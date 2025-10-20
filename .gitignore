@@ -1,0 +1,206 @@
+# Dilithion .gitignore
+
+# Build artifacts
+*.o
+*.lo
+*.la
+*.a
+*.so
+*.dylib
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Build directories
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Bitcoin Core specific
+src/bitcoind
+src/bitcoin-cli
+src/bitcoin-tx
+src/bitcoin-wallet
+src/test/test_bitcoin
+src/qt/bitcoin-qt
+src/bench/bench_bitcoin
+*.log
+*.dat
+*.conf
+!contrib/**/*.conf
+db.log
+debug.log
+
+# Autotools
+Makefile
+Makefile.in
+.deps/
+.dirstamp
+.libs/
+*.stamp
+*-stamp
+aclocal.m4
+autom4te.cache/
+config.cache
+config.log
+config.status
+configure
+libtool
+src/config/
+src/build-aux/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+_deps/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+.project
+.cproject
+.settings/
+*.iml
+
+# Dependencies
+depends/built/
+depends/sources/
+depends/work/
+depends/x86_64-*
+depends/i686-*
+depends/aarch64-*
+depends/arm-*
+depends/mips-*
+depends/riscv64-*
+
+# Qt
+*.qm
+.qmake.cache
+.qmake.stash
+*.pro.user
+*.pro.user.*
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Test artifacts
+test/cache/
+test/data/
+*.trs
+test-suite.log
+
+# Documentation build
+docs/_build/
+docs/.build/
+site/
+
+# Wallet files (NEVER commit real wallets!)
+wallet.dat
+*wallet*.dat
+*.wallet
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Coverage
+*.gcov
+*.gcno
+*.gcda
+coverage/
+htmlcov/
+
+# Profiling
+*.prof
+*.out
+gmon.out
+perf.data
+perf.data.old
+callgrind.out.*
+
+# Keys and secrets (CRITICAL - never commit!)
+*.key
+*.pem
+*.p12
+*.pfx
+privkey.dat
+.env
+.env.local
+secrets.yml
+credentials.json
+
+# Cache
+.cache/
+*.cache
+
+# Python virtual env
+venv/
+env/
+ENV/
+.venv
+
+# Node modules (if any build tools use node)
+node_modules/
+
+# Compiled Python
+__pycache__/
+*.pyc
+
+# JetBrains
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# VSCode
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+
+# Keep some files
+!.gitignore
+!.gitattributes
+!.github/
+!.claude/

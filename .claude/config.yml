@@ -1,0 +1,62 @@
+# Dilithion Agent OS Configuration
+# Quantum-resistant cryptocurrency development
+
+version: 1.0.0
+project: dilithion
+
+# ================================================
+# MULTI-AGENT MODE
+# ================================================
+
+multi_agent_mode: true
+multi_agent_tool: claude-code
+
+# ================================================
+# PROJECT CONTEXT
+# ================================================
+
+project_type: cryptocurrency_core
+base_codebase: bitcoin_core
+primary_language: cpp
+secondary_languages:
+  - python  # for testing
+  - bash    # for scripts
+
+# ================================================
+# SPECIALIZED AGENTS
+# ================================================
+
+agents:
+  - crypto_specialist      # CRYSTALS-Dilithium integration
+  - bitcoin_core_expert    # Bitcoin Core modifications
+  - consensus_validator    # Consensus rule changes
+  - test_engineer          # Testing and QA
+  - security_auditor       # Security review
+  - documentation_writer   # Technical documentation
+
+# ================================================
+# DEVELOPMENT STANDARDS
+# ================================================
+
+code_standards:
+  - bitcoin_core_style     # Follow Bitcoin Core coding standards
+  - constant_time_crypto   # All crypto operations must be constant-time
+  - consensus_critical     # Extra care for consensus code
+  - security_first         # Security over convenience
+
+# ================================================
+# SAFETY RULES
+# ================================================
+
+danger_zones:
+  - src/validation.cpp
+  - src/consensus/
+  - src/key.cpp
+  - src/pubkey.cpp
+  - src/crypto/dilithium/
+
+require_review:
+  - cryptographic_code
+  - consensus_changes
+  - network_protocol
+  - signature_validation
