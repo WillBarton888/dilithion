@@ -1,0 +1,14 @@
+# Cppcheck Suppressions for Dilithion
+#
+# Format: [error id]:[filename]:[line]
+# Use * for wildcards
+
+# Suppress missing include warnings (external dependencies)
+missingInclude
+
+# Suppress warnings in external dependencies
+*:depends/dilithium/*
+*:depends/bitcoin-core/*
+
+# Suppress specific warnings that are false positives
+# (will be added as needed during development)

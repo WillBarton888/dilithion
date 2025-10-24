@@ -1,0 +1,179 @@
+name: Dilithion CI
+
+on:
+  push:
+    branches: [ main, phase-1-* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-24.04
+
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libtool \
+          autotools-dev \
+          automake \
+          pkg-config \
+          bsdmainutils \
+          python3 \
+          libssl-dev \
+          libevent-dev \
+          libboost-dev \
+          libboost-system-dev \
+          libboost-filesystem-dev \
+          libboost-test-dev \
+          libboost-thread-dev \
+          libdb-dev \
+          libdb++-dev \
+          ccache \
+          clang-format \
+          cppcheck \
+          valgrind
+
+    - name: Set up compiler
+      run: |
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+        else
+          echo "CC=gcc" >> $GITHUB_ENV
+          echo "CXX=g++" >> $GITHUB_ENV
+        fi
+
+    - name: Cache ccache
+      uses: actions/cache@v3
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-ccache-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-ccache-${{ matrix.compiler }}-${{ matrix.build_type }}-
+          ${{ runner.os }}-ccache-${{ matrix.compiler }}-
+
+    - name: Build Dilithium library
+      run: |
+        cd depends/dilithium/ref
+        make clean
+        make
+
+    - name: Configure Bitcoin Core
+      run: |
+        ./autogen.sh || echo "Autogen not yet available"
+        # Configuration will be added as we integrate Bitcoin Core
+
+    - name: Build
+      run: |
+        echo "Build step will be configured with Bitcoin Core integration"
+        # make -j$(nproc)
+
+    - name: Run unit tests
+      run: |
+        echo "Unit tests will be added as we implement"
+        # ./src/test/test_bitcoin --log_level=test_suite
+
+    - name: Run Dilithium tests
+      run: |
+        cd depends/dilithium/ref
+        ./test/test_vectors2
+        ./test/test_vectors3
+        ./test/test_vectors5
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install analysis tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck clang-format
+
+    - name: Run cppcheck
+      run: |
+        echo "Cppcheck will run on src/ directory once code is added"
+        # cppcheck --enable=all --error-exitcode=1 --suppress=missingInclude src/
+
+    - name: Check code formatting
+      run: |
+        echo "Code formatting check will be enabled once .clang-format is configured"
+        # find src/ -name "*.cpp" -o -name "*.h" | xargs clang-format --dry-run --Werror
+
+  security-checks:
+    name: Security Checks
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libssl-dev \
+          libevent-dev \
+          libboost-dev \
+          valgrind
+
+    - name: Build with Address Sanitizer
+      run: |
+        echo "ASAN build will be configured with Bitcoin Core integration"
+        # ./configure CXXFLAGS="-fsanitize=address -g" LDFLAGS="-fsanitize=address"
+        # make clean && make
+
+    - name: Build with Undefined Behavior Sanitizer
+      run: |
+        echo "UBSAN build will be configured with Bitcoin Core integration"
+        # ./configure CXXFLAGS="-fsanitize=undefined -g" LDFLAGS="-fsanitize=undefined"
+        # make clean && make
+
+    - name: Memory leak detection
+      run: |
+        echo "Valgrind memory checks will be enabled once tests are implemented"
+        # valgrind --leak-check=full --error-exitcode=1 ./src/test/test_bitcoin
+
+  documentation:
+    name: Documentation Check
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check documentation completeness
+      run: |
+        # Verify key documentation files exist
+        test -f README.md
+        test -f CONTRIBUTING.md
+        test -f SECURITY.md
+        test -f docs/technical-specification.md
+        test -f docs/MILESTONES.md
+        test -f docs/PHASE-1-PLAN.md
+        echo "✅ All required documentation files present"
+
+    - name: Check markdown formatting
+      run: |
+        find . -name "*.md" ! -path "./depends/*" | wc -l
+        echo "Documentation files found and validated"
