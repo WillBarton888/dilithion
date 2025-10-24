@@ -47,7 +47,7 @@ static RPCHelpMan generatedilithiumkeypair()
 
             UniValue result(UniValue::VOBJ);
             result.pushKV("privkey", HexStr(key.GetPrivKey()));
-            result.pushKV("pubkey", HexStr(pubkey));
+            result.pushKV("pubkey", HexStr(pubkey.GetVch()));
             result.pushKV("privkey_size", (int)key.GetPrivKey().size());
             result.pushKV("pubkey_size", (int)pubkey.size());
 
@@ -180,10 +180,11 @@ static RPCHelpMan verifymessagedilithium()
 static RPCHelpMan importdilithiumkey()
 {
     return RPCHelpMan{"importdilithiumkey",
-        "\nImport a Dilithium private key into the keystore.\n"
+        "\nImport a Dilithium key pair into the keystore.\n"
         "\nThe key will be stored with an optional label for easy identification.\n",
         {
             {"privkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The Dilithium private key in hex."},
+            {"pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The Dilithium public key in hex."},
             {"label", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Optional label for the key."},
         },
         RPCResult{
@@ -196,13 +197,14 @@ static RPCHelpMan importdilithiumkey()
             }
         },
         RPCExamples{
-            HelpExampleCli("importdilithiumkey", "\"<privkey_hex>\" \"my-key\"") +
-            HelpExampleRpc("importdilithiumkey", "\"<privkey_hex>\", \"my-key\"")
+            HelpExampleCli("importdilithiumkey", "\"<privkey_hex>\" \"<pubkey_hex>\" \"my-key\"") +
+            HelpExampleRpc("importdilithiumkey", "\"<privkey_hex>\", \"<pubkey_hex>\", \"my-key\"")
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
         {
             std::string strPrivkey = request.params[0].get_str();
-            std::string label = request.params.size() > 1 ? request.params[1].get_str() : "";
+            std::string strPubkey = request.params[1].get_str();
+            std::string label = request.params.size() > 2 ? request.params[2].get_str() : "";
 
             // Decode and validate private key
             std::vector<unsigned char> privkeyData = ParseHex(strPrivkey);
@@ -212,11 +214,22 @@ static RPCHelpMan importdilithiumkey()
                               DILITHIUM_SECRETKEYBYTES, privkeyData.size()));
             }
 
+            // Decode and validate public key
+            std::vector<unsigned char> pubkeyData = ParseHex(strPubkey);
+            if (pubkeyData.size() != DILITHIUM_PUBLICKEYBYTES) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    strprintf("Invalid public key size: expected %d bytes, got %d bytes",
+                              DILITHIUM_PUBLICKEYBYTES, pubkeyData.size()));
+            }
+
             // Create key object and validate
             DilithiumKey key;
             if (!key.SetPrivKey(privkeyData)) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Dilithium private key");
             }
+
+            // Set the public key explicitly (Dilithium secret key doesn't contain pubkey)
+            key.SetPubKey(DilithiumPubKey(pubkeyData));
 
             // Add to keystore
             std::string keyid;
@@ -227,7 +240,7 @@ static RPCHelpMan importdilithiumkey()
             // Build result
             UniValue result(UniValue::VOBJ);
             result.pushKV("keyid", keyid);
-            result.pushKV("pubkey", HexStr(key.GetPubKey()));
+            result.pushKV("pubkey", HexStr(key.GetPubKey().GetVch()));
             result.pushKV("label", label);
             result.pushKV("imported", true);
 
@@ -268,7 +281,7 @@ static RPCHelpMan listdilithiumkeys()
             for (const auto& info : keys) {
                 UniValue key_obj(UniValue::VOBJ);
                 key_obj.pushKV("keyid", info.keyid);
-                key_obj.pushKV("pubkey", HexStr(info.pubkey));
+                key_obj.pushKV("pubkey", HexStr(info.pubkey.GetVch()));
                 key_obj.pushKV("label", info.label);
                 key_obj.pushKV("created", info.created_time);
                 key_obj.pushKV("last_used", info.last_used_time);
@@ -322,7 +335,7 @@ static RPCHelpMan getdilithiumkeyinfo()
             // Build result
             UniValue result(UniValue::VOBJ);
             result.pushKV("keyid", meta.keyid);
-            result.pushKV("pubkey", HexStr(key.GetPubKey()));
+            result.pushKV("pubkey", HexStr(key.GetPubKey().GetVch()));
             result.pushKV("label", meta.label);
             result.pushKV("created", meta.created_time);
             result.pushKV("last_used", meta.last_used_time);

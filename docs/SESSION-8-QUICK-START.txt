@@ -1,0 +1,34 @@
+SESSION 8 COMPLETION GUIDE - Address Format
+============================================
+
+CURRENT STATE:
+- Commit d8e6840: SHA3-256 migration (DONE)
+- Files coded: dilithiumaddress.h/.cpp (NOT IN BUILD)
+- Status: 15 minutes to completion
+
+STEP 1: Edit Makefile.am (2 min)
+---------------------------------
+File: ~/bitcoin-dilithium/src/Makefile.am
+
+Add these 3 lines (MUST have backslash at end):
+
+Line 201: Add after dilithiumkeyid.h
+  dilithium/dilithiumaddress.h 
+Line 665: Add after dilithiumkeyid.h  
+  dilithium/dilithiumaddress.h 
+Line 746: Add after dilithiumkeyid.cpp
+  dilithium/dilithiumaddress.cpp 
+STEP 2: Build (2 min)
+---------------------
+cd ~/bitcoin-dilithium
+make -j20
+
+STEP 3: See full test template
+-------------------------------
+cat /root/dilithion-windows/docs/NEXT-SESSION-START.md
+
+CRITICAL INFO:
+- Makefile lines: 201, 665, 746
+- Test file: src/test/dilithium_address_tests.cpp
+- Add to: src/Makefile.test.include
+

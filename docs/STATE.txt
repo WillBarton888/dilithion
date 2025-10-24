@@ -1,0 +1,5 @@
+SESSION 8 STATE
+Commit: d8e6840 SHA3-256 done
+Files ready: dilithiumaddress.h/.cpp
+Makefile lines: 201, 665, 746
+15 min to completion

@@ -45,7 +45,12 @@
       "Bash(else echo \"Bitcoin Core NOT found - need to clone\")",
       "Bash(fi)",
       "Read(//c/Users/will/**)",
-      "Bash(git clone:*)"
+      "Bash(git clone:*)",
+      "Read(//c/root/dilithion-windows/**)",
+      "Bash(cat:*)",
+      "Bash(timeout 30 wsl bash:*)",
+      "Bash(grep:*)",
+      "Read(//c/mnt/c/Users/will/**)"
     ],
     "deny": [],
     "ask": []
