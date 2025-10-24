@@ -449,4 +449,314 @@ BOOST_AUTO_TEST_CASE(rpc_getdilithiumkeyinfo)
     BOOST_CHECK(caught_exception);
 }
 
+// ============================================================================
+// Session 15: Enhanced Testing & Error Handling
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(rpc_full_workflow_integration)
+{
+    // Clear keystore for clean test
+    g_dilithium_keystore.Clear();
+
+    // Complete workflow: generate → import → list → sign → verify → getinfo
+
+    // Step 1: Generate keypair
+    UniValue gen_result = CallRPC(this, "generatedilithiumkeypair");
+    BOOST_CHECK(gen_result.isObject());
+    std::string privkey = gen_result["privkey"].get_str();
+    std::string pubkey = gen_result["pubkey"].get_str();
+
+    // Step 2: Import the key
+    UniValue import_params(UniValue::VARR);
+    import_params.push_back(privkey);
+    import_params.push_back(pubkey);
+    import_params.push_back("workflow-test-key");
+
+    UniValue import_result = CallRPC(this, "importdilithiumkey", import_params);
+    BOOST_CHECK_EQUAL(import_result["imported"].get_bool(), true);
+    std::string keyid = import_result["keyid"].get_str();
+
+    // Step 3: List keys and verify our key is there
+    UniValue list_result = CallRPC(this, "listdilithiumkeys");
+    BOOST_CHECK(list_result.isArray());
+    BOOST_CHECK(list_result.size() >= 1);
+
+    bool found = false;
+    for (size_t i = 0; i < list_result.size(); i++) {
+        if (list_result[i]["keyid"].get_str() == keyid) {
+            found = true;
+            BOOST_CHECK_EQUAL(list_result[i]["label"].get_str(), "workflow-test-key");
+            break;
+        }
+    }
+    BOOST_CHECK(found);
+
+    // Step 4: Sign a message
+    const std::string test_message = "Integration test message";
+    UniValue sign_params(UniValue::VARR);
+    sign_params.push_back(privkey);
+    sign_params.push_back(test_message);
+
+    UniValue sign_result = CallRPC(this, "signmessagedilithium", sign_params);
+    BOOST_CHECK(sign_result.exists("signature"));
+    std::string signature = sign_result["signature"].get_str();
+
+    // Step 5: Verify the signature
+    UniValue verify_params(UniValue::VARR);
+    verify_params.push_back(pubkey);
+    verify_params.push_back(signature);
+    verify_params.push_back(test_message);
+
+    UniValue verify_result = CallRPC(this, "verifymessagedilithium", verify_params);
+    BOOST_CHECK_EQUAL(verify_result["valid"].get_bool(), true);
+
+    // Step 6: Get key info
+    UniValue info_params(UniValue::VARR);
+    info_params.push_back(keyid);
+
+    UniValue info_result = CallRPC(this, "getdilithiumkeyinfo", info_params);
+    BOOST_CHECK_EQUAL(info_result["keyid"].get_str(), keyid);
+    BOOST_CHECK_EQUAL(info_result["pubkey"].get_str(), pubkey);
+
+    // Verify workflow success
+    BOOST_TEST_MESSAGE("✅ Full RPC workflow completed successfully");
+}
+
+BOOST_AUTO_TEST_CASE(rpc_error_handling_invalid_hex)
+{
+    // Test various invalid hex inputs
+
+    // Invalid hex in generatedilithiumkeypair signing
+    UniValue sign_params(UniValue::VARR);
+    sign_params.push_back("INVALID_HEX_$%^");
+    sign_params.push_back("test message");
+
+    bool caught = false;
+    try {
+        CallRPC(this, "signmessagedilithium", sign_params);
+    } catch (...) {
+        caught = true;
+    }
+    BOOST_CHECK(caught);
+
+    // Invalid hex in verification
+    UniValue verify_params(UniValue::VARR);
+    verify_params.push_back("NOT_HEX");
+    verify_params.push_back("ALSO_NOT_HEX");
+    verify_params.push_back("message");
+
+    caught = false;
+    try {
+        CallRPC(this, "verifymessagedilithium", verify_params);
+    } catch (...) {
+        caught = true;
+    }
+    BOOST_CHECK(caught);
+}
+
+BOOST_AUTO_TEST_CASE(rpc_error_handling_wrong_sizes)
+{
+    // Test with wrong key sizes
+
+    // Private key too short
+    std::string short_key(100, '0'); // Only 50 bytes when decoded
+    UniValue sign_params(UniValue::VARR);
+    sign_params.push_back(short_key);
+    sign_params.push_back("message");
+
+    bool caught = false;
+    try {
+        CallRPC(this, "signmessagedilithium", sign_params);
+    } catch (...) {
+        caught = true;
+    }
+    BOOST_CHECK(caught);
+
+    // Public key too short for verification
+    std::string short_pubkey(100, '0');
+    std::string fake_sig(DILITHIUM_BITCOIN_BYTES * 2, '0');
+
+    UniValue verify_params(UniValue::VARR);
+    verify_params.push_back(short_pubkey);
+    verify_params.push_back(fake_sig);
+    verify_params.push_back("message");
+
+    caught = false;
+    try {
+        CallRPC(this, "verifymessagedilithium", verify_params);
+    } catch (...) {
+        caught = true;
+    }
+    BOOST_CHECK(caught);
+}
+
+BOOST_AUTO_TEST_CASE(rpc_keystore_stress_test)
+{
+    // Clear keystore
+    g_dilithium_keystore.Clear();
+
+    // Import multiple keys rapidly
+    const int NUM_KEYS = 20;
+    std::vector<std::string> keyids;
+
+    for (int i = 0; i < NUM_KEYS; i++) {
+        // Generate key
+        UniValue gen = CallRPC(this, "generatedilithiumkeypair");
+        std::string privkey = gen["privkey"].get_str();
+        std::string pubkey = gen["pubkey"].get_str();
+
+        // Import with numbered label
+        UniValue import_params(UniValue::VARR);
+        import_params.push_back(privkey);
+        import_params.push_back(pubkey);
+        import_params.push_back("stress-key-" + std::to_string(i));
+
+        UniValue result = CallRPC(this, "importdilithiumkey", import_params);
+        BOOST_CHECK_EQUAL(result["imported"].get_bool(), true);
+        keyids.push_back(result["keyid"].get_str());
+    }
+
+    // Verify all keys are in the list
+    UniValue list_result = CallRPC(this, "listdilithiumkeys");
+    BOOST_CHECK(list_result.size() >= NUM_KEYS);
+
+    // Verify each key can be retrieved
+    for (const auto& keyid : keyids) {
+        UniValue info_params(UniValue::VARR);
+        info_params.push_back(keyid);
+
+        UniValue info = CallRPC(this, "getdilithiumkeyinfo", info_params);
+        BOOST_CHECK_EQUAL(info["keyid"].get_str(), keyid);
+    }
+
+    BOOST_TEST_MESSAGE("✅ Stress test: " << NUM_KEYS << " keys handled successfully");
+}
+
+BOOST_AUTO_TEST_CASE(rpc_edge_case_empty_message)
+{
+    // Test signing and verifying empty message
+    UniValue keys = CallRPC(this, "generatedilithiumkeypair");
+    std::string privkey = keys["privkey"].get_str();
+    std::string pubkey = keys["pubkey"].get_str();
+
+    // Sign empty message
+    UniValue sign_params(UniValue::VARR);
+    sign_params.push_back(privkey);
+    sign_params.push_back("");
+
+    UniValue sign_result = CallRPC(this, "signmessagedilithium", sign_params);
+    BOOST_CHECK(sign_result.exists("signature"));
+    std::string signature = sign_result["signature"].get_str();
+
+    // Verify empty message signature
+    UniValue verify_params(UniValue::VARR);
+    verify_params.push_back(pubkey);
+    verify_params.push_back(signature);
+    verify_params.push_back("");
+
+    UniValue verify_result = CallRPC(this, "verifymessagedilithium", verify_params);
+    BOOST_CHECK_EQUAL(verify_result["valid"].get_bool(), true);
+}
+
+BOOST_AUTO_TEST_CASE(rpc_edge_case_long_message)
+{
+    // Test with very long message (10KB)
+    std::string long_message(10000, 'X');
+
+    UniValue keys = CallRPC(this, "generatedilithiumkeypair");
+    std::string privkey = keys["privkey"].get_str();
+    std::string pubkey = keys["pubkey"].get_str();
+
+    // Sign long message
+    UniValue sign_params(UniValue::VARR);
+    sign_params.push_back(privkey);
+    sign_params.push_back(long_message);
+
+    UniValue sign_result = CallRPC(this, "signmessagedilithium", sign_params);
+    BOOST_CHECK(sign_result.exists("signature"));
+    std::string signature = sign_result["signature"].get_str();
+
+    // Verify long message signature
+    UniValue verify_params(UniValue::VARR);
+    verify_params.push_back(pubkey);
+    verify_params.push_back(signature);
+    verify_params.push_back(long_message);
+
+    UniValue verify_result = CallRPC(this, "verifymessagedilithium", verify_params);
+    BOOST_CHECK_EQUAL(verify_result["valid"].get_bool(), true);
+}
+
+BOOST_AUTO_TEST_CASE(rpc_signature_message_mismatch)
+{
+    // Verify that signature for one message doesn't validate for another
+    UniValue keys = CallRPC(this, "generatedilithiumkeypair");
+    std::string privkey = keys["privkey"].get_str();
+    std::string pubkey = keys["pubkey"].get_str();
+
+    // Sign message A
+    UniValue sign_params(UniValue::VARR);
+    sign_params.push_back(privkey);
+    sign_params.push_back("Message A");
+
+    UniValue sign_result = CallRPC(this, "signmessagedilithium", sign_params);
+    std::string signature = sign_result["signature"].get_str();
+
+    // Try to verify with message B (should fail)
+    UniValue verify_params(UniValue::VARR);
+    verify_params.push_back(pubkey);
+    verify_params.push_back(signature);
+    verify_params.push_back("Message B");
+
+    UniValue verify_result = CallRPC(this, "verifymessagedilithium", verify_params);
+    BOOST_CHECK_EQUAL(verify_result["valid"].get_bool(), false);
+
+    // Verify with correct message A (should succeed)
+    verify_params.clear();
+    verify_params.setArray();
+    verify_params.push_back(pubkey);
+    verify_params.push_back(signature);
+    verify_params.push_back("Message A");
+
+    verify_result = CallRPC(this, "verifymessagedilithium", verify_params);
+    BOOST_CHECK_EQUAL(verify_result["valid"].get_bool(), true);
+}
+
+BOOST_AUTO_TEST_CASE(rpc_keystore_duplicate_prevention)
+{
+    g_dilithium_keystore.Clear();
+
+    // Generate and import a key
+    UniValue keys = CallRPC(this, "generatedilithiumkeypair");
+    std::string privkey = keys["privkey"].get_str();
+    std::string pubkey = keys["pubkey"].get_str();
+
+    UniValue import_params(UniValue::VARR);
+    import_params.push_back(privkey);
+    import_params.push_back(pubkey);
+    import_params.push_back("first-import");
+
+    UniValue first_import = CallRPC(this, "importdilithiumkey", import_params);
+    BOOST_CHECK_EQUAL(first_import["imported"].get_bool(), true);
+
+    // Try to import the same key again (should fail)
+    import_params.clear();
+    import_params.setArray();
+    import_params.push_back(privkey);
+    import_params.push_back(pubkey);
+    import_params.push_back("second-import");
+
+    bool caught = false;
+    try {
+        CallRPC(this, "importdilithiumkey", import_params);
+    } catch (...) {
+        caught = true;
+    }
+    BOOST_CHECK(caught);
+
+    // Verify only one key in keystore
+    UniValue list = CallRPC(this, "listdilithiumkeys");
+    BOOST_CHECK_EQUAL(list.size(), 1);
+    BOOST_CHECK_EQUAL(list[0]["label"].get_str(), "first-import");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
