@@ -50,7 +50,8 @@
       "Bash(cat:*)",
       "Bash(timeout 30 wsl bash:*)",
       "Bash(grep:*)",
-      "Read(//c/mnt/c/Users/will/**)"
+      "Read(//c/mnt/c/Users/will/**)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

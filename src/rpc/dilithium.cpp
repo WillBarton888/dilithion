@@ -14,6 +14,10 @@
 #include <uint256.h>
 #include <univalue.h>
 #include <util/strencodings.h>
+#include <core_io.h>
+#include <primitives/transaction.h>
+#include <script/script.h>
+#include <script/interpreter.h>
 
 #include <string>
 
@@ -346,6 +350,225 @@ static RPCHelpMan getdilithiumkeyinfo()
     };
 }
 
+static RPCHelpMan builddilithiumtransaction()
+{
+    return RPCHelpMan{"builddilithiumtransaction",
+        "\nBuild an unsigned transaction from inputs and outputs.\n"
+        "\nSupports both Dilithium addresses and standard Bitcoin addresses.\n",
+        {
+            {"inputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "Array of transaction inputs",
+                {
+                    {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
+                        {
+                            {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The transaction id"},
+                            {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "The output number"},
+                        },
+                    },
+                },
+            },
+            {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "Array of transaction outputs",
+                {
+                    {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
+                        {
+                            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The destination address (Dilithium or Bitcoin)"},
+                            {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "The amount in BTC"},
+                        },
+                    },
+                },
+            },
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::STR_HEX, "hex", "The transaction hex string"},
+                {RPCResult::Type::STR_HEX, "txid", "The transaction id"},
+            }
+        },
+        RPCExamples{
+            HelpExampleCli("builddilithiumtransaction",
+                "'[{\"txid\":\"abc...\",\"vout\":0}]' '[{\"address\":\"bcrt1q...\",\"amount\":1.0}]'") +
+            HelpExampleRpc("builddilithiumtransaction",
+                "[{\"txid\":\"abc...\",\"vout\":0}], [{\"address\":\"bcrt1q...\",\"amount\":1.0}]")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        {
+            RPCTypeCheck(request.params, {UniValue::VARR, UniValue::VARR});
+
+            const UniValue& inputs_uv = request.params[0];
+            const UniValue& outputs_uv = request.params[1];
+
+            // Build CMutableTransaction
+            CMutableTransaction tx;
+            tx.nVersion = 2;
+            tx.nLockTime = 0;
+
+            // Process inputs
+            for (unsigned int idx = 0; idx < inputs_uv.size(); idx++) {
+                const UniValue& input = inputs_uv[idx];
+
+                uint256 txid = ParseHashV(input["txid"], "txid");
+                int nOutput = input["vout"].getInt<int>();
+
+                if (nOutput < 0) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid vout value");
+                }
+
+                CTxIn in(COutPoint(txid, nOutput));
+                tx.vin.push_back(in);
+            }
+
+            // Process outputs
+            for (unsigned int idx = 0; idx < outputs_uv.size(); idx++) {
+                const UniValue& output = outputs_uv[idx];
+
+                std::string address_str = output["address"].get_str();
+                CAmount amount = AmountFromValue(output["amount"]);
+
+                if (amount <= 0) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid amount");
+                }
+
+                // Decode address to get scriptPubKey
+                CTxDestination dest = DecodeDestination(address_str);
+                if (!IsValidDestination(dest)) {
+                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
+                        strprintf("Invalid address: %s", address_str));
+                }
+
+                CScript scriptPubKey = GetScriptForDestination(dest);
+                CTxOut out(amount, scriptPubKey);
+                tx.vout.push_back(out);
+            }
+
+            // Serialize transaction
+            std::string hex = EncodeHexTx(CTransaction(tx));
+
+            // Calculate txid
+            uint256 txid = tx.GetHash();
+
+            UniValue result(UniValue::VOBJ);
+            result.pushKV("hex", hex);
+            result.pushKV("txid", txid.GetHex());
+
+            return result;
+        },
+    };
+}
+
+static RPCHelpMan signdilithiumtransactioninput()
+{
+    return RPCHelpMan{"signdilithiumtransactioninput",
+        "\nSign a specific transaction input with a Dilithium key from the keystore.\n"
+        "\nThe key must be previously imported into the keystore.\n",
+        {
+            {"hexstring", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The transaction hex string"},
+            {"input_index", RPCArg::Type::NUM, RPCArg::Optional::NO, "The input index to sign (0-based)"},
+            {"keyid", RPCArg::Type::STR, RPCArg::Optional::NO, "The key identifier from the keystore"},
+            {"prevout_scriptpubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The scriptPubKey of the previous output being spent"},
+            {"prevout_value", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "The value of the previous output being spent"},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::STR_HEX, "hex", "The signed transaction hex string"},
+                {RPCResult::Type::BOOL, "complete", "Whether all inputs are signed (always false for partial signing)"},
+                {RPCResult::Type::STR_HEX, "signature", "The generated Dilithium signature"},
+            }
+        },
+        RPCExamples{
+            HelpExampleCli("signdilithiumtransactioninput",
+                "\"0200000001...\" 0 \"abc123...\" \"76a914...88ac\" 1.0") +
+            HelpExampleRpc("signdilithiumtransactioninput",
+                "\"0200000001...\", 0, \"abc123...\", \"76a914...88ac\", 1.0")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        {
+            RPCTypeCheck(request.params, {
+                UniValue::VSTR,
+                UniValue::VNUM,
+                UniValue::VSTR,
+                UniValue::VSTR_HEX,
+                UniValue::VNUM
+            });
+
+            // Decode transaction
+            CMutableTransaction tx;
+            if (!DecodeHexTx(tx, request.params[0].get_str())) {
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
+            }
+
+            // Get input index
+            int input_index = request.params[1].getInt<int>();
+            if (input_index < 0 || input_index >= (int)tx.vin.size()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    strprintf("Invalid input index: %d (tx has %d inputs)",
+                        input_index, tx.vin.size()));
+            }
+
+            // Get key from keystore
+            std::string keyid = request.params[2].get_str();
+            DilithiumKey key;
+            if (!g_dilithium_keystore.GetKey(keyid, key)) {
+                throw JSONRPCError(RPC_WALLET_ERROR,
+                    strprintf("Key not found in keystore: %s", keyid));
+            }
+
+            // Decode prevout scriptPubKey
+            std::vector<unsigned char> scriptPubKeyData = ParseHex(request.params[3].get_str());
+            CScript prevout_scriptPubKey(scriptPubKeyData.begin(), scriptPubKeyData.end());
+
+            // Get prevout value
+            CAmount prevout_value = AmountFromValue(request.params[4]);
+
+            // Compute signature hash
+            uint256 sighash = SignatureHash(
+                prevout_scriptPubKey,
+                tx,
+                input_index,
+                SIGHASH_ALL,
+                prevout_value,
+                SigVersion::WITNESS_V0
+            );
+
+            // Sign with Dilithium key
+            std::vector<unsigned char> signature;
+            if (!key.Sign(sighash, signature)) {
+                throw JSONRPCError(RPC_INTERNAL_ERROR, "Dilithium signing failed");
+            }
+
+            // Add SIGHASH_ALL flag to signature
+            signature.push_back(static_cast<unsigned char>(SIGHASH_ALL));
+
+            // Build witness stack
+            CScriptWitness witness;
+            witness.stack.push_back(signature);
+            witness.stack.push_back(ToByteVector(key.GetPubKey().GetVch()));
+
+            // Set witness for this input
+            tx.vin[input_index].scriptWitness = witness;
+
+            // Serialize signed transaction
+            std::string hex = EncodeHexTx(CTransaction(tx));
+
+            // Check if all inputs are signed (simplified check)
+            bool complete = true;
+            for (const auto& input : tx.vin) {
+                if (input.scriptWitness.IsNull()) {
+                    complete = false;
+                    break;
+                }
+            }
+
+            UniValue result(UniValue::VOBJ);
+            result.pushKV("hex", hex);
+            result.pushKV("complete", complete);
+            result.pushKV("signature", HexStr(signature));
+
+            return result;
+        },
+    };
+}
+
 void RegisterDilithiumRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
@@ -355,6 +578,8 @@ void RegisterDilithiumRPCCommands(CRPCTable& t)
         {"dilithium", &importdilithiumkey},
         {"dilithium", &listdilithiumkeys},
         {"dilithium", &getdilithiumkeyinfo},
+        {"dilithium", &builddilithiumtransaction},
+        {"dilithium", &signdilithiumtransactioninput},
     };
     for (const auto& c : commands) {
         t.appendCommand(c.name, &c);

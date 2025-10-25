@@ -418,12 +418,6 @@ libbitcoin_node_a_SOURCES = \
   net_processing.cpp \
   netgroup.cpp \
   node/abort.cpp \
-  node/blockchain_storage.cpp \
-  node/blockchain_storage.h \
-  node/block_index.cpp \
-  node/block_index.h \
-  node/mempool.cpp \
-  node/mempool.h \
   node/blockmanager_args.cpp \
   node/blockstorage.cpp \
   node/caches.cpp \
