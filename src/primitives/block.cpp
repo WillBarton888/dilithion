@@ -23,18 +23,26 @@ void uint256::SetHex(const std::string& str) {
 }
 
 uint256 CBlockHeader::GetHash() const {
+    // Serialize header for hashing
+    std::vector<uint8_t> data;
+    data.reserve(80); // Standard block header size
+
+    // Serialize: version (4) + prevBlock (32) + merkleRoot (32) + time (4) + bits (4) + nonce (4) = 80 bytes
+    const uint8_t* versionBytes = reinterpret_cast<const uint8_t*>(&nVersion);
+    data.insert(data.end(), versionBytes, versionBytes + 4);
+    data.insert(data.end(), hashPrevBlock.begin(), hashPrevBlock.end());
+    data.insert(data.end(), hashMerkleRoot.begin(), hashMerkleRoot.end());
+    const uint8_t* timeBytes = reinterpret_cast<const uint8_t*>(&nTime);
+    data.insert(data.end(), timeBytes, timeBytes + 4);
+    const uint8_t* bitsBytes = reinterpret_cast<const uint8_t*>(&nBits);
+    data.insert(data.end(), bitsBytes, bitsBytes + 4);
+    const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&nNonce);
+    data.insert(data.end(), nonceBytes, nonceBytes + 4);
+
+    // SHA-3-256 hash (quantum-resistant)
     uint256 result;
-    // Simple hash: combine all header fields
-    // In production, this would use SHA256 or RandomX
-    result.data[0] = (uint8_t)(nVersion & 0xFF);
-    result.data[1] = (uint8_t)(nTime & 0xFF);
-    result.data[2] = (uint8_t)(nBits & 0xFF);
-    result.data[3] = (uint8_t)(nNonce & 0xFF);
-    
-    // Mix in prev block hash
-    for (int i = 0; i < 8; i++) {
-        result.data[i+4] ^= hashPrevBlock.data[i];
-    }
-    
+    extern void SHA3_256(const uint8_t* data, size_t len, uint8_t hash[32]);
+    SHA3_256(data.data(), data.size(), result.data);
+
     return result;
 }

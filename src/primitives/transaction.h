@@ -20,7 +20,21 @@ public:
 
     uint256 GetHash() const {
         if (!hash_valid) {
-            hash_cached.data[0] = (uint8_t)nVersion;
+            // Serialize transaction for hashing
+            std::vector<uint8_t> data;
+            data.reserve(GetSerializedSize());
+
+            // Serialize: version (4) + vin + vout + locktime (4)
+            const uint8_t* versionBytes = reinterpret_cast<const uint8_t*>(&nVersion);
+            data.insert(data.end(), versionBytes, versionBytes + 4);
+            data.insert(data.end(), vin.begin(), vin.end());
+            data.insert(data.end(), vout.begin(), vout.end());
+            const uint8_t* lockTimeBytes = reinterpret_cast<const uint8_t*>(&nLockTime);
+            data.insert(data.end(), lockTimeBytes, lockTimeBytes + 4);
+
+            // SHA-3-256 hash (quantum-resistant)
+            extern void SHA3_256(const uint8_t* data, size_t len, uint8_t hash[32]);
+            SHA3_256(data.data(), data.size(), hash_cached.data);
             hash_valid = true;
         }
         return hash_cached;
