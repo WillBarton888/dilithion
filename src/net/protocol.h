@@ -128,7 +128,11 @@ struct CAddress {
         memset(ip, 0, 10);
         ip[10] = 0xff;
         ip[11] = 0xff;
-        memcpy(&ip[12], &ipv4, 4);
+        // Store in network byte order (big-endian)
+        ip[12] = (ipv4 >> 24) & 0xFF;
+        ip[13] = (ipv4 >> 16) & 0xFF;
+        ip[14] = (ipv4 >> 8) & 0xFF;
+        ip[15] = ipv4 & 0xFF;
     }
 
     std::string ToStringIP() const;
