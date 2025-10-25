@@ -104,6 +104,8 @@ RPC_TEST_SOURCE := src/test/rpc_tests.cpp
 RPC_AUTH_TEST_SOURCE := src/test/rpc_auth_tests.cpp
 TIMESTAMP_TEST_SOURCE := src/test/timestamp_tests.cpp
 CRYPTER_TEST_SOURCE := src/test/crypter_tests.cpp
+WALLET_ENCRYPTION_INTEGRATION_TEST_SOURCE := src/test/wallet_encryption_integration_tests.cpp
+WALLET_PERSISTENCE_TEST_SOURCE := src/test/wallet_persistence_tests.cpp
 INTEGRATION_TEST_SOURCE := src/test/integration_tests.cpp
 NET_TEST_SOURCE := src/test/net_tests.cpp
 
@@ -138,7 +140,7 @@ genesis_gen: $(CORE_OBJECTS) $(OBJ_DIR)/test/genesis_test.o $(DILITHIUM_OBJECTS)
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests integration_tests net_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS)
@@ -166,6 +168,14 @@ timestamp_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/timestamp_tests.o $(DILITHIUM_O
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 crypter_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/crypter_tests.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+wallet_encryption_integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/wallet_encryption_integration_tests.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+wallet_persistence_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/wallet_persistence_tests.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
@@ -202,6 +212,12 @@ test: tests
 	@echo ""
 	@echo "$(COLOR_YELLOW)Running wallet encryption tests...$(COLOR_RESET)"
 	@./crypter_tests
+	@echo ""
+	@echo "$(COLOR_YELLOW)Running wallet encryption integration tests...$(COLOR_RESET)"
+	@./wallet_encryption_integration_tests
+	@echo ""
+	@echo "$(COLOR_YELLOW)Running wallet persistence tests...$(COLOR_RESET)"
+	@./wallet_persistence_tests
 	@echo ""
 	@echo "$(COLOR_YELLOW)Running integration tests...$(COLOR_RESET)"
 	@./integration_tests
@@ -254,7 +270,7 @@ clean:
 	@echo "$(COLOR_YELLOW)Cleaning build artifacts...$(COLOR_RESET)"
 	@rm -rf $(BUILD_DIR)
 	@rm -f dilithion-node genesis_gen
-	@rm -f phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests integration_tests net_tests
+	@rm -f phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests
 	@rm -f $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_GREEN)✓ Clean complete$(COLOR_RESET)"
 

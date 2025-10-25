@@ -30,6 +30,10 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getbalance"] = [this](const std::string& p) { return RPC_GetBalance(p); };
     m_handlers["getaddresses"] = [this](const std::string& p) { return RPC_GetAddresses(p); };
     m_handlers["sendtoaddress"] = [this](const std::string& p) { return RPC_SendToAddress(p); };
+    m_handlers["encryptwallet"] = [this](const std::string& p) { return RPC_EncryptWallet(p); };
+    m_handlers["walletpassphrase"] = [this](const std::string& p) { return RPC_WalletPassphrase(p); };
+    m_handlers["walletlock"] = [this](const std::string& p) { return RPC_WalletLock(p); };
+    m_handlers["walletpassphrasechange"] = [this](const std::string& p) { return RPC_WalletPassphraseChange(p); };
     m_handlers["getmininginfo"] = [this](const std::string& p) { return RPC_GetMiningInfo(p); };
     m_handlers["startmining"] = [this](const std::string& p) { return RPC_StartMining(p); };
     m_handlers["stopmining"] = [this](const std::string& p) { return RPC_StopMining(p); };
@@ -429,6 +433,154 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
     throw std::runtime_error("Not implemented yet");
 }
 
+std::string CRPCServer::RPC_EncryptWallet(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (m_wallet->IsCrypted()) {
+        throw std::runtime_error("Error: Wallet is already encrypted");
+    }
+
+    // Parse params to get passphrase
+    // Expected format: {"passphrase":"password"}
+    size_t pos = params.find("\"passphrase\"");
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Missing passphrase parameter");
+    }
+
+    pos = params.find(":", pos);
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Invalid passphrase format");
+    }
+
+    pos = params.find("\"", pos + 1);
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Invalid passphrase format");
+    }
+
+    size_t end = params.find("\"", pos + 1);
+    if (end == std::string::npos) {
+        throw std::runtime_error("Invalid passphrase format");
+    }
+
+    std::string passphrase = params.substr(pos + 1, end - pos - 1);
+
+    if (passphrase.empty()) {
+        throw std::runtime_error("Error: Passphrase cannot be empty");
+    }
+
+    if (!m_wallet->EncryptWallet(passphrase)) {
+        throw std::runtime_error("Error: Failed to encrypt wallet");
+    }
+
+    return "\"Wallet encrypted. Please backup your wallet and remember your passphrase!\"";
+}
+
+std::string CRPCServer::RPC_WalletPassphrase(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (!m_wallet->IsCrypted()) {
+        throw std::runtime_error("Error: Wallet is not encrypted");
+    }
+
+    // Parse params: {"passphrase":"password", "timeout":60}
+    size_t pos = params.find("\"passphrase\"");
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Missing passphrase parameter");
+    }
+
+    pos = params.find(":", pos);
+    pos = params.find("\"", pos + 1);
+    size_t end = params.find("\"", pos + 1);
+    std::string passphrase = params.substr(pos + 1, end - pos - 1);
+
+    // Parse timeout (optional, default 60 seconds)
+    int64_t timeout = 60;
+    size_t timeoutPos = params.find("\"timeout\"");
+    if (timeoutPos != std::string::npos) {
+        timeoutPos = params.find(":", timeoutPos);
+        size_t numStart = timeoutPos + 1;
+        while (numStart < params.length() && isspace(params[numStart])) numStart++;
+        size_t numEnd = numStart;
+        while (numEnd < params.length() && isdigit(params[numEnd])) numEnd++;
+        if (numEnd > numStart) {
+            timeout = std::stoll(params.substr(numStart, numEnd - numStart));
+        }
+    }
+
+    if (!m_wallet->Unlock(passphrase, timeout)) {
+        throw std::runtime_error("Error: The wallet passphrase entered was incorrect");
+    }
+
+    std::ostringstream oss;
+    oss << "\"Wallet unlocked";
+    if (timeout > 0) {
+        oss << " for " << timeout << " seconds";
+    }
+    oss << "\"";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_WalletLock(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (!m_wallet->IsCrypted()) {
+        throw std::runtime_error("Error: Wallet is not encrypted");
+    }
+
+    if (!m_wallet->Lock()) {
+        throw std::runtime_error("Error: Failed to lock wallet");
+    }
+
+    return "\"Wallet locked\"";
+}
+
+std::string CRPCServer::RPC_WalletPassphraseChange(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (!m_wallet->IsCrypted()) {
+        throw std::runtime_error("Error: Wallet is not encrypted");
+    }
+
+    // Parse params: {"oldpassphrase":"old", "newpassphrase":"new"}
+    size_t pos = params.find("\"oldpassphrase\"");
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Missing oldpassphrase parameter");
+    }
+
+    pos = params.find(":", pos);
+    pos = params.find("\"", pos + 1);
+    size_t end = params.find("\"", pos + 1);
+    std::string oldPass = params.substr(pos + 1, end - pos - 1);
+
+    pos = params.find("\"newpassphrase\"", end);
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Missing newpassphrase parameter");
+    }
+
+    pos = params.find(":", pos);
+    pos = params.find("\"", pos + 1);
+    end = params.find("\"", pos + 1);
+    std::string newPass = params.substr(pos + 1, end - pos - 1);
+
+    if (newPass.empty()) {
+        throw std::runtime_error("Error: New passphrase cannot be empty");
+    }
+
+    if (!m_wallet->ChangePassphrase(oldPass, newPass)) {
+        throw std::runtime_error("Error: The wallet passphrase entered was incorrect");
+    }
+
+    return "\"Wallet passphrase changed successfully\"";
+}
+
 std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
@@ -483,6 +635,10 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getnewaddress\",";
     oss << "\"getbalance\",";
     oss << "\"getaddresses\",";
+    oss << "\"encryptwallet\",";
+    oss << "\"walletpassphrase\",";
+    oss << "\"walletlock\",";
+    oss << "\"walletpassphrasechange\",";
     oss << "\"getmininginfo\",";
     oss << "\"stopmining\",";
     oss << "\"getnetworkinfo\",";

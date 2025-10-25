@@ -148,6 +148,12 @@ private:
     std::string RPC_GetAddresses(const std::string& params);
     std::string RPC_SendToAddress(const std::string& params);
 
+    // Wallet encryption methods
+    std::string RPC_EncryptWallet(const std::string& params);
+    std::string RPC_WalletPassphrase(const std::string& params);
+    std::string RPC_WalletLock(const std::string& params);
+    std::string RPC_WalletPassphraseChange(const std::string& params);
+
     // Mining methods
     std::string RPC_GetMiningInfo(const std::string& params);
     std::string RPC_StartMining(const std::string& params);

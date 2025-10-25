@@ -6,12 +6,14 @@
 
 #include <primitives/block.h>
 #include <uint256.h>
+#include <wallet/crypter.h>
 
 #include <string>
 #include <vector>
 #include <map>
 #include <mutex>
 #include <memory>
+#include <chrono>
 
 // Dilithium3 parameters (balanced security/performance)
 static const size_t DILITHIUM_PUBLICKEY_SIZE = 1952;
@@ -35,6 +37,42 @@ struct CKey {
     void Clear() {
         vchPubKey.clear();
         vchPrivKey.clear();
+    }
+};
+
+/**
+ * Encrypted key data
+ */
+struct CEncryptedKey {
+    std::vector<uint8_t> vchCryptedKey;  // Encrypted private key
+    std::vector<uint8_t> vchIV;          // Initialization vector
+    std::vector<uint8_t> vchPubKey;      // Public key (unencrypted)
+
+    CEncryptedKey() {}
+
+    bool IsValid() const {
+        return !vchCryptedKey.empty() &&
+               vchIV.size() == WALLET_CRYPTO_IV_SIZE &&
+               vchPubKey.size() == DILITHIUM_PUBLICKEY_SIZE;
+    }
+};
+
+/**
+ * Master key - encrypted with user passphrase
+ */
+struct CMasterKey {
+    std::vector<uint8_t> vchCryptedKey;  // Encrypted master key
+    std::vector<uint8_t> vchSalt;        // PBKDF2 salt
+    std::vector<uint8_t> vchIV;          // Initialization vector
+    unsigned int nDerivationMethod;       // 0 = PBKDF2-SHA3
+    unsigned int nDeriveIterations;       // Number of iterations (default: 100,000)
+
+    CMasterKey() : nDerivationMethod(0), nDeriveIterations(WALLET_CRYPTO_PBKDF2_ROUNDS) {}
+
+    bool IsValid() const {
+        return !vchCryptedKey.empty() &&
+               vchSalt.size() == WALLET_CRYPTO_SALT_SIZE &&
+               vchIV.size() == WALLET_CRYPTO_IV_SIZE;
     }
 };
 
@@ -98,17 +136,29 @@ struct CWalletTx {
 class CWallet {
 private:
     // Key storage
-    std::map<CAddress, CKey> mapKeys;
+    std::map<CAddress, CKey> mapKeys;              // Unencrypted keys (when wallet not encrypted)
+    std::map<CAddress, CEncryptedKey> mapCryptedKeys;  // Encrypted keys
     std::vector<CAddress> vchAddresses;
 
     // Transaction tracking
     std::map<uint256, CWalletTx> mapWalletTx;
+
+    // Encryption
+    CMasterKey masterKey;                           // Master key (encrypted with passphrase)
+    CKeyingMaterial vMasterKey;                     // Decrypted master key (only when unlocked)
+    bool fWalletUnlocked;                           // Is wallet currently unlocked?
+    bool fWalletUnlockForStakingOnly;              // Unlock for staking only (future use)
+    std::chrono::time_point<std::chrono::steady_clock> nUnlockTime;  // Auto-lock time
 
     // Thread safety
     mutable std::mutex cs_wallet;
 
     // Default address
     CAddress defaultAddress;
+
+    // Persistence
+    std::string m_walletFile;  // Current wallet file path
+    bool m_autoSave;           // Auto-save after changes
 
 public:
     CWallet();
@@ -184,6 +234,84 @@ public:
      */
     size_t GetKeyPoolSize() const;
 
+    // ============================================================================
+    // Wallet Encryption
+    // ============================================================================
+
+    /**
+     * Encrypt the wallet with a passphrase
+     *
+     * This encrypts all existing private keys and sets up the master key.
+     * Once encrypted, the wallet must be unlocked with the passphrase to:
+     * - Generate new keys
+     * - Sign transactions
+     * - Export private keys
+     *
+     * @param passphrase User's wallet passphrase
+     * @return true if successful, false if already encrypted or error
+     */
+    bool EncryptWallet(const std::string& passphrase);
+
+    /**
+     * Unlock the wallet for a specified time
+     *
+     * Decrypts the master key and keeps it in memory for the timeout period.
+     * During this time, the wallet can sign transactions and generate keys.
+     *
+     * @param passphrase User's wallet passphrase
+     * @param timeout Seconds to keep wallet unlocked (0 = forever)
+     * @return true if successful, false if wrong passphrase or not encrypted
+     */
+    bool Unlock(const std::string& passphrase, int64_t timeout = 0);
+
+    /**
+     * Lock the wallet
+     *
+     * Clears the master key from memory. After locking, signing operations
+     * will fail until the wallet is unlocked again.
+     *
+     * @return true if successful
+     */
+    bool Lock();
+
+    /**
+     * Check if wallet is locked
+     *
+     * @return true if wallet is encrypted and currently locked
+     */
+    bool IsLocked() const;
+
+    /**
+     * Check if wallet is encrypted
+     *
+     * @return true if wallet has been encrypted
+     */
+    bool IsCrypted() const;
+
+    /**
+     * Change wallet passphrase
+     *
+     * Re-encrypts the master key with a new passphrase.
+     * Wallet must be unlocked or old passphrase must be provided.
+     *
+     * @param passphraseOld Current passphrase
+     * @param passphraseNew New passphrase
+     * @return true if successful, false if wrong old passphrase or not encrypted
+     */
+    bool ChangePassphrase(const std::string& passphraseOld,
+                          const std::string& passphraseNew);
+
+    /**
+     * Check if unlock timeout has expired and auto-lock if needed
+     *
+     * Called periodically to enforce timeout-based locking.
+     */
+    void CheckUnlockTimeout();
+
+    // ============================================================================
+    // Persistence
+    // ============================================================================
+
     /**
      * Load wallet from file
      * @param filename Path to wallet file
@@ -193,10 +321,26 @@ public:
 
     /**
      * Save wallet to file
-     * @param filename Path to wallet file
+     * @param filename Path to wallet file (optional, uses current file if empty)
      * @return true if successful
      */
-    bool Save(const std::string& filename) const;
+    bool Save(const std::string& filename = "") const;
+
+    /**
+     * Set wallet file path and enable auto-save
+     * @param filename Path to wallet file
+     */
+    void SetWalletFile(const std::string& filename);
+
+    /**
+     * Get current wallet file path
+     */
+    std::string GetWalletFile() const { return m_walletFile; }
+
+    /**
+     * Enable/disable auto-save
+     */
+    void SetAutoSave(bool enabled) { m_autoSave = enabled; }
 
     /**
      * Clear all wallet data
