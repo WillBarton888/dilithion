@@ -22,21 +22,25 @@ public:
         return true;
     }
     
+    bool operator<(const uint256& other) const {
+        return memcmp(data, other.data, 32) < 0;
+    }
+    
+    bool operator==(const uint256& other) const {
+        return memcmp(data, other.data, 32) == 0;
+    }
+    
+    uint8_t* begin() { return data; }
+    const uint8_t* begin() const { return data; }
+    uint8_t* end() { return data + 32; }
+    const uint8_t* end() const { return data + 32; }
+    
     std::string GetHex() const;
     void SetHex(const std::string& str);
 };
 
-/** Nodes collect new transactions into a block, hash them into a hash tree,
- * and scan through nonce values to make the block's hash satisfy proof-of-work
- * requirements. When they solve the proof-of-work, they broadcast the block
- * to everyone and the block is added to the block chain. The first transaction
- * in the block is a special one that creates a new coin owned by the creator
- * of the block.
- */
-class CBlockHeader
-{
+class CBlockHeader {
 public:
-    // header
     int32_t nVersion;
     uint256 hashPrevBlock;
     uint256 hashMerkleRoot;
@@ -44,13 +48,9 @@ public:
     uint32_t nBits;
     uint32_t nNonce;
 
-    CBlockHeader()
-    {
-        SetNull();
-    }
+    CBlockHeader() { SetNull(); }
 
-    void SetNull()
-    {
+    void SetNull() {
         nVersion = 0;
         hashPrevBlock = uint256();
         hashMerkleRoot = uint256();
@@ -59,36 +59,24 @@ public:
         nNonce = 0;
     }
 
-    bool IsNull() const
-    {
-        return (nBits == 0);
-    }
-
+    bool IsNull() const { return (nBits == 0); }
     uint256 GetHash() const;
 };
 
-class CBlock : public CBlockHeader
-{
+class CBlock : public CBlockHeader {
 public:
-    // network and disk
-    std::vector<uint8_t> vtx; // Placeholder for transactions
+    std::vector<uint8_t> vtx;
 
-    CBlock()
-    {
-        SetNull();
-    }
-
-    CBlock(const CBlockHeader &header)
-    {
+    CBlock() { SetNull(); }
+    CBlock(const CBlockHeader &header) {
         SetNull();
         *(static_cast<CBlockHeader*>(this)) = header;
     }
 
-    void SetNull()
-    {
+    void SetNull() {
         CBlockHeader::SetNull();
         vtx.clear();
     }
 };
 
-#endif // DILITHION_PRIMITIVES_BLOCK_H
+#endif
