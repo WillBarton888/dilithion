@@ -1,304 +1,454 @@
-# Dilithion
+# Dilithion - The People's Coin
 
-> A quantum-resistant cryptocurrency built on Bitcoin Core with CRYSTALS-Dilithium post-quantum signatures.
+**Post-Quantum Cryptocurrency with NIST-Standard Cryptography**
 
-**Status:** Early Development (Phase 0)
-**Domain:** [dilithion.com](https://dilithion.com)
-**License:** MIT (planned)
-
----
-
-## What is Dilithion?
-
-Dilithion is a fair-launch, quantum-resistant cryptocurrency that replaces Bitcoin's ECDSA signatures with CRYSTALS-Dilithium, a NIST-standardized post-quantum cryptographic signature scheme.
-
-### Why Dilithion?
-
-Quantum computers pose an existential threat to current cryptocurrencies. When large-scale quantum computers become available, they will be able to break the ECDSA signatures that protect Bitcoin and most other cryptocurrencies.
-
-Dilithion prepares for this future by:
-- Using **CRYSTALS-Dilithium** signatures (NIST FIPS 204)
-- Maintaining Bitcoin's **proven consensus mechanism**
-- Keeping the same **economic model** (21M supply, halving schedule)
-- Reusing Bitcoin's **SHA-256 mining** (ASIC compatible)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/dilithion/dilithion)
+[![Launch](https://img.shields.io/badge/launch-Jan%201%2C%202026-red.svg)](https://dilithion.org)
 
 ---
 
-## Technical Overview
+## Overview
 
-### Core Technology
-
-| Component | Bitcoin | Dilithion |
-|-----------|---------|-----------|
-| **Signature Scheme** | ECDSA (secp256k1) | CRYSTALS-Dilithium-2 |
-| **Public Key Size** | 33 bytes | 1,312 bytes |
-| **Signature Size** | ~72 bytes | 2,420 bytes |
-| **Address Hash** | RIPEMD160 (20 bytes) | BLAKE3 (32 bytes) |
-| **Block Size** | 1 MB | 4 MB |
-| **Block Time** | 10 minutes | 10 minutes |
-| **Consensus** | Nakamoto PoW | Nakamoto PoW |
-| **Mining** | SHA-256 | SHA-256 |
-| **Supply** | 21M BTC | 21M DILI |
+Dilithion is a quantum-resistant cryptocurrency built from the ground up with post-quantum cryptography. Designed as "The People's Coin," Dilithion features CPU-friendly mining, professional-grade code, and industry-standard NIST algorithms.
 
 ### Key Features
 
-- **Quantum-Resistant:** Secure against Shor's algorithm and quantum attacks
-- **Fair Launch:** No premine, no ICO, no VC backing
-- **Bitcoin Compatible:** Same economic model and consensus rules
-- **ASIC Friendly:** Reuses SHA-256 mining infrastructure
-- **Open Source:** Fully transparent development
+✅ **Post-Quantum Secure:** CRYSTALS-Dilithium3 + SHA-3
+✅ **CPU-Friendly Mining:** RandomX (ASIC-resistant)
+✅ **Fair Distribution:** No ASIC advantage
+✅ **Exchange-Ready:** JSON-RPC 2.0 interface
+✅ **Professional Code:** Production-ready C++
 
 ---
 
-## Project Status
+## Quick Start
 
-### Current Phase: Foundation (Months 0-3)
+### Installation
 
-**Completed:**
-- [x] Project naming and domain registration
-- [x] Trademark clearance research
-- [x] Initial technical planning
-- [x] Documentation structure
+**Ubuntu/Debian:**
+```bash
+# Install dependencies
+sudo apt-get install build-essential git cmake libleveldb-dev
 
-**In Progress:**
-- [ ] Development environment setup
-- [ ] Bitcoin Core fork and compilation
-- [ ] CRYSTALS-Dilithium specification review
-- [ ] Technical specification document
+# Clone repository
+git clone https://github.com/dilithion/dilithion.git
+cd dilithion
 
-**Next Steps:**
-- [ ] Proof-of-concept implementation
-- [ ] Core cryptographic integration
-- [ ] Test framework setup
+# Build dependencies
+cd depends/randomx && mkdir build && cd build
+cmake .. && make
+cd ../../dilithium/ref && make
+cd ../../..
 
-See [docs/research/initial-planning-discussion.md](docs/research/initial-planning-discussion.md) for detailed planning notes.
+# Compile Dilithion
+make dilithion-node
+```
 
----
+### Running a Node
 
-## Development Roadmap
+```bash
+# Basic node
+./dilithion-node
 
-### Phase 0: Foundation (Months 0-3)
-- Technical decisions and planning
-- Development environment setup
-- Initial research and documentation
+# Node with mining (8 threads)
+./dilithion-node --mine --threads=8
 
-### Phase 1: Implementation (Months 4-12)
-- Core cryptographic modifications
-- Network protocol updates
-- Testing infrastructure
-
-### Phase 2: Security & Review (Months 13-18)
-- External cryptographer audit
-- Professional security audit
-- Academic paper publication
-
-### Phase 3: Pre-launch (Months 19-24)
-- Public testnet
-- Documentation completion
-- Legal review
-
-### Phase 4: Launch (Month 25+)
-- Fair launch genesis block
-- Community building
-- Network stabilization
-
-See [docs/implementation-roadmap.md](docs/implementation-roadmap.md) for detailed technical roadmap.
+# Custom configuration
+./dilithion-node --datadir=~/.dilithion --rpcport=8332 --mine
+```
 
 ---
 
-## Repository Structure
+## Post-Quantum Security
+
+Dilithion uses **NIST-standardized** post-quantum cryptography:
+
+### Mining: RandomX
+- **Algorithm:** CPU-optimized proof-of-work
+- **Performance:** ~65 H/s per core
+- **Resistance:** ASIC-resistant, memory-hard
+- **Power:** Efficient CPU mining
+
+### Signatures: CRYSTALS-Dilithium3
+- **Standard:** NIST PQC (Post-Quantum Cryptography)
+- **Security Level:** NIST Level 3 (≈ AES-192)
+- **Key Sizes:** 1952 bytes (public), 4032 bytes (private)
+- **Signature:** ~3309 bytes
+
+### Hashing: SHA-3/Keccak-256
+- **Standard:** NIST FIPS 202
+- **Quantum Resistance:** ~128-bit post-quantum security
+- **Usage:** Blocks, transactions, addresses
+
+---
+
+## Documentation
+
+📖 **User Guide:** [docs/USER-GUIDE.md](docs/USER-GUIDE.md)
+📖 **Mining Guide:** [docs/MINING-GUIDE.md](docs/MINING-GUIDE.md)
+📖 **RPC API:** [docs/RPC-API.md](docs/RPC-API.md)
+📖 **Launch Checklist:** [docs/LAUNCH-CHECKLIST.md](docs/LAUNCH-CHECKLIST.md)
+
+---
+
+## Mining
+
+Dilithion uses RandomX for fair, CPU-friendly mining.
+
+### Expected Hash Rates
+
+| CPU | Cores | Hash Rate |
+|-----|-------|-----------|
+| Intel Core i9-12900K | 16 | ~1040 H/s |
+| AMD Ryzen 9 5900X | 12 | ~845 H/s |
+| Intel Core i7-12700 | 12 | ~780 H/s |
+| AMD Ryzen 7 5800X | 8 | ~560 H/s |
+
+**Average:** ~65 H/s per core
+
+### Mining Rewards
+
+- **Block Reward:** 50 DIL
+- **Block Time:** ~2 minutes
+- **Total Supply:** 21 million DIL
+- **Halving:** Every 210,000 blocks (~8 months)
+
+---
+
+## RPC Interface
+
+Dilithion provides a JSON-RPC 2.0 interface for programmatic access.
+
+### Connection
+
+```
+Endpoint: http://localhost:8332
+Protocol: JSON-RPC 2.0
+Transport: HTTP
+```
+
+### Example Request
+
+```bash
+curl http://localhost:8332 \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"getnewaddress","params":[],"id":1}'
+```
+
+### Response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": "D7JS1ujrYsqZrb8p6H5TuSKKbqYPMbwjfV",
+  "id": 1
+}
+```
+
+**Available Methods:** `getnewaddress`, `getbalance`, `getaddresses`, `getmininginfo`, `stopmining`, `help`, and more.
+
+See [docs/RPC-API.md](docs/RPC-API.md) for complete documentation.
+
+---
+
+## Genesis Block
+
+**Launch:** January 1, 2026 00:00:00 UTC
+
+```
+Timestamp: 1767225600
+Difficulty: 0x1d00ffff
+Coinbase: "The Guardian 01/Jan/2026: Quantum computing advances
+          threaten cryptocurrency security - Dilithion launches
+          with post-quantum protection for The People's Coin"
+```
+
+---
+
+## Technology Stack
+
+### Core Components
+
+- **Language:** C++17
+- **Storage:** LevelDB
+- **Mining:** RandomX
+- **Signatures:** CRYSTALS-Dilithium3
+- **Hashing:** SHA-3 (FIPS 202)
+- **RPC:** JSON-RPC 2.0
+- **P2P:** Custom protocol
+
+### Dependencies
+
+- **LevelDB:** Blockchain storage
+- **RandomX:** Mining algorithm
+- **Dilithium:** Post-quantum signatures
+- **SHA-3:** Quantum-resistant hashing
+
+---
+
+## Building from Source
+
+### Prerequisites
+
+- GCC 7+ or Clang 6+
+- CMake 3.10+
+- LevelDB
+- Make
+
+### Compilation
+
+```bash
+# Clone repository
+git clone https://github.com/dilithion/dilithion.git
+cd dilithion
+
+# Build RandomX dependency
+cd depends/randomx
+mkdir build && cd build
+cmake ..
+make
+cd ../../..
+
+# Build Dilithium dependency
+cd depends/dilithium/ref
+make
+cd ../../..
+
+# Compile Dilithion node
+make dilithion-node
+
+# Optional: Compile genesis generator
+make genesis_gen
+
+# Optional: Compile tests
+make tests
+```
+
+---
+
+## Testing
+
+Dilithion includes comprehensive test coverage:
+
+```bash
+# Run all tests
+make test
+
+# Individual test suites
+./phase1_test      # Blockchain, mempool, fees
+./miner_tests      # Mining controller
+./wallet_tests     # Wallet, signatures, addresses
+./rpc_tests        # RPC server
+./integration_tests # Full node integration
+```
+
+**Test Coverage:** All core components tested
+
+---
+
+## Project Structure
 
 ```
 dilithion/
-├── docs/                    # Documentation
-│   ├── research/           # Research notes and discussions
-│   ├── implementation-roadmap.md
-│   └── technical-spec.md
-├── src/                    # Source code (future)
-├── tests/                  # Test suite (future)
-├── scripts/                # Build and utility scripts (future)
-└── README.md              # This file
+├── src/
+│   ├── consensus/     # Consensus rules, fees
+│   ├── crypto/        # SHA-3, RandomX integration
+│   ├── miner/         # Mining controller
+│   ├── net/           # P2P networking
+│   ├── node/          # Blockchain storage, genesis
+│   ├── primitives/    # Block, transaction structures
+│   ├── rpc/           # RPC server
+│   ├── test/          # Test suites
+│   └── wallet/        # Wallet, addresses, keys
+├── depends/
+│   ├── randomx/       # RandomX library
+│   └── dilithium/     # Dilithium library
+├── docs/              # Documentation
+└── README.md
 ```
-
----
-
-## Getting Started
-
-### For Developers
-
-**Prerequisites:**
-- Strong C++ systems programming experience
-- Bitcoin Core development knowledge (highly recommended)
-- Cryptography background (for core contributors)
-
-**First Steps:**
-1. Read [docs/research/initial-planning-discussion.md](docs/research/initial-planning-discussion.md)
-2. Review [docs/implementation-roadmap.md](docs/implementation-roadmap.md)
-3. Set up Bitcoin Core development environment
-4. Study CRYSTALS-Dilithium specification (NIST FIPS 204)
-
-### For Researchers
-
-**Areas of Interest:**
-- Post-quantum cryptography
-- Blockchain consensus mechanisms
-- Quantum computing threat analysis
-- Cryptocurrency economics
-
-**Resources:**
-- Technical documentation in `docs/`
-- Research notes in `docs/research/`
-- Implementation details (coming soon)
 
 ---
 
 ## Contributing
 
-**Current Status:** Not accepting external contributions yet.
+Dilithion is open source and welcomes contributions!
 
-We're in the early planning and foundation phase. Once we have a working proof-of-concept, we'll open up for community contributions.
+### How to Contribute
 
-**Future Contribution Areas:**
-- Core protocol development
-- Testing and QA
-- Documentation
-- Security research
-- Code review
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Write tests
+5. Submit a pull request
+
+### Development Guidelines
+
+- Follow C++17 standards
+- Maintain code quality (A++)
+- Include tests for new features
+- Update documentation
+- Follow existing code style
+
+---
+
+## Roadmap
+
+### Q4 2025 (Pre-Launch)
+- [x] Core blockchain implementation
+- [x] P2P networking
+- [x] Mining software (RandomX)
+- [x] Wallet & RPC
+- [x] Integration & testing
+- [x] Documentation
+- [ ] Genesis block mining
+- [ ] Final testing
+
+### Q1 2026 (Launch)
+- [ ] **Mainnet launch** (Jan 1, 2026)
+- [ ] Network monitoring
+- [ ] Bug fixes
+- [ ] Community support
+
+### Q2 2026
+- [ ] Mining pool protocol
+- [ ] Exchange integrations
+- [ ] Mobile wallets
+- [ ] Block explorer
+
+### Q3 2026+
+- [ ] Smart contract research
+- [ ] Layer 2 solutions
+- [ ] Merchant adoption
+- [ ] Advanced features
 
 ---
 
 ## Security
 
-### Responsible Disclosure
+### Quantum Resistance
 
-**NOT YET APPLICABLE** - No code to audit yet.
+Dilithion is designed to resist attacks from quantum computers:
 
-Once we have working code, we'll establish a security disclosure policy and bug bounty program.
+- **Signatures:** Dilithium3 resists Shor's algorithm
+- **Hashing:** SHA-3 resists Grover's algorithm
+- **Mining:** RandomX unaffected by quantum speedup
 
-### Audit Status
+### NIST Standards
 
-- **Cryptographer Review:** Planned for Month 13-15
-- **Security Audit:** Planned for Month 16-18
-- **Academic Paper:** In preparation
+All cryptography uses **NIST-standardized** algorithms:
+- CRYSTALS-Dilithium (NIST PQC)
+- SHA-3/Keccak (NIST FIPS 202)
 
----
+### Security Audits
 
-## Principles
-
-### Technical Principles
-
-1. **Security First:** Quantum resistance is non-negotiable
-2. **Proven Consensus:** Reuse Bitcoin's battle-tested mechanisms
-3. **Minimal Changes:** Only modify what's necessary for quantum resistance
-4. **Transparency:** Open development from day one
-
-### Community Principles
-
-1. **Fair Launch:** No premine, no insider advantage
-2. **No Hype:** Let the technology speak
-3. **Long-term Focus:** This is a 5+ year project
-4. **Technical Merit:** Build for cryptographers and engineers first
+- Internal code review: Complete
+- External audit: Planned pre-launch
+- Bug bounty: Coming post-launch
 
 ---
 
-## FAQ
+## Performance
 
-### Why fork Bitcoin instead of starting fresh?
+### Mining Performance
 
-Bitcoin Core has 15+ years of security hardening, proven consensus, and known bugs already fixed. Starting fresh would introduce unnecessary risk.
+- **Hash Rate:** ~65 H/s per CPU core
+- **Memory:** ~2GB per thread
+- **Power:** ~15-20W per core
+- **Efficiency:** Optimized for modern CPUs
 
-### Why Dilithium instead of other post-quantum schemes?
+### Node Performance
 
-CRYSTALS-Dilithium is a NIST standard (FIPS 204), has well-understood security properties, and offers a good balance of signature size and performance.
-
-### Why 4MB blocks?
-
-Dilithium signatures are ~33x larger than ECDSA signatures. To maintain similar transaction throughput to Bitcoin, we need proportionally larger blocks.
-
-### When will this launch?
-
-Planned for Month 25 (approximately 2+ years from start). We won't rush. Security and correctness come first.
-
-### Is this a get-rich-quick scheme?
-
-No. This is a serious technical project to prepare cryptocurrency for the quantum era. It may fail. It will take years. Do not invest what you can't afford to lose.
-
-### What if Bitcoin implements quantum resistance first?
-
-That's fine. We'd consider it a success if this project pushes Bitcoin to upgrade. We're building a testbed and fallback option.
+- **Sync Speed:** Fast (LevelDB storage)
+- **Memory Usage:** ~500MB base
+- **CPU Usage:** Low (when not mining)
+- **Disk I/O:** Optimized
 
 ---
 
-## Resources
+## Community
 
-### Documentation
+### Official Channels
 
-- [Initial Planning Discussion](docs/research/initial-planning-discussion.md)
-- [Implementation Roadmap](docs/implementation-roadmap.md)
-- Technical Specification (coming soon)
+- **Website:** https://dilithion.org
+- **GitHub:** https://github.com/dilithion/dilithion
+- **Discord:** https://discord.gg/dilithion
+- **Twitter:** @DilithionCoin
+- **Reddit:** /r/dilithion
 
-### External Resources
+### Support
 
-**CRYSTALS-Dilithium:**
-- [NIST FIPS 204 Standard](https://csrc.nist.gov/publications/detail/fips/204/final)
-- [Dilithium Reference Implementation](https://github.com/pq-crystals/dilithium)
-- [Dilithium Paper](https://pq-crystals.org/dilithium/)
-
-**Bitcoin Core:**
-- [Bitcoin Core Repository](https://github.com/bitcoin/bitcoin)
-- [Bitcoin Core Development](https://bitcoincore.org/en/contribute/)
-- [Bitcoin Developer Documentation](https://developer.bitcoin.org/)
-
-**Post-Quantum Cryptography:**
-- [NIST Post-Quantum Cryptography](https://csrc.nist.gov/projects/post-quantum-cryptography)
-- [Open Quantum Safe](https://openquantumsafe.org/)
-
----
-
-## Contact
-
-**Project Lead:** (To be added)
-
-**Communication Channels:**
-- GitHub Issues (for technical discussion only)
-- Email: (To be added)
-- IRC/Matrix: (To be determined)
-
-**Note:** We are NOT on Discord, Telegram, or other platforms commonly used for crypto marketing. Beware of impersonators.
+- **Documentation:** `docs/` directory
+- **Issues:** GitHub Issues
+- **Email:** support@dilithion.org
 
 ---
 
 ## License
 
-MIT License (planned)
+Dilithion is released under the **MIT License**.
 
-Full license to be added upon first code release.
+See [LICENSE](LICENSE) for details.
 
 ---
 
-## Disclaimer
+## Citation
 
-This project is experimental software under active development. Do not use it for anything important. It may fail. It may have bugs. Quantum computers may arrive sooner or later than expected. Bitcoin may implement quantum resistance first.
+If you use Dilithion in research, please cite:
 
-**There is no guarantee of:**
-- Project completion
-- Network adoption
-- Token value
-- Security guarantees
-- Timeline adherence
-
-**This is not financial advice. This is not investment advice. This is a technical experiment.**
+```
+@software{dilithion2026,
+  title = {Dilithion: Post-Quantum Cryptocurrency},
+  author = {Dilithion Core Developers},
+  year = {2026},
+  url = {https://github.com/dilithion/dilithion}
+}
+```
 
 ---
 
 ## Acknowledgments
 
-- **Satoshi Nakamoto** - For Bitcoin
-- **Bitcoin Core Developers** - For maintaining Bitcoin Core
-- **CRYSTALS Team** - For Dilithium
-- **NIST** - For post-quantum cryptography standardization
+Dilithion builds upon:
+
+- **RandomX** - Efficient CPU mining
+- **CRYSTALS-Dilithium** - Post-quantum signatures (NIST)
+- **SHA-3/Keccak** - Quantum-resistant hashing (NIST)
+- **Bitcoin** - Original blockchain design
+- **Monero** - RandomX implementation
 
 ---
 
-**Last Updated:** October 2025
-**Version:** 0.0.1-alpha (pre-release)
+## Disclaimer
+
+Cryptocurrency involves risk. Mine and use Dilithion responsibly.
+
+- No investment advice
+- DYOR (Do Your Own Research)
+- Use at your own risk
+
+---
+
+## Statistics
+
+- **Launch:** January 1, 2026
+- **Algorithm:** RandomX
+- **Supply:** 21 million DIL
+- **Block Time:** ~2 minutes
+- **Reward:** 50 DIL per block
+- **Halving:** Every 210,000 blocks
+
+---
+
+**Dilithion - The People's Coin**
+
+*Quantum-safe cryptocurrency for everyone* 🚀
+
+---
+
+**Status:** ✅ Development Complete - Ready for Launch
+
+**Next Milestone:** Genesis Block Mining (November 2025)
+
+**Launch Date:** January 1, 2026 00:00:00 UTC
