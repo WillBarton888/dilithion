@@ -51,7 +51,18 @@
       "Bash(timeout 30 wsl bash:*)",
       "Bash(grep:*)",
       "Read(//c/mnt/c/Users/will/**)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(1. Historical reference)",
+      "Bash(2. Understanding decisions made)",
+      "Bash(3. Reusing valid technical insights)",
+      "Bash(4. Complete git history)",
+      "Bash(__NEW_LINE__ All original work remains accessible in git history.)",
+      "Bash(__NEW_LINE__ ---)",
+      "Bash(__NEW_LINE__ *Archived: October 25, 2025*)",
+      "Bash(*Strategic)",
+      "Bash(pivot to standalone Dilithion implementation*)",
+      "Bash(ENDFILE)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []
