@@ -45,9 +45,16 @@ http://localhost:8332
 
 ### Authentication
 
-**Current Version:** No authentication (localhost-only)
+**Version 1.0.0:** HTTP Basic Authentication (RFC 7617)
 
-**Future:** HTTP Basic Auth or API keys (production deployments)
+When authentication is configured via `rpcuser` and `rpcpassword` in `dilithion.conf`, all RPC requests must include valid credentials.
+
+**See:** [RPC-AUTHENTICATION.md](RPC-AUTHENTICATION.md) for complete authentication guide
+
+**Quick Example:**
+```bash
+curl -u username:password http://localhost:8332 ...
+```
 
 ### Changing the Port
 
@@ -108,6 +115,8 @@ All requests must use **HTTP POST** with **JSON-RPC 2.0** format:
 
 ## Error Codes
 
+### JSON-RPC Error Codes
+
 | Code | Message | Description |
 |------|---------|-------------|
 | `-32700` | Parse error | Invalid JSON |
@@ -115,6 +124,15 @@ All requests must use **HTTP POST** with **JSON-RPC 2.0** format:
 | `-32601` | Method not found | Unknown method |
 | `-32602` | Invalid params | Invalid parameters |
 | `-32603` | Internal error | Server error |
+
+### HTTP Error Codes
+
+| Code | Message | Description |
+|------|---------|-------------|
+| `401` | Unauthorized | Invalid or missing authentication credentials |
+| `500` | Internal Server Error | Unexpected server error |
+
+**Note:** When authentication is configured, requests without valid credentials will receive HTTP 401 with WWW-Authenticate header.
 
 ---
 
@@ -149,6 +167,13 @@ Generate a new Dilithion address.
 
 **cURL Example:**
 ```bash
+# With authentication (if configured)
+curl -u username:password http://localhost:8332 \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"getnewaddress","params":[],"id":1}'
+
+# Without authentication (if not configured)
 curl http://localhost:8332 \
   -X POST \
   -H "Content-Type: application/json" \
@@ -543,7 +568,15 @@ curl http://localhost:8332 \
 import requests
 import json
 
-def call_rpc(method, params=[]):
+def call_rpc(method, params=[], auth=None):
+    """
+    Call Dilithion RPC method
+
+    Args:
+        method: RPC method name
+        params: Method parameters (list)
+        auth: Tuple of (username, password) for authentication
+    """
     url = "http://localhost:8332"
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -553,19 +586,21 @@ def call_rpc(method, params=[]):
         "id": 1
     }
 
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
+    # Include authentication if provided
+    response = requests.post(url, headers=headers, data=json.dumps(payload), auth=auth)
     return response.json()
 
-# Get new address
-result = call_rpc("getnewaddress")
+# With authentication (if configured)
+auth = ("myusername", "mySecurePassword123!")
+result = call_rpc("getnewaddress", auth=auth)
 print(f"New address: {result['result']}")
 
 # Check balance
-result = call_rpc("getbalance")
+result = call_rpc("getbalance", auth=auth)
 print(f"Balance: {result['result']} satoshis")
 
 # Get mining info
-result = call_rpc("getmininginfo")
+result = call_rpc("getmininginfo", auth=auth)
 print(f"Mining: {result['result']}")
 ```
 
@@ -576,29 +611,48 @@ print(f"Mining: {result['result']}")
 ```javascript
 const axios = require('axios');
 
-async function callRPC(method, params = []) {
-  const response = await axios.post('http://localhost:8332', {
-    jsonrpc: '2.0',
-    method: method,
-    params: params,
-    id: 1
-  });
+async function callRPC(method, params = [], auth = null) {
+  const config = {
+    method: 'POST',
+    url: 'http://localhost:8332',
+    data: {
+      jsonrpc: '2.0',
+      method: method,
+      params: params,
+      id: 1
+    }
+  };
 
+  // Include authentication if provided
+  if (auth) {
+    config.auth = {
+      username: auth.username,
+      password: auth.password
+    };
+  }
+
+  const response = await axios(config);
   return response.data;
 }
 
+// With authentication (if configured)
+const auth = {
+  username: 'myusername',
+  password: 'mySecurePassword123!'
+};
+
 // Get new address
-callRPC('getnewaddress').then(result => {
+callRPC('getnewaddress', [], auth).then(result => {
   console.log('New address:', result.result);
 });
 
 // Check balance
-callRPC('getbalance').then(result => {
+callRPC('getbalance', [], auth).then(result => {
   console.log('Balance:', result.result, 'satoshis');
 });
 
 // Get mining info
-callRPC('getmininginfo').then(result => {
+callRPC('getmininginfo', [], auth).then(result => {
   console.log('Mining info:', result.result);
 });
 ```
@@ -752,18 +806,37 @@ session.post(url, json=payload)
 
 ## Security Considerations
 
+### Authentication
+
+**Status:** ✅ HTTP Basic Authentication implemented (v1.0.0)
+
+Configure authentication in `dilithion.conf`:
+```ini
+rpcuser=myusername
+rpcpassword=mySecurePassword123!
+```
+
+**Security Features:**
+- SHA-3-256 password hashing (quantum-resistant)
+- Constant-time comparison (timing attack resistant)
+- Cryptographically secure salt generation
+- Thread-safe implementation
+
+**See:** [RPC-AUTHENTICATION.md](RPC-AUTHENTICATION.md) for complete security guide
+
 ### Localhost Only
 
-**Current:** RPC server only listens on `127.0.0.1` (localhost)
+**Default:** RPC server listens on `127.0.0.1` (localhost only)
 
-**Production:** Never expose RPC to the internet without authentication
+**Production:** Enable authentication before exposing RPC to network
 
-### Future Authentication
+### Future Enhancements
 
-Planned authentication methods:
-- HTTP Basic Auth
+Planned improvements:
+- TLS/HTTPS encryption
 - API key authentication
-- TLS/SSL encryption
+- Rate limiting
+- Request signing
 
 ### Firewall
 
@@ -778,19 +851,22 @@ sudo ufw allow from 127.0.0.1 to any port 8332
 
 ## Changelog
 
-### v1.0.0 (2026-01-01)
+### v1.0.0 (October 25, 2025)
 - Initial release
+- ✅ **HTTP Basic Authentication** (SHA-3-256, constant-time comparison)
 - Wallet methods: getnewaddress, getbalance, getaddresses
 - Mining methods: getmininginfo, stopmining
 - Network methods: getnetworkinfo
 - General methods: help, stop
 
 ### Future Versions
-- Authentication
+- TLS/HTTPS encryption
+- API key authentication
 - sendtoaddress implementation
 - getpeerinfo implementation
 - Batch requests
 - WebSocket support
+- Rate limiting
 
 ---
 

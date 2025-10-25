@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(git commit:*)",
-      "Bash(timeout 3 wsl bash:*)"
+      "Bash(timeout 3 wsl bash:*)",
+      "Read(//c/mnt/c/Users/will/**)",
+      "Bash(./phase1_test)",
+      "Bash(chmod:*)",
+      "Bash(make clean:*)",
+      "Bash(where:*)",
+      "Bash(wsl bash:*)",
+      "Bash(make:*)"
     ],
     "deny": [],
     "ask": []

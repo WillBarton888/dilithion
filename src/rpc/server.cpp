@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <rpc/server.h>
+#include <rpc/auth.h>
 
 #include <sstream>
 #include <cstring>
@@ -149,6 +150,34 @@ void CRPCServer::HandleClient(int clientSocket) {
 
     std::string request(buffer);
 
+    // Check authentication if configured
+    if (RPCAuth::IsAuthConfigured()) {
+        std::string authHeader;
+        if (!ExtractAuthHeader(request, authHeader)) {
+            // No Authorization header
+            std::string response = BuildHTTPUnauthorized();
+            send(clientSocket, response.c_str(), response.size(), 0);
+            return;
+        }
+
+        // Parse credentials
+        std::string username, password;
+        if (!RPCAuth::ParseAuthHeader(authHeader, username, password)) {
+            // Malformed Authorization header
+            std::string response = BuildHTTPUnauthorized();
+            send(clientSocket, response.c_str(), response.size(), 0);
+            return;
+        }
+
+        // Authenticate
+        if (!RPCAuth::AuthenticateRequest(username, password)) {
+            // Invalid credentials
+            std::string response = BuildHTTPUnauthorized();
+            send(clientSocket, response.c_str(), response.size(), 0);
+            return;
+        }
+    }
+
     // Parse HTTP request
     std::string jsonrpc;
     if (!ParseHTTPRequest(request, jsonrpc)) {
@@ -202,6 +231,58 @@ std::string CRPCServer::BuildHTTPResponse(const std::string& body) {
     oss << "\r\n";
     oss << body;
     return oss.str();
+}
+
+std::string CRPCServer::BuildHTTPUnauthorized() {
+    std::string body = "{\"error\":\"Unauthorized - Invalid or missing credentials\"}";
+    std::ostringstream oss;
+    oss << "HTTP/1.1 401 Unauthorized\r\n";
+    oss << "WWW-Authenticate: Basic realm=\"Dilithion RPC\"\r\n";
+    oss << "Content-Type: application/json\r\n";
+    oss << "Content-Length: " << body.size() << "\r\n";
+    oss << "Connection: close\r\n";
+    oss << "\r\n";
+    oss << body;
+    return oss.str();
+}
+
+bool CRPCServer::ExtractAuthHeader(const std::string& request, std::string& authHeader) {
+    // Look for "Authorization:" header (case-insensitive)
+    size_t pos = 0;
+    while (pos < request.size()) {
+        // Find line start
+        if (pos > 0 && request[pos - 1] != '\n') {
+            pos++;
+            continue;
+        }
+
+        // Check if this line starts with "Authorization:"
+        if (request.compare(pos, 14, "Authorization:") == 0) {
+            // Found it - extract the value
+            size_t valueStart = pos + 14;
+            // Skip whitespace
+            while (valueStart < request.size() &&
+                   (request[valueStart] == ' ' || request[valueStart] == '\t')) {
+                valueStart++;
+            }
+
+            // Find end of line
+            size_t valueEnd = request.find('\r', valueStart);
+            if (valueEnd == std::string::npos) {
+                valueEnd = request.find('\n', valueStart);
+            }
+            if (valueEnd == std::string::npos) {
+                valueEnd = request.size();
+            }
+
+            authHeader = request.substr(valueStart, valueEnd - valueStart);
+            return true;
+        }
+
+        pos++;
+    }
+
+    return false;  // No Authorization header found
 }
 
 RPCRequest CRPCServer::ParseRPCRequest(const std::string& json) {

@@ -353,6 +353,76 @@ See [RPC-API.md](RPC-API.md) for complete documentation with examples.
 - `help` - List all methods
 - `stop` - Stop the node
 
+### RPC Authentication (Recommended)
+
+**Version 1.0.0 and later** support HTTP Basic Authentication for RPC access.
+
+#### Configuring Authentication
+
+1. **Create Configuration File**
+
+   Create `dilithion.conf` in your data directory:
+   ```bash
+   # Linux/macOS
+   nano ~/.dilithion/dilithion.conf
+
+   # Windows
+   notepad %USERPROFILE%\.dilithion\dilithion.conf
+   ```
+
+2. **Add Credentials**
+
+   ```ini
+   # RPC Authentication
+   rpcuser=myusername
+   rpcpassword=mySecurePassword123!
+   rpcport=8332
+   rpcallowip=127.0.0.1
+   ```
+
+3. **Start Node with Configuration**
+
+   ```bash
+   ./dilithion-node --conf=~/.dilithion/dilithion.conf
+   ```
+
+#### Using Authenticated RPC
+
+Once configured, include credentials in all RPC requests:
+
+```bash
+# With curl
+curl -u myusername:mySecurePassword123! \
+  http://localhost:8332 \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"getbalance","params":[],"id":1}'
+
+# Without credentials (will return HTTP 401 Unauthorized)
+curl http://localhost:8332 \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"getbalance","params":[],"id":1}'
+```
+
+#### Security Best Practices
+
+- ✅ **Use strong passwords** (12+ characters, mixed case, numbers, symbols)
+- ✅ **Keep config file secure** (`chmod 600 dilithion.conf`)
+- ✅ **Never share credentials**
+- ✅ **Use unique password** (not reused from other services)
+- ⚠️ **Only localhost** (keep `rpcallowip=127.0.0.1`)
+- ❌ **Never expose RPC to internet** without additional security (VPN, SSH tunnel)
+
+#### Security Features
+
+- **SHA-3-256 password hashing** (quantum-resistant)
+- **Constant-time comparison** (timing attack resistant)
+- **Cryptographically secure salt generation**
+- **Thread-safe implementation**
+
+**For complete authentication documentation**, see [RPC-AUTHENTICATION.md](RPC-AUTHENTICATION.md)
+
 ---
 
 ## Troubleshooting

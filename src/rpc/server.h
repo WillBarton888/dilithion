@@ -116,6 +116,16 @@ private:
     std::string BuildHTTPResponse(const std::string& body);
 
     /**
+     * Build HTTP 401 Unauthorized response
+     */
+    std::string BuildHTTPUnauthorized();
+
+    /**
+     * Extract Authorization header from HTTP request
+     */
+    bool ExtractAuthHeader(const std::string& request, std::string& authHeader);
+
+    /**
      * Parse JSON-RPC request
      */
     RPCRequest ParseRPCRequest(const std::string& json);
