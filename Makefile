@@ -305,6 +305,14 @@ help:
 	@echo "  install          - Install binaries to /usr/local/bin"
 	@echo "  help             - Show this help message"
 	@echo ""
+	@echo "$(COLOR_BLUE)Code Quality Targets:$(COLOR_RESET)"
+	@echo "  analyze          - Run static analysis (cppcheck)"
+	@echo "  lint             - Run linter (clang-tidy)"
+	@echo "  memcheck         - Run memory leak detection (valgrind)"
+	@echo "  coverage         - Generate code coverage report"
+	@echo "  docs             - Generate API documentation (Doxygen)"
+	@echo "  quality          - Run analysis checks"
+	@echo ""
 	@echo "$(COLOR_BLUE)Examples:$(COLOR_RESET)"
 	@echo "  make                    # Build main binaries"
 	@echo "  make -j8                # Build with 8 parallel jobs"
@@ -318,6 +326,89 @@ help:
 	@echo "  - LevelDB library (apt-get install libleveldb-dev)"
 	@echo "  - CMake (for RandomX dependency)"
 	@echo ""
+
+# ============================================================================
+# Code Quality and Analysis
+# ============================================================================
+
+.PHONY: analyze lint memcheck coverage quality docs
+
+# Static analysis with cppcheck
+analyze:
+	@echo "$(COLOR_YELLOW)Running static analysis...$(COLOR_RESET)"
+	@if command -v cppcheck >/dev/null 2>&1; then \
+		cppcheck --enable=all \
+			--suppress=missingInclude \
+			--suppress=unusedFunction \
+			$(INCLUDES) \
+			src/ 2> cppcheck-report.txt; \
+		cat cppcheck-report.txt; \
+		echo "$(COLOR_GREEN)✓ Analysis complete (see cppcheck-report.txt)$(COLOR_RESET)"; \
+	else \
+		echo "$(COLOR_YELLOW)⚠ cppcheck not installed. See docs/STATIC-ANALYSIS.md$(COLOR_RESET)"; \
+	fi
+
+# Linting with clang-tidy
+lint:
+	@echo "$(COLOR_YELLOW)Running linter...$(COLOR_RESET)"
+	@if command -v clang-tidy >/dev/null 2>&1; then \
+		find src -name "*.cpp" -not -path "*/test/*" | while read file; do \
+			echo "Checking $$file..."; \
+			clang-tidy $$file -- -std=c++17 -I src || true; \
+		done; \
+		echo "$(COLOR_GREEN)✓ Linting complete$(COLOR_RESET)"; \
+	else \
+		echo "$(COLOR_YELLOW)⚠ clang-tidy not installed. See docs/STATIC-ANALYSIS.md$(COLOR_RESET)"; \
+	fi
+
+# Memory leak detection
+memcheck: tests
+	@echo "$(COLOR_YELLOW)Running memory leak detection...$(COLOR_RESET)"
+	@if command -v valgrind >/dev/null 2>&1; then \
+		valgrind --leak-check=full --show-leak-kinds=all \
+			--log-file=valgrind-phase1.txt ./phase1_test; \
+		valgrind --leak-check=full --show-leak-kinds=all \
+			--log-file=valgrind-wallet.txt ./wallet_tests; \
+		echo "$(COLOR_GREEN)✓ Memory check complete$(COLOR_RESET)"; \
+		echo "  Reports: valgrind-phase1.txt, valgrind-wallet.txt"; \
+	else \
+		echo "$(COLOR_YELLOW)⚠ valgrind not installed. See docs/STATIC-ANALYSIS.md$(COLOR_RESET)"; \
+	fi
+
+# Code coverage
+coverage:
+	@echo "$(COLOR_YELLOW)Building with coverage...$(COLOR_RESET)"
+	@if command -v lcov >/dev/null 2>&1; then \
+		$(MAKE) clean; \
+		CXXFLAGS="$(CXXFLAGS) --coverage" $(MAKE) tests; \
+		echo "$(COLOR_YELLOW)Running tests...$(COLOR_RESET)"; \
+		./phase1_test || true; \
+		./wallet_tests || true; \
+		./crypter_tests || true; \
+		./wallet_encryption_integration_tests || true; \
+		echo "$(COLOR_YELLOW)Generating coverage report...$(COLOR_RESET)"; \
+		lcov --capture --directory . --output-file coverage.info; \
+		lcov --remove coverage.info '/usr/*' 'depends/*' 'src/test/*' --output-file coverage-filtered.info; \
+		genhtml coverage-filtered.info --output-directory coverage-report; \
+		echo "$(COLOR_GREEN)✓ Coverage report: coverage-report/index.html$(COLOR_RESET)"; \
+	else \
+		echo "$(COLOR_YELLOW)⚠ lcov not installed. See docs/STATIC-ANALYSIS.md$(COLOR_RESET)"; \
+	fi
+
+# Generate API documentation
+docs:
+	@echo "$(COLOR_YELLOW)Generating API documentation...$(COLOR_RESET)"
+	@if command -v doxygen >/dev/null 2>&1; then \
+		doxygen Doxyfile; \
+		echo "$(COLOR_GREEN)✓ Documentation generated: docs/api/html/index.html$(COLOR_RESET)"; \
+	else \
+		echo "$(COLOR_YELLOW)⚠ doxygen not installed. Install: sudo apt-get install doxygen$(COLOR_RESET)"; \
+	fi
+
+# Run all quality checks
+quality: analyze
+	@echo "$(COLOR_GREEN)✓ Quality checks complete$(COLOR_RESET)"
+	@echo "  Note: Run 'make memcheck' and 'make coverage' separately (time-intensive)"
 
 # ============================================================================
 # Debugging
