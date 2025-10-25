@@ -7,6 +7,13 @@
 #include <primitives/block.h>
 #include <cstdint>
 
+/**
+ * Consensus Parameters
+ */
+
+/** Target block time in seconds (4 minutes) */
+const int64_t BLOCK_TARGET_SPACING = 240;  // 4 minutes = 240 seconds
+
 /** Minimum difficulty target (easiest) */
 const uint32_t MIN_DIFFICULTY_BITS = 0x1d00ffff;
 

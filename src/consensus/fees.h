@@ -10,9 +10,14 @@
 
 namespace Consensus {
 
-static const CAmount MIN_TX_FEE = 10000;
-static const CAmount FEE_PER_BYTE = 10;
-static const CAmount MIN_RELAY_TX_FEE = 50000;
+/** Minimum transaction fee (base) - 0.0005 DIL */
+static const CAmount MIN_TX_FEE = 50000;
+
+/** Fee per byte of transaction size - 25 satoshis per byte */
+static const CAmount FEE_PER_BYTE = 25;
+
+/** Minimum fee for relaying transactions - 0.001 DIL */
+static const CAmount MIN_RELAY_TX_FEE = 100000;
 static const CAmount MAX_REASONABLE_FEE = 10000000;
 
 CAmount CalculateMinFee(size_t tx_size);
