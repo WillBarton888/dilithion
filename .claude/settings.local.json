@@ -1,9 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git rm:*)",
-      "Bash(xargs git rm -f)",
-      "Bash(git branch:*)"
+      "Bash(git commit:*)",
+      "Bash(timeout 3 wsl bash:*)"
     ],
     "deny": [],
     "ask": []
