@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Dilithion - The first post-quantum cryptocurrency. Fair launch January 1, 2026. CPU mining with quantum-resistant CRYSTALS-Dilithium signatures.">
+    <title>Dilithion - Post-Quantum Cryptocurrency</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <h1>DILITHION</h1>
+                <span class="tagline">Post-Quantum Cryptocurrency</span>
+            </div>
+            <div class="nav-links">
+                <a href="#about">About</a>
+                <a href="#dashboard">Dashboard</a>
+                <a href="#getting-started">Get Started</a>
+                <a href="#downloads">Download</a>
+                <a href="WHITEPAPER.html" target="_blank">Whitepaper</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section with Countdown -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">The Future of Money is <span class="gradient-text">Quantum-Resistant</span></h1>
+                <p class="hero-subtitle">Dilithion is the first production-ready cryptocurrency built from the ground up for the post-quantum era.</p>
+
+                <div class="countdown-container">
+                    <h2>Mainnet Launch Countdown</h2>
+                    <div class="countdown" id="countdown">
+                        <div class="countdown-item">
+                            <span class="countdown-value" id="days">00</span>
+                            <span class="countdown-label">Days</span>
+                        </div>
+                        <div class="countdown-item">
+                            <span class="countdown-value" id="hours">00</span>
+                            <span class="countdown-label">Hours</span>
+                        </div>
+                        <div class="countdown-item">
+                            <span class="countdown-value" id="minutes">00</span>
+                            <span class="countdown-label">Minutes</span>
+                        </div>
+                        <div class="countdown-item">
+                            <span class="countdown-value" id="seconds">00</span>
+                            <span class="countdown-label">Seconds</span>
+                        </div>
+                    </div>
+                    <p class="launch-date">January 1, 2026 00:00:00 UTC</p>
+                </div>
+
+                <div class="hero-actions">
+                    <a href="#downloads" class="btn btn-primary">Download Wallet</a>
+                    <a href="#getting-started" class="btn btn-secondary">Start Mining</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Key Features -->
+    <section id="about" class="features">
+        <div class="container">
+            <h2 class="section-title">Why Dilithion?</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔐</div>
+                    <h3>Quantum-Resistant</h3>
+                    <p>Uses CRYSTALS-Dilithium, a NIST-standardized post-quantum signature scheme. Your coins are safe from quantum computers.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Fast & Efficient</h3>
+                    <p>4-minute block time optimized for large post-quantum signatures. 2.5x faster confirmations than Bitcoin.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>Fair Launch</h3>
+                    <p>No premine, no ICO, no VC allocation. 100% proof-of-work. Everyone starts equal on January 1, 2026.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💻</div>
+                    <h3>CPU Mining</h3>
+                    <p>RandomX proof-of-work keeps mining accessible. No expensive ASICs required—mine with your CPU.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Bitcoin Supply Model</h3>
+                    <p>21 million DIL total supply. Block reward halving every 210,000 blocks. Predictable, deflationary economics.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🌐</div>
+                    <h3>Decentralized</h3>
+                    <p>Fully peer-to-peer network. No central authority, no master nodes, no staking. Pure proof-of-work.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Live Dashboard -->
+    <section id="dashboard" class="dashboard">
+        <div class="container">
+            <h2 class="section-title">Network Statistics</h2>
+            <p class="dashboard-status" id="network-status">
+                <span class="status-indicator" id="status-dot"></span>
+                <span id="status-text">Network launching January 1, 2026</span>
+            </p>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Block Height</div>
+                    <div class="stat-value" id="block-height">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Network Hash Rate</div>
+                    <div class="stat-value" id="hash-rate">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Difficulty</div>
+                    <div class="stat-value" id="difficulty">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Supply</div>
+                    <div class="stat-value" id="total-supply">0 DIL</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Current Block Reward</div>
+                    <div class="stat-value" id="block-reward">50 DIL</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Next Halving</div>
+                    <div class="stat-value" id="next-halving">210,000 blocks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Last Block Time</div>
+                    <div class="stat-value" id="last-block-time">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Average Block Time</div>
+                    <div class="stat-value" id="avg-block-time">4 minutes</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Getting Started -->
+    <section id="getting-started" class="getting-started">
+        <div class="container">
+            <h2 class="section-title">Getting Started</h2>
+
+            <div class="guide-container">
+                <div class="guide-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Download the Software</h3>
+                        <p>Download the Dilithion node software for your platform. Available for Windows, Linux, and macOS.</p>
+                        <a href="#downloads" class="btn btn-small">Go to Downloads</a>
+                    </div>
+                </div>
+
+                <div class="guide-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Generate Genesis Block</h3>
+                        <p>Before the network launches, generate the genesis block:</p>
+                        <div class="code-block">
+                            <code>./genesis_gen</code>
+                        </div>
+                        <p class="note">This creates <code>genesis.dat</code> which will be used by all nodes.</p>
+                    </div>
+                </div>
+
+                <div class="guide-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Start Your Node</h3>
+                        <p>Launch the Dilithion node to join the network:</p>
+                        <div class="code-block">
+                            <code>./dilithion-node</code>
+                        </div>
+                        <p class="note">Your node will connect to peers and sync the blockchain.</p>
+                    </div>
+                </div>
+
+                <div class="guide-step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h3>Create a Wallet</h3>
+                        <p>Create a new wallet to receive mining rewards:</p>
+                        <div class="code-block">
+                            <code>./dilithion-cli createwallet "my_wallet"</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="guide-step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <h3>Start Mining</h3>
+                        <p>Begin mining Dilithion with your CPU:</p>
+                        <div class="code-block">
+                            <code>./dilithion-cli setgenerate true 4</code>
+                        </div>
+                        <p class="note">The number (4) sets how many CPU threads to use for mining.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tips-box">
+                <h3>Mining Tips</h3>
+                <ul>
+                    <li><strong>CPU Threads:</strong> Use 50-75% of your CPU cores for optimal performance</li>
+                    <li><strong>Expected Hash Rate:</strong> ~66 H/s per CPU core (Intel i5/i7)</li>
+                    <li><strong>Power Usage:</strong> RandomX is CPU-intensive but ASIC-resistant</li>
+                    <li><strong>Fair Launch:</strong> Everyone starts mining at the same time—no advantage to early miners</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Downloads -->
+    <section id="downloads" class="downloads">
+        <div class="container">
+            <h2 class="section-title">Download Dilithion</h2>
+            <p class="section-subtitle">Choose your platform and get started</p>
+
+            <div class="download-grid">
+                <div class="download-card">
+                    <div class="platform-icon">🪟</div>
+                    <h3>Windows</h3>
+                    <p>Windows 10/11 (64-bit)</p>
+                    <a href="#" class="btn btn-download">Download for Windows</a>
+                    <span class="version">v1.0.0</span>
+                </div>
+
+                <div class="download-card">
+                    <div class="platform-icon">🐧</div>
+                    <h3>Linux</h3>
+                    <p>Ubuntu, Debian, Fedora, Arch</p>
+                    <a href="#" class="btn btn-download">Download for Linux</a>
+                    <span class="version">v1.0.0</span>
+                </div>
+
+                <div class="download-card">
+                    <div class="platform-icon">🍎</div>
+                    <h3>macOS</h3>
+                    <p>macOS 11+ (Intel & Apple Silicon)</p>
+                    <a href="#" class="btn btn-download">Download for macOS</a>
+                    <span class="version">v1.0.0</span>
+                </div>
+            </div>
+
+            <div class="build-from-source">
+                <h3>Build from Source</h3>
+                <p>Developers can compile Dilithion from source code:</p>
+                <div class="code-block">
+                    <code>git clone https://github.com/dilithion/dilithion.git<br>
+                    cd dilithion<br>
+                    make</code>
+                </div>
+                <a href="https://github.com/dilithion/dilithion" class="btn btn-secondary">View on GitHub</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technical Specifications -->
+    <section class="specifications">
+        <div class="container">
+            <h2 class="section-title">Technical Specifications</h2>
+
+            <div class="specs-grid">
+                <div class="spec-row">
+                    <div class="spec-label">Signature Algorithm</div>
+                    <div class="spec-value">CRYSTALS-Dilithium3 (NIST PQC Standard)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Proof-of-Work</div>
+                    <div class="spec-value">RandomX (CPU-optimized, ASIC-resistant)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Hash Function</div>
+                    <div class="spec-value">SHA-3 (Keccak-256, quantum-resistant)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Block Time</div>
+                    <div class="spec-value">4 minutes (240 seconds)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Block Size</div>
+                    <div class="spec-value">4 MB (optimized for PQC signatures)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Total Supply</div>
+                    <div class="spec-value">21,000,000 DIL (fixed cap)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Initial Block Reward</div>
+                    <div class="spec-value">50 DIL</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Halving Period</div>
+                    <div class="spec-value">Every 210,000 blocks (~1.6 years)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Difficulty Adjustment</div>
+                    <div class="spec-value">Every 2,016 blocks (~5.6 days)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Transaction Fee</div>
+                    <div class="spec-value">~0.001-0.003 DIL (dynamic)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">P2P Port</div>
+                    <div class="spec-value">9333</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">RPC Port</div>
+                    <div class="spec-value">9332</div>
+                </div>
+            </div>
+
+            <div class="learn-more">
+                <a href="WHITEPAPER.html" class="btn btn-primary">Read the Whitepaper</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3>Dilithion</h3>
+                    <p>The first post-quantum cryptocurrency. Built for the future, launching January 1, 2026.</p>
+                </div>
+
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="WHITEPAPER.html">Whitepaper</a></li>
+                        <li><a href="https://github.com/dilithion/dilithion">GitHub</a></li>
+                        <li><a href="#downloads">Downloads</a></li>
+                        <li><a href="#getting-started">Documentation</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="#">Twitter</a></li>
+                        <li><a href="#">Reddit</a></li>
+                        <li><a href="#">Discord</a></li>
+                        <li><a href="#">Telegram</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-section">
+                    <h4>Legal</h4>
+                    <ul>
+                        <li><a href="#">MIT License</a></li>
+                        <li><a href="#">Disclaimer</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="footer-bottom">
+                <p>&copy; 2025 Dilithion. Open-source cryptocurrency. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

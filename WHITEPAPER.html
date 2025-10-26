@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dilithion: A Post-Quantum Cryptocurrency - Whitepaper v1.0</title>
+    <style>
+        @media print {
+            @page {
+                margin: 1in;
+                size: letter;
+            }
+            body {
+                font-size: 11pt;
+                line-height: 1.4;
+            }
+            h1 {
+                page-break-before: always;
+                font-size: 18pt;
+                margin-top: 0;
+            }
+            h1:first-of-type {
+                page-break-before: avoid;
+            }
+            h2 {
+                font-size: 14pt;
+                page-break-after: avoid;
+            }
+            h3 {
+                font-size: 12pt;
+                page-break-after: avoid;
+            }
+            table {
+                page-break-inside: avoid;
+                font-size: 10pt;
+            }
+            pre, code {
+                page-break-inside: avoid;
+                font-size: 9pt;
+            }
+            .no-print { display: none; }
+        }
+
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            max-width: 8.5in;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+            background: #fff;
+        }
+
+        h1 {
+            color: #1a1a1a;
+            border-bottom: 3px solid #4a90e2;
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+
+        h2 {
+            color: #2a2a2a;
+            margin-top: 30px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+
+        h3 {
+            color: #3a3a3a;
+            margin-top: 20px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #4a90e2;
+            color: white;
+            font-weight: bold;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        pre {
+            background-color: #f4f4f4;
+            padding: 15px;
+            border-left: 4px solid #4a90e2;
+            overflow-x: auto;
+            border-radius: 3px;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+        }
+
+        blockquote {
+            border-left: 4px solid #4a90e2;
+            padding-left: 20px;
+            margin-left: 0;
+            font-style: italic;
+            color: #666;
+        }
+
+        .cover {
+            text-align: center;
+            padding: 100px 0;
+        }
+
+        .cover h1 {
+            font-size: 32pt;
+            border: none;
+            margin: 20px 0;
+        }
+
+        .cover .subtitle {
+            font-size: 18pt;
+            color: #666;
+            margin: 20px 0;
+        }
+
+        .cover .version {
+            font-size: 14pt;
+            color: #888;
+            margin: 10px 0;
+        }
+
+        .cover .date {
+            font-size: 14pt;
+            color: #888;
+        }
+
+        .abstract {
+            background: #f9f9f9;
+            padding: 20px;
+            border-left: 4px solid #4a90e2;
+            margin: 20px 0;
+            font-size: 11pt;
+        }
+
+        .toc {
+            background: #f9f9f9;
+            padding: 20px;
+            margin: 30px 0;
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            border: none;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            margin: 8px 0;
+        }
+
+        .toc a {
+            text-decoration: none;
+            color: #4a90e2;
+        }
+
+        .toc a:hover {
+            text-decoration: underline;
+        }
+
+        ul, ol {
+            line-height: 1.6;
+        }
+
+        .print-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #4a90e2;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .print-button:hover {
+            background: #357abd;
+        }
+    </style>
+</head>
+<body>
+
+<button class="print-button no-print" onclick="window.print()">Print to PDF</button>
+
+<div class="cover">
+    <h1>Dilithion</h1>
+    <div class="subtitle">A Post-Quantum Cryptocurrency</div>
+    <div class="version">Technical Whitepaper Version 1.0</div>
+    <div class="date">October 2025</div>
+    <p style="margin-top: 40px; font-size: 12pt; color: #666;">
+        <strong>Launch Date:</strong> January 1, 2026, 00:00:00 UTC
+    </p>
+</div>
+
+<div class="abstract">
+    <h2>Abstract</h2>
+    <p>Dilithion is a decentralized cryptocurrency designed from the ground up for the post-quantum era. As quantum computers advance toward breaking classical cryptographic systems like ECDSA and RSA, the need for quantum-resistant blockchain technology becomes critical. Dilithion addresses this threat by implementing CRYSTALS-Dilithium, a NIST-standardized post-quantum digital signature scheme, combined with RandomX proof-of-work for ASIC-resistant CPU mining.</p>
+
+    <p>This whitepaper presents Dilithion's technical architecture, consensus parameters optimized for large post-quantum signatures, economic model, and roadmap for sustainable decentralized currency in the quantum age.</p>
+
+    <p><strong>Key Features:</strong></p>
+    <ul>
+        <li><strong>Post-quantum security:</strong> CRYSTALS-Dilithium (NIST FIPS 204)</li>
+        <li><strong>ASIC-resistant mining:</strong> RandomX proof-of-work</li>
+        <li><strong>Optimized consensus:</strong> 4-minute blocks for large signature propagation</li>
+        <li><strong>Fair distribution:</strong> No premine, pure proof-of-work launch</li>
+        <li><strong>Fixed supply:</strong> 21 million coins</li>
+        <li><strong>Launch:</strong> January 1, 2026, 00:00:00 UTC</li>
+    </ul>
+</div>
+
+<div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#section1">Introduction: The Quantum Threat</a></li>
+        <li><a href="#section2">Post-Quantum Cryptography</a></li>
+        <li><a href="#section3">Technical Architecture</a></li>
+        <li><a href="#section4">Consensus Mechanism</a></li>
+        <li><a href="#section5">Economic Model</a></li>
+        <li><a href="#section6">Network Security</a></li>
+        <li><a href="#section7">Roadmap</a></li>
+        <li><a href="#section8">Conclusion</a></li>
+    </ol>
+</div>
+
+<h1 id="section1">1. Introduction: The Quantum Threat</h1>
+
+<h2>1.1 The Problem</h2>
+
+<p>Modern cryptocurrency security relies on classical cryptography:</p>
+<ul>
+    <li><strong>ECDSA (Bitcoin, Ethereum):</strong> Elliptic Curve Digital Signature Algorithm</li>
+    <li><strong>RSA:</strong> Rivest-Shamir-Adleman encryption</li>
+    <li><strong>SHA-256:</strong> Secure Hash Algorithm (for mining)</li>
+</ul>
+
+<p><strong>Shor's Algorithm</strong> (1994) demonstrated that quantum computers can break ECDSA and RSA in polynomial time. While SHA-256 mining receives only a modest speedup (Grover's algorithm), <strong>digital signatures are critically vulnerable</strong>.</p>
+
+<h2>1.2 Timeline to Quantum Threat</h2>
+
+<p><strong>Current State (2025):</strong></p>
+<ul>
+    <li>IBM: 1,121-qubit quantum computer (Condor)</li>
+    <li>Google: Quantum supremacy claimed</li>
+    <li>China: Pan-Jianwei's quantum network</li>
+</ul>
+
+<p><strong>Expert Estimates:</strong></p>
+<ul>
+    <li><strong>2030-2035:</strong> Cryptographically relevant quantum computers (CRQC)</li>
+    <li><strong>Breaking Bitcoin:</strong> Estimated 1,500-3,000 logical qubits required</li>
+    <li><strong>Current trajectory:</strong> Doubling qubits every ~2 years</li>
+</ul>
+
+<p><strong>Conclusion:</strong> Cryptocurrencies must transition to post-quantum cryptography <strong>now</strong> to remain secure over their multi-decade lifespan.</p>
+
+<h2>1.3 Existing Cryptocurrency Vulnerability</h2>
+
+<table>
+    <tr>
+        <th>Cryptocurrency</th>
+        <th>Signature Scheme</th>
+        <th>Quantum Vulnerable?</th>
+        <th>Migration Plan?</th>
+    </tr>
+    <tr>
+        <td>Bitcoin</td>
+        <td>ECDSA</td>
+        <td>✅ Yes</td>
+        <td>None announced</td>
+    </tr>
+    <tr>
+        <td>Ethereum</td>
+        <td>ECDSA</td>
+        <td>✅ Yes</td>
+        <td>Research phase only</td>
+    </tr>
+    <tr>
+        <td>Litecoin</td>
+        <td>ECDSA</td>
+        <td>✅ Yes</td>
+        <td>None announced</td>
+    </tr>
+    <tr>
+        <td>Monero</td>
+        <td>EdDSA</td>
+        <td>✅ Yes</td>
+        <td>None announced</td>
+    </tr>
+    <tr>
+        <td><strong>Dilithion</strong></td>
+        <td><strong>Dilithium3</strong></td>
+        <td><strong>❌ No</strong></td>
+        <td><strong>Built-in from genesis</strong></td>
+    </tr>
+</table>
+
+<p><strong>Critical Issue:</strong> Retrofitting existing blockchains with post-quantum cryptography requires:</p>
+<ul>
+    <li>Hard fork (community consensus required)</li>
+    <li>Wallet migrations (user action required)</li>
+    <li>Backward compatibility challenges</li>
+    <li>Risk of botched transition</li>
+</ul>
+
+<p><strong>Dilithion's Solution:</strong> Start with post-quantum cryptography from genesis block.</p>
+
+<h1 id="section2">2. Post-Quantum Cryptography</h1>
+
+<h2>2.1 CRYSTALS-Dilithium</h2>
+
+<p><strong>Selection Process:</strong></p>
+<ul>
+    <li>NIST Post-Quantum Cryptography Standardization (2016-2024)</li>
+    <li>82 initial submissions</li>
+    <li>Multiple rounds of evaluation</li>
+    <li><strong>Winner:</strong> CRYSTALS-Dilithium (2022)</li>
+    <li><strong>Standardized:</strong> FIPS 204 (August 2024)</li>
+</ul>
+
+<p><strong>Why Dilithium?</strong></p>
+<ol>
+    <li><strong>Security:</strong> Based on hard lattice problems (Module-LWE, Module-SIS)</li>
+    <li><strong>Performance:</strong> Fast signing and verification</li>
+    <li><strong>Standardization:</strong> Official NIST standard</li>
+    <li><strong>Analysis:</strong> Years of public cryptanalysis, no serious breaks</li>
+    <li><strong>Versatility:</strong> Three security levels (Dilithium2, 3, 5)</li>
+</ol>
+
+<p><strong>Dilithion uses Dilithium3:</strong></p>
+<ul>
+    <li><strong>Security level:</strong> NIST Level 3 (equivalent to AES-192)</li>
+    <li><strong>Public key size:</strong> 1,952 bytes</li>
+    <li><strong>Signature size:</strong> 3,309 bytes</li>
+    <li><strong>Signing speed:</strong> ~1-2 milliseconds</li>
+    <li><strong>Verification speed:</strong> ~1 millisecond</li>
+</ul>
+
+<h2>2.2 Comparison to Classical Cryptography</h2>
+
+<table>
+    <tr>
+        <th>Metric</th>
+        <th>ECDSA (secp256k1)</th>
+        <th>Dilithium3</th>
+        <th>Ratio</th>
+    </tr>
+    <tr>
+        <td><strong>Public key</strong></td>
+        <td>33 bytes</td>
+        <td>1,952 bytes</td>
+        <td>59x larger</td>
+    </tr>
+    <tr>
+        <td><strong>Signature</strong></td>
+        <td>72 bytes</td>
+        <td>3,309 bytes</td>
+        <td>46x larger</td>
+    </tr>
+    <tr>
+        <td><strong>Security</strong></td>
+        <td>~128-bit</td>
+        <td>192-bit (quantum-safe)</td>
+        <td>More secure</td>
+    </tr>
+    <tr>
+        <td><strong>Signing time</strong></td>
+        <td>&lt;1 ms</td>
+        <td>1-2 ms</td>
+        <td>Comparable</td>
+    </tr>
+    <tr>
+        <td><strong>Verify time</strong></td>
+        <td>~1 ms</td>
+        <td>~1 ms</td>
+        <td>Identical</td>
+    </tr>
+    <tr>
+        <td><strong>Quantum safe?</strong></td>
+        <td>❌ No</td>
+        <td>✅ Yes</td>
+        <td>Critical advantage</td>
+    </tr>
+</table>
+
+<p><strong>Trade-off:</strong> Dilithion transactions are ~15x larger than Bitcoin transactions, but provide quantum resistance.</p>
+
+<p style="text-align: center; margin: 40px 0; color: #666; font-style: italic;">
+    Continue reading for complete technical specifications, economic model, security analysis, and launch roadmap...
+</p>
+
+<p style="text-align: center; margin: 40px 0;">
+    <strong>For the complete whitepaper, please refer to WHITEPAPER.md</strong><br>
+    This HTML preview shows the structure and formatting.<br>
+    The full document contains 1,100+ lines covering all technical and economic details.
+</p>
+
+<h1 id="section8">8. Conclusion</h1>
+
+<h2>8.1 Why Dilithion Matters</h2>
+
+<p><strong>The Quantum Threat is Real:</strong></p>
+<ul>
+    <li>Timeline: 5-10 years to cryptographically relevant quantum computers</li>
+    <li>Existing cryptocurrencies are vulnerable</li>
+    <li>Transition will be difficult and contentious</li>
+    <li><strong>Action needed now</strong></li>
+</ul>
+
+<p><strong>Dilithion's Solution:</strong></p>
+<ul>
+    <li>Built quantum-safe from genesis</li>
+    <li>No migration required</li>
+    <li>Users protected from day one</li>
+    <li>Proven cryptography (NIST standard)</li>
+</ul>
+
+<h2>8.2 Technical Excellence</h2>
+
+<p><strong>Optimized for Post-Quantum Era:</strong></p>
+<ul>
+    <li>4-minute blocks accommodate large signatures</li>
+    <li>Balanced emission schedule (31.3% Year 1)</li>
+    <li>Affordable transaction fees</li>
+    <li>ASIC-resistant CPU mining</li>
+    <li>Professional-grade security</li>
+</ul>
+
+<h2>8.3 Fair Launch Principles</h2>
+
+<p><strong>Dilithion adheres to fair launch principles:</strong></p>
+<ul>
+    <li>✅ No premine</li>
+    <li>✅ No ICO / token sale</li>
+    <li>✅ No founder allocation</li>
+    <li>✅ No venture capital pre-allocation</li>
+    <li>✅ Pure proof-of-work from genesis</li>
+    <li>✅ Open-source (MIT license)</li>
+    <li>✅ Community-driven development</li>
+</ul>
+
+<p><strong>Everyone starts equal on January 1, 2026.</strong></p>
+
+<h2>8.4 Long-term Vision</h2>
+
+<p>Dilithion aims to be:</p>
+<ol>
+    <li><strong>The standard</strong> for quantum-safe cryptocurrency</li>
+    <li><strong>A store of value</strong> in the post-quantum era</li>
+    <li><strong>A medium of exchange</strong> with reasonable fees</li>
+    <li><strong>A platform</strong> for decentralized applications</li>
+    <li><strong>A community</strong> of quantum-aware developers and users</li>
+</ol>
+
+<blockquote>
+    <strong>Mission Statement:</strong> "Secure digital currency for the quantum age, built by the community, for the community."
+</blockquote>
+
+<hr style="margin: 40px 0;">
+
+<h2>Technical Specifications Summary</h2>
+
+<table>
+    <tr>
+        <th>Parameter</th>
+        <th>Value</th>
+    </tr>
+    <tr>
+        <td><strong>Launch Date</strong></td>
+        <td>January 1, 2026, 00:00:00 UTC</td>
+    </tr>
+    <tr>
+        <td><strong>Total Supply</strong></td>
+        <td>21,000,000 DIL</td>
+    </tr>
+    <tr>
+        <td><strong>Block Time</strong></td>
+        <td>4 minutes (240 seconds)</td>
+    </tr>
+    <tr>
+        <td><strong>Block Reward</strong></td>
+        <td>50 DIL (halves every 210,000 blocks)</td>
+    </tr>
+    <tr>
+        <td><strong>Halving Interval</strong></td>
+        <td>Every 210,000 blocks (~1.6 years)</td>
+    </tr>
+    <tr>
+        <td><strong>Signature Algorithm</strong></td>
+        <td>CRYSTALS-Dilithium3 (NIST FIPS 204)</td>
+    </tr>
+    <tr>
+        <td><strong>Hash Algorithm</strong></td>
+        <td>SHA-3-256 (NIST FIPS 202)</td>
+    </tr>
+    <tr>
+        <td><strong>Mining Algorithm</strong></td>
+        <td>RandomX (Monero-derived, ASIC-resistant)</td>
+    </tr>
+    <tr>
+        <td><strong>Difficulty Adjustment</strong></td>
+        <td>Every 2,016 blocks (~5.6 days)</td>
+    </tr>
+    <tr>
+        <td><strong>Transaction Fee</strong></td>
+        <td>0.0005 DIL base + 25 sats/byte</td>
+    </tr>
+</table>
+
+<hr style="margin: 40px 0;">
+
+<p style="text-align: center; font-size: 14pt; color: #666;">
+    <strong>Dilithion Whitepaper v1.0</strong><br>
+    October 2025<br>
+    "Quantum-Safe. Community-Driven. Fair Launch."
+</p>
+
+<hr style="margin: 20px 0;">
+
+<p style="text-align: center; font-size: 10pt; color: #999;">
+    <strong>Disclaimer:</strong> This whitepaper is for informational purposes only and does not constitute investment advice. Cryptocurrency investments carry risk. DYOR (Do Your Own Research). Dilithion is experimental software released as open-source. No guarantees are made regarding future value, adoption, or success.
+</p>
+
+</body>
+</html>

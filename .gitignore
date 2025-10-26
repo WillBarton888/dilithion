@@ -14,6 +14,16 @@
 *.x86_64
 *.hex
 
+# Dilithion binaries
+dilithion-node
+dilithion-miner
+genesis_gen
+phase1_test
+miner_tests
+wallet_tests
+rpc_tests
+integration_tests
+
 # Build directories
 build/
 dist/

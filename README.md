@@ -1,24 +1,49 @@
-# Dilithion - The People's Coin
+# Dilithion - Experimental Post-Quantum Cryptocurrency
+
+⚠️ **EXPERIMENTAL - USE AT YOUR OWN RISK** ⚠️
 
 **Post-Quantum Cryptocurrency with NIST-Standard Cryptography**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/dilithion/dilithion)
+[![Version](https://img.shields.io/badge/version-1.0.0--pre-orange.svg)](https://github.com/WillBarton888/dilithion)
 [![Launch](https://img.shields.io/badge/launch-Jan%201%2C%202026-red.svg)](https://dilithion.org)
+[![Status](https://img.shields.io/badge/status-experimental-yellow.svg)](https://github.com/WillBarton888/dilithion)
+
+---
+
+## ⚠️ Important Disclaimers
+
+**This is experimental software developed with AI assistance:**
+- ✅ **Open Source:** MIT License - full transparency
+- ⚠️ **AI-Assisted Development:** Built with Claude Code assistance
+- ⚠️ **No Professional Audit:** Community review only (professional audit: TBD)
+- ⚠️ **Experimental:** Has NOT been battle-tested in production
+- ⚠️ **Use at Own Risk:** No guarantees of security, value, or success
+- ⚠️ **Not Financial Advice:** DYOR (Do Your Own Research)
+
+**Seeking Code Review:** We're actively seeking expert review from cryptographers, blockchain developers, and security researchers before mainnet launch. See [SECURITY.md](SECURITY.md) for details.
 
 ---
 
 ## Overview
 
-Dilithion is a quantum-resistant cryptocurrency built from the ground up with post-quantum cryptography. Designed as "The People's Coin," Dilithion features CPU-friendly mining, professional-grade code, and industry-standard NIST algorithms.
+Dilithion is a quantum-resistant cryptocurrency built from the ground up with post-quantum cryptography. Designed as "The People's Coin," Dilithion features CPU-friendly mining and industry-standard NIST algorithms.
+
+## Status
+
+- 📅 **Launch:** January 1, 2026 (planned)
+- 💻 **Code:** 100% complete, seeking review
+- 🧪 **Testing:** Testnet launching November 2025
+- 🔍 **Audit:** Community review (professional audit: TBD)
+- 🎓 **Educational:** Public learning course available
 
 ### Key Features
 
 ✅ **Post-Quantum Secure:** CRYSTALS-Dilithium3 + SHA-3
 ✅ **CPU-Friendly Mining:** RandomX (ASIC-resistant)
-✅ **Fair Distribution:** No ASIC advantage
+✅ **Fair Launch:** No premine, no ICO, no ASIC advantage
 ✅ **Exchange-Ready:** JSON-RPC 2.0 interface
-✅ **Professional Code:** Production-ready C++
+✅ **Open Source:** MIT License, full transparency
 
 ---
 
@@ -85,10 +110,25 @@ Dilithion uses **NIST-standardized** post-quantum cryptography:
 
 ## Documentation
 
+### User Documentation
 📖 **User Guide:** [docs/USER-GUIDE.md](docs/USER-GUIDE.md)
 📖 **Mining Guide:** [docs/MINING-GUIDE.md](docs/MINING-GUIDE.md)
 📖 **RPC API:** [docs/RPC-API.md](docs/RPC-API.md)
-📖 **Launch Checklist:** [docs/LAUNCH-CHECKLIST.md](docs/LAUNCH-CHECKLIST.md)
+
+### Educational Resources
+🎓 **Post-Quantum Crypto Course:** [website/POST-QUANTUM-CRYPTO-COURSE.md](website/POST-QUANTUM-CRYPTO-COURSE.md)
+📄 **Whitepaper:** [Dilithion-Whitepaper-v1.0.pdf](Dilithion-Whitepaper-v1.0.pdf)
+📚 **Training Summary:** [DILITHION-TRAINING-SUMMARY.md](DILITHION-TRAINING-SUMMARY.md)
+
+### Security & Review
+🔒 **Security Policy:** [SECURITY.md](SECURITY.md)
+✅ **Security Review Checklist:** [SECURITY-REVIEW-CHECKLIST.md](SECURITY-REVIEW-CHECKLIST.md)
+🚨 **Incident Response Plan:** [INCIDENT-RESPONSE-PLAN.md](INCIDENT-RESPONSE-PLAN.md)
+
+### Development
+👥 **Team:** [TEAM.md](TEAM.md)
+📋 **Launch Checklist:** [docs/LAUNCH-CHECKLIST.md](docs/LAUNCH-CHECKLIST.md)
+📅 **Week 2 Action Plan:** [WEEK-2-ACTION-PLAN.md](WEEK-2-ACTION-PLAN.md)
 
 ---
 
@@ -338,14 +378,27 @@ Dilithion is designed to resist attacks from quantum computers:
 ### NIST Standards
 
 All cryptography uses **NIST-standardized** algorithms:
-- CRYSTALS-Dilithium (NIST PQC)
-- SHA-3/Keccak (NIST FIPS 202)
+- CRYSTALS-Dilithium3 (NIST FIPS 204 - Post-Quantum Cryptography)
+- SHA-3/Keccak-256 (NIST FIPS 202 - Quantum-Resistant Hashing)
 
-### Security Audits
+### Security Review Status
 
-- Internal code review: Complete
-- External audit: Planned pre-launch
-- Bug bounty: Coming post-launch
+⚠️ **Current Status:**
+- ✅ **Code Complete:** All functionality implemented
+- ✅ **Unit Tests:** Comprehensive test coverage
+- ✅ **Security Checklist:** Created and available for reviewers
+- ⏳ **Community Review:** Seeking expert cryptographers and security researchers
+- ❌ **Professional Audit:** Not yet completed (TBD based on budget/community)
+- ⏳ **Bug Bounty:** Will launch with mainnet (paid in DIL)
+
+**We are actively seeking code review in:**
+- Post-quantum cryptography implementation
+- Blockchain consensus logic
+- Network protocol security
+- RandomX integration
+- Wallet security and key management
+
+See [SECURITY.md](SECURITY.md) for how to report vulnerabilities and participate in the bug bounty program.
 
 ---
 
