@@ -3,6 +3,7 @@
 
 #include <miner/controller.h>
 #include <crypto/randomx_hash.h>
+#include <consensus/pow.h>
 #include <util/time.h>
 
 #include <thread>
@@ -122,8 +123,11 @@ void CMiningController::SetBlockFoundCallback(std::function<void(const CBlock&)>
 }
 
 bool CMiningController::CheckProofOfWork(const uint256& hash, const uint256& target) const {
-    // Hash must be less than target
-    return hash < target;
+    // Hash must be less than target (using big-endian comparison for PoW)
+    // CRITICAL: Must use HashLessThan(), NOT operator<
+    // operator< uses memcmp (little-endian byte order)
+    // PoW requires big-endian comparison (MSB first)
+    return HashLessThan(hash, target);
 }
 
 void CMiningController::MiningWorker(uint32_t threadId) {
@@ -182,6 +186,13 @@ void CMiningController::MiningWorker(uint32_t threadId) {
 
             // Check if valid block
             if (CheckProofOfWork(hash, hashTarget)) {
+                // Double-check mining flag to prevent race during shutdown
+                // If StopMining() was called between finding block and this check,
+                // discard the block to prevent database corruption
+                if (!m_mining) {
+                    break;  // Shutdown in progress, exit immediately
+                }
+
                 // Found valid block!
                 m_stats.nBlocksFound++;
 

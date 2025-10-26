@@ -21,6 +21,7 @@
 #include <node/blockchain_storage.h>
 #include <node/mempool.h>
 #include <node/genesis.h>
+#include <node/block_index.h>
 #include <net/peers.h>
 #include <net/net.h>
 #include <net/socket.h>
@@ -28,6 +29,7 @@
 #include <wallet/wallet.h>
 #include <rpc/server.h>
 #include <core/chainparams.h>
+#include <consensus/pow.h>
 
 #include <iostream>
 #include <string>
@@ -36,10 +38,12 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <optional>
 
 // Global node state for signal handling
 struct NodeState {
     std::atomic<bool> running{false};
+    std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
     CSocket* p2p_socket = nullptr;
@@ -144,6 +148,80 @@ struct NodeConfig {
     }
 };
 
+/**
+ * Build mining template for next block
+ * @param blockchain Reference to blockchain database
+ * @param verbose If true, print detailed template information
+ * @return Optional containing template if successful, nullopt if error
+ */
+std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, bool verbose = false) {
+    // Get blockchain tip to build on
+    uint256 hashBestBlock;
+    uint32_t nHeight = 0;
+
+    if (!blockchain.ReadBestBlock(hashBestBlock)) {
+        std::cerr << "[ERROR] Cannot read best block from blockchain" << std::endl;
+        return std::nullopt;
+    }
+
+    if (verbose) {
+        std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
+    }
+
+    // Read best block index to get height and calculate next difficulty
+    CBlockIndex bestIndex;
+    const CBlockIndex* pindexPrev = nullptr;
+    if (blockchain.ReadBlockIndex(hashBestBlock, bestIndex)) {
+        nHeight = bestIndex.nHeight + 1;  // New block height
+        pindexPrev = &bestIndex;  // For difficulty calculation
+        if (verbose) {
+            std::cout << "  Building on block height " << bestIndex.nHeight << std::endl;
+            std::cout << "  Mining block height " << nHeight << std::endl;
+        }
+    } else {
+        if (verbose) {
+            std::cout << "  WARNING: Cannot read block index for best block" << std::endl;
+            std::cout << "  Assuming best block is genesis, mining block 1" << std::endl;
+        }
+        nHeight = 1;  // Mining block 1 (after genesis at 0)
+        pindexPrev = nullptr;  // Will use genesis difficulty
+    }
+
+    // Create block header
+    CBlock block;
+    block.nVersion = 1;
+    block.hashPrevBlock = hashBestBlock;
+    block.nTime = static_cast<uint32_t>(std::time(nullptr));
+    block.nBits = GetNextWorkRequired(pindexPrev);
+    block.nNonce = 0;
+
+    // Create coinbase transaction (block reward)
+    std::string coinbaseMsg = "Block " + std::to_string(nHeight) + " mined by Dilithion";
+    block.vtx.resize(coinbaseMsg.size());
+    memcpy(block.vtx.data(), coinbaseMsg.c_str(), coinbaseMsg.size());
+
+    // Calculate merkle root (SHA3-256 hash of coinbase)
+    uint8_t merkleHash[32];
+    extern void SHA3_256(const uint8_t* data, size_t len, uint8_t hash[32]);
+    SHA3_256(block.vtx.data(), block.vtx.size(), merkleHash);
+    memcpy(block.hashMerkleRoot.data, merkleHash, 32);
+
+    // Calculate target from nBits (compact format)
+    uint256 hashTarget = CompactToBig(block.nBits);
+
+    if (verbose) {
+        std::cout << "  Block height: " << nHeight << std::endl;
+        std::cout << "  Previous block: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "  Difficulty (nBits): 0x" << std::hex << block.nBits << std::dec << std::endl;
+        std::cout << "  Target: " << hashTarget.GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "  Coinbase: " << coinbaseMsg << std::endl;
+        std::cout << "  Merkle root: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
+    }
+
+    // Create and return block template
+    return CBlockTemplate(block, hashTarget, nHeight);
+}
+
 int main(int argc, char* argv[]) {
     // Parse configuration
     NodeConfig config;
@@ -234,6 +312,43 @@ int main(int argc, char* argv[]) {
         std::cout << "  Genesis time: " << genesis.nTime << std::endl;
         std::cout << "  ✓ Genesis block verified" << std::endl;
 
+        // Initialize blockchain with genesis block if needed
+        uint256 genesisHash = genesis.GetHash();
+        if (!blockchain.BlockExists(genesisHash)) {
+            std::cout << "Initializing blockchain with genesis block..." << std::endl;
+
+            // Save genesis block
+            if (!blockchain.WriteBlock(genesisHash, genesis)) {
+                std::cerr << "ERROR: Failed to write genesis block to database!" << std::endl;
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
+            std::cout << "  ✓ Genesis block saved to database" << std::endl;
+
+            // Create genesis block index
+            CBlockIndex genesisIndex(genesis);
+            genesisIndex.phashBlock = genesisHash;
+            genesisIndex.nHeight = 0;
+            genesisIndex.nStatus = CBlockIndex::BLOCK_VALID_CHAIN | CBlockIndex::BLOCK_HAVE_DATA;
+
+            if (!blockchain.WriteBlockIndex(genesisHash, genesisIndex)) {
+                std::cerr << "ERROR: Failed to write genesis block index!" << std::endl;
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
+            std::cout << "  ✓ Genesis block index saved (height 0)" << std::endl;
+
+            // Set genesis as best block
+            if (!blockchain.WriteBestBlock(genesisHash)) {
+                std::cerr << "ERROR: Failed to set genesis as best block!" << std::endl;
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
+            std::cout << "  ✓ Genesis block set as blockchain tip" << std::endl;
+        } else {
+            std::cout << "  ✓ Genesis block already in database" << std::endl;
+        }
+
         // Set network magic for P2P protocol
         if (config.testnet) {
             NetProtocol::g_network_magic = NetProtocol::TESTNET_MAGIC;
@@ -282,6 +397,80 @@ int main(int argc, char* argv[]) {
         CMiningController miner(mining_threads);
         g_node_state.miner = &miner;
         std::cout << "  ✓ Mining controller initialized (" << mining_threads << " threads)" << std::endl;
+
+        // Set up block found callback to save mined blocks
+        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &peer_manager, &message_processor](const CBlock& block) {
+            // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
+            if (!g_node_state.running) {
+                // Shutting down - discard this block to prevent race condition
+                return;
+            }
+
+            uint256 blockHash = block.GetHash();
+            std::cout << std::endl;
+            std::cout << "======================================" << std::endl;
+            std::cout << "✓ BLOCK FOUND!" << std::endl;
+            std::cout << "======================================" << std::endl;
+            std::cout << "Block hash: " << blockHash.GetHex() << std::endl;
+            std::cout << "Block time: " << block.nTime << std::endl;
+            std::cout << "Nonce: " << block.nNonce << std::endl;
+            std::cout << "Difficulty: 0x" << std::hex << block.nBits << std::dec << std::endl;
+            std::cout << "======================================" << std::endl;
+            std::cout << std::endl;
+
+            // Save block to blockchain database
+            if (blockchain.WriteBlock(blockHash, block)) {
+                std::cout << "[Blockchain] Block saved to database" << std::endl;
+
+                // Create and save block index
+                CBlockIndex blockIndex(block);  // Constructor copies header
+                blockIndex.phashBlock = blockHash;
+                blockIndex.nHeight = 0;  // Will be updated below
+
+                // Try to get previous block's height
+                CBlockIndex prevIndex;
+                if (blockchain.ReadBlockIndex(block.hashPrevBlock, prevIndex)) {
+                    blockIndex.nHeight = prevIndex.nHeight + 1;
+                }
+
+                if (blockchain.WriteBlockIndex(blockHash, blockIndex)) {
+                    std::cout << "[Blockchain] Block index saved (height " << blockIndex.nHeight << ")" << std::endl;
+                }
+
+                // Update best block pointer
+                if (blockchain.WriteBestBlock(blockHash)) {
+                    std::cout << "[Blockchain] Updated best block pointer" << std::endl;
+                }
+
+                // Broadcast block to network (P2P block relay)
+                auto connected_peers = peer_manager.GetConnectedPeers();
+                if (!connected_peers.empty()) {
+                    // Create inv message announcing new block
+                    std::vector<NetProtocol::CInv> inv;
+                    inv.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, blockHash));
+
+                    CNetMessage invMsg = message_processor.CreateInvMessage(inv);
+
+                    int broadcast_count = 0;
+                    for (const auto& peer : connected_peers) {
+                        if (peer && peer->IsHandshakeComplete()) {
+                            if (connection_manager.SendMessage(peer->id, invMsg)) {
+                                broadcast_count++;
+                            }
+                        }
+                    }
+
+                    if (broadcast_count > 0) {
+                        std::cout << "[P2P] Broadcasted block inv to " << broadcast_count << " peer(s)" << std::endl;
+                    }
+                }
+
+                // Signal main loop to update mining template for next block
+                g_node_state.new_block_found = true;
+            } else {
+                std::cerr << "[Blockchain] ERROR: Failed to save block to database!" << std::endl;
+            }
+        });
 
         // Phase 4: Initialize wallet
         std::cout << "Initializing wallet..." << std::endl;
@@ -514,20 +703,14 @@ int main(int argc, char* argv[]) {
             std::cout << std::endl;
             std::cout << "Starting mining..." << std::endl;
 
-            // Create dummy block template for now
-            // TODO: Get real block template from blockchain
-            CBlock block;
-            block.nVersion = 1;
-            block.nTime = static_cast<uint32_t>(std::time(nullptr));
-            block.nBits = 0x1d00ffff;  // Difficulty target
-            block.nNonce = 0;
+            auto templateOpt = BuildMiningTemplate(blockchain, true);
+            if (!templateOpt) {
+                std::cerr << "ERROR: Failed to build mining template" << std::endl;
+                std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
+                return 1;
+            }
 
-            // Create block template
-            uint256 hashTarget;  // Default initialized to zero
-            // TODO: Calculate hashTarget from nBits
-            CBlockTemplate blockTemplate(block, hashTarget, 0);
-
-            miner.StartMining(blockTemplate);
+            miner.StartMining(*templateOpt);
 
             std::cout << "  ✓ Mining started with " << mining_threads << " threads" << std::endl;
             std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
@@ -549,6 +732,29 @@ int main(int argc, char* argv[]) {
         // Main loop
         while (g_node_state.running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
+
+            // Check if new block was found and mining template needs update
+            if (g_node_state.new_block_found.load()) {
+                std::cout << "[Mining] New block found, updating template..." << std::endl;
+
+                // Stop current mining
+                if (miner.IsMining()) {
+                    miner.StopMining();
+                }
+
+                // Build new template for next block
+                auto templateOpt = BuildMiningTemplate(blockchain, false);
+                if (templateOpt) {
+                    // Restart mining with new template
+                    miner.StartMining(*templateOpt);
+                    std::cout << "[Mining] Resumed mining on block height " << templateOpt->nHeight << std::endl;
+                } else {
+                    std::cerr << "[ERROR] Failed to build new mining template!" << std::endl;
+                }
+
+                // Clear flag
+                g_node_state.new_block_found = false;
+            }
 
             // Periodic tasks
             // - Update mempool
