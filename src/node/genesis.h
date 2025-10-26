@@ -6,6 +6,7 @@
 
 #include <primitives/block.h>
 #include <uint256.h>
+#include <core/chainparams.h>
 
 /**
  * Genesis Block Parameters
@@ -13,45 +14,25 @@
  * The genesis block is the first block in the Dilithion blockchain.
  * It is hardcoded and must be identical across all nodes.
  *
- * Launch: January 1, 2026 00:00:00 UTC
+ * Parameters are network-specific (mainnet vs testnet) and defined in ChainParams.
  */
 namespace Genesis {
 
-// Genesis block timestamp (Unix time)
-// January 1, 2026 00:00:00 UTC
-const uint32_t TIMESTAMP = 1767225600;
-
-// Genesis block version
+// Genesis block version (constant across all networks)
 const int32_t VERSION = 1;
-
-// Genesis block difficulty target (nBits)
-// This represents the initial mining difficulty
-// Format: compact representation of 256-bit target
-// 0x1d00ffff = difficulty 1 (Bitcoin's genesis difficulty)
-const uint32_t NBITS = 0x1d00ffff;
-
-// Genesis block nonce
-// This will be found by mining the genesis block
-// Placeholder until we mine it
-const uint32_t NONCE = 0;
-
-// Genesis coinbase message
-// Traditional: "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
-// Dilithion: Reference to quantum computing threat + People's Coin mission
-extern const char* COINBASE_MESSAGE;
 
 /**
  * Create the genesis block
  *
- * This function creates the genesis block with the hardcoded parameters.
+ * This function creates the genesis block using parameters from g_chainParams.
  * The genesis block has:
  * - No previous block (hashPrevBlock = 0)
- * - Empty merkle root (or hash of coinbase message)
- * - Timestamp: January 1, 2026 00:00:00 UTC
- * - Initial difficulty target
- * - Specific nonce (found by mining)
+ * - Merkle root from coinbase transaction
+ * - Timestamp from ChainParams
+ * - Difficulty target from ChainParams
+ * - Nonce from ChainParams (0 if not yet mined)
  *
- * @return The genesis block
+ * @return The genesis block for the current network
  */
 CBlock CreateGenesisBlock();
 

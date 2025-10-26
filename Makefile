@@ -54,6 +54,8 @@ COLOR_YELLOW := \033[33m
 CONSENSUS_SOURCES := src/consensus/fees.cpp \
                      src/consensus/pow.cpp
 
+CORE_SOURCES_UTIL := src/core/chainparams.cpp
+
 CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/sha3.cpp
 
@@ -82,6 +84,7 @@ WALLET_SOURCES := src/wallet/wallet.cpp \
 
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \
+                $(CORE_SOURCES_UTIL) \
                 $(CRYPTO_SOURCES) \
                 $(MINER_SOURCES) \
                 $(NET_SOURCES) \
@@ -231,6 +234,7 @@ test: tests
 
 # Create build directories
 $(OBJ_DIR)/consensus \
+$(OBJ_DIR)/core \
 $(OBJ_DIR)/crypto \
 $(OBJ_DIR)/miner \
 $(OBJ_DIR)/net \
@@ -242,7 +246,7 @@ $(OBJ_DIR)/test:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/crypto $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 

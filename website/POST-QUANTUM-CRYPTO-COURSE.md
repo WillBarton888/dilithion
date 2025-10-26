@@ -965,7 +965,7 @@ Transaction {
   // Outputs (creating new UTXOs)
   vector<TxOut> vout;
     TxOut {
-      int64_t value;           // Amount in satoshis (0.00000001 DIL)
+      int64_t value;           // Amount in ions (0.00000001 DIL)
       vector<uint8_t> scriptPubKey; // Locking script (pubkey hash)
     }
 
@@ -1054,7 +1054,7 @@ T7JS1ujrYsqZrb8p6H5TuSKKbqYPMbwjfV  ← Valid testnet
 **Minimum transaction fee:**
 ```
 Base fee: 0.0005 DIL (fixed)
-Size fee: 25 satoshis per byte (0.00000025 DIL/byte)
+Size fee: 25 ions per byte (0.00000025 DIL/byte)
 
 Example transaction (3,500 bytes):
 ├─ Base: 0.0005 DIL
@@ -2830,8 +2830,8 @@ When a blockchain's recent history changes because a longer chain is discovered.
 
 ## S
 
-**Satoshi**
-Smallest unit of a cryptocurrency. 1 DIL = 100,000,000 satoshis (like cents in a dollar).
+**Ion**
+Smallest unit of a cryptocurrency. 1 DIL = 100,000,000 ions (like cents in a dollar).
 
 **Script**
 Small program that defines spending conditions. Used in transaction outputs.

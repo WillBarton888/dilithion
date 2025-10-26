@@ -5,29 +5,32 @@
 #include <crypto/randomx_hash.h>
 #include <crypto/sha3.h>
 #include <consensus/pow.h>
+#include <core/chainparams.h>
 
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 
 namespace Genesis {
 
-const char* COINBASE_MESSAGE =
-    "The Guardian 01/Jan/2026: Quantum computing advances threaten cryptocurrency security - "
-    "Dilithion launches with post-quantum protection for The People's Coin";
-
 CBlock CreateGenesisBlock() {
+    // Ensure chain parameters are initialized
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized. Call InitChainParams() first.");
+    }
+
     CBlock genesis;
 
-    // Set header fields
+    // Set header fields from chain parameters
     genesis.nVersion = VERSION;
     genesis.hashPrevBlock = uint256();  // All zeros (no previous block)
-    genesis.nTime = TIMESTAMP;
-    genesis.nBits = NBITS;
-    genesis.nNonce = NONCE;
+    genesis.nTime = Dilithion::g_chainParams->genesisTime;
+    genesis.nBits = Dilithion::g_chainParams->genesisNBits;
+    genesis.nNonce = Dilithion::g_chainParams->genesisNonce;
 
     // Create coinbase message
     // Store the message in the block's transaction data
-    const char* msg = COINBASE_MESSAGE;
+    const char* msg = Dilithion::g_chainParams->genesisCoinbaseMsg.c_str();
     size_t msgLen = strlen(msg);
     genesis.vtx.resize(msgLen);
     memcpy(genesis.vtx.data(), msg, msgLen);
@@ -55,11 +58,16 @@ uint256 GetGenesisHash() {
 }
 
 bool IsGenesisBlock(const CBlock& block) {
+    // Ensure chain parameters are initialized
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized");
+    }
+
     // Check all genesis block fields
     if (block.nVersion != VERSION) return false;
     if (!block.hashPrevBlock.IsNull()) return false;
-    if (block.nTime != TIMESTAMP) return false;
-    if (block.nBits != NBITS) return false;
+    if (block.nTime != Dilithion::g_chainParams->genesisTime) return false;
+    if (block.nBits != Dilithion::g_chainParams->genesisNBits) return false;
 
     // Check merkle root matches expected
     CBlock genesis = CreateGenesisBlock();

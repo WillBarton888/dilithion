@@ -3,8 +3,10 @@
 
 #include <net/net.h>
 #include <util/strencodings.h>
+#include <core/chainparams.h>
 #include <random>
 #include <cstring>
+#include <iostream>
 
 // Global network statistics
 CNetworkStats g_network_stats;
@@ -18,7 +20,9 @@ std::string CNetworkStats::ToString() const {
 
 // CNetMessageProcessor implementation
 
-CNetMessageProcessor::CNetMessageProcessor() {
+CNetMessageProcessor::CNetMessageProcessor(CPeerManager& peer_mgr)
+    : peer_manager(peer_mgr)
+{
     // Default handlers do nothing
     on_version = [](int, const NetProtocol::CVersionMessage&) {};
     on_ping = [](int, uint64_t) {};
@@ -84,7 +88,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         msg.relay = stream.ReadUint8() != 0;
 
         // Update peer info
-        auto peer = g_peer_manager->GetPeer(peer_id);
+        auto peer = peer_manager.GetPeer(peer_id);
         if (peer) {
             peer->version = msg.version;
             peer->user_agent = msg.user_agent;
@@ -103,7 +107,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
 }
 
 bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
-    auto peer = g_peer_manager->GetPeer(peer_id);
+    auto peer = peer_manager.GetPeer(peer_id);
     if (peer && peer->state == CPeer::STATE_VERSION_SENT) {
         peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
         g_network_stats.handshake_complete++;
@@ -380,48 +384,76 @@ CConnectionManager::CConnectionManager(CPeerManager& peer_mgr,
 {
 }
 
-bool CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
+int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
     // Check if we can accept more connections
     if (!peer_manager.CanAcceptConnection()) {
-        return false;
+        return -1;
     }
+
+    // Create socket for outbound connection
+    auto socket = std::make_unique<CSocket>();
+
+    // Extract IP from IPv6-mapped IPv4 address (bytes 12-15)
+    std::string ip_str = strprintf("%d.%d.%d.%d",
+                                    addr.ip[12],
+                                    addr.ip[13],
+                                    addr.ip[14],
+                                    addr.ip[15]);
+
+    // Connect to peer
+    if (!socket->Connect(ip_str, addr.port)) {
+        return -1;
+    }
+
+    // Set socket to non-blocking mode
+    socket->SetNonBlocking(true);
 
     // Add peer
     auto peer = peer_manager.AddPeer(addr);
     if (!peer) {
-        return false;
+        socket->Close();
+        return -1;
     }
 
-    peer->state = CPeer::STATE_CONNECTING;
-
-    // In production, would initiate TCP connection here
-    // For now, just mark as connected
     peer->state = CPeer::STATE_CONNECTED;
     peer->connect_time = GetTime();
 
+    // Store socket
+    {
+        std::lock_guard<std::mutex> lock(cs_sockets);
+        peer_sockets[peer->id] = std::move(socket);
+    }
+
     g_network_stats.connected_peers++;
 
-    return true;
+    return peer->id;
 }
 
-bool CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr) {
+int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
+                                         std::unique_ptr<CSocket> socket) {
     // Check if we can accept more connections
     if (!peer_manager.CanAcceptConnection()) {
-        return false;
+        return -1;  // Return -1 for failure
     }
 
     // Add peer
     auto peer = peer_manager.AddPeer(addr);
     if (!peer) {
-        return false;
+        return -1;
     }
 
     peer->state = CPeer::STATE_CONNECTED;
     peer->connect_time = GetTime();
 
+    // Store socket
+    {
+        std::lock_guard<std::mutex> lock(cs_sockets);
+        peer_sockets[peer->id] = std::move(socket);
+    }
+
     g_network_stats.connected_peers++;
 
-    return true;
+    return peer->id;  // Return peer ID on success
 }
 
 bool CConnectionManager::PerformHandshake(int peer_id) {
@@ -431,9 +463,11 @@ bool CConnectionManager::PerformHandshake(int peer_id) {
     }
 
     // Send version message
-    CNetMessage version_msg = message_processor.CreateVersionMessage();
-    // In production, would actually send the message
+    if (!SendVersionMessage(peer_id)) {
+        return false;
+    }
 
+    peer->state = CPeer::STATE_VERSION_SENT;
     return true;
 }
 
@@ -449,20 +483,22 @@ void CConnectionManager::PeriodicMaintenance() {
     auto peers = peer_manager.GetConnectedPeers();
 
     for (const auto& peer : peers) {
-        if (peer->IsHandshakeComplete()) {
-            int64_t now = GetTime();
+        int64_t now = GetTime();
 
+        if (peer->IsHandshakeComplete()) {
             // Send ping every 60 seconds
             if (now - peer->last_send > 60) {
                 uint64_t nonce = GenerateNonce();
-                CNetMessage ping = message_processor.CreatePingMessage(nonce);
-
-                pending_pings[peer->id] = {nonce, now};
-                peer->last_send = now;
+                if (SendPingMessage(peer->id, nonce)) {
+                    std::cout << "[P2P] Sent keepalive ping to peer " << peer->id << std::endl;
+                } else {
+                    std::cout << "[P2P] WARNING: Failed to send ping to peer " << peer->id << std::endl;
+                }
             }
 
             // Check for timeout (5 minutes)
             if (now - peer->last_recv > 300) {
+                std::cout << "[P2P] Peer " << peer->id << " timed out (no response for 5 minutes)" << std::endl;
                 DisconnectPeer(peer->id, "timeout");
             }
         }
@@ -474,4 +510,161 @@ uint64_t CConnectionManager::GenerateNonce() {
     static std::mt19937_64 gen(rd());
     static std::uniform_int_distribution<uint64_t> dis;
     return dis(gen);
+}
+
+bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
+    if (!message.IsValid()) {
+        std::cout << "[P2P] ERROR: Invalid message for peer " << peer_id << std::endl;
+        return false;
+    }
+
+    // Serialize complete message (header + payload)
+    std::vector<uint8_t> data = message.Serialize();
+
+    // Get socket and send (hold lock during send to prevent socket deletion)
+    {
+        std::lock_guard<std::mutex> lock(cs_sockets);
+        auto it = peer_sockets.find(peer_id);
+        if (it == peer_sockets.end() || !it->second || !it->second->IsValid()) {
+            std::cout << "[P2P] ERROR: No valid socket for peer " << peer_id << std::endl;
+            return false;
+        }
+
+        // Send to socket
+        int sent = it->second->Send(data.data(), data.size());
+        if (sent != static_cast<int>(data.size())) {
+            std::cout << "[P2P] ERROR: Send failed to peer " << peer_id
+                      << " (sent " << sent << " of " << data.size() << " bytes)" << std::endl;
+            return false;
+        }
+    }
+
+    // Update peer last_send time
+    auto peer = peer_manager.GetPeer(peer_id);
+    if (peer) {
+        peer->last_send = GetTime();
+    }
+
+    return true;
+}
+
+void CConnectionManager::ReceiveMessages(int peer_id) {
+    uint8_t header_buf[24];
+    int received = 0;
+
+    // Read message header (hold lock during receive)
+    {
+        std::lock_guard<std::mutex> lock(cs_sockets);
+        auto it = peer_sockets.find(peer_id);
+        if (it == peer_sockets.end() || !it->second || !it->second->IsValid()) {
+            return;  // Socket not found - normal, skip silently
+        }
+
+        received = it->second->Recv(header_buf, 24);
+    }
+
+    if (received <= 0) {
+        return;  // No data or error - normal for non-blocking sockets
+    }
+
+    if (received != 24) {
+        std::cout << "[P2P] ERROR: Incomplete header from peer " << peer_id
+                  << " (" << received << " bytes)" << std::endl;
+        return;
+    }
+
+    // Parse header (manual deserialization)
+    CNetMessage message;
+    std::memcpy(&message.header.magic, header_buf, 4);
+    std::memcpy(message.header.command, header_buf + 4, 12);
+    std::memcpy(&message.header.payload_size, header_buf + 16, 4);
+    std::memcpy(&message.header.checksum, header_buf + 20, 4);
+
+    // Validate header
+    if (!message.header.IsValid(NetProtocol::g_network_magic)) {
+        std::cout << "[P2P] ERROR: Invalid magic from peer " << peer_id
+                  << " (got 0x" << std::hex << message.header.magic
+                  << ", expected 0x" << NetProtocol::g_network_magic << std::dec << ")" << std::endl;
+        return;
+    }
+
+    // Read payload if present
+    if (message.header.payload_size > 0) {
+        if (message.header.payload_size > NetProtocol::MAX_MESSAGE_SIZE) {
+            std::cout << "[P2P] ERROR: Payload too large from peer " << peer_id
+                      << " (" << message.header.payload_size << " bytes)" << std::endl;
+            return;
+        }
+
+        message.payload.resize(message.header.payload_size);
+
+        // Read payload (hold lock during receive)
+        int payload_received = 0;
+        {
+            std::lock_guard<std::mutex> lock(cs_sockets);
+            auto it = peer_sockets.find(peer_id);
+            if (it == peer_sockets.end() || !it->second || !it->second->IsValid()) {
+                std::cout << "[P2P] ERROR: Socket disappeared while reading from peer " << peer_id << std::endl;
+                return;
+            }
+
+            payload_received = it->second->Recv(message.payload.data(),
+                                                 message.header.payload_size);
+        }
+
+        if (payload_received != static_cast<int>(message.header.payload_size)) {
+            std::cout << "[P2P] ERROR: Incomplete payload from peer " << peer_id
+                      << " (got " << payload_received << ", expected "
+                      << message.header.payload_size << " bytes)" << std::endl;
+            return;
+        }
+    }
+
+    // Update peer last_recv time
+    auto peer = peer_manager.GetPeer(peer_id);
+    if (peer) {
+        peer->last_recv = GetTime();
+    }
+
+    // Process message
+    message_processor.ProcessMessage(peer_id, message);
+}
+
+bool CConnectionManager::SendVersionMessage(int peer_id) {
+    CNetMessage msg = message_processor.CreateVersionMessage();
+    return SendMessage(peer_id, msg);
+}
+
+bool CConnectionManager::SendVerackMessage(int peer_id) {
+    CNetMessage msg = message_processor.CreateVerackMessage();
+    return SendMessage(peer_id, msg);
+}
+
+bool CConnectionManager::SendPingMessage(int peer_id, uint64_t nonce) {
+    CNetMessage msg = message_processor.CreatePingMessage(nonce);
+
+    // Track pending ping
+    pending_pings[peer_id] = {nonce, GetTime()};
+
+    return SendMessage(peer_id, msg);
+}
+
+bool CConnectionManager::SendPongMessage(int peer_id, uint64_t nonce) {
+    CNetMessage msg = message_processor.CreatePongMessage(nonce);
+    return SendMessage(peer_id, msg);
+}
+
+void CConnectionManager::Cleanup() {
+    std::lock_guard<std::mutex> lock(cs_sockets);
+
+    // Close all sockets
+    for (auto& pair : peer_sockets) {
+        if (pair.second && pair.second->IsValid()) {
+            pair.second->Close();
+        }
+    }
+
+    // Clear socket map
+    peer_sockets.clear();
+    pending_pings.clear();
 }

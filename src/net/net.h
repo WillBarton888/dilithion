@@ -7,12 +7,15 @@
 #include <net/protocol.h>
 #include <net/serialize.h>
 #include <net/peers.h>
+#include <net/socket.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <string>
 #include <vector>
 #include <functional>
 #include <memory>
+#include <map>
+#include <mutex>
 
 /**
  * CNetMessage - Network message processor
@@ -30,7 +33,7 @@ public:
     using BlockHandler = std::function<void(int peer_id, const CBlock&)>;
     using TxHandler = std::function<void(int peer_id, const CTransaction&)>;
 
-    CNetMessageProcessor();
+    CNetMessageProcessor(CPeerManager& peer_mgr);
 
     // Process incoming message
     bool ProcessMessage(int peer_id, const CNetMessage& message);
@@ -57,6 +60,8 @@ public:
     void SetTxHandler(TxHandler handler) { on_tx = handler; }
 
 private:
+    CPeerManager& peer_manager;
+
     // Message handlers
     VersionHandler on_version;
     PingHandler on_ping;
@@ -92,11 +97,11 @@ class CConnectionManager {
 public:
     CConnectionManager(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc);
 
-    // Initiate outbound connection
-    bool ConnectToPeer(const NetProtocol::CAddress& addr);
+    // Initiate outbound connection (returns peer_id on success, -1 on failure)
+    int ConnectToPeer(const NetProtocol::CAddress& addr);
 
-    // Handle inbound connection
-    bool AcceptConnection(const NetProtocol::CAddress& addr);
+    // Handle inbound connection (NEW signature - stores socket)
+    int AcceptConnection(const NetProtocol::CAddress& addr, std::unique_ptr<CSocket> socket);
 
     // Perform handshake
     bool PerformHandshake(int peer_id);
@@ -107,9 +112,26 @@ public:
     // Periodic maintenance
     void PeriodicMaintenance();
 
+    // NEW: Message send/receive
+    bool SendMessage(int peer_id, const CNetMessage& message);
+    void ReceiveMessages(int peer_id);
+
+    // NEW: Convenience methods for specific messages
+    bool SendVersionMessage(int peer_id);
+    bool SendVerackMessage(int peer_id);
+    bool SendPingMessage(int peer_id, uint64_t nonce);
+    bool SendPongMessage(int peer_id, uint64_t nonce);
+
+    // NEW: Cleanup
+    void Cleanup();
+
 private:
     CPeerManager& peer_manager;
     CNetMessageProcessor& message_processor;
+
+    // NEW: Socket storage
+    std::map<int, std::unique_ptr<CSocket>> peer_sockets;
+    mutable std::mutex cs_sockets;
 
     // Ping tracking
     struct PingInfo {

@@ -46,7 +46,7 @@ Professional launch website for Dilithion cryptocurrency with countdown timer an
 
 The dashboard will automatically connect to your local Dilithion node when:
 - Network launches (January 1, 2026)
-- Node is running on `localhost:9332`
+- Node is running on `localhost:8332`
 
 **To test dashboard before launch:**
 1. Start your Dilithion node: `./dilithion-node`
@@ -78,14 +78,14 @@ const LAUNCH_DATE = new Date('2026-01-01T00:00:00Z').getTime();
 
 ### Change RPC Endpoint
 
-Edit `script.js` line 9:
+Edit `script.js` line 8:
 ```javascript
-const RPC_ENDPOINT = 'http://localhost:9332';
+const RPC_ENDPOINT = 'http://localhost:8332';
 ```
 
 For remote node:
 ```javascript
-const RPC_ENDPOINT = 'http://your-node-ip:9332';
+const RPC_ENDPOINT = 'http://your-node-ip:8332';
 ```
 
 ### Update Interval
@@ -390,7 +390,7 @@ Currently set to `#` (placeholder). Replace with:
 - Check date format in `LAUNCH_DATE`
 
 ### Dashboard Shows "—"
-- Node must be running on `localhost:9332`
+- Node must be running on `localhost:8332`
 - Check RPC port in node config
 - Verify CORS settings (if remote node)
 - Check browser console for network errors

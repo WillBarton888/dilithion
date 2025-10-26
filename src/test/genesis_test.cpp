@@ -5,21 +5,29 @@
  * Genesis Block Test & Generator
  *
  * This program:
- * 1. Creates the genesis block
+ * 1. Creates the genesis block (mainnet or testnet)
  * 2. Displays genesis block parameters
  * 3. Optionally mines the genesis block (finds valid nonce)
  * 4. Outputs the final genesis block hash
+ *
+ * Usage:
+ *   ./genesis_gen              - Display mainnet genesis
+ *   ./genesis_gen --mine       - Mine mainnet genesis
+ *   ./genesis_gen --testnet    - Display testnet genesis
+ *   ./genesis_gen --testnet --mine - Mine testnet genesis
  */
 
 #include <node/genesis.h>
 #include <primitives/block.h>
 #include <consensus/pow.h>
+#include <core/chainparams.h>
 
 #include <iostream>
 #include <iomanip>
 #include <ctime>
 
 using namespace std;
+using namespace Dilithion;
 
 void PrintBlockInfo(const CBlock& block) {
     cout << "Genesis Block Information:" << endl;
@@ -51,6 +59,39 @@ int main(int argc, char* argv[]) {
     cout << "======================================" << endl;
     cout << endl;
 
+    // Parse command-line arguments
+    bool isTestnet = false;
+    bool shouldMine = false;
+
+    for (int i = 1; i < argc; i++) {
+        string arg = argv[i];
+        if (arg == "--testnet") {
+            isTestnet = true;
+        } else if (arg == "--mine") {
+            shouldMine = true;
+        } else if (arg == "--help" || arg == "-h") {
+            cout << "Usage: " << argv[0] << " [OPTIONS]" << endl;
+            cout << endl;
+            cout << "Options:" << endl;
+            cout << "  --testnet    Use testnet parameters (easier difficulty)" << endl;
+            cout << "  --mine       Mine the genesis block (find valid nonce)" << endl;
+            cout << "  --help       Show this help message" << endl;
+            cout << endl;
+            return 0;
+        }
+    }
+
+    // Initialize chain parameters
+    if (isTestnet) {
+        g_chainParams = new ChainParams(ChainParams::Testnet());
+        cout << "Network: TESTNET" << endl;
+        cout << "Difficulty: 256x easier than mainnet" << endl;
+    } else {
+        g_chainParams = new ChainParams(ChainParams::Mainnet());
+        cout << "Network: MAINNET" << endl;
+    }
+    cout << endl;
+
     // Create genesis block
     CBlock genesis = Genesis::CreateGenesisBlock();
 
@@ -58,12 +99,6 @@ int main(int argc, char* argv[]) {
     cout << endl;
 
     PrintBlockInfo(genesis);
-
-    // Check if we should mine the genesis block
-    bool shouldMine = false;
-    if (argc > 1 && string(argv[1]) == "--mine") {
-        shouldMine = true;
-    }
 
     if (shouldMine) {
         cout << "======================================" << endl;
@@ -84,8 +119,16 @@ int main(int argc, char* argv[]) {
 
             PrintBlockInfo(genesis);
 
-            cout << "IMPORTANT: Update src/node/genesis.h with:" << endl;
-            cout << "const uint32_t NONCE = " << genesis.nNonce << ";" << endl;
+            cout << "IMPORTANT: Update src/core/chainparams.cpp with:" << endl;
+            if (isTestnet) {
+                cout << "In ChainParams::Testnet():" << endl;
+                cout << "  params.genesisNonce = " << genesis.nNonce << ";" << endl;
+                cout << "  params.genesisHash = \"" << genesis.GetHash().GetHex() << "\";" << endl;
+            } else {
+                cout << "In ChainParams::Mainnet():" << endl;
+                cout << "  params.genesisNonce = " << genesis.nNonce << ";" << endl;
+                cout << "  params.genesisHash = \"" << genesis.GetHash().GetHex() << "\";" << endl;
+            }
             cout << endl;
         } else {
             cout << "Failed to mine genesis block" << endl;
@@ -108,6 +151,10 @@ int main(int argc, char* argv[]) {
     cout << endl;
     cout << "Final Genesis Hash: " << genesis.GetHash().GetHex() << endl;
     cout << endl;
+
+    // Cleanup
+    delete g_chainParams;
+    g_chainParams = nullptr;
 
     return 0;
 }

@@ -38,7 +38,7 @@ Technical terms and abbreviations used in Dilithion documentation.
 
 **Halving** - Event where block reward is cut in half (every 210,000 blocks).
 
-**Satoshi** - Smallest unit (0.00000001 coins).
+**Ion** - Smallest unit (0.00000001 coins).
 
 ---
 

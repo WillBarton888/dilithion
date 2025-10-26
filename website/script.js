@@ -5,7 +5,7 @@
 
 // Configuration
 const LAUNCH_DATE = new Date('2026-01-01T00:00:00Z').getTime();
-const RPC_ENDPOINT = 'http://localhost:9332'; // Dilithion RPC endpoint
+const RPC_ENDPOINT = 'http://localhost:8332'; // Dilithion RPC endpoint
 const UPDATE_INTERVAL = 5000; // Update dashboard every 5 seconds
 
 // State
