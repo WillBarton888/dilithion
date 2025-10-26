@@ -13,6 +13,7 @@
 
 #include <node/genesis.h>
 #include <primitives/block.h>
+#include <consensus/pow.h>
 
 #include <iostream>
 #include <iomanip>
@@ -43,32 +44,6 @@ void PrintBlockInfo(const CBlock& block) {
     cout << endl;
 }
 
-// Convert nBits to target hash
-uint256 GetTargetFromBits(uint32_t nBits) {
-    uint256 target;
-
-    // Extract exponent and mantissa
-    uint32_t exponent = (nBits >> 24) & 0xFF;
-    uint32_t mantissa = nBits & 0x00FFFFFF;
-
-    // Calculate target
-    // target = mantissa * 256^(exponent - 3)
-    if (exponent <= 3) {
-        // Shift right
-        uint32_t shift = 8 * (3 - exponent);
-        uint32_t value = mantissa >> shift;
-        memcpy(target.data, &value, 4);
-    } else {
-        // Shift left
-        uint32_t offset = exponent - 3;
-        if (offset < 29) {  // Ensure we don't overflow
-            memcpy(target.data + offset, &mantissa, 3);
-        }
-    }
-
-    return target;
-}
-
 int main(int argc, char* argv[]) {
     cout << "======================================" << endl;
     cout << "Dilithion Genesis Block Generator" << endl;
@@ -96,8 +71,8 @@ int main(int argc, char* argv[]) {
         cout << "======================================" << endl;
         cout << endl;
 
-        // Calculate target from nBits
-        uint256 target = GetTargetFromBits(genesis.nBits);
+        // Calculate target from nBits (using consensus CompactToBig)
+        uint256 target = CompactToBig(genesis.nBits);
 
         // Mine the genesis block
         if (Genesis::MineGenesisBlock(genesis, target)) {

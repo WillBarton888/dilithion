@@ -4,6 +4,7 @@
 #include <node/genesis.h>
 #include <crypto/randomx_hash.h>
 #include <crypto/sha3.h>
+#include <consensus/pow.h>
 
 #include <cstring>
 #include <iostream>
@@ -82,12 +83,22 @@ bool MineGenesisBlock(CBlock& block, const uint256& target) {
         // Calculate hash
         uint256 hash = block.GetHash();
 
-        // Check if hash is less than target
-        if (hash < target) {
+        // Check if hash is less than target (BIG-ENDIAN comparison for PoW)
+        if (HashLessThan(hash, target)) {
             std::cout << "\nGenesis block found!" << std::endl;
             std::cout << "Nonce: " << nonce << std::endl;
             std::cout << "Hash: " << hash.GetHex() << std::endl;
             std::cout << "Hashes tried: " << nHashesTried << std::endl;
+
+            // Verify the found nonce passes consensus validation
+            std::cout << "Verifying with consensus rules..." << std::endl;
+            if (!CheckProofOfWork(hash, block.nBits)) {
+                std::cout << "ERROR: Found nonce does NOT pass CheckProofOfWork!" << std::endl;
+                std::cout << "This indicates a bug in the mining code." << std::endl;
+                return false;
+            }
+            std::cout << "Verification passed! Genesis block is valid." << std::endl;
+
             return true;
         }
 

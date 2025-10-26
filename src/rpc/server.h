@@ -7,6 +7,7 @@
 #include <wallet/wallet.h>
 #include <miner/controller.h>
 #include <net/net.h>
+#include <rpc/ratelimiter.h>
 
 #include <string>
 #include <map>
