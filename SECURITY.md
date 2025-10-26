@@ -4,12 +4,12 @@
 
 **DO NOT** open public GitHub issues for security vulnerabilities.
 
-Instead, report privately to: **[Your secure email or contact method - please update]**
+Instead, report privately to: **security@dilithion.org**
 
 For critical vulnerabilities, you can also reach us via:
 - **GitHub Security Advisory:** https://github.com/WillBarton888/dilithion/security/advisories/new
-- **Discord:** [Your Discord handle - to be added]
-- **Email:** [Your secure email]
+- **Discord:** [Server link - to be added]
+- **Email:** security@dilithion.org
 
 ## Response Timeline
 
@@ -201,15 +201,15 @@ No vulnerabilities have been reported yet. This section will be updated as issue
 
 ## Contact Information
 
-**Security Contact:** [Your secure email - please update]
+**Security Contact:** security@dilithion.org
 
 **Public Communication:**
 - **GitHub:** https://github.com/WillBarton888/dilithion
-- **Discord:** [Server link when created]
-- **Twitter:** @DilithionCoin [when created]
-- **Reddit:** r/dilithion [when created]
+- **Discord:** [Server link - to be added]
+- **Twitter:** @DilithionCoin [to be created]
+- **Reddit:** r/dilithion [to be created]
 
-**Bug Bounty Submissions:** Via GitHub Security Advisory or private email
+**Bug Bounty Submissions:** Via GitHub Security Advisory or security@dilithion.org
 
 ---
 

@@ -5,7 +5,7 @@
 **Will Barton** (GitHub: @WillBarton888)
 - **Role:** Project Lead & Developer
 - **Background:** Cryptocurrency enthusiast, learning AI-assisted development
-- **Contact:** [Discord/Email - please update]
+- **Contact:** team@dilithion.org
 - **GitHub:** [@WillBarton888](https://github.com/WillBarton888)
 
 ---
@@ -32,10 +32,10 @@ This project was developed using AI assistance (Anthropic's Claude Code):
 -  Rapid prototyping and iteration
 
 **And challenges we acknowledge:**
--   AI-generated code requires careful human review
--   No substitute for expert cryptographer validation
--   Community code review even more critical
--   Experimental nature must be honestly communicated
+- ï¿½ AI-generated code requires careful human review
+- ï¿½ No substitute for expert cryptographer validation
+- ï¿½ Community code review even more critical
+- ï¿½ Experimental nature must be honestly communicated
 
 ---
 
@@ -87,7 +87,7 @@ We're looking for advisors with expertise in:
 - **Community Building:** Crypto community management
 - **Exchange Relations:** Listing and integration processes
 
-**Interested in advising?** Contact: [email - please update]
+**Interested in advising?** Contact: team@dilithion.org
 
 ---
 
@@ -144,16 +144,16 @@ We're looking for advisors with expertise in:
 - = Social media and community building
 
 ### Upcoming (December 2025)
-- =Å Testnet launch and stress testing
-- =Å Bug fixes from community feedback
-- =Å Code freeze
-- =Å Genesis block mining
+- =ï¿½ Testnet launch and stress testing
+- =ï¿½ Bug fixes from community feedback
+- =ï¿½ Code freeze
+- =ï¿½ Genesis block mining
 
 ### Launch (January 1, 2026)
-- =€ Mainnet launch
-- =€ Network monitoring
-- =€ Bug bounty program activation
-- =€ Community support
+- =ï¿½ Mainnet launch
+- =ï¿½ Network monitoring
+- =ï¿½ Bug bounty program activation
+- =ï¿½ Community support
 
 ---
 
@@ -165,7 +165,7 @@ Dilithion builds upon excellent open source work:
 
 - **RandomX:** CPU-friendly mining (tevador and contributors)
 - **CRYSTALS-Dilithium:** Post-quantum signatures (NIST PQC team)
-- **SHA-3/Keccak:** Quantum-resistant hashing (Guido Bertoni, Joan Daemen, Michaël Peeters, and Gilles Van Assche)
+- **SHA-3/Keccak:** Quantum-resistant hashing (Guido Bertoni, Joan Daemen, Michaï¿½l Peeters, and Gilles Van Assche)
 - **Bitcoin:** Original blockchain design (Satoshi Nakamoto)
 - **Monero:** RandomX implementation and inspiration
 - **LevelDB:** Database storage (Google)
@@ -196,10 +196,10 @@ Dilithion builds upon excellent open source work:
 
 ### Contact
 
-- **General Inquiries:** [email - please update]
-- **Security:** See [SECURITY.md](SECURITY.md)
+- **General Inquiries:** team@dilithion.org
+- **Security:** security@dilithion.org (see [SECURITY.md](SECURITY.md))
 - **Development:** [Discord - to be added]
-- **Media:** [email - please update]
+- **Media:** media@dilithion.org
 
 ---
 
@@ -275,7 +275,7 @@ We're building something new: the first community-driven, AI-assisted, post-quan
 - Help with testing and documentation
 - Spread the word about post-quantum security
 
-**Together, we can build a quantum-safe future for cryptocurrency.** =€
+**Together, we can build a quantum-safe future for cryptocurrency.** =ï¿½
 
 ---
 

@@ -424,17 +424,17 @@ See [SECURITY.md](SECURITY.md) for how to report vulnerabilities and participate
 
 ### Official Channels
 
-- **Website:** https://dilithion.org
-- **GitHub:** https://github.com/dilithion/dilithion
-- **Discord:** https://discord.gg/dilithion
-- **Twitter:** @DilithionCoin
-- **Reddit:** /r/dilithion
+- **Website:** https://dilithion.org (launching soon)
+- **GitHub:** https://github.com/WillBarton888/dilithion
+- **Discord:** [Server link - to be added]
+- **Twitter:** @DilithionCoin [to be created]
+- **Reddit:** r/dilithion [to be created]
 
 ### Support
 
 - **Documentation:** `docs/` directory
 - **Issues:** GitHub Issues
-- **Email:** support@dilithion.org
+- **Email:** support@dilithion.org [to be configured]
 
 ---
 
