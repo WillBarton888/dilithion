@@ -1,0 +1,13 @@
+# Redirect dilithion.com to dilithion.org
+RewriteEngine On
+RewriteCond %{HTTP_HOST} ^(www\.)?dilithion\.com$ [NC]
+RewriteRule ^(.*)$ https://dilithion.org/$1 [R=301,L]
+
+# Force HTTPS for dilithion.org
+RewriteCond %{HTTPS} off
+RewriteCond %{HTTP_HOST} ^(www\.)?dilithion\.org$ [NC]
+RewriteRule ^(.*)$ https://dilithion.org/$1 [R=301,L]
+
+# Remove www from dilithion.org
+RewriteCond %{HTTP_HOST} ^www\.dilithion\.org$ [NC]
+RewriteRule ^(.*)$ https://dilithion.org/$1 [R=301,L]
