@@ -26,6 +26,26 @@
  */
 
 /**
+ * Secure memory wiping - prevents compiler optimization
+ *
+ * Standard memset() can be optimized away by compilers if the memory
+ * is not used afterwards. This function uses a memory barrier to prevent
+ * that optimization, ensuring sensitive data is actually wiped.
+ *
+ * @param ptr Pointer to memory to wipe
+ * @param len Length of memory to wipe in bytes
+ */
+inline void memory_cleanse(void* ptr, size_t len) {
+    if (ptr == nullptr || len == 0) return;
+
+    std::memset(ptr, 0, len);
+
+    // Memory barrier prevents compiler from optimizing away the memset
+    // The asm volatile tells compiler: "this has side effects, don't optimize"
+    __asm__ __volatile__("" : : "r"(ptr) : "memory");
+}
+
+/**
  * CKeyingMaterial
  *
  * Secure container for cryptographic key material that automatically
@@ -43,7 +63,7 @@ public:
     // Destructor securely wipes memory
     ~CKeyingMaterial() {
         if (!data.empty()) {
-            memset(data.data(), 0, data.size());
+            memory_cleanse(data.data(), data.size());
         }
     }
 

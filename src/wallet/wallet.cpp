@@ -502,7 +502,7 @@ void CWallet::CheckUnlockTimeout() {
         fWalletUnlocked = false;
         // Clear master key from memory
         if (!vMasterKey.empty()) {
-            memset(vMasterKey.data_ptr(), 0, vMasterKey.size());
+            memory_cleanse(vMasterKey.data_ptr(), vMasterKey.size());
         }
     }
 }
@@ -519,7 +519,7 @@ bool CWallet::Lock() {
 
     // Clear master key from memory
     if (!vMasterKey.empty()) {
-        memset(vMasterKey.data_ptr(), 0, vMasterKey.size());
+        memory_cleanse(vMasterKey.data_ptr(), vMasterKey.size());
     }
 
     return true;
@@ -570,8 +570,8 @@ bool CWallet::Unlock(const std::string& passphrase, int64_t timeout) {
     }
 
     // Wipe derived key
-    memset(derivedKey.data(), 0, derivedKey.size());
-    memset(decryptedKey.data(), 0, decryptedKey.size());
+    memory_cleanse(derivedKey.data(), derivedKey.size());
+    memory_cleanse(decryptedKey.data(), decryptedKey.size());
 
     return true;
 }

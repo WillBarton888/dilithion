@@ -74,7 +74,8 @@ NODE_SOURCES := src/node/block_index.cpp \
 PRIMITIVES_SOURCES := src/primitives/block.cpp
 
 RPC_SOURCES := src/rpc/server.cpp \
-               src/rpc/auth.cpp
+               src/rpc/auth.cpp \
+               src/rpc/ratelimiter.cpp
 
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp

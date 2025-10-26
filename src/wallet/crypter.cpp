@@ -508,10 +508,10 @@ static void HMAC_SHA3_256(const uint8_t* key, size_t keyLen,
     SHA3_256(outer.data(), outer.size(), out);
 
     // Wipe sensitive data
-    memset(keyPad, 0, blockSize);
-    memset(ipad, 0, blockSize);
-    memset(opad, 0, blockSize);
-    memset(innerHash, 0, 32);
+    memory_cleanse(keyPad, blockSize);
+    memory_cleanse(ipad, blockSize);
+    memory_cleanse(opad, blockSize);
+    memory_cleanse(innerHash, 32);
 }
 
 bool DeriveKey(const std::string& passphrase,

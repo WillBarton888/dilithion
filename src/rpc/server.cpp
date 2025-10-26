@@ -22,6 +22,17 @@
     #define closesocket close
 #endif
 
+// Helper function to extract IP address from client socket
+static std::string GetClientIP(int clientSocket) {
+    struct sockaddr_in addr;
+    socklen_t addr_size = sizeof(struct sockaddr_in);
+    int res = getpeername(clientSocket, (struct sockaddr *)&addr, &addr_size);
+    if (res != 0) {
+        return "unknown";
+    }
+    return std::string(inet_ntoa(addr.sin_addr));
+}
+
 CRPCServer::CRPCServer(uint16_t port)
     : m_port(port), m_wallet(nullptr), m_miner(nullptr), m_serverSocket(INVALID_SOCKET)
 {
@@ -144,6 +155,27 @@ void CRPCServer::ServerThread() {
 }
 
 void CRPCServer::HandleClient(int clientSocket) {
+    // Get client IP for rate limiting
+    std::string clientIP = GetClientIP(clientSocket);
+
+    // Check if IP is locked out due to failed auth attempts
+    if (m_rateLimiter.IsLockedOut(clientIP)) {
+        std::string response = BuildHTTPResponse(
+            "{\"error\":\"Too many failed authentication attempts. Try again later.\"}"
+        );
+        send(clientSocket, response.c_str(), response.size(), 0);
+        return;
+    }
+
+    // Check rate limit
+    if (!m_rateLimiter.AllowRequest(clientIP)) {
+        std::string response = BuildHTTPResponse(
+            "{\"error\":\"Rate limit exceeded. Please slow down your requests.\"}"
+        );
+        send(clientSocket, response.c_str(), response.size(), 0);
+        return;
+    }
+
     // Read HTTP request
     char buffer[4096];
     int bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
@@ -175,11 +207,15 @@ void CRPCServer::HandleClient(int clientSocket) {
 
         // Authenticate
         if (!RPCAuth::AuthenticateRequest(username, password)) {
-            // Invalid credentials
+            // Invalid credentials - record failure
+            m_rateLimiter.RecordAuthFailure(clientIP);
             std::string response = BuildHTTPUnauthorized();
             send(clientSocket, response.c_str(), response.size(), 0);
             return;
         }
+
+        // Authentication successful - reset failure counter
+        m_rateLimiter.RecordAuthSuccess(clientIP);
     }
 
     // Parse HTTP request

@@ -92,6 +92,9 @@ private:
     std::map<std::string, RPCHandler> m_handlers;
     std::mutex m_handlersMutex;
 
+    // Rate limiting
+    CRateLimiter m_rateLimiter;
+
     // Server socket
     int m_serverSocket;
 

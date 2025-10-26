@@ -23,6 +23,16 @@ This whitepaper presents Dilithion's technical architecture, consensus parameter
 
 ---
 
+## Important Disclosure
+
+**Experimental Nature:** Dilithion is an experimental cryptocurrency project. This software has NOT been professionally audited and may contain bugs or vulnerabilities. Use at your own risk.
+
+**AI-Assisted Development:** This project was developed with AI assistance (Anthropic's Claude Code). While AI tools enable rapid development and comprehensive documentation, all code requires careful human review and community scrutiny. We believe in full transparency about our development methods.
+
+**No Guarantees:** This project comes with no guarantee of success, security, or value. Users assume all risks. This is not financial advice. Do your own research (DYOR) before participating.
+
+---
+
 ## Table of Contents
 
 1. [Introduction: The Quantum Threat](#1-introduction-the-quantum-threat)
@@ -176,7 +186,7 @@ class CTxIn {
 };
 
 class CTxOut {
-    CAmount nValue;                 // Amount in satoshis
+    CAmount nValue;                 // Amount in ions (smallest unit)
     std::vector<uint8_t> scriptPubKey; // Dilithium public key (1,952 bytes)
 };
 ```
@@ -190,7 +200,42 @@ class CTxOut {
 - Bitcoin typical: ~250 bytes
 - **Dilithion is ~15x larger** (trade-off for quantum security)
 
-### 3.3 Block Structure
+### 3.3 Currency Units and Denominations
+
+**Base Unit: DIL**
+- Symbol: **DIL**
+- Total Supply: 21,000,000 DIL
+- Decimal Places: 8
+
+**Smallest Unit: ions**
+- 1 DIL = 100,000,000 ions
+- Named after "Dilith-**ion**" - fitting the post-quantum theme
+- Similar to how Bitcoin uses "satoshis" (named after Satoshi Nakamoto)
+
+**Denomination Table:**
+
+| Unit Name | Value in ions | Value in DIL | Description |
+|-----------|---------------|--------------|-------------|
+| **ion** | 1 | 0.00000001 DIL | Smallest unit (indivisible) |
+| **kiloion** | 1,000 | 0.00001 DIL | Thousand ions |
+| **megaion** | 1,000,000 | 0.01 DIL | Million ions (1 cent) |
+| **DIL** | 100,000,000 | 1 DIL | Base currency unit |
+
+**Why "ions"?**
+- Consistent with Dilithion branding
+- Quantum/scientific theme (from "Dilithium")
+- Short, memorable, easy to type
+- Avoids confusion with other cryptocurrencies
+- Represents the smallest "quantum" of value
+
+**Examples:**
+- Minimum transaction fee: 50,000 ions (0.0005 DIL)
+- Typical transaction: 100,000-300,000 ions (0.001-0.003 DIL)
+- Block reward (initial): 5,000,000,000 ions (50 DIL)
+
+---
+
+### 3.4 Block Structure
 
 ```cpp
 class CBlockHeader {
@@ -362,9 +407,9 @@ Halving:         Every 210,000 blocks (~1.6 years)
 
 ```cpp
 // Consensus parameters
-MIN_TX_FEE = 50,000 satoshis      // 0.0005 DIL (base fee)
-FEE_PER_BYTE = 25 satoshis        // 25 sats per byte
-MIN_RELAY_TX_FEE = 100,000 sats   // 0.001 DIL (relay minimum)
+MIN_TX_FEE = 50,000 ions          // 0.0005 DIL (base fee)
+FEE_PER_BYTE = 25 ions            // 25 ions per byte
+MIN_RELAY_TX_FEE = 100,000 ions   // 0.001 DIL (relay minimum)
 
 // Fee calculation
 fee = MIN_TX_FEE + (transaction_size_bytes × FEE_PER_BYTE)
@@ -780,19 +825,21 @@ Dilithion aims to be:
 
 ## Appendix B: Contact & Community
 
-**Website:** https://dilithion.org (launching January 2026)
+**Website:** https://dilithion.org (launching soon)
 
-**GitHub:** https://github.com/dilithion/dilithion
+**GitHub:** https://github.com/WillBarton888/dilithion
 
-**Discord:** [Community server - TBD]
+**Discord:** [Community server - launching Week 2]
 
-**Twitter/X:** @DilithionCrypto [TBD]
+**Twitter/X:** @DilithionCoin
 
-**Reddit:** r/dilithion [TBD]
+**Reddit:** r/dilithion
 
-**Email:** contact@dilithion.org
-
-**Developer Documentation:** https://docs.dilithion.org
+**Contact:**
+- **General Inquiries:** team@dilithion.org
+- **Security Reports:** security@dilithion.org
+- **Media Inquiries:** media@dilithion.org
+- **User Support:** support@dilithion.org
 
 ---
 
@@ -802,4 +849,4 @@ Dilithion aims to be:
 
 ---
 
-**Disclaimer:** This whitepaper is for informational purposes only and does not constitute investment advice. Cryptocurrency investments carry risk. DYOR (Do Your Own Research). Dilithion is experimental software released as open-source. No guarantees are made regarding future value, adoption, or success.
+**Disclaimer:** This whitepaper is for informational and educational purposes only and does not constitute investment, financial, or legal advice. Dilithion is EXPERIMENTAL software developed with AI assistance and has NOT been professionally audited. The software may contain bugs, vulnerabilities, or design flaws. Cryptocurrency investments carry significant risk, including total loss of funds. No guarantees are made regarding security, functionality, future value, adoption, or success. Use this software entirely at your own risk. Users are responsible for securing their own keys and funds. Always do your own research (DYOR) and consult with qualified professionals before participating in any cryptocurrency project.

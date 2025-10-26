@@ -712,3 +712,58 @@ a:hover {
         font-size: 0.75rem;
     }
 }
+
+/* Warning Badge for Experimental Status */
+.warning-badge {
+    display: inline-block;
+    background: rgba(239, 68, 68, 0.1);
+    border: 2px solid var(--error-color);
+    color: var(--error-color);
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-top: 20px;
+    text-align: center;
+    animation: pulse-warning 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+}
+
+/* Legal Disclaimers in Footer */
+.legal-disclaimers {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.6;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.legal-disclaimers p {
+    margin-bottom: 15px;
+}
+
+.legal-disclaimers strong {
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+.legal-disclaimers a {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
+.legal-disclaimers a:hover {
+    color: var(--secondary-color);
+}
