@@ -72,7 +72,8 @@ NET_SOURCES := src/net/protocol.cpp \
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \
                 src/node/mempool.cpp \
-                src/node/genesis.cpp
+                src/node/genesis.cpp \
+                src/node/utxo_set.cpp
 
 PRIMITIVES_SOURCES := src/primitives/block.cpp \
                       src/primitives/transaction.cpp
