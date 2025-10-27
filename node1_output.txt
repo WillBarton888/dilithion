@@ -1,0 +1,188 @@
+======================================
+Dilithion Node v1.0.0
+Post-Quantum Cryptocurrency
+======================================
+
+Network: TESTNET (256x easier difficulty)
+Data directory: .dilithion-testnet
+P2P port: 18444
+RPC port: 18332
+
+Initializing blockchain storage...
+  ✓ Blockchain database opened
+Initializing mempool...
+  ✓ Mempool initialized
+Initializing chain state...
+  ✓ Chain state initialized
+Initializing RandomX...
+  ✓ RandomX initialized
+Loading genesis block...
+  Network: testnet
+  Genesis hash: 924bdb80469e1185814407147bc763a62425cc400bc902ce37d73ffbc3524475
+  Genesis time: 1730000000
+  ✓ Genesis block verified
+Initializing blockchain with genesis block...
+  ✓ Genesis block saved to database
+  ✓ Genesis block index saved (height 0)
+[Chain] Activating genesis block at height 0
+[DEBUG] WriteBestBlock: Writing hash: 924bdb80469e1185...
+[DEBUG] WriteBestBlock: Writing hash: 924bdb80469e1185...
+  ✓ Genesis block set as blockchain tip
+Initializing P2P components...
+  ✓ P2P components ready (not started)
+Initializing mining controller...
+  ✓ Mining controller initialized (2 threads)
+Initializing wallet...
+  Generating initial address...
+  ✓ Initial address: D6PNugQbEwEFwb4pdUS8q2njddG7eVrP2e
+Starting P2P networking server...
+  ✓ P2P server listening on port 18444
+  ✓ P2P accept thread started
+  ✓ P2P receive thread started
+Initializing RPC server...
+  ✓ P2P maintenance thread started
+  ✓ RPC server listening on port 18332
+
+Starting mining...
+[DEBUG] ReadBestBlock: Read value: 924bdb80469e1185...
+[DEBUG] ReadBestBlock: After SetHex: 924bdb80469e1185...
+  Best block hash: 924bdb80469e1185...
+  Building on block height 0
+  Mining block height 1
+  Block height: 1
+  Previous block: 924bdb80469e1185...
+  Difficulty (nBits): 0x1f060000
+  Target: 0006000000000000...
+  Coinbase: Block 1 mined by Dilithion
+  Merkle root: 6891c5296b7a0538...
+  ✓ Mining started with 2 threads
+  Expected hash rate: ~130 H/s
+
+======================================
+Node Status: RUNNING
+======================================
+
+RPC Interface:
+  URL: http://localhost:18332
+  Methods: getnewaddress, getbalance, getmininginfo, help
+
+Press Ctrl+C to stop
+
+
+======================================
+✓ BLOCK FOUND!
+======================================
+Block hash: 0001c400f0c864132758f07e2a6e0d5dc42fb465b98f164cd8d3023c11066478
+Block time: 1761530604
+Nonce: 58
+Difficulty: 0x1f060000
+======================================
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 1)
+[Chain] Block extends current tip: height 1
+[Chain] WARNING: Block extends tip but doesn't increase chain work
+[Blockchain] ERROR: Failed to activate mined block in chain
+[Mining] Hash rate: 60 H/s, Total hashes: 655
+[P2P] New peer connected: 127.0.0.1:56572
+[P2P] Peer accepted and added to connection pool (peer_id=1)
+[P2P] Sent version message to peer 1
+[P2P] Handshake with peer 1 (/Dilithion:0.1.0/)
+[Mining] Hash rate: 60 H/s, Total hashes: 1299
+[Mining] Hash rate: 60 H/s, Total hashes: 1955
+[P2P] New peer connected: 127.0.0.1:60948
+[Mining] Hash rate: 60 H/s, Total hashes: 2549
+[Mining] Hash rate: 0 H/s, Total hashes: 3161
+[Mining] Hash rate: 59 H/s, Total hashes: 3763
+[Mining] Hash rate: 57 H/s, Total hashes: 4379
+[Mining] Hash rate: 61 H/s, Total hashes: 5029
+[Mining] Hash rate: 60 H/s, Total hashes: 5680
+[Mining] Hash rate: 59 H/s, Total hashes: 6335
+[Mining] Hash rate: 60 H/s, Total hashes: 6975
+[P2P] Peer accepted and added to connection pool (peer_id=2)
+[P2P] Sent version message to peer 2
+[P2P] Sent keepalive ping to peer 1
+[Mining] Hash rate: 61 H/s, Total hashes: 7624
+[Mining] Hash rate: 60 H/s, Total hashes: 8279
+[Mining] Hash rate: 60 H/s, Total hashes: 8928
+[Mining] Hash rate: 59 H/s, Total hashes: 9556
+[Mining] Hash rate: 58 H/s, Total hashes: 10153
+[Mining] Hash rate: 60 H/s, Total hashes: 10800
+[Mining] Hash rate: 59 H/s, Total hashes: 11448
+[Mining] Hash rate: 57 H/s, Total hashes: 12088
+
+======================================
+✓ BLOCK FOUND!
+======================================
+Block hash: 0003e980029125baebc75cc9b6b75fecbfbdc06dc91a4de594539e0016520acf
+Block time: 1761530604
+Nonce: 15297
+Difficulty: 0x1f060000
+======================================
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 1)
+[Chain] Block extends current tip: height 1
+[Chain] WARNING: Block extends tip but doesn't increase chain work
+[Blockchain] ERROR: Failed to activate mined block in chain
+[Mining] Hash rate: 58 H/s, Total hashes: 12693
+
+======================================
+✓ BLOCK FOUND!
+======================================
+Block hash: 0000cf2fef3870bf120d2efe16d1246580989418c05acc2cf711b504eee02822
+Block time: 1761530604
+Nonce: 10300
+Difficulty: 0x1f060000
+======================================
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 1)
+[Chain] Block extends current tip: height 1
+[Chain] WARNING: Block extends tip but doesn't increase chain work
+[Blockchain] ERROR: Failed to activate mined block in chain
+[P2P] Handshake with peer 2 (/Dilithion:0.1.0/)
+[P2P] Sent keepalive ping to peer 1
+[Mining] Hash rate: 61 H/s, Total hashes: 13307
+[Mining] Hash rate: 60 H/s, Total hashes: 13916
+[Mining] Hash rate: 60 H/s, Total hashes: 14546
+[Mining] Hash rate: 62 H/s, Total hashes: 15189
+[Mining] Hash rate: 61 H/s, Total hashes: 15799
+[Mining] Hash rate: 61 H/s, Total hashes: 16404
+
+======================================
+✓ BLOCK FOUND!
+======================================
+Block hash: 00014370315b16df1fe5d76138c0205623a9c39db48929e2138e0821862793fe
+Block time: 1761530604
+Nonce: 22669
+Difficulty: 0x1f060000
+======================================
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 1)
+[Chain] Block extends current tip: height 1
+[Chain] WARNING: Block extends tip but doesn't increase chain work
+[Blockchain] ERROR: Failed to activate mined block in chain
+[Mining] Hash rate: 59 H/s, Total hashes: 17016
+[Mining] Hash rate: 60 H/s, Total hashes: 17638
+[Mining] Hash rate: 58 H/s, Total hashes: 18270
+[P2P] Sent keepalive ping to peer 1
+[Mining] Hash rate: 0 H/s, Total hashes: 18873
+[Mining] Hash rate: 56 H/s, Total hashes: 19477
+[Mining] Hash rate: 59 H/s, Total hashes: 20092
+
+======================================
+✓ BLOCK FOUND!
+======================================
+Block hash: 0001d8107a353bb5db134c8b1ae16946c88740167adf95b5f82691915bed416b
+Block time: 1761530604
+Nonce: 18238
+Difficulty: 0x1f060000
+======================================
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 1)
+[Chain] Block extends current tip: height 1
+[Chain] WARNING: Block extends tip but doesn't increase chain work
+[Blockchain] ERROR: Failed to activate mined block in chain
