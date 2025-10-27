@@ -7,7 +7,7 @@
 static const size_t DEFAULT_MAX_MEMPOOL_SIZE = 300 * 1024 * 1024;
 
 CTxMemPoolEntry::CTxMemPoolEntry(const CTransactionRef& _tx, CAmount _fee, int64_t _time, unsigned int _height)
-    : tx(_tx), fee(_fee), time(_time), height(_height) {
+    : tx(_tx), tx_hash(_tx->GetHash()), fee(_fee), time(_time), height(_height) {
     tx_size = tx->GetSerializedSize();
     fee_rate = Consensus::CalculateFeeRate(fee, tx_size);
 }
