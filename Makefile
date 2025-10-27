@@ -53,7 +53,8 @@ COLOR_YELLOW := \033[33m
 # Core source files (organized by module)
 CONSENSUS_SOURCES := src/consensus/fees.cpp \
                      src/consensus/pow.cpp \
-                     src/consensus/chain.cpp
+                     src/consensus/chain.cpp \
+                     src/consensus/tx_validation.cpp
 
 CORE_SOURCES_UTIL := src/core/chainparams.cpp
 
@@ -115,6 +116,7 @@ WALLET_ENCRYPTION_INTEGRATION_TEST_SOURCE := src/test/wallet_encryption_integrat
 WALLET_PERSISTENCE_TEST_SOURCE := src/test/wallet_persistence_tests.cpp
 INTEGRATION_TEST_SOURCE := src/test/integration_tests.cpp
 NET_TEST_SOURCE := src/test/net_tests.cpp
+TX_VALIDATION_TEST_SOURCE := src/test/tx_validation_tests.cpp
 
 # ============================================================================
 # Targets
@@ -152,7 +154,7 @@ inspect_db: $(CORE_OBJECTS) $(OBJ_DIR)/tools/inspect_db.o $(DILITHIUM_OBJECTS)
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests tx_validation_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS)
@@ -196,6 +198,10 @@ integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/integration_tests.o $(DILITHI
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 net_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/net_tests.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+tx_validation_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/tx_validation_tests.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
@@ -283,7 +289,7 @@ clean:
 	@echo "$(COLOR_YELLOW)Cleaning build artifacts...$(COLOR_RESET)"
 	@rm -rf $(BUILD_DIR)
 	@rm -f dilithion-node genesis_gen
-	@rm -f phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests
+	@rm -f phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests tx_validation_tests
 	@rm -f $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_GREEN)✓ Clean complete$(COLOR_RESET)"
 
