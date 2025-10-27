@@ -249,21 +249,441 @@ bool TestHashConsistency() {
     return true;
 }
 
+// ============================================================================
+// Phase 5.2: Transaction Creation Tests
+// ============================================================================
+
+#include <node/utxo_set.h>
+#include <node/mempool.h>
+#include <primitives/transaction.h>
+#include <consensus/tx_validation.h>
+
+bool TestScriptCreation() {
+    cout << "\nTesting script creation (Phase 5.2)..." << endl;
+
+    // Generate a public key hash (32 bytes)
+    std::vector<uint8_t> pubkey_hash(32);
+    for (size_t i = 0; i < 32; i++) {
+        pubkey_hash[i] = static_cast<uint8_t>(i);
+    }
+
+    // Create scriptPubKey
+    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(pubkey_hash);
+
+    // Verify format: [hash_size(1)] [hash(32)] [OP_CHECKSIG(1)] = 34 bytes
+    if (scriptPubKey.size() != 34) {
+        cout << "  ✗ scriptPubKey size should be 34 bytes, got " << scriptPubKey.size() << endl;
+        return false;
+    }
+
+    if (scriptPubKey[0] != 32) {
+        cout << "  ✗ First byte should be hash size (32)" << endl;
+        return false;
+    }
+
+    if (scriptPubKey[33] != 0xAC) {
+        cout << "  ✗ Last byte should be OP_CHECKSIG (0xAC)" << endl;
+        return false;
+    }
+
+    cout << "  ✓ scriptPubKey format correct" << endl;
+
+    // Extract hash back
+    std::vector<uint8_t> extracted_hash = WalletCrypto::ExtractPubKeyHash(scriptPubKey);
+    if (extracted_hash != pubkey_hash) {
+        cout << "  ✗ Extracted hash doesn't match original" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Hash extraction working" << endl;
+
+    // Create scriptSig
+    std::vector<uint8_t> signature(3293, 0xFF);  // Mock Dilithium signature
+    std::vector<uint8_t> pubkey(1952, 0xAA);     // Mock Dilithium pubkey
+
+    std::vector<uint8_t> scriptSig = WalletCrypto::CreateScriptSig(signature, pubkey);
+
+    // Verify format: [sig_size(2)] [signature] [pk_size(2)] [pubkey]
+    size_t expected_size = 2 + 3293 + 2 + 1952;
+    if (scriptSig.size() != expected_size) {
+        cout << "  ✗ scriptSig size should be " << expected_size << " bytes, got " << scriptSig.size() << endl;
+        return false;
+    }
+
+    // Verify signature size encoding (little-endian)
+    uint16_t sig_size = scriptSig[0] | (scriptSig[1] << 8);
+    if (sig_size != 3293) {
+        cout << "  ✗ Signature size encoding incorrect" << endl;
+        return false;
+    }
+
+    cout << "  ✓ scriptSig format correct" << endl;
+
+    return true;
+}
+
+bool TestCoinSelection() {
+    cout << "\nTesting coin selection (Phase 5.2)..." << endl;
+
+    // Create wallet with multiple UTXOs
+    CWallet wallet;
+    wallet.GenerateNewKey();
+    CAddress addr = wallet.GetNewAddress();
+
+    // Create mock UTXO set
+    CUTXOSet utxo_set;
+    utxo_set.Open(":memory:");  // In-memory database for testing
+
+    // Add multiple UTXOs to wallet with different values
+    std::vector<CAmount> values = {50000000, 30000000, 20000000, 10000000};
+    for (size_t i = 0; i < values.size(); i++) {
+        uint256 txid;
+        txid.data[0] = static_cast<uint8_t>(i + 1);
+
+        wallet.AddTxOut(txid, 0, values[i], addr, 100);
+
+        // Add to global UTXO set
+        std::vector<uint8_t> pubkey_hash = wallet.GetPubKeyHash();
+        std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(pubkey_hash);
+        CTxOut txout(values[i], scriptPubKey);
+        COutPoint outpoint(txid, 0);
+        utxo_set.AddUTXO(outpoint, txout, 100, false);
+    }
+
+    utxo_set.Flush();
+
+    // Test: Select coins for exact amount
+    std::vector<CWalletTx> selected;
+    CAmount total = 0;
+    std::string error;
+
+    unsigned int current_height = 200;  // All coins are mature
+
+    if (!wallet.SelectCoins(50000000, selected, total, utxo_set, current_height, error)) {
+        cout << "  ✗ Coin selection failed: " << error << endl;
+        return false;
+    }
+
+    if (total < 50000000) {
+        cout << "  ✗ Selected coins total less than requested" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Exact amount selection: selected " << selected.size() << " coins totaling " << total << endl;
+
+    // Test: Select more than available (should fail)
+    selected.clear();
+    total = 0;
+    if (wallet.SelectCoins(200000000, selected, total, utxo_set, current_height, error)) {
+        cout << "  ✗ Should have failed to select insufficient coins" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Insufficient funds correctly detected" << endl;
+
+    return true;
+}
+
+bool TestTransactionCreation() {
+    cout << "\nTesting transaction creation (Phase 5.2)..." << endl;
+
+    // Create two wallets
+    CWallet sender_wallet;
+    sender_wallet.GenerateNewKey();
+    CAddress sender_addr = sender_wallet.GetNewAddress();
+
+    CWallet recipient_wallet;
+    recipient_wallet.GenerateNewKey();
+    CAddress recipient_addr = recipient_wallet.GetNewAddress();
+
+    // Create UTXO set
+    CUTXOSet utxo_set;
+    utxo_set.Open(":memory:");
+
+    // Give sender some coins
+    uint256 funding_txid;
+    funding_txid.data[0] = 0x01;
+    CAmount funding_amount = 100000000;  // 1 DLT
+
+    sender_wallet.AddTxOut(funding_txid, 0, funding_amount, sender_addr, 100);
+
+    // Add to UTXO set
+    std::vector<uint8_t> sender_hash = sender_wallet.GetPubKeyHash();
+    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(sender_hash);
+    CTxOut funding_txout(funding_amount, scriptPubKey);
+    COutPoint funding_outpoint(funding_txid, 0);
+    utxo_set.AddUTXO(funding_outpoint, funding_txout, 100, false);
+    utxo_set.Flush();
+
+    // Create transaction
+    CAmount amount_to_send = 50000000;  // 0.5 DLT
+    CAmount fee = 1000;
+    CTransactionRef tx;
+    std::string error;
+    unsigned int current_height = 200;
+
+    if (!sender_wallet.CreateTransaction(recipient_addr, amount_to_send, fee,
+                                        utxo_set, current_height, tx, error)) {
+        cout << "  ✗ Transaction creation failed: " << error << endl;
+        return false;
+    }
+
+    cout << "  ✓ Transaction created successfully" << endl;
+
+    // Verify transaction structure
+    if (tx->vin.empty()) {
+        cout << "  ✗ Transaction has no inputs" << endl;
+        return false;
+    }
+
+    if (tx->vout.size() < 1 || tx->vout.size() > 2) {
+        cout << "  ✗ Transaction should have 1-2 outputs (recipient + optional change)" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Transaction has " << tx->vin.size() << " input(s) and " << tx->vout.size() << " output(s)" << endl;
+
+    // Verify first output is to recipient
+    std::vector<uint8_t> recipient_hash = recipient_wallet.GetPubKeyHash();
+    std::vector<uint8_t> expected_script = WalletCrypto::CreateScriptPubKey(recipient_hash);
+
+    if (tx->vout[0].scriptPubKey != expected_script) {
+        cout << "  ✗ First output not to recipient" << endl;
+        return false;
+    }
+
+    if (tx->vout[0].nValue != amount_to_send) {
+        cout << "  ✗ First output value incorrect" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Recipient output correct" << endl;
+
+    // Verify change output if present
+    if (tx->vout.size() == 2) {
+        CAmount expected_change = funding_amount - amount_to_send - fee;
+        if (tx->vout[1].nValue != expected_change) {
+            cout << "  ✗ Change output value incorrect" << endl;
+            return false;
+        }
+        cout << "  ✓ Change output correct: " << expected_change << endl;
+    }
+
+    // Verify inputs are signed
+    for (size_t i = 0; i < tx->vin.size(); i++) {
+        if (tx->vin[i].scriptSig.empty()) {
+            cout << "  ✗ Input " << i << " not signed" << endl;
+            return false;
+        }
+    }
+
+    cout << "  ✓ All inputs signed" << endl;
+
+    return true;
+}
+
+bool TestTransactionSending() {
+    cout << "\nTesting transaction sending (Phase 5.2)..." << endl;
+
+    // Create wallet
+    CWallet wallet;
+    wallet.GenerateNewKey();
+    CAddress addr = wallet.GetNewAddress();
+
+    // Create UTXO set
+    CUTXOSet utxo_set;
+    utxo_set.Open(":memory:");
+
+    // Fund wallet
+    uint256 funding_txid;
+    funding_txid.data[0] = 0x01;
+    CAmount funding_amount = 100000000;
+
+    wallet.AddTxOut(funding_txid, 0, funding_amount, addr, 100);
+
+    std::vector<uint8_t> sender_hash = wallet.GetPubKeyHash();
+    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(sender_hash);
+    CTxOut funding_txout(funding_amount, scriptPubKey);
+    COutPoint funding_outpoint(funding_txid, 0);
+    utxo_set.AddUTXO(funding_outpoint, funding_txout, 100, false);
+    utxo_set.Flush();
+
+    // Create recipient
+    CWallet recipient;
+    recipient.GenerateNewKey();
+    CAddress recipient_addr = recipient.GetNewAddress();
+
+    // Create transaction
+    CTransactionRef tx;
+    std::string error;
+    unsigned int current_height = 200;
+
+    if (!wallet.CreateTransaction(recipient_addr, 50000000, 1000,
+                                 utxo_set, current_height, tx, error)) {
+        cout << "  ✗ Transaction creation failed: " << error << endl;
+        return false;
+    }
+
+    // Create mempool
+    CTxMemPool mempool;
+    mempool.SetHeight(current_height);
+
+    // Send transaction
+    if (!wallet.SendTransaction(tx, mempool, utxo_set, current_height, error)) {
+        cout << "  ✗ Transaction sending failed: " << error << endl;
+        return false;
+    }
+
+    cout << "  ✓ Transaction accepted to mempool" << endl;
+
+    // Verify transaction is in mempool
+    if (!mempool.Exists(tx->GetHash())) {
+        cout << "  ✗ Transaction not found in mempool" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Transaction found in mempool" << endl;
+
+    return true;
+}
+
+bool TestBalanceCalculation() {
+    cout << "\nTesting balance calculation with maturity (Phase 5.2)..." << endl;
+
+    CWallet wallet;
+    wallet.GenerateNewKey();
+    CAddress addr = wallet.GetNewAddress();
+
+    CUTXOSet utxo_set;
+    utxo_set.Open(":memory:");
+
+    std::vector<uint8_t> pubkey_hash = wallet.GetPubKeyHash();
+    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(pubkey_hash);
+
+    // Add mature coinbase UTXO
+    uint256 txid1;
+    txid1.data[0] = 0x01;
+    wallet.AddTxOut(txid1, 0, 50000000, addr, 50);
+
+    CTxOut txout1(50000000, scriptPubKey);
+    COutPoint outpoint1(txid1, 0);
+    utxo_set.AddUTXO(outpoint1, txout1, 50, true);  // Coinbase
+
+    // Add immature coinbase UTXO
+    uint256 txid2;
+    txid2.data[0] = 0x02;
+    wallet.AddTxOut(txid2, 0, 30000000, addr, 180);
+
+    CTxOut txout2(30000000, scriptPubKey);
+    COutPoint outpoint2(txid2, 0);
+    utxo_set.AddUTXO(outpoint2, txout2, 180, true);  // Coinbase
+
+    utxo_set.Flush();
+
+    // Check balance at height 200
+    // UTXO1 (height 50): 200 - 50 = 150 > 100 confirmations → MATURE
+    // UTXO2 (height 180): 200 - 180 = 20 < 100 confirmations → IMMATURE
+
+    unsigned int current_height = 200;
+    CAmount balance = wallet.GetAvailableBalance(utxo_set, current_height);
+
+    if (balance != 50000000) {
+        cout << "  ✗ Balance should be 50000000 (only mature coinbase), got " << balance << endl;
+        return false;
+    }
+
+    cout << "  ✓ Balance correctly excludes immature coinbase" << endl;
+
+    // Check balance at height 280 (both mature)
+    current_height = 280;
+    balance = wallet.GetAvailableBalance(utxo_set, current_height);
+
+    if (balance != 80000000) {
+        cout << "  ✗ Balance should be 80000000 (both mature), got " << balance << endl;
+        return false;
+    }
+
+    cout << "  ✓ Balance correct when both coinbases mature" << endl;
+
+    return true;
+}
+
+bool TestEdgeCases() {
+    cout << "\nTesting edge cases (Phase 5.2)..." << endl;
+
+    CWallet wallet;
+    wallet.GenerateNewKey();
+    CAddress addr = wallet.GetNewAddress();
+
+    CUTXOSet utxo_set;
+    utxo_set.Open(":memory:");
+
+    // Test: Create transaction with zero amount (should fail)
+    CTransactionRef tx;
+    std::string error;
+    unsigned int current_height = 200;
+
+    if (wallet.CreateTransaction(addr, 0, 1000, utxo_set, current_height, tx, error)) {
+        cout << "  ✗ Should have rejected zero amount" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Zero amount correctly rejected" << endl;
+
+    // Test: Create transaction with negative fee (should fail)
+    if (wallet.CreateTransaction(addr, 1000, -100, utxo_set, current_height, tx, error)) {
+        cout << "  ✗ Should have rejected negative fee" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Negative fee correctly rejected" << endl;
+
+    // Test: Create transaction with no funds (should fail)
+    if (wallet.CreateTransaction(addr, 1000000, 1000, utxo_set, current_height, tx, error)) {
+        cout << "  ✗ Should have rejected insufficient funds" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Insufficient funds correctly detected" << endl;
+
+    // Test: Empty wallet balance
+    CAmount balance = wallet.GetAvailableBalance(utxo_set, current_height);
+    if (balance != 0) {
+        cout << "  ✗ Empty wallet should have zero balance" << endl;
+        return false;
+    }
+
+    cout << "  ✓ Empty wallet balance correct" << endl;
+
+    return true;
+}
+
 int main() {
     cout << "======================================" << endl;
-    cout << "Phase 4 Wallet Tests" << endl;
-    cout << "Post-Quantum Cryptography Validation" << endl;
+    cout << "Phase 5.2 Wallet Integration Tests" << endl;
+    cout << "Post-Quantum Transaction System" << endl;
     cout << "======================================" << endl;
     cout << endl;
 
     bool allPassed = true;
 
+    // Phase 4 tests (baseline)
+    cout << "=== Phase 4 Tests (Baseline) ===" << endl;
     allPassed &= TestSHA3();
     allPassed &= TestHashConsistency();
     allPassed &= TestKeyGeneration();
     allPassed &= TestSignature();
     allPassed &= TestAddressGeneration();
     allPassed &= TestWalletBasics();
+
+    // Phase 5.2 tests (new transaction functionality)
+    cout << endl << "=== Phase 5.2 Tests (Transaction System) ===" << endl;
+    allPassed &= TestScriptCreation();
+    allPassed &= TestCoinSelection();
+    allPassed &= TestTransactionCreation();
+    allPassed &= TestTransactionSending();
+    allPassed &= TestBalanceCalculation();
+    allPassed &= TestEdgeCases();
 
     cout << endl;
     cout << "======================================" << endl;
@@ -275,19 +695,24 @@ int main() {
     cout << "======================================" << endl;
     cout << endl;
 
-    cout << "Phase 4 Components Validated:" << endl;
+    cout << "Phase 5.2 Components Validated:" << endl;
     cout << "  ✓ SHA-3-256 hashing (quantum-resistant)" << endl;
-    cout << "  ✓ Dilithium3 key generation" << endl;
-    cout << "  ✓ Dilithium3 signatures" << endl;
+    cout << "  ✓ Dilithium3 key generation & signatures" << endl;
     cout << "  ✓ Address generation (Base58Check)" << endl;
-    cout << "  ✓ Wallet UTXO tracking" << endl;
-    cout << "  ✓ Balance calculation" << endl;
+    cout << "  ✓ UTXO management & tracking" << endl;
+    cout << "  ✓ Balance calculation with maturity" << endl;
+    cout << "  ✓ Script creation (P2PKH-like)" << endl;
+    cout << "  ✓ Coin selection algorithm" << endl;
+    cout << "  ✓ Transaction creation & signing" << endl;
+    cout << "  ✓ Transaction validation" << endl;
+    cout << "  ✓ Mempool integration" << endl;
     cout << endl;
 
-    cout << "Post-Quantum Security:" << endl;
-    cout << "  ✓ Signatures: CRYSTALS-Dilithium (NIST PQC)" << endl;
-    cout << "  ✓ Hashing: SHA-3/Keccak (quantum-resistant)" << endl;
-    cout << "  ✓ Mining: RandomX (CPU-friendly)" << endl;
+    cout << "Post-Quantum Security Stack:" << endl;
+    cout << "  ✓ Signatures: CRYSTALS-Dilithium3 (NIST PQC)" << endl;
+    cout << "  ✓ Hashing: SHA-3-256 (quantum-resistant)" << endl;
+    cout << "  ✓ Mining: RandomX (CPU-friendly, ASIC-resistant)" << endl;
+    cout << "  ✓ Transactions: Full UTXO model" << endl;
     cout << endl;
 
     return allPassed ? 0 : 1;

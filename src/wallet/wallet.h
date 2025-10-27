@@ -5,6 +5,8 @@
 #define DILITHION_WALLET_WALLET_H
 
 #include <primitives/block.h>
+#include <primitives/transaction.h>
+#include <amount.h>
 #include <uint256.h>
 #include <wallet/crypter.h>
 
@@ -346,6 +348,171 @@ public:
      * Clear all wallet data
      */
     void Clear();
+
+    // ============================================================================
+    // Phase 5.2: UTXO Management & Transaction Creation
+    // ============================================================================
+
+    /**
+     * Scan the global UTXO set and identify all UTXOs belonging to this wallet
+     *
+     * This function iterates through the global UTXO set and finds all outputs
+     * that are spendable by this wallet's keys. Used for wallet synchronization.
+     *
+     * @param global_utxo_set The global UTXO set to scan
+     * @return true if scan completed successfully
+     */
+    bool ScanUTXOs(class CUTXOSet& global_utxo_set);
+
+    /**
+     * Get wallet's spendable balance
+     *
+     * Calculates total balance from unspent outputs, excluding immature coinbase.
+     * Thread-safe.
+     *
+     * @param utxo_set UTXO set to query
+     * @param current_height Current blockchain height (for maturity checks)
+     * @return Total spendable balance in ions (1 DIL = 100,000,000 ions)
+     */
+    CAmount GetAvailableBalance(class CUTXOSet& utxo_set, unsigned int current_height) const;
+
+    /**
+     * List all unspent transaction outputs for this wallet
+     *
+     * Returns only mature, spendable UTXOs (filters out immature coinbase).
+     *
+     * @param utxo_set UTXO set to query
+     * @param current_height Current blockchain height
+     * @return Vector of wallet transaction outputs
+     */
+    std::vector<CWalletTx> ListUnspentOutputs(class CUTXOSet& utxo_set, unsigned int current_height) const;
+
+    /**
+     * Select coins to fund a transaction (coin selection algorithm)
+     *
+     * Uses simple greedy algorithm: selects largest UTXOs first until target is reached.
+     * Future versions can implement more sophisticated algorithms (knapsack, branch & bound).
+     *
+     * @param target_value Amount needed (including fee)
+     * @param selected_coins Output vector of selected UTXOs
+     * @param total_value Output parameter for total value of selected coins
+     * @param utxo_set UTXO set to query
+     * @param current_height Current blockchain height
+     * @param error Error message if selection fails
+     * @return true if sufficient coins selected, false if insufficient balance
+     */
+    bool SelectCoins(CAmount target_value,
+                    std::vector<CWalletTx>& selected_coins,
+                    CAmount& total_value,
+                    class CUTXOSet& utxo_set,
+                    unsigned int current_height,
+                    std::string& error) const;
+
+    /**
+     * Create a new transaction
+     *
+     * Complete transaction creation pipeline:
+     * 1. Select coins to cover amount + fee
+     * 2. Create inputs from selected coins
+     * 3. Create output for recipient
+     * 4. Create change output if needed
+     * 5. Sign all inputs
+     * 6. Validate transaction
+     *
+     * @param recipient_address Recipient's wallet address
+     * @param amount Amount to send (in ions)
+     * @param fee Transaction fee (in ions)
+     * @param utxo_set UTXO set for coin selection and validation
+     * @param current_height Current blockchain height
+     * @param tx_out Output parameter for created transaction
+     * @param error Error message if creation fails
+     * @return true if transaction created successfully
+     */
+    bool CreateTransaction(const CAddress& recipient_address,
+                          CAmount amount,
+                          CAmount fee,
+                          class CUTXOSet& utxo_set,
+                          unsigned int current_height,
+                          CTransactionRef& tx_out,
+                          std::string& error);
+
+    /**
+     * Sign all inputs of a transaction
+     *
+     * For each input:
+     * 1. Lookup the UTXO being spent
+     * 2. Extract the public key hash from scriptPubKey
+     * 3. Find corresponding wallet key
+     * 4. Create signature message (tx hash + input index)
+     * 5. Sign with Dilithium
+     * 6. Build scriptSig with signature and public key
+     *
+     * @param tx Transaction to sign (modified in place)
+     * @param utxo_set UTXO set to lookup previous outputs
+     * @param error Error message if signing fails
+     * @return true if all inputs signed successfully
+     */
+    bool SignTransaction(CTransaction& tx, class CUTXOSet& utxo_set, std::string& error);
+
+    /**
+     * Broadcast a transaction to the network
+     *
+     * Steps:
+     * 1. Validate transaction against consensus rules
+     * 2. Add to mempool
+     * 3. (Future) Relay to P2P network
+     *
+     * @param tx Transaction to send
+     * @param mempool Mempool to add transaction to
+     * @param utxo_set UTXO set for validation
+     * @param current_height Current blockchain height
+     * @param error Error message if broadcast fails
+     * @return true if transaction accepted to mempool
+     */
+    bool SendTransaction(const CTransactionRef& tx,
+                        class CTxMemPool& mempool,
+                        class CUTXOSet& utxo_set,
+                        unsigned int current_height,
+                        std::string& error);
+
+    /**
+     * Estimate transaction fee (v1.0: fixed fee)
+     *
+     * Returns fixed fee for v1.0. Future versions will implement:
+     * - Size-based fees
+     * - Priority-based fees
+     * - Dynamic fee estimation based on mempool
+     *
+     * @return Estimated fee in ions
+     */
+    static CAmount EstimateFee() { return DEFAULT_TRANSACTION_FEE; }
+
+    /**
+     * Default transaction fee (0.00001000 DLT = 1000 ions)
+     */
+    static const CAmount DEFAULT_TRANSACTION_FEE = 1000;
+
+    /**
+     * Get this wallet's public key hash (for receiving payments)
+     *
+     * @return SHA3-256 hash of default address's public key (32 bytes)
+     */
+    std::vector<uint8_t> GetPubKeyHash() const;
+
+    /**
+     * Get this wallet's public key
+     *
+     * @return Public key of default address (~1952 bytes for Dilithium3)
+     */
+    std::vector<uint8_t> GetPublicKey() const;
+
+    /**
+     * Get public key hash from an address
+     *
+     * @param address Address to extract hash from
+     * @return Public key hash (20 bytes) or empty vector if invalid
+     */
+    static std::vector<uint8_t> GetPubKeyHashFromAddress(const CAddress& address);
 };
 
 /**
@@ -383,6 +550,39 @@ namespace WalletCrypto {
      * Base58 decode and verify checksum
      */
     bool DecodeBase58Check(const std::string& str, std::vector<uint8_t>& data);
+
+    /**
+     * Create scriptPubKey from public key hash (P2PKH-like)
+     *
+     * Format: [hash_size(1)] [pubkey_hash(32)] [OP_CHECKSIG(1)]
+     *
+     * @param pubkey_hash Public key hash (32 bytes from SHA3-256)
+     * @return scriptPubKey bytes
+     */
+    std::vector<uint8_t> CreateScriptPubKey(const std::vector<uint8_t>& pubkey_hash);
+
+    /**
+     * Create scriptSig from signature and public key
+     *
+     * Format: [sig_size(2)] [signature] [pubkey_size(2)] [pubkey]
+     * Sizes are little-endian 16-bit integers
+     *
+     * @param signature Dilithium signature (~3293 bytes)
+     * @param pubkey Dilithium public key (~1952 bytes)
+     * @return scriptSig bytes
+     */
+    std::vector<uint8_t> CreateScriptSig(const std::vector<uint8_t>& signature,
+                                         const std::vector<uint8_t>& pubkey);
+
+    /**
+     * Extract public key hash from scriptPubKey
+     *
+     * Parses P2PKH-like scriptPubKey to extract the hash.
+     *
+     * @param scriptPubKey Script to parse
+     * @return Public key hash (32 bytes) or empty if invalid
+     */
+    std::vector<uint8_t> ExtractPubKeyHash(const std::vector<uint8_t>& scriptPubKey);
 }
 
 #endif // DILITHION_WALLET_WALLET_H
