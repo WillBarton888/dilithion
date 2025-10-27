@@ -87,6 +87,11 @@ private:
     // Component references
     CWallet* m_wallet;
     CMiningController* m_miner;
+    class CTxMemPool* m_mempool;
+    class CBlockchainDB* m_blockchain;
+    class CUTXOSet* m_utxo_set;
+    class CChainState* m_chainstate;
+    // CNetworkManager* m_network;  // TODO: Implement network manager
 
     // RPC handlers
     std::map<std::string, RPCHandler> m_handlers;
@@ -145,11 +150,27 @@ private:
 
     // RPC method handlers
 
-    // Wallet methods
+    // Wallet information methods
     std::string RPC_GetNewAddress(const std::string& params);
     std::string RPC_GetBalance(const std::string& params);
     std::string RPC_GetAddresses(const std::string& params);
+    std::string RPC_ListUnspent(const std::string& params);
+
+    // Transaction creation methods
     std::string RPC_SendToAddress(const std::string& params);
+    std::string RPC_SignRawTransaction(const std::string& params);
+    std::string RPC_SendRawTransaction(const std::string& params);
+
+    // Transaction query methods
+    std::string RPC_GetTransaction(const std::string& params);
+    std::string RPC_ListTransactions(const std::string& params);
+    std::string RPC_GetMempoolInfo(const std::string& params);
+
+    // Blockchain query methods
+    std::string RPC_GetBlockchainInfo(const std::string& params);
+    std::string RPC_GetBlock(const std::string& params);
+    std::string RPC_GetBlockHash(const std::string& params);
+    std::string RPC_GetTxOut(const std::string& params);
 
     // Wallet encryption methods
     std::string RPC_EncryptWallet(const std::string& params);
@@ -169,6 +190,11 @@ private:
     // General methods
     std::string RPC_Help(const std::string& params);
     std::string RPC_Stop(const std::string& params);
+
+    // Helper functions
+    std::string FormatAmount(CAmount amount) const;
+    bool ValidateAddress(const std::string& addressStr, CAddress& addressOut) const;
+    std::string EscapeJSON(const std::string& str) const;
 
 public:
     /**
@@ -195,6 +221,32 @@ public:
      * Register miner instance
      */
     void RegisterMiner(CMiningController* miner) { m_miner = miner; }
+
+    /**
+     * Register mempool instance
+     */
+    void RegisterMempool(class CTxMemPool* mempool) { m_mempool = mempool; }
+
+    /**
+     * Register blockchain database instance
+     */
+    void RegisterBlockchain(class CBlockchainDB* blockchain) { m_blockchain = blockchain; }
+
+    /**
+     * Register UTXO set instance
+     */
+    void RegisterUTXOSet(class CUTXOSet* utxo_set) { m_utxo_set = utxo_set; }
+
+    /**
+     * Register chain state instance
+     */
+    void RegisterChainState(class CChainState* chainstate) { m_chainstate = chainstate; }
+
+    /**
+     * Register network manager instance
+     * TODO: Implement when network manager is ready
+     */
+    // void RegisterNetwork(CNetworkManager* network) { m_network = network; }
 
     /**
      * Start RPC server

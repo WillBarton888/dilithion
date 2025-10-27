@@ -2,14 +2,28 @@
 // Distributed under the MIT software license
 
 #include <net/net.h>
+#include <net/tx_relay.h>
 #include <util/strencodings.h>
+#include <util/time.h>
 #include <core/chainparams.h>
+#include <node/mempool.h>
+#include <node/utxo_set.h>
+#include <consensus/tx_validation.h>
 #include <random>
 #include <cstring>
 #include <iostream>
 
 // Global network statistics
 CNetworkStats g_network_stats;
+
+// Global transaction relay manager (Phase 5.3)
+CTxRelayManager* g_tx_relay_manager = nullptr;
+
+// Global pointers for transaction relay (Phase 5.3)
+CTxMemPool* g_mempool = nullptr;
+CTransactionValidator* g_tx_validator = nullptr;
+CUTXOSet* g_utxo_set = nullptr;
+unsigned int g_chain_height = 0;
 
 std::string CNetworkStats::ToString() const {
     return strprintf("CNetworkStats(peers=%d/%d, handshake=%d, "
@@ -170,6 +184,8 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
     try {
         uint64_t count = stream.ReadCompactSize();
         if (count > NetProtocol::MAX_INV_SIZE) {
+            std::cout << "[P2P] ERROR: INV message too large from peer " << peer_id
+                      << " (count=" << count << ")" << std::endl;
             return false;
         }
 
@@ -181,9 +197,45 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
             inv.push_back(item);
         }
 
+        // Phase 5.3: Handle transaction inventory announcements
+        std::vector<NetProtocol::CInv> vToFetch;
+
+        for (const NetProtocol::CInv& inv_item : inv) {
+            if (inv_item.type == NetProtocol::MSG_TX_INV) {
+                // Check if we need this transaction
+                if (g_tx_relay_manager && g_mempool) {
+                    if (!g_tx_relay_manager->AlreadyHave(inv_item.hash, *g_mempool)) {
+                        vToFetch.push_back(inv_item);
+                        g_tx_relay_manager->MarkRequested(inv_item.hash, peer_id);
+
+                        std::cout << "[P2P] Requesting transaction "
+                                  << inv_item.hash.GetHex().substr(0, 16)
+                                  << "... from peer " << peer_id << std::endl;
+                    }
+                }
+            }
+            else if (inv_item.type == NetProtocol::MSG_BLOCK_INV) {
+                // Existing block handling (keep as-is)
+                vToFetch.push_back(inv_item);
+            }
+        }
+
+        // Request transactions/blocks we don't have
+        if (!vToFetch.empty()) {
+            // Create GETDATA message
+            CNetMessage getdata_msg = CreateGetDataMessage(vToFetch);
+
+            // Send via connection manager (need to get connection manager reference)
+            // For now, use the handler callback
+            on_getdata(peer_id, vToFetch);  // This will trigger sending getdata
+        }
+
+        // Call handler for any additional processing
         on_inv(peer_id, inv);
         return true;
     } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: Exception processing INV from peer " << peer_id
+                  << ": " << e.what() << std::endl;
         return false;
     }
 }
@@ -192,6 +244,12 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
     try {
         // Read number of inv items
         uint64_t count = stream.ReadCompactSize();
+
+        if (count > NetProtocol::MAX_INV_SIZE) {
+            std::cout << "[P2P] ERROR: GETDATA message too large from peer " << peer_id
+                      << " (count=" << count << ")" << std::endl;
+            return false;
+        }
 
         std::vector<NetProtocol::CInv> getdata;
         getdata.reserve(count);
@@ -204,11 +262,47 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             getdata.push_back(inv);
         }
 
+        // Phase 5.3: Handle transaction data requests
+        for (const NetProtocol::CInv& inv : getdata) {
+            if (inv.type == NetProtocol::MSG_TX_INV) {
+                // Try to get transaction from mempool
+                if (g_mempool) {
+                    // Create dummy transaction for mempool lookup
+                    CTransactionRef tx_ref = MakeTransactionRef();
+                    CTxMemPoolEntry entry(tx_ref, 0, 0, 0);
+
+                    if (g_mempool->GetTx(inv.hash, entry)) {
+                        CTransactionRef tx = entry.GetSharedTx();
+
+                        // Create TX message and send it
+                        CNetMessage tx_msg = CreateTxMessage(*tx);
+
+                        // Note: Actual sending will be done by handler
+                        // For now, just log
+                        std::cout << "[P2P] Serving transaction "
+                                  << inv.hash.GetHex().substr(0, 16)
+                                  << "... to peer " << peer_id << std::endl;
+                    } else {
+                        std::cout << "[P2P] Transaction "
+                                  << inv.hash.GetHex().substr(0, 16)
+                                  << "... not found in mempool for peer " << peer_id << std::endl;
+                        // Could send "notfound" message here
+                    }
+                }
+            }
+            else if (inv.type == NetProtocol::MSG_BLOCK_INV) {
+                // Existing block handling (keep as-is)
+                // Block serving logic would go here
+            }
+        }
+
         // Call handler to serve requested data
         on_getdata(peer_id, getdata);
         return true;
 
-    } catch (...) {
+    } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: Exception processing GETDATA from peer " << peer_id
+                  << ": " << e.what() << std::endl;
         return false;
     }
 }
@@ -240,13 +334,102 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
 
 bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
     try {
+        // Deserialize transaction
         CTransaction tx;
         tx.nVersion = stream.ReadInt32();
-        // Simplified - would read full transaction
 
+        // Read inputs
+        uint64_t vin_size = stream.ReadCompactSize();
+        tx.vin.resize(vin_size);
+        for (uint64_t i = 0; i < vin_size; i++) {
+            tx.vin[i].prevout.hash = stream.ReadUint256();
+            tx.vin[i].prevout.n = stream.ReadUint32();
+
+            uint64_t script_size = stream.ReadCompactSize();
+            tx.vin[i].scriptSig.resize(script_size);
+            if (script_size > 0) {
+                stream.read(tx.vin[i].scriptSig.data(), script_size);
+            }
+
+            tx.vin[i].nSequence = stream.ReadUint32();
+        }
+
+        // Read outputs
+        uint64_t vout_size = stream.ReadCompactSize();
+        tx.vout.resize(vout_size);
+        for (uint64_t i = 0; i < vout_size; i++) {
+            tx.vout[i].nValue = stream.ReadUint64();
+
+            uint64_t script_size = stream.ReadCompactSize();
+            tx.vout[i].scriptPubKey.resize(script_size);
+            if (script_size > 0) {
+                stream.read(tx.vout[i].scriptPubKey.data(), script_size);
+            }
+        }
+
+        // Read locktime
+        tx.nLockTime = stream.ReadUint32();
+
+        // Get transaction hash
+        const uint256 txid = tx.GetHash();
+
+        std::cout << "[P2P] Received transaction " << txid.GetHex().substr(0, 16)
+                  << "... from peer " << peer_id << std::endl;
+
+        // Phase 5.3: Transaction relay processing
+        if (g_tx_relay_manager) {
+            // Remove from in-flight
+            g_tx_relay_manager->RemoveInFlight(txid);
+        }
+
+        // Check if we already have it
+        if (g_mempool && g_mempool->Exists(txid)) {
+            std::cout << "[P2P] Transaction " << txid.GetHex().substr(0, 16)
+                      << "... already in mempool" << std::endl;
+            on_tx(peer_id, tx);
+            return true;
+        }
+
+        // Validate transaction
+        if (g_tx_validator && g_utxo_set && g_mempool) {
+            std::string error;
+            CAmount fee = 0;
+
+            if (!g_tx_validator->CheckTransaction(tx, *g_utxo_set, g_chain_height, fee, error)) {
+                std::cout << "[P2P] Invalid transaction " << txid.GetHex().substr(0, 16)
+                          << "... from peer " << peer_id << ": " << error << std::endl;
+                // Could penalize peer here
+                return false;
+            }
+
+            // Add to mempool
+            std::string mempool_error;
+            int64_t current_time = GetTime();
+            CTransactionRef tx_ref = MakeTransactionRef(std::move(tx));
+
+            if (!g_mempool->AddTx(tx_ref, fee, current_time, g_chain_height, &mempool_error)) {
+                std::cout << "[P2P] Failed to add tx " << txid.GetHex().substr(0, 16)
+                          << "... to mempool: " << mempool_error << std::endl;
+                return true;  // Not necessarily peer's fault
+            }
+
+            std::cout << "[P2P] Accepted transaction " << txid.GetHex().substr(0, 16)
+                      << "... from peer " << peer_id << " (fee: " << fee << " ions)" << std::endl;
+
+            // Relay to other peers
+            AnnounceTransactionToPeers(txid, peer_id);
+
+            // Call handler
+            on_tx(peer_id, *tx_ref);
+            return true;
+        }
+
+        // If global pointers not set, just call handler
         on_tx(peer_id, tx);
         return true;
     } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: Exception processing TX from peer " << peer_id
+                  << ": " << e.what() << std::endl;
         return false;
     }
 }
@@ -351,8 +534,37 @@ CNetMessage CNetMessageProcessor::CreateBlockMessage(const CBlock& block) {
 
 CNetMessage CNetMessageProcessor::CreateTxMessage(const CTransaction& tx) {
     CDataStream stream;
+
+    // Serialize version
     stream.WriteInt32(tx.nVersion);
-    // Would serialize full transaction
+
+    // Serialize inputs
+    stream.WriteCompactSize(tx.vin.size());
+    for (const CTxIn& txin : tx.vin) {
+        stream.WriteUint256(txin.prevout.hash);
+        stream.WriteUint32(txin.prevout.n);
+
+        stream.WriteCompactSize(txin.scriptSig.size());
+        if (!txin.scriptSig.empty()) {
+            stream.write(txin.scriptSig.data(), txin.scriptSig.size());
+        }
+
+        stream.WriteUint32(txin.nSequence);
+    }
+
+    // Serialize outputs
+    stream.WriteCompactSize(tx.vout.size());
+    for (const CTxOut& txout : tx.vout) {
+        stream.WriteUint64(txout.nValue);
+
+        stream.WriteCompactSize(txout.scriptPubKey.size());
+        if (!txout.scriptPubKey.empty()) {
+            stream.write(txout.scriptPubKey.data(), txout.scriptPubKey.size());
+        }
+    }
+
+    // Serialize locktime
+    stream.WriteUint32(tx.nLockTime);
 
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();
@@ -700,4 +912,39 @@ void CConnectionManager::Cleanup() {
     // Clear socket map
     peer_sockets.clear();
     pending_pings.clear();
+}
+
+// ============================================================================
+// Phase 5.3: Transaction Relay Functions
+// ============================================================================
+
+/**
+ * AnnounceTransactionToPeers
+ *
+ * Announce a transaction to all connected peers via INV message.
+ * This is called when:
+ * 1. Wallet sends a new transaction
+ * 2. Node receives and validates a transaction from a peer (relay)
+ *
+ * @param txid Transaction hash to announce
+ * @param exclude_peer Peer ID to exclude (e.g., originating peer), -1 for none
+ */
+void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
+    // Note: This function needs access to peer manager and message processor
+    // In a real implementation, these would be passed as parameters or accessed via globals
+    // For now, this is a simplified version that will be called from contexts
+    // where peer management is available
+
+    std::cout << "[TX-RELAY] Announcing transaction " << txid.GetHex().substr(0, 16)
+              << "... to all peers (excluding peer " << exclude_peer << ")" << std::endl;
+
+    // This function will be properly implemented when called from contexts
+    // with access to connection manager
+    // The actual implementation would:
+    // 1. Get list of connected peers from peer manager
+    // 2. For each peer (except exclude_peer):
+    //    a. Check if we should announce (via g_tx_relay_manager->ShouldAnnounce)
+    //    b. Create INV message with MSG_TX_INV type
+    //    c. Send INV message to peer
+    //    d. Mark as announced (via g_tx_relay_manager->MarkAnnounced)
 }

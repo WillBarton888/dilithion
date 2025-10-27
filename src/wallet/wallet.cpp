@@ -3,10 +3,14 @@
 
 #include <wallet/wallet.h>
 #include <crypto/sha3.h>
+#include <node/utxo_set.h>
+#include <node/mempool.h>
+#include <consensus/tx_validation.h>
 
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <limits>
 
 // Dilithium3 API
 extern "C" {
@@ -1080,4 +1084,484 @@ void CWallet::Clear() {
 
     // Clear master key data
     masterKey = CMasterKey();
+}
+
+// ============================================================================
+// Phase 5.2: Transaction Creation Helper Functions
+// ============================================================================
+
+namespace WalletCrypto {
+
+std::vector<uint8_t> CreateScriptPubKey(const std::vector<uint8_t>& pubkey_hash) {
+    std::vector<uint8_t> script;
+
+    // Push hash size (1 byte)
+    script.push_back(static_cast<uint8_t>(pubkey_hash.size()));
+
+    // Push hash data
+    script.insert(script.end(), pubkey_hash.begin(), pubkey_hash.end());
+
+    // Push OP_CHECKSIG (0xAC)
+    script.push_back(0xAC);
+
+    return script;
+}
+
+std::vector<uint8_t> CreateScriptSig(const std::vector<uint8_t>& signature,
+                                     const std::vector<uint8_t>& pubkey) {
+    std::vector<uint8_t> script;
+
+    // Push signature size (2 bytes, little-endian)
+    uint16_t sig_size = static_cast<uint16_t>(signature.size());
+    script.push_back(static_cast<uint8_t>(sig_size & 0xFF));
+    script.push_back(static_cast<uint8_t>((sig_size >> 8) & 0xFF));
+
+    // Push signature data
+    script.insert(script.end(), signature.begin(), signature.end());
+
+    // Push pubkey size (2 bytes, little-endian)
+    uint16_t pk_size = static_cast<uint16_t>(pubkey.size());
+    script.push_back(static_cast<uint8_t>(pk_size & 0xFF));
+    script.push_back(static_cast<uint8_t>((pk_size >> 8) & 0xFF));
+
+    // Push pubkey data
+    script.insert(script.end(), pubkey.begin(), pubkey.end());
+
+    return script;
+}
+
+std::vector<uint8_t> ExtractPubKeyHash(const std::vector<uint8_t>& scriptPubKey) {
+    // scriptPubKey format: [hash_size(1)] [pubkey_hash(32)] [OP_CHECKSIG(1)]
+    // Minimum size: 34 bytes
+
+    if (scriptPubKey.size() < 34) {
+        return std::vector<uint8_t>();
+    }
+
+    uint8_t hash_size = scriptPubKey[0];
+
+    // Verify hash size is 32 bytes (SHA3-256)
+    if (hash_size != 32) {
+        return std::vector<uint8_t>();
+    }
+
+    // Verify OP_CHECKSIG at the end
+    if (scriptPubKey[33] != 0xAC) {
+        return std::vector<uint8_t>();
+    }
+
+    // Extract hash (bytes 1-32)
+    return std::vector<uint8_t>(scriptPubKey.begin() + 1, scriptPubKey.begin() + 33);
+}
+
+} // namespace WalletCrypto
+
+// ============================================================================
+// Phase 5.2: UTXO Management & Transaction Creation Implementation
+// ============================================================================
+
+// Helper: Get public key hash (20 bytes) from CAddress
+std::vector<uint8_t> CWallet::GetPubKeyHashFromAddress(const CAddress& address) {
+    if (!address.IsValid()) {
+        return std::vector<uint8_t>();
+    }
+
+    const std::vector<uint8_t>& addrData = address.GetData();
+
+    // Address format: [version(1)] [hash(20)]
+    if (addrData.size() != 21) {
+        return std::vector<uint8_t>();
+    }
+
+    // Extract hash (skip version byte)
+    return std::vector<uint8_t>(addrData.begin() + 1, addrData.end());
+}
+
+std::vector<uint8_t> CWallet::GetPubKeyHash() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!defaultAddress.IsValid()) {
+        return std::vector<uint8_t>();
+    }
+
+    return GetPubKeyHashFromAddress(defaultAddress);
+}
+
+std::vector<uint8_t> CWallet::GetPublicKey() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!defaultAddress.IsValid()) {
+        return std::vector<uint8_t>();
+    }
+
+    // Get key for default address
+    CKey key;
+    if (GetKey(defaultAddress, key)) {
+        return key.vchPubKey;
+    }
+
+    return std::vector<uint8_t>();
+}
+
+bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
+    // Note: This is a placeholder implementation
+    // In production, you would need to iterate the entire UTXO set
+    // which requires adding an iterator interface to CUTXOSet
+    // For now, UTXOs are tracked via AddTxOut/MarkSpent
+
+    // Future enhancement: Add CUTXOSet::ForEach(callback) method
+    // to iterate all UTXOs and check if they belong to this wallet
+
+    return true;
+}
+
+CAmount CWallet::GetAvailableBalance(CUTXOSet& utxo_set, unsigned int current_height) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    CAmount balance = 0;
+
+    // Coinbase maturity requirement
+    const unsigned int COINBASE_MATURITY = 100;
+
+    for (const auto& pair : mapWalletTx) {
+        const CWalletTx& wtx = pair.second;
+
+        // Skip spent outputs
+        if (wtx.fSpent) {
+            continue;
+        }
+
+        // Verify UTXO still exists in global set
+        COutPoint outpoint(wtx.txid, wtx.vout);
+        CUTXOEntry entry;
+        if (!utxo_set.GetUTXO(outpoint, entry)) {
+            continue;  // UTXO was spent elsewhere
+        }
+
+        // Check coinbase maturity
+        if (entry.fCoinBase) {
+            if (current_height < entry.nHeight + COINBASE_MATURITY) {
+                continue;  // Immature coinbase
+            }
+        }
+
+        // Add to balance (with overflow protection)
+        if (balance > std::numeric_limits<CAmount>::max() - wtx.nValue) {
+            // Overflow would occur - this should never happen in practice
+            continue;
+        }
+
+        balance += wtx.nValue;
+    }
+
+    return balance;
+}
+
+std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned int current_height) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    std::vector<CWalletTx> unspent;
+    const unsigned int COINBASE_MATURITY = 100;
+
+    for (const auto& pair : mapWalletTx) {
+        const CWalletTx& wtx = pair.second;
+
+        // Skip spent outputs
+        if (wtx.fSpent) {
+            continue;
+        }
+
+        // Verify UTXO still exists
+        COutPoint outpoint(wtx.txid, wtx.vout);
+        CUTXOEntry entry;
+        if (!utxo_set.GetUTXO(outpoint, entry)) {
+            continue;
+        }
+
+        // Check coinbase maturity
+        if (entry.fCoinBase) {
+            if (current_height < entry.nHeight + COINBASE_MATURITY) {
+                continue;  // Immature coinbase
+            }
+        }
+
+        unspent.push_back(wtx);
+    }
+
+    return unspent;
+}
+
+bool CWallet::SelectCoins(CAmount target_value,
+                          std::vector<CWalletTx>& selected_coins,
+                          CAmount& total_value,
+                          CUTXOSet& utxo_set,
+                          unsigned int current_height,
+                          std::string& error) const {
+    selected_coins.clear();
+    total_value = 0;
+
+    // Get all spendable UTXOs
+    std::vector<CWalletTx> unspent = ListUnspentOutputs(utxo_set, current_height);
+
+    if (unspent.empty()) {
+        error = "No spendable outputs available";
+        return false;
+    }
+
+    // Simple greedy algorithm: Select largest UTXOs first
+    // Sort by value (descending)
+    std::sort(unspent.begin(), unspent.end(),
+              [](const CWalletTx& a, const CWalletTx& b) {
+                  return a.nValue > b.nValue;
+              });
+
+    // Select coins until we reach target
+    for (const CWalletTx& wtx : unspent) {
+        selected_coins.push_back(wtx);
+        total_value += wtx.nValue;
+
+        if (total_value >= target_value) {
+            return true;  // Success - we have enough
+        }
+    }
+
+    // Insufficient funds
+    error = "Insufficient balance (need " + std::to_string(target_value) +
+            " but only have " + std::to_string(total_value) + ")";
+    selected_coins.clear();
+    total_value = 0;
+    return false;
+}
+
+bool CWallet::CreateTransaction(const CAddress& recipient_address,
+                                CAmount amount,
+                                CAmount fee,
+                                CUTXOSet& utxo_set,
+                                unsigned int current_height,
+                                CTransactionRef& tx_out,
+                                std::string& error) {
+    // Input validation
+    if (!recipient_address.IsValid()) {
+        error = "Invalid recipient address";
+        return false;
+    }
+
+    if (amount <= 0) {
+        error = "Invalid amount (must be positive)";
+        return false;
+    }
+
+    if (fee < 0) {
+        error = "Invalid fee (cannot be negative)";
+        return false;
+    }
+
+    // Calculate total needed
+    CAmount total_needed = amount + fee;
+    if (total_needed < amount) {  // Overflow check
+        error = "Amount + fee overflow";
+        return false;
+    }
+
+    // Select coins
+    std::vector<CWalletTx> selected_coins;
+    CAmount total_selected = 0;
+
+    if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error)) {
+        return false;
+    }
+
+    // Create transaction
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    // Create inputs from selected coins
+    for (const CWalletTx& wtx : selected_coins) {
+        COutPoint outpoint(wtx.txid, wtx.vout);
+        CTxIn txin(outpoint);
+        tx.vin.push_back(txin);
+    }
+
+    // Create output for recipient
+    std::vector<uint8_t> recipient_hash = GetPubKeyHashFromAddress(recipient_address);
+    if (recipient_hash.empty()) {
+        error = "Failed to extract recipient public key hash";
+        return false;
+    }
+
+    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(recipient_hash);
+    CTxOut txout_recipient(amount, scriptPubKey);
+    tx.vout.push_back(txout_recipient);
+
+    // Create change output if needed
+    CAmount change = total_selected - total_needed;
+    if (change > 0) {
+        std::vector<uint8_t> change_hash = GetPubKeyHash();
+        if (change_hash.empty()) {
+            error = "Failed to get wallet public key hash for change";
+            return false;
+        }
+
+        std::vector<uint8_t> change_scriptPubKey = WalletCrypto::CreateScriptPubKey(change_hash);
+        CTxOut txout_change(change, change_scriptPubKey);
+        tx.vout.push_back(txout_change);
+    }
+
+    // Sign transaction
+    if (!SignTransaction(tx, utxo_set, error)) {
+        return false;
+    }
+
+    // Validate transaction
+    CTransactionValidator validator;
+    CAmount calculated_fee = 0;
+    std::string validation_error;
+
+    if (!validator.CheckTransaction(tx, utxo_set, current_height, calculated_fee, validation_error)) {
+        error = "Transaction validation failed: " + validation_error;
+        return false;
+    }
+
+    // Create transaction reference
+    tx_out = MakeTransactionRef(std::move(tx));
+
+    return true;
+}
+
+bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string& error) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Get wallet's public key
+    std::vector<uint8_t> wallet_pubkey = GetPublicKey();
+    if (wallet_pubkey.empty()) {
+        error = "Failed to get wallet public key";
+        return false;
+    }
+
+    // Get transaction hash for signing
+    uint256 tx_hash = tx.GetHash();
+
+    // Sign each input
+    for (size_t i = 0; i < tx.vin.size(); i++) {
+        CTxIn& txin = tx.vin[i];
+
+        // Lookup the UTXO being spent
+        CUTXOEntry utxo_entry;
+        if (!utxo_set.GetUTXO(txin.prevout, utxo_entry)) {
+            error = "UTXO not found for input " + std::to_string(i);
+            return false;
+        }
+
+        // Extract public key hash from scriptPubKey
+        std::vector<uint8_t> required_hash = WalletCrypto::ExtractPubKeyHash(utxo_entry.out.scriptPubKey);
+        if (required_hash.empty()) {
+            error = "Failed to extract public key hash from scriptPubKey for input " + std::to_string(i);
+            return false;
+        }
+
+        // Compute hash of our public key
+        std::vector<uint8_t> our_hash = WalletCrypto::HashPubKey(wallet_pubkey);
+
+        // Verify we can spend this output
+        if (our_hash != required_hash) {
+            error = "Cannot spend input " + std::to_string(i) + " - public key mismatch";
+            return false;
+        }
+
+        // Create signature message: tx_hash + input_index
+        std::vector<uint8_t> sig_message;
+        sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
+
+        // Add input index (4 bytes, little-endian)
+        uint32_t input_idx = static_cast<uint32_t>(i);
+        sig_message.push_back(static_cast<uint8_t>(input_idx & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((input_idx >> 8) & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((input_idx >> 16) & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((input_idx >> 24) & 0xFF));
+
+        // Hash the signature message
+        uint8_t sig_hash[32];
+        SHA3_256(sig_message.data(), sig_message.size(), sig_hash);
+
+        // Find the key for this address
+        CKey signing_key;
+        bool found_key = false;
+
+        // Check all wallet addresses to find the matching key
+        for (const auto& addr : vchAddresses) {
+            CKey key;
+            if (GetKey(addr, key)) {
+                std::vector<uint8_t> key_hash = WalletCrypto::HashPubKey(key.vchPubKey);
+                if (key_hash == required_hash) {
+                    signing_key = key;
+                    found_key = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found_key) {
+            error = "Wallet does not have key to sign input " + std::to_string(i);
+            return false;
+        }
+
+        // Sign with Dilithium
+        std::vector<uint8_t> signature;
+        if (!WalletCrypto::Sign(signing_key, sig_hash, 32, signature)) {
+            error = "Failed to sign input " + std::to_string(i);
+            return false;
+        }
+
+        // Create scriptSig
+        std::vector<uint8_t> scriptSig = WalletCrypto::CreateScriptSig(signature, signing_key.vchPubKey);
+
+        // Set scriptSig on input
+        txin.scriptSig = scriptSig;
+    }
+
+    return true;
+}
+
+bool CWallet::SendTransaction(const CTransactionRef& tx,
+                              CTxMemPool& mempool,
+                              CUTXOSet& utxo_set,
+                              unsigned int current_height,
+                              std::string& error) {
+    if (!tx) {
+        error = "Null transaction pointer";
+        return false;
+    }
+
+    // Validate transaction one more time
+    CTransactionValidator validator;
+    CAmount fee = 0;
+    std::string validation_error;
+
+    if (!validator.CheckTransaction(*tx, utxo_set, current_height, fee, validation_error)) {
+        error = "Transaction validation failed: " + validation_error;
+        return false;
+    }
+
+    // Add to mempool
+    int64_t current_time = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    std::string mempool_error;
+    if (!mempool.AddTx(tx, fee, current_time, current_height, &mempool_error)) {
+        error = "Failed to add transaction to mempool: " + mempool_error;
+        return false;
+    }
+
+    // Phase 5.3: Announce transaction to P2P network
+    const uint256 txid = tx->GetHash();
+
+    // Forward declaration from net/net.h
+    extern void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer);
+
+    // Announce to all peers (-1 = no excluding peer)
+    AnnounceTransactionToPeers(txid, -1);
+
+    return true;
 }

@@ -171,4 +171,28 @@ struct CNetworkStats {
  */
 extern CNetworkStats g_network_stats;
 
+/**
+ * Global transaction relay manager (Phase 5.3)
+ */
+class CTxRelayManager;
+extern CTxRelayManager* g_tx_relay_manager;
+
+/**
+ * Global pointers for transaction relay (Phase 5.3)
+ */
+class CTxMemPool;
+class CTransactionValidator;
+class CUTXOSet;
+extern CTxMemPool* g_mempool;
+extern CTransactionValidator* g_tx_validator;
+extern CUTXOSet* g_utxo_set;
+extern unsigned int g_chain_height;
+
+/**
+ * Announce a transaction to all connected peers (Phase 5.3)
+ * @param txid Transaction hash to announce
+ * @param exclude_peer Peer ID to exclude (e.g., originating peer), -1 for none
+ */
+void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer);
+
 #endif // DILITHION_NET_NET_H

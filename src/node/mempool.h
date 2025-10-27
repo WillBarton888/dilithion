@@ -17,6 +17,7 @@
 class CTxMemPoolEntry {
 private:
     CTransactionRef tx;
+    uint256 tx_hash;  // Cached transaction hash
     CAmount fee;
     size_t tx_size;
     double fee_rate;
@@ -26,7 +27,7 @@ public:
     CTxMemPoolEntry(const CTransactionRef& _tx, CAmount _fee, int64_t _time, unsigned int _height);
     const CTransaction& GetTx() const { return *tx; }
     CTransactionRef GetSharedTx() const { return tx; }
-    const uint256& GetTxHash() const { return tx->GetHash(); }
+    const uint256& GetTxHash() const { return tx_hash; }
     CAmount GetFee() const { return fee; }
     size_t GetTxSize() const { return tx_size; }
     double GetFeeRate() const { return fee_rate; }
