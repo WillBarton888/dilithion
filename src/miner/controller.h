@@ -5,6 +5,7 @@
 #define DILITHION_MINER_CONTROLLER_H
 
 #include <primitives/block.h>
+#include <primitives/transaction.h>
 #include <uint256.h>
 
 #include <atomic>
@@ -13,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <functional>
+#include <optional>
 
 /**
  * Mining statistics tracking
@@ -185,6 +187,92 @@ public:
      * Get current hash rate in hashes per second
      */
     uint64_t GetHashRate() const { return m_stats.GetHashRate(); }
+
+    /**
+     * CreateBlockTemplate - Generate mining template with mempool transactions
+     *
+     * Creates a block template by:
+     * 1. Selecting transactions from mempool (ordered by fee rate)
+     * 2. Validating transactions against UTXO set
+     * 3. Calculating total fees
+     * 4. Creating coinbase transaction with subsidy + fees
+     * 5. Building complete block with merkle root
+     *
+     * This is the core of transaction integration with mining.
+     *
+     * @param mempool Transaction mempool to pull transactions from
+     * @param utxoSet UTXO set for validating transaction inputs
+     * @param hashPrevBlock Hash of previous block (chain tip)
+     * @param nHeight Height of block being mined
+     * @param nBits Difficulty target in compact format
+     * @param minerAddress Address to receive coinbase reward
+     * @param error String to store error message on failure
+     * @return Optional block template if successful, nullopt on error
+     *
+     * Thread Safety: This method is thread-safe if mempool and utxoSet
+     * are properly synchronized by caller
+     */
+    std::optional<CBlockTemplate> CreateBlockTemplate(
+        class CTxMemPool& mempool,
+        class CUTXOSet& utxoSet,
+        const uint256& hashPrevBlock,
+        uint32_t nHeight,
+        uint32_t nBits,
+        const std::vector<uint8_t>& minerAddress,
+        std::string& error
+    );
+
+private:
+    /**
+     * SelectTransactionsForBlock - Choose transactions from mempool
+     *
+     * Implements greedy algorithm to maximize fees while respecting size limit.
+     * Skips transactions with missing inputs (dependencies).
+     *
+     * @param mempool Transaction mempool
+     * @param utxoSet UTXO set for input validation
+     * @param maxBlockSize Maximum block size in bytes (default: 1MB)
+     * @param totalFees Output: total fees from selected transactions
+     * @return Vector of selected transactions
+     */
+    std::vector<CTransactionRef> SelectTransactionsForBlock(
+        CTxMemPool& mempool,
+        CUTXOSet& utxoSet,
+        size_t maxBlockSize,
+        uint64_t& totalFees
+    );
+
+    /**
+     * CreateCoinbaseTransaction - Build coinbase TX with subsidy + fees
+     *
+     * @param nHeight Block height (for subsidy calculation)
+     * @param totalFees Total transaction fees collected
+     * @param minerAddress Address to pay coinbase reward to
+     * @return Coinbase transaction reference
+     */
+    CTransactionRef CreateCoinbaseTransaction(
+        uint32_t nHeight,
+        uint64_t totalFees,
+        const std::vector<uint8_t>& minerAddress
+    );
+
+    /**
+     * CalculateBlockSubsidy - Get block mining subsidy
+     *
+     * Implements halving schedule: 50 DIL initial, halving every 210,000 blocks
+     *
+     * @param nHeight Block height
+     * @return Subsidy amount in ions (satoshis)
+     */
+    uint64_t CalculateBlockSubsidy(uint32_t nHeight) const;
+
+    /**
+     * BuildMerkleRoot - Calculate merkle root from transactions
+     *
+     * @param transactions Vector of all transactions (coinbase first)
+     * @return Merkle root hash
+     */
+    uint256 BuildMerkleRoot(const std::vector<CTransactionRef>& transactions) const;
 };
 
 #endif // DILITHION_MINER_CONTROLLER_H
