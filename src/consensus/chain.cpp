@@ -114,12 +114,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     if (pindexNew->pprev == pindexTip) {
         std::cout << "[Chain] Block extends current tip: height " << pindexNew->nHeight << std::endl;
 
-        // DEBUG: Print chain work values
-        std::cout << "[Chain] DEBUG: Chain work comparison:" << std::endl;
-        std::cout << "  Parent work: " << pindexTip->nChainWork.GetHex() << std::endl;
-        std::cout << "  New work:    " << pindexNew->nChainWork.GetHex() << std::endl;
-        std::cout << "  New nBits:   0x" << std::hex << pindexNew->nBits << std::dec << std::endl;
-
         // Compare chain work to be safe (should always be greater if extending tip)
         if (!ChainWorkGreaterThan(pindexNew->nChainWork, pindexTip->nChainWork)) {
             std::cerr << "[Chain] WARNING: Block extends tip but doesn't increase chain work" << std::endl;

@@ -417,11 +417,9 @@ bool CBlockchainDB::WriteBestBlock(const uint256& hash) {
     std::string key = "bestblock";
     std::string value = hash.GetHex();
 
-    std::cout << "[DEBUG] WriteBestBlock: Writing hash: " << value.substr(0, 16) << "..." << std::endl;
-
     leveldb::Status status = db->Put(leveldb::WriteOptions(), key, value);
     if (!status.ok()) {
-        std::cerr << "[DEBUG] WriteBestBlock: LevelDB Put failed: " << status.ToString() << std::endl;
+        std::cerr << "[Error] WriteBestBlock: LevelDB Put failed: " << status.ToString() << std::endl;
     }
     return status.ok();
 }
@@ -436,18 +434,14 @@ bool CBlockchainDB::ReadBestBlock(uint256& hash) {
 
     leveldb::Status status = db->Get(leveldb::ReadOptions(), key, &value);
     if (!status.ok()) {
-        std::cerr << "[DEBUG] ReadBestBlock: Key not found in database" << std::endl;
         return false;
     }
 
     if (value.empty()) {
-        std::cerr << "[DEBUG] ReadBestBlock: Value is empty!" << std::endl;
         return false;
     }
 
-    std::cout << "[DEBUG] ReadBestBlock: Read value: " << value.substr(0, 16) << "..." << std::endl;
     hash.SetHex(value);
-    std::cout << "[DEBUG] ReadBestBlock: After SetHex: " << hash.GetHex().substr(0, 16) << "..." << std::endl;
     return true;
 }
 

@@ -87,7 +87,6 @@ private:
     // Component references
     CWallet* m_wallet;
     CMiningController* m_miner;
-    // CNetworkManager* m_network;  // TODO: Implement network manager
 
     // RPC handlers
     std::map<std::string, RPCHandler> m_handlers;
@@ -196,12 +195,6 @@ public:
      * Register miner instance
      */
     void RegisterMiner(CMiningController* miner) { m_miner = miner; }
-
-    /**
-     * Register network manager instance
-     * TODO: Implement when network manager is ready
-     */
-    // void RegisterNetwork(CNetworkManager* network) { m_network = network; }
 
     /**
      * Start RPC server

@@ -557,15 +557,6 @@ int main(int argc, char* argv[]) {
                         std::cout << "[P2P] Serving block " << item.hash.GetHex().substr(0, 16)
                                   << "... to peer " << peer_id << std::endl;
 
-                        // Debug: Print block fields being sent
-                        std::cout << "[DEBUG] Block fields being sent:" << std::endl;
-                        std::cout << "  nVersion: " << block.nVersion << std::endl;
-                        std::cout << "  nTime: " << block.nTime << std::endl;
-                        std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
-                        std::cout << "  nNonce: " << block.nNonce << std::endl;
-                        std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-                        std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
-
                         // Send block to requesting peer
                         CNetMessage blockMsg = message_processor.CreateBlockMessage(block);
                         connection_manager.SendMessage(peer_id, blockMsg);
@@ -574,7 +565,7 @@ int main(int argc, char* argv[]) {
                                   << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
                     }
                 }
-                // TODO: Handle MSG_TX_INV for transactions
+                // Phase 5: Transaction relay - implement MSG_TX_INV handling after testnet stabilizes
             }
         });
 
@@ -585,23 +576,7 @@ int main(int argc, char* argv[]) {
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
                       << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
 
-            // Debug: Print received block fields
-            std::cout << "[DEBUG] Block fields received:" << std::endl;
-            std::cout << "  nVersion: " << block.nVersion << std::endl;
-            std::cout << "  nTime: " << block.nTime << std::endl;
-            std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
-            std::cout << "  nNonce: " << block.nNonce << std::endl;
-            std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-            std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
-            std::cout << "  Calculated hash: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
-
             // Basic validation: Check PoW
-            uint256 target = CompactToBig(block.nBits);
-            std::cout << "[DEBUG] PoW validation:" << std::endl;
-            std::cout << "  Hash:   " << blockHash.GetHex() << std::endl;
-            std::cout << "  Target: " << target.GetHex() << std::endl;
-            std::cout << "  nBits:  0x" << std::hex << block.nBits << std::dec << std::endl;
-
             if (!CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[P2P] ERROR: Block from peer " << peer_id << " has invalid PoW" << std::endl;
                 std::cerr << "  Hash must be less than target" << std::endl;

@@ -465,8 +465,8 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
         throw std::runtime_error("Wallet not initialized");
     }
 
-    // TODO: Implement transaction creation
-    throw std::runtime_error("Not implemented yet");
+    // Phase 5: Transaction creation - implement after testnet stabilizes
+    throw std::runtime_error("Transaction creation not yet implemented (Phase 5)");
 }
 
 std::string CRPCServer::RPC_EncryptWallet(const std::string& params) {
@@ -636,8 +636,8 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         throw std::runtime_error("Miner not initialized");
     }
 
-    // TODO: Get block template from blockchain
-    // For now, just return status
+    // Phase 5: Block template generation - implement after testnet stabilizes
+    // For now, just return mining status
     return m_miner->IsMining() ? "true" : "false";
 }
 
@@ -661,7 +661,8 @@ std::string CRPCServer::RPC_GetNetworkInfo(const std::string& params) {
 }
 
 std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
-    // TODO: Get from network manager
+    // Network management is handled by CConnectionManager and CPeerManager in dilithion-node.cpp
+    // Phase 5: Expose peer information via RPC interface
     return "[]";
 }
 
