@@ -12,13 +12,14 @@ class CBlockIndex
 {
 public:
     CBlockHeader header;
-    CBlockIndex* pprev;
-    CBlockIndex* pskip;
+    CBlockIndex* pprev;      // Pointer to previous block in chain
+    CBlockIndex* pnext;      // Pointer to next block in MAIN chain (nullptr if not on main chain)
+    CBlockIndex* pskip;      // Skip pointer for faster chain traversal
     int nHeight;
     int nFile;
     unsigned int nDataPos;
     unsigned int nUndoPos;
-    uint256 nChainWork;
+    uint256 nChainWork;      // Total cumulative chain work up to and including this block
     unsigned int nTx;
     uint32_t nStatus;
     uint32_t nSequenceId;
@@ -34,6 +35,31 @@ public:
     bool IsValid() const;
     bool HaveData() const;
     std::string ToString() const;
+
+    /**
+     * Calculate the proof-of-work for this block
+     * Work is defined as: ~uint256(0) / (target + 1)
+     * Approximated as: 2^256 / (target + 1)
+     */
+    uint256 GetBlockProof() const;
+
+    /**
+     * Check if this block is on the main (active) chain
+     * A block is on main chain if pnext is set OR if it's the current tip
+     */
+    bool IsOnMainChain() const { return pnext != nullptr; }
+
+    /**
+     * Build chain work from parent
+     * Called during block index initialization
+     */
+    void BuildChainWork();
+
+    /**
+     * Get ancestor at specific height
+     * Uses pskip pointers for efficient traversal
+     */
+    CBlockIndex* GetAncestor(int height);
 
     enum BlockStatus : uint32_t {
         BLOCK_VALID_UNKNOWN      = 0,

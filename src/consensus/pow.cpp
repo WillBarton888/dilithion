@@ -21,6 +21,18 @@ bool HashLessThan(const uint256& hash, const uint256& target) {
     return false; // Equal, not less than
 }
 
+bool ChainWorkGreaterThan(const uint256& work1, const uint256& work2) {
+    // Compare chain work as big-endian (most significant byte first)
+    // Returns true if work1 > work2
+    for (int i = 31; i >= 0; i--) {
+        if (work1.data[i] > work2.data[i])
+            return true;
+        if (work1.data[i] < work2.data[i])
+            return false;
+    }
+    return false; // Equal, not greater than
+}
+
 uint256 CompactToBig(uint32_t nCompact) {
     uint256 result;
     memset(result.data, 0, 32);

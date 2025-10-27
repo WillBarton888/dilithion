@@ -52,7 +52,8 @@ COLOR_YELLOW := \033[33m
 
 # Core source files (organized by module)
 CONSENSUS_SOURCES := src/consensus/fees.cpp \
-                     src/consensus/pow.cpp
+                     src/consensus/pow.cpp \
+                     src/consensus/chain.cpp
 
 CORE_SOURCES_UTIL := src/core/chainparams.cpp
 

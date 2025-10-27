@@ -32,6 +32,12 @@ uint32_t BigToCompact(const uint256& target);
 /** Check if hash is less than target (satisfies PoW) */
 bool HashLessThan(const uint256& hash, const uint256& target);
 
+/**
+ * Compare chain work (cumulative PoW)
+ * Returns true if work1 > work2 (using big-endian comparison)
+ */
+bool ChainWorkGreaterThan(const uint256& work1, const uint256& work2);
+
 // Forward declaration
 class CBlockIndex;
 

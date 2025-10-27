@@ -30,6 +30,7 @@
 #include <rpc/server.h>
 #include <core/chainparams.h>
 #include <consensus/pow.h>
+#include <consensus/chain.h>
 
 #include <iostream>
 #include <string>
@@ -40,6 +41,9 @@
 #include <chrono>
 #include <atomic>
 #include <optional>
+
+// Global chain state
+CChainState g_chainstate;
 
 // Global node state for signal handling
 struct NodeState {
@@ -298,6 +302,11 @@ int main(int argc, char* argv[]) {
         CTxMemPool mempool;
         std::cout << "  ✓ Mempool initialized" << std::endl;
 
+        // Initialize chain state
+        std::cout << "Initializing chain state..." << std::endl;
+        g_chainstate.SetDatabase(&blockchain);
+        std::cout << "  ✓ Chain state initialized" << std::endl;
+
         // Initialize RandomX (required for block hashing)
         std::cout << "Initializing RandomX..." << std::endl;
         extern void randomx_init_cache(const void* key, size_t key_len);
@@ -335,19 +344,39 @@ int main(int argc, char* argv[]) {
             std::cout << "  ✓ Genesis block saved to database" << std::endl;
 
             // Create genesis block index
-            CBlockIndex genesisIndex(genesis);
-            genesisIndex.phashBlock = genesisHash;
-            genesisIndex.nHeight = 0;
-            genesisIndex.nStatus = CBlockIndex::BLOCK_VALID_CHAIN | CBlockIndex::BLOCK_HAVE_DATA;
+            CBlockIndex* pgenesisIndex = new CBlockIndex(genesis);
+            pgenesisIndex->phashBlock = genesisHash;
+            pgenesisIndex->nHeight = 0;
+            pgenesisIndex->pprev = nullptr;
+            pgenesisIndex->pnext = nullptr;
+            pgenesisIndex->nChainWork = pgenesisIndex->GetBlockProof();
+            pgenesisIndex->nStatus = CBlockIndex::BLOCK_VALID_CHAIN | CBlockIndex::BLOCK_HAVE_DATA;
 
-            if (!blockchain.WriteBlockIndex(genesisHash, genesisIndex)) {
+            // Save to database
+            if (!blockchain.WriteBlockIndex(genesisHash, *pgenesisIndex)) {
                 std::cerr << "ERROR: Failed to write genesis block index!" << std::endl;
+                delete pgenesisIndex;
                 delete Dilithion::g_chainParams;
                 return 1;
             }
             std::cout << "  ✓ Genesis block index saved (height 0)" << std::endl;
 
-            // Set genesis as best block
+            // Add to chain state and set as tip
+            if (!g_chainstate.AddBlockIndex(genesisHash, pgenesisIndex)) {
+                std::cerr << "ERROR: Failed to add genesis to chain state!" << std::endl;
+                delete pgenesisIndex;
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
+
+            bool reorgOccurred = false;
+            if (!g_chainstate.ActivateBestChain(pgenesisIndex, genesis, reorgOccurred)) {
+                std::cerr << "ERROR: Failed to activate genesis block!" << std::endl;
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
+
+            // Set genesis as best block in database
             if (!blockchain.WriteBestBlock(genesisHash)) {
                 std::cerr << "ERROR: Failed to set genesis as best block!" << std::endl;
                 delete Dilithion::g_chainParams;
@@ -356,6 +385,101 @@ int main(int argc, char* argv[]) {
             std::cout << "  ✓ Genesis block set as blockchain tip" << std::endl;
         } else {
             std::cout << "  ✓ Genesis block already in database" << std::endl;
+
+            // Load existing chain state from database
+            std::cout << "Loading chain state from database..." << std::endl;
+
+            // Load genesis block index first
+            CBlockIndex genesisIndexFromDB;
+            if (blockchain.ReadBlockIndex(genesisHash, genesisIndexFromDB)) {
+                CBlockIndex* pgenesisIndex = new CBlockIndex(genesisIndexFromDB);
+                pgenesisIndex->pprev = nullptr;
+                g_chainstate.AddBlockIndex(genesisHash, pgenesisIndex);
+                std::cout << "  Loaded genesis block index (height 0)" << std::endl;
+            } else {
+                std::cerr << "ERROR: Cannot load genesis block index from database!" << std::endl;
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
+
+            // Load current best block
+            uint256 hashBestBlock;
+            if (blockchain.ReadBestBlock(hashBestBlock)) {
+                std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
+
+                // Load best block index and rebuild chain backwards to genesis
+                std::vector<uint256> chainHashes;
+                uint256 currentHash = hashBestBlock;
+
+                while (!(currentHash == genesisHash)) {
+                    chainHashes.push_back(currentHash);
+
+                    CBlockIndex blockIndexFromDB;
+                    if (!blockchain.ReadBlockIndex(currentHash, blockIndexFromDB)) {
+                        std::cerr << "ERROR: Cannot load block index " << currentHash.GetHex().substr(0, 16) << std::endl;
+                        delete Dilithion::g_chainParams;
+                        return 1;
+                    }
+
+                    currentHash = blockIndexFromDB.header.hashPrevBlock;
+                }
+
+                // Now load all blocks in forward order (genesis to tip)
+                // Genesis already loaded, so start from the chain
+                for (auto it = chainHashes.rbegin(); it != chainHashes.rend(); ++it) {
+                    const uint256& blockHash = *it;
+
+                    CBlockIndex blockIndexFromDB;
+                    if (!blockchain.ReadBlockIndex(blockHash, blockIndexFromDB)) {
+                        std::cerr << "ERROR: Cannot load block index " << blockHash.GetHex().substr(0, 16) << std::endl;
+                        delete Dilithion::g_chainParams;
+                        return 1;
+                    }
+
+                    // Create new CBlockIndex* and link to parent
+                    CBlockIndex* pblockIndex = new CBlockIndex(blockIndexFromDB);
+                    pblockIndex->pprev = g_chainstate.GetBlockIndex(pblockIndex->header.hashPrevBlock);
+
+                    if (pblockIndex->pprev == nullptr && !(blockHash == genesisHash)) {
+                        std::cerr << "ERROR: Cannot find parent block for " << blockHash.GetHex().substr(0, 16) << std::endl;
+                        delete pblockIndex;
+                        delete Dilithion::g_chainParams;
+                        return 1;
+                    }
+
+                    // Rebuild chain work
+                    pblockIndex->BuildChainWork();
+
+                    // Add to chain state
+                    if (!g_chainstate.AddBlockIndex(blockHash, pblockIndex)) {
+                        std::cerr << "ERROR: Failed to add block index to chain state" << std::endl;
+                        delete pblockIndex;
+                        delete Dilithion::g_chainParams;
+                        return 1;
+                    }
+
+                    // Set pnext pointer on parent to maintain chain
+                    if (pblockIndex->pprev != nullptr) {
+                        pblockIndex->pprev->pnext = pblockIndex;
+                    }
+                }
+
+                // Set the tip
+                CBlockIndex* pindexTip = g_chainstate.GetBlockIndex(hashBestBlock);
+                if (pindexTip == nullptr) {
+                    std::cerr << "ERROR: Cannot find tip block index after loading!" << std::endl;
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
+
+                g_chainstate.SetTip(pindexTip);
+                std::cout << "  ✓ Loaded chain state: " << chainHashes.size() + 1 << " blocks (height "
+                          << pindexTip->nHeight << ")" << std::endl;
+            } else {
+                std::cerr << "ERROR: Cannot read best block from database!" << std::endl;
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
         }
 
         // Set network magic for P2P protocol
@@ -484,49 +608,83 @@ int main(int argc, char* argv[]) {
                 return;
             }
 
-            // Check if we already have this block
+            // Check if we already have this block in memory
+            if (g_chainstate.HasBlockIndex(blockHash)) {
+                std::cout << "[P2P] Block already in chain state, skipping" << std::endl;
+                return;
+            }
+
+            // Check if we already have this block in database
             if (blockchain.BlockExists(blockHash)) {
                 std::cout << "[P2P] Block already in database, skipping" << std::endl;
                 return;
             }
 
-            // Save block to database
-            if (blockchain.WriteBlock(blockHash, block)) {
-                std::cout << "[P2P] Block saved to database" << std::endl;
+            // Save block to database first
+            if (!blockchain.WriteBlock(blockHash, block)) {
+                std::cerr << "[P2P] ERROR: Failed to save block from peer " << peer_id << std::endl;
+                return;
+            }
+            std::cout << "[P2P] Block saved to database" << std::endl;
 
-                // Create and save block index
-                CBlockIndex blockIndex(block);
-                blockIndex.phashBlock = blockHash;
-                blockIndex.nHeight = 0;  // Will be updated below
+            // Create block index with proper chain linkage
+            CBlockIndex* pblockIndex = new CBlockIndex(block);
+            pblockIndex->phashBlock = blockHash;
+            pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
-                // Try to get previous block's height
-                CBlockIndex prevIndex;
-                if (blockchain.ReadBlockIndex(block.hashPrevBlock, prevIndex)) {
-                    blockIndex.nHeight = prevIndex.nHeight + 1;
-                }
+            // Link to parent block
+            pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+            if (pblockIndex->pprev == nullptr) {
+                std::cerr << "[P2P] ERROR: Cannot find parent block "
+                          << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cerr << "  This is an orphan block - need to download more blocks" << std::endl;
+                delete pblockIndex;
+                return;
+            }
 
-                if (blockchain.WriteBlockIndex(blockHash, blockIndex)) {
-                    std::cout << "[P2P] Block index saved (height " << blockIndex.nHeight << ")" << std::endl;
-                }
+            // Calculate height and chain work
+            pblockIndex->nHeight = pblockIndex->pprev->nHeight + 1;
+            pblockIndex->BuildChainWork();
 
-                // Check if this block extends the best chain
-                uint256 currentBest;
-                if (blockchain.ReadBestBlock(currentBest)) {
-                    CBlockIndex currentBestIndex;
-                    if (blockchain.ReadBlockIndex(currentBest, currentBestIndex)) {
-                        // Simple longest chain rule: if new block has greater height, update tip
-                        if (blockIndex.nHeight > currentBestIndex.nHeight) {
-                            if (blockchain.WriteBestBlock(blockHash)) {
-                                std::cout << "[P2P] Updated best block pointer to height " << blockIndex.nHeight << std::endl;
+            std::cout << "[P2P] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
 
-                                // Signal main loop to update mining template
-                                g_node_state.new_block_found = true;
-                            }
-                        }
+            // Save block index to database
+            if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
+                std::cerr << "[P2P] ERROR: Failed to save block index" << std::endl;
+                delete pblockIndex;
+                return;
+            }
+
+            // Add to chain state memory map
+            if (!g_chainstate.AddBlockIndex(blockHash, pblockIndex)) {
+                std::cerr << "[P2P] ERROR: Failed to add block to chain state" << std::endl;
+                delete pblockIndex;
+                return;
+            }
+
+            // Activate best chain (handles reorg if needed)
+            bool reorgOccurred = false;
+            if (g_chainstate.ActivateBestChain(pblockIndex, block, reorgOccurred)) {
+                if (reorgOccurred) {
+                    std::cout << "[P2P] ⚠️  CHAIN REORGANIZATION occurred!" << std::endl;
+                    std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
+                              << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
+
+                    // Signal main loop to update mining template
+                    g_node_state.new_block_found = true;
+                } else {
+                    std::cout << "[P2P] Block activated successfully" << std::endl;
+
+                    // Check if this became the new tip
+                    if (g_chainstate.GetTip() == pblockIndex) {
+                        std::cout << "[P2P] Updated best block to height " << pblockIndex->nHeight << std::endl;
+                        g_node_state.new_block_found = true;
+                    } else {
+                        std::cout << "[P2P] Block is valid but not on best chain (orphan)" << std::endl;
                     }
                 }
             } else {
-                std::cerr << "[P2P] ERROR: Failed to save block from peer " << peer_id << std::endl;
+                std::cerr << "[P2P] ERROR: Failed to activate block in chain" << std::endl;
             }
         });
 
@@ -562,56 +720,96 @@ int main(int argc, char* argv[]) {
             std::cout << std::endl;
 
             // Save block to blockchain database
-            if (blockchain.WriteBlock(blockHash, block)) {
-                std::cout << "[Blockchain] Block saved to database" << std::endl;
+            if (!blockchain.WriteBlock(blockHash, block)) {
+                std::cerr << "[Blockchain] ERROR: Failed to save block to database!" << std::endl;
+                return;
+            }
+            std::cout << "[Blockchain] Block saved to database" << std::endl;
 
-                // Create and save block index
-                CBlockIndex blockIndex(block);  // Constructor copies header
-                blockIndex.phashBlock = blockHash;
-                blockIndex.nHeight = 0;  // Will be updated below
+            // Create block index with proper chain linkage
+            CBlockIndex* pblockIndex = new CBlockIndex(block);
+            pblockIndex->phashBlock = blockHash;
+            pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
-                // Try to get previous block's height
-                CBlockIndex prevIndex;
-                if (blockchain.ReadBlockIndex(block.hashPrevBlock, prevIndex)) {
-                    blockIndex.nHeight = prevIndex.nHeight + 1;
-                }
+            // Link to parent block
+            pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+            if (pblockIndex->pprev == nullptr) {
+                std::cerr << "[Blockchain] ERROR: Cannot find parent block "
+                          << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                delete pblockIndex;
+                return;
+            }
 
-                if (blockchain.WriteBlockIndex(blockHash, blockIndex)) {
-                    std::cout << "[Blockchain] Block index saved (height " << blockIndex.nHeight << ")" << std::endl;
-                }
+            // Calculate height and chain work
+            pblockIndex->nHeight = pblockIndex->pprev->nHeight + 1;
+            pblockIndex->BuildChainWork();
 
-                // Update best block pointer
-                if (blockchain.WriteBestBlock(blockHash)) {
-                    std::cout << "[Blockchain] Updated best block pointer" << std::endl;
-                }
+            std::cout << "[Blockchain] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
 
-                // Broadcast block to network (P2P block relay)
-                auto connected_peers = peer_manager.GetConnectedPeers();
-                if (!connected_peers.empty()) {
-                    // Create inv message announcing new block
-                    std::vector<NetProtocol::CInv> inv;
-                    inv.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, blockHash));
+            // Save block index to database
+            if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
+                std::cerr << "[Blockchain] ERROR: Failed to save block index" << std::endl;
+                delete pblockIndex;
+                return;
+            }
 
-                    CNetMessage invMsg = message_processor.CreateInvMessage(inv);
+            // Add to chain state memory map
+            if (!g_chainstate.AddBlockIndex(blockHash, pblockIndex)) {
+                std::cerr << "[Blockchain] ERROR: Failed to add block to chain state" << std::endl;
+                delete pblockIndex;
+                return;
+            }
 
-                    int broadcast_count = 0;
-                    for (const auto& peer : connected_peers) {
-                        if (peer && peer->IsHandshakeComplete()) {
-                            if (connection_manager.SendMessage(peer->id, invMsg)) {
-                                broadcast_count++;
+            // Activate best chain (handles reorg if needed)
+            bool reorgOccurred = false;
+            if (g_chainstate.ActivateBestChain(pblockIndex, block, reorgOccurred)) {
+                if (reorgOccurred) {
+                    std::cout << "[Blockchain] ⚠️  CHAIN REORGANIZATION occurred during mining!" << std::endl;
+                    std::cout << "  Our mined block triggered a reorg" << std::endl;
+                    std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
+                              << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
+
+                    // Stop mining - need to reassess chain state
+                    g_node_state.new_block_found = true;
+                } else if (g_chainstate.GetTip() == pblockIndex) {
+                    std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndex->nHeight << std::endl;
+
+                    // Broadcast block to network (P2P block relay)
+                    auto connected_peers = peer_manager.GetConnectedPeers();
+                    if (!connected_peers.empty()) {
+                        // Create inv message announcing new block
+                        std::vector<NetProtocol::CInv> inv;
+                        inv.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, blockHash));
+
+                        CNetMessage invMsg = message_processor.CreateInvMessage(inv);
+
+                        int broadcast_count = 0;
+                        for (const auto& peer : connected_peers) {
+                            if (peer && peer->IsHandshakeComplete()) {
+                                if (connection_manager.SendMessage(peer->id, invMsg)) {
+                                    broadcast_count++;
+                                }
                             }
+                        }
+
+                        if (broadcast_count > 0) {
+                            std::cout << "[P2P] Broadcasted block inv to " << broadcast_count << " peer(s)" << std::endl;
                         }
                     }
 
-                    if (broadcast_count > 0) {
-                        std::cout << "[P2P] Broadcasted block inv to " << broadcast_count << " peer(s)" << std::endl;
-                    }
-                }
+                    // Signal main loop to update mining template for next block
+                    g_node_state.new_block_found = true;
+                } else {
+                    std::cout << "[Blockchain] WARNING: Mined block is valid but not on best chain" << std::endl;
+                    std::cout << "  This should not happen during solo mining" << std::endl;
+                    std::cout << "  Current tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
+                              << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
 
-                // Signal main loop to update mining template for next block
-                g_node_state.new_block_found = true;
+                    // Stop mining and reassess
+                    g_node_state.new_block_found = true;
+                }
             } else {
-                std::cerr << "[Blockchain] ERROR: Failed to save block to database!" << std::endl;
+                std::cerr << "[Blockchain] ERROR: Failed to activate mined block in chain" << std::endl;
             }
         });
 
