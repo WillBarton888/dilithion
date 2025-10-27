@@ -223,6 +223,13 @@ public:
     );
 
 private:
+    // Friend declarations for unit tests
+    friend void test_block_subsidy_calculation();
+    friend void test_coinbase_transaction_creation();
+    friend void test_merkle_root_calculation();
+    friend void test_block_validation_no_duplicates();
+    friend void test_subsidy_consistency();
+
     /**
      * SelectTransactionsForBlock - Choose transactions from mempool
      *

@@ -376,7 +376,7 @@ bool TestFullNodeStack() {
 
         // Phase 2: P2P components (not fully tested yet)
         CPeerManager peer_manager;
-        CNetMessageProcessor message_processor;
+        CNetMessageProcessor message_processor(peer_manager);
         CConnectionManager connection_manager(peer_manager, message_processor);
         cout << "  ✓ P2P components initialized" << endl;
 

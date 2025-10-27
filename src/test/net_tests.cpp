@@ -199,7 +199,8 @@ void test_peer_manager() {
 void test_message_processor() {
     std::cout << "Testing message processor..." << std::endl;
 
-    CNetMessageProcessor processor;
+    g_peer_manager = std::make_unique<CPeerManager>();
+    CNetMessageProcessor processor(*g_peer_manager);
 
     // Test creating version message
     CNetMessage version_msg = processor.CreateVersionMessage();
@@ -238,7 +239,7 @@ void test_connection_manager() {
     std::cout << "Testing connection manager..." << std::endl;
 
     g_peer_manager = std::make_unique<CPeerManager>();
-    CNetMessageProcessor processor;
+    CNetMessageProcessor processor(*g_peer_manager);
     CConnectionManager conn_mgr(*g_peer_manager, processor);
 
     // Test connecting to peer
