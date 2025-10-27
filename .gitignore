@@ -23,6 +23,8 @@ miner_tests
 wallet_tests
 rpc_tests
 integration_tests
+crypter_tests
+inspect_db
 
 # Build directories
 build/
@@ -111,6 +113,15 @@ test/cache/
 test/data/
 *.trs
 test-suite.log
+
+# Testnet data directories
+.dilithion-testnet*/
+
+# Test output files
+node*_output.txt
+testnet_*.txt
+Terminal*.txt
+*.working
 
 # Documentation build
 docs/_build/

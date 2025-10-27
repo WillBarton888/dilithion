@@ -1,8 +1,0 @@
-Terminal 1:wsl
-  ./dilithion-node --testnet --port=18444 --rpcport=18332
-
-  Terminal 2:wsl
-  ./dilithion-node --testnet --port=18445 --rpcport=18333 --connect=127.0.0.1:18444 --datadir=.dilithion-testnet-2
-
- Terminal 3, run:wsl
-  ./dilithion-node --testnet --port=18446 --rpcport=18334 --connect=127.0.0.1:18445 --datadir=.dilithion-testnet-3
