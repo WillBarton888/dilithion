@@ -74,7 +74,8 @@ NODE_SOURCES := src/node/block_index.cpp \
                 src/node/mempool.cpp \
                 src/node/genesis.cpp
 
-PRIMITIVES_SOURCES := src/primitives/block.cpp
+PRIMITIVES_SOURCES := src/primitives/block.cpp \
+                      src/primitives/transaction.cpp
 
 RPC_SOURCES := src/rpc/server.cpp \
                src/rpc/auth.cpp \
