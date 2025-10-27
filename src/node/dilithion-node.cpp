@@ -35,6 +35,7 @@
 #include <string>
 #include <memory>
 #include <csignal>
+#include <cstring>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -44,6 +45,7 @@
 struct NodeState {
     std::atomic<bool> running{false};
     std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
+    std::atomic<bool> mining_enabled{false};   // Whether user requested --mine
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
     CSocket* p2p_socket = nullptr;
@@ -296,6 +298,13 @@ int main(int argc, char* argv[]) {
         CTxMemPool mempool;
         std::cout << "  ✓ Mempool initialized" << std::endl;
 
+        // Initialize RandomX (required for block hashing)
+        std::cout << "Initializing RandomX..." << std::endl;
+        extern void randomx_init_cache(const void* key, size_t key_len);
+        const char* rx_key = "Dilithion";
+        randomx_init_cache(rx_key, strlen(rx_key));
+        std::cout << "  ✓ RandomX initialized" << std::endl;
+
         // Load and verify genesis block
         std::cout << "Loading genesis block..." << std::endl;
         CBlock genesis = Genesis::CreateGenesisBlock();
@@ -385,6 +394,140 @@ int main(int argc, char* argv[]) {
         // Register pong handler (keepalive response received)
         message_processor.SetPongHandler([](int peer_id, uint64_t nonce) {
             // Silently acknowledge - keepalive working
+        });
+
+        // Register inv handler to request announced blocks
+        message_processor.SetInvHandler([&blockchain, &connection_manager, &message_processor](
+            int peer_id, const std::vector<NetProtocol::CInv>& inv_items) {
+
+            std::vector<NetProtocol::CInv> getdata;
+
+            for (const auto& item : inv_items) {
+                if (item.type == NetProtocol::MSG_BLOCK_INV) {
+                    // Check if we already have this block
+                    if (!blockchain.BlockExists(item.hash)) {
+                        std::cout << "[P2P] Peer " << peer_id << " announced new block: "
+                                  << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
+                        getdata.push_back(item);
+                    }
+                }
+            }
+
+            // Request blocks we don't have
+            if (!getdata.empty()) {
+                std::cout << "[P2P] Requesting " << getdata.size() << " block(s) from peer " << peer_id << std::endl;
+                CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
+                connection_manager.SendMessage(peer_id, msg);
+            }
+        });
+
+        // Register getdata handler to serve blocks to requesting peers
+        message_processor.SetGetDataHandler([&blockchain, &connection_manager, &message_processor](
+            int peer_id, const std::vector<NetProtocol::CInv>& requested_items) {
+
+            for (const auto& item : requested_items) {
+                if (item.type == NetProtocol::MSG_BLOCK_INV) {
+                    // Look up block in database
+                    CBlock block;
+                    if (blockchain.ReadBlock(item.hash, block)) {
+                        std::cout << "[P2P] Serving block " << item.hash.GetHex().substr(0, 16)
+                                  << "... to peer " << peer_id << std::endl;
+
+                        // Debug: Print block fields being sent
+                        std::cout << "[DEBUG] Block fields being sent:" << std::endl;
+                        std::cout << "  nVersion: " << block.nVersion << std::endl;
+                        std::cout << "  nTime: " << block.nTime << std::endl;
+                        std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
+                        std::cout << "  nNonce: " << block.nNonce << std::endl;
+                        std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                        std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
+
+                        // Send block to requesting peer
+                        CNetMessage blockMsg = message_processor.CreateBlockMessage(block);
+                        connection_manager.SendMessage(peer_id, blockMsg);
+                    } else {
+                        std::cout << "[P2P] Peer " << peer_id << " requested unknown block: "
+                                  << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
+                    }
+                }
+                // TODO: Handle MSG_TX_INV for transactions
+            }
+        });
+
+        // Register block handler to validate and save received blocks
+        message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
+            uint256 blockHash = block.GetHash();
+
+            std::cout << "[P2P] Received block from peer " << peer_id << ": "
+                      << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+
+            // Debug: Print received block fields
+            std::cout << "[DEBUG] Block fields received:" << std::endl;
+            std::cout << "  nVersion: " << block.nVersion << std::endl;
+            std::cout << "  nTime: " << block.nTime << std::endl;
+            std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
+            std::cout << "  nNonce: " << block.nNonce << std::endl;
+            std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout << "  Calculated hash: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+
+            // Basic validation: Check PoW
+            uint256 target = CompactToBig(block.nBits);
+            std::cout << "[DEBUG] PoW validation:" << std::endl;
+            std::cout << "  Hash:   " << blockHash.GetHex() << std::endl;
+            std::cout << "  Target: " << target.GetHex() << std::endl;
+            std::cout << "  nBits:  0x" << std::hex << block.nBits << std::dec << std::endl;
+
+            if (!CheckProofOfWork(blockHash, block.nBits)) {
+                std::cerr << "[P2P] ERROR: Block from peer " << peer_id << " has invalid PoW" << std::endl;
+                std::cerr << "  Hash must be less than target" << std::endl;
+                return;
+            }
+
+            // Check if we already have this block
+            if (blockchain.BlockExists(blockHash)) {
+                std::cout << "[P2P] Block already in database, skipping" << std::endl;
+                return;
+            }
+
+            // Save block to database
+            if (blockchain.WriteBlock(blockHash, block)) {
+                std::cout << "[P2P] Block saved to database" << std::endl;
+
+                // Create and save block index
+                CBlockIndex blockIndex(block);
+                blockIndex.phashBlock = blockHash;
+                blockIndex.nHeight = 0;  // Will be updated below
+
+                // Try to get previous block's height
+                CBlockIndex prevIndex;
+                if (blockchain.ReadBlockIndex(block.hashPrevBlock, prevIndex)) {
+                    blockIndex.nHeight = prevIndex.nHeight + 1;
+                }
+
+                if (blockchain.WriteBlockIndex(blockHash, blockIndex)) {
+                    std::cout << "[P2P] Block index saved (height " << blockIndex.nHeight << ")" << std::endl;
+                }
+
+                // Check if this block extends the best chain
+                uint256 currentBest;
+                if (blockchain.ReadBestBlock(currentBest)) {
+                    CBlockIndex currentBestIndex;
+                    if (blockchain.ReadBlockIndex(currentBest, currentBestIndex)) {
+                        // Simple longest chain rule: if new block has greater height, update tip
+                        if (blockIndex.nHeight > currentBestIndex.nHeight) {
+                            if (blockchain.WriteBestBlock(blockHash)) {
+                                std::cout << "[P2P] Updated best block pointer to height " << blockIndex.nHeight << std::endl;
+
+                                // Signal main loop to update mining template
+                                g_node_state.new_block_found = true;
+                            }
+                        }
+                    }
+                }
+            } else {
+                std::cerr << "[P2P] ERROR: Failed to save block from peer " << peer_id << std::endl;
+            }
         });
 
         std::cout << "  ✓ P2P components ready (not started)" << std::endl;
@@ -700,6 +843,7 @@ int main(int argc, char* argv[]) {
 
         // Start mining if requested
         if (config.start_mining) {
+            g_node_state.mining_enabled = true;  // Track that mining was requested
             std::cout << std::endl;
             std::cout << "Starting mining..." << std::endl;
 
@@ -742,14 +886,16 @@ int main(int argc, char* argv[]) {
                     miner.StopMining();
                 }
 
-                // Build new template for next block
-                auto templateOpt = BuildMiningTemplate(blockchain, false);
-                if (templateOpt) {
-                    // Restart mining with new template
-                    miner.StartMining(*templateOpt);
-                    std::cout << "[Mining] Resumed mining on block height " << templateOpt->nHeight << std::endl;
-                } else {
-                    std::cerr << "[ERROR] Failed to build new mining template!" << std::endl;
+                // Build new template for next block (only if mining was requested)
+                if (g_node_state.mining_enabled.load()) {
+                    auto templateOpt = BuildMiningTemplate(blockchain, false);
+                    if (templateOpt) {
+                        // Restart mining with new template
+                        miner.StartMining(*templateOpt);
+                        std::cout << "[Mining] Resumed mining on block height " << templateOpt->nHeight << std::endl;
+                    } else {
+                        std::cerr << "[ERROR] Failed to build new mining template!" << std::endl;
+                    }
                 }
 
                 // Clear flag

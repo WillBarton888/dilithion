@@ -14,11 +14,11 @@
 /** Target block time in seconds (4 minutes) */
 const int64_t BLOCK_TARGET_SPACING = 240;  // 4 minutes = 240 seconds
 
-/** Minimum difficulty target (easiest) */
+/** Minimum difficulty target (hardest) */
 const uint32_t MIN_DIFFICULTY_BITS = 0x1d00ffff;
 
-/** Maximum difficulty target (hardest) */
-const uint32_t MAX_DIFFICULTY_BITS = 0x1f00ffff;
+/** Maximum difficulty target (easiest - allow testnet 0x1f060000) */
+const uint32_t MAX_DIFFICULTY_BITS = 0x1f0fffff;
 
 /** Check whether a block hash satisfies the proof-of-work requirement */
 bool CheckProofOfWork(uint256 hash, uint32_t nBits);
@@ -34,6 +34,16 @@ bool HashLessThan(const uint256& hash, const uint256& target);
 
 // Forward declaration
 class CBlockIndex;
+
+/**
+ * Calculate the next required proof-of-work difficulty
+ * Implements difficulty adjustment algorithm (every 2016 blocks)
+ *
+ * @param pindexLast The last block in the chain
+ * @param params Chain parameters containing adjustment interval and target spacing
+ * @return The new difficulty target in compact format (nBits)
+ */
+uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast);
 
 /**
  * Calculate median-time-past for timestamp validation

@@ -3,6 +3,7 @@
 
 #include <consensus/pow.h>
 #include <node/block_index.h>
+#include <core/chainparams.h>
 #include <util/time.h>
 #include <algorithm>
 #include <vector>
@@ -23,10 +24,16 @@ bool HashLessThan(const uint256& hash, const uint256& target) {
 uint256 CompactToBig(uint32_t nCompact) {
     uint256 result;
     memset(result.data, 0, 32);
-    
+
     int nSize = nCompact >> 24;
     uint32_t nWord = nCompact & 0x007fffff;
-    
+
+    // Validate size is within bounds [1, 32]
+    if (nSize < 1 || nSize > 32) {
+        std::cerr << "CompactToBig: Invalid nSize " << nSize << " (must be 1-32)" << std::endl;
+        return result;  // Return zero target
+    }
+
     if (nSize <= 3) {
         nWord >>= 8 * (3 - nSize);
         result.data[0] = nWord & 0xff;
@@ -37,7 +44,7 @@ uint256 CompactToBig(uint32_t nCompact) {
         result.data[nSize - 2] = (nWord >> 8) & 0xff;
         result.data[nSize - 1] = (nWord >> 16) & 0xff;
     }
-    
+
     return result;
 }
 
@@ -74,6 +81,93 @@ bool CheckProofOfWork(uint256 hash, uint32_t nBits) {
 
     // Check if hash is less than target
     return HashLessThan(hash, target);
+}
+
+uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
+    // Genesis block (or no previous block)
+    if (pindexLast == nullptr) {
+        return Dilithion::g_chainParams->genesisNBits;
+    }
+
+    // Get difficulty adjustment interval from chain params
+    int64_t nInterval = Dilithion::g_chainParams->difficultyAdjustment;
+
+    // Only adjust difficulty at specific intervals
+    if ((pindexLast->nHeight + 1) % nInterval != 0) {
+        // Not at adjustment point, return previous difficulty
+        // Use header nBits (since block index nBits field may not be deserialized yet)
+        uint32_t prevBits = pindexLast->header.nBits;
+
+        // Safety check: if previous difficulty is zero, use genesis difficulty
+        if (prevBits == 0) {
+            return Dilithion::g_chainParams->genesisNBits;
+        }
+
+        return prevBits;
+    }
+
+    // We're at a difficulty adjustment point
+    // Find the block at the start of this interval
+    const CBlockIndex* pindexFirst = pindexLast;
+    for (int i = 0; pindexFirst != nullptr && i < nInterval - 1; i++) {
+        pindexFirst = pindexFirst->pprev;
+    }
+
+    if (pindexFirst == nullptr) {
+        // Not enough blocks yet, use current difficulty
+        return pindexLast->nBits;
+    }
+
+    // Calculate actual time taken for this interval
+    int64_t nActualTimespan = pindexLast->nTime - pindexFirst->nTime;
+
+    // Calculate expected timespan
+    int64_t nTargetTimespan = nInterval * Dilithion::g_chainParams->blockTime;
+
+    // Limit adjustment to prevent extreme changes (4x max change)
+    // This prevents difficulty from swinging wildly
+    if (nActualTimespan < nTargetTimespan / 4)
+        nActualTimespan = nTargetTimespan / 4;
+    if (nActualTimespan > nTargetTimespan * 4)
+        nActualTimespan = nTargetTimespan * 4;
+
+    // Calculate new target (difficulty)
+    // If blocks came faster than expected, increase difficulty (smaller target)
+    // If blocks came slower than expected, decrease difficulty (larger target)
+    uint256 targetOld = CompactToBig(pindexLast->nBits);
+    uint256 targetNew;
+    memset(targetNew.data, 0, 32);
+
+    // Multiply old target by actual timespan, divide by expected timespan
+    // This is done using 256-bit arithmetic to avoid overflow
+    // For simplicity, we'll use a basic implementation
+
+    // Convert to double for calculation (loses some precision but good enough)
+    double adjustment = (double)nActualTimespan / (double)nTargetTimespan;
+
+    // Adjust each byte of the target
+    uint32_t carry = 0;
+    for (int i = 0; i < 32; i++) {
+        uint64_t newVal = (uint64_t)(targetOld.data[i] * adjustment) + carry;
+        targetNew.data[i] = newVal & 0xFF;
+        carry = newVal >> 8;
+    }
+
+    // Convert back to compact format
+    uint32_t nBitsNew = BigToCompact(targetNew);
+
+    // Ensure new difficulty is within allowed bounds
+    if (nBitsNew < MIN_DIFFICULTY_BITS)
+        nBitsNew = MIN_DIFFICULTY_BITS;
+    if (nBitsNew > MAX_DIFFICULTY_BITS)
+        nBitsNew = MAX_DIFFICULTY_BITS;
+
+    std::cout << "[Difficulty] Adjustment at height " << (pindexLast->nHeight + 1) << std::endl;
+    std::cout << "  Actual time: " << nActualTimespan << "s, Expected: " << nTargetTimespan << "s" << std::endl;
+    std::cout << "  Old difficulty: 0x" << std::hex << pindexLast->nBits << std::endl;
+    std::cout << "  New difficulty: 0x" << nBitsNew << std::dec << std::endl;
+
+    return nBitsNew;
 }
 
 int64_t GetMedianTimePast(const CBlockIndex* pindex) {

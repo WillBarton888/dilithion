@@ -16,9 +16,29 @@ std::string uint256::GetHex() const {
 
 void uint256::SetHex(const std::string& str) {
     memset(data, 0, 32);
-    // Simple implementation - just set first byte from string
-    if (!str.empty()) {
-        data[0] = std::stoi(str.substr(0, 2), nullptr, 16);
+
+    if (str.empty()) {
+        return;
+    }
+
+    // Hex string should be 64 characters (32 bytes * 2 hex chars)
+    size_t len = str.length();
+    if (len > 64) {
+        len = 64;
+    }
+
+    // Convert hex string to bytes (big-endian format, stored in reverse for little-endian)
+    // GetHex() outputs in reverse order (data[31] first), so SetHex() should match
+    for (size_t i = 0; i < len / 2; i++) {
+        size_t strPos = len - 2 - (i * 2);  // Start from end of string
+        std::string byteStr = str.substr(strPos, 2);
+        data[i] = static_cast<uint8_t>(std::stoi(byteStr, nullptr, 16));
+    }
+
+    // Handle odd-length strings (shouldn't happen, but be safe)
+    if (len % 2 == 1) {
+        std::string byteStr = "0" + str.substr(0, 1);
+        data[len / 2] = static_cast<uint8_t>(std::stoi(byteStr, nullptr, 16));
     }
 }
 
@@ -39,10 +59,10 @@ uint256 CBlockHeader::GetHash() const {
     const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&nNonce);
     data.insert(data.end(), nonceBytes, nonceBytes + 4);
 
-    // SHA-3-256 hash (quantum-resistant)
+    // RandomX hash (CPU-mining resistant, ASIC-resistant)
     uint256 result;
-    extern void SHA3_256(const uint8_t* data, size_t len, uint8_t hash[32]);
-    SHA3_256(data.data(), data.size(), result.data);
+    extern void randomx_hash_fast(const void* input, size_t inputSize, void* output);
+    randomx_hash_fast(data.data(), data.size(), result.data);
 
     return result;
 }

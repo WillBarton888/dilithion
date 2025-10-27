@@ -53,10 +53,10 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
         return false;
     }
 
-    // Initialize RandomX cache with genesis block hash as key
-    // In production, this would use the previous block hash
-    uint256 key = blockTemplate.block.hashPrevBlock;
-    randomx_init_cache(key.begin(), 32);
+    // Initialize RandomX cache with constant key
+    // Using same key as node startup for consistency
+    const char* rx_key = "Dilithion";
+    randomx_init_cache(rx_key, strlen(rx_key));
 
     // Store block template
     {

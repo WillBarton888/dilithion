@@ -30,6 +30,7 @@ public:
     using PongHandler = std::function<void(int peer_id, uint64_t nonce)>;
     using AddrHandler = std::function<void(int peer_id, const std::vector<NetProtocol::CAddress>&)>;
     using InvHandler = std::function<void(int peer_id, const std::vector<NetProtocol::CInv>&)>;
+    using GetDataHandler = std::function<void(int peer_id, const std::vector<NetProtocol::CInv>&)>;
     using BlockHandler = std::function<void(int peer_id, const CBlock&)>;
     using TxHandler = std::function<void(int peer_id, const CTransaction&)>;
 
@@ -56,6 +57,7 @@ public:
     void SetPongHandler(PongHandler handler) { on_pong = handler; }
     void SetAddrHandler(AddrHandler handler) { on_addr = handler; }
     void SetInvHandler(InvHandler handler) { on_inv = handler; }
+    void SetGetDataHandler(GetDataHandler handler) { on_getdata = handler; }
     void SetBlockHandler(BlockHandler handler) { on_block = handler; }
     void SetTxHandler(TxHandler handler) { on_tx = handler; }
 
@@ -68,6 +70,7 @@ private:
     PongHandler on_pong;
     AddrHandler on_addr;
     InvHandler on_inv;
+    GetDataHandler on_getdata;
     BlockHandler on_block;
     TxHandler on_tx;
 

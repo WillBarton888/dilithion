@@ -29,6 +29,7 @@ CNetMessageProcessor::CNetMessageProcessor(CPeerManager& peer_mgr)
     on_pong = [](int, uint64_t) {};
     on_addr = [](int, const std::vector<NetProtocol::CAddress>&) {};
     on_inv = [](int, const std::vector<NetProtocol::CInv>&) {};
+    on_getdata = [](int, const std::vector<NetProtocol::CInv>&) {};
     on_block = [](int, const CBlock&) {};
     on_tx = [](int, const CTransaction&) {};
 }
@@ -188,21 +189,47 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
 }
 
 bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& stream) {
-    // Peer is requesting data (blocks/transactions)
-    // Would look up requested items and send them
-    return true;
+    try {
+        // Read number of inv items
+        uint64_t count = stream.ReadCompactSize();
+
+        std::vector<NetProtocol::CInv> getdata;
+        getdata.reserve(count);
+
+        // Read each inv item
+        for (uint64_t i = 0; i < count; i++) {
+            NetProtocol::CInv inv;
+            inv.type = stream.ReadUint32();
+            inv.hash = stream.ReadUint256();
+            getdata.push_back(inv);
+        }
+
+        // Call handler to serve requested data
+        on_getdata(peer_id, getdata);
+        return true;
+
+    } catch (...) {
+        return false;
+    }
 }
 
 bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream) {
     try {
         CBlock block;
-        // Simplified block deserialization
+        // Deserialize block header
         block.nVersion = stream.ReadInt32();
         block.hashPrevBlock = stream.ReadUint256();
         block.hashMerkleRoot = stream.ReadUint256();
         block.nTime = stream.ReadUint32();
         block.nBits = stream.ReadUint32();
         block.nNonce = stream.ReadUint32();
+
+        // Deserialize transaction data
+        uint64_t vtx_size = stream.ReadCompactSize();
+        block.vtx.resize(vtx_size);
+        if (vtx_size > 0) {
+            stream.read(block.vtx.data(), vtx_size);
+        }
 
         on_block(peer_id, block);
         return true;
@@ -309,6 +336,12 @@ CNetMessage CNetMessageProcessor::CreateBlockMessage(const CBlock& block) {
     stream.WriteUint32(block.nTime);
     stream.WriteUint32(block.nBits);
     stream.WriteUint32(block.nNonce);
+
+    // Serialize transaction data
+    stream.WriteCompactSize(block.vtx.size());
+    if (!block.vtx.empty()) {
+        stream.write(block.vtx.data(), block.vtx.size());
+    }
 
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();
