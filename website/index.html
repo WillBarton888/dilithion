@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Dilithion - The first post-quantum cryptocurrency. Fair launch January 1, 2026. CPU mining with quantum-resistant CRYSTALS-Dilithium signatures.">
+    <meta name="description" content="Dilithion - Post-quantum cryptocurrency testnet now live! Join the testing phase before mainnet launch January 1, 2026. CRYSTALS-Dilithium signatures, RandomX mining, 93% test pass rate.">
     <title>Dilithion - Post-Quantum Cryptocurrency</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -28,10 +28,17 @@
     <!-- Hero Section with Countdown -->
     <section class="hero">
         <div class="container">
+            <!-- Testnet Live Banner -->
+            <div class="testnet-banner" style="background: linear-gradient(135deg, #22c55e, #10b981); padding: 16px 24px; text-align: center; border-radius: 12px; margin-bottom: 32px; animation: pulse-glow 2s infinite;">
+                <h2 style="margin: 0; font-size: 1.5rem; color: white;">🚀 TESTNET IS NOW LIVE!</h2>
+                <p style="margin: 8px 0 0 0; font-size: 1.1rem; color: white;">Join the testing phase • Test pass rate: 93% • Mainnet launches January 1, 2026</p>
+                <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #10b981;">View Testnet Guide →</a>
+            </div>
+
             <div class="hero-content">
                 <h1 class="hero-title">The Future of Money is <span class="gradient-text">Quantum-Resistant</span></h1>
                 <p class="hero-subtitle">Dilithion is an experimental cryptocurrency built from the ground up for the post-quantum era.</p>
-                <p class="warning-badge">⚠️ EXPERIMENTAL - AI-Assisted Development - Use at Your Own Risk</p>
+                <p class="warning-badge">⚠️ TESTNET ACTIVE - Coins Have NO Value - For Testing Only - AI-Assisted Development</p>
 
                 <div class="countdown-container">
                     <h2>Mainnet Launch Countdown</h2>
@@ -57,9 +64,62 @@
                 </div>
 
                 <div class="hero-actions">
-                    <a href="#downloads" class="btn btn-primary">Download Wallet</a>
-                    <a href="#getting-started" class="btn btn-secondary">Start Mining</a>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-primary">Download Testnet</a>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" class="btn btn-secondary">Testnet Guide</a>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testnet Participation Section -->
+    <section class="testnet-info" style="padding: 80px 0; background: var(--bg-dark);">
+        <div class="container">
+            <h2 class="section-title">Join the Testnet</h2>
+            <p style="text-align: center; color: var(--text-secondary); font-size: 1.2rem; max-width: 700px; margin: 0 auto 60px;">
+                Help us test Dilithion before the mainnet launch. Find bugs, test features, and earn recognition as an early contributor.
+            </p>
+
+            <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+                <div class="feature-card">
+                    <div class="feature-icon">📖</div>
+                    <h3>Quick Start Guide</h3>
+                    <p>Follow our comprehensive testnet launch guide to get started in minutes.</p>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" class="btn btn-small">Read Guide</a>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">⛏️</div>
+                    <h3>Start Mining</h3>
+                    <p>Mine testnet blocks with your CPU. No specialized hardware required.</p>
+                    <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px;">
+                        <code>./dilithion-node --mine</code>
+                    </div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🐛</div>
+                    <h3>Report Bugs</h3>
+                    <p>Found an issue? Report it on GitHub and help improve Dilithion.</p>
+                    <a href="https://github.com/WillBarton888/dilithion/issues" class="btn btn-small">GitHub Issues</a>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">💬</div>
+                    <h3>Join Community</h3>
+                    <p>Connect with other testers and developers on GitHub Discussions.</p>
+                    <a href="https://github.com/WillBarton888/dilithion/discussions" class="btn btn-small">Discussions</a>
+                </div>
+            </div>
+
+            <div class="tips-box" style="margin-top: 60px;">
+                <h3>⚠️ Important Testnet Information</h3>
+                <ul>
+                    <li><strong>Testnet coins have NO monetary value</strong> - For testing purposes only</li>
+                    <li><strong>Testnet may be reset at any time</strong> - Don't rely on testnet data</li>
+                    <li><strong>Test pass rate:</strong> 93% (13/14 tests passing)</li>
+                    <li><strong>Launch date:</strong> October 28, 2025</li>
+                    <li><strong>Mainnet launch:</strong> January 1, 2026 (target)</li>
+                </ul>
             </div>
         </div>
     </section>
@@ -108,8 +168,8 @@
         <div class="container">
             <h2 class="section-title">Network Statistics</h2>
             <p class="dashboard-status" id="network-status">
-                <span class="status-indicator" id="status-dot"></span>
-                <span id="status-text">Network launching January 1, 2026</span>
+                <span class="status-indicator live" id="status-dot"></span>
+                <span id="status-text">Testnet: LIVE NOW | Mainnet: January 1, 2026</span>
             </p>
 
             <div class="stats-grid">
@@ -235,24 +295,24 @@
                     <div class="platform-icon">🪟</div>
                     <h3>Windows</h3>
                     <p>Windows 10/11 (64-bit)</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases" class="btn btn-download">Coming Soon - GitHub Releases</a>
-                    <span class="version">v1.0.0 (Pre-launch)</span>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-download">Download Testnet - GitHub</a>
+                    <span class="version">v1.0-testnet (October 28, 2025) ⚠️ TESTNET ONLY</span>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon">🐧</div>
                     <h3>Linux</h3>
                     <p>Ubuntu, Debian, Fedora, Arch</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases" class="btn btn-download">Coming Soon - GitHub Releases</a>
-                    <span class="version">v1.0.0 (Pre-launch)</span>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-download">Download Testnet - GitHub</a>
+                    <span class="version">v1.0-testnet (October 28, 2025) ⚠️ TESTNET ONLY</span>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon">🍎</div>
                     <h3>macOS</h3>
                     <p>macOS 11+ (Intel & Apple Silicon)</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases" class="btn btn-download">Coming Soon - GitHub Releases</a>
-                    <span class="version">v1.0.0 (Pre-launch)</span>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-download">Download Testnet - GitHub</a>
+                    <span class="version">v1.0-testnet (October 28, 2025) ⚠️ TESTNET ONLY</span>
                 </div>
             </div>
 
@@ -341,16 +401,17 @@
             <div class="footer-content">
                 <div class="footer-section">
                     <h3>Dilithion</h3>
-                    <p>Experimental post-quantum cryptocurrency. AI-assisted development with full transparency. Launching January 1, 2026.</p>
-                    <p style="margin-top: 10px;"><strong>⚠️ Use at your own risk</strong></p>
+                    <p>Experimental post-quantum cryptocurrency. Testnet LIVE NOW - Mainnet launching January 1, 2026. AI-assisted development with full transparency.</p>
+                    <p style="margin-top: 10px;"><strong>⚠️ Testnet coins have NO VALUE</strong></p>
                 </div>
 
                 <div class="footer-section">
                     <h4>Resources</h4>
                     <ul>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md">Testnet Guide</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet">Testnet Release</a></li>
                         <li><a href="Dilithion-Whitepaper-v1.0.pdf">Whitepaper (PDF)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion">GitHub</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TEAM.md">Team</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/SECURITY.md">Security</a></li>
                         <li><a href="POST-QUANTUM-CRYPTO-COURSE.md">Learning Course</a></li>
                     </ul>
@@ -359,8 +420,9 @@
                 <div class="footer-section">
                     <h4>Community</h4>
                     <ul>
-                        <li><a href="https://twitter.com/DilithionCoin" target="_blank">Twitter</a></li>
-                        <li><a href="https://reddit.com/r/dilithion" target="_blank">Reddit</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/discussions">GitHub Discussions</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/issues">Report Issues</a></li>
+                        <li><a href="#" target="_blank">Twitter (Coming Soon)</a></li>
                         <li><a href="#" target="_blank">Discord (Coming Soon)</a></li>
                         <li><a href="#" target="_blank">Telegram (Coming Soon)</a></li>
                     </ul>
@@ -378,9 +440,11 @@
             </div>
 
             <div class="footer-bottom">
-                <p>&copy; 2025 Dilithion. Experimental open-source cryptocurrency. AI-assisted development. MIT License. Use at your own risk.</p>
+                <p>&copy; 2025 Dilithion. Experimental open-source cryptocurrency. AI-assisted development. MIT License. Testnet: LIVE | Mainnet: Jan 1, 2026</p>
 
                 <div class="legal-disclaimers">
+                    <p><strong>Testnet Disclaimer:</strong> Testnet coins have NO monetary value. Testnet may be reset at any time. For testing purposes only. Do not store real value.</p>
+
                     <p><strong>Legal Disclaimer:</strong> Dilithion is open-source protocol software. We do not operate an exchange, offer investment advice, provide custodial services, or make any guarantees regarding value or security. Users are solely responsible for compliance with local laws and regulations.</p>
 
                     <p><strong>Australian Users:</strong> Cryptocurrency may be subject to capital gains tax under Australian law. Mining income is generally taxable as ordinary income. Consult a qualified tax professional regarding your obligations. See ATO guidance: <a href="https://www.ato.gov.au/individuals-and-families/investments-and-assets/crypto-asset-investments" target="_blank" rel="noopener">ato.gov.au/crypto-assets</a></p>

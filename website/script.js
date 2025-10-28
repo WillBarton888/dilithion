@@ -59,10 +59,10 @@ function updateNetworkStatus(live) {
 
     if (live) {
         statusDot.classList.add('live');
-        statusText.textContent = 'Network Live';
+        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 1, 2026';
     } else {
         statusDot.classList.remove('live');
-        statusText.textContent = 'Network launching January 1, 2026';
+        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 1, 2026';
     }
 }
 
