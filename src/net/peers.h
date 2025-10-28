@@ -90,6 +90,23 @@ private:
     // Hardcoded seed nodes
     std::vector<NetProtocol::CAddress> seed_nodes;
 
+    // Peer address database (NW-003)
+    struct CAddrInfo {
+        NetProtocol::CAddress addr;
+        int64_t nTime;          // Last seen time
+        int64_t nLastTry;       // Last connection attempt time
+        int64_t nLastSuccess;   // Last successful connection time
+        int nAttempts;          // Total connection attempts
+        int nSuccesses;         // Successful connections
+        bool fInTried;          // In "tried" table (vs "new" table)
+
+        CAddrInfo() : nTime(0), nLastTry(0), nLastSuccess(0),
+                      nAttempts(0), nSuccesses(0), fInTried(false) {}
+    };
+
+    std::map<std::string, CAddrInfo> addr_map;  // IP:port -> address info
+    mutable std::mutex cs_addrs;
+
     // Connection limits
     static const int MAX_OUTBOUND_CONNECTIONS = 8;
     static const int MAX_INBOUND_CONNECTIONS = 117;
@@ -143,6 +160,12 @@ public:
     // Seed nodes
     void InitializeSeedNodes();
     std::vector<NetProtocol::CAddress> GetSeedNodes() const { return seed_nodes; }
+
+    // Address database management (NW-003)
+    void MarkAddressGood(const NetProtocol::CAddress& addr);  // Mark successful connection
+    void MarkAddressTried(const NetProtocol::CAddress& addr); // Mark connection attempt
+    std::vector<NetProtocol::CAddress> SelectAddressesToConnect(int count);  // Select addresses for outbound connections
+    size_t GetAddressCount() const;  // Total addresses in database
 };
 
 /**

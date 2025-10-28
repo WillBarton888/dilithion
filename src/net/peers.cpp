@@ -143,8 +143,36 @@ std::vector<NetProtocol::CAddress> CPeerManager::GetPeerAddresses(int max_count)
 }
 
 void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
-    // For now, just store it - in production would have address manager
-    // This is a simplified implementation
+    std::lock_guard<std::mutex> lock(cs_addrs);
+
+    // Skip localhost and invalid addresses
+    std::string ip = addr.ToStringIP();
+    if (ip == "127.0.0.1" || ip == "::1" || ip.empty()) {
+        return;
+    }
+
+    // Create unique key: IP:port
+    std::string key = addr.ToString();
+
+    // Check if address already exists
+    auto it = addr_map.find(key);
+    if (it != addr_map.end()) {
+        // Update timestamp
+        it->second.nTime = GetTime();
+        return;
+    }
+
+    // Add new address
+    CAddrInfo info;
+    info.addr = addr;
+    info.nTime = GetTime();
+    info.nLastTry = 0;
+    info.nLastSuccess = 0;
+    info.nAttempts = 0;
+    info.nSuccesses = 0;
+    info.fInTried = false;
+
+    addr_map[key] = info;
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
@@ -261,4 +289,92 @@ void CPeerManager::InitializeSeedNodes() {
     //
     // For testnet launch, operators should manually configure peer addresses
     // using the -addnode command line parameter or peers.dat file.
+}
+
+// Address database management (NW-003)
+
+void CPeerManager::MarkAddressGood(const NetProtocol::CAddress& addr) {
+    std::lock_guard<std::mutex> lock(cs_addrs);
+
+    std::string key = addr.ToString();
+    auto it = addr_map.find(key);
+    if (it == addr_map.end()) {
+        // Address not in database yet, add it
+        AddPeerAddress(addr);
+        it = addr_map.find(key);
+        if (it == addr_map.end()) return;
+    }
+
+    // Update success metrics
+    it->second.nLastSuccess = GetTime();
+    it->second.nSuccesses++;
+    it->second.fInTried = true;  // Move to "tried" table
+}
+
+void CPeerManager::MarkAddressTried(const NetProtocol::CAddress& addr) {
+    std::lock_guard<std::mutex> lock(cs_addrs);
+
+    std::string key = addr.ToString();
+    auto it = addr_map.find(key);
+    if (it == addr_map.end()) {
+        return;  // Address not in database
+    }
+
+    // Update attempt metrics
+    it->second.nLastTry = GetTime();
+    it->second.nAttempts++;
+}
+
+std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int count) {
+    std::lock_guard<std::mutex> lock(cs_addrs);
+
+    std::vector<NetProtocol::CAddress> result;
+
+    if (addr_map.empty()) {
+        return result;
+    }
+
+    // Selection strategy:
+    // 1. Prefer addresses we've never tried (nAttempts == 0)
+    // 2. Then prefer addresses with successful connections (fInTried && nSuccesses > 0)
+    // 3. Then try older addresses (larger time since last attempt)
+
+    std::vector<std::pair<std::string, CAddrInfo*>> candidates;
+    candidates.reserve(addr_map.size());
+
+    for (auto& pair : addr_map) {
+        candidates.push_back({pair.first, &pair.second});
+    }
+
+    // Sort by priority:
+    // Priority 1: Never tried (nAttempts == 0)
+    // Priority 2: Tried and succeeded (fInTried && nSuccesses > 0)
+    // Priority 3: Everything else, sorted by last attempt time (oldest first)
+    std::sort(candidates.begin(), candidates.end(),
+              [](const auto& a, const auto& b) {
+                  // Never tried addresses come first
+                  if (a.second->nAttempts == 0 && b.second->nAttempts > 0) return true;
+                  if (a.second->nAttempts > 0 && b.second->nAttempts == 0) return false;
+
+                  // Among tried addresses, prioritize successful ones
+                  if (a.second->fInTried && a.second->nSuccesses > 0 &&
+                      (!b.second->fInTried || b.second->nSuccesses == 0)) return true;
+                  if (b.second->fInTried && b.second->nSuccesses > 0 &&
+                      (!a.second->fInTried || a.second->nSuccesses == 0)) return false;
+
+                  // Otherwise sort by last attempt time (oldest first)
+                  return a.second->nLastTry < b.second->nLastTry;
+              });
+
+    // Select up to 'count' addresses
+    for (size_t i = 0; i < candidates.size() && result.size() < (size_t)count; i++) {
+        result.push_back(candidates[i].second->addr);
+    }
+
+    return result;
+}
+
+size_t CPeerManager::GetAddressCount() const {
+    std::lock_guard<std::mutex> lock(cs_addrs);
+    return addr_map.size();
 }
