@@ -808,40 +808,50 @@ bool CWallet::Load(const std::string& filename) {
     // Read header
     char magic[8];
     file.read(magic, 8);
+    if (!file.good()) return false;  // SEC-001: Check I/O error
     if (std::string(magic, 8) != "DILWLT01") {
         return false;  // Invalid file format
     }
 
     uint32_t version;
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
+    if (!file.good()) return false;  // SEC-001: Check I/O error
     if (version != 1) {
         return false;  // Unsupported version
     }
 
     uint32_t flags;
     file.read(reinterpret_cast<char*>(&flags), sizeof(flags));
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     // Skip reserved bytes
     uint8_t reserved[16];
     file.read(reinterpret_cast<char*>(reserved), 16);
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     // Read master key if encrypted
     bool isEncrypted = (flags & 0x01) != 0;
     if (isEncrypted) {
         uint32_t cryptedKeyLen;
         file.read(reinterpret_cast<char*>(&cryptedKeyLen), sizeof(cryptedKeyLen));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         masterKey.vchCryptedKey.resize(cryptedKeyLen);
         file.read(reinterpret_cast<char*>(masterKey.vchCryptedKey.data()), cryptedKeyLen);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         masterKey.vchSalt.resize(WALLET_CRYPTO_SALT_SIZE);
         file.read(reinterpret_cast<char*>(masterKey.vchSalt.data()), WALLET_CRYPTO_SALT_SIZE);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         masterKey.vchIV.resize(WALLET_CRYPTO_IV_SIZE);
         file.read(reinterpret_cast<char*>(masterKey.vchIV.data()), WALLET_CRYPTO_IV_SIZE);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         file.read(reinterpret_cast<char*>(&masterKey.nDerivationMethod), sizeof(masterKey.nDerivationMethod));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.read(reinterpret_cast<char*>(&masterKey.nDeriveIterations), sizeof(masterKey.nDeriveIterations));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         // Wallet starts locked (encryption status determined by masterKey.IsValid())
         fWalletUnlocked = false;
@@ -850,11 +860,13 @@ bool CWallet::Load(const std::string& filename) {
     // Read keys
     uint32_t numKeys;
     file.read(reinterpret_cast<char*>(&numKeys), sizeof(numKeys));
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     for (uint32_t i = 0; i < numKeys; i++) {
         // Read address
         std::vector<uint8_t> addrData(21);
         file.read(reinterpret_cast<char*>(addrData.data()), 21);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         CAddress addr;
         if (!addr.SetString(WalletCrypto::EncodeBase58Check(addrData))) {
@@ -870,15 +882,19 @@ bool CWallet::Load(const std::string& filename) {
 
             encKey.vchPubKey.resize(DILITHIUM_PUBLICKEY_SIZE);
             file.read(reinterpret_cast<char*>(encKey.vchPubKey.data()), DILITHIUM_PUBLICKEY_SIZE);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             uint32_t cryptedKeyLen;
             file.read(reinterpret_cast<char*>(&cryptedKeyLen), sizeof(cryptedKeyLen));
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             encKey.vchCryptedKey.resize(cryptedKeyLen);
             file.read(reinterpret_cast<char*>(encKey.vchCryptedKey.data()), cryptedKeyLen);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             encKey.vchIV.resize(16);
             file.read(reinterpret_cast<char*>(encKey.vchIV.data()), 16);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Create address from public key
             CAddress keyAddr(encKey.vchPubKey);
@@ -890,9 +906,11 @@ bool CWallet::Load(const std::string& filename) {
 
             key.vchPubKey.resize(DILITHIUM_PUBLICKEY_SIZE);
             file.read(reinterpret_cast<char*>(key.vchPubKey.data()), DILITHIUM_PUBLICKEY_SIZE);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             key.vchPrivKey.resize(DILITHIUM_SECRETKEY_SIZE);
             file.read(reinterpret_cast<char*>(key.vchPrivKey.data()), DILITHIUM_SECRETKEY_SIZE);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Create address from public key
             CAddress keyAddr(key.vchPubKey);
@@ -904,9 +922,11 @@ bool CWallet::Load(const std::string& filename) {
     // Read default address
     uint8_t hasDefault;
     file.read(reinterpret_cast<char*>(&hasDefault), 1);
+    if (!file.good()) return false;  // SEC-001: Check I/O error
     if (hasDefault) {
         std::vector<uint8_t> addrData(21);
         file.read(reinterpret_cast<char*>(addrData.data()), 21);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         // Find matching address in vchAddresses
         for (const auto& addr : vchAddresses) {
@@ -920,16 +940,21 @@ bool CWallet::Load(const std::string& filename) {
     // Read transactions
     uint32_t numTxs;
     file.read(reinterpret_cast<char*>(&numTxs), sizeof(numTxs));
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     for (uint32_t i = 0; i < numTxs; i++) {
         CWalletTx wtx;
 
         file.read(reinterpret_cast<char*>(wtx.txid.begin()), 32);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.read(reinterpret_cast<char*>(&wtx.vout), sizeof(wtx.vout));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.read(reinterpret_cast<char*>(&wtx.nValue), sizeof(wtx.nValue));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         std::vector<uint8_t> addrData(21);
         file.read(reinterpret_cast<char*>(addrData.data()), 21);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         // Find matching address
         for (const auto& addr : vchAddresses) {
@@ -941,9 +966,11 @@ bool CWallet::Load(const std::string& filename) {
 
         uint8_t fSpent;
         file.read(reinterpret_cast<char*>(&fSpent), 1);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         wtx.fSpent = (fSpent != 0);
 
         file.read(reinterpret_cast<char*>(&wtx.nHeight), sizeof(wtx.nHeight));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         mapWalletTx[wtx.txid] = wtx;
     }
@@ -973,27 +1000,37 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     // Write header
     const char magic[9] = "DILWLT01";
     file.write(magic, 8);  // Write 8 bytes (without null terminator)
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     uint32_t version = 1;
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     uint32_t flags = masterKey.IsValid() ? 0x01 : 0x00;  // Bit 0 = encrypted
     file.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     // Reserved bytes
     uint8_t reserved[16] = {0};
     file.write(reinterpret_cast<const char*>(reserved), 16);
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     // Write master key if encrypted
     if (masterKey.IsValid()) {
         uint32_t cryptedKeyLen = static_cast<uint32_t>(masterKey.vchCryptedKey.size());
         file.write(reinterpret_cast<const char*>(&cryptedKeyLen), sizeof(cryptedKeyLen));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(masterKey.vchCryptedKey.data()), cryptedKeyLen);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         file.write(reinterpret_cast<const char*>(masterKey.vchSalt.data()), WALLET_CRYPTO_SALT_SIZE);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(masterKey.vchIV.data()), WALLET_CRYPTO_IV_SIZE);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&masterKey.nDerivationMethod), sizeof(masterKey.nDerivationMethod));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&masterKey.nDeriveIterations), sizeof(masterKey.nDeriveIterations));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
     }
 
     // Write keys
@@ -1001,6 +1038,7 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         // Encrypted wallet - write encrypted keys
         uint32_t numKeys = static_cast<uint32_t>(mapCryptedKeys.size());
         file.write(reinterpret_cast<const char*>(&numKeys), sizeof(numKeys));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         for (const auto& pair : mapCryptedKeys) {
             const CAddress& addr = pair.first;
@@ -1008,22 +1046,28 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
 
             // Write address
             file.write(reinterpret_cast<const char*>(addr.GetData().data()), 21);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Write public key
             file.write(reinterpret_cast<const char*>(encKey.vchPubKey.data()), DILITHIUM_PUBLICKEY_SIZE);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Write encrypted private key
             uint32_t cryptedKeyLen = static_cast<uint32_t>(encKey.vchCryptedKey.size());
             file.write(reinterpret_cast<const char*>(&cryptedKeyLen), sizeof(cryptedKeyLen));
+            if (!file.good()) return false;  // SEC-001: Check I/O error
             file.write(reinterpret_cast<const char*>(encKey.vchCryptedKey.data()), cryptedKeyLen);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Write IV
             file.write(reinterpret_cast<const char*>(encKey.vchIV.data()), 16);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
         }
     } else {
         // Unencrypted wallet - write unencrypted keys
         uint32_t numKeys = static_cast<uint32_t>(mapKeys.size());
         file.write(reinterpret_cast<const char*>(&numKeys), sizeof(numKeys));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
 
         for (const auto& pair : mapKeys) {
             const CAddress& addr = pair.first;
@@ -1031,36 +1075,48 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
 
             // Write address
             file.write(reinterpret_cast<const char*>(addr.GetData().data()), 21);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Write public key
             file.write(reinterpret_cast<const char*>(key.vchPubKey.data()), DILITHIUM_PUBLICKEY_SIZE);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Write private key
             file.write(reinterpret_cast<const char*>(key.vchPrivKey.data()), DILITHIUM_SECRETKEY_SIZE);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
         }
     }
 
     // Write default address
     uint8_t hasDefault = defaultAddress.IsValid() ? 1 : 0;
     file.write(reinterpret_cast<const char*>(&hasDefault), 1);
+    if (!file.good()) return false;  // SEC-001: Check I/O error
     if (hasDefault) {
         file.write(reinterpret_cast<const char*>(defaultAddress.GetData().data()), 21);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
     }
 
     // Write transactions
     uint32_t numTxs = static_cast<uint32_t>(mapWalletTx.size());
     file.write(reinterpret_cast<const char*>(&numTxs), sizeof(numTxs));
+    if (!file.good()) return false;  // SEC-001: Check I/O error
 
     for (const auto& pair : mapWalletTx) {
         const CWalletTx& wtx = pair.second;
 
         file.write(reinterpret_cast<const char*>(wtx.txid.begin()), 32);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&wtx.vout), sizeof(wtx.vout));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&wtx.nValue), sizeof(wtx.nValue));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(wtx.address.GetData().data()), 21);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         uint8_t fSpent = wtx.fSpent ? 1 : 0;
         file.write(reinterpret_cast<const char*>(&fSpent), 1);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&wtx.nHeight), sizeof(wtx.nHeight));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
     }
 
     file.close();
