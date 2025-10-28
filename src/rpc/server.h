@@ -83,6 +83,7 @@ private:
     uint16_t m_port;
     std::atomic<bool> m_running{false};
     std::thread m_serverThread;
+    std::thread m_cleanupThread;  // Rate limiter cleanup thread
 
     // Component references
     CWallet* m_wallet;
@@ -107,6 +108,11 @@ private:
      * Server thread function
      */
     void ServerThread();
+
+    /**
+     * Cleanup thread function (rate limiter maintenance)
+     */
+    void CleanupThread();
 
     /**
      * Handle a single client connection

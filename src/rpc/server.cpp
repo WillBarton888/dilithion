@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <chrono>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -135,6 +136,9 @@ bool CRPCServer::Start() {
     m_running = true;
     m_serverThread = std::thread(&CRPCServer::ServerThread, this);
 
+    // Start cleanup thread (rate limiter maintenance)
+    m_cleanupThread = std::thread(&CRPCServer::CleanupThread, this);
+
     return true;
 }
 
@@ -163,6 +167,11 @@ void CRPCServer::Stop() {
         m_serverThread.join();
     }
 
+    // Wait for cleanup thread
+    if (m_cleanupThread.joinable()) {
+        m_cleanupThread.join();
+    }
+
 #ifdef _WIN32
     WSACleanup();
 #endif
@@ -189,6 +198,25 @@ void CRPCServer::ServerThread() {
         // In production, would use thread pool
         HandleClient(clientSocket);
         closesocket(clientSocket);
+    }
+}
+
+void CRPCServer::CleanupThread() {
+    // Rate limiter maintenance: clean up old records every 5 minutes
+    const std::chrono::minutes CLEANUP_INTERVAL(5);
+
+    while (m_running) {
+        // Sleep for 5 minutes, but wake up every second to check m_running
+        for (int i = 0; i < 300 && m_running; i++) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        if (!m_running) {
+            break;
+        }
+
+        // Clean up old rate limiter records
+        m_rateLimiter.CleanupOldRecords();
     }
 }
 
