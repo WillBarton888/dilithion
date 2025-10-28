@@ -1487,11 +1487,29 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
 }
 
 std::string CRPCServer::RPC_Stop(const std::string& params) {
-    // Stop the server gracefully
+    // PS-005: Secure RPC Stop - Require explicit confirmation to prevent unauthorized shutdown
+    // Expected params: {"confirm": true}
+
+    // Parse confirmation parameter
+    bool confirmed = false;
+    if (params.find("\"confirm\"") != std::string::npos &&
+        params.find("true") != std::string::npos) {
+        confirmed = true;
+    }
+
+    if (!confirmed) {
+        throw std::runtime_error(
+            "Server shutdown requires explicit confirmation. "
+            "Call with {\\\"confirm\\\": true} to confirm shutdown. "
+            "This prevents accidental or unauthorized server termination."
+        );
+    }
+
+    // Confirmation received - proceed with graceful shutdown
     std::thread([this]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         Stop();
     }).detach();
 
-    return "\"Dilithion server stopping\"";
+    return "\"Dilithion server stopping (confirmed)\"";
 }

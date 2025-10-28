@@ -160,11 +160,20 @@ bool CTransactionValidator::CheckTransactionInputs(const CTransaction& tx, CUTXO
         return false;
     }
 
-    // Check for suspiciously low fee (but allow zero for testing)
-    // In production, you might want to enforce minimum fee
+    // Check for negative fees (should never happen with proper UTXO validation)
     if (txFee < 0) {
         error = "Transaction fee is negative";
         return false;
+    }
+
+    // CF-006: Enforce minimum transaction fees (production anti-spam)
+    // Only enforce for non-coinbase transactions (coinbase has no inputs)
+    if (!tx.IsCoinBase()) {
+        std::string fee_error;
+        if (!Consensus::CheckFee(tx, txFee, /*check_relay=*/true, &fee_error)) {
+            error = "Fee requirement check failed: " + fee_error;
+            return false;
+        }
     }
 
     return true;
