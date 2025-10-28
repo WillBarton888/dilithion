@@ -2,8 +2,10 @@
 // Distributed under the MIT software license
 
 #include <net/peers.h>
+#include <net/dns.h>
 #include <util/strencodings.h>
 #include <algorithm>
+#include <iostream>
 
 // Global peer manager instance
 std::unique_ptr<CPeerManager> g_peer_manager = nullptr;
@@ -178,8 +180,44 @@ void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
 std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
     std::vector<NetProtocol::CAddress> result;
 
-    // In production, this would query DNS seeds
-    // For now, return empty (DNS resolution would require platform-specific code)
+    // NW-002: Query DNS seeds for peer discovery
+    std::cout << "[PeerManager] Querying DNS seeds for peer discovery..." << std::endl;
+
+    for (const auto& seed_hostname : dns_seeds) {
+        std::cout << "[PeerManager] Querying seed: " << seed_hostname << std::endl;
+
+        try {
+            // Query the DNS seed
+            std::vector<NetProtocol::CAddress> addresses =
+                CDNSResolver::QuerySeed(seed_hostname, NetProtocol::DEFAULT_PORT);
+
+            if (addresses.empty()) {
+                std::cout << "[PeerManager] No addresses returned from seed: " << seed_hostname << std::endl;
+                continue;
+            }
+
+            // Add addresses to result
+            std::cout << "[PeerManager] Found " << addresses.size()
+                      << " peer(s) from seed: " << seed_hostname << std::endl;
+
+            for (const auto& addr : addresses) {
+                result.push_back(addr);
+                // Also add to peer address database
+                AddPeerAddress(addr);
+            }
+
+        } catch (const std::exception& e) {
+            std::cerr << "[PeerManager] ERROR: Failed to query seed " << seed_hostname
+                      << ": " << e.what() << std::endl;
+            continue;
+        } catch (...) {
+            std::cerr << "[PeerManager] ERROR: Unknown error querying seed " << seed_hostname << std::endl;
+            continue;
+        }
+    }
+
+    std::cout << "[PeerManager] DNS seed query complete: Found " << result.size()
+              << " total peer address(es)" << std::endl;
 
     return result;
 }
