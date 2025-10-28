@@ -25,6 +25,30 @@
 
 ---
 
+## 🚀 **TESTNET NOW LIVE!**
+
+**Public testnet is now available for testing!**
+
+🎯 **Join the Testnet**: [TESTNET-LAUNCH.md](TESTNET-LAUNCH.md)
+
+**What's New** (October 28, 2025):
+- ✅ All critical bugs fixed (UTXO serialization, wallet unlock, DNS seeds)
+- ✅ Test pass rate: 93% (13/14 tests)
+- ✅ Security hardening: 4 phases complete
+- ✅ Ready for community testing
+
+**Quick Start**:
+```bash
+git clone https://github.com/WillBarton888/dilithion.git
+cd dilithion
+make
+./dilithion-node --mine --threads=4
+```
+
+**Need Help?** See full guide: [TESTNET-LAUNCH.md](TESTNET-LAUNCH.md)
+
+---
+
 ## Overview
 
 Dilithion is a quantum-resistant cryptocurrency built from the ground up with post-quantum cryptography. Designed as "The People's Coin," Dilithion features CPU-friendly mining and industry-standard NIST algorithms.
