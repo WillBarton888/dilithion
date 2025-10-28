@@ -1154,6 +1154,7 @@ std::vector<uint8_t> CreateScriptSig(const std::vector<uint8_t>& signature,
 std::vector<uint8_t> ExtractPubKeyHash(const std::vector<uint8_t>& scriptPubKey) {
     // P2PKH scriptPubKey format: OP_DUP OP_HASH160 <hash_size> <pubkey_hash> OP_EQUALVERIFY OP_CHECKSIG
     // Expected size: 25 bytes (1+1+1+20+1+1) for 20-byte hash
+    //           or: 37 bytes (1+1+1+32+1+1) for 32-byte hash
 
     // Minimum size: 25 bytes for P2PKH
     if (scriptPubKey.size() < 25) {
@@ -1168,14 +1169,24 @@ std::vector<uint8_t> ExtractPubKeyHash(const std::vector<uint8_t>& scriptPubKey)
         return std::vector<uint8_t>();
     }
 
+    // SEC-002: Validate hash_size before using it in calculations
     uint8_t hash_size = scriptPubKey[2];
 
+    // Only accept standard hash sizes: 20 (RIPEMD160) or 32 (SHA3-256)
+    // This prevents potential overflow and malformed scripts
+    if (hash_size != 20 && hash_size != 32) {
+        return std::vector<uint8_t>();
+    }
+
     // Verify script size matches P2PKH format: 3 (opcodes) + hash_size + 2 (opcodes)
-    if (scriptPubKey.size() != (3 + static_cast<size_t>(hash_size) + 2)) {
+    // Now safe because hash_size is validated to be 20 or 32
+    size_t expected_size = 3 + static_cast<size_t>(hash_size) + 2;
+    if (scriptPubKey.size() != expected_size) {
         return std::vector<uint8_t>();
     }
 
     // Verify OP_EQUALVERIFY and OP_CHECKSIG at the end
+    // Safe to access because size was validated above
     if (scriptPubKey[3 + hash_size] != 0x88) {  // OP_EQUALVERIFY
         return std::vector<uint8_t>();
     }
