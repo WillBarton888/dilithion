@@ -25,12 +25,13 @@ Dilithion is a **post-quantum cryptocurrency** built from scratch (NOT a Bitcoin
 ## 🆕 What's New in This Release
 
 ### Critical Fixes (October 28, 2025)
+- ✅ **Global Pointer Initialization**: Fixed critical crash on node startup
 - ✅ **UTXO Serialization Bug**: Fixed consensus-critical transaction validation
 - ✅ **Wallet Unlock Issue**: Unencrypted wallets now work properly
-- ✅ **DNS Seed Nodes**: Peer discovery operational
+- ✅ **Official Seed Node**: 170.64.203.134:18444 now live (24/7 uptime)
 - ✅ **Test Pass Rate**: Improved from 79% to 93%
 
-**Full details**: See [DEFICIENCY-FIXES-SUMMARY.md](DEFICIENCY-FIXES-SUMMARY.md)
+**Full details**: See [CRITICAL-BUG-FIX-SUMMARY.md](CRITICAL-BUG-FIX-SUMMARY.md)
 
 ---
 
@@ -42,7 +43,7 @@ Dilithion is a **post-quantum cryptocurrency** built from scratch (NOT a Bitcoin
 - **Disk**: 20GB free space
 - **Network**: Ports 8444 (P2P) and 8445 (RPC) open
 
-### Option 1: Quick Start (Recommended for Testing)
+### Option 1: Quick Start with Seed Node (Recommended)
 
 ```bash
 # Clone the repository
@@ -52,26 +53,33 @@ cd dilithion
 # Build (Linux/WSL)
 make
 
-# Start mining node
-./dilithion-node --mine --threads=4
+# Start mining node connected to seed node
+./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=4
 
 # In another terminal, check status
-./dilithion-cli getinfo
+./dilithion-cli --testnet getinfo
 ```
 
-### Option 2: Manual Peer Configuration
+### Option 2: Connect to Official Seed Node (Recommended)
 
-For better testnet connectivity, manually connect to other nodes:
+**Official Testnet Seed Node** (Available 24/7):
 
 ```bash
-# Start node with manual peer connections
-./dilithion-node --addnode=<peer1_ip>:8444 --addnode=<peer2_ip>:8444
+# Connect to official seed node
+./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=4
 
-# Example (replace with real testnet peer IPs):
-./dilithion-node --addnode=192.168.1.100:8444 --addnode=192.168.1.101:8444
+# Or without mining
+./dilithion-node --testnet --addnode=170.64.203.134:18444
 ```
 
-**Where to find peer IPs**: See [Community Discord](#-community--support) or [GitHub Discussions](https://github.com/WillBarton888/dilithion/discussions)
+**Seed Node Details**:
+- **IP**: 170.64.203.134
+- **Port**: 18444 (testnet)
+- **Location**: DigitalOcean (Australia region)
+- **Uptime**: 24/7
+- **Capacity**: Up to 117 concurrent connections
+
+**Note**: The seed node does NOT mine, it only relays blocks and transactions.
 
 ---
 
@@ -256,8 +264,8 @@ Create `~/.dilithion/dilithion.conf`:
 ```ini
 # Network
 testnet=1
-port=8444
-rpcport=8445
+port=18444
+rpcport=18332
 
 # Mining
 gen=1
@@ -267,9 +275,8 @@ genproclimit=4
 rpcuser=testuser
 rpcpassword=testpass
 
-# Peers (add testnet peers here)
-addnode=192.168.1.100:8444
-addnode=192.168.1.101:8444
+# Official Seed Node
+addnode=170.64.203.134:18444
 
 # Logging
 debug=1
