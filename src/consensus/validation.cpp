@@ -124,16 +124,47 @@ bool CBlockValidator::DeserializeBlockTransactions(
         return false;
     }
 
-    // For now, we'll use a simplified deserialization
-    // In production, this would be a full transaction deserializer
-    // Since CBlock.vtx is currently just raw bytes, we'll need to handle this carefully
+    // Sanity check: max 100k transactions per block
+    if (txCount > 100000) {
+        error = "Too many transactions in block";
+        return false;
+    }
 
-    // TODO: Implement full transaction deserialization
-    // For Phase 5.4, we'll accept that block.vtx contains serialized transactions
-    // and trust that they were properly constructed by CreateBlockTemplate
+    // Deserialize each transaction (CS-002)
+    transactions.reserve(txCount);
 
-    error = "Transaction deserialization not yet fully implemented";
-    return false;
+    for (uint64_t i = 0; i < txCount; i++) {
+        // Check if we have remaining data
+        if (offset >= dataSize) {
+            error = "Incomplete transaction data at index " + std::to_string(i);
+            return false;
+        }
+
+        // Deserialize transaction from remaining bytes
+        CTransaction tx;
+        std::string deserializeError;
+
+        if (!tx.Deserialize(data + offset, dataSize - offset, &deserializeError)) {
+            error = "Failed to deserialize transaction " + std::to_string(i) + ": " + deserializeError;
+            return false;
+        }
+
+        // Calculate how many bytes were consumed
+        // We need to re-serialize to find the size (could optimize later with a GetDeserializedSize method)
+        size_t txSize = tx.GetSerializedSize();
+        offset += txSize;
+
+        // Add transaction to result vector
+        transactions.push_back(MakeTransactionRef(std::move(tx)));
+    }
+
+    // Verify we consumed all data
+    if (offset != dataSize) {
+        error = "Extra data after last transaction (" + std::to_string(dataSize - offset) + " bytes remaining)";
+        return false;
+    }
+
+    return true;
 }
 
 bool CBlockValidator::CheckBlockHeader(

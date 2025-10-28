@@ -215,3 +215,214 @@ uint64_t CTransaction::GetValueOut() const {
     }
     return total;
 }
+
+// ============================================================================
+// Deserialization Helper Functions (CS-002)
+// ============================================================================
+
+/** Helper function to deserialize a uint32_t from little-endian format */
+static bool DeserializeUint32(const uint8_t*& data, const uint8_t* end, uint32_t& value, std::string* error = nullptr) {
+    if (end - data < 4) {
+        if (error) *error = "Insufficient data for uint32_t";
+        return false;
+    }
+
+    value = static_cast<uint32_t>(data[0]) |
+            (static_cast<uint32_t>(data[1]) << 8) |
+            (static_cast<uint32_t>(data[2]) << 16) |
+            (static_cast<uint32_t>(data[3]) << 24);
+
+    data += 4;
+    return true;
+}
+
+/** Helper function to deserialize a uint64_t from little-endian format */
+static bool DeserializeUint64(const uint8_t*& data, const uint8_t* end, uint64_t& value, std::string* error = nullptr) {
+    if (end - data < 8) {
+        if (error) *error = "Insufficient data for uint64_t";
+        return false;
+    }
+
+    value = static_cast<uint64_t>(data[0]) |
+            (static_cast<uint64_t>(data[1]) << 8) |
+            (static_cast<uint64_t>(data[2]) << 16) |
+            (static_cast<uint64_t>(data[3]) << 24) |
+            (static_cast<uint64_t>(data[4]) << 32) |
+            (static_cast<uint64_t>(data[5]) << 40) |
+            (static_cast<uint64_t>(data[6]) << 48) |
+            (static_cast<uint64_t>(data[7]) << 56);
+
+    data += 8;
+    return true;
+}
+
+/** Helper function to deserialize a compact size (Bitcoin-style varint) */
+static bool DeserializeCompactSize(const uint8_t*& data, const uint8_t* end, uint64_t& size, std::string* error = nullptr) {
+    if (data >= end) {
+        if (error) *error = "Insufficient data for CompactSize";
+        return false;
+    }
+
+    uint8_t first = *data;
+    data++;
+
+    if (first < 253) {
+        size = first;
+        return true;
+    } else if (first == 253) {
+        // 2-byte size
+        if (end - data < 2) {
+            if (error) *error = "Insufficient data for CompactSize (2-byte)";
+            return false;
+        }
+        size = static_cast<uint64_t>(data[0]) |
+               (static_cast<uint64_t>(data[1]) << 8);
+        data += 2;
+        return true;
+    } else if (first == 254) {
+        // 4-byte size
+        uint32_t size32;
+        if (!DeserializeUint32(data, end, size32, error)) {
+            return false;
+        }
+        size = size32;
+        return true;
+    } else {  // first == 255
+        // 8-byte size
+        return DeserializeUint64(data, end, size, error);
+    }
+}
+
+// ============================================================================
+// CTransaction Deserialization (CS-002)
+// ============================================================================
+
+bool CTransaction::Deserialize(const uint8_t* data, size_t len, std::string* error) {
+    // Clear current transaction state
+    SetNull();
+
+    const uint8_t* ptr = data;
+    const uint8_t* end = data + len;
+
+    // Deserialize version (4 bytes)
+    uint32_t version;
+    if (!DeserializeUint32(ptr, end, version, error)) {
+        return false;
+    }
+    nVersion = static_cast<int32_t>(version);
+
+    // Deserialize input count
+    uint64_t vin_count;
+    if (!DeserializeCompactSize(ptr, end, vin_count, error)) {
+        return false;
+    }
+
+    // Sanity check: max 100k inputs
+    if (vin_count > 100000) {
+        if (error) *error = "Too many inputs";
+        return false;
+    }
+
+    // Deserialize each input
+    vin.resize(vin_count);
+    for (size_t i = 0; i < vin_count; i++) {
+        CTxIn& txin = vin[i];
+
+        // Deserialize prevout hash (32 bytes)
+        if (end - ptr < 32) {
+            if (error) *error = "Insufficient data for prevout hash";
+            return false;
+        }
+        std::memcpy(txin.prevout.hash.data, ptr, 32);
+        ptr += 32;
+
+        // Deserialize prevout index (4 bytes)
+        if (!DeserializeUint32(ptr, end, txin.prevout.n, error)) {
+            return false;
+        }
+
+        // Deserialize scriptSig length
+        uint64_t scriptSig_len;
+        if (!DeserializeCompactSize(ptr, end, scriptSig_len, error)) {
+            return false;
+        }
+
+        // Sanity check: max 10KB scriptSig
+        if (scriptSig_len > 10000) {
+            if (error) *error = "scriptSig too large";
+            return false;
+        }
+
+        // Deserialize scriptSig data
+        if (end - ptr < static_cast<ptrdiff_t>(scriptSig_len)) {
+            if (error) *error = "Insufficient data for scriptSig";
+            return false;
+        }
+        txin.scriptSig.assign(ptr, ptr + scriptSig_len);
+        ptr += scriptSig_len;
+
+        // Deserialize sequence (4 bytes)
+        if (!DeserializeUint32(ptr, end, txin.nSequence, error)) {
+            return false;
+        }
+    }
+
+    // Deserialize output count
+    uint64_t vout_count;
+    if (!DeserializeCompactSize(ptr, end, vout_count, error)) {
+        return false;
+    }
+
+    // Sanity check: max 100k outputs
+    if (vout_count > 100000) {
+        if (error) *error = "Too many outputs";
+        return false;
+    }
+
+    // Deserialize each output
+    vout.resize(vout_count);
+    for (size_t i = 0; i < vout_count; i++) {
+        CTxOut& txout = vout[i];
+
+        // Deserialize value (8 bytes)
+        if (!DeserializeUint64(ptr, end, txout.nValue, error)) {
+            return false;
+        }
+
+        // Deserialize scriptPubKey length
+        uint64_t scriptPubKey_len;
+        if (!DeserializeCompactSize(ptr, end, scriptPubKey_len, error)) {
+            return false;
+        }
+
+        // Sanity check: max 10KB scriptPubKey
+        if (scriptPubKey_len > 10000) {
+            if (error) *error = "scriptPubKey too large";
+            return false;
+        }
+
+        // Deserialize scriptPubKey data
+        if (end - ptr < static_cast<ptrdiff_t>(scriptPubKey_len)) {
+            if (error) *error = "Insufficient data for scriptPubKey";
+            return false;
+        }
+        txout.scriptPubKey.assign(ptr, ptr + scriptPubKey_len);
+        ptr += scriptPubKey_len;
+    }
+
+    // Deserialize locktime (4 bytes)
+    if (!DeserializeUint32(ptr, end, nLockTime, error)) {
+        return false;
+    }
+
+    // Verify we consumed exactly the right amount of data
+    if (ptr != end) {
+        if (error) *error = "Extra data after transaction";
+        return false;
+    }
+
+    // Invalidate cached hash (will be recalculated on next GetHash())
+    hash_valid = false;
+
+    return true;
+}
