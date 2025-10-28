@@ -200,7 +200,7 @@ public:
 static const unsigned int WALLET_CRYPTO_KEY_SIZE = 32;    // AES-256 key size
 static const unsigned int WALLET_CRYPTO_SALT_SIZE = 16;   // Salt size for PBKDF2
 static const unsigned int WALLET_CRYPTO_IV_SIZE = 16;     // IV size for AES
-static const unsigned int WALLET_CRYPTO_PBKDF2_ROUNDS = 100000;  // PBKDF2 iterations
+static const unsigned int WALLET_CRYPTO_PBKDF2_ROUNDS = 300000;  // SEC-003: PBKDF2 iterations (increased from 100k to 300k for stronger security)
 
 /**
  * Derive encryption key from passphrase using PBKDF2-SHA3
