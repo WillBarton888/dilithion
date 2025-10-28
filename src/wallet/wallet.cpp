@@ -509,6 +509,12 @@ bool CWallet::IsLocked() const {
 // VULN-002 FIX: Helper to check if unlock is still valid (not expired)
 // Assumes caller holds cs_wallet lock
 bool CWallet::IsUnlockValid() const {
+    // If wallet is not encrypted, it doesn't need to be unlocked
+    if (!masterKey.IsValid()) {
+        return true;  // Unencrypted wallet is always "unlocked"
+    }
+
+    // Wallet is encrypted - check if unlocked
     if (!fWalletUnlocked) {
         return false;  // Wallet is locked
     }

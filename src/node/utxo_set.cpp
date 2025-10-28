@@ -449,24 +449,31 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
             key.append(reinterpret_cast<const char*>(&outpoint.n), 4);
 
             // Build value: CUTXOEntry serialization
+            // Format: height (4) + fCoinBase (1) + nValue (8) + scriptPubKey_size (4) + scriptPubKey
             std::vector<uint8_t> value;
-            value.resize(8 + 4 + txout.scriptPubKey.size() + 4 + 1);
+            value.resize(4 + 1 + 8 + 4 + txout.scriptPubKey.size());
 
             uint8_t* ptr = value.data();
+
+            // Height (4 bytes)
+            std::memcpy(ptr, &height, 4);
+            ptr += 4;
+
+            // fCoinBase flag (1 byte)
+            *ptr = is_coinbase ? 1 : 0;
+            ptr++;
+
+            // nValue (8 bytes)
             std::memcpy(ptr, &txout.nValue, 8);
             ptr += 8;
 
+            // scriptPubKey size (4 bytes)
             uint32_t script_len = txout.scriptPubKey.size();
             std::memcpy(ptr, &script_len, 4);
             ptr += 4;
 
+            // scriptPubKey data
             std::memcpy(ptr, txout.scriptPubKey.data(), script_len);
-            ptr += script_len;
-
-            std::memcpy(ptr, &height, 4);
-            ptr += 4;
-
-            *ptr = is_coinbase ? 1 : 0;
 
             batch.Put(key, leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
 
@@ -650,23 +657,30 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
         key.append(reinterpret_cast<const char*>(&outpoint.n), 4);
 
         // Build value: CUTXOEntry serialization
+        // Format: height (4) + fCoinBase (1) + nValue (8) + scriptPubKey_size (4) + scriptPubKey
         std::vector<uint8_t> value;
-        value.resize(8 + 4 + scriptPubKey.size() + 4 + 1);
+        value.resize(4 + 1 + 8 + 4 + scriptPubKey.size());
 
         uint8_t* value_ptr = value.data();
-        std::memcpy(value_ptr, &nValue, 8);
-        value_ptr += 8;
 
-        std::memcpy(value_ptr, &script_len, 4);
-        value_ptr += 4;
-
-        std::memcpy(value_ptr, scriptPubKey.data(), script_len);
-        value_ptr += script_len;
-
+        // Height (4 bytes)
         std::memcpy(value_ptr, &height, 4);
         value_ptr += 4;
 
+        // fCoinBase flag (1 byte)
         *value_ptr = fCoinBase ? 1 : 0;
+        value_ptr++;
+
+        // nValue (8 bytes)
+        std::memcpy(value_ptr, &nValue, 8);
+        value_ptr += 8;
+
+        // scriptPubKey size (4 bytes)
+        std::memcpy(value_ptr, &script_len, 4);
+        value_ptr += 4;
+
+        // scriptPubKey data
+        std::memcpy(value_ptr, scriptPubKey.data(), script_len);
 
         batch.Put(key, leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
 
