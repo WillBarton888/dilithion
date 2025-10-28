@@ -270,18 +270,35 @@ bool TestScriptCreation() {
     // Create scriptPubKey
     std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(pubkey_hash);
 
-    // Verify format: [hash_size(1)] [hash(32)] [OP_CHECKSIG(1)] = 34 bytes
-    if (scriptPubKey.size() != 34) {
-        cout << "  ✗ scriptPubKey size should be 34 bytes, got " << scriptPubKey.size() << endl;
+    // Verify P2PKH format: OP_DUP OP_HASH160 <hash_size> <hash> OP_EQUALVERIFY OP_CHECKSIG
+    // Expected size: 1 + 1 + 1 + 32 + 1 + 1 = 37 bytes for 32-byte hash
+    if (scriptPubKey.size() != 37) {
+        cout << "  ✗ scriptPubKey size should be 37 bytes (P2PKH), got " << scriptPubKey.size() << endl;
         return false;
     }
 
-    if (scriptPubKey[0] != 32) {
-        cout << "  ✗ First byte should be hash size (32)" << endl;
+    // Verify P2PKH opcodes
+    if (scriptPubKey[0] != 0x76) {  // OP_DUP
+        cout << "  ✗ First byte should be OP_DUP (0x76)" << endl;
         return false;
     }
 
-    if (scriptPubKey[33] != 0xAC) {
+    if (scriptPubKey[1] != 0xA9) {  // OP_HASH160
+        cout << "  ✗ Second byte should be OP_HASH160 (0xA9)" << endl;
+        return false;
+    }
+
+    if (scriptPubKey[2] != 32) {  // hash size
+        cout << "  ✗ Third byte should be hash size (32)" << endl;
+        return false;
+    }
+
+    if (scriptPubKey[35] != 0x88) {  // OP_EQUALVERIFY
+        cout << "  ✗ Second-to-last byte should be OP_EQUALVERIFY (0x88)" << endl;
+        return false;
+    }
+
+    if (scriptPubKey[36] != 0xAC) {  // OP_CHECKSIG
         cout << "  ✗ Last byte should be OP_CHECKSIG (0xAC)" << endl;
         return false;
     }
@@ -518,7 +535,10 @@ bool TestTransactionSending() {
     std::string error;
     unsigned int current_height = 200;
 
-    if (!wallet.CreateTransaction(recipient_addr, 50000000, 1000,
+    // Use estimated fee instead of hardcoded fee
+    CAmount fee = CWallet::EstimateFee();
+
+    if (!wallet.CreateTransaction(recipient_addr, 50000000, fee,
                                  utxo_set, current_height, tx, error)) {
         cout << "  ✗ Transaction creation failed: " << error << endl;
         return false;

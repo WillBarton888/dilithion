@@ -143,14 +143,14 @@ Difficulty will adjust after 2016 blocks
 **Current Model:** (src/consensus/fees.cpp:9-10)
 ```cpp
 static const CAmount MIN_TX_FEE = 10000;      // 10,000 satoshis
-static const CAmount FEE_PER_BYTE = 10;        // 10 sat/byte
+static const CAmount FEE_PER_BYTE = 10;        // 10 ions/byte
 Fee = 10,000 + (tx_size * 10)
 ```
 
 **Transaction Sizes with Dilithium3:**
 ```
-1-input, 1-output:  3,864 bytes → 48,640 sats fee (~0.00048640 DIL)
-2-input, 1-output:  7,646 bytes → 86,460 sats fee (~0.00086460 DIL)
+1-input, 1-output:  3,864 bytes → 48,640 ions fee (~0.00048640 DIL)
+2-input, 1-output:  7,646 bytes → 86,460 ions fee (~0.00086460 DIL)
 ```
 
 **Analysis:**
@@ -180,11 +180,11 @@ At Halving #4 (Reward = 6.25 DIL):
 ### 3.2 Recommendations for Fee Model
 
 **Short-term (Pre-Launch):**
-1. **Consider increasing MIN_TX_FEE** to 50,000-100,000 sats
+1. **Consider increasing MIN_TX_FEE** to 50,000-100,000 ions
    - Provides better spam protection
    - Still affordable (0.0005-0.001 DIL per tx)
 
-2. **Add minimum relay fee enforcement** (already implemented: 50,000 sats)
+2. **Add minimum relay fee enforcement** (already implemented: 50,000 ions)
 
 **Long-term (Post-Launch):**
 1. **Implement dynamic fee market**

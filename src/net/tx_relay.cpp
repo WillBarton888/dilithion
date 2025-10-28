@@ -28,19 +28,10 @@ bool CTxRelayManager::ShouldAnnounce(int64_t peer_id, const uint256& txid) {
         }
     }
 
-    // Check if recently announced globally (within TTL window)
-    auto recent_it = recently_announced.find(txid);
-    if (recent_it != recently_announced.end()) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - recent_it->second
-        ).count();
-
-        if (elapsed < TX_ANNOUNCE_TTL) {
-            // Still within TTL window, don't re-announce
-            return false;
-        }
-    }
+    // Allow announcements to different peers
+    // The recently_announced map is used for cleanup only, not for blocking announcements
+    // This allows proper peer distribution while still preventing immediate re-announcements
+    // to the same peer (handled by tx_inv_sent check above)
 
     return true;
 }

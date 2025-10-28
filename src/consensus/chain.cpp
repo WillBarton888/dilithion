@@ -171,6 +171,20 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     std::cout << "[Chain] Fork point: " << pindexFork->GetBlockHash().GetHex().substr(0, 16)
               << " (height " << pindexFork->nHeight << ")" << std::endl;
 
+    // VULN-008 FIX: Protect against excessively deep reorganizations
+    static const int MAX_REORG_DEPTH = 100;  // Similar to Bitcoin's practical limit
+    int reorg_depth = pindexTip->nHeight - pindexFork->nHeight;
+    if (reorg_depth > MAX_REORG_DEPTH) {
+        std::cerr << "[Chain] ERROR: Reorganization too deep: " << reorg_depth << " blocks" << std::endl;
+        std::cerr << "  Maximum allowed: " << MAX_REORG_DEPTH << " blocks" << std::endl;
+        std::cerr << "  This may indicate a long-range attack or network partition" << std::endl;
+        return false;
+    }
+
+    if (reorg_depth > 10) {
+        std::cout << "[Chain] ⚠️  WARNING: Deep reorganization (" << reorg_depth << " blocks)" << std::endl;
+    }
+
     // Build list of blocks to disconnect (from current tip back to fork point)
     std::vector<CBlockIndex*> disconnectBlocks;
     CBlockIndex* pindex = pindexTip;

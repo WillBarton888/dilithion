@@ -150,6 +150,12 @@ std::string EncodeBase58Check(const std::vector<uint8_t>& data) {
 }
 
 bool DecodeBase58Check(const std::string& str, std::vector<uint8_t>& data) {
+    // VULN-006 FIX: Prevent DoS via excessively long Base58 strings
+    static const size_t MAX_BASE58_LEN = 1024;  // Reasonable limit for addresses
+    if (str.size() > MAX_BASE58_LEN) {
+        return false;  // Reject maliciously long input
+    }
+
     // Simple implementation - convert from base58
     std::vector<uint8_t> vch;
     vch.reserve(str.size() * 138 / 100 + 1);
@@ -452,6 +458,12 @@ int64_t CWallet::GetBalance() const {
     for (const auto& pair : mapWalletTx) {
         const CWalletTx& wtx = pair.second;
         if (!wtx.fSpent) {
+            // VULN-001 FIX: Protect against integer overflow
+            if (balance > std::numeric_limits<int64_t>::max() - wtx.nValue) {
+                // Overflow would occur - this indicates corrupted wallet or attack
+                std::cerr << "[Wallet] ERROR: Balance overflow detected - wallet may be corrupted" << std::endl;
+                return std::numeric_limits<int64_t>::max();  // Return max value instead of wrapping
+            }
             balance += wtx.nValue;
         }
     }

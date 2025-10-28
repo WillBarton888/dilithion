@@ -68,12 +68,12 @@ const int64_t BLOCK_TARGET_SPACING = 240;  // 4 minutes = 240 seconds
 ```cpp
 // BEFORE:
 static const CAmount MIN_TX_FEE = 10000;        // 0.0001 DIL
-static const CAmount FEE_PER_BYTE = 10;         // 10 sat/byte
+static const CAmount FEE_PER_BYTE = 10;         // 10 ions/byte
 static const CAmount MIN_RELAY_TX_FEE = 50000;  // 0.0005 DIL
 
 // AFTER (Option A):
 static const CAmount MIN_TX_FEE = 50000;        // 0.0005 DIL (5x)
-static const CAmount FEE_PER_BYTE = 25;         // 25 sat/byte (2.5x)
+static const CAmount FEE_PER_BYTE = 25;         // 25 ions/byte (2.5x)
 static const CAmount MIN_RELAY_TX_FEE = 100000; // 0.001 DIL (2x)
 ```
 
@@ -188,7 +188,7 @@ const int64_t BLOCK_TARGET_SPACING = 240;
 ### 2. src/consensus/fees.h
 ```cpp
 static const CAmount MIN_TX_FEE = 50000;        // 0.0005 DIL
-static const CAmount FEE_PER_BYTE = 25;         // 25 sat/byte
+static const CAmount FEE_PER_BYTE = 25;         // 25 ions/byte
 static const CAmount MIN_RELAY_TX_FEE = 100000; // 0.001 DIL
 ```
 
@@ -266,8 +266,8 @@ static const CAmount MIN_RELAY_TX_FEE = 100000; // 0.001 DIL
 | Parameter | Bitcoin | Dilithion | Ratio |
 |-----------|---------|-----------|-------|
 | Block time | 10 min | 4 min | 2.5x faster |
-| Min fee | ~1,000 sats | 50,000 sats | 50x higher |
-| Fee per byte | ~1-5 sat/byte (market) | 25 sat/byte | ~5-25x higher |
+| Min fee | ~1,000 ions | 50,000 ions | 50x higher |
+| Fee per byte | ~1-5 ions/byte (market) | 25 ions/byte | ~5-25x higher |
 | Typical tx size | 250 bytes | 3,864 bytes | 15.5x larger |
 | **Typical tx fee** | **~$1-5** | **~$0.001-0.003** | **1000-5000x cheaper** |
 
@@ -407,9 +407,9 @@ Implemented two critical consensus optimizations before mainnet launch:
    - Better global mining fairness
 
 2. Transaction Fee Increase (Option A):
-   - MIN_TX_FEE: 10,000 → 50,000 sats (5x)
-   - FEE_PER_BYTE: 10 → 25 sats (2.5x)
-   - MIN_RELAY_TX_FEE: 50,000 → 100,000 sats (2x)
+   - MIN_TX_FEE: 10,000 → 50,000 ions (5x)
+   - FEE_PER_BYTE: 10 → 25 ions (2.5x)
+   - MIN_RELAY_TX_FEE: 50,000 → 100,000 ions (2x)
    - Improves spam protection by 3x
    - Increases miner fee revenue by 3x
    - Still very affordable (~0.001-0.003 DIL per tx)

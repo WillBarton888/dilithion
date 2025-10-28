@@ -30,7 +30,7 @@
 
 ### 5. **Economic Sustainability**
 - **Consider minimal dev fund** - Even 1% of block rewards for ongoing development wouldn't compromise fair launch principles
-- **Fee market modeling** - Your 0.0005 DIL + 25 sats/byte may not scale; model under various loads
+- **Fee market modeling** - Your 0.0005 DIL + 25 ions/byte may not scale; model under various loads
 
 ---
 

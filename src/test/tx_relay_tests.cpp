@@ -136,7 +136,7 @@ bool TestInFlightTracking() {
 // ============================================================================
 
 bool TestFloodPrevention() {
-    std::cout << "\n=== Test 3: Flood Prevention (TTL) ===" << std::endl;
+    std::cout << "\n=== Test 3: Flood Prevention (Per-Peer) ===" << std::endl;
     g_tests_total++;
 
     CTxRelayManager relay_mgr;
@@ -152,23 +152,27 @@ bool TestFloodPrevention() {
 
     // Test 3a: Announce to peer1
     TEST_ASSERT(relay_mgr.ShouldAnnounce(peer1, txid),
-                "Should announce initially");
+                "Should announce initially to peer1");
     relay_mgr.MarkAnnounced(peer1, txid);
 
-    // Test 3b: peer2 should not be able to announce within TTL
+    // Test 3b: peer1 should NOT be able to receive the same announcement again
+    TEST_ASSERT(!relay_mgr.ShouldAnnounce(peer1, txid),
+                "Should not re-announce to same peer");
+
+    // Test 3c: peer2 SHOULD be able to receive announcement (different peer!)
+    TEST_ASSERT(relay_mgr.ShouldAnnounce(peer2, txid),
+                "Should announce to different peer for P2P propagation");
+
+    relay_mgr.MarkAnnounced(peer2, txid);
+
+    // Test 3d: peer2 should NOT be able to receive the same announcement again
     TEST_ASSERT(!relay_mgr.ShouldAnnounce(peer2, txid),
-                "Should not announce to different peer within TTL");
+                "Should not re-announce to peer2");
 
-    std::cout << "  - Waiting 2 seconds to test TTL..." << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::cout << "  - Per-peer flood prevention working correctly" << std::endl;
+    std::cout << "  - Proper P2P propagation to multiple peers verified" << std::endl;
 
-    // Test 3c: Still within TTL (15 seconds)
-    TEST_ASSERT(!relay_mgr.ShouldAnnounce(peer2, txid),
-                "Should still not announce within TTL");
-
-    std::cout << "  - Flood prevention (TTL) working correctly" << std::endl;
-
-    TEST_SUCCESS("Flood prevention (TTL expiration)");
+    TEST_SUCCESS("Flood prevention (per-peer tracking)");
     g_tests_passed++;
     return true;
 }

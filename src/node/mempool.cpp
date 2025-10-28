@@ -25,6 +25,15 @@ bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, uns
     if (!tx) { if (error) *error = "Null tx"; return false; }
     const uint256 txid = tx->GetHash();
     if (mapTx.count(txid) > 0) { if (error) *error = "Already in mempool"; return false; }
+
+    // VULN-007 FIX: Check for double-spend conflicts
+    for (const auto& input : tx->vin) {
+        if (mapSpentOutpoints.count(input.prevout) > 0) {
+            if (error) *error = "Transaction spends output already spent by transaction in mempool (double-spend attempt)";
+            return false;
+        }
+    }
+
     std::string fee_error;
     if (!Consensus::CheckFee(*tx, fee, true, &fee_error)) {
         if (error) *error = fee_error;
@@ -32,9 +41,16 @@ bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, uns
     }
     size_t tx_size = tx->GetSerializedSize();
     if (mempool_size + tx_size > max_mempool_size) { if (error) *error = "Mempool full"; return false; }
+
     CTxMemPoolEntry entry(tx, fee, time, height);
     mapTx.emplace(txid, entry);
     setEntries.insert(entry);
+
+    // VULN-007 FIX: Track spent outpoints
+    for (const auto& input : tx->vin) {
+        mapSpentOutpoints.insert(input.prevout);
+    }
+
     mempool_size += tx_size;
     return true;
 }
@@ -43,6 +59,13 @@ bool CTxMemPool::RemoveTx(const uint256& txid) {
     std::lock_guard<std::mutex> lock(cs);
     auto it = mapTx.find(txid);
     if (it == mapTx.end()) return false;
+
+    // VULN-007 FIX: Remove spent outpoints when transaction is removed
+    const CTransaction& tx = it->second.GetTx();
+    for (const auto& input : tx.vin) {
+        mapSpentOutpoints.erase(input.prevout);
+    }
+
     setEntries.erase(it->second);
     mempool_size -= it->second.GetTxSize();
     mapTx.erase(it);
@@ -87,6 +110,7 @@ void CTxMemPool::Clear() {
     std::lock_guard<std::mutex> lock(cs);
     mapTx.clear();
     setEntries.clear();
+    mapSpentOutpoints.clear();  // VULN-007 FIX: Clear spent outpoints
     mempool_size = 0;
 }
 
@@ -124,6 +148,12 @@ void CTxMemPool::RemoveConfirmedTxs(const std::vector<CTransactionRef>& block_tx
         const uint256 txid = tx->GetHash();
         auto it = mapTx.find(txid);
         if (it != mapTx.end()) {
+            // VULN-007 FIX: Remove spent outpoints when confirmed transaction is removed
+            const CTransaction& mempool_tx = it->second.GetTx();
+            for (const auto& input : mempool_tx.vin) {
+                mapSpentOutpoints.erase(input.prevout);
+            }
+
             setEntries.erase(it->second);
             mempool_size -= it->second.GetTxSize();
             mapTx.erase(it);

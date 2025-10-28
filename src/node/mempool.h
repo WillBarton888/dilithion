@@ -44,6 +44,7 @@ private:
     mutable std::mutex cs;
     std::map<uint256, CTxMemPoolEntry> mapTx;
     std::set<CTxMemPoolEntry, CompareTxMemPoolEntryByFeeRate> setEntries;
+    std::set<COutPoint> mapSpentOutpoints;  // VULN-007 FIX: Track spent outpoints to detect double-spends
     unsigned int nHeight;
     size_t max_mempool_size;
     size_t mempool_size;

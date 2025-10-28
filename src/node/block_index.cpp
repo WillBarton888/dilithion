@@ -5,6 +5,7 @@
 #include <consensus/pow.h>
 #include <sstream>
 #include <cstring>
+#include <iostream>
 
 CBlockIndex::CBlockIndex() {
     pprev = nullptr;
@@ -67,12 +68,17 @@ std::string CBlockIndex::ToString() const {
 
 uint256 CBlockIndex::GetBlockProof() const {
     // Calculate proof-of-work from difficulty target
-    // Work = 2^256 / (target + 1)
-    // For simplicity, we approximate as: ~target (bitwise NOT)
-    // This gives higher work for smaller (harder) targets
+    // Work should be inversely proportional to target: smaller target = more work
+    //
+    // Formula: work = 2^256 / (target + 1)
+    // We approximate this by calculating: work = 2^(256 - 8*size) / mantissa
+    // where size is the exponent byte from nBits compact representation
+    //
+    // This avoids overflow and maintains proper ordering
 
     uint256 target = CompactToBig(nBits);
     uint256 proof;
+    memset(proof.data, 0, 32);
 
     // If target is zero, return max work (should never happen)
     bool isZero = true;
@@ -84,15 +90,48 @@ uint256 CBlockIndex::GetBlockProof() const {
     }
 
     if (isZero) {
-        memset(proof.data, 0xFF, 32);  // Max work
+        // Max work
+        memset(proof.data, 0xFF, 32);
         return proof;
     }
 
-    // Calculate ~target (bitwise NOT)
-    // This is an approximation: actual formula is (2^256 - 1) / (target + 1)
-    // But bitwise NOT is faster and good enough for comparison
-    for (int i = 0; i < 32; i++) {
-        proof.data[i] = ~target.data[i];
+    // Extract size and mantissa from nBits compact form
+    // nBits format: 0xSSMMMMM where SS is size, MMMMM is mantissa
+    int size = nBits >> 24;
+    uint64_t mantissa = nBits & 0x00FFFFFF;
+
+    // Avoid division by zero
+    if (mantissa == 0) {
+        memset(proof.data, 0xFF, 32);
+        return proof;
+    }
+
+    // Calculate work = 2^(256 - 8*size) / mantissa
+    // We store this as a 256-bit number in little-endian format
+    //
+    // The key insight: as size increases, target gets larger, so work decreases
+    // As mantissa increases, target gets larger, so work decreases
+    //
+    // We use a simplified calculation that maintains ordering:
+    // Store the exponent in the high bytes and the mantissa reciprocal in low bytes
+
+    // Calculate the byte position where work should be stored
+    // work = 2^(256 - 8*size) / mantissa
+    // The exponent (256 - 8*size) tells us which byte position has the MSB
+    int work_exponent = 256 - 8 * size;  // Bit position of MSB
+    int work_byte_pos = work_exponent / 8;  // Byte position (0-31)
+
+    // Clamp to valid range
+    if (work_byte_pos < 0) work_byte_pos = 0;
+    if (work_byte_pos > 31) work_byte_pos = 31;
+
+    // Calculate reciprocal of mantissa scaled to 64 bits
+    uint64_t work_mantissa = (mantissa > 0) ? (0xFFFFFFFFFFFFFFFFULL / mantissa) : 0xFFFFFFFFFFFFFFFFULL;
+
+    // Store the work value at the appropriate byte position
+    // This creates a properly scaled work value
+    for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
+        proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
     }
 
     return proof;

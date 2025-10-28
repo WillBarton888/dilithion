@@ -95,9 +95,9 @@ $ ./phase1_test
 **Test Output:**
 ```
 Testing fee calculations...
-  1-in, 1-out: 3864 bytes, fee: 48640 sats
-  Fee rate: 12.588 sat/byte
-  2-in, 1-out: 7646 bytes, fee: 86460 sats
+  1-in, 1-out: 3864 bytes, fee: 48640 ions
+  Fee rate: 12.588 ions/byte
+  2-in, 1-out: 7646 bytes, fee: 86460 ions
   ✓ Fee calculations correct
 
 Testing uint256 operators...
@@ -119,7 +119,7 @@ Testing mempool basic operations...
 ```
 
 **Verified Components:**
-- ✅ Fee validation (Hybrid Model: 10k base + 10 sat/byte)
+- ✅ Fee validation (Hybrid Model: 10k base + 10 ions/byte)
 - ✅ uint256 operators
 - ✅ Transaction basics
 - ✅ Block index

@@ -129,11 +129,12 @@ MINING_INTEGRATION_TEST_SOURCE := src/test/mining_integration_tests.cpp
 .PHONY: all clean install help tests test depends
 .DEFAULT_GOAL := all
 
-# Default target: build main binaries
-all: dilithion-node genesis_gen
+# Default target: build main binaries and utilities
+all: dilithion-node genesis_gen check-wallet-balance
 	@echo "$(COLOR_GREEN)✓ Build complete!$(COLOR_RESET)"
-	@echo "  dilithion-node: $(shell ls -lh dilithion-node 2>/dev/null | awk '{print $$5}')"
-	@echo "  genesis_gen:    $(shell ls -lh genesis_gen 2>/dev/null | awk '{print $$5}')"
+	@echo "  dilithion-node:        $(shell ls -lh dilithion-node 2>/dev/null | awk '{print $$5}')"
+	@echo "  genesis_gen:           $(shell ls -lh genesis_gen 2>/dev/null | awk '{print $$5}')"
+	@echo "  check-wallet-balance:  $(shell ls -lh check-wallet-balance 2>/dev/null | awk '{print $$5}')"
 
 # ============================================================================
 # Main Binaries
@@ -153,6 +154,11 @@ inspect_db: $(CORE_OBJECTS) $(OBJ_DIR)/tools/inspect_db.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ inspect_db built successfully$(COLOR_RESET)"
+
+check-wallet-balance: $(CORE_OBJECTS) $(OBJ_DIR)/check-wallet-balance.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ check-wallet-balance built successfully$(COLOR_RESET)"
 
 # ============================================================================
 # Test Binaries
@@ -273,6 +279,11 @@ $(OBJ_DIR)/test:
 
 # Compile C++ source files
 $(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/test
+	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
+	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile utility C++ files from root directory
+$(OBJ_DIR)/%.o: %.cpp | $(OBJ_DIR)
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 

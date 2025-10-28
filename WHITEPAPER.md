@@ -773,7 +773,7 @@ Dilithion aims to be:
 | **Mining Algorithm** | RandomX (Monero-derived, ASIC-resistant) |
 | **Difficulty Adjustment** | Every 2,016 blocks (~5.6 days) |
 | **Address Format** | Dilithium3 public key hash (SHA-3) |
-| **Transaction Fee** | 0.0005 DIL base + 25 sats/byte |
+| **Transaction Fee** | 0.0005 DIL base + 25 ions/byte |
 | **Confirmations (typical)** | 3-10 blocks (12-40 minutes) |
 | **Genesis Block** | Hardcoded, January 1, 2026 |
 

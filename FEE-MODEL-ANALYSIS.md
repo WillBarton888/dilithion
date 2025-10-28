@@ -27,7 +27,7 @@ Dilithion's transaction fee model is **acceptable for launch** but requires atte
 
 ```cpp
 static const CAmount MIN_TX_FEE = 10000;        // 10,000 satoshis = 0.0001 DIL
-static const CAmount FEE_PER_BYTE = 10;         // 10 sat/byte
+static const CAmount FEE_PER_BYTE = 10;         // 10 ions/byte
 static const CAmount MIN_RELAY_TX_FEE = 50000;  // 50,000 satoshis = 0.0005 DIL
 static const CAmount MAX_REASONABLE_FEE = 10000000; // 0.1 DIL
 
@@ -52,8 +52,8 @@ Fee = MIN_TX_FEE + (tx_size_bytes × FEE_PER_BYTE)
 | 2-input, 2-output | 9,598 | 105,980 | 0.00105980 |
 
 **Comparison to Bitcoin:**
-- Bitcoin 1-in-1-out: ~250 bytes → ~2,500 sats fee
-- **Dilithion 1-in-1-out: ~3,864 bytes → 48,640 sats fee**
+- Bitcoin 1-in-1-out: ~250 bytes → ~2,500 ions fee
+- **Dilithion 1-in-1-out: ~3,864 bytes → 48,640 ions fee**
 - **Dilithion transactions are ~15x larger and more expensive**
 
 ---
@@ -198,12 +198,12 @@ Year 32 (1.5625 DIL reward):
 
 // Current:
 static const CAmount MIN_TX_FEE = 10000;        // 0.0001 DIL
-static const CAmount FEE_PER_BYTE = 10;         // 10 sat/byte
+static const CAmount FEE_PER_BYTE = 10;         // 10 ions/byte
 static const CAmount MIN_RELAY_TX_FEE = 50000;  // 0.0005 DIL
 
 // Proposed Option A:
 static const CAmount MIN_TX_FEE = 50000;        // 0.0005 DIL (5x increase)
-static const CAmount FEE_PER_BYTE = 25;         // 25 sat/byte (2.5x increase)
+static const CAmount FEE_PER_BYTE = 25;         // 25 ions/byte (2.5x increase)
 static const CAmount MIN_RELAY_TX_FEE = 100000; // 0.001 DIL (2x increase)
 ```
 
@@ -240,7 +240,7 @@ static const CAmount MIN_RELAY_TX_FEE = 100000; // 0.001 DIL (2x increase)
 
 ```cpp
 static const CAmount MIN_TX_FEE = 25000;        // 0.00025 DIL (2.5x increase)
-static const CAmount FEE_PER_BYTE = 15;         // 15 sat/byte (1.5x increase)
+static const CAmount FEE_PER_BYTE = 15;         // 15 ions/byte (1.5x increase)
 static const CAmount MIN_RELAY_TX_FEE = 75000;  // 0.00075 DIL (1.5x increase)
 ```
 
@@ -356,7 +356,7 @@ Future:  N inputs = 1 aggregated signature (~4,000 bytes)
 ```cpp
 // src/consensus/fees.h
 static const CAmount MIN_TX_FEE = 50000;        // 0.0005 DIL
-static const CAmount FEE_PER_BYTE = 25;         // 25 sat/byte
+static const CAmount FEE_PER_BYTE = 25;         // 25 ions/byte
 static const CAmount MIN_RELAY_TX_FEE = 100000; // 0.001 DIL
 ```
 
@@ -430,7 +430,7 @@ static const CAmount MIN_RELAY_TX_FEE = 100000; // 0.001 DIL
 | Signature size | 72 bytes | 3,309 bytes | 46x |
 | Typical tx size | ~250 bytes | ~3,864 bytes | 15x |
 | Min fee (current) | ~0.00001 BTC | ~0.0005 DIL | 50x higher |
-| **Fee per byte** | ~40 sat/byte | ~13 sat/byte | **3x lower** |
+| **Fee per byte** | ~40 ions/byte | ~13 ions/byte | **3x lower** |
 
 **Observation:** Despite larger transactions, Dilithion's per-byte fee is actually **lower** than Bitcoin. This is reasonable given the security trade-off.
 

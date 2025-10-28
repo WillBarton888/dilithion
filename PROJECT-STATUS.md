@@ -37,7 +37,7 @@
 
 ### Components Delivered
 - ✅ Blockchain storage (LevelDB wrapper)
-- ✅ Fee validation (Hybrid Model: 10k + 10 sat/byte)
+- ✅ Fee validation (Hybrid Model: 10k + 10 ions/byte)
 - ✅ Transaction mempool (fee-rate prioritization)
 - ✅ Block index management
 - ✅ Supporting infrastructure (uint256, CTransaction, utilities)
