@@ -188,6 +188,10 @@ extern CTransactionValidator* g_tx_validator;
 extern CUTXOSet* g_utxo_set;
 extern unsigned int g_chain_height;
 
+// Global P2P networking pointers (NW-005)
+extern CConnectionManager* g_connection_manager;
+extern CNetMessageProcessor* g_message_processor;
+
 /**
  * Announce a transaction to all connected peers (Phase 5.3)
  * @param txid Transaction hash to announce

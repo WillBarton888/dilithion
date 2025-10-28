@@ -33,6 +33,7 @@
 #include <consensus/chain.h>
 
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <memory>
 #include <csignal>
@@ -154,13 +155,18 @@ struct NodeConfig {
     }
 };
 
+// Global coinbase transaction reference for mining callback
+static CTransactionRef g_currentCoinbase;
+static std::mutex g_coinbaseMutex;
+
 /**
  * Build mining template for next block
  * @param blockchain Reference to blockchain database
+ * @param wallet Reference to wallet (for coinbase reward address)
  * @param verbose If true, print detailed template information
  * @return Optional containing template if successful, nullopt if error
  */
-std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, bool verbose = false) {
+std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWallet& wallet, bool verbose = false) {
     // Get blockchain tip to build on
     uint256 hashBestBlock;
     uint32_t nHeight = 0;
@@ -201,12 +207,56 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, boo
     block.nBits = GetNextWorkRequired(pindexPrev);
     block.nNonce = 0;
 
-    // Create coinbase transaction (block reward)
-    std::string coinbaseMsg = "Block " + std::to_string(nHeight) + " mined by Dilithion";
-    block.vtx.resize(coinbaseMsg.size());
-    memcpy(block.vtx.data(), coinbaseMsg.c_str(), coinbaseMsg.size());
+    // Get wallet address for coinbase reward
+    CAddress minerAddress = wallet.GetNewAddress();
+    std::vector<uint8_t> minerPubKeyHash = wallet.GetPubKeyHash();
 
-    // Calculate merkle root (SHA3-256 hash of coinbase)
+    // Calculate block subsidy (50 DIL * COIN, halving every 210000 blocks)
+    int64_t nSubsidy = 50 * COIN;
+    int nHalvings = nHeight / 210000;
+    if (nHalvings >= 64) {
+        nSubsidy = 0;
+    } else {
+        nSubsidy >>= nHalvings;
+    }
+
+    // Create coinbase transaction
+    CTransaction coinbaseTx;
+    coinbaseTx.nVersion = 1;
+    coinbaseTx.nLockTime = 0;
+
+    // Coinbase input (null prevout)
+    CTxIn coinbaseIn;
+    coinbaseIn.prevout.SetNull();
+    std::string coinbaseMsg = "Block " + std::to_string(nHeight) + " mined by Dilithion";
+    coinbaseIn.scriptSig.resize(coinbaseMsg.size());
+    memcpy(coinbaseIn.scriptSig.data(), coinbaseMsg.c_str(), coinbaseMsg.size());
+    coinbaseIn.nSequence = 0xffffffff;
+    coinbaseTx.vin.push_back(coinbaseIn);
+
+    // Coinbase output (reward to miner)
+    CTxOut coinbaseOut;
+    coinbaseOut.nValue = nSubsidy;
+    coinbaseOut.scriptPubKey = WalletCrypto::CreateScriptPubKey(minerPubKeyHash);
+    coinbaseTx.vout.push_back(coinbaseOut);
+
+    // DEBUG: Show coinbase details
+    if (verbose) {
+        std::cout << "[DEBUG] Coinbase creation:" << std::endl;
+        std::cout << "[DEBUG]   Miner pubkey hash size: " << minerPubKeyHash.size() << " bytes" << std::endl;
+        std::cout << "[DEBUG]   scriptPubKey size: " << coinbaseOut.scriptPubKey.size() << " bytes" << std::endl;
+    }
+
+    // Store coinbase transaction globally for callback access
+    {
+        std::lock_guard<std::mutex> lock(g_coinbaseMutex);
+        g_currentCoinbase = MakeTransactionRef(coinbaseTx);
+    }
+
+    // Serialize coinbase for block
+    block.vtx = coinbaseTx.Serialize();
+
+    // Calculate merkle root (SHA3-256 hash of serialized coinbase)
     uint8_t merkleHash[32];
     extern void SHA3_256(const uint8_t* data, size_t len, uint8_t hash[32]);
     SHA3_256(block.vtx.data(), block.vtx.size(), merkleHash);
@@ -495,6 +545,10 @@ int main(int argc, char* argv[]) {
         CNetMessageProcessor message_processor(peer_manager);
         CConnectionManager connection_manager(peer_manager, message_processor);
 
+        // Set global pointers for transaction announcement (NW-005)
+        g_connection_manager = &connection_manager;
+        g_message_processor = &message_processor;
+
         // Register version handler to automatically respond with verack
         message_processor.SetVersionHandler([&connection_manager, &peer_manager](int peer_id, const NetProtocol::CVersionMessage& msg) {
             std::cout << "[P2P] Handshake with peer " << peer_id << " (" << msg.user_agent << ")" << std::endl;
@@ -674,8 +728,22 @@ int main(int argc, char* argv[]) {
         g_node_state.miner = &miner;
         std::cout << "  ✓ Mining controller initialized (" << mining_threads << " threads)" << std::endl;
 
-        // Set up block found callback to save mined blocks
-        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &peer_manager, &message_processor](const CBlock& block) {
+        // Phase 4: Initialize wallet (before mining callback setup)
+        std::cout << "Initializing wallet..." << std::endl;
+        CWallet wallet;
+
+        // Generate initial key if wallet is empty
+        if (wallet.GetAddresses().empty()) {
+            std::cout << "  Generating initial address..." << std::endl;
+            wallet.GenerateNewKey();
+            CAddress addr = wallet.GetNewAddress();
+            std::cout << "  ✓ Initial address: " << addr.ToString() << std::endl;
+        } else {
+            std::cout << "  ✓ Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
+        }
+
+        // Set up block found callback to save mined blocks and credit wallet
+        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &peer_manager, &message_processor, &wallet](const CBlock& block) {
             // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
             if (!g_node_state.running) {
                 // Shutting down - discard this block to prevent race condition
@@ -692,6 +760,72 @@ int main(int argc, char* argv[]) {
             std::cout << "Nonce: " << block.nNonce << std::endl;
             std::cout << "Difficulty: 0x" << std::hex << block.nBits << std::dec << std::endl;
             std::cout << "======================================" << std::endl;
+            std::cout << std::endl;
+
+            // Credit coinbase transaction to wallet using globally stored coinbase
+            CTransactionRef coinbase;
+            {
+                std::lock_guard<std::mutex> lock(g_coinbaseMutex);
+                coinbase = g_currentCoinbase;
+            }
+
+            if (coinbase && !coinbase->vout.empty()) {
+                const CTxOut& coinbaseOut = coinbase->vout[0];
+
+                // Extract public key hash from scriptPubKey to verify it's ours
+                std::vector<uint8_t> pubkey_hash = WalletCrypto::ExtractPubKeyHash(coinbaseOut.scriptPubKey);
+                std::vector<uint8_t> our_hash = wallet.GetPubKeyHash();
+
+                // DEBUG: Show verification details
+                std::cout << "[DEBUG] Coinbase verification:" << std::endl;
+                std::cout << "[DEBUG]   scriptPubKey size: " << coinbaseOut.scriptPubKey.size() << " bytes" << std::endl;
+                std::cout << "[DEBUG]   Extracted pubkey_hash size: " << pubkey_hash.size() << " bytes" << std::endl;
+                std::cout << "[DEBUG]   Our wallet hash size: " << our_hash.size() << " bytes" << std::endl;
+                std::cout << "[DEBUG]   Hashes match: " << (pubkey_hash == our_hash ? "YES" : "NO") << std::endl;
+                if (pubkey_hash.empty()) {
+                    std::cout << "[DEBUG]   WARNING: Extracted hash is empty!" << std::endl;
+                }
+
+                // Verify this coinbase belongs to our wallet
+                std::cout << "[DEBUG] Before wallet crediting if block" << std::endl;
+                std::cout << "[DEBUG] pubkey_hash.empty() = " << (pubkey_hash.empty() ? "true" : "false") << std::endl;
+                std::cout << "[DEBUG] hashes equal = " << (pubkey_hash == our_hash ? "true" : "false") << std::endl;
+
+                if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
+                    std::cout << "[DEBUG] Inside wallet crediting if block!" << std::endl;
+
+                    // Construct address from the verified public key hash
+                    CAddress our_address(pubkey_hash);
+                    std::cout << "[DEBUG] Successfully constructed address from pubkey_hash" << std::endl;
+
+                    // Get block height for UTXO tracking
+                    uint32_t block_height = 0;
+                    CBlockIndex tempIndex;
+                    if (blockchain.ReadBlockIndex(block.hashPrevBlock, tempIndex)) {
+                        block_height = tempIndex.nHeight + 1;
+                    }
+
+                    std::cout << "[DEBUG] About to call wallet.AddTxOut()..." << std::endl;
+                    // Add coinbase UTXO to wallet
+                    wallet.AddTxOut(coinbase->GetHash(), 0, coinbaseOut.nValue, our_address, block_height);
+                    std::cout << "[DEBUG] Successfully added UTXO to wallet" << std::endl;
+
+                    // Display credited amount
+                    double amountDIL = static_cast<double>(coinbaseOut.nValue) / 100000000.0;
+                    std::cout << "[Wallet] Coinbase credited: " << std::fixed << std::setprecision(8)
+                              << amountDIL << " DIL" << std::endl;
+                } else {
+                    std::cout << "[DEBUG] Skipped wallet crediting - if condition was false" << std::endl;
+                }
+            }
+
+            std::cout << "[DEBUG] After coinbase processing, before balance display" << std::endl;
+
+            // Display updated wallet balance
+            int64_t balance = wallet.GetBalance();
+            double balanceInDIL = static_cast<double>(balance) / 100000000.0;
+            std::cout << "[Wallet] Total Balance: " << std::fixed << std::setprecision(8)
+                      << balanceInDIL << " DIL (" << balance << " ions)" << std::endl;
             std::cout << std::endl;
 
             // Save block to blockchain database
@@ -787,20 +921,6 @@ int main(int argc, char* argv[]) {
                 std::cerr << "[Blockchain] ERROR: Failed to activate mined block in chain" << std::endl;
             }
         });
-
-        // Phase 4: Initialize wallet
-        std::cout << "Initializing wallet..." << std::endl;
-        CWallet wallet;
-
-        // Generate initial key if wallet is empty
-        if (wallet.GetAddresses().empty()) {
-            std::cout << "  Generating initial address..." << std::endl;
-            wallet.GenerateNewKey();
-            CAddress addr = wallet.GetNewAddress();
-            std::cout << "  ✓ Initial address: " << addr.ToString() << std::endl;
-        } else {
-            std::cout << "  ✓ Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
-        }
 
         // Phase 2.5: Start P2P networking server
         std::cout << "Starting P2P networking server..." << std::endl;
@@ -1020,7 +1140,7 @@ int main(int argc, char* argv[]) {
             std::cout << std::endl;
             std::cout << "Starting mining..." << std::endl;
 
-            auto templateOpt = BuildMiningTemplate(blockchain, true);
+            auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
             if (!templateOpt) {
                 std::cerr << "ERROR: Failed to build mining template" << std::endl;
                 std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
@@ -1061,7 +1181,7 @@ int main(int argc, char* argv[]) {
 
                 // Build new template for next block (only if mining was requested)
                 if (g_node_state.mining_enabled.load()) {
-                    auto templateOpt = BuildMiningTemplate(blockchain, false);
+                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, false);
                     if (templateOpt) {
                         // Restart mining with new template
                         miner.StartMining(*templateOpt);
@@ -1110,6 +1230,10 @@ int main(int argc, char* argv[]) {
         if (p2p_maint_thread.joinable()) {
             p2p_maint_thread.join();
         }
+
+        // Clear global P2P networking pointers (NW-005)
+        g_connection_manager = nullptr;
+        g_message_processor = nullptr;
 
         std::cout << "  Stopping RPC server..." << std::endl;
         rpc_server.Stop();

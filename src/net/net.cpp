@@ -25,6 +25,10 @@ CTransactionValidator* g_tx_validator = nullptr;
 CUTXOSet* g_utxo_set = nullptr;
 unsigned int g_chain_height = 0;
 
+// Global pointers for P2P networking (NW-005)
+CConnectionManager* g_connection_manager = nullptr;
+CNetMessageProcessor* g_message_processor = nullptr;
+
 std::string CNetworkStats::ToString() const {
     return strprintf("CNetworkStats(peers=%d/%d, handshake=%d, "
                     "bytes=%d/%d, msgs=%d/%d)",
@@ -930,21 +934,64 @@ void CConnectionManager::Cleanup() {
  * @param exclude_peer Peer ID to exclude (e.g., originating peer), -1 for none
  */
 void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
-    // Note: This function needs access to peer manager and message processor
-    // In a real implementation, these would be passed as parameters or accessed via globals
-    // For now, this is a simplified version that will be called from contexts
-    // where peer management is available
+    // Check if networking infrastructure is initialized
+    if (!g_peer_manager || !g_connection_manager || !g_message_processor || !g_tx_relay_manager) {
+        std::cout << "[TX-RELAY] Cannot announce transaction " << txid.GetHex().substr(0, 16)
+                  << "... (networking not initialized)" << std::endl;
+        return;
+    }
 
-    std::cout << "[TX-RELAY] Announcing transaction " << txid.GetHex().substr(0, 16)
-              << "... to all peers (excluding peer " << exclude_peer << ")" << std::endl;
+    // Get list of connected peers
+    std::vector<std::shared_ptr<CPeer>> peers = g_peer_manager->GetConnectedPeers();
 
-    // This function will be properly implemented when called from contexts
-    // with access to connection manager
-    // The actual implementation would:
-    // 1. Get list of connected peers from peer manager
-    // 2. For each peer (except exclude_peer):
-    //    a. Check if we should announce (via g_tx_relay_manager->ShouldAnnounce)
-    //    b. Create INV message with MSG_TX_INV type
-    //    c. Send INV message to peer
-    //    d. Mark as announced (via g_tx_relay_manager->MarkAnnounced)
+    if (peers.empty()) {
+        std::cout << "[TX-RELAY] No connected peers to announce transaction "
+                  << txid.GetHex().substr(0, 16) << "..." << std::endl;
+        return;
+    }
+
+    int announced_count = 0;
+    int skipped_count = 0;
+
+    // Announce to each peer
+    for (const auto& peer : peers) {
+        // Skip excluded peer
+        if (peer->id == exclude_peer) {
+            continue;
+        }
+
+        // Skip if not handshake complete
+        if (!peer->IsHandshakeComplete()) {
+            continue;
+        }
+
+        // Skip if peer doesn't relay transactions
+        if (!peer->relay) {
+            continue;
+        }
+
+        // Check if we should announce to this peer
+        if (!g_tx_relay_manager->ShouldAnnounce(peer->id, txid)) {
+            skipped_count++;
+            continue;
+        }
+
+        // Create INV message
+        std::vector<NetProtocol::CInv> inv_vec;
+        inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, txid));
+
+        CNetMessage inv_message = g_message_processor->CreateInvMessage(inv_vec);
+
+        // Send INV message to peer
+        if (g_connection_manager->SendMessage(peer->id, inv_message)) {
+            // Mark as announced
+            g_tx_relay_manager->MarkAnnounced(peer->id, txid);
+            announced_count++;
+        }
+    }
+
+    std::cout << "[TX-RELAY] Announced transaction " << txid.GetHex().substr(0, 16)
+              << "... to " << announced_count << " peer(s) "
+              << "(skipped " << skipped_count << " already announced, "
+              << "excluded peer " << exclude_peer << ")" << std::endl;
 }
