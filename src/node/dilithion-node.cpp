@@ -38,6 +38,7 @@
 #include <memory>
 #include <csignal>
 #include <cstring>
+#include <cassert>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -548,6 +549,12 @@ int main(int argc, char* argv[]) {
         // Set global pointers for transaction announcement (NW-005)
         g_connection_manager = &connection_manager;
         g_message_processor = &message_processor;
+
+        // Verify global pointers are properly initialized (audit recommendation)
+        assert(g_connection_manager != nullptr && "g_connection_manager must be initialized");
+        assert(g_message_processor != nullptr && "g_message_processor must be initialized");
+        assert(g_peer_manager != nullptr && "g_peer_manager must be initialized");
+        assert(g_tx_relay_manager != nullptr && "g_tx_relay_manager must be initialized");
 
         // Register version handler to automatically respond with verack
         message_processor.SetVersionHandler([&connection_manager, &peer_manager](int peer_id, const NetProtocol::CVersionMessage& msg) {

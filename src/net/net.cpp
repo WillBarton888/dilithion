@@ -983,10 +983,14 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
         CNetMessage inv_message = g_message_processor->CreateInvMessage(inv_vec);
 
         // Send INV message to peer
+        // Only mark as announced if send succeeds (audit recommendation)
         if (g_connection_manager->SendMessage(peer->id, inv_message)) {
-            // Mark as announced
+            // Mark as announced to prevent duplicates
             g_tx_relay_manager->MarkAnnounced(peer->id, txid);
             announced_count++;
+        } else {
+            // Send failed - don't mark as announced, will retry on next call
+            skipped_count++;
         }
     }
 
