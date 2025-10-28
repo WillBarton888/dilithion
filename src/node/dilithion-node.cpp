@@ -25,6 +25,7 @@
 #include <consensus/params.h>
 #include <net/peers.h>
 #include <net/net.h>
+#include <net/tx_relay.h>
 #include <net/socket.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
@@ -581,9 +582,16 @@ int main(int argc, char* argv[]) {
 
         // Phase 2: Initialize P2P networking (prepare for later)
         std::cout << "Initializing P2P components..." << std::endl;
-        CPeerManager peer_manager;
-        CNetMessageProcessor message_processor(peer_manager);
-        CConnectionManager connection_manager(peer_manager, message_processor);
+
+        // Initialize peer manager as unique_ptr (global)
+        g_peer_manager = std::make_unique<CPeerManager>();
+
+        // Initialize transaction relay manager (global)
+        g_tx_relay_manager = new CTxRelayManager();
+
+        // Create message processor and connection manager (local, using global peer manager)
+        CNetMessageProcessor message_processor(*g_peer_manager);
+        CConnectionManager connection_manager(*g_peer_manager, message_processor);
 
         // Set global pointers for transaction announcement (NW-005)
         g_connection_manager = &connection_manager;
@@ -596,14 +604,14 @@ int main(int argc, char* argv[]) {
         assert(g_tx_relay_manager != nullptr && "g_tx_relay_manager must be initialized");
 
         // Register version handler to automatically respond with verack
-        message_processor.SetVersionHandler([&connection_manager, &peer_manager](int peer_id, const NetProtocol::CVersionMessage& msg) {
+        message_processor.SetVersionHandler([&connection_manager](int peer_id, const NetProtocol::CVersionMessage& msg) {
             std::cout << "[P2P] Handshake with peer " << peer_id << " (" << msg.user_agent << ")" << std::endl;
 
             // Send verack in response
             connection_manager.SendVerackMessage(peer_id);
 
             // Check if handshake is now complete (both sides sent verack)
-            auto peer = peer_manager.GetPeer(peer_id);
+            auto peer = g_peer_manager->GetPeer(peer_id);
             if (peer && peer->IsHandshakeComplete()) {
                 std::cout << "[P2P] Handshake complete with peer " << peer_id << std::endl;
             }
@@ -789,7 +797,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Set up block found callback to save mined blocks and credit wallet
-        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &peer_manager, &message_processor, &wallet](const CBlock& block) {
+        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &message_processor, &wallet](const CBlock& block) {
             // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
             if (!g_node_state.running) {
                 // Shutting down - discard this block to prevent race condition
@@ -907,7 +915,7 @@ int main(int argc, char* argv[]) {
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndex->nHeight << std::endl;
 
                     // Broadcast block to network (P2P block relay)
-                    auto connected_peers = peer_manager.GetConnectedPeers();
+                    auto connected_peers = g_peer_manager->GetConnectedPeers();
                     if (!connected_peers.empty()) {
                         // Create inv message announcing new block
                         std::vector<NetProtocol::CInv> inv;
@@ -1140,12 +1148,12 @@ int main(int argc, char* argv[]) {
         }
 
         // Launch P2P message receive thread
-        std::thread p2p_recv_thread([&connection_manager, &peer_manager]() {
+        std::thread p2p_recv_thread([&connection_manager]() {
             std::cout << "  ✓ P2P receive thread started" << std::endl;
 
             while (g_node_state.running) {
                 // Get all connected peers
-                auto peers = peer_manager.GetConnectedPeers();
+                auto peers = g_peer_manager->GetConnectedPeers();
 
                 // Try to receive messages from each peer
                 for (const auto& peer : peers) {
@@ -1290,6 +1298,13 @@ int main(int argc, char* argv[]) {
         g_connection_manager = nullptr;
         g_message_processor = nullptr;
 
+        // Clean up transaction relay manager
+        delete g_tx_relay_manager;
+        g_tx_relay_manager = nullptr;
+
+        // Reset peer manager unique_ptr
+        g_peer_manager.reset();
+
         std::cout << "  Stopping RPC server..." << std::endl;
         rpc_server.Stop();
 
@@ -1307,6 +1322,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "Fatal error: " << e.what() << std::endl;
 
         // Cleanup on error
+        if (g_tx_relay_manager) {
+            delete g_tx_relay_manager;
+            g_tx_relay_manager = nullptr;
+        }
+        g_peer_manager.reset();
+
         if (Dilithion::g_chainParams) {
             delete Dilithion::g_chainParams;
             Dilithion::g_chainParams = nullptr;
