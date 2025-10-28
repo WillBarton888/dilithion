@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <node/utxo_set.h>
+#include <consensus/validation.h>
 #include <leveldb/write_batch.h>
 #include <leveldb/options.h>
 #include <cstring>
@@ -349,14 +350,160 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
         return false;
     }
 
-    // Note: This is a simplified implementation for Phase 5.1.2
-    // Full transaction parsing will be implemented in Phase 5.4
-    // For now, we just provide the interface
+    // ============================================================================
+    // CS-004: UTXO Set Updates - ApplyBlock Implementation
+    // ============================================================================
 
-    std::cout << "[INFO] CUTXOSet::ApplyBlock: Block application at height " << height
-              << " (transaction processing not yet implemented)" << std::endl;
+    // Step 1: Deserialize transactions from block (CS-002)
+    std::vector<CTransactionRef> transactions;
+    std::string error;
 
+    CBlockValidator validator;
+    if (!validator.DeserializeBlockTransactions(block, transactions, error)) {
+        std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Failed to deserialize transactions: "
+                  << error << std::endl;
+        return false;
+    }
+
+    if (transactions.empty()) {
+        std::cerr << "[ERROR] CUTXOSet::ApplyBlock: No transactions in block" << std::endl;
+        return false;
+    }
+
+    // Step 2: Prepare undo data (spent UTXOs) for potential rollback
+    // Format: count (4 bytes) + for each UTXO: hash (32) + n (4) + CUTXOEntry
+    std::vector<uint8_t> undoData;
+    uint32_t spentCount = 0;
+
+    // Reserve space for count (will write at end)
+    undoData.resize(4, 0);
+
+    // Step 3: Process each transaction
+    leveldb::WriteBatch batch;
+
+    for (size_t tx_idx = 0; tx_idx < transactions.size(); ++tx_idx) {
+        const CTransactionRef& tx = transactions[tx_idx];
+        bool is_coinbase = (tx_idx == 0);
+        uint256 txid = tx->GetHash();
+
+        // Step 3a: Spend inputs (skip for coinbase)
+        if (!is_coinbase) {
+            for (const auto& txin : tx->vin) {
+                // Get UTXO entry before spending (for undo data)
+                CUTXOEntry entry;
+                if (!GetUTXO(txin.prevout, entry)) {
+                    std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Input not found in UTXO set: "
+                              << "tx " << tx_idx << ", input spending "
+                              << txin.prevout.hash.GetHex() << ":" << txin.prevout.n << std::endl;
+                    return false;
+                }
+
+                // Save to undo data
+                undoData.insert(undoData.end(), txin.prevout.hash.begin(), txin.prevout.hash.end());
+
+                uint8_t n_bytes[4];
+                std::memcpy(n_bytes, &txin.prevout.n, 4);
+                undoData.insert(undoData.end(), n_bytes, n_bytes + 4);
+
+                // Serialize CUTXOEntry: nValue (8) + scriptPubKey length (4) + scriptPubKey + nHeight (4) + fCoinBase (1)
+                uint8_t value_bytes[8];
+                std::memcpy(value_bytes, &entry.out.nValue, 8);
+                undoData.insert(undoData.end(), value_bytes, value_bytes + 8);
+
+                uint32_t script_len = entry.out.scriptPubKey.size();
+                uint8_t len_bytes[4];
+                std::memcpy(len_bytes, &script_len, 4);
+                undoData.insert(undoData.end(), len_bytes, len_bytes + 4);
+                undoData.insert(undoData.end(), entry.out.scriptPubKey.begin(), entry.out.scriptPubKey.end());
+
+                uint8_t height_bytes[4];
+                std::memcpy(height_bytes, &entry.nHeight, 4);
+                undoData.insert(undoData.end(), height_bytes, height_bytes + 4);
+
+                undoData.push_back(entry.fCoinBase ? 1 : 0);
+
+                spentCount++;
+
+                // Remove from UTXO set
+                std::string key = "u";
+                key.append(reinterpret_cast<const char*>(txin.prevout.hash.data), 32);
+                key.append(reinterpret_cast<const char*>(&txin.prevout.n), 4);
+                batch.Delete(key);
+
+                // Update statistics
+                if (stats.nUTXOs > 0) stats.nUTXOs--;
+                if (stats.nTotalAmount >= entry.out.nValue) {
+                    stats.nTotalAmount -= entry.out.nValue;
+                }
+            }
+        }
+
+        // Step 3b: Add new UTXOs from outputs
+        for (uint32_t n = 0; n < tx->vout.size(); ++n) {
+            COutPoint outpoint(txid, n);
+            const CTxOut& txout = tx->vout[n];
+
+            // Build key: "u" + txhash (32 bytes) + n (4 bytes)
+            std::string key = "u";
+            key.append(reinterpret_cast<const char*>(outpoint.hash.data), 32);
+            key.append(reinterpret_cast<const char*>(&outpoint.n), 4);
+
+            // Build value: CUTXOEntry serialization
+            std::vector<uint8_t> value;
+            value.resize(8 + 4 + txout.scriptPubKey.size() + 4 + 1);
+
+            uint8_t* ptr = value.data();
+            std::memcpy(ptr, &txout.nValue, 8);
+            ptr += 8;
+
+            uint32_t script_len = txout.scriptPubKey.size();
+            std::memcpy(ptr, &script_len, 4);
+            ptr += 4;
+
+            std::memcpy(ptr, txout.scriptPubKey.data(), script_len);
+            ptr += script_len;
+
+            std::memcpy(ptr, &height, 4);
+            ptr += 4;
+
+            *ptr = is_coinbase ? 1 : 0;
+
+            batch.Put(key, leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
+
+            // Update statistics
+            stats.nUTXOs++;
+            stats.nTotalAmount += txout.nValue;
+        }
+    }
+
+    // Step 4: Write spent count to undo data
+    std::memcpy(undoData.data(), &spentCount, 4);
+
+    // Step 5: Store undo data with key "undo_<blockhash>"
+    uint256 blockHash = block.GetHash();
+    std::string undoKey = "undo_";
+    undoKey.append(reinterpret_cast<const char*>(blockHash.data), 32);
+    batch.Put(undoKey, leveldb::Slice(reinterpret_cast<const char*>(undoData.data()), undoData.size()));
+
+    // Step 6: Update height
     stats.nHeight = height;
+
+    // Step 7: Write batch to database
+    leveldb::Status status = db->Write(leveldb::WriteOptions(), &batch);
+    if (!status.ok()) {
+        std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Database write failed: " << status.ToString() << std::endl;
+        return false;
+    }
+
+    // Step 8: Flush statistics
+    if (!Flush()) {
+        std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Failed to flush statistics" << std::endl;
+        return false;
+    }
+
+    std::cout << "[INFO] CUTXOSet::ApplyBlock: Applied block at height " << height
+              << " (" << transactions.size() << " txs, " << spentCount << " inputs spent)"
+              << std::endl;
 
     return true;
 }
@@ -367,11 +514,190 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
         return false;
     }
 
-    // Note: This is a simplified implementation for Phase 5.1.2
-    // Full undo logic will be implemented in Phase 5.4
-    // For now, we just provide the interface
+    // ============================================================================
+    // CS-004: UTXO Set Updates - UndoBlock Implementation
+    // ============================================================================
 
-    std::cout << "[INFO] CUTXOSet::UndoBlock: Block undo (transaction processing not yet implemented)" << std::endl;
+    // Step 1: Load undo data for this block
+    uint256 blockHash = block.GetHash();
+    std::string undoKey = "undo_";
+    undoKey.append(reinterpret_cast<const char*>(blockHash.data), 32);
+
+    std::string undoValue;
+    leveldb::Status status = db->Get(leveldb::ReadOptions(), undoKey, &undoValue);
+    if (!status.ok()) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Failed to load undo data: " << status.ToString() << std::endl;
+        return false;
+    }
+
+    if (undoValue.size() < 4) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Invalid undo data (too small)" << std::endl;
+        return false;
+    }
+
+    // Parse undo data
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(undoValue.data());
+    const uint8_t* ptr = data;
+    const uint8_t* end = data + undoValue.size();
+
+    uint32_t spentCount;
+    std::memcpy(&spentCount, ptr, 4);
+    ptr += 4;
+
+    // Step 2: Deserialize transactions from block (CS-002)
+    std::vector<CTransactionRef> transactions;
+    std::string error;
+
+    CBlockValidator validator;
+    if (!validator.DeserializeBlockTransactions(block, transactions, error)) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Failed to deserialize transactions: "
+                  << error << std::endl;
+        return false;
+    }
+
+    if (transactions.empty()) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: No transactions in block" << std::endl;
+        return false;
+    }
+
+    // Step 3: Process in reverse order
+    leveldb::WriteBatch batch;
+
+    // Step 3a: Remove all outputs created by this block (process txs in reverse)
+    for (int tx_idx = transactions.size() - 1; tx_idx >= 0; --tx_idx) {
+        const CTransactionRef& tx = transactions[tx_idx];
+        uint256 txid = tx->GetHash();
+
+        for (uint32_t n = 0; n < tx->vout.size(); ++n) {
+            COutPoint outpoint(txid, n);
+            const CTxOut& txout = tx->vout[n];
+
+            // Build key
+            std::string key = "u";
+            key.append(reinterpret_cast<const char*>(outpoint.hash.data), 32);
+            key.append(reinterpret_cast<const char*>(&outpoint.n), 4);
+
+            // Remove from database
+            batch.Delete(key);
+
+            // Update statistics
+            if (stats.nUTXOs > 0) stats.nUTXOs--;
+            if (stats.nTotalAmount >= txout.nValue) {
+                stats.nTotalAmount -= txout.nValue;
+            }
+        }
+    }
+
+    // Step 3b: Restore all spent inputs from undo data
+    for (uint32_t i = 0; i < spentCount; ++i) {
+        if (end - ptr < 32 + 4) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Insufficient undo data (outpoint)" << std::endl;
+            return false;
+        }
+
+        // Read outpoint
+        uint256 hash;
+        std::memcpy(hash.data, ptr, 32);
+        ptr += 32;
+
+        uint32_t n;
+        std::memcpy(&n, ptr, 4);
+        ptr += 4;
+
+        // Read CUTXOEntry
+        if (end - ptr < 8) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Insufficient undo data (nValue)" << std::endl;
+            return false;
+        }
+
+        uint64_t nValue;
+        std::memcpy(&nValue, ptr, 8);
+        ptr += 8;
+
+        if (end - ptr < 4) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Insufficient undo data (script length)" << std::endl;
+            return false;
+        }
+
+        uint32_t script_len;
+        std::memcpy(&script_len, ptr, 4);
+        ptr += 4;
+
+        if (end - ptr < script_len) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Insufficient undo data (scriptPubKey)" << std::endl;
+            return false;
+        }
+
+        std::vector<uint8_t> scriptPubKey(ptr, ptr + script_len);
+        ptr += script_len;
+
+        if (end - ptr < 4 + 1) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Insufficient undo data (height/coinbase)" << std::endl;
+            return false;
+        }
+
+        uint32_t height;
+        std::memcpy(&height, ptr, 4);
+        ptr += 4;
+
+        bool fCoinBase = (*ptr != 0);
+        ptr++;
+
+        // Restore UTXO to database
+        COutPoint outpoint(hash, n);
+        std::string key = "u";
+        key.append(reinterpret_cast<const char*>(outpoint.hash.data), 32);
+        key.append(reinterpret_cast<const char*>(&outpoint.n), 4);
+
+        // Build value: CUTXOEntry serialization
+        std::vector<uint8_t> value;
+        value.resize(8 + 4 + scriptPubKey.size() + 4 + 1);
+
+        uint8_t* value_ptr = value.data();
+        std::memcpy(value_ptr, &nValue, 8);
+        value_ptr += 8;
+
+        std::memcpy(value_ptr, &script_len, 4);
+        value_ptr += 4;
+
+        std::memcpy(value_ptr, scriptPubKey.data(), script_len);
+        value_ptr += script_len;
+
+        std::memcpy(value_ptr, &height, 4);
+        value_ptr += 4;
+
+        *value_ptr = fCoinBase ? 1 : 0;
+
+        batch.Put(key, leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
+
+        // Update statistics
+        stats.nUTXOs++;
+        stats.nTotalAmount += nValue;
+    }
+
+    // Step 4: Delete undo data (no longer needed)
+    batch.Delete(undoKey);
+
+    // Step 5: Update height
+    if (stats.nHeight > 0) {
+        stats.nHeight--;
+    }
+
+    // Step 6: Write batch to database
+    status = db->Write(leveldb::WriteOptions(), &batch);
+    if (!status.ok()) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Database write failed: " << status.ToString() << std::endl;
+        return false;
+    }
+
+    // Step 7: Flush statistics
+    if (!Flush()) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Failed to flush statistics" << std::endl;
+        return false;
+    }
+
+    std::cout << "[INFO] CUTXOSet::UndoBlock: Undid block (" << transactions.size()
+              << " txs, " << spentCount << " inputs restored)" << std::endl;
 
     return true;
 }
