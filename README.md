@@ -29,6 +29,7 @@
 
 **Public testnet is now available for testing!**
 
+🌐 **Website**: [dilithion.org](https://dilithion.org)
 🎯 **Join the Testnet**: [TESTNET-LAUNCH.md](TESTNET-LAUNCH.md)
 
 **What's New** (October 28, 2025):

@@ -4,6 +4,7 @@
 **Status**: ✅ **LIVE AND OPEN FOR TESTING**
 **Network**: Testnet v1.0
 **Test Pass Rate**: 93% (13/14 tests passing)
+**Website**: 🌐 [dilithion.org](https://dilithion.org)
 
 ---
 
