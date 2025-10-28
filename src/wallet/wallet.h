@@ -24,6 +24,7 @@ static const size_t DILITHIUM_SIGNATURE_SIZE = 3309;
 
 /**
  * Dilithium key pair
+ * WS-001: Secure memory wiping for private keys
  */
 struct CKey {
     std::vector<uint8_t> vchPubKey;  // Public key (1952 bytes)
@@ -31,14 +32,26 @@ struct CKey {
 
     CKey() {}
 
+    // WS-001: Destructor securely wipes private key from memory
+    ~CKey() {
+        Clear();
+    }
+
     bool IsValid() const {
         return vchPubKey.size() == DILITHIUM_PUBLICKEY_SIZE &&
                vchPrivKey.size() == DILITHIUM_SECRETKEY_SIZE;
     }
 
+    // WS-001: Clear with secure memory wiping
     void Clear() {
-        vchPubKey.clear();
+        // Securely wipe private key before clearing
+        if (!vchPrivKey.empty()) {
+            memory_cleanse(vchPrivKey.data(), vchPrivKey.size());
+        }
         vchPrivKey.clear();
+
+        // Public key doesn't need secure wiping (it's public)
+        vchPubKey.clear();
     }
 };
 
@@ -161,6 +174,12 @@ private:
     // Persistence
     std::string m_walletFile;  // Current wallet file path
     bool m_autoSave;           // Auto-save after changes
+
+    // Private helper methods - assume caller already holds cs_wallet lock
+    bool SaveUnlocked(const std::string& filename = "") const;
+    std::vector<uint8_t> GetPubKeyHashUnlocked() const;
+    std::vector<uint8_t> GetPublicKeyUnlocked() const;
+    bool GetKeyUnlocked(const CAddress& address, CKey& keyOut) const;
 
 public:
     CWallet();
@@ -488,9 +507,10 @@ public:
     static CAmount EstimateFee() { return DEFAULT_TRANSACTION_FEE; }
 
     /**
-     * Default transaction fee (0.00001000 DLT = 1000 ions)
+     * Default transaction fee (0.00185000 DLT = 185000 ions)
+     * Updated for P2PKH script format (larger than simplified script)
      */
-    static const CAmount DEFAULT_TRANSACTION_FEE = 1000;
+    static const CAmount DEFAULT_TRANSACTION_FEE = 185000;
 
     /**
      * Get this wallet's public key hash (for receiving payments)
