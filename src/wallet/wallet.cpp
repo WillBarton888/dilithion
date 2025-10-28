@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <limits>
 
 // Dilithium3 API
@@ -288,17 +289,17 @@ bool CWallet::GenerateNewKey() {
         std::vector<uint8_t> masterKeyVec(vMasterKey.data_ptr(),
                                           vMasterKey.data_ptr() + vMasterKey.size());
         if (!crypter.SetKey(masterKeyVec, encKey.vchIV)) {
-            memset(masterKeyVec.data(), 0, masterKeyVec.size());
+            memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
             return false;
         }
 
         if (!crypter.Encrypt(key.vchPrivKey, encKey.vchCryptedKey)) {
-            memset(masterKeyVec.data(), 0, masterKeyVec.size());
+            memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
             return false;
         }
 
         mapCryptedKeys[address] = encKey;
-        memset(masterKeyVec.data(), 0, masterKeyVec.size());
+        memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
     } else {
         // Wallet not encrypted, store key as-is
         mapKeys[address] = key;
@@ -311,9 +312,9 @@ bool CWallet::GenerateNewKey() {
         defaultAddress = address;
     }
 
-    // Auto-save wallet if enabled
+    // Auto-save wallet if enabled (we already hold the lock)
     if (m_autoSave && !m_walletFile.empty()) {
-        Save();
+        SaveUnlocked();
     }
 
     return true;
@@ -345,9 +346,14 @@ bool CWallet::HasKey(const CAddress& address) const {
     return mapCryptedKeys.find(address) != mapCryptedKeys.end();
 }
 
+// Public GetKey - acquires lock
 bool CWallet::GetKey(const CAddress& address, CKey& keyOut) const {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    return GetKeyUnlocked(address, keyOut);
+}
 
+// Private GetKeyUnlocked - assumes caller holds lock
+bool CWallet::GetKeyUnlocked(const CAddress& address, CKey& keyOut) const {
     // First check unencrypted keys
     auto it = mapKeys.find(address);
     if (it != mapKeys.end()) {
@@ -373,13 +379,13 @@ bool CWallet::GetKey(const CAddress& address, CKey& keyOut) const {
     std::vector<uint8_t> masterKeyVec(vMasterKey.data_ptr(),
                                       vMasterKey.data_ptr() + vMasterKey.size());
     if (!crypter.SetKey(masterKeyVec, encKey.vchIV)) {
-        memset(masterKeyVec.data(), 0, masterKeyVec.size());
+        memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
         return false;
     }
 
     std::vector<uint8_t> decryptedPrivKey;
     if (!crypter.Decrypt(encKey.vchCryptedKey, decryptedPrivKey)) {
-        memset(masterKeyVec.data(), 0, masterKeyVec.size());
+        memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
         return false;
     }
 
@@ -388,8 +394,8 @@ bool CWallet::GetKey(const CAddress& address, CKey& keyOut) const {
     keyOut.vchPrivKey = decryptedPrivKey;
 
     // Wipe sensitive data
-    memset(masterKeyVec.data(), 0, masterKeyVec.size());
-    memset(decryptedPrivKey.data(), 0, decryptedPrivKey.size());
+    memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+    memory_cleanse(decryptedPrivKey.data(), decryptedPrivKey.size());
 
     return true;
 }
@@ -408,10 +414,8 @@ bool CWallet::AddTxOut(const uint256& txid, uint32_t vout, int64_t nValue,
                        const CAddress& address, uint32_t nHeight) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
-    // Check if we own this address
-    if (!HasKey(address)) {
-        return false;
-    }
+    // Note: Caller should verify address ownership before calling
+    // We don't check HasKey() here to avoid nested locking
 
     CWalletTx wtx;
     wtx.txid = txid;
@@ -601,35 +605,35 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
 
     // Generate salt for PBKDF2
     if (!GenerateSalt(masterKey.vchSalt)) {
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         return false;
     }
 
     // Derive key from passphrase
     std::vector<uint8_t> derivedKey;
     if (!DeriveKey(passphrase, masterKey.vchSalt, WALLET_CRYPTO_PBKDF2_ROUNDS, derivedKey)) {
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         return false;
     }
 
     // Generate IV for master key encryption
     if (!GenerateIV(masterKey.vchIV)) {
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
-        memset(derivedKey.data(), 0, derivedKey.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+        memory_cleanse(derivedKey.data(), derivedKey.size());
         return false;
     }
 
     // Encrypt master key with passphrase-derived key
     CCrypter masterCrypter;
     if (!masterCrypter.SetKey(derivedKey, masterKey.vchIV)) {
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
-        memset(derivedKey.data(), 0, derivedKey.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+        memory_cleanse(derivedKey.data(), derivedKey.size());
         return false;
     }
 
     if (!masterCrypter.Encrypt(vMasterKeyPlain, masterKey.vchCryptedKey)) {
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
-        memset(derivedKey.data(), 0, derivedKey.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+        memory_cleanse(derivedKey.data(), derivedKey.size());
         return false;
     }
 
@@ -646,22 +650,22 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
 
         // Generate unique IV for this key
         if (!GenerateIV(encKey.vchIV)) {
-            memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
-            memset(derivedKey.data(), 0, derivedKey.size());
+            memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+            memory_cleanse(derivedKey.data(), derivedKey.size());
             return false;
         }
 
         // Encrypt private key with master key
         CCrypter keyCrypter;
         if (!keyCrypter.SetKey(vMasterKeyPlain, encKey.vchIV)) {
-            memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
-            memset(derivedKey.data(), 0, derivedKey.size());
+            memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+            memory_cleanse(derivedKey.data(), derivedKey.size());
             return false;
         }
 
         if (!keyCrypter.Encrypt(key.vchPrivKey, encKey.vchCryptedKey)) {
-            memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
-            memset(derivedKey.data(), 0, derivedKey.size());
+            memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+            memory_cleanse(derivedKey.data(), derivedKey.size());
             return false;
         }
 
@@ -677,12 +681,12 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
     nUnlockTime = std::chrono::steady_clock::time_point::max();
 
     // Wipe sensitive data
-    memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
-    memset(derivedKey.data(), 0, derivedKey.size());
+    memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+    memory_cleanse(derivedKey.data(), derivedKey.size());
 
-    // Auto-save wallet if enabled
+    // Auto-save wallet if enabled (we already hold the lock)
     if (m_autoSave && !m_walletFile.empty()) {
-        Save();
+        SaveUnlocked();
     }
 
     return true;
@@ -709,55 +713,55 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
     // Decrypt current master key
     CCrypter crypterOld;
     if (!crypterOld.SetKey(derivedKeyOld, masterKey.vchIV)) {
-        memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
         return false;
     }
 
     std::vector<uint8_t> vMasterKeyPlain;
     if (!crypterOld.Decrypt(masterKey.vchCryptedKey, vMasterKeyPlain)) {
-        memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
         return false;  // Wrong old passphrase
     }
 
     // Generate new salt
     std::vector<uint8_t> newSalt;
     if (!GenerateSalt(newSalt)) {
-        memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         return false;
     }
 
     // Derive new key
     std::vector<uint8_t> derivedKeyNew;
     if (!DeriveKey(passphraseNew, newSalt, WALLET_CRYPTO_PBKDF2_ROUNDS, derivedKeyNew)) {
-        memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         return false;
     }
 
     // Generate new IV
     std::vector<uint8_t> newIV;
     if (!GenerateIV(newIV)) {
-        memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
-        memset(derivedKeyNew.data(), 0, derivedKeyNew.size());
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+        memory_cleanse(derivedKeyNew.data(), derivedKeyNew.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         return false;
     }
 
     // Re-encrypt master key with new passphrase
     CCrypter crypterNew;
     if (!crypterNew.SetKey(derivedKeyNew, newIV)) {
-        memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
-        memset(derivedKeyNew.data(), 0, derivedKeyNew.size());
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+        memory_cleanse(derivedKeyNew.data(), derivedKeyNew.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         return false;
     }
 
     std::vector<uint8_t> newCryptedKey;
     if (!crypterNew.Encrypt(vMasterKeyPlain, newCryptedKey)) {
-        memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
-        memset(derivedKeyNew.data(), 0, derivedKeyNew.size());
-        memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+        memory_cleanse(derivedKeyNew.data(), derivedKeyNew.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         return false;
     }
 
@@ -767,13 +771,13 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
     masterKey.vchIV = newIV;
 
     // Wipe sensitive data
-    memset(derivedKeyOld.data(), 0, derivedKeyOld.size());
-    memset(derivedKeyNew.data(), 0, derivedKeyNew.size());
-    memset(vMasterKeyPlain.data(), 0, vMasterKeyPlain.size());
+    memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+    memory_cleanse(derivedKeyNew.data(), derivedKeyNew.size());
+    memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
 
-    // Auto-save wallet if enabled
+    // Auto-save wallet if enabled (we already hold the lock)
     if (m_autoSave && !m_walletFile.empty()) {
-        Save();
+        SaveUnlocked();
     }
 
     return true;
@@ -830,16 +834,16 @@ bool CWallet::Load(const std::string& filename) {
         masterKey.vchCryptedKey.resize(cryptedKeyLen);
         file.read(reinterpret_cast<char*>(masterKey.vchCryptedKey.data()), cryptedKeyLen);
 
-        masterKey.vchSalt.resize(32);
-        file.read(reinterpret_cast<char*>(masterKey.vchSalt.data()), 32);
+        masterKey.vchSalt.resize(WALLET_CRYPTO_SALT_SIZE);
+        file.read(reinterpret_cast<char*>(masterKey.vchSalt.data()), WALLET_CRYPTO_SALT_SIZE);
 
-        masterKey.vchIV.resize(16);
-        file.read(reinterpret_cast<char*>(masterKey.vchIV.data()), 16);
+        masterKey.vchIV.resize(WALLET_CRYPTO_IV_SIZE);
+        file.read(reinterpret_cast<char*>(masterKey.vchIV.data()), WALLET_CRYPTO_IV_SIZE);
 
         file.read(reinterpret_cast<char*>(&masterKey.nDerivationMethod), sizeof(masterKey.nDerivationMethod));
         file.read(reinterpret_cast<char*>(&masterKey.nDeriveIterations), sizeof(masterKey.nDeriveIterations));
 
-        // Wallet starts locked
+        // Wallet starts locked (encryption status determined by masterKey.IsValid())
         fWalletUnlocked = false;
     }
 
@@ -947,9 +951,14 @@ bool CWallet::Load(const std::string& filename) {
     return file.good();
 }
 
+// Public Save() method - acquires lock and calls SaveUnlocked()
 bool CWallet::Save(const std::string& filename) const {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    return SaveUnlocked(filename);
+}
 
+// Private SaveUnlocked() method - assumes caller already holds cs_wallet lock
+bool CWallet::SaveUnlocked(const std::string& filename) const {
     // Use current wallet file if no filename specified
     std::string saveFile = filename.empty() ? m_walletFile : filename;
     if (saveFile.empty()) {
@@ -981,8 +990,8 @@ bool CWallet::Save(const std::string& filename) const {
         file.write(reinterpret_cast<const char*>(&cryptedKeyLen), sizeof(cryptedKeyLen));
         file.write(reinterpret_cast<const char*>(masterKey.vchCryptedKey.data()), cryptedKeyLen);
 
-        file.write(reinterpret_cast<const char*>(masterKey.vchSalt.data()), 32);
-        file.write(reinterpret_cast<const char*>(masterKey.vchIV.data()), 16);
+        file.write(reinterpret_cast<const char*>(masterKey.vchSalt.data()), WALLET_CRYPTO_SALT_SIZE);
+        file.write(reinterpret_cast<const char*>(masterKey.vchIV.data()), WALLET_CRYPTO_IV_SIZE);
         file.write(reinterpret_cast<const char*>(&masterKey.nDerivationMethod), sizeof(masterKey.nDerivationMethod));
         file.write(reinterpret_cast<const char*>(&masterKey.nDeriveIterations), sizeof(masterKey.nDeriveIterations));
     }
@@ -1079,7 +1088,7 @@ void CWallet::Clear() {
 
     // Wipe master key from memory
     if (!vMasterKey.empty()) {
-        memset(vMasterKey.data_ptr(), 0, vMasterKey.size());
+        memory_cleanse(vMasterKey.data_ptr(), vMasterKey.size());
     }
 
     // Clear master key data
@@ -1095,13 +1104,25 @@ namespace WalletCrypto {
 std::vector<uint8_t> CreateScriptPubKey(const std::vector<uint8_t>& pubkey_hash) {
     std::vector<uint8_t> script;
 
-    // Push hash size (1 byte)
+    // P2PKH scriptPubKey format: OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
+    // This creates a standard P2PKH script (25 bytes for 20-byte hash)
+
+    // OP_DUP (0x76) - Duplicates top stack item
+    script.push_back(0x76);
+
+    // OP_HASH160 (0xA9) - Hash top stack item with RIPEMD160(SHA256())
+    script.push_back(0xA9);
+
+    // Push pubkey hash length (should be 20 bytes)
     script.push_back(static_cast<uint8_t>(pubkey_hash.size()));
 
-    // Push hash data
+    // Push pubkey hash data
     script.insert(script.end(), pubkey_hash.begin(), pubkey_hash.end());
 
-    // Push OP_CHECKSIG (0xAC)
+    // OP_EQUALVERIFY (0x88) - Verify top two items are equal
+    script.push_back(0x88);
+
+    // OP_CHECKSIG (0xAC) - Verify signature
     script.push_back(0xAC);
 
     return script;
@@ -1131,27 +1152,39 @@ std::vector<uint8_t> CreateScriptSig(const std::vector<uint8_t>& signature,
 }
 
 std::vector<uint8_t> ExtractPubKeyHash(const std::vector<uint8_t>& scriptPubKey) {
-    // scriptPubKey format: [hash_size(1)] [pubkey_hash(32)] [OP_CHECKSIG(1)]
-    // Minimum size: 34 bytes
+    // P2PKH scriptPubKey format: OP_DUP OP_HASH160 <hash_size> <pubkey_hash> OP_EQUALVERIFY OP_CHECKSIG
+    // Expected size: 25 bytes (1+1+1+20+1+1) for 20-byte hash
 
-    if (scriptPubKey.size() < 34) {
+    // Minimum size: 25 bytes for P2PKH
+    if (scriptPubKey.size() < 25) {
         return std::vector<uint8_t>();
     }
 
-    uint8_t hash_size = scriptPubKey[0];
-
-    // Verify hash size is 32 bytes (SHA3-256)
-    if (hash_size != 32) {
+    // Verify P2PKH opcodes
+    if (scriptPubKey[0] != 0x76) {  // OP_DUP
+        return std::vector<uint8_t>();
+    }
+    if (scriptPubKey[1] != 0xA9) {  // OP_HASH160
         return std::vector<uint8_t>();
     }
 
-    // Verify OP_CHECKSIG at the end
-    if (scriptPubKey[33] != 0xAC) {
+    uint8_t hash_size = scriptPubKey[2];
+
+    // Verify script size matches P2PKH format: 3 (opcodes) + hash_size + 2 (opcodes)
+    if (scriptPubKey.size() != (3 + static_cast<size_t>(hash_size) + 2)) {
         return std::vector<uint8_t>();
     }
 
-    // Extract hash (bytes 1-32)
-    return std::vector<uint8_t>(scriptPubKey.begin() + 1, scriptPubKey.begin() + 33);
+    // Verify OP_EQUALVERIFY and OP_CHECKSIG at the end
+    if (scriptPubKey[3 + hash_size] != 0x88) {  // OP_EQUALVERIFY
+        return std::vector<uint8_t>();
+    }
+    if (scriptPubKey[4 + hash_size] != 0xAC) {  // OP_CHECKSIG
+        return std::vector<uint8_t>();
+    }
+
+    // Extract hash (skip OP_DUP, OP_HASH160, hash_size)
+    return std::vector<uint8_t>(scriptPubKey.begin() + 3, scriptPubKey.begin() + 3 + hash_size);
 }
 
 } // namespace WalletCrypto
@@ -1177,9 +1210,19 @@ std::vector<uint8_t> CWallet::GetPubKeyHashFromAddress(const CAddress& address) 
     return std::vector<uint8_t>(addrData.begin() + 1, addrData.end());
 }
 
+// Public methods - acquire lock and call unlocked versions
 std::vector<uint8_t> CWallet::GetPubKeyHash() const {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    return GetPubKeyHashUnlocked();
+}
 
+std::vector<uint8_t> CWallet::GetPublicKey() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return GetPublicKeyUnlocked();
+}
+
+// Private unlocked methods - assume caller already holds lock
+std::vector<uint8_t> CWallet::GetPubKeyHashUnlocked() const {
     if (!defaultAddress.IsValid()) {
         return std::vector<uint8_t>();
     }
@@ -1187,16 +1230,14 @@ std::vector<uint8_t> CWallet::GetPubKeyHash() const {
     return GetPubKeyHashFromAddress(defaultAddress);
 }
 
-std::vector<uint8_t> CWallet::GetPublicKey() const {
-    std::lock_guard<std::mutex> lock(cs_wallet);
-
+std::vector<uint8_t> CWallet::GetPublicKeyUnlocked() const {
     if (!defaultAddress.IsValid()) {
         return std::vector<uint8_t>();
     }
 
-    // Get key for default address
+    // Get key for default address (we already hold the lock)
     CKey key;
-    if (GetKey(defaultAddress, key)) {
+    if (GetKeyUnlocked(defaultAddress, key)) {
         return key.vchPubKey;
     }
 
@@ -1204,6 +1245,9 @@ std::vector<uint8_t> CWallet::GetPublicKey() const {
 }
 
 bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
+    // Suppress unused parameter warning for placeholder implementation
+    (void)global_utxo_set;
+
     // Note: This is a placeholder implementation
     // In production, you would need to iterate the entire UTXO set
     // which requires adding an iterator interface to CUTXOSet
@@ -1432,8 +1476,8 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
 bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string& error) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
-    // Get wallet's public key
-    std::vector<uint8_t> wallet_pubkey = GetPublicKey();
+    // Get wallet's public key (we already hold the lock)
+    std::vector<uint8_t> wallet_pubkey = GetPublicKeyUnlocked();
     if (wallet_pubkey.empty()) {
         error = "Failed to get wallet public key";
         return false;
@@ -1488,10 +1532,10 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
         CKey signing_key;
         bool found_key = false;
 
-        // Check all wallet addresses to find the matching key
+        // Check all wallet addresses to find the matching key (we already hold the lock)
         for (const auto& addr : vchAddresses) {
             CKey key;
-            if (GetKey(addr, key)) {
+            if (GetKeyUnlocked(addr, key)) {
                 std::vector<uint8_t> key_hash = WalletCrypto::HashPubKey(key.vchPubKey);
                 if (key_hash == required_hash) {
                     signing_key = key;

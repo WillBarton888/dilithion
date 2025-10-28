@@ -93,20 +93,24 @@ public:
     /**
      * VerifyScript
      *
-     * Validates transaction scripts (simplified P2PKH for now).
-     * This is a placeholder for full Dilithium signature verification (Phase 5.2).
+     * Validates transaction scripts with full Dilithium signature verification.
      *
-     * Currently performs basic P2PKH validation:
+     * Performs complete cryptographic validation:
+     * - Parse signature and public key from scriptSig
      * - Extract public key hash from scriptPubKey
-     * - Extract public key from scriptSig
-     * - Verify they match
+     * - Verify public key hashes to expected value
+     * - Verify Dilithium3 signature over transaction
      *
+     * @param tx The transaction being validated (for signature message)
+     * @param inputIdx Index of the input being verified
      * @param scriptSig The signature script (unlocking script)
      * @param scriptPubKey The public key script (locking script)
      * @param error Reference to store error message if validation fails
      * @return true if valid, false otherwise
      */
-    bool VerifyScript(const std::vector<uint8_t>& scriptSig,
+    bool VerifyScript(const CTransaction& tx,
+                      size_t inputIdx,
+                      const std::vector<uint8_t>& scriptSig,
                       const std::vector<uint8_t>& scriptPubKey,
                       std::string& error) const;
 

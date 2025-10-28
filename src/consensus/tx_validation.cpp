@@ -3,9 +3,11 @@
 
 #include <consensus/tx_validation.h>
 #include <consensus/fees.h>
+#include <crypto/sha3.h>
 #include <set>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 // ============================================================================
 // Basic Structural Validation
@@ -169,53 +171,183 @@ bool CTransactionValidator::CheckTransactionInputs(const CTransaction& tx, CUTXO
 }
 
 // ============================================================================
-// Script Verification (Simplified P2PKH)
+// Script Verification (Full Dilithium Signature Verification)
 // ============================================================================
 
-bool CTransactionValidator::VerifyScript(const std::vector<uint8_t>& scriptSig,
+// Dilithium3 external API
+extern "C" {
+    int pqcrystals_dilithium3_ref_verify(const uint8_t *sig, size_t siglen,
+                                         const uint8_t *m, size_t mlen,
+                                         const uint8_t *ctx, size_t ctxlen,
+                                         const uint8_t *pk);
+}
+
+bool CTransactionValidator::VerifyScript(const CTransaction& tx,
+                                          size_t inputIdx,
+                                          const std::vector<uint8_t>& scriptSig,
                                           const std::vector<uint8_t>& scriptPubKey,
                                           std::string& error) const
 {
-    // For now, we implement basic P2PKH validation
-    // Full Dilithium signature verification will be added in Phase 5.2
-
+    // ========================================================================
+    // 1. Validate P2PKH scriptPubKey structure
+    // ========================================================================
     // P2PKH scriptPubKey format: OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
-    // Minimum size: 25 bytes (1+1+1+20+1+1)
-    if (scriptPubKey.size() < 25) {
-        error = "scriptPubKey too short for P2PKH";
+    // Standard size: 1 + 1 + 1 + 20 + 1 + 1 = 25 bytes
+    // But Dilithium uses SHA3-256, so hash is 32 bytes: 1 + 1 + 1 + 32 + 1 + 1 = 37 bytes
+
+    // First check for our SHA3-256 based P2PKH (37 bytes)
+    const bool isStandardP2PKH = (scriptPubKey.size() == 37 &&
+                                  scriptPubKey[0] == 0x76 &&  // OP_DUP
+                                  scriptPubKey[1] == 0xa9 &&  // OP_HASH160
+                                  scriptPubKey[2] == 0x20 &&  // Push 32 bytes (SHA3-256)
+                                  scriptPubKey[35] == 0x88 && // OP_EQUALVERIFY
+                                  scriptPubKey[36] == 0xac);  // OP_CHECKSIG
+
+    // Also accept legacy 20-byte hash for backwards compatibility
+    const bool isLegacyP2PKH = (scriptPubKey.size() == 25 &&
+                                scriptPubKey[0] == 0x76 &&  // OP_DUP
+                                scriptPubKey[1] == 0xa9 &&  // OP_HASH160
+                                scriptPubKey[2] == 0x14 &&  // Push 20 bytes
+                                scriptPubKey[23] == 0x88 && // OP_EQUALVERIFY
+                                scriptPubKey[24] == 0xac);  // OP_CHECKSIG
+
+    if (!isStandardP2PKH && !isLegacyP2PKH) {
+        error = "scriptPubKey is not valid P2PKH format";
         return false;
     }
 
-    // P2PKH scriptSig format: <signature> <pubKey>
-    // For now, we just check it's not empty
-    if (scriptSig.empty()) {
-        error = "scriptSig is empty";
+    // ========================================================================
+    // 2. Parse scriptSig to extract signature and public key
+    // ========================================================================
+    // scriptSig format: [sig_size(2)] [signature] [pubkey_size(2)] [pubkey]
+
+    // Expected size: 2 + DILITHIUM3_SIG_SIZE + 2 + DILITHIUM3_PK_SIZE = 5265 bytes
+    const size_t DILITHIUM3_SIG_SIZE = 3309;
+    const size_t DILITHIUM3_PK_SIZE = 1952;
+    const size_t EXPECTED_SCRIPTSIG_SIZE = 2 + DILITHIUM3_SIG_SIZE + 2 + DILITHIUM3_PK_SIZE;
+
+    if (scriptSig.size() != EXPECTED_SCRIPTSIG_SIZE) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "scriptSig must be exactly %zu bytes, got %zu",
+                 EXPECTED_SCRIPTSIG_SIZE, scriptSig.size());
+        error = buf;
         return false;
     }
 
-    // Basic structure validation for P2PKH
-    // Check opcodes: OP_DUP (0x76), OP_HASH160 (0xa9), OP_EQUALVERIFY (0x88), OP_CHECKSIG (0xac)
-    if (scriptPubKey.size() == 25 &&
-        scriptPubKey[0] == 0x76 &&  // OP_DUP
-        scriptPubKey[1] == 0xa9 &&  // OP_HASH160
-        scriptPubKey[2] == 0x14 &&  // Push 20 bytes
-        scriptPubKey[23] == 0x88 && // OP_EQUALVERIFY
-        scriptPubKey[24] == 0xac) { // OP_CHECKSIG
+    // Extract signature size (little-endian 16-bit)
+    size_t pos = 0;
+    uint16_t sig_size = scriptSig[pos] | (scriptSig[pos + 1] << 8);
+    pos += 2;
 
-        // Valid P2PKH structure
-        // Placeholder: In Phase 5.2, we'll verify Dilithium signature here
-        return true;
+    // Validate signature size
+    if (sig_size != DILITHIUM3_SIG_SIZE) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "Invalid Dilithium3 signature size: %u (expected %zu)",
+                 sig_size, DILITHIUM3_SIG_SIZE);
+        error = buf;
+        return false;
     }
 
-    // For now, accept any non-empty scriptSig with valid scriptPubKey structure
-    // This is a PLACEHOLDER for full cryptographic verification
+    // Ensure we have enough data for signature
+    if (pos + sig_size + 2 > scriptSig.size()) {
+        error = "scriptSig too short for signature data";
+        return false;
+    }
 
-    // TODO Phase 5.2: Implement Dilithium signature verification
-    // 1. Extract signature and public key from scriptSig
-    // 2. Extract public key hash from scriptPubKey
-    // 3. Verify public key hashes to expected value
-    // 4. Verify Dilithium signature over transaction
+    // Extract signature
+    std::vector<uint8_t> signature(scriptSig.begin() + pos, scriptSig.begin() + pos + sig_size);
+    pos += sig_size;
 
+    // Extract public key size (little-endian 16-bit)
+    uint16_t pk_size = scriptSig[pos] | (scriptSig[pos + 1] << 8);
+    pos += 2;
+
+    // Validate public key size
+    if (pk_size != DILITHIUM3_PK_SIZE) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "Invalid Dilithium3 public key size: %u (expected %zu)",
+                 pk_size, DILITHIUM3_PK_SIZE);
+        error = buf;
+        return false;
+    }
+
+    // Ensure we have enough data for public key
+    if (pos + pk_size != scriptSig.size()) {
+        error = "scriptSig size mismatch (extra or missing data)";
+        return false;
+    }
+
+    // Extract public key
+    std::vector<uint8_t> pubkey(scriptSig.begin() + pos, scriptSig.begin() + pos + pk_size);
+
+    // ========================================================================
+    // 3. Verify public key hash matches scriptPubKey
+    // ========================================================================
+
+    // Hash the public key with SHA3-256
+    uint8_t computed_hash[32];
+    SHA3_256(pubkey.data(), pubkey.size(), computed_hash);
+
+    // Extract expected hash from scriptPubKey
+    const uint8_t* expected_hash;
+    size_t hash_size;
+
+    if (isStandardP2PKH) {
+        // SHA3-256 (32 bytes) starts at byte 3
+        expected_hash = scriptPubKey.data() + 3;
+        hash_size = 32;
+    } else {
+        // Legacy RIPEMD160 (20 bytes) starts at byte 3
+        expected_hash = scriptPubKey.data() + 3;
+        hash_size = 20;
+        // Only compare first 20 bytes of computed hash for legacy
+    }
+
+    // Compare hashes
+    if (memcmp(computed_hash, expected_hash, hash_size) != 0) {
+        error = "Public key hash does not match scriptPubKey";
+        return false;
+    }
+
+    // ========================================================================
+    // 4. Construct signature message (same as signing)
+    // ========================================================================
+
+    // Get transaction hash
+    uint256 tx_hash = tx.GetHash();
+
+    // Create signature message: tx_hash + input_index
+    std::vector<uint8_t> sig_message;
+    sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
+
+    // Add input index (4 bytes, little-endian)
+    uint32_t input_idx = static_cast<uint32_t>(inputIdx);
+    sig_message.push_back(static_cast<uint8_t>(input_idx & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((input_idx >> 8) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((input_idx >> 16) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((input_idx >> 24) & 0xFF));
+
+    // Hash the signature message with SHA3-256
+    uint8_t sig_hash[32];
+    SHA3_256(sig_message.data(), sig_message.size(), sig_hash);
+
+    // ========================================================================
+    // 5. Verify Dilithium3 signature
+    // ========================================================================
+
+    int verify_result = pqcrystals_dilithium3_ref_verify(
+        signature.data(), signature.size(),  // Signature
+        sig_hash, 32,                        // Message (signature hash)
+        nullptr, 0,                          // No context
+        pubkey.data()                        // Public key
+    );
+
+    if (verify_result != 0) {
+        error = "Dilithium signature verification failed";
+        return false;
+    }
+
+    // Success! Signature is cryptographically valid
     return true;
 }
 
@@ -239,16 +371,18 @@ bool CTransactionValidator::CheckTransaction(const CTransaction& tx, CUTXOSet& u
 
     // Step 3: Script verification for all inputs
     if (!tx.IsCoinBase()) {
-        for (const auto& txin : tx.vin) {
+        for (size_t i = 0; i < tx.vin.size(); ++i) {
+            const CTxIn& txin = tx.vin[i];
+
             CUTXOEntry entry;
             if (!utxoSet.GetUTXO(txin.prevout, entry)) {
                 error = "Failed to retrieve UTXO for script verification";
                 return false;
             }
 
-            if (!VerifyScript(txin.scriptSig, entry.out.scriptPubKey, error)) {
+            if (!VerifyScript(tx, i, txin.scriptSig, entry.out.scriptPubKey, error)) {
                 char buf[256];
-                snprintf(buf, sizeof(buf), "Script verification failed: %s", error.c_str());
+                snprintf(buf, sizeof(buf), "Script verification failed for input %zu: %s", i, error.c_str());
                 error = buf;
                 return false;
             }

@@ -248,17 +248,17 @@ void CPeerManager::InitializeSeedNodes() {
     // Format: IPv4 mapped to IPv6
     seed_nodes.clear();
 
-    // Example seed node (would be real IPs in production)
-    NetProtocol::CAddress seed1;
-    seed1.services = NetProtocol::NODE_NETWORK;
-    seed1.SetIPv4(0x7F000001);  // 127.0.0.1 (localhost for testing)
-    seed1.port = NetProtocol::DEFAULT_PORT;
-    seed1.time = GetTime();
-    seed_nodes.push_back(seed1);
-
-    // Additional seed nodes would be added here
-    // NetProtocol::CAddress seed2;
-    // seed2.SetIPv4(0xC0A80001);  // 192.168.0.1
-    // seed2.port = NetProtocol::DEFAULT_PORT;
-    // seed_nodes.push_back(seed2);
+    // PRODUCTION TODO: Add real seed node IP addresses here
+    // Seed nodes should be publicly accessible nodes run by trusted community members
+    //
+    // Example format:
+    //   NetProtocol::CAddress seed1;
+    //   seed1.services = NetProtocol::NODE_NETWORK;
+    //   seed1.SetIPv4(0xC0A80001);  // Example: 192.168.0.1
+    //   seed1.port = NetProtocol::DEFAULT_PORT;
+    //   seed1.time = GetTime();
+    //   seed_nodes.push_back(seed1);
+    //
+    // For testnet launch, operators should manually configure peer addresses
+    // using the -addnode command line parameter or peers.dat file.
 }

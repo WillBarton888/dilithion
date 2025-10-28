@@ -38,11 +38,20 @@
 inline void memory_cleanse(void* ptr, size_t len) {
     if (ptr == nullptr || len == 0) return;
 
+#if defined(_MSC_VER)
+    // Windows: Use SecureZeroMemory which is guaranteed not to be optimized away
+    SecureZeroMemory(ptr, len);
+#elif defined(__GNUC__) || defined(__clang__)
+    // GCC/Clang: Use memory barrier to prevent optimization
     std::memset(ptr, 0, len);
-
-    // Memory barrier prevents compiler from optimizing away the memset
-    // The asm volatile tells compiler: "this has side effects, don't optimize"
     __asm__ __volatile__("" : : "r"(ptr) : "memory");
+#else
+    // Fallback: Use volatile pointer (less reliable but portable)
+    volatile uint8_t* volatile_ptr = static_cast<volatile uint8_t*>(ptr);
+    for (size_t i = 0; i < len; ++i) {
+        volatile_ptr[i] = 0;
+    }
+#endif
 }
 
 /**
@@ -76,7 +85,7 @@ public:
     CKeyingMaterial& operator=(CKeyingMaterial&& other) noexcept {
         if (this != &other) {
             if (!data.empty()) {
-                memset(data.data(), 0, data.size());
+                memory_cleanse(data.data(), data.size());
             }
             data = std::move(other.data);
         }
@@ -144,7 +153,7 @@ public:
     ~CCrypter() {
         // vchKey auto-wipes via CKeyingMaterial destructor
         if (!vchIV.empty()) {
-            memset(vchIV.data(), 0, vchIV.size());
+            memory_cleanse(vchIV.data(), vchIV.size());
         }
     }
 

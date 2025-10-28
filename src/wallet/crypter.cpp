@@ -401,7 +401,7 @@ bool CCrypter::EncryptAES256(const std::vector<uint8_t>& plaintext,
     }
 
     // Wipe sensitive data
-    memset(roundKeys, 0, sizeof(roundKeys));
+    memory_cleanse(roundKeys, sizeof(roundKeys));
 
     return true;
 }
@@ -431,14 +431,14 @@ bool CCrypter::DecryptAES256(const std::vector<uint8_t>& ciphertext,
 
     // Remove padding
     if (!RemovePKCS7Padding(decrypted, 16)) {
-        memset(roundKeys, 0, sizeof(roundKeys));
+        memory_cleanse(roundKeys, sizeof(roundKeys));
         return false;  // Invalid padding (wrong key or corrupted data)
     }
 
     plaintext = std::move(decrypted);
 
     // Wipe sensitive data
-    memset(roundKeys, 0, sizeof(roundKeys));
+    memory_cleanse(roundKeys, sizeof(roundKeys));
 
     return true;
 }
@@ -474,7 +474,7 @@ static void HMAC_SHA3_256(const uint8_t* key, size_t keyLen,
                           uint8_t* out) {
     const size_t blockSize = 136;  // SHA3-256 rate in bytes
     uint8_t keyPad[blockSize];
-    memset(keyPad, 0, blockSize);
+    memory_cleanse(keyPad, blockSize);
 
     if (keyLen <= blockSize) {
         memcpy(keyPad, key, keyLen);
@@ -557,7 +557,7 @@ bool DeriveKey(const std::string& passphrase,
     }
 
     // Wipe sensitive data
-    memset(U, 0, 32);
+    memory_cleanse(U, 32);
 
     return true;
 }
