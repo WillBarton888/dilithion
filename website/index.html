@@ -90,9 +90,9 @@
                 <div class="feature-card">
                     <div class="feature-icon">⛏️</div>
                     <h3>Start Mining</h3>
-                    <p>Mine testnet blocks with your CPU. No specialized hardware required.</p>
-                    <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px;">
-                        <code>./dilithion-node --mine</code>
+                    <p>Connect to our official seed node and start mining testnet blocks.</p>
+                    <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px; font-size: 0.85rem;">
+                        <code>./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=4</code>
                     </div>
                 </div>
 
@@ -111,7 +111,19 @@
                 </div>
             </div>
 
-            <div class="tips-box" style="margin-top: 60px;">
+            <div class="tips-box" style="margin-top: 60px; background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1)); border-left: 4px solid #22c55e;">
+                <h3>🌐 Official Testnet Seed Node</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">Connect to our 24/7 seed node for optimal network connectivity:</p>
+                <ul>
+                    <li><strong>IP Address:</strong> 170.64.203.134</li>
+                    <li><strong>Port:</strong> 18444 (testnet)</li>
+                    <li><strong>Location:</strong> DigitalOcean (Australia)</li>
+                    <li><strong>Uptime:</strong> 24/7 availability</li>
+                    <li><strong>Capacity:</strong> Up to 117 concurrent connections</li>
+                </ul>
+            </div>
+
+            <div class="tips-box" style="margin-top: 24px;">
                 <h3>⚠️ Important Testnet Information</h3>
                 <ul>
                     <li><strong>Testnet coins have NO monetary value</strong> - For testing purposes only</li>
