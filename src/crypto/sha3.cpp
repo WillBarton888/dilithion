@@ -3,6 +3,7 @@
 
 #include <crypto/sha3.h>
 #include <cstring>
+#include <stdexcept>
 
 // Import SHA-3 from Dilithium's FIPS 202 implementation
 extern "C" {
@@ -29,16 +30,18 @@ CSHA3_256::~CSHA3_256() {
 }
 
 CSHA3_256& CSHA3_256::Write(const uint8_t* data, size_t len) {
-    // For simplicity, we'll use the one-shot API
-    // A full streaming implementation would require absorb/squeeze
-    // This is fine for our use case
+    // CRITICAL: Streaming API not implemented! Use SHA3_256() one-shot function instead.
+    // This method is a stub and will cause assertion failure if called.
+    (void)data;
+    (void)len;
+    throw std::runtime_error("CSHA3_256::Write() not implemented - use SHA3_256() one-shot function");
     return *this;
 }
 
 void CSHA3_256::Finalize(uint8_t hash[OUTPUT_SIZE]) {
-    if (!finalized) {
-        finalized = true;
-    }
+    // CRITICAL: Streaming API not implemented! Use SHA3_256() one-shot function instead.
+    (void)hash;
+    throw std::runtime_error("CSHA3_256::Finalize() not implemented - use SHA3_256() one-shot function");
 }
 
 CSHA3_256& CSHA3_256::Reset() {
@@ -63,13 +66,17 @@ CSHA3_512::~CSHA3_512() {
 }
 
 CSHA3_512& CSHA3_512::Write(const uint8_t* data, size_t len) {
+    // CRITICAL: Streaming API not implemented! Use SHA3_512() one-shot function instead.
+    (void)data;
+    (void)len;
+    throw std::runtime_error("CSHA3_512::Write() not implemented - use SHA3_512() one-shot function");
     return *this;
 }
 
 void CSHA3_512::Finalize(uint8_t hash[OUTPUT_SIZE]) {
-    if (!finalized) {
-        finalized = true;
-    }
+    // CRITICAL: Streaming API not implemented! Use SHA3_512() one-shot function instead.
+    (void)hash;
+    throw std::runtime_error("CSHA3_512::Finalize() not implemented - use SHA3_512() one-shot function");
 }
 
 CSHA3_512& CSHA3_512::Reset() {

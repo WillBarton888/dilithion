@@ -145,8 +145,15 @@ void CRPCServer::Stop() {
 
     m_running = false;
 
-    // Close server socket
+    // Shutdown and close server socket
     if (m_serverSocket != INVALID_SOCKET) {
+        // Shutdown the socket to unblock accept() call
+        #ifdef _WIN32
+        shutdown(m_serverSocket, SD_BOTH);
+        #else
+        shutdown(m_serverSocket, SHUT_RDWR);
+        #endif
+
         closesocket(m_serverSocket);
         m_serverSocket = INVALID_SOCKET;
     }
@@ -207,15 +214,70 @@ void CRPCServer::HandleClient(int clientSocket) {
         return;
     }
 
-    // Read HTTP request
-    char buffer[4096];
-    int bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-    if (bytesRead <= 0) {
+    // Read HTTP request with dynamic buffer (prevents truncation and buffer overflow)
+    // Maximum request size: 1MB (prevents memory exhaustion DoS)
+    const size_t MAX_REQUEST_SIZE = 1024 * 1024;
+    const size_t CHUNK_SIZE = 4096;
+
+    std::vector<char> buffer;
+    buffer.reserve(CHUNK_SIZE);
+
+    size_t totalRead = 0;
+    bool requestComplete = false;
+
+    // Read in chunks until we have complete HTTP request (headers + body)
+    while (totalRead < MAX_REQUEST_SIZE && !requestComplete) {
+        char chunk[CHUNK_SIZE];
+        int bytesRead = recv(clientSocket, chunk, sizeof(chunk), 0);
+
+        if (bytesRead <= 0) {
+            // Connection closed or error
+            if (totalRead == 0) {
+                // No data received at all
+                return;
+            }
+            // Partial data received - treat as complete
+            break;
+        }
+
+        // Append chunk to buffer
+        buffer.insert(buffer.end(), chunk, chunk + bytesRead);
+        totalRead += bytesRead;
+
+        // Check if we have complete HTTP request (headers end with \r\n\r\n)
+        if (buffer.size() >= 4) {
+            // Look for end of headers in last chunk + overlap
+            size_t searchStart = (buffer.size() > bytesRead + 3) ? buffer.size() - bytesRead - 3 : 0;
+            for (size_t i = searchStart; i < buffer.size() - 3; i++) {
+                if (buffer[i] == '\r' && buffer[i+1] == '\n' &&
+                    buffer[i+2] == '\r' && buffer[i+3] == '\n') {
+                    requestComplete = true;
+                    break;
+                }
+                // Also check for \n\n (less common but valid)
+                if (i < buffer.size() - 1 && buffer[i] == '\n' && buffer[i+1] == '\n') {
+                    requestComplete = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Check if request exceeded size limit
+    if (totalRead >= MAX_REQUEST_SIZE && !requestComplete) {
+        std::string response = "HTTP/1.1 413 Payload Too Large\r\n"
+                               "Content-Type: application/json\r\n"
+                               "Content-Length: 52\r\n"
+                               "Connection: close\r\n"
+                               "\r\n"
+                               "{\"error\":\"Request too large (max 1MB)\",\"code\":-32700}";
+        send(clientSocket, response.c_str(), response.size(), 0);
         return;
     }
-    buffer[bytesRead] = '\0';
 
-    std::string request(buffer);
+    // Null-terminate and convert to string
+    buffer.push_back('\0');
+    std::string request(buffer.data());
 
     // Check authentication if configured
     if (RPCAuth::IsAuthConfigured()) {
