@@ -7,6 +7,8 @@
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
 #include <consensus/chain.h>
+#include <consensus/tx_validation.h>
+#include <util/strencodings.h>
 #include <amount.h>
 
 #include <sstream>
@@ -908,10 +910,35 @@ std::string CRPCServer::RPC_SignRawTransaction(const std::string& params) {
 
     std::string hex_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
 
-    // Deserialize transaction from hex
-    // TODO: Implement hex deserialization for CTransaction
-    // For now, return error
-    throw std::runtime_error("signrawtransaction not fully implemented - use sendtoaddress instead");
+    // TASK 2.4: Deserialize transaction from hex string
+    std::vector<uint8_t> tx_data = ParseHex(hex_str);
+    if (tx_data.empty()) {
+        throw std::runtime_error("Invalid hex string");
+    }
+
+    CTransaction tx;
+    std::string deserialize_error;
+    if (!tx.Deserialize(tx_data.data(), tx_data.size(), &deserialize_error)) {
+        throw std::runtime_error("Failed to deserialize transaction: " + deserialize_error);
+    }
+
+    // Sign the transaction
+    std::string sign_error;
+    if (!m_wallet->SignTransaction(tx, *m_utxo_set, sign_error)) {
+        throw std::runtime_error("Failed to sign transaction: " + sign_error);
+    }
+
+    // TASK 2.4: Serialize signed transaction back to hex
+    std::vector<uint8_t> signed_data = tx.Serialize();
+    std::string signed_hex = HexStr(signed_data);
+
+    // Return signed transaction hex
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"hex\":\"" << signed_hex << "\",";
+    oss << "\"complete\":true";
+    oss << "}";
+    return oss.str();
 }
 
 std::string CRPCServer::RPC_SendRawTransaction(const std::string& params) {
@@ -940,10 +967,49 @@ std::string CRPCServer::RPC_SendRawTransaction(const std::string& params) {
 
     std::string hex_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
 
-    // Deserialize transaction from hex
-    // TODO: Implement hex deserialization for CTransaction
-    // For now, return error
-    throw std::runtime_error("sendrawtransaction not fully implemented - use sendtoaddress instead");
+    // TASK 2.4: Deserialize transaction from hex string
+    std::vector<uint8_t> tx_data = ParseHex(hex_str);
+    if (tx_data.empty()) {
+        throw std::runtime_error("Invalid hex string");
+    }
+
+    CTransactionRef tx = MakeTransactionRef();
+    CTransaction tx_mutable;
+    std::string deserialize_error;
+    if (!tx_mutable.Deserialize(tx_data.data(), tx_data.size(), &deserialize_error)) {
+        throw std::runtime_error("Failed to deserialize transaction: " + deserialize_error);
+    }
+
+    // Validate transaction
+    CTransactionValidator txValidator;
+    std::string validation_error;
+    CAmount tx_fee = 0;
+    unsigned int current_height = m_chainstate->GetHeight();
+
+    if (!txValidator.CheckTransaction(tx_mutable, *m_utxo_set, current_height, tx_fee, validation_error)) {
+        throw std::runtime_error("Transaction validation failed: " + validation_error);
+    }
+
+    // Create shared pointer for mempool
+    tx = MakeTransactionRef(tx_mutable);
+    uint256 txid = tx->GetHash();
+
+    // Add to mempool
+    std::string mempool_error;
+    int64_t current_time = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    if (!m_mempool->AddTx(tx, tx_fee, current_time, current_height, &mempool_error)) {
+        throw std::runtime_error("Failed to add to mempool: " + mempool_error);
+    }
+
+    // Transaction will be relayed to network via normal P2P mempool propagation
+
+    // Return txid
+    std::ostringstream oss;
+    oss << "\"" << txid.GetHex() << "\"";
+    return oss.str();
 }
 
 // ----------------------------------------------------------------------------
@@ -1409,10 +1475,65 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
     }
+    if (!m_mempool) {
+        throw std::runtime_error("Mempool not initialized");
+    }
+    if (!m_blockchain) {
+        throw std::runtime_error("Blockchain not initialized");
+    }
+    if (!m_utxo_set) {
+        throw std::runtime_error("UTXO set not initialized");
+    }
+    if (!m_chainstate) {
+        throw std::runtime_error("Chain state not initialized");
+    }
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized - need address for coinbase");
+    }
 
-    // TODO: Get block template from blockchain
-    // For now, just return status
-    return m_miner->IsMining() ? "true" : "false";
+    // Check if already mining
+    if (m_miner->IsMining()) {
+        return "true";  // Already mining
+    }
+
+    // Get mining parameters from blockchain
+    uint256 hashPrevBlock;
+    if (!m_blockchain->ReadBestBlock(hashPrevBlock)) {
+        throw std::runtime_error("Failed to read best block hash");
+    }
+
+    uint32_t nHeight = m_chainstate->GetHeight() + 1;
+    uint32_t nBits = 0x1f00ffff;  // Initial difficulty (will be adjusted by difficulty algorithm later)
+
+    // Get miner address from wallet
+    std::vector<CAddress> addresses = m_wallet->GetAddresses();
+    if (addresses.empty()) {
+        throw std::runtime_error("No wallet address available for mining rewards");
+    }
+    std::vector<uint8_t> minerAddress = addresses[0].GetData();
+
+    // Create block template
+    std::string templateError;
+    auto templateOpt = m_miner->CreateBlockTemplate(
+        *m_mempool,
+        *m_utxo_set,
+        hashPrevBlock,
+        nHeight,
+        nBits,
+        minerAddress,
+        templateError
+    );
+
+    if (!templateOpt.has_value()) {
+        throw std::runtime_error("Failed to create block template: " + templateError);
+    }
+
+    // Start mining with the template
+    if (!m_miner->StartMining(templateOpt.value())) {
+        throw std::runtime_error("Failed to start mining");
+    }
+
+    return "true";
 }
 
 std::string CRPCServer::RPC_StopMining(const std::string& params) {
@@ -1451,8 +1572,8 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
 
     // Transaction creation
     oss << "\"sendtoaddress - Send coins to an address\",";
-    oss << "\"signrawtransaction - Sign a raw transaction (not fully implemented)\",";
-    oss << "\"sendrawtransaction - Broadcast a raw transaction (not fully implemented)\",";
+    oss << "\"signrawtransaction - Sign inputs for a raw transaction\",";
+    oss << "\"sendrawtransaction - Broadcast a raw transaction to the network\",";
 
     // Transaction query
     oss << "\"gettransaction - Get transaction details by txid\",";

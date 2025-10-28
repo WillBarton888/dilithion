@@ -325,8 +325,12 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
     // Get transaction hash
     uint256 tx_hash = tx.GetHash();
 
-    // Create signature message: tx_hash + input_index
+    // VULN-003 FIX: Canonical signature message construction
+    // Create signature message: tx_hash + input_index + tx_version
+    // Adding tx version prevents cross-transaction signature reuse
     std::vector<uint8_t> sig_message;
+    sig_message.reserve(32 + 4 + 4);  // hash + index + version
+
     sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
 
     // Add input index (4 bytes, little-endian)
@@ -335,6 +339,19 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
     sig_message.push_back(static_cast<uint8_t>((input_idx >> 8) & 0xFF));
     sig_message.push_back(static_cast<uint8_t>((input_idx >> 16) & 0xFF));
     sig_message.push_back(static_cast<uint8_t>((input_idx >> 24) & 0xFF));
+
+    // VULN-003 FIX: Add transaction version to prevent signature replay across versions
+    uint32_t version = tx.nVersion;
+    sig_message.push_back(static_cast<uint8_t>(version & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
+
+    // VULN-003 FIX: Validate message construction
+    if (sig_message.size() != 40) {  // 32 (hash) + 4 (index) + 4 (version)
+        error = "Internal error: Invalid signature message size";
+        return false;
+    }
 
     // Hash the signature message with SHA3-256
     uint8_t sig_hash[32];

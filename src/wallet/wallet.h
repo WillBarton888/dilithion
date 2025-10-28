@@ -180,6 +180,7 @@ private:
     std::vector<uint8_t> GetPubKeyHashUnlocked() const;
     std::vector<uint8_t> GetPublicKeyUnlocked() const;
     bool GetKeyUnlocked(const CAddress& address, CKey& keyOut) const;
+    bool IsUnlockValid() const;  // VULN-002 FIX: Check if unlock hasn't expired
 
 public:
     CWallet();

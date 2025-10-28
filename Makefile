@@ -88,6 +88,8 @@ RPC_SOURCES := src/rpc/server.cpp \
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp
 
+UTIL_SOURCES := src/util/strencodings.cpp
+
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(CORE_SOURCES_UTIL) \
@@ -97,6 +99,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(NODE_SOURCES) \
                 $(PRIMITIVES_SOURCES) \
                 $(RPC_SOURCES) \
+                $(UTIL_SOURCES) \
                 $(WALLET_SOURCES)
 
 # Object files

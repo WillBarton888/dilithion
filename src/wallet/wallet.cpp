@@ -506,6 +506,22 @@ bool CWallet::IsLocked() const {
     return masterKey.IsValid() && !fWalletUnlocked;
 }
 
+// VULN-002 FIX: Helper to check if unlock is still valid (not expired)
+// Assumes caller holds cs_wallet lock
+bool CWallet::IsUnlockValid() const {
+    if (!fWalletUnlocked) {
+        return false;  // Wallet is locked
+    }
+
+    // If no timeout set, unlock is always valid
+    if (nUnlockTime == std::chrono::steady_clock::time_point::max()) {
+        return true;
+    }
+
+    // Check if timeout has expired
+    return std::chrono::steady_clock::now() < nUnlockTime;
+}
+
 void CWallet::CheckUnlockTimeout() {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
@@ -1670,6 +1686,12 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
 bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string& error) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
+    // VULN-002 FIX: Check if unlock is still valid (not expired) before signing
+    if (!IsUnlockValid()) {
+        error = "Wallet is locked or unlock timeout has expired";
+        return false;
+    }
+
     // Get wallet's public key (we already hold the lock)
     std::vector<uint8_t> wallet_pubkey = GetPublicKeyUnlocked();
     if (wallet_pubkey.empty()) {
@@ -1707,8 +1729,10 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
             return false;
         }
 
-        // Create signature message: tx_hash + input_index
+        // VULN-003 FIX: Create signature message with version (must match validation)
+        // signature message: tx_hash + input_index + tx_version
         std::vector<uint8_t> sig_message;
+        sig_message.reserve(32 + 4 + 4);  // hash + index + version
         sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
 
         // Add input index (4 bytes, little-endian)
@@ -1717,6 +1741,13 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
         sig_message.push_back(static_cast<uint8_t>((input_idx >> 8) & 0xFF));
         sig_message.push_back(static_cast<uint8_t>((input_idx >> 16) & 0xFF));
         sig_message.push_back(static_cast<uint8_t>((input_idx >> 24) & 0xFF));
+
+        // VULN-003 FIX: Add transaction version to prevent signature replay
+        uint32_t version = tx.nVersion;
+        sig_message.push_back(static_cast<uint8_t>(version & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
 
         // Hash the signature message
         uint8_t sig_hash[32];
