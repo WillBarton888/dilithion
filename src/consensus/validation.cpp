@@ -400,17 +400,122 @@ bool CBlockValidator::CheckBlock(
         return false;
     }
 
-    // Note: Full transaction deserialization is not yet implemented
-    // For Phase 5.4, we'll perform partial validation only
-    // In production, we would:
-    // 1. Deserialize all transactions
-    // 2. Validate each transaction
-    // 3. Check coinbase
-    // 4. Verify merkle root
-    // 5. Check for duplicates and double-spends
+    // ============================================================================
+    // CS-003: Complete Block Validation - IMPLEMENTATION
+    // ============================================================================
 
-    // For now, we'll do basic structural checks
-    // The mining code already ensures proper block construction
+    // Step 1: Deserialize all transactions (CS-002)
+    std::vector<CTransactionRef> transactions;
+    if (!DeserializeBlockTransactions(block, transactions, error)) {
+        return false;
+    }
 
+    // Sanity check
+    if (transactions.empty()) {
+        error = "Block has no transactions after deserialization";
+        return false;
+    }
+
+    // Step 2: Validate coinbase transaction
+    // First transaction must be coinbase
+    if (!transactions[0]->IsCoinBase()) {
+        error = "First transaction is not coinbase";
+        return false;
+    }
+
+    // Only first transaction can be coinbase
+    for (size_t i = 1; i < transactions.size(); i++) {
+        if (transactions[i]->IsCoinBase()) {
+            error = "Multiple coinbase transactions in block";
+            return false;
+        }
+    }
+
+    // Step 3: Check for duplicate transaction hashes
+    std::set<uint256> txHashes;
+    for (const auto& tx : transactions) {
+        uint256 txHash = tx->GetHash();
+        if (txHashes.count(txHash) > 0) {
+            error = "Duplicate transaction in block";
+            return false;
+        }
+        txHashes.insert(txHash);
+    }
+
+    // Step 4: Check for double-spends within block
+    std::set<COutPoint> spentOutputs;
+    for (size_t i = 1; i < transactions.size(); i++) {  // Skip coinbase
+        const CTransaction& tx = *transactions[i];
+        for (const CTxIn& txin : tx.vin) {
+            if (spentOutputs.count(txin.prevout) > 0) {
+                error = "Double-spend detected within block";
+                return false;
+            }
+            spentOutputs.insert(txin.prevout);
+        }
+    }
+
+    // Step 5: Verify merkle root
+    uint256 calculatedMerkleRoot = BuildMerkleRoot(transactions);
+    if (!(calculatedMerkleRoot == block.hashMerkleRoot)) {
+        error = "Merkle root mismatch";
+        return false;
+    }
+
+    // Step 6: Validate each transaction
+    CTransactionValidator txValidator;
+
+    // Validate coinbase basic structure
+    std::string txError;
+    if (!txValidator.CheckTransactionBasic(*transactions[0], txError)) {
+        error = "Invalid coinbase transaction: " + txError;
+        return false;
+    }
+
+    // Calculate total fees from non-coinbase transactions
+    uint64_t totalFees = 0;
+    for (size_t i = 1; i < transactions.size(); i++) {
+        const CTransaction& tx = *transactions[i];
+
+        // Basic structure validation
+        if (!txValidator.CheckTransactionBasic(tx, txError)) {
+            error = "Invalid transaction at index " + std::to_string(i) + ": " + txError;
+            return false;
+        }
+
+        // Input validation (requires UTXO set)
+        CAmount txFee = 0;
+        if (!txValidator.CheckTransactionInputs(tx, utxoSet, nHeight, txFee, txError)) {
+            error = "Transaction validation failed at index " + std::to_string(i) + ": " + txError;
+            return false;
+        }
+
+        // Accumulate fees
+        if (txFee < 0) {
+            error = "Negative fee in transaction at index " + std::to_string(i);
+            return false;
+        }
+
+        // Check for fee overflow
+        if (totalFees + static_cast<uint64_t>(txFee) < totalFees) {
+            error = "Total fees overflow";
+            return false;
+        }
+        totalFees += static_cast<uint64_t>(txFee);
+    }
+
+    // Step 7: Validate coinbase value (subsidy + fees)
+    uint64_t blockSubsidy = CalculateBlockSubsidy(nHeight);
+    uint64_t maxCoinbaseValue = blockSubsidy + totalFees;
+
+    uint64_t coinbaseValue = transactions[0]->GetValueOut();
+    if (coinbaseValue > maxCoinbaseValue) {
+        error = "Coinbase value exceeds subsidy + fees (" +
+                std::to_string(coinbaseValue) + " > " +
+                std::to_string(maxCoinbaseValue) + ")";
+        return false;
+    }
+
+    // All checks passed
     return true;
 }
