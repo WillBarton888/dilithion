@@ -1216,7 +1216,18 @@ std::string CRPCServer::RPC_GetBlockHash(const std::string& params) {
         throw std::runtime_error("Invalid height parameter format");
     }
 
-    int height = std::stoi(params.substr(num_start, num_end - num_start));
+    // PHASE 4 FIX: Add exception handling for invalid height parameter
+    int height = 0;
+    try {
+        height = std::stoi(params.substr(num_start, num_end - num_start));
+        if (height < 0) {
+            throw std::runtime_error("Invalid height parameter (must be non-negative)");
+        }
+    } catch (const std::invalid_argument& e) {
+        throw std::runtime_error("Invalid height parameter format (not a number)");
+    } catch (const std::out_of_range& e) {
+        throw std::runtime_error("Height parameter out of range");
+    }
 
     // Get blocks at this height
     std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(height);

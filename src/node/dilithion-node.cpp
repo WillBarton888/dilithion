@@ -22,6 +22,7 @@
 #include <node/mempool.h>
 #include <node/genesis.h>
 #include <node/block_index.h>
+#include <consensus/params.h>
 #include <net/peers.h>
 #include <net/net.h>
 #include <net/socket.h>
@@ -95,10 +96,40 @@ struct NodeConfig {
                 datadir = arg.substr(10);
             }
             else if (arg.find("--rpcport=") == 0) {
-                rpcport = std::stoi(arg.substr(10));
+                // PHASE 4 FIX: Add exception handling for invalid port numbers
+                try {
+                    int port = std::stoi(arg.substr(10));
+                    if (port < Consensus::MIN_PORT || port > Consensus::MAX_PORT) {
+                        std::cerr << "Error: Invalid RPC port (must be " << Consensus::MIN_PORT
+                                  << "-" << Consensus::MAX_PORT << "): " << arg << std::endl;
+                        return false;
+                    }
+                    rpcport = static_cast<uint16_t>(port);
+                } catch (const std::invalid_argument& e) {
+                    std::cerr << "Error: Invalid RPC port format (not a number): " << arg << std::endl;
+                    return false;
+                } catch (const std::out_of_range& e) {
+                    std::cerr << "Error: RPC port number out of range: " << arg << std::endl;
+                    return false;
+                }
             }
             else if (arg.find("--port=") == 0) {
-                p2pport = std::stoi(arg.substr(7));
+                // PHASE 4 FIX: Add exception handling for invalid port numbers
+                try {
+                    int port = std::stoi(arg.substr(7));
+                    if (port < Consensus::MIN_PORT || port > Consensus::MAX_PORT) {
+                        std::cerr << "Error: Invalid P2P port (must be " << Consensus::MIN_PORT
+                                  << "-" << Consensus::MAX_PORT << "): " << arg << std::endl;
+                        return false;
+                    }
+                    p2pport = static_cast<uint16_t>(port);
+                } catch (const std::invalid_argument& e) {
+                    std::cerr << "Error: Invalid P2P port format (not a number): " << arg << std::endl;
+                    return false;
+                } catch (const std::out_of_range& e) {
+                    std::cerr << "Error: P2P port number out of range: " << arg << std::endl;
+                    return false;
+                }
             }
             else if (arg.find("--connect=") == 0) {
                 connect_nodes.push_back(arg.substr(10));
@@ -110,7 +141,22 @@ struct NodeConfig {
                 start_mining = true;
             }
             else if (arg.find("--threads=") == 0) {
-                mining_threads = std::stoi(arg.substr(10));
+                // PHASE 4 FIX: Add exception handling for invalid thread count
+                try {
+                    int threads = std::stoi(arg.substr(10));
+                    if (threads < Consensus::MIN_MINING_THREADS || threads > Consensus::MAX_MINING_THREADS) {
+                        std::cerr << "Error: Invalid thread count (must be " << Consensus::MIN_MINING_THREADS
+                                  << "-" << Consensus::MAX_MINING_THREADS << "): " << arg << std::endl;
+                        return false;
+                    }
+                    mining_threads = threads;
+                } catch (const std::invalid_argument& e) {
+                    std::cerr << "Error: Invalid thread count format (not a number): " << arg << std::endl;
+                    return false;
+                } catch (const std::out_of_range& e) {
+                    std::cerr << "Error: Thread count number out of range: " << arg << std::endl;
+                    return false;
+                }
             }
             else if (arg == "--help" || arg == "-h") {
                 return false;
@@ -212,10 +258,10 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     CAddress minerAddress = wallet.GetNewAddress();
     std::vector<uint8_t> minerPubKeyHash = wallet.GetPubKeyHash();
 
-    // Calculate block subsidy (50 DIL * COIN, halving every 210000 blocks)
-    int64_t nSubsidy = 50 * COIN;
-    int nHalvings = nHeight / 210000;
-    if (nHalvings >= 64) {
+    // Calculate block subsidy using consensus parameters
+    int64_t nSubsidy = Consensus::INITIAL_BLOCK_SUBSIDY;
+    int nHalvings = nHeight / Consensus::SUBSIDY_HALVING_INTERVAL;
+    if (nHalvings >= Consensus::SUBSIDY_HALVING_BITS) {
         nSubsidy = 0;
     } else {
         nSubsidy >>= nHalvings;
@@ -240,13 +286,6 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     coinbaseOut.nValue = nSubsidy;
     coinbaseOut.scriptPubKey = WalletCrypto::CreateScriptPubKey(minerPubKeyHash);
     coinbaseTx.vout.push_back(coinbaseOut);
-
-    // DEBUG: Show coinbase details
-    if (verbose) {
-        std::cout << "[DEBUG] Coinbase creation:" << std::endl;
-        std::cout << "[DEBUG]   Miner pubkey hash size: " << minerPubKeyHash.size() << " bytes" << std::endl;
-        std::cout << "[DEBUG]   scriptPubKey size: " << coinbaseOut.scriptPubKey.size() << " bytes" << std::endl;
-    }
 
     // Store coinbase transaction globally for callback access
     {
@@ -783,27 +822,10 @@ int main(int argc, char* argv[]) {
                 std::vector<uint8_t> pubkey_hash = WalletCrypto::ExtractPubKeyHash(coinbaseOut.scriptPubKey);
                 std::vector<uint8_t> our_hash = wallet.GetPubKeyHash();
 
-                // DEBUG: Show verification details
-                std::cout << "[DEBUG] Coinbase verification:" << std::endl;
-                std::cout << "[DEBUG]   scriptPubKey size: " << coinbaseOut.scriptPubKey.size() << " bytes" << std::endl;
-                std::cout << "[DEBUG]   Extracted pubkey_hash size: " << pubkey_hash.size() << " bytes" << std::endl;
-                std::cout << "[DEBUG]   Our wallet hash size: " << our_hash.size() << " bytes" << std::endl;
-                std::cout << "[DEBUG]   Hashes match: " << (pubkey_hash == our_hash ? "YES" : "NO") << std::endl;
-                if (pubkey_hash.empty()) {
-                    std::cout << "[DEBUG]   WARNING: Extracted hash is empty!" << std::endl;
-                }
-
                 // Verify this coinbase belongs to our wallet
-                std::cout << "[DEBUG] Before wallet crediting if block" << std::endl;
-                std::cout << "[DEBUG] pubkey_hash.empty() = " << (pubkey_hash.empty() ? "true" : "false") << std::endl;
-                std::cout << "[DEBUG] hashes equal = " << (pubkey_hash == our_hash ? "true" : "false") << std::endl;
-
                 if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
-                    std::cout << "[DEBUG] Inside wallet crediting if block!" << std::endl;
-
                     // Construct address from the verified public key hash
                     CAddress our_address(pubkey_hash);
-                    std::cout << "[DEBUG] Successfully constructed address from pubkey_hash" << std::endl;
 
                     // Get block height for UTXO tracking
                     uint32_t block_height = 0;
@@ -812,21 +834,15 @@ int main(int argc, char* argv[]) {
                         block_height = tempIndex.nHeight + 1;
                     }
 
-                    std::cout << "[DEBUG] About to call wallet.AddTxOut()..." << std::endl;
                     // Add coinbase UTXO to wallet
                     wallet.AddTxOut(coinbase->GetHash(), 0, coinbaseOut.nValue, our_address, block_height);
-                    std::cout << "[DEBUG] Successfully added UTXO to wallet" << std::endl;
 
                     // Display credited amount
                     double amountDIL = static_cast<double>(coinbaseOut.nValue) / 100000000.0;
                     std::cout << "[Wallet] Coinbase credited: " << std::fixed << std::setprecision(8)
                               << amountDIL << " DIL" << std::endl;
-                } else {
-                    std::cout << "[DEBUG] Skipped wallet crediting - if condition was false" << std::endl;
                 }
             }
-
-            std::cout << "[DEBUG] After coinbase processing, before balance display" << std::endl;
 
             // Display updated wallet balance
             int64_t balance = wallet.GetBalance();
@@ -1022,7 +1038,23 @@ int main(int argc, char* argv[]) {
                 size_t colon_pos = node_addr.find(':');
                 if (colon_pos != std::string::npos) {
                     std::string ip = node_addr.substr(0, colon_pos);
-                    uint16_t port = std::stoi(node_addr.substr(colon_pos + 1));
+                    std::string port_str = node_addr.substr(colon_pos + 1);
+
+                    // PHASE 4 FIX: Add exception handling for invalid port in peer address
+                    uint16_t port = 0;
+                    try {
+                        int port_int = std::stoi(port_str);
+                        if (port_int < Consensus::MIN_PORT || port_int > Consensus::MAX_PORT) {
+                            std::cerr << "    ✗ Invalid port number in address: " << node_addr
+                                      << " (must be " << Consensus::MIN_PORT << "-" << Consensus::MAX_PORT << ")" << std::endl;
+                            continue;
+                        }
+                        port = static_cast<uint16_t>(port_int);
+                    } catch (const std::exception& e) {
+                        std::cerr << "    ✗ Invalid port format in address: " << node_addr
+                                  << " (expected ip:port)" << std::endl;
+                        continue;
+                    }
 
                     NetProtocol::CAddress addr;
                     addr.time = static_cast<uint32_t>(std::time(nullptr));
@@ -1063,7 +1095,23 @@ int main(int argc, char* argv[]) {
                 size_t colon_pos = node_addr.find(':');
                 if (colon_pos != std::string::npos) {
                     std::string ip = node_addr.substr(0, colon_pos);
-                    uint16_t port = std::stoi(node_addr.substr(colon_pos + 1));
+                    std::string port_str = node_addr.substr(colon_pos + 1);
+
+                    // PHASE 4 FIX: Add exception handling for invalid port in peer address
+                    uint16_t port = 0;
+                    try {
+                        int port_int = std::stoi(port_str);
+                        if (port_int < Consensus::MIN_PORT || port_int > Consensus::MAX_PORT) {
+                            std::cerr << "    ✗ Invalid port number in address: " << node_addr
+                                      << " (must be " << Consensus::MIN_PORT << "-" << Consensus::MAX_PORT << ")" << std::endl;
+                            continue;
+                        }
+                        port = static_cast<uint16_t>(port_int);
+                    } catch (const std::exception& e) {
+                        std::cerr << "    ✗ Invalid port format in address: " << node_addr
+                                  << " (expected ip:port)" << std::endl;
+                        continue;
+                    }
 
                     NetProtocol::CAddress addr;
                     addr.time = static_cast<uint32_t>(std::time(nullptr));
