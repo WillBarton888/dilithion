@@ -42,7 +42,7 @@ static std::string GetClientIP(int clientSocket) {
 }
 
 CRPCServer::CRPCServer(uint16_t port)
-    : m_port(port), m_wallet(nullptr), m_miner(nullptr), m_mempool(nullptr),
+    : m_port(port), m_threadPoolSize(8), m_wallet(nullptr), m_miner(nullptr), m_mempool(nullptr),
       m_blockchain(nullptr), m_utxo_set(nullptr), m_chainstate(nullptr),
       m_serverSocket(INVALID_SOCKET)
 {
@@ -136,6 +136,13 @@ bool CRPCServer::Start() {
     m_running = true;
     m_serverThread = std::thread(&CRPCServer::ServerThread, this);
 
+    // RPC-002: Start worker thread pool
+    m_workerThreads.reserve(m_threadPoolSize);
+    for (size_t i = 0; i < m_threadPoolSize; ++i) {
+        m_workerThreads.emplace_back(&CRPCServer::WorkerThread, this);
+    }
+    std::cout << "[RPC] Started thread pool with " << m_threadPoolSize << " workers" << std::endl;
+
     // Start cleanup thread (rate limiter maintenance)
     m_cleanupThread = std::thread(&CRPCServer::CleanupThread, this);
 
@@ -162,10 +169,21 @@ void CRPCServer::Stop() {
         m_serverSocket = INVALID_SOCKET;
     }
 
+    // RPC-002: Wake up all worker threads so they can exit
+    m_queueCV.notify_all();
+
     // Wait for server thread
     if (m_serverThread.joinable()) {
         m_serverThread.join();
     }
+
+    // RPC-002: Wait for all worker threads to finish
+    for (auto& thread : m_workerThreads) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+    m_workerThreads.clear();
 
     // Wait for cleanup thread
     if (m_cleanupThread.joinable()) {
@@ -194,10 +212,47 @@ void CRPCServer::ServerThread() {
             }
         }
 
-        // Handle client in this thread (for simplicity)
-        // In production, would use thread pool
-        HandleClient(clientSocket);
-        closesocket(clientSocket);
+        // RPC-002: Add client to thread pool queue
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            m_clientQueue.push(clientSocket);
+        }
+        // Notify one worker thread that work is available
+        m_queueCV.notify_one();
+    }
+}
+
+// RPC-002: Worker Thread Implementation
+void CRPCServer::WorkerThread() {
+    while (m_running) {
+        int clientSocket = INVALID_SOCKET;
+
+        // Wait for work or shutdown
+        {
+            std::unique_lock<std::mutex> lock(m_queueMutex);
+
+            // Wait until there's work in the queue or we're shutting down
+            m_queueCV.wait(lock, [this] {
+                return !m_running || !m_clientQueue.empty();
+            });
+
+            // Check if we're shutting down
+            if (!m_running && m_clientQueue.empty()) {
+                return;
+            }
+
+            // Get next client socket from queue
+            if (!m_clientQueue.empty()) {
+                clientSocket = m_clientQueue.front();
+                m_clientQueue.pop();
+            }
+        }
+
+        // Handle client connection (outside the lock)
+        if (clientSocket != INVALID_SOCKET) {
+            HandleClient(clientSocket);
+            closesocket(clientSocket);
+        }
     }
 }
 
@@ -221,6 +276,19 @@ void CRPCServer::CleanupThread() {
 }
 
 void CRPCServer::HandleClient(int clientSocket) {
+    // RPC-002: Set socket timeouts (30 seconds for both send and receive)
+    #ifdef _WIN32
+    DWORD timeout = 30000;  // 30 seconds in milliseconds
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+    #else
+    struct timeval timeout;
+    timeout.tv_sec = 30;  // 30 seconds
+    timeout.tv_usec = 0;
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+    #endif
+
     // Get client IP for rate limiting
     std::string clientIP = GetClientIP(clientSocket);
 

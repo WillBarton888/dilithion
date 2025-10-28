@@ -16,6 +16,8 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <queue>
+#include <condition_variable>
 
 /**
  * JSON-RPC 2.0 Request
@@ -85,6 +87,13 @@ private:
     std::thread m_serverThread;
     std::thread m_cleanupThread;  // Rate limiter cleanup thread
 
+    // RPC-002: Thread Pool Implementation
+    std::vector<std::thread> m_workerThreads;
+    std::queue<int> m_clientQueue;        // Queue of pending client sockets
+    std::mutex m_queueMutex;              // Protects client queue
+    std::condition_variable m_queueCV;    // Notifies workers of new work
+    size_t m_threadPoolSize;              // Number of worker threads (default 8)
+
     // Component references
     CWallet* m_wallet;
     CMiningController* m_miner;
@@ -108,6 +117,12 @@ private:
      * Server thread function
      */
     void ServerThread();
+
+    /**
+     * Worker thread function (RPC-002)
+     * Processes client connections from the queue
+     */
+    void WorkerThread();
 
     /**
      * Cleanup thread function (rate limiter maintenance)
