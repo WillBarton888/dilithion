@@ -795,15 +795,15 @@ bool CWallet::Load(const std::string& filename) {
         return false;  // File doesn't exist or can't be opened
     }
 
-    // Set wallet file path on successful load
-    m_walletFile = filename;
-
-    // Clear existing wallet data
-    mapKeys.clear();
-    mapCryptedKeys.clear();
-    vchAddresses.clear();
-    mapWalletTx.clear();
-    defaultAddress = CAddress();
+    // SEC-001 FIX: Load into temporary variables first (atomic load pattern)
+    // Only clear existing wallet if load succeeds completely
+    std::map<CAddress, CKey> temp_mapKeys;
+    std::map<CAddress, CEncryptedKey> temp_mapCryptedKeys;
+    std::vector<CAddress> temp_vchAddresses;
+    std::map<uint256, CWalletTx> temp_mapWalletTx;
+    CAddress temp_defaultAddress;
+    CMasterKey temp_masterKey;
+    bool temp_fWalletUnlocked = true;
 
     // Read header
     char magic[8];
@@ -836,31 +836,43 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(&cryptedKeyLen), sizeof(cryptedKeyLen));
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        masterKey.vchCryptedKey.resize(cryptedKeyLen);
-        file.read(reinterpret_cast<char*>(masterKey.vchCryptedKey.data()), cryptedKeyLen);
+        // SEC-001 FIX: Validate cryptedKeyLen to prevent memory exhaustion
+        const uint32_t MAX_ENCRYPTED_KEY_SIZE = 8192;  // Reasonable upper bound
+        if (cryptedKeyLen > MAX_ENCRYPTED_KEY_SIZE) {
+            return false;  // Reject malicious sizes
+        }
+
+        temp_masterKey.vchCryptedKey.resize(cryptedKeyLen);
+        file.read(reinterpret_cast<char*>(temp_masterKey.vchCryptedKey.data()), cryptedKeyLen);
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        masterKey.vchSalt.resize(WALLET_CRYPTO_SALT_SIZE);
-        file.read(reinterpret_cast<char*>(masterKey.vchSalt.data()), WALLET_CRYPTO_SALT_SIZE);
+        temp_masterKey.vchSalt.resize(WALLET_CRYPTO_SALT_SIZE);
+        file.read(reinterpret_cast<char*>(temp_masterKey.vchSalt.data()), WALLET_CRYPTO_SALT_SIZE);
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        masterKey.vchIV.resize(WALLET_CRYPTO_IV_SIZE);
-        file.read(reinterpret_cast<char*>(masterKey.vchIV.data()), WALLET_CRYPTO_IV_SIZE);
+        temp_masterKey.vchIV.resize(WALLET_CRYPTO_IV_SIZE);
+        file.read(reinterpret_cast<char*>(temp_masterKey.vchIV.data()), WALLET_CRYPTO_IV_SIZE);
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        file.read(reinterpret_cast<char*>(&masterKey.nDerivationMethod), sizeof(masterKey.nDerivationMethod));
+        file.read(reinterpret_cast<char*>(&temp_masterKey.nDerivationMethod), sizeof(temp_masterKey.nDerivationMethod));
         if (!file.good()) return false;  // SEC-001: Check I/O error
-        file.read(reinterpret_cast<char*>(&masterKey.nDeriveIterations), sizeof(masterKey.nDeriveIterations));
+        file.read(reinterpret_cast<char*>(&temp_masterKey.nDeriveIterations), sizeof(temp_masterKey.nDeriveIterations));
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
         // Wallet starts locked (encryption status determined by masterKey.IsValid())
-        fWalletUnlocked = false;
+        temp_fWalletUnlocked = false;
     }
 
     // Read keys
     uint32_t numKeys;
     file.read(reinterpret_cast<char*>(&numKeys), sizeof(numKeys));
     if (!file.good()) return false;  // SEC-001: Check I/O error
+
+    // SEC-001 FIX: Validate numKeys to prevent iteration bomb / DoS
+    const uint32_t MAX_WALLET_KEYS = 1000000;  // 1M keys is already excessive
+    if (numKeys > MAX_WALLET_KEYS) {
+        return false;  // Reject malicious loop counts
+    }
 
     for (uint32_t i = 0; i < numKeys; i++) {
         // Read address
@@ -888,6 +900,12 @@ bool CWallet::Load(const std::string& filename) {
             file.read(reinterpret_cast<char*>(&cryptedKeyLen), sizeof(cryptedKeyLen));
             if (!file.good()) return false;  // SEC-001: Check I/O error
 
+            // SEC-001 FIX: Validate cryptedKeyLen (same check as master key)
+            const uint32_t MAX_ENCRYPTED_KEY_SIZE = 8192;
+            if (cryptedKeyLen > MAX_ENCRYPTED_KEY_SIZE) {
+                return false;  // Reject malicious sizes
+            }
+
             encKey.vchCryptedKey.resize(cryptedKeyLen);
             file.read(reinterpret_cast<char*>(encKey.vchCryptedKey.data()), cryptedKeyLen);
             if (!file.good()) return false;  // SEC-001: Check I/O error
@@ -898,8 +916,8 @@ bool CWallet::Load(const std::string& filename) {
 
             // Create address from public key
             CAddress keyAddr(encKey.vchPubKey);
-            mapCryptedKeys[keyAddr] = encKey;
-            vchAddresses.push_back(keyAddr);
+            temp_mapCryptedKeys[keyAddr] = encKey;
+            temp_vchAddresses.push_back(keyAddr);
         } else {
             // Read unencrypted key
             CKey key;
@@ -914,8 +932,8 @@ bool CWallet::Load(const std::string& filename) {
 
             // Create address from public key
             CAddress keyAddr(key.vchPubKey);
-            mapKeys[keyAddr] = key;
-            vchAddresses.push_back(keyAddr);
+            temp_mapKeys[keyAddr] = key;
+            temp_vchAddresses.push_back(keyAddr);
         }
     }
 
@@ -928,10 +946,10 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(addrData.data()), 21);
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        // Find matching address in vchAddresses
-        for (const auto& addr : vchAddresses) {
+        // Find matching address in temp_vchAddresses
+        for (const auto& addr : temp_vchAddresses) {
             if (addr.GetData() == addrData) {
-                defaultAddress = addr;
+                temp_defaultAddress = addr;
                 break;
             }
         }
@@ -941,6 +959,12 @@ bool CWallet::Load(const std::string& filename) {
     uint32_t numTxs;
     file.read(reinterpret_cast<char*>(&numTxs), sizeof(numTxs));
     if (!file.good()) return false;  // SEC-001: Check I/O error
+
+    // SEC-001 FIX: Validate numTxs to prevent iteration bomb / DoS
+    const uint32_t MAX_WALLET_TXS = 10000000;  // 10M transactions is excessive
+    if (numTxs > MAX_WALLET_TXS) {
+        return false;  // Reject malicious loop counts
+    }
 
     for (uint32_t i = 0; i < numTxs; i++) {
         CWalletTx wtx;
@@ -956,8 +980,8 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(addrData.data()), 21);
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        // Find matching address
-        for (const auto& addr : vchAddresses) {
+        // Find matching address in temp_vchAddresses
+        for (const auto& addr : temp_vchAddresses) {
             if (addr.GetData() == addrData) {
                 wtx.address = addr;
                 break;
@@ -972,10 +996,26 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(&wtx.nHeight), sizeof(wtx.nHeight));
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        mapWalletTx[wtx.txid] = wtx;
+        temp_mapWalletTx[wtx.txid] = wtx;
     }
 
-    return file.good();
+    // SEC-001 FIX: Only if ALL data loaded successfully, swap into wallet
+    // This ensures atomic load - either everything loads or nothing changes
+    if (!file.good()) {
+        return false;  // File error occurred, temp data discarded
+    }
+
+    // All data loaded successfully - now atomically replace wallet contents
+    mapKeys = std::move(temp_mapKeys);
+    mapCryptedKeys = std::move(temp_mapCryptedKeys);
+    vchAddresses = std::move(temp_vchAddresses);
+    mapWalletTx = std::move(temp_mapWalletTx);
+    defaultAddress = temp_defaultAddress;
+    masterKey = temp_masterKey;
+    fWalletUnlocked = temp_fWalletUnlocked;
+    m_walletFile = filename;  // Set wallet file path only on successful load
+
+    return true;
 }
 
 // Public Save() method - acquires lock and calls SaveUnlocked()
@@ -992,7 +1032,12 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         return false;  // No wallet file specified
     }
 
-    std::ofstream file(saveFile, std::ios::binary);
+    // SEC-001 FIX: Atomic file write pattern
+    // Write to temporary file first, then atomically rename on success
+    // This prevents corruption if write fails mid-operation
+    std::string tempFile = saveFile + ".tmp";
+
+    std::ofstream file(tempFile, std::ios::binary);
     if (!file.is_open()) {
         return false;
     }
@@ -1120,7 +1165,29 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     }
 
     file.close();
-    return file.good();
+
+    // SEC-001 FIX: Check if write was successful before committing
+    if (!file.good()) {
+        // Write failed - clean up temp file and return error
+        std::remove(tempFile.c_str());
+        return false;
+    }
+
+    // SEC-001 FIX: Atomically replace old file with new file
+    // On most OS, rename() is atomic - either fully succeeds or fully fails
+    // This ensures we never have a half-written wallet file
+    #ifdef _WIN32
+    // On Windows, need to remove target file first
+    std::remove(saveFile.c_str());
+    #endif
+
+    if (std::rename(tempFile.c_str(), saveFile.c_str()) != 0) {
+        // Rename failed - clean up temp file
+        std::remove(tempFile.c_str());
+        return false;
+    }
+
+    return true;
 }
 
 void CWallet::SetWalletFile(const std::string& filename) {
