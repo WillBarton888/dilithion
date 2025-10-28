@@ -1245,16 +1245,64 @@ std::vector<uint8_t> CWallet::GetPublicKeyUnlocked() const {
 }
 
 bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
-    // Suppress unused parameter warning for placeholder implementation
-    (void)global_utxo_set;
+    std::cout << "[Wallet] Scanning UTXO set for wallet outputs..." << std::endl;
 
-    // Note: This is a placeholder implementation
-    // In production, you would need to iterate the entire UTXO set
-    // which requires adding an iterator interface to CUTXOSet
-    // For now, UTXOs are tracked via AddTxOut/MarkSpent
+    // Step 1: Get all wallet addresses and their pubkey hashes
+    std::vector<CAddress> addresses = GetAddresses();
+    if (addresses.empty()) {
+        std::cout << "[Wallet] No addresses in wallet - nothing to scan" << std::endl;
+        return true;
+    }
 
-    // Future enhancement: Add CUTXOSet::ForEach(callback) method
-    // to iterate all UTXOs and check if they belong to this wallet
+    // Build set of pubkey hashes for fast lookup
+    std::set<std::vector<uint8_t>> walletPubKeyHashes;
+    for (const auto& addr : addresses) {
+        std::vector<uint8_t> pkh = GetPubKeyHashFromAddress(addr);
+        if (!pkh.empty()) {
+            walletPubKeyHashes.insert(pkh);
+        }
+    }
+
+    std::cout << "[Wallet] Scanning for " << walletPubKeyHashes.size() << " address(es)" << std::endl;
+
+    // Step 2: Track found UTXOs
+    size_t utxosScanned = 0;
+    size_t utxosFound = 0;
+
+    // Step 3: Scan all UTXOs using ForEach iterator
+    global_utxo_set.ForEach([&](const COutPoint& outpoint, const CUTXOEntry& entry) {
+        utxosScanned++;
+
+        // Extract pubkey hash from scriptPubKey
+        std::vector<uint8_t> scriptPubKeyHash = WalletCrypto::ExtractPubKeyHash(entry.out.scriptPubKey);
+
+        // Check if this UTXO belongs to our wallet
+        if (!scriptPubKeyHash.empty() && walletPubKeyHashes.count(scriptPubKeyHash) > 0) {
+            // Find which address this belongs to
+            for (const auto& addr : addresses) {
+                std::vector<uint8_t> addrHash = GetPubKeyHashFromAddress(addr);
+                if (addrHash == scriptPubKeyHash) {
+                    // Add to wallet (this acquires lock internally)
+                    AddTxOut(outpoint.hash, outpoint.n, entry.out.nValue, addr, entry.nHeight);
+                    utxosFound++;
+
+                    std::cout << "[Wallet] Found UTXO: " << outpoint.hash.GetHex().substr(0, 16)
+                              << ":" << outpoint.n << " (" << entry.out.nValue << " ions)" << std::endl;
+                    break;
+                }
+            }
+        }
+
+        // Progress update every 10000 UTXOs
+        if (utxosScanned % 10000 == 0) {
+            std::cout << "[Wallet] Scanned " << utxosScanned << " UTXOs..." << std::endl;
+        }
+
+        return true; // Continue iteration
+    });
+
+    std::cout << "[Wallet] Scan complete: Found " << utxosFound << " wallet UTXO(s) out of "
+              << utxosScanned << " total" << std::endl;
 
     return true;
 }

@@ -179,6 +179,16 @@ public:
     bool UpdateStats();
 
     /**
+     * Iterate over all UTXOs in the set (WS-002)
+     * Calls callback for each UTXO
+     * @param callback Function to call for each UTXO: bool callback(COutPoint, CUTXOEntry)
+     *                 Return true to continue iteration, false to stop
+     * @return Number of UTXOs processed
+     */
+    template<typename Callback>
+    size_t ForEach(Callback callback) const;
+
+    /**
      * Check if a coinbase UTXO is mature (can be spent)
      * Coinbase outputs require COINBASE_MATURITY confirmations
      * @param outpoint The UTXO to check
@@ -212,5 +222,69 @@ public:
      */
     uint64_t GetTotalAmount() const { return stats.nTotalAmount; }
 };
+
+// ============================================================================
+// Template Implementation (WS-002)
+// ============================================================================
+
+template<typename Callback>
+size_t CUTXOSet::ForEach(Callback callback) const {
+    std::lock_guard<std::mutex> lock(cs_utxo);
+
+    if (!db) {
+        return 0;
+    }
+
+    size_t count = 0;
+    leveldb::Iterator* it = db->NewIterator(leveldb::ReadOptions());
+
+    // Seek to first UTXO key (prefix "u")
+    std::string prefix = "u";
+    it->Seek(prefix);
+
+    while (it->Valid()) {
+        leveldb::Slice key = it->key();
+        leveldb::Slice value = it->value();
+
+        // Check if we're still in UTXO keys (start with "u")
+        if (key.size() == 0 || key.data()[0] != 'u') {
+            break;
+        }
+
+        // Key format: "u" + 32-byte hash + 4-byte index = 37 bytes
+        if (key.size() != 37) {
+            it->Next();
+            continue;
+        }
+
+        // Deserialize COutPoint from key
+        COutPoint outpoint;
+        const uint8_t* keyData = reinterpret_cast<const uint8_t*>(key.data());
+
+        // Skip "u" prefix, read 32-byte hash
+        std::copy(keyData + 1, keyData + 33, outpoint.hash.begin());
+
+        // Read 4-byte index (little-endian)
+        outpoint.n = keyData[33] | (keyData[34] << 8) | (keyData[35] << 16) | (keyData[36] << 24);
+
+        // Deserialize CUTXOEntry from value
+        CUTXOEntry entry;
+        std::string valueStr(value.data(), value.size());
+
+        if (DeserializeUTXOEntry(valueStr, entry)) {
+            // Call callback - if it returns false, stop iteration
+            if (!callback(outpoint, entry)) {
+                delete it;
+                return count;
+            }
+            count++;
+        }
+
+        it->Next();
+    }
+
+    delete it;
+    return count;
+}
 
 #endif // DILITHION_NODE_UTXO_SET_H
