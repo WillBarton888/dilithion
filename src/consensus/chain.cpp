@@ -4,10 +4,11 @@
 #include <consensus/chain.h>
 #include <consensus/pow.h>
 #include <node/blockchain_storage.h>
+#include <node/utxo_set.h>
 #include <iostream>
 #include <algorithm>
 
-CChainState::CChainState() : pindexTip(nullptr), pdb(nullptr) {
+CChainState::CChainState() : pindexTip(nullptr), pdb(nullptr), pUTXOSet(nullptr) {
 }
 
 CChainState::~CChainState() {
@@ -117,6 +118,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         // Compare chain work to be safe (should always be greater if extending tip)
         if (!ChainWorkGreaterThan(pindexNew->nChainWork, pindexTip->nChainWork)) {
             std::cerr << "[Chain] WARNING: Block extends tip but doesn't increase chain work" << std::endl;
+            std::cerr << "  Current work: " << pindexTip->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cerr << "  New work:     " << pindexNew->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
             return false;
         }
 
@@ -201,42 +204,121 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     std::cout << "  Disconnect " << disconnectBlocks.size() << " block(s)" << std::endl;
     std::cout << "  Connect " << connectBlocks.size() << " block(s)" << std::endl;
 
+    // ============================================================================
+    // CS-005: Chain Reorganization Rollback - Atomic Reorg with Rollback
+    // ============================================================================
+
     // Disconnect old chain
     std::cout << "[Chain] Disconnecting old chain..." << std::endl;
-    for (CBlockIndex* pindexDisconnect : disconnectBlocks) {
+    size_t disconnectedCount = 0;
+    for (size_t i = 0; i < disconnectBlocks.size(); ++i) {
+        CBlockIndex* pindexDisconnect = disconnectBlocks[i];
         std::cout << "  Disconnecting: " << pindexDisconnect->GetBlockHash().GetHex().substr(0, 16)
                   << " (height " << pindexDisconnect->nHeight << ")" << std::endl;
 
         if (!DisconnectTip(pindexDisconnect)) {
-            std::cerr << "[Chain] ERROR: Failed to disconnect block during reorg" << std::endl;
-            // This is a critical error - chain state is now inconsistent
-            // In production, would need rollback mechanism
+            std::cerr << "[Chain] ERROR: Failed to disconnect block during reorg at height "
+                      << pindexDisconnect->nHeight << std::endl;
+
+            // ROLLBACK: Reconnect all blocks we already disconnected
+            std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " blocks..." << std::endl;
+            for (int j = disconnectedCount - 1; j >= 0; --j) {
+                CBlockIndex* pindexReconnect = disconnectBlocks[j];
+                CBlock reconnectBlock;
+
+                if (pdb != nullptr && pdb->ReadBlock(pindexReconnect->GetBlockHash(), reconnectBlock)) {
+                    if (!ConnectTip(pindexReconnect, reconnectBlock)) {
+                        std::cerr << "[Chain] CRITICAL: Rollback failed! Chain state corrupted!" << std::endl;
+                        // Database corruption - manual intervention required
+                        return false;
+                    }
+                }
+            }
+
+            std::cerr << "[Chain] Rollback complete. Reorg aborted." << std::endl;
             return false;
         }
+
+        disconnectedCount++;
     }
 
     // Connect new chain
     std::cout << "[Chain] Connecting new chain..." << std::endl;
-    for (CBlockIndex* pindexConnect : connectBlocks) {
+    size_t connectedCount = 0;
+    for (size_t i = 0; i < connectBlocks.size(); ++i) {
+        CBlockIndex* pindexConnect = connectBlocks[i];
         std::cout << "  Connecting: " << pindexConnect->GetBlockHash().GetHex().substr(0, 16)
                   << " (height " << pindexConnect->nHeight << ")" << std::endl;
 
-        // Need to load block data from database
-        // For now, we only have the last block's full data
-        // In production, would load from database
+        // Load block data from database
+        CBlock connectBlock;
+        bool haveBlockData = false;
+
         if (pindexConnect == pindexNew) {
             // We have the full block data for the new tip
-            if (!ConnectTip(pindexConnect, block)) {
-                std::cerr << "[Chain] ERROR: Failed to connect block during reorg" << std::endl;
-                return false;
-            }
-        } else {
-            // For other blocks in the new chain, we already connected them
-            // when they were first received. Just update pnext pointers.
-            if (pindexConnect->pprev != nullptr) {
-                pindexConnect->pprev->pnext = pindexConnect;
-            }
+            connectBlock = block;
+            haveBlockData = true;
+        } else if (pdb != nullptr && pdb->ReadBlock(pindexConnect->GetBlockHash(), connectBlock)) {
+            haveBlockData = true;
         }
+
+        if (!haveBlockData) {
+            std::cerr << "[Chain] ERROR: Cannot load block data for connect at height "
+                      << pindexConnect->nHeight << std::endl;
+
+            // ROLLBACK: Disconnect what we connected, reconnect what we disconnected
+            std::cerr << "[Chain] ROLLBACK: Disconnecting " << connectedCount << " newly connected blocks..." << std::endl;
+            for (int j = connectedCount - 1; j >= 0; --j) {
+                if (!DisconnectTip(connectBlocks[j])) {
+                    std::cerr << "[Chain] CRITICAL: Rollback failed during disconnect! Chain state corrupted!" << std::endl;
+                    return false;
+                }
+            }
+
+            std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " old blocks..." << std::endl;
+            for (int j = disconnectedCount - 1; j >= 0; --j) {
+                CBlock reconnectBlock;
+                if (pdb != nullptr && pdb->ReadBlock(disconnectBlocks[j]->GetBlockHash(), reconnectBlock)) {
+                    if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
+                        std::cerr << "[Chain] CRITICAL: Rollback failed! Chain state corrupted!" << std::endl;
+                        return false;
+                    }
+                }
+            }
+
+            std::cerr << "[Chain] Rollback complete. Reorg aborted." << std::endl;
+            return false;
+        }
+
+        if (!ConnectTip(pindexConnect, connectBlock)) {
+            std::cerr << "[Chain] ERROR: Failed to connect block during reorg at height "
+                      << pindexConnect->nHeight << std::endl;
+
+            // ROLLBACK: Same as above
+            std::cerr << "[Chain] ROLLBACK: Disconnecting " << connectedCount << " newly connected blocks..." << std::endl;
+            for (int j = connectedCount - 1; j >= 0; --j) {
+                if (!DisconnectTip(connectBlocks[j])) {
+                    std::cerr << "[Chain] CRITICAL: Rollback failed during disconnect! Chain state corrupted!" << std::endl;
+                    return false;
+                }
+            }
+
+            std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " old blocks..." << std::endl;
+            for (int j = disconnectedCount - 1; j >= 0; --j) {
+                CBlock reconnectBlock;
+                if (pdb != nullptr && pdb->ReadBlock(disconnectBlocks[j]->GetBlockHash(), reconnectBlock)) {
+                    if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
+                        std::cerr << "[Chain] CRITICAL: Rollback failed! Chain state corrupted!" << std::endl;
+                        return false;
+                    }
+                }
+            }
+
+            std::cerr << "[Chain] Rollback complete. Reorg aborted." << std::endl;
+            return false;
+        }
+
+        connectedCount++;
     }
 
     // Update tip
@@ -260,18 +342,30 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
         return false;
     }
 
-    // Update pnext pointer on parent
+    // ============================================================================
+    // CS-005: Chain Reorganization Rollback - ConnectTip Implementation
+    // ============================================================================
+
+    // Step 1: Update UTXO set (CS-004)
+    if (pUTXOSet != nullptr) {
+        if (!pUTXOSet->ApplyBlock(block, pindex->nHeight)) {
+            std::cerr << "[Chain] ERROR: Failed to apply block to UTXO set at height "
+                      << pindex->nHeight << std::endl;
+            return false;
+        }
+    }
+
+    // Step 2: Update pnext pointer on parent
     if (pindex->pprev != nullptr) {
         pindex->pprev->pnext = pindex;
     }
 
-    // Mark block as connected
+    // Step 3: Mark block as connected
     pindex->nStatus |= CBlockIndex::BLOCK_VALID_CHAIN;
 
-    // In production, would also:
-    // - Update UTXO set
-    // - Validate all transactions
+    // Future enhancements:
     // - Update wallet balances
+    // - Notify subscribers of new block
 
     return true;
 }
@@ -281,19 +375,44 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex) {
         return false;
     }
 
-    // Clear pnext pointer on parent
+    // ============================================================================
+    // CS-005: Chain Reorganization Rollback - DisconnectTip Implementation
+    // ============================================================================
+
+    // Step 1: Load block data from database (needed for UTXO undo)
+    CBlock block;
+    if (pdb != nullptr) {
+        if (!pdb->ReadBlock(pindex->GetBlockHash(), block)) {
+            std::cerr << "[Chain] ERROR: Failed to load block from database for disconnect at height "
+                      << pindex->nHeight << std::endl;
+            return false;
+        }
+    } else {
+        std::cerr << "[Chain] ERROR: Cannot disconnect block without database access" << std::endl;
+        return false;
+    }
+
+    // Step 2: Undo UTXO set changes (CS-004)
+    if (pUTXOSet != nullptr) {
+        if (!pUTXOSet->UndoBlock(block)) {
+            std::cerr << "[Chain] ERROR: Failed to undo block from UTXO set at height "
+                      << pindex->nHeight << std::endl;
+            return false;
+        }
+    }
+
+    // Step 3: Clear pnext pointer on parent
     if (pindex->pprev != nullptr) {
         pindex->pprev->pnext = nullptr;
     }
 
-    // Clear own pnext pointer
+    // Step 4: Clear own pnext pointer
     pindex->pnext = nullptr;
 
-    // Unmark block as on main chain
+    // Step 5: Unmark block as on main chain
     pindex->nStatus &= ~CBlockIndex::BLOCK_VALID_CHAIN;
 
-    // In production, would also:
-    // - Revert UTXO set changes
+    // Future enhancements:
     // - Return transactions to mempool
     // - Update wallet balances
 

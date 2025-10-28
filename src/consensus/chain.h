@@ -11,6 +11,7 @@
 
 // Forward declarations
 class CBlockchainDB;
+class CUTXOSet;
 
 /**
  * Chain State Manager
@@ -29,6 +30,9 @@ private:
     // Database reference for persisting chain state
     CBlockchainDB* pdb;
 
+    // UTXO set reference for chain validation (CS-005)
+    CUTXOSet* pUTXOSet;
+
 public:
     CChainState();
     ~CChainState();
@@ -37,6 +41,11 @@ public:
      * Initialize chain state with database
      */
     void SetDatabase(CBlockchainDB* database) { pdb = database; }
+
+    /**
+     * Initialize chain state with UTXO set (CS-005)
+     */
+    void SetUTXOSet(CUTXOSet* utxoSet) { pUTXOSet = utxoSet; }
 
     /**
      * Get current chain tip (most work)
