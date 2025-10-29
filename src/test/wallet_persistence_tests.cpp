@@ -70,7 +70,7 @@ int main() {
         wallet1.GenerateNewKey();
 
         // Encrypt wallet
-        if (!wallet1.EncryptWallet("TestPassword123!")) {
+        if (!wallet1.EncryptWallet("MyStr0ng!T3st#P@ss")) {
             std::cout << COLOR_RED << "✗ Failed to encrypt wallet" << COLOR_RESET << std::endl;
             return 1;
         }
@@ -103,7 +103,7 @@ int main() {
         std::cout << COLOR_GREEN << "✓ Wallet is locked" << COLOR_RESET << std::endl;
 
         // Unlock with correct passphrase
-        if (!wallet2.Unlock("TestPassword123!")) {
+        if (!wallet2.Unlock("MyStr0ng!T3st#P@ss")) {
             std::cout << COLOR_RED << "✗ Failed to unlock" << COLOR_RESET << std::endl;
             return 1;
         }

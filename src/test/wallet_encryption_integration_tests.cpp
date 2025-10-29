@@ -150,8 +150,8 @@ bool Test_PassphraseChange() {
     CWallet wallet;
     wallet.GenerateNewKey();
 
-    std::string oldPass = "OldPassword123!";
-    std::string newPass = "NewPassword456!";
+    std::string oldPass = "MyStr0ng!Old#P@ss";
+    std::string newPass = "MyStr0ng!New#P@ss";
 
     wallet.EncryptWallet(oldPass);
 
@@ -452,7 +452,7 @@ bool Test_StressMultipleKeys() {
     }
 
     // Encrypt wallet
-    std::string pass = "StressTest123!";
+    std::string pass = "MyStr3ss!T3st#P@ss";
     TEST_INFO("Encrypting wallet with " + std::to_string(numKeys) + " keys...");
     TEST_ASSERT(wallet.EncryptWallet(pass), "Encrypt wallet");
     TEST_SUCCESS("Wallet encrypted with " + std::to_string(numKeys) + " keys");
