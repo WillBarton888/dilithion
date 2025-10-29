@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <wallet/wallet.h>
+#include <wallet/passphrase_validator.h>
 #include <crypto/sha3.h>
 #include <node/utxo_set.h>
 #include <node/mempool.h>
@@ -629,6 +630,26 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
         return false;
     }
 
+    // Validate passphrase strength
+    PassphraseValidator validator;
+    PassphraseValidationResult validation = validator.Validate(passphrase);
+
+    if (!validation.is_valid) {
+        std::cerr << "[Wallet] Passphrase validation failed: "
+                  << validation.error_message << std::endl;
+        return false;
+    }
+
+    // Log passphrase strength
+    std::cout << "[Wallet] Passphrase strength: "
+              << PassphraseValidator::GetStrengthDescription(validation.strength_score)
+              << " (" << validation.strength_score << "/100)" << std::endl;
+
+    // Display any warnings
+    for (const auto& warning : validation.warnings) {
+        std::cout << "[Wallet] Warning: " << warning << std::endl;
+    }
+
     // Allow encrypting empty wallet - keys will be encrypted as they're generated
 
     // Generate random master key
@@ -736,6 +757,26 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
 
     if (passphraseNew.empty()) {
         return false;
+    }
+
+    // Validate new passphrase strength
+    PassphraseValidator validator;
+    PassphraseValidationResult validation = validator.Validate(passphraseNew);
+
+    if (!validation.is_valid) {
+        std::cerr << "[Wallet] New passphrase validation failed: "
+                  << validation.error_message << std::endl;
+        return false;
+    }
+
+    // Log passphrase strength
+    std::cout << "[Wallet] New passphrase strength: "
+              << PassphraseValidator::GetStrengthDescription(validation.strength_score)
+              << " (" << validation.strength_score << "/100)" << std::endl;
+
+    // Display any warnings
+    for (const auto& warning : validation.warnings) {
+        std::cout << "[Wallet] Warning: " << warning << std::endl;
     }
 
     // Derive old key

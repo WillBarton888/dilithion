@@ -3,6 +3,7 @@
 
 #include <rpc/server.h>
 #include <rpc/auth.h>
+#include <wallet/passphrase_validator.h>
 #include <node/mempool.h>
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
@@ -41,6 +42,60 @@ static std::string GetClientIP(int clientSocket) {
         return "unknown";
     }
     return std::string(inet_ntoa(addr.sin_addr));
+}
+
+/**
+ * Safely parse string to double with validation
+ * Prevents RPC server crashes from malformed numeric inputs
+ */
+static double SafeParseDouble(const std::string& str, double min_val, double max_val) {
+    try {
+        double result = std::stod(str);
+        if (result < min_val || result > max_val) {
+            throw std::runtime_error("Value out of valid range");
+        }
+        return result;
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error("Invalid number format");
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error("Number out of range");
+    }
+}
+
+/**
+ * Safely parse string to int64_t with validation
+ * Prevents RPC server crashes from malformed numeric inputs
+ */
+static int64_t SafeParseInt64(const std::string& str, int64_t min_val, int64_t max_val) {
+    try {
+        int64_t result = std::stoll(str);
+        if (result < min_val || result > max_val) {
+            throw std::runtime_error("Value out of valid range");
+        }
+        return result;
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error("Invalid integer format");
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error("Integer out of range");
+    }
+}
+
+/**
+ * Safely parse string to uint32_t with validation
+ * Prevents RPC server crashes from malformed numeric inputs
+ */
+static uint32_t SafeParseUInt32(const std::string& str, uint32_t min_val, uint32_t max_val) {
+    try {
+        unsigned long result = std::stoul(str);
+        if (result < min_val || result > max_val) {
+            throw std::runtime_error("Value out of valid range");
+        }
+        return static_cast<uint32_t>(result);
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error("Invalid integer format");
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error("Integer out of range");
+    }
 }
 
 CRPCServer::CRPCServer(uint16_t port)
@@ -845,7 +900,9 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
             num_end++;
         }
         if (num_end > num_start) {
-            double amt_dbl = std::stod(params.substr(num_start, num_end - num_start));
+            // MEDIUM-004: Use SafeParseDouble to prevent RPC crashes from malformed input
+            // Max supply is 21 million DIL, so 21000000.0 is a reasonable upper bound
+            double amt_dbl = SafeParseDouble(params.substr(num_start, num_end - num_start), 0.0, 21000000.0);
             amount = static_cast<CAmount>(amt_dbl * 100000000);  // Convert DIL to ions
         }
     }
@@ -1285,7 +1342,9 @@ std::string CRPCServer::RPC_GetTxOut(const std::string& params) {
         throw std::runtime_error("Invalid n parameter format");
     }
 
-    uint32_t n = std::stoul(params.substr(num_start, num_end - num_start));
+    // MEDIUM-004: Use SafeParseUInt32 to prevent RPC crashes from malformed input
+    // Transaction outputs are indexed by uint32_t
+    uint32_t n = SafeParseUInt32(params.substr(num_start, num_end - num_start), 0, UINT32_MAX);
 
     // Look up UTXO
     COutPoint outpoint(txid, n);
@@ -1357,11 +1416,29 @@ std::string CRPCServer::RPC_EncryptWallet(const std::string& params) {
         throw std::runtime_error("Error: Passphrase cannot be empty");
     }
 
+    // Validate passphrase strength before attempting encryption
+    PassphraseValidator validator;
+    PassphraseValidationResult validation = validator.Validate(passphrase);
+
+    if (!validation.is_valid) {
+        // Return detailed error message with strength score
+        std::string error_msg = "Error: Passphrase validation failed - " + validation.error_message;
+        throw std::runtime_error(error_msg);
+    }
+
+    // Attempt to encrypt wallet
     if (!m_wallet->EncryptWallet(passphrase)) {
         throw std::runtime_error("Error: Failed to encrypt wallet");
     }
 
-    return "\"Wallet encrypted. Please backup your wallet and remember your passphrase!\"";
+    // Return success message with strength info
+    std::ostringstream oss;
+    oss << "Wallet encrypted successfully! Passphrase strength: "
+        << PassphraseValidator::GetStrengthDescription(validation.strength_score)
+        << " (" << validation.strength_score << "/100). "
+        << "Please backup your wallet and remember your passphrase!";
+
+    return "\"" + oss.str() + "\"";
 }
 
 std::string CRPCServer::RPC_WalletPassphrase(const std::string& params) {
@@ -1394,7 +1471,9 @@ std::string CRPCServer::RPC_WalletPassphrase(const std::string& params) {
         size_t numEnd = numStart;
         while (numEnd < params.length() && isdigit(params[numEnd])) numEnd++;
         if (numEnd > numStart) {
-            timeout = std::stoll(params.substr(numStart, numEnd - numStart));
+            // MEDIUM-004: Use SafeParseInt64 to prevent RPC crashes from malformed input
+            // Max timeout is 24 hours (86400 seconds)
+            timeout = SafeParseInt64(params.substr(numStart, numEnd - numStart), 0, 86400);
         }
     }
 
@@ -1461,11 +1540,28 @@ std::string CRPCServer::RPC_WalletPassphraseChange(const std::string& params) {
         throw std::runtime_error("Error: New passphrase cannot be empty");
     }
 
+    // Validate new passphrase strength before attempting change
+    PassphraseValidator validator;
+    PassphraseValidationResult validation = validator.Validate(newPass);
+
+    if (!validation.is_valid) {
+        // Return detailed error message with strength score
+        std::string error_msg = "Error: New passphrase validation failed - " + validation.error_message;
+        throw std::runtime_error(error_msg);
+    }
+
+    // Attempt to change passphrase
     if (!m_wallet->ChangePassphrase(oldPass, newPass)) {
         throw std::runtime_error("Error: The wallet passphrase entered was incorrect");
     }
 
-    return "\"Wallet passphrase changed successfully\"";
+    // Return success message with strength info
+    std::ostringstream oss;
+    oss << "Wallet passphrase changed successfully! New passphrase strength: "
+        << PassphraseValidator::GetStrengthDescription(validation.strength_score)
+        << " (" << validation.strength_score << "/100)";
+
+    return "\"" + oss.str() + "\"";
 }
 
 std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {

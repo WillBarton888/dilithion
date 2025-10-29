@@ -302,7 +302,7 @@ CPeerManager::Stats CPeerManager::GetStats() const {
 
 void CPeerManager::InitializeSeedNodes() {
     // Hardcoded seed nodes for Dilithion network
-    // In production, these would be reliable nodes run by the community
+    // These are reliable nodes run by the community
 
     dns_seeds = {
         "seed.dilithion.com",
@@ -314,28 +314,34 @@ void CPeerManager::InitializeSeedNodes() {
     // Format: IPv4 mapped to IPv6
     seed_nodes.clear();
 
-    // TESTNET: Add localhost as seed node for testing
-    // PRODUCTION: Replace with real community seed node IPs before mainnet launch
-    NetProtocol::CAddress testnet_seed;
-    testnet_seed.services = NetProtocol::NODE_NETWORK;
-    testnet_seed.SetIPv4(0x7F000001);  // 127.0.0.1 (localhost)
-    testnet_seed.port = NetProtocol::DEFAULT_PORT;
-    testnet_seed.time = GetTime();
-    seed_nodes.push_back(testnet_seed);
+    // PRODUCTION SEED NODE #1: Official Testnet Seed (DigitalOcean Australia)
+    // IP: 170.64.203.134, Port: 18444 (testnet), 24/7 uptime, Up to 117 connections
+    NetProtocol::CAddress official_seed1;
+    official_seed1.services = NetProtocol::NODE_NETWORK;
+    official_seed1.SetIPv4(0xAA40CB86);  // 170.64.203.134
+    official_seed1.port = NetProtocol::TESTNET_PORT;
+    official_seed1.time = GetTime();
+    seed_nodes.push_back(official_seed1);
 
-    // PRODUCTION TODO: Add real seed node IP addresses here
-    // Seed nodes should be publicly accessible nodes run by trusted community members
+    // FUTURE: Add more seed nodes as they become available
+    // Community operators can run seed nodes and submit them via GitHub
     //
-    // Example format for mainnet:
-    //   NetProtocol::CAddress mainnet_seed;
-    //   mainnet_seed.services = NetProtocol::NODE_NETWORK;
-    //   mainnet_seed.SetIPv4(0xC0A80001);  // Example: 192.168.0.1
-    //   mainnet_seed.port = NetProtocol::DEFAULT_PORT;
-    //   mainnet_seed.time = GetTime();
-    //   seed_nodes.push_back(mainnet_seed);
+    // To add a new seed node:
+    //   NetProtocol::CAddress new_seed;
+    //   new_seed.services = NetProtocol::NODE_NETWORK;
+    //   new_seed.SetIPv4(0xXXXXXXXX);  // Convert IP to hex (e.g., 192.168.0.1 = 0xC0A80001)
+    //   new_seed.port = NetProtocol::TESTNET_PORT;  // Use DEFAULT_PORT for mainnet
+    //   new_seed.time = GetTime();
+    //   seed_nodes.push_back(new_seed);
     //
-    // For testnet launch, operators should manually configure additional peer addresses
-    // using the --addnode command line parameter.
+    // Seed node requirements:
+    // - Static IP address with port 18444 (testnet) or 8444 (mainnet) open
+    // - 95%+ uptime (24/7 operation)
+    // - Minimum 1 Mbps bandwidth
+    // - Not mining (relay only)
+    // - Latest Dilithion node software
+    //
+    // Users can also manually configure peers using --addnode command line parameter.
 }
 
 // Address database management (NW-003)

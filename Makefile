@@ -86,7 +86,8 @@ RPC_SOURCES := src/rpc/server.cpp \
                src/rpc/ratelimiter.cpp
 
 WALLET_SOURCES := src/wallet/wallet.cpp \
-                  src/wallet/crypter.cpp
+                  src/wallet/crypter.cpp \
+                  src/wallet/passphrase_validator.cpp
 
 UTIL_SOURCES := src/util/strencodings.cpp
 
@@ -124,6 +125,7 @@ NET_TEST_SOURCE := src/test/net_tests.cpp
 TX_VALIDATION_TEST_SOURCE := src/test/tx_validation_tests.cpp
 TX_RELAY_TEST_SOURCE := src/test/tx_relay_tests.cpp
 MINING_INTEGRATION_TEST_SOURCE := src/test/mining_integration_tests.cpp
+PASSPHRASE_VALIDATOR_TEST_SOURCE := test_passphrase_validator.cpp
 
 # ============================================================================
 # Targets
@@ -167,7 +169,7 @@ check-wallet-balance: $(CORE_OBJECTS) $(OBJ_DIR)/check-wallet-balance.o $(DILITH
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests tx_validation_tests tx_relay_tests mining_integration_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests tx_validation_tests tx_relay_tests mining_integration_tests test_passphrase_validator
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS)
@@ -226,6 +228,10 @@ mining_integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/mining_integration_tes
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
+test_passphrase_validator: $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/test_passphrase_validator.o
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
 # ============================================================================
 # Run Tests
 # ============================================================================
@@ -257,6 +263,9 @@ test: tests
 	@echo ""
 	@echo "$(COLOR_YELLOW)Running wallet persistence tests...$(COLOR_RESET)"
 	@./wallet_persistence_tests
+	@echo ""
+	@echo "$(COLOR_YELLOW)Running passphrase validator tests...$(COLOR_RESET)"
+	@./test_passphrase_validator
 	@echo ""
 	@echo "$(COLOR_YELLOW)Running integration tests...$(COLOR_RESET)"
 	@./integration_tests

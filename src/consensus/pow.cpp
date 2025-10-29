@@ -95,6 +95,79 @@ bool CheckProofOfWork(uint256 hash, uint32_t nBits) {
     return HashLessThan(hash, target);
 }
 
+/**
+ * Multiply 256-bit number by 64-bit number using integer-only arithmetic
+ * result = a * b (result is 320 bits, stored in 40 bytes)
+ *
+ * This is consensus-critical code - must be deterministic across all platforms.
+ * We store the result in 40 bytes (320 bits) to handle potential overflow.
+ *
+ * Algorithm: Standard long multiplication in base 256
+ * Each byte of 'a' is multiplied by 'b', and results are accumulated with carry.
+ */
+static void Multiply256x64(const uint256& a, uint64_t b, uint8_t* result) {
+    // Initialize result to zero
+    memset(result, 0, 40);
+
+    // Perform long multiplication: multiply each byte of 'a' by 'b'
+    // and accumulate results with proper carry handling
+    uint64_t carry = 0;
+    for (int i = 0; i < 32; i++) {
+        // Multiply byte i of 'a' by 'b', add previous carry
+        uint64_t product = (uint64_t)a.data[i] * b + carry;
+
+        // Store low byte in result
+        result[i] = product & 0xFF;
+
+        // Carry forward the high bits
+        carry = product >> 8;
+    }
+
+    // Store remaining carry bytes (up to 8 bytes = 64 bits)
+    for (int i = 32; i < 40 && carry > 0; i++) {
+        result[i] = carry & 0xFF;
+        carry >>= 8;
+    }
+}
+
+/**
+ * Divide 320-bit number by 64-bit number using integer-only arithmetic
+ * Returns quotient as uint256
+ *
+ * This is consensus-critical code - must be deterministic across all platforms.
+ *
+ * Algorithm: Standard long division in base 256
+ * We process from most significant byte to least significant byte,
+ * maintaining a running remainder that is carried forward.
+ */
+static uint256 Divide320x64(const uint8_t* dividend, uint64_t divisor) {
+    uint256 quotient;
+    memset(quotient.data, 0, 32);
+
+    // Long division: process from most significant byte (index 39) to least (index 0)
+    uint64_t remainder = 0;
+
+    // Start from the highest byte and work down
+    for (int i = 39; i >= 0; i--) {
+        // Bring down next byte into remainder
+        remainder = (remainder << 8) | dividend[i];
+
+        // Calculate quotient byte and new remainder
+        uint64_t q = remainder / divisor;
+        remainder = remainder % divisor;
+
+        // Store quotient byte (only first 32 bytes fit in uint256)
+        if (i < 32) {
+            quotient.data[i] = q & 0xFF;
+        }
+        // Note: If i >= 32 and q > 0, the result would overflow uint256
+        // This should not happen in normal difficulty adjustment as we're
+        // dividing by a larger timespan after multiplying
+    }
+
+    return quotient;
+}
+
 uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
     // Genesis block (or no previous block)
     if (pindexLast == nullptr) {
@@ -148,22 +221,22 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
     // If blocks came slower than expected, decrease difficulty (larger target)
     uint256 targetOld = CompactToBig(pindexLast->nBits);
     uint256 targetNew;
-    memset(targetNew.data, 0, 32);
 
-    // Multiply old target by actual timespan, divide by expected timespan
-    // This is done using 256-bit arithmetic to avoid overflow
-    // For simplicity, we'll use a basic implementation
-
-    // Convert to double for calculation (loses some precision but good enough)
-    double adjustment = (double)nActualTimespan / (double)nTargetTimespan;
-
-    // Adjust each byte of the target
-    uint32_t carry = 0;
-    for (int i = 0; i < 32; i++) {
-        uint64_t newVal = (uint64_t)(targetOld.data[i] * adjustment) + carry;
-        targetNew.data[i] = newVal & 0xFF;
-        carry = newVal >> 8;
-    }
+    // CRITICAL: Use integer-only arithmetic for deterministic cross-platform behavior
+    // Formula: targetNew = targetOld * nActualTimespan / nTargetTimespan
+    //
+    // FIXME: This integer-only difficulty adjustment requires extensive testnet
+    // validation to ensure it behaves correctly across all edge cases and produces
+    // the same consensus results on all platforms (x86, ARM, etc.)
+    //
+    // Old floating-point code removed due to non-determinism:
+    //   double adjustment = (double)nActualTimespan / (double)nTargetTimespan;
+    //   (byte-by-byte multiplication with floating point)
+    //
+    // New approach: 320-bit intermediate for multiplication, then 256-bit division
+    uint8_t product[40];  // 320 bits to handle overflow from multiplication
+    Multiply256x64(targetOld, static_cast<uint64_t>(nActualTimespan), product);
+    targetNew = Divide320x64(product, static_cast<uint64_t>(nTargetTimespan));
 
     // Convert back to compact format
     uint32_t nBitsNew = BigToCompact(targetNew);
