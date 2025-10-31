@@ -6,21 +6,41 @@
 # Configuration
 # ============================================================================
 
+# Detect operating system
+UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
+
 # Compiler and flags
 CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 CFLAGS := -O2
 
-# Include paths
+# Include paths (base)
 INCLUDES := -I src \
             -I depends/randomx/src \
             -I depends/dilithium/ref
 
-# Library paths and libraries
+# Library paths and libraries (base)
 LDFLAGS := -L depends/randomx/build \
            -L depends/dilithium/ref
 
 LIBS := -lrandomx -lleveldb -lpthread
+
+# Platform-specific configuration
+ifeq ($(UNAME_S),Darwin)
+    # macOS with Homebrew
+    HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
+    INCLUDES += -I$(HOMEBREW_PREFIX)/opt/leveldb/include
+    LDFLAGS += -L$(HOMEBREW_PREFIX)/opt/leveldb/lib
+else ifeq ($(UNAME_S),Windows)
+    # Windows requires ws2_32 for sockets
+    LIBS += -lws2_32
+else ifneq (,$(findstring MINGW,$(UNAME_S)))
+    # MinGW/MSYS2 on Windows
+    LIBS += -lws2_32
+else ifneq (,$(findstring MSYS,$(UNAME_S)))
+    # MSYS on Windows
+    LIBS += -lws2_32
+endif
 
 # Dilithium C files (compiled separately)
 DILITHIUM_DIR := depends/dilithium/ref
