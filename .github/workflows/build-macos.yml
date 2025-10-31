@@ -1,0 +1,55 @@
+name: Build macOS Release
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        brew install leveldb cmake
+
+    - name: Build RandomX
+      run: |
+        cd depends/randomx
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(sysctl -n hw.ncpu)
+        ls -lh librandomx.a
+
+    - name: Build Dilithion
+      run: |
+        make clean
+        make -j$(sysctl -n hw.ncpu)
+        ls -lh dilithion-node check-wallet-balance genesis_gen
+
+    - name: Create release package
+      run: |
+        chmod +x package-macos-release.sh
+        ./package-macos-release.sh
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dilithion-macos-package
+        path: releases/dilithion-testnet-v1.0.0-macos-x64.tar.gz
+
+    - name: Upload to release (if tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: releases/dilithion-testnet-v1.0.0-macos-x64.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
