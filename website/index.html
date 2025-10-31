@@ -32,7 +32,7 @@
             <div class="testnet-banner" style="background: linear-gradient(135deg, #22c55e, #10b981); padding: 16px 24px; text-align: center; border-radius: 12px; margin-bottom: 32px; animation: pulse-glow 2s infinite;">
                 <h2 style="margin: 0; font-size: 1.5rem; color: white;">🚀 TESTNET IS NOW LIVE!</h2>
                 <p style="margin: 8px 0 0 0; font-size: 1.1rem; color: white;">Join the testing phase • Test pass rate: 93% • Mainnet launches January 1, 2026</p>
-                <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #10b981;">View Testnet Guide →</a>
+                <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #10b981;">View Testnet Guide →</a>
             </div>
 
             <div class="hero-content">
@@ -64,8 +64,8 @@
                 </div>
 
                 <div class="hero-actions">
-                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-primary">Download Testnet</a>
-                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" class="btn btn-secondary">Testnet Guide</a>
+                    <a href="#downloads" class="btn btn-primary">Download Testnet</a>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank" class="btn btn-secondary">Testnet Guide</a>
                 </div>
             </div>
         </div>
@@ -84,15 +84,15 @@
                     <div class="feature-icon">📖</div>
                     <h3>Quick Start Guide</h3>
                     <p>Follow our comprehensive testnet launch guide to get started in minutes.</p>
-                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" class="btn btn-small">Read Guide</a>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank" class="btn btn-small">Read Guide</a>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">⛏️</div>
                     <h3>Start Mining</h3>
-                    <p>Connect to our official seed node and start mining testnet blocks.</p>
+                    <p>Easy one-click start! Just run the launcher script and you're mining:</p>
                     <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px; font-size: 0.85rem;">
-                        <code>./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=4</code>
+                        <code>Windows: Double-click START-MINING.bat<br>Linux/Mac: ./start-mining.sh</code>
                     </div>
                 </div>
 
@@ -100,14 +100,14 @@
                     <div class="feature-icon">🐛</div>
                     <h3>Report Bugs</h3>
                     <p>Found an issue? Report it on GitHub and help improve Dilithion.</p>
-                    <a href="https://github.com/WillBarton888/dilithion/issues" class="btn btn-small">GitHub Issues</a>
+                    <a href="https://github.com/WillBarton888/dilithion/issues" target="_blank" class="btn btn-small">GitHub Issues</a>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">💬</div>
                     <h3>Join Community</h3>
                     <p>Connect with other testers and developers on GitHub Discussions.</p>
-                    <a href="https://github.com/WillBarton888/dilithion/discussions" class="btn btn-small">Discussions</a>
+                    <a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank" class="btn btn-small">Discussions</a>
                 </div>
             </div>
 
@@ -239,47 +239,37 @@
                 <div class="guide-step">
                     <div class="step-number">2</div>
                     <div class="step-content">
-                        <h3>Generate Genesis Block</h3>
-                        <p>Before the network launches, generate the genesis block:</p>
+                        <h3>Extract the Package</h3>
+                        <p>Unzip (Windows) or extract the .tar.gz (Linux/Mac) to a folder on your computer.</p>
                         <div class="code-block">
-                            <code>./genesis_gen</code>
+                            <code># Linux/Mac<br>tar -xzf dilithion-testnet-v1.0.0-linux-x64.tar.gz</code>
                         </div>
-                        <p class="note">This creates <code>genesis.dat</code> which will be used by all nodes.</p>
                     </div>
                 </div>
 
                 <div class="guide-step">
                     <div class="step-number">3</div>
                     <div class="step-content">
-                        <h3>Start Your Node</h3>
-                        <p>Launch the Dilithion node to join the network:</p>
-                        <div class="code-block">
-                            <code>./dilithion-node</code>
-                        </div>
-                        <p class="note">Your node will connect to peers and sync the blockchain.</p>
+                        <h3>Choose Your Start Method</h3>
+                        <p><strong>Option 1 (Easiest):</strong> Double-click START-MINING.bat (Windows) or run ./start-mining.sh (Linux/Mac)</p>
+                        <p><strong>Option 2:</strong> Run the interactive wizard: SETUP-AND-START.bat or ./setup-and-start.sh</p>
+                        <p><strong>Option 3:</strong> Just run dilithion-node.exe (Windows) or ./dilithion-node (Linux/Mac) with no arguments!</p>
+                        <p class="note">All three methods auto-configure everything. You'll be mining in seconds!</p>
                     </div>
                 </div>
 
                 <div class="guide-step">
                     <div class="step-number">4</div>
                     <div class="step-content">
-                        <h3>Create a Wallet</h3>
-                        <p>Create a new wallet to receive mining rewards:</p>
-                        <div class="code-block">
-                            <code>./dilithion-cli createwallet "my_wallet"</code>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="guide-step">
-                    <div class="step-number">5</div>
-                    <div class="step-content">
-                        <h3>Start Mining</h3>
-                        <p>Begin mining Dilithion with your CPU:</p>
-                        <div class="code-block">
-                            <code>./dilithion-cli setgenerate true 4</code>
-                        </div>
-                        <p class="note">The number (4) sets how many CPU threads to use for mining.</p>
+                        <h3>You're Mining!</h3>
+                        <p>That's it! Your node automatically:</p>
+                        <ul style="text-align: left; margin: 10px 0;">
+                            <li>Connects to the official seed node</li>
+                            <li>Syncs the blockchain</li>
+                            <li>Creates a wallet</li>
+                            <li>Starts mining testnet DIL</li>
+                        </ul>
+                        <p>To check your balance, run: <code>./check-wallet-balance</code></p>
                     </div>
                 </div>
             </div>
@@ -287,10 +277,12 @@
             <div class="tips-box">
                 <h3>Mining Tips</h3>
                 <ul>
-                    <li><strong>CPU Threads:</strong> Use 50-75% of your CPU cores for optimal performance</li>
+                    <li><strong>Auto-Start:</strong> No configuration needed! Scripts auto-detect your CPU and connect to seed node</li>
+                    <li><strong>Testnet Difficulty:</strong> 256x easier than mainnet for rapid testing—you'll mine blocks quickly!</li>
+                    <li><strong>CPU Threads:</strong> Auto-detection uses 50-75% of your CPU cores (customizable in wizard)</li>
                     <li><strong>Expected Hash Rate:</strong> ~66 H/s per CPU core (Intel i5/i7)</li>
-                    <li><strong>Power Usage:</strong> RandomX is CPU-intensive but ASIC-resistant</li>
-                    <li><strong>Fair Launch:</strong> Everyone starts mining at the same time—no advantage to early miners</li>
+                    <li><strong>Stop Anytime:</strong> Press Ctrl+C to stop mining—completely safe</li>
+                    <li><strong>Testnet = No Value:</strong> These coins are for testing only, not real money</li>
                 </ul>
             </div>
         </div>
@@ -302,29 +294,40 @@
             <h2 class="section-title">Download Dilithion</h2>
             <p class="section-subtitle">Choose your platform and get started</p>
 
+            <div class="download-notice" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1)); border-left: 4px solid #22c55e; padding: 20px; margin-bottom: 30px; border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #22c55e;">🎉 All Platforms Available!</h3>
+                <p><strong>✅ Windows (x64) • ✅ Linux (x64) • ✅ macOS (ARM64 Apple Silicon)</strong></p>
+                <p><strong>Easy Installation:</strong> Download, extract, and run! No compiler needed. No configuration required.</p>
+                <p>Each package includes one-click launcher scripts, interactive setup wizard, and beginner-friendly README.</p>
+                <p><strong>Get mining in under 60 seconds!</strong></p>
+            </div>
+
             <div class="download-grid">
                 <div class="download-card">
                     <div class="platform-icon">🪟</div>
                     <h3>Windows</h3>
-                    <p>Windows 10/11 (64-bit)</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-download">Download Testnet - GitHub</a>
-                    <span class="version">v1.0-testnet (October 28, 2025) ⚠️ TESTNET ONLY</span>
+                    <p>Windows 10/11 (64-bit x86-64) - Pre-Compiled Binary</p>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip" class="btn btn-download">Download for Windows (.zip)</a>
+                    <span class="version">v1.0.0-testnet • x64 • Ready to Run • One-Click Start</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Includes: START-MINING.bat, SETUP-AND-START.bat, README • 1.44 MB</p>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon">🐧</div>
                     <h3>Linux</h3>
-                    <p>Ubuntu, Debian, Fedora, Arch</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-download">Download Testnet - GitHub</a>
-                    <span class="version">v1.0-testnet (October 28, 2025) ⚠️ TESTNET ONLY</span>
+                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Pre-Compiled Binary</p>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz" class="btn btn-download">Download for Linux (.tar.gz)</a>
+                    <span class="version">v1.0.0-testnet • x64 • Ready to Run • One-Click Start</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Includes: start-mining.sh, setup-and-start.sh, README • 1.04 MB</p>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon">🍎</div>
                     <h3>macOS</h3>
-                    <p>macOS 11+ (Intel & Apple Silicon)</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" class="btn btn-download">Download Testnet - GitHub</a>
-                    <span class="version">v1.0-testnet (October 28, 2025) ⚠️ TESTNET ONLY</span>
+                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3) - Pre-Compiled Binary</p>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz" class="btn btn-download">Download for macOS (.tar.gz)</a>
+                    <span class="version">v1.0.0-testnet • ARM64 • Ready to Run • One-Click Start</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Includes: start-mining.sh, setup-and-start.sh, README • 923 KB</p>
                 </div>
             </div>
 
@@ -336,7 +339,7 @@
                     cd dilithion<br>
                     make</code>
                 </div>
-                <a href="https://github.com/WillBarton888/dilithion" class="btn btn-secondary">View on GitHub</a>
+                <a href="https://github.com/WillBarton888/dilithion" target="_blank" class="btn btn-secondary">View on GitHub</a>
             </div>
         </div>
     </section>
@@ -420,20 +423,21 @@
                 <div class="footer-section">
                     <h4>Resources</h4>
                     <ul>
-                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md">Testnet Guide</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet">Testnet Release</a></li>
-                        <li><a href="Dilithion-Whitepaper-v1.0.pdf">Whitepaper (PDF)</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion">GitHub</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/SECURITY.md">Security</a></li>
-                        <li><a href="POST-QUANTUM-CRYPTO-COURSE.md">Learning Course</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank">Testnet Guide</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" target="_blank">Testnet Release</a></li>
+                        <li><a href="WHITEPAPER.html" target="_blank">Whitepaper (HTML)</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md" target="_blank">Whitepaper (Markdown)</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion" target="_blank">GitHub Repository</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/SECURITY.md" target="_blank">Security Policy</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/website/POST-QUANTUM-CRYPTO-COURSE.md" target="_blank">Learning Course</a></li>
                     </ul>
                 </div>
 
                 <div class="footer-section">
                     <h4>Community</h4>
                     <ul>
-                        <li><a href="https://github.com/WillBarton888/dilithion/discussions">GitHub Discussions</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/issues">Report Issues</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank">GitHub Discussions</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/issues" target="_blank">Report Issues</a></li>
                         <li><a href="#" target="_blank">Twitter (Coming Soon)</a></li>
                         <li><a href="#" target="_blank">Discord (Coming Soon)</a></li>
                         <li><a href="#" target="_blank">Telegram (Coming Soon)</a></li>
@@ -446,7 +450,7 @@
                         <li><a href="mailto:team@dilithion.org">General: team@dilithion.org</a></li>
                         <li><a href="mailto:security@dilithion.org">Security: security@dilithion.org</a></li>
                         <li><a href="mailto:media@dilithion.org">Media: media@dilithion.org</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/LICENSE">MIT License</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/LICENSE" target="_blank">MIT License</a></li>
                     </ul>
                 </div>
             </div>
