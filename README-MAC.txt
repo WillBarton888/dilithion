@@ -22,6 +22,20 @@ This testnet allows you to:
   - Help us find bugs before mainnet launch
 
 ================================================================
+  INSTALL DEPENDENCIES (REQUIRED FIRST!)
+================================================================
+
+Before running Dilithion, install Homebrew and LevelDB:
+
+1. Install Homebrew (if not already installed):
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+2. Install LevelDB:
+   brew install leveldb
+
+This database library is required for the blockchain storage.
+
+================================================================
   GETTING STARTED - THREE EASY WAYS
 ================================================================
 

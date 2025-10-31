@@ -22,6 +22,27 @@ This testnet allows you to:
   - Help us find bugs before mainnet launch
 
 ================================================================
+  INSTALL DEPENDENCIES (REQUIRED FIRST!)
+================================================================
+
+Before running Dilithion, install the required libraries:
+
+UBUNTU / DEBIAN:
+  sudo apt-get update
+  sudo apt-get install libleveldb-dev libsnappy-dev
+
+FEDORA / RHEL / CENTOS:
+  sudo dnf install leveldb-devel snappy-devel
+
+ARCH LINUX:
+  sudo pacman -S leveldb snappy
+
+OPENSUSE:
+  sudo zypper install leveldb-devel libsnappy-devel
+
+These libraries are required for the blockchain database.
+
+================================================================
   GETTING STARTED - THREE EASY WAYS
 ================================================================
 
