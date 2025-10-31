@@ -144,6 +144,23 @@ a:hover {
     align-items: center;
 }
 
+.nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.nav-logo {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+}
+
+.nav-text {
+    display: flex;
+    flex-direction: column;
+}
+
 .nav-brand h1 {
     font-size: 1.5rem;
     background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
@@ -198,6 +215,24 @@ a:hover {
     text-align: center;
     position: relative;
     z-index: 1;
+}
+
+.hero-logo {
+    width: 200px;
+    height: 200px;
+    object-fit: contain;
+    margin: 0 auto 32px;
+    display: block;
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+    0%, 100% {
+        transform: translateY(0px);
+    }
+    50% {
+        transform: translateY(-10px);
+    }
 }
 
 .hero-title {
@@ -617,6 +652,13 @@ a:hover {
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 48px;
     margin-bottom: 48px;
+}
+
+.footer-logo {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    margin-bottom: 16px;
 }
 
 .footer-section h3 {
