@@ -1,0 +1,397 @@
+#!/bin/bash
+#
+# Dilithion CLI Wallet Wrapper - SECURE VERSION
+# Simple command-line interface for wallet operations via RPC
+# Version: 1.0.1-secure
+#
+# SECURITY: All user inputs validated before use
+# - Address format validation (DLT1 + alphanumeric, 44-94 chars)
+# - Amount validation (positive, max 8 decimals, range check)
+# - Command injection protection via jq JSON construction
+# - Network timeouts to prevent hanging
+#
+
+# Version
+VERSION="1.0.1-secure"
+
+# Configuration
+RPC_HOST="${DILITHION_RPC_HOST:-localhost}"
+RPC_PORT="${DILITHION_RPC_PORT:-18332}"
+RPC_URL="http://${RPC_HOST}:${RPC_PORT}"
+
+# Curl timeout settings (seconds)
+CURL_TIMEOUT=30
+CURL_CONNECT_TIMEOUT=10
+
+# Colors for output (disabled if not TTY)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+fi
+
+# Check if curl is installed
+if ! command -v curl &> /dev/null; then
+    echo -e "${RED}Error: curl is required but not installed.${NC}"
+    echo "Install with: sudo apt-get install curl"
+    exit 1
+fi
+
+# Check if jq is installed (optional, for pretty output)
+if command -v jq &> /dev/null; then
+    HAS_JQ=true
+else
+    HAS_JQ=false
+fi
+
+# Validate Dilithion address format
+validate_address() {
+    local addr="$1"
+
+    # Length check
+    if [ ${#addr} -lt 44 ] || [ ${#addr} -gt 94 ]; then
+        echo -e "${RED}Error: Address length invalid (must be 44-94 characters)${NC}"
+        echo -e "${YELLOW}Provided address length: ${#addr}${NC}"
+        return 1
+    fi
+
+    # Format check: Must start with DLT1 and be alphanumeric
+    if ! [[ "$addr" =~ ^DLT1[a-zA-Z0-9]{40,90}$ ]]; then
+        echo -e "${RED}Error: Invalid Dilithion address format${NC}"
+        echo -e "${YELLOW}Address must start with 'DLT1' followed by 40-90 alphanumeric characters${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}✓ Address validation: PASSED${NC}"
+    return 0
+}
+
+# Validate amount format and range
+validate_amount() {
+    local amt="$1"
+
+    # Format check: positive number with max 8 decimals
+    if ! [[ "$amt" =~ ^[0-9]+(\.[0-9]{1,8})?$ ]]; then
+        echo -e "${RED}Error: Amount must be a positive number with up to 8 decimal places${NC}"
+        echo -e "${YELLOW}Examples: 10, 10.5, 10.12345678${NC}"
+        return 1
+    fi
+
+    # Check if zero
+    if [[ "$amt" =~ ^0+(\.0+)?$ ]]; then
+        echo -e "${RED}Error: Amount must be greater than zero${NC}"
+        return 1
+    fi
+
+    # Check upper bound (if bc available)
+    if command -v bc &> /dev/null; then
+        if (( $(echo "$amt > 21000000" | bc -l) )); then
+            echo -e "${RED}Error: Amount exceeds maximum supply (21,000,000 DIL)${NC}"
+            return 1
+        fi
+    fi
+
+    echo -e "${GREEN}✓ Amount validation: PASSED${NC}"
+    return 0
+}
+
+# Function to make RPC call
+rpc_call() {
+    local method="$1"
+    local params="$2"
+
+    if ! response=$(curl --max-time "$CURL_TIMEOUT" \
+                         --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+                         -s -X POST "$RPC_URL" \
+                         -H "Content-Type: application/json" \
+                         -d "{\"jsonrpc\":\"2.0\",\"method\":\"$method\",\"params\":$params,\"id\":1}" 2>&1); then
+        echo -e "${RED}Error: Network request failed${NC}"
+        echo "Make sure the node is running and accessible at $RPC_URL"
+        exit 2
+    fi
+
+    # Check for connection error
+    if [ -z "$response" ]; then
+        echo -e "${RED}Error: Could not connect to Dilithion node at $RPC_URL${NC}"
+        echo "Make sure the node is running with RPC enabled."
+        exit 2
+    fi
+
+    # Check for RPC error
+    if [ "$HAS_JQ" = true ]; then
+        local error=$(echo "$response" | jq -r '.error // empty')
+        if [ -n "$error" ]; then
+            local error_code=$(echo "$response" | jq -r '.error.code // "unknown"')
+            local error_msg=$(echo "$response" | jq -r '.error.message // "Unknown error"')
+            echo -e "${RED}RPC Error [$error_code]: $error_msg${NC}"
+            exit 5
+        fi
+    else
+        local error=$(echo "$response" | grep -o '"error":[^,}]*' | cut -d':' -f2-)
+        if [ "$error" != "null" ] && [ -n "$error" ]; then
+            echo -e "${RED}RPC Error: $error${NC}"
+            exit 5
+        fi
+    fi
+
+    echo "$response"
+}
+
+# Secure RPC call for sendtoaddress (uses jq or safe printf)
+rpc_call_sendtoaddress() {
+    local addr="$1"
+    local amt="$2"
+
+    local json_request
+    if [ "$HAS_JQ" = true ]; then
+        # Use jq for safe JSON construction (prevents injection)
+        json_request=$(jq -n \
+            --arg addr "$addr" \
+            --arg amt "$amt" \
+            '{jsonrpc: "2.0", method: "sendtoaddress", params: {address: $addr, amount: ($amt|tonumber)}, id: 1}')
+    else
+        # Fallback: inputs already validated, use printf
+        json_request=$(printf '{"jsonrpc":"2.0","method":"sendtoaddress","params":{"address":"%s","amount":%s},"id":1}' "$addr" "$amt")
+    fi
+
+    if ! response=$(curl --max-time "$CURL_TIMEOUT" \
+                         --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+                         -s -X POST "$RPC_URL" \
+                         -H "Content-Type: application/json" \
+                         -d "$json_request" 2>&1); then
+        echo -e "${RED}Error: Network request failed${NC}"
+        exit 2
+    fi
+
+    # Check for RPC error
+    if [ "$HAS_JQ" = true ]; then
+        local error=$(echo "$response" | jq -r '.error // empty')
+        if [ -n "$error" ]; then
+            local error_code=$(echo "$response" | jq -r '.error.code // "unknown"')
+            local error_msg=$(echo "$response" | jq -r '.error.message // "Unknown error"')
+            echo -e "${RED}RPC Error [$error_code]: $error_msg${NC}"
+            exit 5
+        fi
+    fi
+
+    echo "$response"
+}
+
+# Function to extract result from RPC response
+extract_result() {
+    local response="$1"
+
+    if [ "$HAS_JQ" = true ]; then
+        echo "$response" | jq -r '.result'
+    else
+        # Fallback: simple grep extraction
+        echo "$response" | grep -o '"result":[^}]*' | cut -d':' -f2- | sed 's/^"//;s/"$//'
+    fi
+}
+
+# Function to format DIL amount
+format_dil() {
+    printf "%.8f DIL" "$1"
+}
+
+# Show help
+show_help() {
+    echo -e "${BLUE}Dilithion CLI Wallet v$VERSION${NC}"
+    echo ""
+    echo "Usage:"
+    echo -e "  ${GREEN}dilithion-wallet balance${NC}                  - Show wallet balance"
+    echo -e "  ${GREEN}dilithion-wallet newaddress${NC}               - Generate new receiving address"
+    echo -e "  ${GREEN}dilithion-wallet addresses${NC}                - List all wallet addresses"
+    echo -e "  ${GREEN}dilithion-wallet listunspent${NC}              - List unspent transaction outputs"
+    echo -e "  ${GREEN}dilithion-wallet send <address> <amount>${NC}  - Send DIL to address"
+    echo -e "  ${GREEN}dilithion-wallet help${NC}                     - Show this help message"
+    echo -e "  ${GREEN}dilithion-wallet version${NC}                  - Show version"
+    echo ""
+    echo "Environment Variables:"
+    echo -e "  ${YELLOW}DILITHION_RPC_HOST${NC}  - RPC host (default: localhost)"
+    echo -e "  ${YELLOW}DILITHION_RPC_PORT${NC}  - RPC port (default: 18332 for testnet)"
+    echo ""
+    echo "Examples:"
+    echo -e "  ${BLUE}# Check balance${NC}"
+    echo "  dilithion-wallet balance"
+    echo ""
+    echo -e "  ${BLUE}# Generate new address${NC}"
+    echo "  dilithion-wallet newaddress"
+    echo ""
+    echo -e "  ${BLUE}# Send 10.5 DIL${NC}"
+    echo "  dilithion-wallet send DLT1abc123... 10.5"
+    echo ""
+    echo -e "${YELLOW}⚠️  SECURITY: Always verify addresses before sending!${NC}"
+    echo -e "${YELLOW}⚠️  See CLI-WALLET-GUIDE.md for important safety information${NC}"
+    echo ""
+}
+
+# Command dispatcher
+case "$1" in
+    balance)
+        echo -e "${BLUE}Fetching wallet balance...${NC}"
+        response=$(rpc_call "getbalance" "{}")
+
+        if [ "$HAS_JQ" = true ]; then
+            balance=$(echo "$response" | jq -r '.result.balance // 0')
+            unconfirmed=$(echo "$response" | jq -r '.result.unconfirmed_balance // 0')
+            immature=$(echo "$response" | jq -r '.result.immature_balance // 0')
+
+            echo ""
+            echo -e "${GREEN}Balance:${NC}              $(format_dil $balance)"
+            echo -e "${YELLOW}Unconfirmed:${NC}          $(format_dil $unconfirmed)"
+            echo -e "${YELLOW}Immature (mining):${NC}    $(format_dil $immature)"
+            echo ""
+
+            if command -v bc &> /dev/null; then
+                total=$(echo "$balance + $unconfirmed + $immature" | bc)
+            else
+                total=$(awk "BEGIN {print $balance + $unconfirmed + $immature}")
+            fi
+            echo -e "${BLUE}Total:${NC}                $(format_dil $total)"
+        else
+            echo "$response" | grep -o '"result":{[^}]*}' | sed 's/"result"://'
+        fi
+        ;;
+
+    newaddress)
+        echo -e "${BLUE}Generating new address...${NC}"
+        response=$(rpc_call "getnewaddress" "{}")
+        address=$(extract_result "$response")
+
+        echo ""
+        echo -e "${GREEN}New Address:${NC} $address"
+        echo ""
+        echo "You can receive DIL at this address."
+        ;;
+
+    addresses)
+        echo -e "${BLUE}Listing wallet addresses...${NC}"
+        response=$(rpc_call "getaddresses" "{}")
+
+        if [ "$HAS_JQ" = true ]; then
+            echo "$response" | jq -r '.result[]' | while read addr; do
+                echo -e "${GREEN}•${NC} $addr"
+            done
+        else
+            extract_result "$response"
+        fi
+        ;;
+
+    listunspent)
+        echo -e "${BLUE}Listing unspent outputs...${NC}"
+        response=$(rpc_call "listunspent" "{}")
+
+        if [ "$HAS_JQ" = true ]; then
+            count=$(echo "$response" | jq -r '.result | length')
+
+            if [ "$count" -eq 0 ]; then
+                echo ""
+                echo -e "${YELLOW}No unspent outputs found.${NC}"
+                echo ""
+            else
+                echo ""
+                echo "$response" | jq -r '.result[] | "  \(.confirmations) conf  \(.amount) DIL  \(.address)  [\(.txid[0:16])...]"'
+                echo ""
+                echo -e "${GREEN}Total UTXOs: $count${NC}"
+            fi
+        else
+            extract_result "$response"
+        fi
+        ;;
+
+    send)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo -e "${RED}Error: Missing arguments${NC}"
+            echo "Usage: dilithion-wallet send <address> <amount>"
+            echo "Example: dilithion-wallet send DLT1abc123... 10.5"
+            exit 3
+        fi
+
+        address="$2"
+        amount="$3"
+
+        echo -e "${BLUE}Validating transaction parameters...${NC}"
+        echo ""
+
+        # Validate address (SECURITY: prevents sending to invalid addresses)
+        if ! validate_address "$address"; then
+            exit 3
+        fi
+
+        # Validate amount (SECURITY: prevents invalid transactions)
+        if ! validate_amount "$amount"; then
+            exit 4
+        fi
+
+        echo ""
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}                 CONFIRM TRANSACTION${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
+        echo -e "To:      ${GREEN}$address${NC}"
+        echo -e "Amount:  ${GREEN}$(format_dil $amount)${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "${RED}⚠️  WARNING: This action is PERMANENT and CANNOT be undone!${NC}"
+        echo -e "${RED}⚠️  Verify the address is EXACTLY correct!${NC}"
+        echo ""
+
+        # Confirm transaction
+        read -p "Type 'yes' to confirm, anything else to cancel: " confirm
+        confirm=$(echo "$confirm" | tr '[:upper:]' '[:lower:]' | xargs) # Case-insensitive, trim whitespace
+
+        if [ "$confirm" != "yes" ]; then
+            echo "Transaction cancelled."
+            exit 0
+        fi
+
+        echo ""
+        echo -e "${BLUE}Sending transaction...${NC}"
+
+        # Use secure RPC call (SECURITY: prevents command injection)
+        response=$(rpc_call_sendtoaddress "$address" "$amount")
+
+        if [ "$HAS_JQ" = true ]; then
+            txid=$(echo "$response" | jq -r '.result.txid // empty')
+            if [ -n "$txid" ]; then
+                echo ""
+                echo -e "${GREEN}✓ Transaction sent successfully!${NC}"
+                echo ""
+                echo -e "${BLUE}Transaction ID:${NC}"
+                echo "$txid"
+                echo ""
+                echo -e "${YELLOW}Note: Transaction requires network confirmation${NC}"
+            else
+                echo -e "${RED}Error: Failed to send transaction${NC}"
+                echo "$response"
+                exit 5
+            fi
+        else
+            extract_result "$response"
+        fi
+        ;;
+
+    version|--version|-v)
+        echo "Dilithion CLI Wallet v$VERSION"
+        echo "Security: Production-grade with input validation"
+        ;;
+
+    help|--help|-h)
+        show_help
+        ;;
+
+    *)
+        echo -e "${RED}Error: Unknown command '$1'${NC}"
+        echo ""
+        show_help
+        exit 1
+        ;;
+esac
