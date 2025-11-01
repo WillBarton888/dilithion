@@ -47,11 +47,36 @@ echo "  Your CPU will be auto-detected if you leave this blank."
 echo ""
 read -p "Enter number of CPU cores (or press ENTER for auto): " threads
 
+#########################################################
+# SECURITY: Validate input to prevent command injection
+#########################################################
 if [ -z "$threads" ]; then
     threads="auto"
     threads_display="Auto-Detect"
-else
+elif [ "$threads" = "auto" ] || [ "$threads" = "AUTO" ] || [ "$threads" = "Auto" ]; then
+    threads="auto"
+    threads_display="Auto-Detect"
+elif echo "$threads" | grep -q '^[0-9]\+$' && [ "$threads" -ge 1 ] && [ "$threads" -le 128 ]; then
+    # Valid numeric input (1-128)
     threads_display="$threads cores"
+else
+    clear
+    echo -e "${YELLOW}"
+    echo "  ========================================================"
+    echo "    ERROR: Invalid Input"
+    echo "  ========================================================"
+    echo -e "${NC}"
+    echo ""
+    echo "  Please enter either:"
+    echo "    - A number between 1 and 128"
+    echo "    - 'auto' for automatic detection"
+    echo "    - Press ENTER for automatic detection"
+    echo ""
+    echo "  Your input \"$threads\" is not valid."
+    echo ""
+    echo "  ========================================================"
+    echo ""
+    exit 1
 fi
 
 clear
@@ -101,7 +126,7 @@ OS_TYPE="$(uname -s)"
 
 if [ "$OS_TYPE" = "Linux" ]; then
     # Check for LevelDB on Linux
-    if ! ldconfig -p | grep -q libleveldb; then
+    if ! ldconfig -p 2>/dev/null | grep -q libleveldb; then
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${YELLOW}⚠  MISSING DEPENDENCIES${NC}"
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

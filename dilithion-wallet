@@ -14,6 +14,60 @@
 # Version
 VERSION="1.0.1-secure"
 
+#########################################################
+# SECURITY: Temp file cleanup handlers
+#########################################################
+
+# Array to track temp files for cleanup
+TEMP_FILES=()
+
+# Cleanup function
+cleanup_temp_files() {
+    for file in "${TEMP_FILES[@]}"; do
+        if [ -f "$file" ]; then
+            rm -f "$file" 2>/dev/null
+        fi
+    done
+}
+
+# Register cleanup on exit, interrupt, termination
+trap cleanup_temp_files EXIT INT TERM
+
+#########################################################
+# SECURITY: Validate environment variables
+#########################################################
+
+# Validate DILITHION_RPC_HOST (prevent SSRF attacks)
+if [ -n "$DILITHION_RPC_HOST" ]; then
+    # Check for suspicious characters (allow only alphanumeric, dots, hyphens)
+    if echo "$DILITHION_RPC_HOST" | grep -qE '[^a-zA-Z0-9.\-]'; then
+        echo "WARNING: DILITHION_RPC_HOST contains suspicious characters"
+        echo "Using default: localhost"
+        DILITHION_RPC_HOST="localhost"
+    fi
+
+    # Warn if RPC_HOST is not localhost/127.0.0.1
+    if [ "$DILITHION_RPC_HOST" != "localhost" ] && [ "$DILITHION_RPC_HOST" != "127.0.0.1" ]; then
+        echo "WARNING: Connecting to remote RPC host: $DILITHION_RPC_HOST"
+        echo "This may expose your wallet to security risks."
+        echo "Press Ctrl+C to cancel, or wait 5 seconds to continue..."
+        sleep 5
+    fi
+fi
+
+# Validate DILITHION_RPC_PORT (ensure numeric, valid port range)
+if [ -n "$DILITHION_RPC_PORT" ]; then
+    if ! echo "$DILITHION_RPC_PORT" | grep -qE '^[0-9]+$'; then
+        echo "ERROR: DILITHION_RPC_PORT must be numeric"
+        echo "Using default: 18332"
+        DILITHION_RPC_PORT="18332"
+    elif [ "$DILITHION_RPC_PORT" -lt 1 ] || [ "$DILITHION_RPC_PORT" -gt 65535 ]; then
+        echo "ERROR: DILITHION_RPC_PORT must be between 1-65535"
+        echo "Using default: 18332"
+        DILITHION_RPC_PORT="18332"
+    fi
+fi
+
 # Configuration
 RPC_HOST="${DILITHION_RPC_HOST:-localhost}"
 RPC_PORT="${DILITHION_RPC_PORT:-18332}"

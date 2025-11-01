@@ -15,6 +15,34 @@ setlocal enabledelayedexpansion
 REM Version
 set VERSION=1.0.1-secure
 
+REM ========================================
+REM SECURITY: Validate environment variables
+REM ========================================
+
+REM Validate TEMP directory
+if not defined TEMP (
+    echo ERROR: TEMP environment variable not set
+    echo Please set TEMP to a valid directory path
+    exit /b 1
+)
+
+REM Check if TEMP directory exists
+if not exist "%TEMP%\" (
+    echo ERROR: TEMP directory does not exist: %TEMP%
+    echo Please create the directory or update TEMP variable
+    exit /b 1
+)
+
+REM Validate RPC host (prevent SSRF attacks)
+if defined DILITHION_RPC_HOST (
+    echo %DILITHION_RPC_HOST% | findstr /R /C:"[^a-zA-Z0-9\.\-]" >nul
+    if not errorlevel 1 (
+        echo WARNING: DILITHION_RPC_HOST contains suspicious characters
+        echo Using default: localhost
+        set DILITHION_RPC_HOST=localhost
+    )
+)
+
 REM Configuration
 if "%DILITHION_RPC_HOST%"=="" set DILITHION_RPC_HOST=localhost
 if "%DILITHION_RPC_PORT%"=="" set DILITHION_RPC_PORT=18332
@@ -64,13 +92,20 @@ echo ============================================================
 echo.
 echo Dilithion wallet requires curl to communicate with the node.
 echo.
-echo SOLUTION for Windows 10/11:
+echo SOLUTION for Windows 10 version 1803+ / Windows 11:
 echo   curl should be pre-installed at C:\Windows\System32\curl.exe
-echo   If missing, try: Windows Update, or download from https://curl.se/windows/
+echo   If missing, try Windows Update to upgrade to latest version
 echo.
-echo SOLUTION if you have Git installed:
-echo   curl is usually at: C:\Program Files\Git\mingw64\bin\curl.exe
-echo   Add to PATH or reinstall Git for Windows from https://git-scm.com/
+echo SOLUTION for Windows 10 pre-1803 (older versions):
+echo   1. Download curl from: https://curl.se/windows/
+echo   2. Extract curl.exe to C:\Windows\System32\
+echo   OR
+echo   3. Install Git for Windows: https://git-scm.com/
+echo      (includes curl at C:\Program Files\Git\mingw64\bin\curl.exe)
+echo.
+echo ALTERNATIVE: Check your Windows version:
+echo   Run: winver
+echo   If older than Windows 10 1803, consider updating Windows
 echo.
 echo For support, join our Discord: https://discord.gg/dilithion
 echo ============================================================
