@@ -21,9 +21,147 @@
     <meta name="twitter:image" content="https://dilithion.org/dilithion-logo-256.png">
 
     <title>Dilithion - Post-Quantum Cryptocurrency</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- SVG Icon Library -->
+    <svg style="display: none;" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <!-- Shield Icon (Quantum-Resistant) -->
+            <symbol id="icon-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="M12 8v4"/>
+                <path d="M12 16h.01"/>
+            </symbol>
+
+            <!-- Zap Icon (Fast & Efficient) -->
+            <symbol id="icon-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </symbol>
+
+            <!-- Target Icon (Fair Launch) -->
+            <symbol id="icon-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <circle cx="12" cy="12" r="6"/>
+                <circle cx="12" cy="12" r="2"/>
+            </symbol>
+
+            <!-- CPU Icon (CPU Mining) -->
+            <symbol id="icon-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
+                <rect x="9" y="9" width="6" height="6"/>
+                <line x1="9" y1="1" x2="9" y2="4"/>
+                <line x1="15" y1="1" x2="15" y2="4"/>
+                <line x1="9" y1="20" x2="9" y2="23"/>
+                <line x1="15" y1="20" x2="15" y2="23"/>
+                <line x1="20" y1="9" x2="23" y2="9"/>
+                <line x1="20" y1="14" x2="23" y2="14"/>
+                <line x1="1" y1="9" x2="4" y2="9"/>
+                <line x1="1" y1="14" x2="4" y2="14"/>
+            </symbol>
+
+            <!-- Bar Chart Icon (Bitcoin Supply Model) -->
+            <symbol id="icon-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10"/>
+                <line x1="12" y1="20" x2="12" y2="4"/>
+                <line x1="6" y1="20" x2="6" y2="14"/>
+            </symbol>
+
+            <!-- Globe Icon (Decentralized) -->
+            <symbol id="icon-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </symbol>
+
+            <!-- Rocket Icon (Testnet Live) -->
+            <symbol id="icon-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>
+                <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>
+                <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/>
+                <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>
+            </symbol>
+
+            <!-- Alert Triangle Icon (Warning) -->
+            <symbol id="icon-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                <path d="M12 9v4"/>
+                <path d="M12 17h.01"/>
+            </symbol>
+
+            <!-- Check Circle Icon (Checkmark) -->
+            <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+            </symbol>
+
+            <!-- Monitor Icon (Windows) -->
+            <symbol id="icon-windows" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+            </symbol>
+
+            <!-- Terminal Icon (Linux) -->
+            <symbol id="icon-linux" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"/>
+                <line x1="12" y1="19" x2="20" y2="19"/>
+            </symbol>
+
+            <!-- Command Icon (macOS) -->
+            <symbol id="icon-macos" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
+            </symbol>
+
+            <!-- Menu Icon (Mobile Hamburger) -->
+            <symbol id="icon-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+            </symbol>
+
+            <!-- X Icon (Mobile Close) -->
+            <symbol id="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+            </symbol>
+
+            <!-- Award Icon (Trust Badge) -->
+            <symbol id="icon-award" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="7"/>
+                <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
+            </symbol>
+
+            <!-- Code Icon (Open Source) -->
+            <symbol id="icon-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6"/>
+                <polyline points="8 6 2 12 8 18"/>
+            </symbol>
+
+            <!-- Book Icon (Documentation/Standards) -->
+            <symbol id="icon-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </symbol>
+
+            <!-- GitHub Icon -->
+            <symbol id="icon-github" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+            </symbol>
+
+            <!-- Chevron Down Icon (FAQ Accordion) -->
+            <symbol id="icon-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+            </symbol>
+        </defs>
+    </svg>
+
     <!-- Navigation -->
     <nav class="navbar">
         <div class="container">
@@ -34,11 +172,23 @@
                     <span class="tagline">Post-Quantum Cryptocurrency</span>
                 </div>
             </div>
-            <div class="nav-links">
+
+            <!-- Mobile Menu Button -->
+            <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Toggle Menu" aria-expanded="false">
+                <svg class="menu-icon" id="menuIcon">
+                    <use href="#icon-menu"/>
+                </svg>
+                <svg class="close-icon" id="closeIcon">
+                    <use href="#icon-x"/>
+                </svg>
+            </button>
+
+            <div class="nav-links" id="navLinks">
                 <a href="#about">About</a>
                 <a href="#dashboard">Dashboard</a>
                 <a href="#getting-started">Get Started</a>
                 <a href="#downloads">Download</a>
+                <a href="#faq">FAQ</a>
                 <a href="WHITEPAPER.html" target="_blank">Whitepaper</a>
             </div>
         </div>
@@ -47,18 +197,51 @@
     <!-- Hero Section with Countdown -->
     <section class="hero">
         <div class="container">
-            <!-- Testnet Live Banner -->
-            <div class="testnet-banner" style="background: linear-gradient(135deg, #22c55e, #10b981); padding: 16px 24px; text-align: center; border-radius: 12px; margin-bottom: 32px; animation: pulse-glow 2s infinite;">
-                <h2 style="margin: 0; font-size: 1.5rem; color: white;">🚀 TESTNET IS NOW LIVE!</h2>
-                <p style="margin: 8px 0 0 0; font-size: 1.1rem; color: white;">Join the testing phase • Test pass rate: 93% • Mainnet launches January 1, 2026</p>
-                <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #10b981;">View Testnet Guide →</a>
-            </div>
-
             <div class="hero-content">
                 <img src="dilithion-logo.png" alt="Dilithion Shield" class="hero-logo">
-                <h1 class="hero-title">The Future of Money is <span class="gradient-text">Quantum-Resistant</span></h1>
+                <h1 class="hero-title">The Future of Cryptocurrency is<br><span class="gradient-text">Quantum-Resistant</span></h1>
                 <p class="hero-subtitle">Dilithion is an experimental cryptocurrency built from the ground up for the post-quantum era.</p>
-                <p class="warning-badge">⚠️ TESTNET ACTIVE - Coins Have NO Value - For Testing Only - AI-Assisted Development</p>
+
+                <!-- Trust Badges -->
+                <div class="trust-badges">
+                    <a href="https://csrc.nist.gov/projects/post-quantum-cryptography" target="_blank" rel="noopener" class="trust-badge">
+                        <svg class="badge-icon"><use href="#icon-award"/></svg>
+                        <div class="badge-text">
+                            <div class="badge-label">NIST</div>
+                            <div class="badge-value">PQC Standardized</div>
+                        </div>
+                    </a>
+                    <a href="https://pq-crystals.org/dilithium/" target="_blank" rel="noopener" class="trust-badge">
+                        <svg class="badge-icon"><use href="#icon-shield"/></svg>
+                        <div class="badge-text">
+                            <div class="badge-label">Algorithm</div>
+                            <div class="badge-value">Dilithium3</div>
+                        </div>
+                    </a>
+                    <a href="https://github.com/WillBarton888/dilithion" target="_blank" rel="noopener" class="trust-badge">
+                        <svg class="badge-icon"><use href="#icon-github"/></svg>
+                        <div class="badge-text">
+                            <div class="badge-label">Source Code</div>
+                            <div class="badge-value">Open Source</div>
+                        </div>
+                    </a>
+                    <div class="trust-badge">
+                        <svg class="badge-icon"><use href="#icon-check"/></svg>
+                        <div class="badge-text">
+                            <div class="badge-label">Test Suite</div>
+                            <div class="badge-value">93% Passing</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Testnet Live Banner -->
+                <div class="testnet-banner" style="background: linear-gradient(135deg, #22d3ee, #06b6d4); padding: 16px 24px; text-align: center; border-radius: 12px; margin: 32px 0 24px 0; animation: pulse-glow 2s infinite;">
+                    <h2 style="margin: 0; font-size: 1.5rem; color: white;"><svg class="inline-icon"><use href="#icon-rocket"/></svg> TESTNET IS NOW LIVE!</h2>
+                    <p style="margin: 8px 0 0 0; font-size: 1.1rem; color: white;">Join the testing phase • Test pass rate: 93% • Mainnet launches January 1, 2026</p>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #06b6d4;">View Testnet Guide →</a>
+                </div>
+
+                <p class="warning-badge"><svg class="inline-icon"><use href="#icon-alert"/></svg> TESTNET ACTIVE - Coins Have NO Value - For Testing Only - AI-Assisted Development</p>
 
                 <div class="countdown-container">
                     <h2>Mainnet Launch Countdown</h2>
@@ -92,14 +275,14 @@
     </section>
 
     <!-- Testnet Participation Section -->
-    <section class="testnet-info" style="padding: 80px 0; background: var(--bg-dark);">
+    <section class="testnet-info" style="padding: 0 0 80px 0; background: var(--bg-dark);">
         <div class="container">
-            <h2 class="section-title">Join the Testnet</h2>
+            <h2 class="section-title" style="margin-top: 0;">Join the Testnet</h2>
             <p style="text-align: center; color: var(--text-secondary); font-size: 1.2rem; max-width: 700px; margin: 0 auto 60px;">
                 Help us test Dilithion before the mainnet launch. Find bugs, test features, and earn recognition as an early contributor.
             </p>
 
-            <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+            <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
                 <div class="feature-card">
                     <div class="feature-icon">📖</div>
                     <h3>Quick Start Guide</h3>
@@ -116,6 +299,16 @@
                     </div>
                 </div>
 
+                <div class="feature-card" style="background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(6, 182, 212, 0.1)); border: 1px solid rgba(34, 211, 238, 0.3);">
+                    <div class="feature-icon">💳</div>
+                    <h3>CLI Wallet</h3>
+                    <p>Easy command-line wallet tools now available! Check balance, send transactions, generate addresses:</p>
+                    <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px; font-size: 0.85rem;">
+                        <code>./dilithion-wallet balance<br>./dilithion-wallet send</code>
+                    </div>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/CLI-WALLET-GUIDE.md" target="_blank" class="btn btn-small">Wallet Guide</a>
+                </div>
+
                 <div class="feature-card">
                     <div class="feature-icon">🐛</div>
                     <h3>Report Bugs</h3>
@@ -126,13 +319,13 @@
                 <div class="feature-card">
                     <div class="feature-icon">💬</div>
                     <h3>Join Community</h3>
-                    <p>Connect with other testers and developers on GitHub Discussions.</p>
-                    <a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank" class="btn btn-small">Discussions</a>
+                    <p>Connect with other testers and developers on Discord and GitHub.</p>
+                    <a href="https://discord.gg/c25WwRNg" target="_blank" class="btn btn-small">Discord Server</a>
                 </div>
             </div>
 
             <div class="tips-box" style="margin-top: 60px; background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1)); border-left: 4px solid #22c55e;">
-                <h3>🌐 Official Testnet Seed Node</h3>
+                <h3><svg class="inline-icon"><use href="#icon-globe"/></svg> Official Testnet Seed Node</h3>
                 <p style="color: var(--text-secondary); margin-bottom: 16px;">Connect to our 24/7 seed node for optimal network connectivity:</p>
                 <ul>
                     <li><strong>IP Address:</strong> 170.64.203.134</li>
@@ -144,7 +337,7 @@
             </div>
 
             <div class="tips-box" style="margin-top: 24px;">
-                <h3>⚠️ Important Testnet Information</h3>
+                <h3><svg class="inline-icon"><use href="#icon-alert"/></svg> Important Testnet Information</h3>
                 <ul>
                     <li><strong>Testnet coins have NO monetary value</strong> - For testing purposes only</li>
                     <li><strong>Testnet may be reset at any time</strong> - Don't rely on testnet data</li>
@@ -162,32 +355,32 @@
             <h2 class="section-title">Why Dilithion?</h2>
             <div class="features-grid">
                 <div class="feature-card">
-                    <div class="feature-icon">🔐</div>
+                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-shield"/></svg></div>
                     <h3>Quantum-Resistant</h3>
                     <p>Uses CRYSTALS-Dilithium, a NIST-standardized post-quantum signature scheme. Your coins are safe from quantum computers.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">⚡</div>
+                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-zap"/></svg></div>
                     <h3>Fast & Efficient</h3>
                     <p>4-minute block time optimized for large post-quantum signatures. 2.5x faster confirmations than Bitcoin.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🎯</div>
+                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-target"/></svg></div>
                     <h3>Fair Launch</h3>
                     <p>No premine, no ICO, no VC allocation. 100% proof-of-work. Everyone starts equal on January 1, 2026.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">💻</div>
+                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-cpu"/></svg></div>
                     <h3>CPU Mining</h3>
                     <p>RandomX proof-of-work keeps mining accessible. No expensive ASICs required—mine with your CPU.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">📊</div>
+                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-chart"/></svg></div>
                     <h3>Bitcoin Supply Model</h3>
                     <p>21 million DIL total supply. Block reward halving every 210,000 blocks. Predictable, deflationary economics.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🌐</div>
+                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-globe"/></svg></div>
                     <h3>Decentralized</h3>
                     <p>Fully peer-to-peer network. No central authority, no master nodes, no staking. Pure proof-of-work.</p>
                 </div>
@@ -315,9 +508,9 @@
             <p class="section-subtitle">Choose your platform and get started</p>
 
             <div class="download-notice" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1)); border-left: 4px solid #22c55e; padding: 20px; margin-bottom: 30px; border-radius: 8px;">
-                <h3 style="margin-top: 0; color: #22c55e;">🎉 All Platforms Available!</h3>
-                <p><strong>✅ Windows (x64) • ✅ Linux (x64) • ✅ macOS (ARM64 Apple Silicon)</strong></p>
-                <p style="background: rgba(34, 197, 94, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;"><strong>✓ Quality Assured:</strong> All packages have passed comprehensive security and functionality audits (50/50 tests passed).</p>
+                <h3 style="margin-top: 0; color: #22c55e;">All Platforms Available!</h3>
+                <p><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Windows (x64) • <svg class="inline-icon"><use href="#icon-check"/></svg> Linux (x64) • <svg class="inline-icon"><use href="#icon-check"/></svg> macOS (ARM64 Apple Silicon)</strong></p>
+                <p style="background: rgba(34, 197, 94, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;"><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Quality Assured:</strong> All packages have passed comprehensive security and functionality audits (50/50 tests passed).</p>
                 <p><strong>Easy Installation:</strong> Download, extract, and run! No compiler needed. No configuration required.</p>
                 <p>Each package includes one-click launcher scripts, interactive setup wizard, and beginner-friendly README.</p>
                 <p><strong>Get mining in under 60 seconds!</strong></p>
@@ -325,33 +518,73 @@
 
             <div class="download-grid">
                 <div class="download-card">
-                    <div class="platform-icon">🪟</div>
+                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-windows"/></svg></div>
                     <h3>Windows</h3>
-                    <p>Windows 10/11 (64-bit x86-64) - Pre-Compiled Binary</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip" class="btn btn-download">Download for Windows (.zip)</a>
-                    <span class="version">v1.0.0-testnet • x64 • Ready to Run • One-Click Start</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Includes: START-MINING.bat, SETUP-AND-START.bat, README, Runtime DLLs • 2.6 MB</p>
+                    <p>Windows 10/11 (64-bit x86-64) - Multiple Formats Available</p>
+                    <div style="display: flex; gap: 10px; margin: 15px 0;">
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip" class="btn btn-download" style="flex: 1;">ZIP Package (2.6 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-testnet-windows-x64-installer.exe" class="btn btn-download" style="flex: 1;">EXE Installer (685 KB)</a>
+                    </div>
+                    <span class="version">v1.0.0-testnet • x64 • Extract & Run • One-Click Start</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-MINING.bat, SETUP-AND-START.bat, README, Binaries, Runtime DLLs</p>
+                    <p style="margin-top: 10px; font-size: 0.85rem; color: var(--text-muted);">
+                        <span style="color: #f59e0b;">⚠️ Note: Unsigned .exe files may trigger Windows SmartScreen.</span>
+                    </p>
                 </div>
 
                 <div class="download-card">
-                    <div class="platform-icon">🐧</div>
+                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-linux"/></svg></div>
                     <h3>Linux</h3>
-                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Pre-Compiled Binary</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz" class="btn btn-download">Download for Linux (.tar.gz)</a>
-                    <span class="version">v1.0.0-testnet • x64 • Ready to Run • One-Click Start</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Includes: start-mining.sh, setup-and-start.sh, README, Dependency Checks • 1.1 MB</p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">Requires: libleveldb, libsnappy (install via apt/dnf/pacman)</p>
+                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Self-Extracting Installer</p>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-testnet-linux-x64-installer.run" class="btn btn-download">Download Auto-Installer (.run)</a>
+                    <span class="version">v1.0.0-testnet • x64 • Run to Install • Interactive Setup</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Self-extracting: start-mining.sh, setup-and-start.sh, README, Binaries • 1.4 MB</p>
+                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
+                        <strong>Install dependencies:</strong><br>
+                        Ubuntu/Debian: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo apt install libleveldb-dev libsnappy-dev</code><br>
+                        Fedora: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo dnf install leveldb-devel snappy-devel</code><br>
+                        Arch: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo pacman -S leveldb snappy</code>
+                    </p>
                 </div>
 
                 <div class="download-card">
-                    <div class="platform-icon">🍎</div>
+                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-macos"/></svg></div>
                     <h3>macOS</h3>
-                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3) - Pre-Compiled Binary</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz" class="btn btn-download">Download for macOS (.tar.gz)</a>
-                    <span class="version">v1.0.0-testnet • ARM64 • Ready to Run • One-Click Start</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Includes: start-mining.sh, setup-and-start.sh, README, Dependency Checks • 940 KB</p>
+                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3) - Self-Extracting Installer</p>
+                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-testnet-macos-installer.run" class="btn btn-download">Download Auto-Installer (.run)</a>
+                    <span class="version">v1.0.0-testnet • ARM64 • Run to Install • Interactive Setup</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Self-extracting: start-mining.sh, setup-and-start.sh, README, Binaries • 1.4 MB</p>
+                    <p style="margin-top: 10px; font-size: 0.85rem; color: var(--text-muted);">
+                        <span style="color: #f59e0b;">⚠️ macOS Gatekeeper: Unsigned files may show "cannot be verified" warning.</span><br>
+                        <strong>Fix:</strong> Right-click file → Open, or System Settings → Privacy & Security → Allow Anyway
+                    </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">Requires: leveldb (install via Homebrew: brew install leveldb)</p>
                 </div>
+            </div>
+
+            <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; padding: 20px; margin: 30px 0;">
+                <h3 style="margin-top: 0; color: var(--primary); display: flex; align-items: center; gap: 8px;">
+                    <svg style="width: 24px; height: 24px;"><use href="#icon-shield"/></svg>
+                    Security Notice: Antivirus &amp; Code Signing
+                </h3>
+                <p style="margin: 10px 0;"><strong style="color: #f59e0b;">Why might antivirus software flag these files?</strong></p>
+                <p style="margin: 10px 0;">During the testnet phase, our executables are <strong>not digitally code-signed</strong>. This is normal for open-source testnet software and doesn't mean the files are dangerous—it simply means we haven't purchased a code signing certificate yet.</p>
+                <p style="margin: 10px 0;">Windows SmartScreen and some antivirus programs may show warnings for unsigned executables. This is a false positive. All our binaries are compiled from open-source code available on GitHub.</p>
+
+                <p style="margin: 15px 0 10px 0;"><strong style="color: var(--primary);">How to verify the files are legitimate:</strong></p>
+                <ol style="margin: 5px 0 5px 20px; padding: 0;">
+                    <li style="margin: 5px 0;">Download the corresponding <code>.sha256</code> checksum file from GitHub Releases</li>
+                    <li style="margin: 5px 0;">Verify the SHA256 hash matches:
+                        <ul style="margin: 5px 0 5px 20px;">
+                            <li><strong>Windows:</strong> <code>certutil -hashfile filename.exe SHA256</code></li>
+                            <li><strong>Linux:</strong> <code>sha256sum -c filename.sha256</code></li>
+                            <li><strong>macOS:</strong> <code>shasum -a 256 -c filename.sha256</code></li>
+                        </ul>
+                    </li>
+                    <li style="margin: 5px 0;">Review the source code on <a href="https://github.com/WillBarton888/dilithion" target="_blank" style="color: var(--primary); text-decoration: underline;">GitHub</a></li>
+                </ol>
+
+                <p style="margin: 15px 0 0 0;"><strong style="color: var(--success);">Future plans:</strong> Before mainnet launch (January 1, 2026), all binaries will be digitally code-signed to eliminate false positives and build trust.</p>
             </div>
 
             <div class="build-from-source">
@@ -433,6 +666,180 @@
         </div>
     </section>
 
+    <!-- FAQ Section -->
+    <section id="faq" class="faq-section">
+        <div class="container">
+            <h2 class="section-title">Frequently Asked Questions</h2>
+            <p class="section-subtitle">Everything you need to know about Dilithion</p>
+
+            <div class="faq-container">
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>What is Dilithion?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Dilithion is an experimental post-quantum cryptocurrency that uses CRYSTALS-Dilithium, a NIST-standardized digital signature algorithm designed to resist attacks from quantum computers. Unlike Bitcoin and other cryptocurrencies that use ECDSA (vulnerable to quantum attacks), Dilithion is built from the ground up for the quantum era.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>Why is quantum resistance important?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Quantum computers threaten current cryptocurrency security. A sufficiently powerful quantum computer could break ECDSA signatures used by Bitcoin, Ethereum, and most cryptocurrencies, allowing attackers to steal coins. NIST estimates this threat could materialize within 10-15 years.</p>
+                        <p>Dilithion uses post-quantum cryptography standardized by NIST in 2024, making it resistant to both classical and quantum computer attacks. This ensures your coins remain secure in the quantum era.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>How is Dilithion different from Bitcoin?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p><strong>Similarities:</strong> 21 million coin supply, proof-of-work mining, halving every 210,000 blocks, decentralized peer-to-peer network, no premine or ICO.</p>
+                        <p><strong>Differences:</strong></p>
+                        <ul>
+                            <li><strong>Signatures:</strong> Dilithium3 (quantum-resistant) vs ECDSA (quantum-vulnerable)</li>
+                            <li><strong>Block time:</strong> 4 minutes vs 10 minutes (2.5x faster confirmations)</li>
+                            <li><strong>Mining:</strong> RandomX (CPU-only) vs SHA-256 (ASIC-dominated)</li>
+                            <li><strong>Transaction size:</strong> Larger due to post-quantum signatures (signature: 3.3 KB, pubkey: 1.9 KB vs ~250 bytes total for Bitcoin)</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>Is the testnet safe to use?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p><strong>Testnet coins have ZERO monetary value.</strong> The testnet is for testing purposes only and may be reset at any time. Do not store anything of value on the testnet.</p>
+                        <p>The testnet software is experimental and has not undergone professional security audit. Use it to learn, test, and report bugs—not to store real value. Wait for the mainnet launch on January 1, 2026 for production use.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>Can I mine with my GPU or ASIC?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p><strong>No.</strong> Dilithion uses RandomX proof-of-work, which is optimized for CPUs and designed to be ASIC-resistant and GPU-inefficient. This keeps mining accessible to everyone with a regular computer.</p>
+                        <p>GPU and ASIC mining would provide no advantage and would actually be slower and less efficient than CPU mining. Any modern CPU can mine Dilithion effectively.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>What is the total supply and halving schedule?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p><strong>Total supply:</strong> 21 million DIL (same as Bitcoin)</p>
+                        <p><strong>Initial reward:</strong> 50 DIL per block</p>
+                        <p><strong>Halving:</strong> Every 210,000 blocks (~1.6 years with 4-minute blocks)</p>
+                        <p><strong>Final halving:</strong> Around 2089 when block reward becomes negligible</p>
+                        <p>This creates predictable, deflationary economics similar to Bitcoin's proven model.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>When is the mainnet launch?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p><strong>Target date:</strong> January 1, 2026 at 00:00:00 UTC</p>
+                        <p>The testnet is currently live for testing and bug reporting. We're conducting extensive testing to ensure mainnet stability and security. Join the testnet now to help us prepare for a successful mainnet launch!</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>How can I contribute to the project?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>We welcome contributions from the community:</p>
+                        <ul>
+                            <li><strong>Test the testnet:</strong> Mine, make transactions, and report bugs on <a href="https://github.com/WillBarton888/dilithion/issues" target="_blank">GitHub Issues</a></li>
+                            <li><strong>Code contributions:</strong> Submit pull requests on <a href="https://github.com/WillBarton888/dilithion" target="_blank">GitHub</a></li>
+                            <li><strong>Documentation:</strong> Help improve guides, tutorials, and documentation</li>
+                            <li><strong>Community:</strong> Join <a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank">GitHub Discussions</a> to help others</li>
+                            <li><strong>Security:</strong> Report vulnerabilities to security@dilithion.org</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>Is this project AI-generated?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Dilithion is developed with AI assistance (Claude Code) working alongside human oversight. The AI helps with:</p>
+                        <ul>
+                            <li>Code generation and optimization</li>
+                            <li>Documentation and website development</li>
+                            <li>Bug fixing and testing</li>
+                            <li>Implementation of cryptographic standards</li>
+                        </ul>
+                        <p>However, all critical decisions, cryptographic implementations, and security architecture are reviewed by humans. The CRYSTALS-Dilithium algorithm itself is developed by world-class cryptographers and standardized by NIST—not AI-generated.</p>
+                        <p>We believe in full transparency about our development process. AI is a tool that accelerates development while maintaining security and correctness through rigorous testing and peer review.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>Where can I get help or ask questions?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Multiple ways to get help:</p>
+                        <ul>
+                            <li><strong>GitHub Discussions:</strong> <a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank">General questions and discussions</a></li>
+                            <li><strong>GitHub Issues:</strong> <a href="https://github.com/WillBarton888/dilithion/issues" target="_blank">Bug reports and technical issues</a></li>
+                            <li><strong>Email:</strong> team@dilithion.org for general inquiries</li>
+                            <li><strong>Documentation:</strong> <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank">Testnet Launch Guide</a></li>
+                            <li><strong>Whitepaper:</strong> <a href="WHITEPAPER.html" target="_blank">Technical documentation</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Newsletter Signup -->
+    <section class="newsletter-section">
+        <div class="container">
+            <div class="newsletter-container">
+                <div class="newsletter-content">
+                    <h2>Stay Updated on Mainnet Launch</h2>
+                    <p>Get notified when Dilithion mainnet launches on January 1, 2026. Join our community of quantum-resistant cryptocurrency early adopters.</p>
+                </div>
+                <form class="newsletter-form" id="newsletterForm">
+                    <input
+                        type="email"
+                        class="newsletter-input"
+                        placeholder="Enter your email address"
+                        required
+                        aria-label="Email address"
+                    >
+                    <button type="submit" class="btn btn-primary newsletter-btn">
+                        Subscribe
+                    </button>
+                </form>
+                <p class="newsletter-disclaimer">
+                    We respect your privacy. Unsubscribe anytime. No spam, only mainnet launch announcements and critical updates.
+                </p>
+            </div>
+        </div>
+    </section>
+
     <!-- Footer -->
     <footer class="footer">
         <div class="container">
@@ -441,13 +848,14 @@
                     <img src="dilithion-logo-256.png" alt="Dilithion Logo" class="footer-logo">
                     <h3>Dilithion</h3>
                     <p>Experimental post-quantum cryptocurrency. Testnet LIVE NOW - Mainnet launching January 1, 2026. AI-assisted development with full transparency.</p>
-                    <p style="margin-top: 10px;"><strong>⚠️ Testnet coins have NO VALUE</strong></p>
+                    <p style="margin-top: 10px;"><strong><svg class="inline-icon"><use href="#icon-alert"/></svg> Testnet coins have NO VALUE</strong></p>
                 </div>
 
                 <div class="footer-section">
                     <h4>Resources</h4>
                     <ul>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank">Testnet Guide</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/CLI-WALLET-GUIDE.md" target="_blank">CLI Wallet Guide</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet" target="_blank">Testnet Release</a></li>
                         <li><a href="WHITEPAPER.html" target="_blank">Whitepaper (HTML)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md" target="_blank">Whitepaper (Markdown)</a></li>
@@ -460,10 +868,10 @@
                 <div class="footer-section">
                     <h4>Community</h4>
                     <ul>
+                        <li><a href="https://discord.gg/c25WwRNg" target="_blank">Discord: Dilithion Discussions</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank">GitHub Discussions</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/issues" target="_blank">Report Issues</a></li>
                         <li><a href="#" target="_blank">Twitter (Coming Soon)</a></li>
-                        <li><a href="#" target="_blank">Discord (Coming Soon)</a></li>
                         <li><a href="#" target="_blank">Telegram (Coming Soon)</a></li>
                     </ul>
                 </div>
