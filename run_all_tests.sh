@@ -1,61 +1,53 @@
 #!/bin/bash
-echo '=========================================='
-echo 'Dilithion Phase 5.6 Test Suite'
-echo 'Running All Available Tests'
-echo '=========================================='
-echo
+PASSED=0
+FAILED=0
 
-tests=(
-  'miner_tests:60'
-  'timestamp_tests:30'
-  'rpc_auth_tests:30'
-  'crypter_tests:60'
-  'wallet_persistence_tests:60'
-  'wallet_encryption_integration_tests:120'
-  'rpc_tests:60'
-  'tx_validation_tests:120'
-  'tx_relay_tests:120'
-  'wallet_tests:300'
-)
+echo "====================================="
+echo "Dilithion Comprehensive Test Suite"
+echo "====================================="
 
-passed=0
-failed=0
-timeout_count=0
-
-for test_spec in ""; do
-  test_name=
-  test_timeout=
-  
-  if [ ! -f "./" ]; then
-    echo "❌ : NOT FOUND"
-    ((failed++))
-    continue
-  fi
-  
-  echo "Running:  (timeout: s)"
-  echo "----------------------------------------"
-  
-  if timeout  ./ 2>&1 | tee test-result-.log; then
-    echo "✅ : PASSED"
-    ((passed++))
-  else
-    exit_code=0
-    if [  -eq 124 ]; then
-      echo "⏱️  : TIMEOUT"
-      ((timeout_count++))
+run_test() {
+    test_name=
+    test_cmd=
+    printf "%-40s" ": "
+    
+    if eval "" > /tmp/test_output.txt 2>&1; then
+        PASSED=1
+        echo "✅ PASS"
     else
-      echo "❌ : FAILED (exit code: )"
-      ((failed++))
+        FAILED=1
+        echo "❌ FAIL"
     fi
-  fi
-  echo
-done
+}
 
-echo '=========================================='
-echo 'Test Suite Summary'
-echo '=========================================='
-echo "✅ Passed: "
-echo "❌ Failed: "
-echo "⏱️  Timeout: "
-echo "Total: 0"
-echo
+# Phase 1: Unit Tests
+run_test "phase1_test" "./phase1_test"
+run_test "crypter_tests" "./crypter_tests"
+run_test "timestamp_tests" "./timestamp_tests"
+run_test "rpc_auth_tests" "./rpc_auth_tests"
+
+# Phase 2: Security Tests  
+run_test "tx_validation_tests" "rm -rf .test_utxo_validation && ./tx_validation_tests"
+run_test "mining_integration_tests" "./mining_integration_tests"
+run_test "wallet_encryption_integration_tests" "./wallet_encryption_integration_tests"
+
+# Phase 3: Integration Tests
+run_test "tx_relay_tests" "timeout 30 ./tx_relay_tests"
+run_test "net_tests" "./net_tests"
+run_test "integration_tests" "timeout 30 ./integration_tests"
+
+# Phase 4: E2E Tests
+run_test "miner_tests" "./miner_tests"
+run_test "wallet_tests" "timeout 30 ./wallet_tests"
+run_test "wallet_persistence_tests" "timeout 30 ./wallet_persistence_tests"
+run_test "rpc_tests" "timeout 30 ./rpc_tests"
+
+echo ""
+echo "====================================="
+echo "Final Results: /14 tests passed"
+echo "====================================="
+if [  -eq 0 ]; then
+    echo "✅ ALL TESTS PASSED"
+else
+    echo "⚠️   test(s) failed"
+fi

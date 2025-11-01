@@ -1,0 +1,35 @@
+Dilithium3 Size Calculations (NIST Level 3 Security):
+
+Constants:
+  SEEDBYTES = 32
+  TRBYTES = 64
+  K = 6 (matrix rows)
+  L = 5 (matrix columns)
+  ETA = 4
+  OMEGA = 55
+  CTILDEBYTES = 48
+
+Packed Sizes:
+  POLYT1_PACKEDBYTES = 320
+  POLYT0_PACKEDBYTES = 416
+  POLYZ_PACKEDBYTES = 640
+  POLYETA_PACKEDBYTES = 128
+  POLYVECH_PACKEDBYTES = OMEGA + K = 61
+
+Public Key Size:
+  SEEDBYTES + K * POLYT1_PACKEDBYTES
+  = 32 + 6 * 320
+  = 32 + 1920
+  = 1952 bytes (1.91 KB)
+
+Secret Key Size:
+  2*SEEDBYTES + TRBYTES + L*POLYETA_PACKEDBYTES + K*POLYETA_PACKEDBYTES + K*POLYT0_PACKEDBYTES
+  = 2*32 + 64 + 5*128 + 6*128 + 6*416
+  = 64 + 64 + 640 + 768 + 2496
+  = 4032 bytes (3.94 KB)
+
+Signature Size:
+  CTILDEBYTES + L * POLYZ_PACKEDBYTES + POLYVECH_PACKEDBYTES
+  = 48 + 5 * 640 + 61
+  = 48 + 3200 + 61
+  = 3309 bytes (3.23 KB)

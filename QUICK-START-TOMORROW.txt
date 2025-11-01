@@ -1,0 +1,54 @@
+================================================================
+  DILITHION WINDOWS BUILD - QUICK START FOR TOMORROW
+================================================================
+
+CURRENT STATUS: 95% complete - just need to build RandomX
+
+WHERE YOU LEFT OFF:
+  Directory: /c/Users/will/dilithion/depends/randomx/build
+  Problem: Building RandomX dependency for Windows
+
+================================================================
+  QUICK STEPS TO FINISH (10 minutes)
+================================================================
+
+STEP 1: Open MSYS2 MinGW 64-bit Terminal
+  - Press Windows Key
+  - Type: msys2 mingw 64
+  - Click "MSYS2 MinGW 64-bit"
+
+STEP 2: Navigate and Build RandomX
+  cd /c/Users/will/dilithion/depends/randomx/build
+  cmake -G "MSYS Makefiles" ..
+  make
+
+STEP 3: Fix Makefile (add Windows library)
+  cd /c/Users/will/dilithion
+  sed -i 's/-lpthread/-lpthread -lws2_32/' Makefile
+
+STEP 4: Build Windows Binaries
+  make clean
+  make
+
+STEP 5: Open Regular Command Prompt and Package
+  cd C:\Users\will\dilithion
+  package-windows-release.bat
+
+STEP 6: Upload to GitHub
+  gh release upload v1.0-testnet releases\dilithion-testnet-v1.0.0-windows-x64.zip
+
+DONE! ✅
+
+================================================================
+  IF STUCK
+================================================================
+
+Can't paste in terminal? Type each word separately:
+  cmake (space) -G (space) "MSYS Makefiles" (space) ..
+
+Or just use:
+  cmake ..
+
+Full details in: SESSION-RESUME-OCT30-WINDOWS-BUILD.md
+
+================================================================

@@ -321,3 +321,179 @@ document.addEventListener('DOMContentLoaded', function() {
 window.addEventListener('beforeunload', function() {
     stopDashboardUpdates();
 });
+
+/**
+ * Mobile Menu Functionality
+ */
+function initMobileMenu() {
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const navLinks = document.getElementById('navLinks');
+    const menuIcon = document.getElementById('menuIcon');
+    const closeIcon = document.getElementById('closeIcon');
+
+    if (!mobileMenuBtn || !navLinks) return;
+
+    // Toggle mobile menu
+    mobileMenuBtn.addEventListener('click', function() {
+        const isExpanded = this.getAttribute('aria-expanded') === 'true';
+
+        // Toggle menu state
+        this.setAttribute('aria-expanded', !isExpanded);
+        navLinks.classList.toggle('active');
+        document.body.classList.toggle('menu-open');
+
+        // Toggle icons
+        if (menuIcon && closeIcon) {
+            menuIcon.style.display = isExpanded ? 'block' : 'none';
+            closeIcon.style.display = isExpanded ? 'none' : 'block';
+        }
+    });
+
+    // Close mobile menu when clicking on a link
+    const navLinksAll = navLinks.querySelectorAll('a');
+    navLinksAll.forEach(link => {
+        link.addEventListener('click', function() {
+            navLinks.classList.remove('active');
+            document.body.classList.remove('menu-open');
+            mobileMenuBtn.setAttribute('aria-expanded', 'false');
+
+            if (menuIcon && closeIcon) {
+                menuIcon.style.display = 'block';
+                closeIcon.style.display = 'none';
+            }
+        });
+    });
+
+    // Close mobile menu when clicking outside
+    document.addEventListener('click', function(event) {
+        if (!navLinks.contains(event.target) && !mobileMenuBtn.contains(event.target)) {
+            if (navLinks.classList.contains('active')) {
+                navLinks.classList.remove('active');
+                document.body.classList.remove('menu-open');
+                mobileMenuBtn.setAttribute('aria-expanded', 'false');
+
+                if (menuIcon && closeIcon) {
+                    menuIcon.style.display = 'block';
+                    closeIcon.style.display = 'none';
+                }
+            }
+        }
+    });
+
+    // Close mobile menu on escape key
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape' && navLinks.classList.contains('active')) {
+            navLinks.classList.remove('active');
+            document.body.classList.remove('menu-open');
+            mobileMenuBtn.setAttribute('aria-expanded', 'false');
+
+            if (menuIcon && closeIcon) {
+                menuIcon.style.display = 'block';
+                closeIcon.style.display = 'none';
+            }
+        }
+    });
+}
+
+// Initialize mobile menu when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    initMobileMenu();
+    initFAQ();
+    initNewsletter();
+});
+
+/**
+ * FAQ Accordion Functionality
+ */
+function initFAQ() {
+    const faqItems = document.querySelectorAll('.faq-item');
+
+    faqItems.forEach(item => {
+        const question = item.querySelector('.faq-question');
+
+        question.addEventListener('click', () => {
+            // Toggle active class
+            const isActive = item.classList.contains('active');
+
+            // Close all other FAQ items (optional - remove to allow multiple open)
+            faqItems.forEach(otherItem => {
+                if (otherItem !== item) {
+                    otherItem.classList.remove('active');
+                }
+            });
+
+            // Toggle current item
+            if (isActive) {
+                item.classList.remove('active');
+            } else {
+                item.classList.add('active');
+            }
+        });
+    });
+}
+
+/**
+ * Newsletter Form Handler
+ */
+function initNewsletter() {
+    const form = document.getElementById('newsletterForm');
+    if (!form) return;
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const emailInput = this.querySelector('.newsletter-input');
+        const email = emailInput.value.trim();
+
+        // Basic email validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            showNewsletterMessage('Please enter a valid email address.', 'error');
+            return;
+        }
+
+        // In production, this would send to a backend API or email service
+        // For now, just show a success message
+        console.log('Newsletter signup:', email);
+
+        // Store in localStorage as placeholder (production would use real backend)
+        const subscribers = JSON.parse(localStorage.getItem('dilithion_subscribers') || '[]');
+        if (!subscribers.includes(email)) {
+            subscribers.push(email);
+            localStorage.setItem('dilithion_subscribers', JSON.stringify(subscribers));
+        }
+
+        // Show success message
+        showNewsletterMessage('Success! You\'re subscribed to mainnet launch updates.', 'success');
+
+        // Clear form
+        emailInput.value = '';
+    });
+}
+
+/**
+ * Show newsletter feedback message
+ */
+function showNewsletterMessage(message, type) {
+    const form = document.getElementById('newsletterForm');
+    if (!form) return;
+
+    // Remove existing message
+    const existingMessage = form.parentElement.querySelector('.newsletter-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+
+    // Create message element
+    const messageEl = document.createElement('div');
+    messageEl.className = `newsletter-message newsletter-message-${type}`;
+    messageEl.textContent = message;
+
+    // Insert after form
+    form.parentElement.insertBefore(messageEl, form.nextSibling);
+
+    // Remove after 5 seconds
+    setTimeout(() => {
+        messageEl.remove();
+    }, 5000);
+}

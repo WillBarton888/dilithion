@@ -1,0 +1,47 @@
+# FastAPI and ASGI server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.12.1
+psycopg2-binary==2.9.9
+
+# Data validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
+cryptography==41.0.7
+
+# HTTP client
+httpx==0.25.2
+requests==2.31.0
+
+# Platform APIs
+tweepy==4.14.0
+praw==7.7.1
+PyGithub==2.1.1
+
+# AI Integration
+anthropic==0.7.8
+
+# Background tasks
+APScheduler==3.10.4
+
+# Rate limiting
+slowapi==0.1.9
+
+# CORS
+python-cors==1.0.0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Logging
+structlog==23.2.0

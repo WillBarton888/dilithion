@@ -143,20 +143,27 @@ struct NodeConfig {
             }
             else if (arg.find("--threads=") == 0) {
                 // PHASE 4 FIX: Add exception handling for invalid thread count
-                try {
-                    int threads = std::stoi(arg.substr(10));
-                    if (threads < Consensus::MIN_MINING_THREADS || threads > Consensus::MAX_MINING_THREADS) {
-                        std::cerr << "Error: Invalid thread count (must be " << Consensus::MIN_MINING_THREADS
-                                  << "-" << Consensus::MAX_MINING_THREADS << "): " << arg << std::endl;
+                std::string threads_str = arg.substr(10);
+
+                // Support "auto" for automatic thread detection
+                if (threads_str == "auto" || threads_str == "AUTO") {
+                    mining_threads = 0;  // 0 means auto-detect
+                } else {
+                    try {
+                        int threads = std::stoi(threads_str);
+                        if (threads < Consensus::MIN_MINING_THREADS || threads > Consensus::MAX_MINING_THREADS) {
+                            std::cerr << "Error: Invalid thread count (must be " << Consensus::MIN_MINING_THREADS
+                                      << "-" << Consensus::MAX_MINING_THREADS << " or 'auto'): " << arg << std::endl;
+                            return false;
+                        }
+                        mining_threads = threads;
+                    } catch (const std::invalid_argument& e) {
+                        std::cerr << "Error: Invalid thread count (must be a number or 'auto'): " << arg << std::endl;
+                        return false;
+                    } catch (const std::out_of_range& e) {
+                        std::cerr << "Error: Thread count number out of range: " << arg << std::endl;
                         return false;
                     }
-                    mining_threads = threads;
-                } catch (const std::invalid_argument& e) {
-                    std::cerr << "Error: Invalid thread count format (not a number): " << arg << std::endl;
-                    return false;
-                } catch (const std::out_of_range& e) {
-                    std::cerr << "Error: Thread count number out of range: " << arg << std::endl;
-                    return false;
                 }
             }
             else if (arg == "--help" || arg == "-h") {
@@ -175,6 +182,13 @@ struct NodeConfig {
         std::cout << std::endl;
         std::cout << "Usage: " << program << " [options]" << std::endl;
         std::cout << std::endl;
+        std::cout << "\033[1;32mQUICK START (Beginners):\033[0m" << std::endl;
+        std::cout << "  " << program << "              No arguments = Auto-start testnet mining!" << std::endl;
+        std::cout << "                            • Testnet mode" << std::endl;
+        std::cout << "                            • Auto-connect to seed node" << std::endl;
+        std::cout << "                            • Auto-detect CPU threads" << std::endl;
+        std::cout << "                            • Start mining immediately" << std::endl;
+        std::cout << std::endl;
         std::cout << "Options:" << std::endl;
         std::cout << "  --testnet             Use testnet (256x easier difficulty)" << std::endl;
         std::cout << "  --datadir=<path>      Data directory (default: network-specific)" << std::endl;
@@ -183,17 +197,18 @@ struct NodeConfig {
         std::cout << "  --connect=<ip:port>   Connect to node (disables DNS seeds)" << std::endl;
         std::cout << "  --addnode=<ip:port>   Add node to connect to (repeatable)" << std::endl;
         std::cout << "  --mine                Start mining automatically" << std::endl;
-        std::cout << "  --threads=<n>         Mining threads (default: auto-detect)" << std::endl;
+        std::cout << "  --threads=<n|auto>    Mining threads (number or 'auto' to detect)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Network Defaults:" << std::endl;
         std::cout << "  Mainnet:  datadir=.dilithion         port=8444  rpcport=8332" << std::endl;
         std::cout << "  Testnet:  datadir=.dilithion-testnet port=18444 rpcport=18332" << std::endl;
         std::cout << std::endl;
-        std::cout << "P2P Examples:" << std::endl;
-        std::cout << "  " << program << " --testnet --port=18445" << std::endl;
-        std::cout << "  " << program << " --testnet --connect=127.0.0.1:18444" << std::endl;
-        std::cout << "  " << program << " --testnet --addnode=127.0.0.1:18444" << std::endl;
+        std::cout << "Examples:" << std::endl;
+        std::cout << "  " << program << "                                                    (Quick start testnet)" << std::endl;
+        std::cout << "  " << program << " --testnet --mine --threads=auto                     (Same as above)" << std::endl;
+        std::cout << "  " << program << " --testnet --addnode=170.64.203.134:18444 --mine     (Connect to seed)" << std::endl;
+        std::cout << "  " << program << " --testnet --mine --threads=4                        (4 CPU cores)" << std::endl;
         std::cout << std::endl;
         std::cout << "Post-Quantum Security Stack:" << std::endl;
         std::cout << "  Mining:      RandomX (CPU-friendly, ASIC-resistant)" << std::endl;
@@ -320,9 +335,39 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 }
 
 int main(int argc, char* argv[]) {
+    // Quick Start Mode: If no arguments provided, use beginner-friendly defaults
+    bool quick_start_mode = (argc == 1);
+
     // Parse configuration
     NodeConfig config;
-    if (!config.ParseArgs(argc, argv)) {
+
+    if (quick_start_mode) {
+        // Smart defaults for crypto novices
+        std::cout << "\033[1;32m" << std::endl;  // Green bold
+        std::cout << "======================================" << std::endl;
+        std::cout << "  DILITHION QUICK START MODE" << std::endl;
+        std::cout << "======================================" << std::endl;
+        std::cout << "\033[0m" << std::endl;  // Reset color
+        std::cout << "No arguments detected - using beginner-friendly defaults:" << std::endl;
+        std::cout << "  • Testnet:    ENABLED (coins have no value)" << std::endl;
+        std::cout << "  • Seed node:  170.64.203.134:18444 (official)" << std::endl;
+        std::cout << "  • Mining:     ENABLED" << std::endl;
+        std::cout << "  • Threads:    AUTO-DETECT (50-75% of your CPU)" << std::endl;
+        std::cout << std::endl;
+        std::cout << "To customize settings, run: " << argv[0] << " --help" << std::endl;
+        std::cout << "To stop mining anytime: Press Ctrl+C" << std::endl;
+        std::cout << std::endl;
+        std::cout << "Starting in 3 seconds..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        std::cout << std::endl;
+
+        // Apply smart defaults
+        config.testnet = true;
+        config.start_mining = true;
+        config.mining_threads = 0;  // 0 = auto-detect
+        config.add_nodes.push_back("170.64.203.134:18444");
+    }
+    else if (!config.ParseArgs(argc, argv)) {
         config.PrintUsage(argv[0]);
         return 1;
     }
