@@ -29,7 +29,11 @@ public:
     bool operator==(const uint256& other) const {
         return memcmp(data, other.data, 32) == 0;
     }
-    
+
+    bool operator!=(const uint256& other) const {
+        return memcmp(data, other.data, 32) != 0;
+    }
+
     uint8_t* begin() { return data; }
     const uint8_t* begin() const { return data; }
     uint8_t* end() { return data + 32; }
