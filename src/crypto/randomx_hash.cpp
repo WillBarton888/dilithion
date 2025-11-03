@@ -15,7 +15,7 @@ namespace {
     std::vector<uint8_t> g_current_key;
 }
 
-void randomx_init_cache(const void* key, size_t key_len) {
+void randomx_init_cache(const void* key, size_t key_len, bool light_mode) {
     std::lock_guard<std::mutex> lock(g_randomx_mutex);
 
     std::vector<uint8_t> new_key((const uint8_t*)key, (const uint8_t*)key + key_len);
@@ -32,7 +32,9 @@ void randomx_init_cache(const void* key, size_t key_len) {
         g_randomx_cache = nullptr;
     }
 
-    randomx_flags flags = randomx_get_flags();
+    // Use light mode for testing/CI environments with limited memory
+    // RANDOMX_FLAG_DEFAULT uses ~256MB vs full mode ~2GB
+    randomx_flags flags = light_mode ? RANDOMX_FLAG_DEFAULT : randomx_get_flags();
     g_randomx_cache = randomx_alloc_cache(flags);
     if (g_randomx_cache == nullptr) {
         throw std::runtime_error("Failed to allocate RandomX cache");

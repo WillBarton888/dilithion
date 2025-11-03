@@ -14,8 +14,8 @@
 #include <iostream>
 #include <cstring>
 
-// RandomX initialization
-extern "C" void randomx_init_cache(const void* key, size_t key_len);
+// RandomX initialization (with light mode support for testing)
+extern "C" void randomx_init_cache(const void* key, size_t key_len, bool light_mode);
 
 /**
  * Global test suite setup
@@ -28,15 +28,11 @@ struct DilithionTestSetup {
                   << BOOST_VERSION / 100 % 1000 << "."
                   << BOOST_VERSION % 100 << std::endl;
 
-        // Initialize RandomX for tests that need GetHash()
-        // Note: Some CI environments may have limited memory
-        try {
-            const char* rx_key = "Dilithion-RandomX-Test";
-            randomx_init_cache(rx_key, strlen(rx_key));
-            std::cout << "RandomX initialized for testing" << std::endl;
-        } catch (const std::exception& e) {
-            std::cout << "Warning: RandomX init failed (" << e.what() << ") - tests requiring GetHash() will be skipped" << std::endl;
-        }
+        // Initialize RandomX in light mode for tests
+        // Light mode uses ~256MB vs full mode ~2GB (suitable for CI)
+        const char* rx_key = "Dilithion-RandomX-Test";
+        randomx_init_cache(rx_key, strlen(rx_key), true /* light_mode */);
+        std::cout << "✓ RandomX initialized (light mode)" << std::endl;
     }
 
     ~DilithionTestSetup() {
