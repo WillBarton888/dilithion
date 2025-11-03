@@ -274,10 +274,22 @@ jobs:
         LDFLAGS="--coverage" \
         make test_dilithion -j$(nproc)
 
+        # Verify test binary exists and has coverage symbols
+        ls -lh ./test_dilithion
+        nm ./test_dilithion | grep -c gcov || echo "Warning: No gcov symbols found in binary"
+
     - name: Run tests for coverage
       run: |
         # Run Boost unit tests to generate coverage data
         ./test_dilithion --log_level=test_suite --report_level=short || true
+
+        # Verify .gcda files were generated
+        echo "Checking for .gcda files..."
+        find . -name "*.gcda" -type f | head -20 || echo "No .gcda files found yet"
+
+        # List build directory to verify structure
+        ls -la build/obj/test/ || echo "build/obj/test/ not found"
+
         echo "✅ Tests executed for coverage analysis"
 
     - name: Generate coverage report
