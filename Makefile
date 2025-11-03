@@ -11,8 +11,10 @@ UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
 
 # Compiler and flags
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
-CFLAGS := -O2
+# Use ?= to allow environment variables (e.g., --coverage) to completely override defaults
+# If not set by environment, use optimized defaults
+CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2
+CFLAGS ?= -O2
 
 # Include paths (base)
 INCLUDES := -I src \
@@ -20,7 +22,10 @@ INCLUDES := -I src \
             -I depends/dilithium/ref
 
 # Library paths and libraries (base)
-LDFLAGS := -L depends/randomx/build \
+# Use ?= to allow environment to set initial LDFLAGS (e.g., --coverage)
+# Then append our library paths
+LDFLAGS ?=
+LDFLAGS += -L depends/randomx/build \
            -L depends/dilithium/ref
 
 LIBS := -lrandomx -lleveldb -lpthread
