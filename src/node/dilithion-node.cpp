@@ -33,6 +33,7 @@
 #include <core/chainparams.h>
 #include <consensus/pow.h>
 #include <consensus/chain.h>
+#include <crypto/randomx_hash.h>
 
 #include <iostream>
 #include <iomanip>
@@ -445,7 +446,6 @@ int main(int argc, char* argv[]) {
 
         // Initialize RandomX (required for block hashing)
         std::cout << "Initializing RandomX..." << std::endl;
-        extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode);
         const char* rx_key = "Dilithion";
         randomx_init_for_hashing(rx_key, strlen(rx_key), 0 /* use full mode for production */);
         std::cout << "  [OK] RandomX initialized" << std::endl;
