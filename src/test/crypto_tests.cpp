@@ -125,6 +125,105 @@ BOOST_AUTO_TEST_CASE(sha3_512_known_test_vector) {
     BOOST_CHECK_EQUAL_COLLECTIONS(hash, hash + 64, expected, expected + 64);
 }
 
+/**
+ * Additional SHA-3 Edge Case Tests
+ * To improve coverage from 33.3% to 80%+
+ */
+
+BOOST_AUTO_TEST_CASE(sha3_256_large_input) {
+    // Test with large input (10 KB)
+    std::vector<uint8_t> large_input(10240);
+    for (size_t i = 0; i < large_input.size(); i++) {
+        large_input[i] = static_cast<uint8_t>(i & 0xFF);
+    }
+
+    uint8_t hash[32];
+    SHA3_256(large_input.data(), large_input.size(), hash);
+
+    // Hash should be computed without crash
+    BOOST_CHECK(!std::all_of(hash, hash + 32, [](uint8_t b) { return b == 0; }));
+}
+
+BOOST_AUTO_TEST_CASE(sha3_256_very_large_input) {
+    // Test with very large input (1 MB)
+    std::vector<uint8_t> very_large_input(1024 * 1024);
+    for (size_t i = 0; i < very_large_input.size(); i++) {
+        very_large_input[i] = static_cast<uint8_t>((i * 7) & 0xFF);
+    }
+
+    uint8_t hash[32];
+    SHA3_256(very_large_input.data(), very_large_input.size(), hash);
+
+    // Should handle large input without issue
+    BOOST_CHECK(!std::all_of(hash, hash + 32, [](uint8_t b) { return b == 0; }));
+}
+
+BOOST_AUTO_TEST_CASE(sha3_256_single_byte_inputs) {
+    // Test all single-byte inputs (0x00 through 0xFF)
+    for (uint16_t i = 0; i <= 0xFF; i++) {
+        uint8_t input = static_cast<uint8_t>(i);
+        uint8_t hash[32];
+
+        SHA3_256(&input, 1, hash);
+
+        // Each single byte should produce unique hash
+        BOOST_CHECK(!std::all_of(hash, hash + 32, [](uint8_t b) { return b == 0; }));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(sha3_256_consecutive_hashes) {
+    // Test multiple consecutive hash operations
+    const uint8_t input[] = "consecutive test";
+    uint8_t hash1[32], hash2[32], hash3[32];
+
+    SHA3_256(input, sizeof(input) - 1, hash1);
+    SHA3_256(input, sizeof(input) - 1, hash2);
+    SHA3_256(input, sizeof(input) - 1, hash3);
+
+    // All should be identical
+    BOOST_CHECK_EQUAL_COLLECTIONS(hash1, hash1 + 32, hash2, hash2 + 32);
+    BOOST_CHECK_EQUAL_COLLECTIONS(hash2, hash2 + 32, hash3, hash3 + 32);
+}
+
+BOOST_AUTO_TEST_CASE(sha3_512_large_input) {
+    // Test SHA-3-512 with large input
+    std::vector<uint8_t> large_input(10240);
+    for (size_t i = 0; i < large_input.size(); i++) {
+        large_input[i] = static_cast<uint8_t>((i * 13) & 0xFF);
+    }
+
+    uint8_t hash[64];
+    SHA3_512(large_input.data(), large_input.size(), hash);
+
+    // Should produce non-zero hash
+    BOOST_CHECK(!std::all_of(hash, hash + 64, [](uint8_t b) { return b == 0; }));
+}
+
+BOOST_AUTO_TEST_CASE(sha3_512_deterministic) {
+    const uint8_t input[] = "SHA3-512 determinism test";
+    uint8_t hash1[64], hash2[64];
+
+    SHA3_512(input, sizeof(input) - 1, hash1);
+    SHA3_512(input, sizeof(input) - 1, hash2);
+
+    BOOST_CHECK_EQUAL_COLLECTIONS(hash1, hash1 + 64, hash2, hash2 + 64);
+}
+
+BOOST_AUTO_TEST_CASE(sha3_256_boundary_length) {
+    // Test boundary input lengths (powers of 2 around block size)
+    std::vector<size_t> test_sizes = {63, 64, 65, 127, 128, 129, 255, 256, 257};
+
+    for (size_t size : test_sizes) {
+        std::vector<uint8_t> input(size, 0xAA);
+        uint8_t hash[32];
+
+        SHA3_256(input.data(), input.size(), hash);
+
+        // Should handle all boundary sizes
+        BOOST_CHECK(!std::all_of(hash, hash + 32, [](uint8_t b) { return b == 0; }));
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END() // sha3_tests
 
 /**

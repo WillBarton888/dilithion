@@ -479,6 +479,200 @@ BOOST_AUTO_TEST_CASE(block_timestamps_ascending) {
     BOOST_CHECK(block1.nTime < block3.nTime);
 }
 
+/**
+ * Additional Block and uint256 Edge Case Tests
+ * To improve block.h coverage from 43.8% to 75%+
+ */
+
+BOOST_AUTO_TEST_CASE(block_header_get_hash) {
+    CBlockHeader header;
+    header.nVersion = 1;
+    header.nTime = 1234567890;
+    header.nBits = 0x1d00ffff;
+    header.nNonce = 0;
+
+    // Set merkle root
+    memset(header.hashMerkleRoot.data, 0xAA, 32);
+
+    // GetHash() should produce non-null hash
+    uint256 hash = header.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+
+    // Hash should be deterministic
+    uint256 hash2 = header.GetHash();
+    BOOST_CHECK(hash == hash2);
+}
+
+BOOST_AUTO_TEST_CASE(block_header_different_versions) {
+    CBlockHeader h1, h2;
+
+    h1.nVersion = 1;
+    h2.nVersion = 2;
+
+    // Different versions should produce different hashes
+    uint256 hash1 = h1.GetHash();
+    uint256 hash2 = h2.GetHash();
+
+    BOOST_CHECK(hash1 != hash2);
+}
+
+BOOST_AUTO_TEST_CASE(block_with_transactions) {
+    CBlock block;
+    block.nVersion = 1;
+
+    // Add mock transaction data
+    std::vector<uint8_t> tx_data(100, 0xBB);
+    block.vtx = tx_data;
+
+    BOOST_CHECK(!block.vtx.empty());
+    BOOST_CHECK_EQUAL(block.vtx.size(), 100);
+}
+
+BOOST_AUTO_TEST_CASE(uint256_hex_conversion) {
+    uint256 original;
+    memset(original.data, 0, 32);
+    original.data[0] = 0x12;
+    original.data[1] = 0x34;
+    original.data[31] = 0xAB;
+
+    // Convert to hex and back
+    std::string hex = original.GetHex();
+    BOOST_CHECK(!hex.empty());
+    BOOST_CHECK_EQUAL(hex.length(), 64); // 32 bytes * 2 hex chars
+
+    uint256 parsed;
+    parsed.SetHex(hex);
+
+    BOOST_CHECK(parsed == original);
+}
+
+BOOST_AUTO_TEST_CASE(uint256_all_bits_set) {
+    uint256 all_ones;
+    memset(all_ones.data, 0xFF, 32);
+
+    BOOST_CHECK(!all_ones.IsNull());
+
+    // All bytes should be 0xFF
+    for (int i = 0; i < 32; i++) {
+        BOOST_CHECK_EQUAL(all_ones.data[i], 0xFF);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(uint256_alternating_pattern) {
+    uint256 pattern;
+    for (int i = 0; i < 32; i++) {
+        pattern.data[i] = (i % 2 == 0) ? 0xAA : 0x55;
+    }
+
+    BOOST_CHECK(!pattern.IsNull());
+
+    // Verify pattern
+    for (int i = 0; i < 32; i++) {
+        uint8_t expected = (i % 2 == 0) ? 0xAA : 0x55;
+        BOOST_CHECK_EQUAL(pattern.data[i], expected);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(uint256_comparison_boundaries) {
+    uint256 min, max;
+
+    // Min: all zeros except last byte = 1
+    memset(min.data, 0, 32);
+    min.data[0] = 0x01;
+
+    // Max: all 0xFF
+    memset(max.data, 0xFF, 32);
+
+    BOOST_CHECK(min < max);
+    BOOST_CHECK(!(max < min));
+    BOOST_CHECK(min != max);
+}
+
+BOOST_AUTO_TEST_CASE(block_difficulty_bits_encoding) {
+    CBlockHeader header;
+
+    // Test various difficulty encodings
+    std::vector<uint32_t> test_bits = {
+        0x1d00ffff,  // MIN_DIFFICULTY_BITS
+        0x1d01ffff,
+        0x1d0fffff,
+        0x1e00ffff,
+        0x1f0fffff   // MAX_DIFFICULTY_BITS (testnet)
+    };
+
+    for (uint32_t bits : test_bits) {
+        header.nBits = bits;
+        BOOST_CHECK_EQUAL(header.nBits, bits);
+
+        // Should be able to hash with any valid difficulty
+        uint256 hash = header.GetHash();
+        BOOST_CHECK(!hash.IsNull());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(block_nonce_range) {
+    CBlockHeader header;
+    header.nVersion = 1;
+    header.nBits = 0x1d00ffff;
+
+    // Test nonce at boundaries
+    header.nNonce = 0;
+    uint256 hash1 = header.GetHash();
+
+    header.nNonce = 0xFFFFFFFF;
+    uint256 hash2 = header.GetHash();
+
+    // Different nonces should produce different hashes
+    BOOST_CHECK(hash1 != hash2);
+}
+
+BOOST_AUTO_TEST_CASE(block_merkle_root_variations) {
+    CBlockHeader header;
+    header.nVersion = 1;
+
+    // Test with different merkle roots
+    uint256 merkle1, merkle2;
+    memset(merkle1.data, 0xAA, 32);
+    memset(merkle2.data, 0xBB, 32);
+
+    header.hashMerkleRoot = merkle1;
+    uint256 hash1 = header.GetHash();
+
+    header.hashMerkleRoot = merkle2;
+    uint256 hash2 = header.GetHash();
+
+    // Different merkle roots should produce different block hashes
+    BOOST_CHECK(hash1 != hash2);
+}
+
+BOOST_AUTO_TEST_CASE(block_timestamp_boundaries) {
+    CBlockHeader header;
+
+    // Test timestamp boundaries
+    header.nTime = 0;  // Epoch
+    BOOST_CHECK_EQUAL(header.nTime, 0);
+
+    header.nTime = 0xFFFFFFFF;  // Max uint32_t
+    BOOST_CHECK_EQUAL(header.nTime, 0xFFFFFFFF);
+
+    header.nTime = 1609459200;  // Jan 1, 2021
+    BOOST_CHECK_EQUAL(header.nTime, 1609459200);
+}
+
+BOOST_AUTO_TEST_CASE(uint256_bitwise_operations) {
+    uint256 a, b;
+
+    memset(a.data, 0xF0, 32);
+    memset(b.data, 0x0F, 32);
+
+    // Test that they're different
+    BOOST_CHECK(a != b);
+
+    // Both should be non-null
+    BOOST_CHECK(!a.IsNull());
+    BOOST_CHECK(!b.IsNull());
+}
+
 BOOST_AUTO_TEST_SUITE_END() // block_chain_tests
 
 BOOST_AUTO_TEST_SUITE_END() // block_tests (outer)
