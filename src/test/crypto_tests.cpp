@@ -19,9 +19,17 @@
 
 // Dilithium3 API from pqcrystals reference implementation
 extern "C" {
-    #include <sign.h>
-    #include <params.h>
+    #include <api.h>
 }
+
+// Alias the pqcrystals names to PQCLEAN style for test code consistency
+#define PQCLEAN_DILITHIUM3_REF_CRYPTO_PUBLICKEYBYTES pqcrystals_dilithium3_ref_PUBLICKEYBYTES
+#define PQCLEAN_DILITHIUM3_REF_CRYPTO_SECRETKEYBYTES pqcrystals_dilithium3_ref_SECRETKEYBYTES
+#define PQCLEAN_DILITHIUM3_REF_CRYPTO_BYTES pqcrystals_dilithium3_ref_BYTES
+
+#define crypto_sign_keypair pqcrystals_dilithium3_ref_keypair
+#define crypto_sign_signature pqcrystals_dilithium3_ref_signature
+#define crypto_sign_verify pqcrystals_dilithium3_ref_verify
 
 #include <vector>
 #include <cstring>
