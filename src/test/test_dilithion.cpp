@@ -12,6 +12,10 @@
 #include <boost/test/included/unit_test.hpp>
 
 #include <iostream>
+#include <cstring>
+
+// RandomX initialization
+extern "C" void randomx_init_cache(const void* key, size_t key_len);
 
 /**
  * Global test suite setup
@@ -23,6 +27,11 @@ struct DilithionTestSetup {
                   << BOOST_VERSION / 100000 << "."
                   << BOOST_VERSION / 100 % 1000 << "."
                   << BOOST_VERSION % 100 << std::endl;
+
+        // Initialize RandomX for tests that need GetHash()
+        const char* rx_key = "Dilithion-RandomX-Test";
+        randomx_init_cache(rx_key, strlen(rx_key));
+        std::cout << "RandomX initialized for testing" << std::endl;
     }
 
     ~DilithionTestSetup() {
