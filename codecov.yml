@@ -1,0 +1,109 @@
+# Codecov Configuration for Dilithion
+# Documentation: https://docs.codecov.com/docs/codecov-yaml
+
+# Coverage targets and thresholds
+coverage:
+  status:
+    # Project-level coverage (overall codebase)
+    project:
+      default:
+        target: 60%                    # Week 4 target: 60%+
+        threshold: 5%                  # Allow 5% decrease
+        if_ci_failed: error            # Fail if CI failed
+        informational: false           # Block PR if not met
+
+    # Patch-level coverage (new code in PR)
+    patch:
+      default:
+        target: 70%                    # New code must be 70%+ covered
+        threshold: 5%                  # Allow 5% deviation
+        if_ci_failed: error
+        informational: false           # Block PR if not met
+
+  # Coverage precision
+  precision: 2
+  round: down
+
+# Which files to track
+ignore:
+  - "depends/**/*"                     # External dependencies
+  - "test/**/*"                        # Test code itself
+  - "src/test/**/*"                    # C++ test files
+  - "**/*.pb.h"                        # Generated protobuf headers
+  - "**/*.pb.cc"                       # Generated protobuf source
+
+# Component-based coverage tracking
+flags:
+  unittests:
+    paths:
+      - src/
+    carryforward: true
+
+# Comments on PRs
+comment:
+  layout: "header, diff, flags, components, footer"
+  behavior: default                    # Comment on every PR
+  require_changes: false               # Always comment
+  require_base: false                  # Comment even without base coverage
+  require_head: true                   # Require head coverage
+
+# Coverage comparison
+comparisons:
+  - base: main
+    threshold: 1%                      # Flag if coverage drops >1%
+
+# Component-specific targets (informational)
+component_management:
+  individual_components:
+    # P0 - Consensus Critical (80%+ required)
+    - component_id: consensus
+      name: Consensus
+      paths:
+        - src/consensus/**
+      target: 80%
+
+    - component_id: primitives
+      name: Primitives
+      paths:
+        - src/primitives/**
+      target: 80%
+
+    - component_id: crypto
+      name: Cryptography
+      paths:
+        - src/crypto/**
+      target: 80%
+
+    # P1 - High Priority (70%+ required)
+    - component_id: network
+      name: Network
+      paths:
+        - src/net/**
+      target: 70%
+
+    - component_id: wallet
+      name: Wallet
+      paths:
+        - src/wallet/**
+      target: 70%
+
+    - component_id: rpc
+      name: RPC
+      paths:
+        - src/rpc/**
+      target: 70%
+
+    # P2 - Medium Priority (60%+ desired)
+    - component_id: util
+      name: Utilities
+      paths:
+        - src/util/**
+      target: 60%
+
+# GitHub checks integration
+github_checks:
+  annotations: true                    # Show annotations on PR diff
+
+# Notification settings
+slack_app: false
+twitter: false

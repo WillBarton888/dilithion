@@ -309,7 +309,31 @@ make test
 ./integration_tests # Full node integration
 ```
 
-**Test Coverage:** All core components tested
+**Test Suites:**
+- **Unit Tests:** C++ Boost.Test framework (targeting Week 2)
+- **Functional Tests:** Python-based end-to-end tests (14 tests, 134 test cases)
+- **Fuzz Tests:** LibFuzzer harnesses (9 harnesses, 42+ targets)
+
+### Code Coverage
+
+[![codecov](https://codecov.io/gh/WillBarton888/dilithion/branch/main/graph/badge.svg)](https://codecov.io/gh/WillBarton888/dilithion)
+
+**Current Coverage:** Baseline being established (Week 4) - Track progress on [Codecov Dashboard](https://codecov.io/gh/WillBarton888/dilithion)
+
+**Coverage Targets:**
+- **Consensus Code (P0):** 80%+ required
+- **Network/Wallet (P1):** 70%+ required
+- **Utilities (P2):** 60%+ desired
+
+```bash
+# Generate coverage report
+make coverage
+
+# View report
+open coverage_html/index.html
+```
+
+**Documentation:** See [docs/COVERAGE.md](docs/COVERAGE.md) for complete coverage guide.
 
 ---
 

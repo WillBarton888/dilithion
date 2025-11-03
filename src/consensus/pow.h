@@ -29,6 +29,25 @@ uint256 CompactToBig(uint32_t nCompact);
 /** Get compact difficulty from target */
 uint32_t BigToCompact(const uint256& target);
 
+/**
+ * Calculate difficulty adjustment (testing version)
+ *
+ * This is a simplified version of GetNextWorkRequired for testing purposes.
+ * It performs just the core difficulty arithmetic without blockchain context.
+ *
+ * Used by: difficulty_determinism_test.cpp for cross-platform validation
+ *
+ * @param nCompactOld The current difficulty in compact format
+ * @param nActualTimespan The actual time taken (seconds)
+ * @param nTargetTimespan The target time expected (seconds)
+ * @return The new difficulty in compact format
+ */
+uint32_t CalculateNextWorkRequired(
+    uint32_t nCompactOld,
+    int64_t nActualTimespan,
+    int64_t nTargetTimespan
+);
+
 /** Check if hash is less than target (satisfies PoW) */
 bool HashLessThan(const uint256& hash, const uint256& target);
 

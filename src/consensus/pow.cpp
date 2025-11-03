@@ -168,6 +168,39 @@ static uint256 Divide320x64(const uint8_t* dividend, uint64_t divisor) {
     return quotient;
 }
 
+uint32_t CalculateNextWorkRequired(
+    uint32_t nCompactOld,
+    int64_t nActualTimespan,
+    int64_t nTargetTimespan
+) {
+    // Limit adjustment to prevent extreme changes (4x max change)
+    if (nActualTimespan < nTargetTimespan / 4)
+        nActualTimespan = nTargetTimespan / 4;
+    if (nActualTimespan > nTargetTimespan * 4)
+        nActualTimespan = nTargetTimespan * 4;
+
+    // Convert compact to full target
+    uint256 targetOld = CompactToBig(nCompactOld);
+    uint256 targetNew;
+
+    // CRITICAL: Use integer-only arithmetic for deterministic behavior
+    // Formula: targetNew = targetOld * nActualTimespan / nTargetTimespan
+    uint8_t product[40];  // 320 bits to handle overflow
+    Multiply256x64(targetOld, static_cast<uint64_t>(nActualTimespan), product);
+    targetNew = Divide320x64(product, static_cast<uint64_t>(nTargetTimespan));
+
+    // Convert back to compact format
+    uint32_t nBitsNew = BigToCompact(targetNew);
+
+    // Ensure new difficulty is within allowed bounds
+    if (nBitsNew < MIN_DIFFICULTY_BITS)
+        nBitsNew = MIN_DIFFICULTY_BITS;
+    if (nBitsNew > MAX_DIFFICULTY_BITS)
+        nBitsNew = MAX_DIFFICULTY_BITS;
+
+    return nBitsNew;
+}
+
 uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
     // Genesis block (or no previous block)
     if (pindexLast == nullptr) {
