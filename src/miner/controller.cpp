@@ -62,7 +62,7 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
     // Initialize RandomX cache with constant key
     // Using same key as node startup for consistency
     const char* rx_key = "Dilithion";
-    randomx_init_for_hashing(rx_key, strlen(rx_key));
+    randomx_init_for_hashing(rx_key, strlen(rx_key), 0 /* full mode */);
 
     // Store block template
     {

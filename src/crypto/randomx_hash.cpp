@@ -69,7 +69,7 @@ void randomx_cleanup() {
 
 void randomx_hash(const void* input, size_t input_len, void* output,
                   const void* key, size_t key_len) {
-    randomx_init_for_hashing(key, key_len);
+    randomx_init_for_hashing(key, key_len, 0 /* full mode */);
     randomx_hash_fast(input, input_len, output);
 }
 
