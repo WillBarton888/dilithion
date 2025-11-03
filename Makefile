@@ -269,6 +269,15 @@ test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o 
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully (header-only)$(COLOR_RESET)"
 
 # ============================================================================
+# Difficulty Determinism Test (Week 4 Track B - CRITICAL CONSENSUS TEST)
+# ============================================================================
+
+difficulty_determinism_test: $(OBJ_DIR)/test/difficulty_determinism_test.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ Difficulty determinism test built successfully$(COLOR_RESET)"
+
+# ============================================================================
 # Run Tests
 # ============================================================================
 
