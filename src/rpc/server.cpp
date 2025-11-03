@@ -1858,31 +1858,11 @@ std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
         }
     }
 
-    // Check mempool first
-    if (m_mempool) {
-        CTransactionRef tx = m_mempool->GetTransaction(txid);
-        if (tx) {
-            if (verbosity == 0) {
-                // Return hex
-                std::string hex = HexStr(tx->Serialize());
-                return "\"" + hex + "\"";
-            } else {
-                // Return JSON (verbosity 1+)
-                std::ostringstream oss;
-                oss << "{";
-                oss << "\"txid\":\"" << tx->GetHash().GetHex() << "\",";
-                oss << "\"version\":" << tx->nVersion << ",";
-                oss << "\"locktime\":" << tx->nLockTime << ",";
-                oss << "\"vin_count\":" << tx->vin.size() << ",";
-                oss << "\"vout_count\":" << tx->vout.size();
-                oss << "}";
-                return oss.str();
-            }
-        }
-    }
-
+    // TODO: Check mempool for transaction (requires CTxMemPool::GetTransaction method)
     // TODO: Check blockchain for confirmed transactions
-    throw std::runtime_error("Transaction not found");
+
+    // For now, return not implemented
+    throw std::runtime_error("getrawtransaction not fully implemented - requires mempool/blockchain integration");
 }
 
 std::string CRPCServer::RPC_DecodeRawTransaction(const std::string& params) {
@@ -1909,8 +1889,9 @@ std::string CRPCServer::RPC_DecodeRawTransaction(const std::string& params) {
 
     // Deserialize transaction
     CTransaction tx;
-    if (!tx.Deserialize(txData)) {
-        throw std::runtime_error("Failed to deserialize transaction");
+    std::string error;
+    if (!tx.Deserialize(txData.data(), txData.size(), &error)) {
+        throw std::runtime_error("Failed to deserialize transaction: " + error);
     }
 
     // Build JSON response
