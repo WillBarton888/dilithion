@@ -284,10 +284,10 @@ jobs:
       run: |
         # Initialize coverage data
         lcov --zerocounters --directory .
-        lcov --capture --initial --directory . --output-file coverage-base.info
+        lcov --capture --initial --directory . --output-file coverage-base.info --ignore-errors mismatch
 
         # Capture coverage data from test execution
-        lcov --capture --directory . --output-file coverage-test.info
+        lcov --capture --directory . --output-file coverage-test.info --ignore-errors mismatch
         lcov --add-tracefile coverage-base.info \
              --add-tracefile coverage-test.info \
              --output-file coverage-total.info
@@ -297,14 +297,14 @@ jobs:
              '/usr/*' \
              '*/depends/*' \
              '*/test/*' \
-             --output-file coverage-filtered.info
+             --output-file coverage-filtered.info --ignore-errors mismatch
 
         # Generate HTML report
         genhtml coverage-filtered.info \
                 --output-directory coverage-report \
                 --title "Dilithion Coverage Report" \
                 --legend \
-                --show-details
+                --show-details --ignore-errors mismatch
 
         # Display summary
         lcov --list coverage-filtered.info
