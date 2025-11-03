@@ -432,23 +432,23 @@ int main(int argc, char* argv[]) {
             std::cerr << "Failed to open blockchain database" << std::endl;
             return 1;
         }
-        std::cout << "  ✓ Blockchain database opened" << std::endl;
+        std::cout << "  [OK] Blockchain database opened" << std::endl;
 
         std::cout << "Initializing mempool..." << std::endl;
         CTxMemPool mempool;
-        std::cout << "  ✓ Mempool initialized" << std::endl;
+        std::cout << "  [OK] Mempool initialized" << std::endl;
 
         // Initialize chain state
         std::cout << "Initializing chain state..." << std::endl;
         g_chainstate.SetDatabase(&blockchain);
-        std::cout << "  ✓ Chain state initialized" << std::endl;
+        std::cout << "  [OK] Chain state initialized" << std::endl;
 
         // Initialize RandomX (required for block hashing)
         std::cout << "Initializing RandomX..." << std::endl;
-        extern void randomx_init_cache(const void* key, size_t key_len);
+        extern void randomx_init_cache(const void* key, size_t key_len, bool light_mode);
         const char* rx_key = "Dilithion";
-        randomx_init_cache(rx_key, strlen(rx_key));
-        std::cout << "  ✓ RandomX initialized" << std::endl;
+        randomx_init_cache(rx_key, strlen(rx_key), false /* use full mode for production */);
+        std::cout << "  [OK] RandomX initialized" << std::endl;
 
         // Load and verify genesis block
         std::cout << "Loading genesis block..." << std::endl;
@@ -464,7 +464,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  Network: " << Dilithion::g_chainParams->GetNetworkName() << std::endl;
         std::cout << "  Genesis hash: " << genesis.GetHash().GetHex() << std::endl;
         std::cout << "  Genesis time: " << genesis.nTime << std::endl;
-        std::cout << "  ✓ Genesis block verified" << std::endl;
+        std::cout << "  [OK] Genesis block verified" << std::endl;
 
         // Initialize blockchain with genesis block if needed
         uint256 genesisHash = genesis.GetHash();
@@ -477,7 +477,7 @@ int main(int argc, char* argv[]) {
                 delete Dilithion::g_chainParams;
                 return 1;
             }
-            std::cout << "  ✓ Genesis block saved to database" << std::endl;
+            std::cout << "  [OK] Genesis block saved to database" << std::endl;
 
             // Create genesis block index
             CBlockIndex* pgenesisIndex = new CBlockIndex(genesis);
@@ -495,7 +495,7 @@ int main(int argc, char* argv[]) {
                 delete Dilithion::g_chainParams;
                 return 1;
             }
-            std::cout << "  ✓ Genesis block index saved (height 0)" << std::endl;
+            std::cout << "  [OK] Genesis block index saved (height 0)" << std::endl;
 
             // Add to chain state and set as tip
             if (!g_chainstate.AddBlockIndex(genesisHash, pgenesisIndex)) {
@@ -518,9 +518,9 @@ int main(int argc, char* argv[]) {
                 delete Dilithion::g_chainParams;
                 return 1;
             }
-            std::cout << "  ✓ Genesis block set as blockchain tip" << std::endl;
+            std::cout << "  [OK] Genesis block set as blockchain tip" << std::endl;
         } else {
-            std::cout << "  ✓ Genesis block already in database" << std::endl;
+            std::cout << "  [OK] Genesis block already in database" << std::endl;
 
             // Load existing chain state from database
             std::cout << "Loading chain state from database..." << std::endl;
@@ -609,7 +609,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 g_chainstate.SetTip(pindexTip);
-                std::cout << "  ✓ Loaded chain state: " << chainHashes.size() + 1 << " blocks (height "
+                std::cout << "  [OK] Loaded chain state: " << chainHashes.size() + 1 << " blocks (height "
                           << pindexTip->nHeight << ")" << std::endl;
             } else {
                 std::cerr << "ERROR: Cannot read best block from database!" << std::endl;
@@ -816,7 +816,7 @@ int main(int argc, char* argv[]) {
             }
         });
 
-        std::cout << "  ✓ P2P components ready (not started)" << std::endl;
+        std::cout << "  [OK] P2P components ready (not started)" << std::endl;
 
         // Phase 3: Initialize mining controller
         std::cout << "Initializing mining controller..." << std::endl;
@@ -825,7 +825,7 @@ int main(int argc, char* argv[]) {
                             std::thread::hardware_concurrency();
         CMiningController miner(mining_threads);
         g_node_state.miner = &miner;
-        std::cout << "  ✓ Mining controller initialized (" << mining_threads << " threads)" << std::endl;
+        std::cout << "  [OK] Mining controller initialized (" << mining_threads << " threads)" << std::endl;
 
         // Phase 4: Initialize wallet (before mining callback setup)
         std::cout << "Initializing wallet..." << std::endl;
@@ -836,9 +836,9 @@ int main(int argc, char* argv[]) {
             std::cout << "  Generating initial address..." << std::endl;
             wallet.GenerateNewKey();
             CAddress addr = wallet.GetNewAddress();
-            std::cout << "  ✓ Initial address: " << addr.ToString() << std::endl;
+            std::cout << "  [OK] Initial address: " << addr.ToString() << std::endl;
         } else {
-            std::cout << "  ✓ Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
+            std::cout << "  [OK] Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
         }
 
         // Set up block found callback to save mined blocks and credit wallet
@@ -852,7 +852,7 @@ int main(int argc, char* argv[]) {
             uint256 blockHash = block.GetHash();
             std::cout << std::endl;
             std::cout << "======================================" << std::endl;
-            std::cout << "✓ BLOCK FOUND!" << std::endl;
+            std::cout << "[OK] BLOCK FOUND!" << std::endl;
             std::cout << "======================================" << std::endl;
             std::cout << "Block hash: " << blockHash.GetHex() << std::endl;
             std::cout << "Block time: " << block.nTime << std::endl;
@@ -1025,7 +1025,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        std::cout << "  ✓ P2P server listening on port " << config.p2pport << std::endl;
+        std::cout << "  [OK] P2P server listening on port " << config.p2pport << std::endl;
 
         // Set socket to non-blocking for graceful shutdown
         p2p_socket.SetNonBlocking(true);
@@ -1033,7 +1033,7 @@ int main(int argc, char* argv[]) {
 
         // Launch P2P accept thread
         std::thread p2p_thread([&p2p_socket, &connection_manager]() {
-            std::cout << "  ✓ P2P accept thread started" << std::endl;
+            std::cout << "  [OK] P2P accept thread started" << std::endl;
 
             while (g_node_state.running) {
                 // Accept new connection (non-blocking)
@@ -1098,13 +1098,13 @@ int main(int argc, char* argv[]) {
                     try {
                         int port_int = std::stoi(port_str);
                         if (port_int < Consensus::MIN_PORT || port_int > Consensus::MAX_PORT) {
-                            std::cerr << "    ✗ Invalid port number in address: " << node_addr
+                            std::cerr << "    [FAIL] Invalid port number in address: " << node_addr
                                       << " (must be " << Consensus::MIN_PORT << "-" << Consensus::MAX_PORT << ")" << std::endl;
                             continue;
                         }
                         port = static_cast<uint16_t>(port_int);
                     } catch (const std::exception& e) {
-                        std::cerr << "    ✗ Invalid port format in address: " << node_addr
+                        std::cerr << "    [FAIL] Invalid port format in address: " << node_addr
                                   << " (expected ip:port)" << std::endl;
                         continue;
                     }
@@ -1121,19 +1121,19 @@ int main(int argc, char* argv[]) {
 
                     int peer_id = connection_manager.ConnectToPeer(addr);
                     if (peer_id >= 0) {
-                        std::cout << "    ✓ Connected to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
+                        std::cout << "    [OK] Connected to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
 
                         // Perform version/verack handshake
                         if (connection_manager.PerformHandshake(peer_id)) {
-                            std::cout << "    ✓ Sent version message to peer " << peer_id << std::endl;
+                            std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
                         } else {
-                            std::cout << "    ✗ Failed to send version to peer " << peer_id << std::endl;
+                            std::cout << "    [FAIL] Failed to send version to peer " << peer_id << std::endl;
                         }
                     } else {
-                        std::cout << "    ✗ Failed to connect to " << node_addr << std::endl;
+                        std::cout << "    [FAIL] Failed to connect to " << node_addr << std::endl;
                     }
                 } else {
-                    std::cerr << "    ✗ Invalid address format: " << node_addr << " (expected ip:port)" << std::endl;
+                    std::cerr << "    [FAIL] Invalid address format: " << node_addr << " (expected ip:port)" << std::endl;
                 }
             }
         }
@@ -1155,13 +1155,13 @@ int main(int argc, char* argv[]) {
                     try {
                         int port_int = std::stoi(port_str);
                         if (port_int < Consensus::MIN_PORT || port_int > Consensus::MAX_PORT) {
-                            std::cerr << "    ✗ Invalid port number in address: " << node_addr
+                            std::cerr << "    [FAIL] Invalid port number in address: " << node_addr
                                       << " (must be " << Consensus::MIN_PORT << "-" << Consensus::MAX_PORT << ")" << std::endl;
                             continue;
                         }
                         port = static_cast<uint16_t>(port_int);
                     } catch (const std::exception& e) {
-                        std::cerr << "    ✗ Invalid port format in address: " << node_addr
+                        std::cerr << "    [FAIL] Invalid port format in address: " << node_addr
                                   << " (expected ip:port)" << std::endl;
                         continue;
                     }
@@ -1177,24 +1177,24 @@ int main(int argc, char* argv[]) {
 
                     int peer_id = connection_manager.ConnectToPeer(addr);
                     if (peer_id >= 0) {
-                        std::cout << "    ✓ Added node " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
+                        std::cout << "    [OK] Added node " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
 
                         // Perform version/verack handshake
                         if (connection_manager.PerformHandshake(peer_id)) {
-                            std::cout << "    ✓ Sent version message to peer " << peer_id << std::endl;
+                            std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
                         }
                     } else {
-                        std::cout << "    ✗ Failed to add node " << node_addr << std::endl;
+                        std::cout << "    [FAIL] Failed to add node " << node_addr << std::endl;
                     }
                 } else {
-                    std::cerr << "    ✗ Invalid address format: " << node_addr << " (expected ip:port)" << std::endl;
+                    std::cerr << "    [FAIL] Invalid address format: " << node_addr << " (expected ip:port)" << std::endl;
                 }
             }
         }
 
         // Launch P2P message receive thread
         std::thread p2p_recv_thread([&connection_manager]() {
-            std::cout << "  ✓ P2P receive thread started" << std::endl;
+            std::cout << "  [OK] P2P receive thread started" << std::endl;
 
             while (g_node_state.running) {
                 // Get all connected peers
@@ -1214,7 +1214,7 @@ int main(int argc, char* argv[]) {
 
         // Launch P2P maintenance thread (ping/pong keepalive)
         std::thread p2p_maint_thread([&connection_manager]() {
-            std::cout << "  ✓ P2P maintenance thread started" << std::endl;
+            std::cout << "  [OK] P2P maintenance thread started" << std::endl;
 
             while (g_node_state.running) {
                 // Send periodic pings, check timeouts
@@ -1240,7 +1240,7 @@ int main(int argc, char* argv[]) {
             std::cerr << "Failed to start RPC server on port " << config.rpcport << std::endl;
             return 1;
         }
-        std::cout << "  ✓ RPC server listening on port " << config.rpcport << std::endl;
+        std::cout << "  [OK] RPC server listening on port " << config.rpcport << std::endl;
 
         // Start mining if requested
         if (config.start_mining) {
@@ -1257,7 +1257,7 @@ int main(int argc, char* argv[]) {
 
             miner.StartMining(*templateOpt);
 
-            std::cout << "  ✓ Mining started with " << mining_threads << " threads" << std::endl;
+            std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
             std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
         }
 
