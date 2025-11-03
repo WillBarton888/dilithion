@@ -44,10 +44,8 @@ public:
     void SetHex(const std::string& str);
 };
 
-// Stream output operator for Boost.Test
-inline std::ostream& operator<<(std::ostream& os, const uint256& h) {
-    return os << h.GetHex();
-}
+// Stream output operator for Boost.Test (defined in block.cpp)
+std::ostream& operator<<(std::ostream& os, const uint256& h);
 
 class CBlockHeader {
 public:

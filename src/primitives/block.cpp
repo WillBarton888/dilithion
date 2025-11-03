@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <ostream>
 
 std::string uint256::GetHex() const {
     std::stringstream ss;
@@ -40,6 +41,11 @@ void uint256::SetHex(const std::string& str) {
         std::string byteStr = "0" + str.substr(0, 1);
         data[len / 2] = static_cast<uint8_t>(std::stoi(byteStr, nullptr, 16));
     }
+}
+
+// Stream output operator for Boost.Test
+std::ostream& operator<<(std::ostream& os, const uint256& h) {
+    return os << h.GetHex();
 }
 
 uint256 CBlockHeader::GetHash() const {
