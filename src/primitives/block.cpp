@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <primitives/block.h>
+#include <crypto/randomx_hash.h>
 #include <sstream>
 #include <iomanip>
 #include <cstring>
@@ -67,7 +68,6 @@ uint256 CBlockHeader::GetHash() const {
 
     // RandomX hash (CPU-mining resistant, ASIC-resistant)
     uint256 result;
-    extern void randomx_hash_fast(const void* input, size_t inputSize, void* output);
     randomx_hash_fast(data.data(), data.size(), result.data);
 
     return result;
