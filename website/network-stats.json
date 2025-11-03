@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-11-02T22:25:00Z",
+  "network": "testnet",
+  "blockHeight": 2,
+  "difficulty": 393216,
+  "networkHashRate": 75,
+  "totalSupply": 100,
+  "blockReward": 50,
+  "blocksUntilHalving": 209998,
+  "peerCount": 1,
+  "averageBlockTime": 240,
+  "status": "live"
+}

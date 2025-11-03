@@ -27,7 +27,7 @@ int main() {
     // Initialize RandomX
     std::cout << "Initializing RandomX..." << std::endl;
     const char* rx_key = "Dilithion-RandomX-v1";
-    randomx_init_cache(rx_key, strlen(rx_key));
+    randomx_init_for_hashing(rx_key, strlen(rx_key));
     std::cout << "RandomX initialized!" << std::endl;
     std::cout << std::endl;
     

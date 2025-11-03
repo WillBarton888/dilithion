@@ -1,5 +1,18 @@
 # Pull Request
 
+## Component
+
+<!-- Use Bitcoin Core-style component prefix in PR title -->
+<!-- Examples: -->
+<!-- consensus: Fix block validation edge case -->
+<!-- crypto: Optimize Dilithium signature verification -->
+<!-- wallet: Add HD wallet support -->
+<!-- net: Improve peer connection handling -->
+<!-- test: Add fuzzing for transaction parser -->
+<!-- doc: Update installation instructions -->
+
+**Component:** `component-name` (consensus, crypto, wallet, rpc, net, mining, test, doc, build, refactor, fix, perf, ci)
+
 ## Summary
 
 Brief description of what this PR does.
@@ -83,6 +96,23 @@ References #(issue number)
 ## Review Notes
 
 Any specific areas you'd like reviewers to focus on?
+
+## For Reviewers
+
+**How to Review:**
+
+Use Bitcoin Core-style review tags:
+- `Concept ACK` - Agree with the goal and approach
+- `Approach ACK` - Agree with implementation approach
+- `utACK <commit>` - Code looks correct (untested)
+- `Tested ACK <commit>` - Code looks correct AND tested
+- `ACK <commit>` - Full approval
+- `NACK` - Disagree (must explain why)
+
+**Approval Requirements:**
+- At least 2 Tested ACKs required for merge
+- All NACKs must be addressed
+- All CI checks must pass
 
 ## Screenshots
 

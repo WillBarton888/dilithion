@@ -1,0 +1,1 @@
+1fbc23e24c88c37ef26d6cefd335a204cbe3d25dc82f97eed9f7a8d34b89b922 *dilithion-testnet-v1.0.2-windows-x64.zip

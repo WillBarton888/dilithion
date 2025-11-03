@@ -1,0 +1,77 @@
+---
+# Bitcoin Core-style clang-tidy configuration for Dilithion
+# Enables comprehensive static analysis checks for C++ code quality
+
+Checks: >
+  -*,
+  bitcoin-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-narrowing-conversions,
+  -bugprone-unchecked-optional-access,
+  cert-dcl21-cpp,
+  cert-dcl58-cpp,
+  cert-err52-cpp,
+  cert-err60-cpp,
+  concurrency-*,
+  -concurrency-mt-unsafe,
+  cppcoreguidelines-avoid-non-const-global-variables,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-interfaces-global-init,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-slicing,
+  misc-no-recursion,
+  misc-non-private-member-variables-in-classes,
+  misc-unused-using-decls,
+  modernize-deprecated-headers,
+  modernize-make-shared,
+  modernize-make-unique,
+  modernize-use-bool-literals,
+  modernize-use-default-member-init,
+  modernize-use-emplace,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-transparent-functors,
+  modernize-use-uncaught-exceptions,
+  performance-*,
+  -performance-avoid-endl,
+  -performance-enum-size,
+  -performance-unnecessary-value-param,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-duplicate-include,
+  readability-redundant-control-flow,
+  readability-redundant-declaration,
+  readability-redundant-function-ptr-dereference,
+  readability-redundant-smartptr-get,
+  readability-redundant-string-init,
+  readability-string-compare,
+
+WarningsAsErrors: '*'
+
+HeaderFilterRegex: '.*'
+
+CheckOptions:
+  - key: modernize-use-default-member-init.UseAssignment
+    value: '1'
+  - key: modernize-use-default-member-init.IgnoreMacros
+    value: '0'
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: '0'
+  - key: bugprone-suspicious-enum-usage.StrictMode
+    value: '1'
+  - key: readability-identifier-naming.ClassCase
+    value: 'CamelCase'
+  - key: readability-identifier-naming.ClassPrefix
+    value: 'C'
+  - key: readability-identifier-naming.FunctionCase
+    value: 'CamelCase'
+  - key: readability-identifier-naming.MemberCase
+    value: 'camelBack'
+  - key: readability-identifier-naming.PrivateMemberPrefix
+    value: 'm_'
+  - key: readability-identifier-naming.ConstantCase
+    value: 'UPPER_CASE'

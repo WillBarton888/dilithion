@@ -15,7 +15,7 @@
 #include <cstring>
 
 // RandomX initialization (with light mode support for testing)
-extern "C" void randomx_init_cache(const void* key, size_t key_len, bool light_mode);
+extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, bool light_mode);
 
 /**
  * Global test suite setup
@@ -31,7 +31,7 @@ struct DilithionTestSetup {
         // Initialize RandomX in light mode for tests
         // Light mode uses ~256MB vs full mode ~2GB (suitable for CI)
         const char* rx_key = "Dilithion-RandomX-Test";
-        randomx_init_cache(rx_key, strlen(rx_key), true /* light_mode */);
+        randomx_init_for_hashing(rx_key, strlen(rx_key), true /* light_mode */);
         std::cout << "✓ RandomX initialized (light mode)" << std::endl;
     }
 

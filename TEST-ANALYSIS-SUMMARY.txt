@@ -1,0 +1,148 @@
+
+DILITHION TEST REQUIREMENTS ANALYSIS - EXECUTIVE SUMMARY
+========================================================
+
+Analysis Date: November 3, 2025
+Scope: Dilithion v1.0.6 Codebase (80+ files, 2,979+ LOC in critical paths)
+
+KEY FINDINGS
+============
+
+Codebase Structure:
+  - 80+ source files analyzed
+  - 8 major component categories
+  - 20 existing test files
+  - ~500+ existing test cases
+
+Critical Gaps Identified:
+  - Consensus validation: Merkle roots, difficulty adjustment, timestamp boundaries
+  - Deserialization: No fuzz testing for network messages, transactions, blocks
+  - Network protocol: Malformed message handling, checksum validation
+  - RPC interface: Input validation across all parameter types
+  - Wallet: Multi-input signing, concurrent access, coin selection edge cases
+
+Risk Level: HIGH
+
+TEST REQUIREMENTS
+=================
+
+Functional Tests Needed: 15 tests
+  - P0 (Critical): 6 tests - 16 hours (Consensus rules)
+  - P1 (High): 5 tests - 11 hours (Network, wallet, mempool)
+  - P2 (Medium): 2 tests - 3 hours (UTXO, fees)
+  - P3+ (Nice-to-have): 2 tests - 4 hours
+  Total: 38+ test cases
+
+Fuzz Harnesses Needed: 10 harnesses
+  - P0 (Critical): 5 harnesses (860 lines total code)
+  - P1 (High): 4 harnesses
+  - P2 (Medium): 1 harness
+  Total: 860+ lines of fuzz code
+
+Total Effort: 40-50 hours
+
+PRIORITY P0 TESTS (CRITICAL CONSENSUS)
+======================================
+
+P0-1: Merkle Root Validation (2 hrs)
+  - Risk: Consensus forks if merkle roots not validated
+  
+P0-2: Difficulty Adjustment (3 hrs)
+  - Risk: Mining broken if difficulty not adjusted correctly
+  
+P0-3: Coinbase Subsidy Halving (2 hrs)
+  - Risk: Inflation errors if halving schedule incorrect
+  
+P0-4: PoW Target Validation (2 hrs)
+  - Risk: Invalid blocks accepted if PoW not checked
+  
+P0-5: Signature Validation (3 hrs)
+  - Risk: Double-spending possible if signatures not validated
+  
+P0-6: Timestamp Validation (2 hrs)
+  - Risk: Past/future blocks accepted if timestamps not validated
+
+PRIORITY P1 TESTS (HIGH-PRIORITY)
+==================================
+
+P1-1: Transaction Serialization Roundtrip (2 hrs)
+P1-2: Multi-Input Wallet Signing (3 hrs)
+P1-3: Mempool Double-Spend Detection (2 hrs)
+P1-4: Network Message Checksum (2 hrs)
+P1-5: RPC Input Validation (2 hrs)
+
+PRIORITY P2 TESTS (MEDIUM)
+===========================
+
+P2-1: UTXO Coinbase Maturity (2 hrs)
+P2-2: Fee Calculation (1 hr)
+
+WEEK 3 IMPLEMENTATION TIMELINE
+==============================
+
+Phase 1: Infrastructure (4 hrs)
+  - Fuzzing harness template
+  - Test utilities library
+  - CI integration
+
+Phase 2: P0 Tests (16 hrs)
+  - Days 1-2: Consensus tests (8 hrs)
+  - Day 3: Signature validation (5 hrs)
+  - Day 4: Timestamp validation (3 hrs)
+
+Phase 3: P1 Tests (14 hrs)
+  - Day 5: Network & serialization (5 hrs)
+  - Day 6: Wallet & mempool (5 hrs)
+  - Day 7: RPC tests (4 hrs)
+
+Phase 4: P2 & Additional Fuzz (10 hrs)
+  - Day 8: UTXO & fees (4 hrs)
+  - Days 9-10: Fuzz harnesses (6 hrs)
+
+Total: 44 hours / Week 3
+
+CRITICAL RISK AREAS (UNTESTED)
+===============================
+
+Consensus Validation:
+  - CheckProofOfWork edge cases >> Invalid blocks accepted
+  - VerifyMerkleRoot paths >> Consensus forks
+  - Timestamp boundaries >> Past/future blocks
+  - Signature verify >> Double-spending
+  - Difficulty algorithm >> Mining broken
+  - Coinbase halving >> Inflation errors
+
+Network & Protocol:
+  - Transaction deserialization >> Network corruption
+  - Message parsing >> Protocol DoS
+  - CompactSize parsing >> Buffer overflow
+  - Checksum validation >> Invalid messages
+
+Wallet & Input:
+  - Multi-input signing >> Signing failures
+  - Mempool concurrent ops >> Lost transactions
+  - RPC input validation >> Server crashes
+  - UTXO maturity >> Consensus violation
+
+DELIVERABLES
+=============
+
+Document: DILITHION-TEST-REQUIREMENTS-ANALYSIS.md
+  - 184 lines of detailed analysis
+  - Component inventory with test needs
+  - 15 functional test specifications
+  - 10 fuzz harness specifications
+  - Implementation roadmap
+  - Risk assessment matrix
+  - Coverage goals
+
+Files Created:
+  - DILITHION-TEST-REQUIREMENTS-ANALYSIS.md (6.9 KB)
+  - TEST-ANALYSIS-SUMMARY.txt (this file)
+
+Next Steps:
+  - Week 1 (Nov 3-7): P0 tests
+  - Week 2 (Nov 10-14): P1 tests
+  - Week 3 (Nov 17-21): P2 tests + analysis
+
+Status: READY FOR IMPLEMENTATION

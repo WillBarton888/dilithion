@@ -203,6 +203,35 @@ No vulnerabilities have been reported yet. This section will be updated as issue
 
 **Security Contact:** security@dilithion.org
 
+### GPG Keys for Encrypted Communication
+
+For sensitive security reports, you can encrypt your message using PGP/GPG.
+
+**Security Team GPG Keys:**
+
+```
+⚠️ TODO: Generate and publish GPG keys before mainnet launch
+```
+
+**To be added before mainnet (Week 1):**
+- Primary security contact GPG key
+- Secondary security contact GPG key
+- Emergency contact GPG key
+
+**Key Import Instructions:**
+```bash
+# Import a key from keyserver (once published)
+gpg --keyserver hkps://keys.openpgp.org --recv-keys "<fingerprint>"
+
+# Verify key fingerprint
+gpg --fingerprint "<fingerprint>"
+```
+
+**Keyservers where keys will be published:**
+- keys.openpgp.org
+- pgp.mit.edu
+- keyserver.ubuntu.com
+
 **Public Communication:**
 - **GitHub:** https://github.com/WillBarton888/dilithion
 - **Discord:** [Server link - to be added]

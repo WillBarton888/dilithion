@@ -15,7 +15,7 @@ namespace {
     std::vector<uint8_t> g_current_key;
 }
 
-void randomx_init_cache(const void* key, size_t key_len, bool light_mode) {
+void randomx_init_for_hashing(const void* key, size_t key_len, bool light_mode) {
     std::lock_guard<std::mutex> lock(g_randomx_mutex);
 
     std::vector<uint8_t> new_key((const uint8_t*)key, (const uint8_t*)key + key_len);
@@ -40,6 +40,7 @@ void randomx_init_cache(const void* key, size_t key_len, bool light_mode) {
         throw std::runtime_error("Failed to allocate RandomX cache");
     }
 
+    // Call the actual RandomX library function to initialize the cache
     randomx_init_cache(g_randomx_cache, key, key_len);
 
     g_randomx_vm = randomx_create_vm(flags, g_randomx_cache, nullptr);
@@ -68,7 +69,7 @@ void randomx_cleanup() {
 
 void randomx_hash(const void* input, size_t input_len, void* output,
                   const void* key, size_t key_len) {
-    randomx_init_cache(key, key_len);
+    randomx_init_for_hashing(key, key_len);
     randomx_hash_fast(input, input_len, output);
 }
 

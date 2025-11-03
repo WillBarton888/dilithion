@@ -4,9 +4,11 @@
  */
 
 // Configuration
-const LAUNCH_DATE = new Date('2026-01-01T00:00:00Z').getTime();
-const RPC_ENDPOINT = 'http://localhost:8332'; // Dilithion RPC endpoint
-const UPDATE_INTERVAL = 5000; // Update dashboard every 5 seconds
+const TESTNET_LAUNCH_DATE = 1762041600000; // Nov 2, 2025 00:00:00 UTC
+const MAINNET_LAUNCH_DATE = 1767225600000; // Jan 1, 2026 00:00:00 UTC
+const RPC_ENDPOINT = 'http://localhost:8332';
+const STATS_JSON_URL = 'https://dilithion.org/network-stats.json';
+const UPDATE_INTERVAL = 30000;
 
 // State
 let isNetworkLive = false;
@@ -17,7 +19,7 @@ let dashboardUpdateInterval = null;
  */
 function updateCountdown() {
     const now = new Date().getTime();
-    const distance = LAUNCH_DATE - now;
+    const distance = MAINNET_LAUNCH_DATE - now; // Count down to mainnet launch
 
     // If countdown is finished
     if (distance < 0) {
@@ -97,11 +99,41 @@ async function fetchRPCData(method, params = []) {
 }
 
 /**
+ * Fetch network stats from static JSON file
+ */
+async function fetchNetworkStats() {
+    try {
+        const response = await fetch(STATS_JSON_URL + '?t=' + Date.now(), {
+            cache: 'no-store'
+        });
+
+        if (!response.ok) {
+            throw new Error('Stats file not available');
+        }
+
+        const stats = await response.json();
+        return stats;
+    } catch (error) {
+        console.log('Static stats not available, trying RPC:', error.message);
+        return null;
+    }
+}
+
+/**
  * Update dashboard with live network data
  */
 async function updateDashboard() {
     try {
-        // Fetch blockchain info
+        // Try fetching from static JSON first (for public website)
+        let stats = await fetchNetworkStats();
+
+        if (stats) {
+            // Use static JSON data
+            updateDashboardFromStats(stats);
+            return;
+        }
+
+        // Fallback to direct RPC (for local node users)
         const blockchainInfo = await fetchRPCData('getblockchaininfo');
 
         if (!blockchainInfo) {
@@ -164,6 +196,69 @@ async function updateDashboard() {
 
     } catch (error) {
         console.error('Dashboard update error:', error);
+    }
+}
+
+/**
+ * Update dashboard from static stats JSON
+ */
+function updateDashboardFromStats(stats) {
+    // Update network status to live
+    if (!isNetworkLive && stats.status === 'live') {
+        updateNetworkStatus(true);
+    }
+
+    // Update block height
+    if (stats.blockHeight !== undefined) {
+        document.getElementById('block-height').textContent =
+            stats.blockHeight.toLocaleString();
+    }
+
+    // Update difficulty
+    if (stats.difficulty !== undefined) {
+        document.getElementById('difficulty').textContent =
+            formatNumber(stats.difficulty);
+    }
+
+    // Update hash rate
+    if (stats.networkHashRate !== undefined) {
+        document.getElementById('hash-rate').textContent =
+            formatHashRate(stats.networkHashRate);
+    }
+
+    // Update total supply
+    if (stats.totalSupply !== undefined) {
+        document.getElementById('total-supply').textContent =
+            stats.totalSupply.toLocaleString() + ' DIL';
+    }
+
+    // Update block reward
+    if (stats.blockReward !== undefined) {
+        document.getElementById('block-reward').textContent =
+            stats.blockReward + ' DIL';
+    }
+
+    // Update next halving
+    if (stats.blocksUntilHalving !== undefined) {
+        document.getElementById('next-halving').textContent =
+            stats.blocksUntilHalving.toLocaleString() + ' blocks';
+    }
+
+    // Update last update time
+    if (stats.timestamp) {
+        const statsTime = new Date(stats.timestamp);
+        const now = new Date();
+        const secondsAgo = Math.floor((now - statsTime) / 1000);
+
+        let timeAgo = 'Just now';
+        if (secondsAgo > 60) {
+            const minutesAgo = Math.floor(secondsAgo / 60);
+            timeAgo = minutesAgo + ' min ago';
+        } else if (secondsAgo > 5) {
+            timeAgo = secondsAgo + ' sec ago';
+        }
+
+        document.getElementById('last-block-time').textContent = timeAgo;
     }
 }
 
@@ -300,14 +395,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize smooth scrolling
     initSmoothScroll();
 
-    // Check if network is already live
+    // Check if testnet is already live (separate from mainnet countdown)
     const now = new Date().getTime();
-    if (now >= LAUNCH_DATE) {
+    if (now >= TESTNET_LAUNCH_DATE) {
+        // Testnet is live - start showing stats immediately
         updateNetworkStatus(true);
         startDashboardUpdates();
     } else {
-        // Schedule dashboard start for launch time
-        const timeUntilLaunch = LAUNCH_DATE - now;
+        // Schedule dashboard start for testnet launch time
+        const timeUntilLaunch = TESTNET_LAUNCH_DATE - now;
         setTimeout(() => {
             updateNetworkStatus(true);
             startDashboardUpdates();

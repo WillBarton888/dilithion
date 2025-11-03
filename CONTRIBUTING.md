@@ -190,9 +190,9 @@ For cryptographic and consensus code, follow:
 
 ### Commit Messages
 
-**Format:**
+**Format (Bitcoin Core Style):**
 ```
-Brief summary (50 chars or less)
+component: Brief summary (50 chars or less)
 
 More detailed explanation (if needed). Wrap at 72 characters.
 Explain WHY the change was made, not just WHAT changed.
@@ -202,17 +202,52 @@ Explain WHY the change was made, not just WHAT changed.
 - Reference issues (#123)
 ```
 
+**Component Prefixes:**
+
+Use these prefixes to categorize your commits (like Bitcoin Core):
+
+- `consensus:` - Consensus-critical code (block validation, transaction rules)
+- `crypto:` - Cryptographic primitives (Dilithium, SHA-3, key handling)
+- `wallet:` - Wallet functionality
+- `rpc:` - RPC interface changes
+- `net:` - Network protocol and P2P code
+- `mining:` - Mining and RandomX integration
+- `test:` - Test-only changes
+- `doc:` - Documentation updates
+- `build:` - Build system and dependencies
+- `refactor:` - Code refactoring (no behavior change)
+- `fix:` - Bug fixes
+- `perf:` - Performance improvements
+- `ci:` - CI/CD configuration
+
 **Examples:**
 
 Good:
 ```
-Implement Dilithium signature verification
+crypto: Implement Dilithium signature verification
 
 Add constant-time Dilithium signature verification using
 pqcrystals reference implementation. Includes comprehensive
 unit tests and validation against NIST test vectors.
 
 Closes #42
+```
+
+```
+consensus: Fix off-by-one error in block height validation
+
+The block height check was using <= instead of <, allowing
+blocks one height too high to be accepted. This could have
+allowed chain splits in rare edge cases.
+
+Fixes #123
+```
+
+```
+test: Add fuzz testing for transaction deserialization
+
+Adds libFuzzer-based fuzzing for CTransaction deserialization
+to catch potential crashes from malformed inputs.
 ```
 
 Bad:
@@ -222,6 +257,10 @@ fixed stuff
 
 ```
 wip
+```
+
+```
+Update code (no component prefix, too vague)
 ```
 
 ---
@@ -288,9 +327,90 @@ test/functional/test_runner.py
 
 ### Coverage Requirements
 
-- New code: 100% line coverage
-- Modified code: Maintain or improve coverage
-- Critical code: 100% branch coverage
+**All PRs must meet coverage standards:**
+
+#### Coverage Targets by Component
+
+**P0 - Consensus Critical (REQUIRED: 80%+):**
+- `src/consensus/` - Validation, PoW, subsidy rules
+- `src/primitives/` - Block, transaction structures
+- `src/crypto/dilithium3.cpp` - Signature operations
+
+**P1 - High Priority (REQUIRED: 70%+):**
+- `src/net/` - Network protocol, P2P
+- `src/wallet/` - Wallet operations
+- `src/rpc/` - RPC interface
+- `src/node/mempool.cpp` - Mempool management
+
+**P2 - Medium Priority (TARGET: 60%+):**
+- `src/util/` - Utility functions
+- `src/base58.cpp` - Address encoding
+- `src/support/` - Support libraries
+
+#### PR Coverage Rules
+
+**For New Code:**
+- Must achieve component's target coverage
+- P0 code requires 80%+ coverage (no exceptions)
+- P1 code requires 70%+ coverage
+- Exceptions require justification in PR description
+
+**For Modified Code:**
+- Must not decrease overall coverage
+- Codecov will comment on PR with coverage delta
+- Coverage decrease of >5% will block PR
+- Must cover modified lines + edge cases
+
+**For Refactoring:**
+- Coverage must remain same or improve
+- Use refactoring to improve testability
+- Add tests if previously untested
+
+#### Checking Coverage
+
+**Before Submitting PR:**
+```bash
+# Generate coverage report
+make coverage-clean
+make coverage
+
+# View report
+open coverage_html/index.html
+
+# Check your changed files
+# Ensure they meet component targets
+```
+
+**In CI:**
+- Coverage report generated automatically
+- Codecov comments on PR with coverage change
+- Badge shows current coverage
+- Failed coverage check blocks merge
+
+#### Coverage Best Practices
+
+**DO:**
+- ✅ Test both success and error paths
+- ✅ Test boundary conditions (0, 1, max, max+1)
+- ✅ Test error handling and exceptions
+- ✅ Focus on critical paths first
+- ✅ Write tests while coding (not after)
+
+**DON'T:**
+- ❌ Write tests just to hit 100%
+- ❌ Test trivial getters/setters excessively
+- ❌ Skip testing because "it's obvious"
+- ❌ Submit PR without running coverage
+- ❌ Ask for coverage exceptions without justification
+
+#### Coverage Documentation
+
+See [docs/COVERAGE.md](docs/COVERAGE.md) for:
+- Detailed coverage guide
+- Component-specific requirements
+- How to improve coverage
+- Troubleshooting tips
+- CI/CD integration
 
 ---
 
@@ -338,26 +458,67 @@ References #456
 
 ### Review Process
 
-1. **Automated Checks:**
+#### 1. Automated Checks
    - CI/CD runs all tests
    - Linters check code style
    - Coverage reports generated
 
-2. **Code Review:**
-   - At least 2 reviewers required
-   - Security-critical code needs specialist review
-   - Address all review comments
+#### 2. Code Review and ACK/NACK System
 
-3. **Testing:**
+We follow Bitcoin Core's review terminology:
+
+**Review Tags:**
+- **Concept ACK** - You agree with the general goal and approach
+- **Approach ACK** - You agree with the implementation approach
+- **utACK (untested ACK)** - Code looks correct but you haven't tested it
+- **Tested ACK** - Code looks correct AND you've tested it
+- **ACK** - Full approval (code review + testing complete)
+- **NACK** - You disagree with the change (must explain why)
+- **Concept NACK** - You disagree with the goal/approach fundamentally
+
+**How to Review:**
+```
+Concept ACK
+
+I agree this is needed. The approach of using constant-time operations
+is the right way to prevent timing side-channels.
+```
+
+```
+Tested ACK abc1234
+
+I've reviewed the code and tested locally on Windows 10 and Ubuntu 22.04.
+All unit tests pass and the new functionality works as expected.
+```
+
+```
+NACK
+
+This changes consensus behavior without adequate justification. The current
+implementation already handles this edge case correctly in block.cpp:234.
+We should not introduce breaking changes without clear benefit.
+```
+
+**Important:**
+- Anyone can ACK or NACK (you don't need to be a core contributor)
+- Multiple reviewers strengthen confidence in changes
+- Address all NACKs before merging
+- Trivial NACKs (style, nits) may be overruled
+- Consensus-critical NACKs must be resolved
+
+#### 3. Testing
    - Reviewers test changes locally
    - Verify functionality
    - Check for edge cases
 
-4. **Approval:**
-   - All reviewers approve
-   - All CI checks pass
-   - No merge conflicts
-   - Ready to merge
+#### 4. Approval Requirements
+
+**For Merge:**
+- At least 2 Tested ACKs from different reviewers
+- No unresolved NACKs
+- All CI checks pass
+- No merge conflicts
+- Security-critical code needs specialist review
 
 ### Review Timeline
 

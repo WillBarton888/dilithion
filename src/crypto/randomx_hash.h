@@ -14,7 +14,7 @@ void randomx_hash(const void* input, size_t input_len, void* output,
 
 void randomx_hash_fast(const void* input, size_t input_len, void* output);
 
-void randomx_init_cache(const void* key, size_t key_len, bool light_mode = false);
+void randomx_init_for_hashing(const void* key, size_t key_len, bool light_mode = false);
 
 void randomx_cleanup();
 
