@@ -192,7 +192,7 @@ BOOST_AUTO_TEST_CASE(block_with_multiple_transactions) {
     // tx1: Coinbase
     CTransaction tx1;
     tx1.nVersion = 1;
-    std::vector<uint8_t> cb_script = {0x01};
+    std::vector<uint8_t> cb_script = {0x01, 0x00};  // Coinbase scriptSig must be 2-100 bytes
     tx1.vin.push_back(CTxIn(COutPoint(), cb_script, CTxIn::SEQUENCE_FINAL));
     std::vector<uint8_t> pk = {0xAA};
     tx1.vout.push_back(CTxOut(50 * COIN, pk));

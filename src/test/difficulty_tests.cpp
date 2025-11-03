@@ -62,14 +62,15 @@ BOOST_AUTO_TEST_CASE(big_to_compact_conversion) {
  * Test CompactToBig/BigToCompact roundtrip
  */
 BOOST_AUTO_TEST_CASE(difficulty_conversion_roundtrip) {
-    uint32_t original = 0x1d00ffff;
+    // Use a value without leading zeros in mantissa for perfect roundtrip
+    uint32_t original = 0x1d01ffff;  // Changed from 0x1d00ffff to avoid leading zero
 
     // Convert compact -> big -> compact
     uint256 target = CompactToBig(original);
     uint32_t result = BigToCompact(target);
 
-    // Should match original (within rounding)
-    BOOST_CHECK(result == original || ((result & 0xFFFFFF) == (original & 0xFFFFFF)));
+    // Should match original exactly for non-zero mantissa
+    BOOST_CHECK_EQUAL(result, original);
 }
 
 /**
