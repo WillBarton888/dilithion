@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 #include <string>
+#include <iosfwd>
 
 /** 256-bit hash */
 class uint256 {
@@ -42,6 +43,11 @@ public:
     std::string GetHex() const;
     void SetHex(const std::string& str);
 };
+
+// Stream output operator for Boost.Test
+inline std::ostream& operator<<(std::ostream& os, const uint256& h) {
+    return os << h.GetHex();
+}
 
 class CBlockHeader {
 public:
