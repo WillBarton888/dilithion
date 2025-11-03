@@ -212,6 +212,24 @@ private:
     std::string RPC_Help(const std::string& params);
     std::string RPC_Stop(const std::string& params);
 
+    // Missing blockchain query methods (for functional tests)
+    std::string RPC_GetBlockCount(const std::string& params);
+    std::string RPC_GetBestBlockHash(const std::string& params);
+    std::string RPC_GetChainTips(const std::string& params);
+
+    // Missing mempool methods
+    std::string RPC_GetRawMempool(const std::string& params);
+
+    // Missing mining methods
+    std::string RPC_GenerateToAddress(const std::string& params);
+
+    // Missing transaction methods
+    std::string RPC_GetRawTransaction(const std::string& params);
+    std::string RPC_DecodeRawTransaction(const std::string& params);
+
+    // Missing network methods
+    std::string RPC_AddNode(const std::string& params);
+
     // Helper functions
     std::string FormatAmount(CAmount amount) const;
     bool ValidateAddress(const std::string& addressStr, CAddress& addressOut) const;

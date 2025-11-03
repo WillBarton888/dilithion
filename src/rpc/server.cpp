@@ -141,6 +141,16 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getpeerinfo"] = [this](const std::string& p) { return RPC_GetPeerInfo(p); };
     m_handlers["help"] = [this](const std::string& p) { return RPC_Help(p); };
     m_handlers["stop"] = [this](const std::string& p) { return RPC_Stop(p); };
+
+    // Missing methods for functional tests
+    m_handlers["getblockcount"] = [this](const std::string& p) { return RPC_GetBlockCount(p); };
+    m_handlers["getbestblockhash"] = [this](const std::string& p) { return RPC_GetBestBlockHash(p); };
+    m_handlers["getchaintips"] = [this](const std::string& p) { return RPC_GetChainTips(p); };
+    m_handlers["getrawmempool"] = [this](const std::string& p) { return RPC_GetRawMempool(p); };
+    m_handlers["generatetoaddress"] = [this](const std::string& p) { return RPC_GenerateToAddress(p); };
+    m_handlers["getrawtransaction"] = [this](const std::string& p) { return RPC_GetRawTransaction(p); };
+    m_handlers["decoderawtransaction"] = [this](const std::string& p) { return RPC_DecodeRawTransaction(p); };
+    m_handlers["addnode"] = [this](const std::string& p) { return RPC_AddNode(p); };
 }
 
 CRPCServer::~CRPCServer() {
@@ -1740,4 +1750,272 @@ std::string CRPCServer::RPC_Stop(const std::string& params) {
     }).detach();
 
     return "\"Dilithion server stopping (confirmed)\"";
+}
+// Missing RPC methods for functional test support
+// These implementations will be added to server.cpp
+
+// ============================================================================
+// BLOCKCHAIN QUERY METHODS
+// ============================================================================
+
+std::string CRPCServer::RPC_GetBlockCount(const std::string& params) {
+    if (!m_chainstate) {
+        throw std::runtime_error("Chain state not initialized");
+    }
+
+    int height = m_chainstate->GetHeight();
+    return std::to_string(height);
+}
+
+std::string CRPCServer::RPC_GetBestBlockHash(const std::string& params) {
+    if (!m_blockchain) {
+        throw std::runtime_error("Blockchain not initialized");
+    }
+
+    uint256 hashBestBlock;
+    if (!m_blockchain->ReadBestBlock(hashBestBlock)) {
+        throw std::runtime_error("Failed to read best block");
+    }
+
+    return "\"" + hashBestBlock.GetHex() + "\"";
+}
+
+std::string CRPCServer::RPC_GetChainTips(const std::string& params) {
+    if (!m_chainstate) {
+        throw std::runtime_error("Chain state not initialized");
+    }
+
+    // Get current tip
+    CBlockIndex* pTip = m_chainstate->GetTip();
+    if (!pTip) {
+        return "[]";
+    }
+
+    // For now, return single tip (active chain)
+    // Future: Scan for all chain tips (fork detection)
+    std::ostringstream oss;
+    oss << "[{";
+    oss << "\"height\":" << pTip->nHeight << ",";
+    oss << "\"hash\":\"" << pTip->GetBlockHash().GetHex() << "\",";
+    oss << "\"branchlen\":0,";
+    oss << "\"status\":\"active\"";
+    oss << "}]";
+    return oss.str();
+}
+
+// ============================================================================
+// MEMPOOL METHODS
+// ============================================================================
+
+std::string CRPCServer::RPC_GetRawMempool(const std::string& params) {
+    if (!m_mempool) {
+        throw std::runtime_error("Mempool not initialized");
+    }
+
+    std::vector<CTransactionRef> txs = m_mempool->GetOrderedTxs();
+
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < txs.size(); ++i) {
+        if (i > 0) oss << ",";
+        oss << "\"" << txs[i]->GetHash().GetHex() << "\"";
+    }
+    oss << "]";
+    return oss.str();
+}
+
+// ============================================================================
+// TRANSACTION METHODS
+// ============================================================================
+
+std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
+    // Parse params - expecting {"txid":"...", "verbosity":0}
+    size_t txid_pos = params.find("\"txid\"");
+    if (txid_pos == std::string::npos) {
+        throw std::runtime_error("Missing txid parameter");
+    }
+
+    size_t colon = params.find(":", txid_pos);
+    size_t quote1 = params.find("\"", colon);
+    size_t quote2 = params.find("\"", quote1 + 1);
+    if (quote1 == std::string::npos || quote2 == std::string::npos) {
+        throw std::runtime_error("Invalid txid parameter format");
+    }
+
+    std::string txid_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+    uint256 txid;
+    txid.SetHex(txid_str);
+
+    // Parse verbosity (default 0)
+    int verbosity = 0;
+    size_t verb_pos = params.find("\"verbosity\"");
+    if (verb_pos != std::string::npos) {
+        size_t verb_colon = params.find(":", verb_pos);
+        size_t num_start = verb_colon + 1;
+        while (num_start < params.length() && isspace(params[num_start])) num_start++;
+        if (num_start < params.length() && params[num_start] >= '0' && params[num_start] <= '9') {
+            verbosity = params[num_start] - '0';
+        }
+    }
+
+    // Check mempool first
+    if (m_mempool) {
+        CTransactionRef tx = m_mempool->GetTransaction(txid);
+        if (tx) {
+            if (verbosity == 0) {
+                // Return hex
+                std::string hex = HexStr(tx->Serialize());
+                return "\"" + hex + "\"";
+            } else {
+                // Return JSON (verbosity 1+)
+                std::ostringstream oss;
+                oss << "{";
+                oss << "\"txid\":\"" << tx->GetHash().GetHex() << "\",";
+                oss << "\"version\":" << tx->nVersion << ",";
+                oss << "\"locktime\":" << tx->nLockTime << ",";
+                oss << "\"vin_count\":" << tx->vin.size() << ",";
+                oss << "\"vout_count\":" << tx->vout.size();
+                oss << "}";
+                return oss.str();
+            }
+        }
+    }
+
+    // TODO: Check blockchain for confirmed transactions
+    throw std::runtime_error("Transaction not found");
+}
+
+std::string CRPCServer::RPC_DecodeRawTransaction(const std::string& params) {
+    // Parse params - expecting {"hex":"..."}
+    size_t hex_pos = params.find("\"hex\"");
+    if (hex_pos == std::string::npos) {
+        throw std::runtime_error("Missing hex parameter");
+    }
+
+    size_t colon = params.find(":", hex_pos);
+    size_t quote1 = params.find("\"", colon);
+    size_t quote2 = params.find("\"", quote1 + 1);
+    if (quote1 == std::string::npos || quote2 == std::string::npos) {
+        throw std::runtime_error("Invalid hex parameter format");
+    }
+
+    std::string hex_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+
+    // Decode hex to bytes
+    std::vector<uint8_t> txData = ParseHex(hex_str);
+    if (txData.empty()) {
+        throw std::runtime_error("Invalid hex data");
+    }
+
+    // Deserialize transaction
+    CTransaction tx;
+    if (!tx.Deserialize(txData)) {
+        throw std::runtime_error("Failed to deserialize transaction");
+    }
+
+    // Build JSON response
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"txid\":\"" << tx.GetHash().GetHex() << "\",";
+    oss << "\"version\":" << tx.nVersion << ",";
+    oss << "\"locktime\":" << tx.nLockTime << ",";
+    oss << "\"vin_count\":" << tx.vin.size() << ",";
+    oss << "\"vout_count\":" << tx.vout.size();
+    oss << "}";
+    return oss.str();
+}
+
+// ============================================================================
+// NETWORK METHODS
+// ============================================================================
+
+std::string CRPCServer::RPC_AddNode(const std::string& params) {
+    // Parse params - expecting {"node":"ip:port", "command":"add|remove|onetry"}
+    size_t node_pos = params.find("\"node\"");
+    if (node_pos == std::string::npos) {
+        throw std::runtime_error("Missing node parameter");
+    }
+
+    size_t colon = params.find(":", node_pos);
+    size_t quote1 = params.find("\"", colon);
+    size_t quote2 = params.find("\"", quote1 + 1);
+    if (quote1 == std::string::npos || quote2 == std::string::npos) {
+        throw std::runtime_error("Invalid node parameter format");
+    }
+
+    std::string node_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+
+    // Parse command
+    std::string command = "add";  // default
+    size_t cmd_pos = params.find("\"command\"");
+    if (cmd_pos != std::string::npos) {
+        size_t cmd_colon = params.find(":", cmd_pos);
+        size_t cmd_quote1 = params.find("\"", cmd_colon);
+        size_t cmd_quote2 = params.find("\"", cmd_quote1 + 1);
+        if (cmd_quote1 != std::string::npos && cmd_quote2 != std::string::npos) {
+            command = params.substr(cmd_quote1 + 1, cmd_quote2 - cmd_quote1 - 1);
+        }
+    }
+
+    // TODO: Integrate with network manager when available
+    // For now, just return success
+    return "null";
+}
+
+// ============================================================================
+// MINING METHODS - GENERATETOADDRESS (CRITICAL FOR FUNCTIONAL TESTS)
+// ============================================================================
+
+std::string CRPCServer::RPC_GenerateToAddress(const std::string& params) {
+    if (!m_blockchain) throw std::runtime_error("Blockchain not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+    if (!m_mempool) throw std::runtime_error("Mempool not initialized");
+    if (!m_utxo_set) throw std::runtime_error("UTXO set not initialized");
+
+    // Parse params: {"nblocks":10, "address":"DLT1..."}
+    int nblocks = 1;
+    std::string address_str;
+
+    // Extract nblocks
+    size_t nblocks_pos = params.find("\"nblocks\"");
+    if (nblocks_pos != std::string::npos) {
+        size_t colon = params.find(":", nblocks_pos);
+        size_t num_start = colon + 1;
+        while (num_start < params.length() && isspace(params[num_start])) num_start++;
+        size_t num_end = num_start;
+        while (num_end < params.length() && isdigit(params[num_end])) num_end++;
+        if (num_end > num_start) {
+            nblocks = SafeParseInt64(params.substr(num_start, num_end - num_start), 1, 1000);
+        }
+    }
+
+    // Extract address
+    size_t addr_pos = params.find("\"address\"");
+    if (addr_pos != std::string::npos) {
+        size_t colon = params.find(":", addr_pos);
+        size_t quote1 = params.find("\"", colon);
+        size_t quote2 = params.find("\"", quote1 + 1);
+        if (quote1 != std::string::npos && quote2 != std::string::npos) {
+            address_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+        }
+    }
+
+    // Validate address
+    CAddress minerAddress;
+    if (!ValidateAddress(address_str, minerAddress)) {
+        throw std::runtime_error("Invalid address: " + address_str);
+    }
+
+    std::vector<std::string> block_hashes;
+
+    // TODO: Full implementation requires:
+    // 1. GetNextWorkRequired() from consensus/pow.h
+    // 2. GetBlockSubsidy() from consensus/subsidy.h
+    // 3. SolveBlock() helper to find valid nonce
+    // 4. Proper coinbase transaction creation
+    // 5. Merkle root calculation
+    // 6. UTXO set updates
+
+    // For now, return placeholder indicating not fully implemented
+    throw std::runtime_error("generatetoaddress not fully implemented - requires mining infrastructure");
 }

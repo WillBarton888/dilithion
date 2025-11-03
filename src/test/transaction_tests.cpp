@@ -336,6 +336,266 @@ BOOST_AUTO_TEST_CASE(transaction_locktime) {
     BOOST_CHECK_EQUAL(tx.nLockTime, 1609459200);
 }
 
+/**
+ * P0 CRITICAL: Transaction Serialization Tests
+ * These tests cover Serialize/Deserialize/GetHash functions
+ * that were previously untested (0% coverage)
+ */
+
+BOOST_AUTO_TEST_CASE(transaction_serialization_simple) {
+    // Create a simple transaction
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    // Add one input
+    uint256 prevHash;
+    memset(prevHash.data, 0xAA, 32);
+    std::vector<uint8_t> scriptSig = {0x01, 0x02, 0x03};
+    tx.vin.push_back(CTxIn(prevHash, 0, scriptSig, CTxIn::SEQUENCE_FINAL));
+
+    // Add one output
+    std::vector<uint8_t> scriptPubKey = {0x76, 0xa9, 0x14};  // P2PKH prefix
+    tx.vout.push_back(CTxOut(50 * COIN, scriptPubKey));
+
+    // Serialize
+    std::vector<uint8_t> serialized = tx.Serialize();
+
+    // Check that we got data
+    BOOST_CHECK(serialized.size() > 0);
+    BOOST_CHECK(serialized.size() == tx.GetSerializedSize());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_serialization_roundtrip) {
+    // Create a transaction
+    CTransaction tx1;
+    tx1.nVersion = 2;
+    tx1.nLockTime = 123456;
+
+    // Add inputs
+    uint256 hash1, hash2;
+    memset(hash1.data, 0xBB, 32);
+    memset(hash2.data, 0xCC, 32);
+
+    std::vector<uint8_t> sig1 = {0x11, 0x22, 0x33, 0x44};
+    std::vector<uint8_t> sig2 = {0x55, 0x66, 0x77};
+
+    tx1.vin.push_back(CTxIn(hash1, 1, sig1, 100));
+    tx1.vin.push_back(CTxIn(hash2, 3, sig2, 200));
+
+    // Add outputs
+    std::vector<uint8_t> pk1 = {0xAA, 0xBB, 0xCC};
+    std::vector<uint8_t> pk2 = {0xDD, 0xEE, 0xFF, 0x00};
+
+    tx1.vout.push_back(CTxOut(25 * COIN, pk1));
+    tx1.vout.push_back(CTxOut(10 * COIN, pk2));
+
+    // Serialize
+    std::vector<uint8_t> serialized = tx1.Serialize();
+
+    // Deserialize into new transaction
+    CTransaction tx2;
+    std::string error;
+    bool success = tx2.Deserialize(serialized.data(), serialized.size(), &error);
+
+    // Check deserialization succeeded
+    BOOST_CHECK_MESSAGE(success, "Deserialization failed: " + error);
+
+    // Verify all fields match
+    BOOST_CHECK_EQUAL(tx2.nVersion, tx1.nVersion);
+    BOOST_CHECK_EQUAL(tx2.nLockTime, tx1.nLockTime);
+    BOOST_CHECK_EQUAL(tx2.vin.size(), tx1.vin.size());
+    BOOST_CHECK_EQUAL(tx2.vout.size(), tx1.vout.size());
+
+    // Verify inputs match
+    for (size_t i = 0; i < tx1.vin.size(); i++) {
+        BOOST_CHECK(tx2.vin[i] == tx1.vin[i]);
+    }
+
+    // Verify outputs match
+    for (size_t i = 0; i < tx1.vout.size(); i++) {
+        BOOST_CHECK(tx2.vout[i] == tx1.vout[i]);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(transaction_hash_determinism) {
+    // Create a transaction
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    uint256 hash;
+    memset(hash.data, 0x42, 32);
+    std::vector<uint8_t> script = {0x01, 0x02};
+
+    tx.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
+    tx.vout.push_back(CTxOut(50 * COIN, script));
+
+    // Get hash multiple times
+    uint256 hash1 = tx.GetHash();
+    uint256 hash2 = tx.GetHash();
+    uint256 hash3 = tx.GetHash();
+
+    // All hashes should be identical (deterministic)
+    BOOST_CHECK(hash1 == hash2);
+    BOOST_CHECK(hash2 == hash3);
+
+    // Hash should not be null
+    BOOST_CHECK(!hash1.IsNull());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_hash_uniqueness) {
+    // Create two different transactions
+    CTransaction tx1, tx2;
+    tx1.nVersion = 1;
+    tx2.nVersion = 1;
+
+    uint256 hash;
+    memset(hash.data, 0x42, 32);
+    std::vector<uint8_t> script = {0x01, 0x02};
+
+    // tx1: one output
+    tx1.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
+    tx1.vout.push_back(CTxOut(50 * COIN, script));
+
+    // tx2: different output value
+    tx2.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
+    tx2.vout.push_back(CTxOut(25 * COIN, script));
+
+    // Hashes should be different
+    uint256 hash1 = tx1.GetHash();
+    uint256 hash2 = tx2.GetHash();
+
+    BOOST_CHECK(hash1 != hash2);
+}
+
+BOOST_AUTO_TEST_CASE(transaction_deserialization_invalid_data) {
+    // Test deserializing truncated data
+    std::vector<uint8_t> truncated = {0x01, 0x00};  // Too short
+    CTransaction tx;
+    std::string error;
+
+    bool success = tx.Deserialize(truncated.data(), truncated.size(), &error);
+    BOOST_CHECK(!success);
+    BOOST_CHECK(!error.empty());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_deserialization_empty) {
+    // Test deserializing empty data
+    CTransaction tx;
+    std::string error;
+
+    bool success = tx.Deserialize(nullptr, 0, &error);
+    BOOST_CHECK(!success);
+}
+
+BOOST_AUTO_TEST_CASE(transaction_check_basic_structure_valid) {
+    // Create a valid transaction
+    CTransaction tx;
+    tx.nVersion = 1;
+
+    uint256 hash;
+    memset(hash.data, 0x42, 32);
+    std::vector<uint8_t> script = {0x01, 0x02};
+
+    tx.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
+    tx.vout.push_back(CTxOut(50 * COIN, script));
+
+    // Should pass basic structure check
+    BOOST_CHECK(tx.CheckBasicStructure());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_check_basic_structure_no_inputs) {
+    // Transaction with no inputs should fail
+    CTransaction tx;
+    tx.nVersion = 1;
+
+    std::vector<uint8_t> script = {0x01, 0x02};
+    tx.vout.push_back(CTxOut(50 * COIN, script));
+
+    BOOST_CHECK(!tx.CheckBasicStructure());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_check_basic_structure_no_outputs) {
+    // Transaction with no outputs should fail
+    CTransaction tx;
+    tx.nVersion = 1;
+
+    uint256 hash;
+    memset(hash.data, 0x42, 32);
+    std::vector<uint8_t> script = {0x01, 0x02};
+
+    tx.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
+
+    BOOST_CHECK(!tx.CheckBasicStructure());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_check_basic_structure_overflow) {
+    // Transaction with value overflow should fail
+    CTransaction tx;
+    tx.nVersion = 1;
+
+    uint256 hash;
+    memset(hash.data, 0x42, 32);
+    std::vector<uint8_t> script = {0x01, 0x02};
+
+    tx.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
+
+    // Add two outputs that overflow when summed
+    uint64_t max_val = 21000000ULL * 100000000ULL + 1;  // Over max supply
+    tx.vout.push_back(CTxOut(max_val, script));
+
+    BOOST_CHECK(!tx.CheckBasicStructure());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_check_basic_structure_coinbase_valid) {
+    // Valid coinbase transaction
+    CTransaction tx;
+    tx.nVersion = 1;
+
+    // Coinbase has null prevout
+    std::vector<uint8_t> coinbase_script = {0x03, 0x12, 0x34};  // 3 bytes
+    tx.vin.push_back(CTxIn(COutPoint(), coinbase_script, CTxIn::SEQUENCE_FINAL));
+
+    std::vector<uint8_t> output_script = {0x76, 0xa9};
+    tx.vout.push_back(CTxOut(50 * COIN, output_script));
+
+    BOOST_CHECK(tx.IsCoinBase());
+    BOOST_CHECK(tx.CheckBasicStructure());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_check_basic_structure_coinbase_invalid_script) {
+    // Coinbase with scriptSig too short
+    CTransaction tx;
+    tx.nVersion = 1;
+
+    std::vector<uint8_t> coinbase_script = {0x01};  // Only 1 byte (need >= 2)
+    tx.vin.push_back(CTxIn(COutPoint(), coinbase_script, CTxIn::SEQUENCE_FINAL));
+
+    std::vector<uint8_t> output_script = {0x76, 0xa9};
+    tx.vout.push_back(CTxOut(50 * COIN, output_script));
+
+    BOOST_CHECK(tx.IsCoinBase());
+    BOOST_CHECK(!tx.CheckBasicStructure());
+}
+
+BOOST_AUTO_TEST_CASE(transaction_get_value_out) {
+    CTransaction tx;
+    tx.nVersion = 1;
+
+    uint256 hash;
+    memset(hash.data, 0x42, 32);
+    std::vector<uint8_t> script = {0x01, 0x02};
+
+    tx.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
+    tx.vout.push_back(CTxOut(25 * COIN, script));
+    tx.vout.push_back(CTxOut(15 * COIN, script));
+    tx.vout.push_back(CTxOut(10 * COIN, script));
+
+    // Total output value should be 50 COIN
+    BOOST_CHECK_EQUAL(tx.GetValueOut(), 50 * COIN);
+}
+
 BOOST_AUTO_TEST_SUITE_END() // transaction_tests
 
 BOOST_AUTO_TEST_SUITE_END() // transaction_tests (outer)
