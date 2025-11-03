@@ -6,6 +6,9 @@
 #include <cstring>
 #include <stdexcept>
 
+// Define static const members (required for C++11/14 linkage)
+const uint32_t CTxIn::SEQUENCE_FINAL;
+
 /** Helper function to serialize a uint32_t in little-endian format */
 static void SerializeUint32(std::vector<uint8_t>& data, uint32_t value) {
     data.push_back(static_cast<uint8_t>(value));
