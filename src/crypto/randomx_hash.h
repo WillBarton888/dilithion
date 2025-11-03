@@ -9,13 +9,21 @@
 
 static const size_t RANDOMX_HASH_SIZE = 32;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void randomx_hash(const void* input, size_t input_len, void* output,
                   const void* key, size_t key_len);
 
 void randomx_hash_fast(const void* input, size_t input_len, void* output);
 
-void randomx_init_for_hashing(const void* key, size_t key_len, bool light_mode = false);
+void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode);
 
 void randomx_cleanup();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // BITCOIN_CRYPTO_RANDOMX_HASH_H

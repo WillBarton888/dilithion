@@ -445,9 +445,9 @@ int main(int argc, char* argv[]) {
 
         // Initialize RandomX (required for block hashing)
         std::cout << "Initializing RandomX..." << std::endl;
-        extern void randomx_init_for_hashing(const void* key, size_t key_len, bool light_mode);
+        extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode);
         const char* rx_key = "Dilithion";
-        randomx_init_for_hashing(rx_key, strlen(rx_key), false /* use full mode for production */);
+        randomx_init_for_hashing(rx_key, strlen(rx_key), 0 /* use full mode for production */);
         std::cout << "  [OK] RandomX initialized" << std::endl;
 
         // Load and verify genesis block

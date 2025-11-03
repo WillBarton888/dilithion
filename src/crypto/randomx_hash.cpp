@@ -15,7 +15,7 @@ namespace {
     std::vector<uint8_t> g_current_key;
 }
 
-void randomx_init_for_hashing(const void* key, size_t key_len, bool light_mode) {
+extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode) {
     std::lock_guard<std::mutex> lock(g_randomx_mutex);
 
     std::vector<uint8_t> new_key((const uint8_t*)key, (const uint8_t*)key + key_len);
