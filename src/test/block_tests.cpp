@@ -673,6 +673,296 @@ BOOST_AUTO_TEST_CASE(uint256_bitwise_operations) {
     BOOST_CHECK(!b.IsNull());
 }
 
+/**
+ * WEEK 5 COVERAGE EXPANSION: Block Negative Testing
+ * Adding comprehensive error path testing for blocks
+ */
+
+BOOST_AUTO_TEST_CASE(block_timestamp_too_early) {
+    CBlockHeader header;
+    header.nVersion = 1;
+    header.nBits = 0x1d00ffff;
+    header.nTime = 1;  // Very early timestamp (1970-01-01 + 1 second)
+
+    // Should still be able to hash it
+    uint256 hash = header.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+
+    // Whether it's considered valid depends on consensus rules
+    // This test documents that extremely early timestamps don't crash
+}
+
+BOOST_AUTO_TEST_CASE(block_timestamp_far_future) {
+    CBlockHeader header;
+    header.nVersion = 1;
+    header.nBits = 0x1d00ffff;
+    header.nTime = 0xFFFFFFFF;  // Max uint32_t (year 2106)
+
+    // Should still be able to hash it
+    uint256 hash = header.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+
+    // Consensus rules will reject blocks too far in future
+    // This test verifies we don't crash on such values
+}
+
+BOOST_AUTO_TEST_CASE(block_invalid_version_zero) {
+    CBlockHeader header;
+    header.nVersion = 0;  // Invalid version
+    header.nBits = 0x1d00ffff;
+    header.nTime = 1234567890;
+
+    // Should still be able to hash even with version 0
+    uint256 hash = header.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+
+    // Consensus validation will reject this
+}
+
+BOOST_AUTO_TEST_CASE(block_invalid_version_negative) {
+    CBlockHeader header;
+    header.nVersion = -1;  // Negative version (will be cast to large uint32_t)
+    header.nBits = 0x1d00ffff;
+    header.nTime = 1234567890;
+
+    // Should still be able to hash
+    uint256 hash = header.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+}
+
+BOOST_AUTO_TEST_CASE(block_nbits_zero) {
+    CBlockHeader header;
+    header.nVersion = 1;
+    header.nBits = 0;  // Zero difficulty (invalid for proof-of-work)
+    header.nTime = 1234567890;
+
+    // IsNull() returns true when nBits is 0
+    BOOST_CHECK(header.IsNull());
+
+    // Should still be able to hash
+    uint256 hash = header.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+}
+
+BOOST_AUTO_TEST_CASE(block_nbits_extreme_values) {
+    CBlockHeader header;
+    header.nVersion = 1;
+    header.nTime = 1234567890;
+
+    // Test extreme nBits values
+    std::vector<uint32_t> extreme_bits = {
+        0x00000001,  // Minimum non-zero
+        0x01000000,  // Exponent 1
+        0x02000000,  // Exponent 2
+        0xff000000,  // Maximum exponent
+        0x00ffffff,  // Maximum mantissa with exponent 0
+        0xffffffff   // All bits set
+    };
+
+    for (uint32_t bits : extreme_bits) {
+        header.nBits = bits;
+
+        // Should be able to hash with any nBits value
+        uint256 hash = header.GetHash();
+        BOOST_CHECK(!hash.IsNull());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(block_empty_prev_hash_non_genesis) {
+    CBlock block;
+    block.nVersion = 1;
+    block.nBits = 0x1d00ffff;
+    block.nTime = 1234567890;
+    block.nNonce = 100;
+
+    // Previous hash is null (but this isn't height 0)
+    BOOST_CHECK(block.hashPrevBlock.IsNull());
+
+    // Should still be structurally valid (consensus will reject non-genesis with null prev)
+    uint256 hash = block.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+}
+
+BOOST_AUTO_TEST_CASE(block_empty_merkle_root) {
+    CBlock block;
+    block.nVersion = 1;
+    block.nBits = 0x1d00ffff;
+    block.nTime = 1234567890;
+
+    // Merkle root is null (invalid for block with transactions)
+    BOOST_CHECK(block.hashMerkleRoot.IsNull());
+
+    // Should still be able to hash
+    uint256 hash = block.GetHash();
+    BOOST_CHECK(!hash.IsNull());
+}
+
+BOOST_AUTO_TEST_CASE(block_large_transaction_vector) {
+    CBlock block;
+    block.nVersion = 1;
+    block.nBits = 0x1d00ffff;
+
+    // Add large transaction data (1 MB)
+    block.vtx.resize(1024 * 1024);
+    for (size_t i = 0; i < block.vtx.size(); i++) {
+        block.vtx[i] = static_cast<uint8_t>(i % 256);
+    }
+
+    BOOST_CHECK_EQUAL(block.vtx.size(), 1024 * 1024);
+
+    // Should handle large transaction vectors
+    // (Actual consensus limits will reject oversized blocks)
+}
+
+BOOST_AUTO_TEST_CASE(block_hash_collision_resistance) {
+    // Create many blocks with different nonces
+    // Verify they all produce different hashes
+    CBlockHeader base;
+    base.nVersion = 1;
+    base.nBits = 0x1d00ffff;
+    base.nTime = 1234567890;
+    memset(base.hashPrevBlock.data, 0x42, 32);
+    memset(base.hashMerkleRoot.data, 0x43, 32);
+
+    std::vector<uint256> hashes;
+    for (uint32_t nonce = 0; nonce < 100; nonce++) {
+        CBlockHeader header = base;
+        header.nNonce = nonce;
+
+        uint256 hash = header.GetHash();
+        BOOST_CHECK(!hash.IsNull());
+
+        // Check this hash is unique
+        for (const auto& prev_hash : hashes) {
+            BOOST_CHECK(hash != prev_hash);
+        }
+
+        hashes.push_back(hash);
+    }
+
+    BOOST_CHECK_EQUAL(hashes.size(), 100);
+}
+
+BOOST_AUTO_TEST_CASE(block_serialization_determinism) {
+    // Create block with specific values
+    CBlock block;
+    block.nVersion = 2;
+    block.nTime = 1609459200;
+    block.nBits = 0x1d00ffff;
+    block.nNonce = 12345;
+    memset(block.hashPrevBlock.data, 0xAA, 32);
+    memset(block.hashMerkleRoot.data, 0xBB, 32);
+
+    // Add some transaction data
+    for (int i = 0; i < 50; i++) {
+        block.vtx.push_back(static_cast<uint8_t>(i));
+    }
+
+    // Hash should be deterministic
+    uint256 hash1 = block.GetHash();
+    uint256 hash2 = block.GetHash();
+    uint256 hash3 = block.GetHash();
+
+    BOOST_CHECK(hash1 == hash2);
+    BOOST_CHECK(hash2 == hash3);
+    BOOST_CHECK(!hash1.IsNull());
+}
+
+BOOST_AUTO_TEST_CASE(block_prev_hash_sensitivity) {
+    // Changing prev hash should change block hash
+    CBlock block1, block2;
+
+    block1.nVersion = block2.nVersion = 1;
+    block1.nTime = block2.nTime = 1234567890;
+    block1.nBits = block2.nBits = 0x1d00ffff;
+    block1.nNonce = block2.nNonce = 0;
+
+    memset(block1.hashMerkleRoot.data, 0xCC, 32);
+    memset(block2.hashMerkleRoot.data, 0xCC, 32);
+
+    // Different prev hashes
+    memset(block1.hashPrevBlock.data, 0x11, 32);
+    memset(block2.hashPrevBlock.data, 0x22, 32);
+
+    uint256 hash1 = block1.GetHash();
+    uint256 hash2 = block2.GetHash();
+
+    // Hashes must be different
+    BOOST_CHECK(hash1 != hash2);
+}
+
+BOOST_AUTO_TEST_CASE(block_time_sensitivity) {
+    // Changing timestamp should change block hash
+    CBlockHeader h1, h2;
+
+    h1.nVersion = h2.nVersion = 1;
+    h1.nBits = h2.nBits = 0x1d00ffff;
+    h1.nNonce = h2.nNonce = 0;
+
+    memset(h1.hashPrevBlock.data, 0x42, 32);
+    memset(h2.hashPrevBlock.data, 0x42, 32);
+    memset(h1.hashMerkleRoot.data, 0x43, 32);
+    memset(h2.hashMerkleRoot.data, 0x43, 32);
+
+    h1.nTime = 1000;
+    h2.nTime = 1001;  // Just 1 second different
+
+    uint256 hash1 = h1.GetHash();
+    uint256 hash2 = h2.GetHash();
+
+    // Even 1 second difference should produce different hash
+    BOOST_CHECK(hash1 != hash2);
+}
+
+BOOST_AUTO_TEST_CASE(uint256_sethex_invalid) {
+    uint256 hash;
+
+    // Test invalid hex strings
+    // NOTE: SetHex may throw exceptions on invalid input
+    // This test documents error handling behavior
+
+    try {
+        hash.SetHex("invalid");
+        // May throw or handle gracefully
+    } catch (...) {
+        // Exception is acceptable for invalid input
+    }
+
+    try {
+        hash.SetHex("G123");  // Invalid hex character
+        // May throw or handle gracefully
+    } catch (...) {
+        // Exception is acceptable
+    }
+
+    // Empty string should be safe
+    hash.SetHex("");
+    // Should result in null hash or handle gracefully
+}
+
+BOOST_AUTO_TEST_CASE(uint256_sethex_short) {
+    uint256 hash;
+
+    // Test short hex string (less than 64 characters)
+    hash.SetHex("1234");
+
+    // Should pad with zeros or handle appropriately
+    std::string result = hash.GetHex();
+    BOOST_CHECK_EQUAL(result.length(), 64);
+}
+
+BOOST_AUTO_TEST_CASE(uint256_sethex_long) {
+    uint256 hash;
+
+    // Test overly long hex string (more than 64 characters)
+    std::string long_hex(100, 'F');
+    hash.SetHex(long_hex);
+
+    // Should truncate or handle appropriately
+    std::string result = hash.GetHex();
+    BOOST_CHECK_EQUAL(result.length(), 64);
+}
+
 BOOST_AUTO_TEST_SUITE_END() // block_chain_tests
 
 BOOST_AUTO_TEST_SUITE_END() // block_tests (outer)
