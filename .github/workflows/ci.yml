@@ -483,3 +483,105 @@ jobs:
         MD_COUNT=$(find . -name "*.md" ! -path "./depends/*" ! -path "./.git/*" | wc -l)
         echo "Found $MD_COUNT markdown documentation files"
         echo "✅ Documentation validated"
+
+  difficulty-determinism:
+    name: Difficulty Determinism Validation (${{ matrix.os }}, ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04, ubuntu-20.04]
+        compiler: [gcc, clang]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          libleveldb-dev \
+          libssl-dev \
+          python3
+
+    - name: Install compiler
+      run: |
+        if [ "${{ matrix.compiler }}" = "clang" ]; then
+          sudo apt-get install -y clang
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+        else
+          echo "CC=gcc" >> $GITHUB_ENV
+          echo "CXX=g++" >> $GITHUB_ENV
+        fi
+
+    - name: Build RandomX
+      run: |
+        cd depends/randomx
+        mkdir -p build
+        cd build
+        cmake ..
+        make -j$(nproc)
+
+    - name: Build Dilithium library
+      run: |
+        cd depends/dilithium/ref
+        make clean
+        make -j$(nproc)
+
+    - name: Build difficulty determinism test
+      run: |
+        make difficulty_determinism_test -j$(nproc)
+
+    - name: Run difficulty test
+      run: |
+        ./difficulty_determinism_test
+        echo "✅ Difficulty test passed on ${{ matrix.os }} with ${{ matrix.compiler }}"
+
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      with:
+        name: difficulty-results-${{ matrix.os }}-${{ matrix.compiler }}
+        path: difficulty_results.json
+        retention-days: 30
+
+  difficulty-comparison:
+    name: Cross-Platform Difficulty Comparison
+    needs: difficulty-determinism
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all results
+      uses: actions/download-artifact@v4
+      with:
+        path: difficulty-results
+
+    - name: List downloaded files
+      run: |
+        echo "Downloaded difficulty result files:"
+        find difficulty-results -name "*.json" -type f
+
+    - name: Compare all platforms
+      run: |
+        echo "🔍 Comparing difficulty calculations across all platforms..."
+        python3 scripts/compare_difficulty_results.py difficulty-results/*/difficulty_results.json
+
+        if [ $? -eq 0 ]; then
+          echo "✅ ALL PLATFORMS AGREE - Consensus validated!"
+          echo "✅ No fork risk detected"
+          echo "✅ Safe for mainnet deployment"
+        else
+          echo "❌ CRITICAL: Platforms disagree on difficulty calculations!"
+          echo "❌ This would cause consensus forks on mainnet"
+          echo "❌ See comparison output above for details"
+          exit 1
+        fi

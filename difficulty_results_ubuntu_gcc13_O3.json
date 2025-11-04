@@ -1,0 +1,107 @@
+{
+  "platform_info": "Platform: x86-64, OS: Linux, Compiler: GCC 13.3",
+  "test_count": 10,
+  "passed_count": 10,
+  "results": [
+    {
+      "test_id": "basic_001_no_change",
+      "input_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1d00ffff",
+      "actual_timespan": 1209600,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d00ffff",
+      "passed": true
+    },
+    {
+      "test_id": "basic_002_2x_faster",
+      "input_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1d00ffff",
+      "actual_timespan": 604800,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d00ffff",
+      "passed": true
+    },
+    {
+      "test_id": "basic_003_2x_slower",
+      "input_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1d00ffff",
+      "actual_timespan": 2419200,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000001fffe0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d01fffe",
+      "passed": true
+    },
+    {
+      "test_id": "edge_004_max_increase",
+      "input_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1d00ffff",
+      "actual_timespan": 302400,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d00ffff",
+      "passed": true
+    },
+    {
+      "test_id": "edge_005_max_decrease",
+      "input_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1d00ffff",
+      "actual_timespan": 4838400,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000003fffc0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d03fffc",
+      "passed": true
+    },
+    {
+      "test_id": "edge_006_faster_than_4x",
+      "input_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1d00ffff",
+      "actual_timespan": 151200,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d00ffff",
+      "passed": true
+    },
+    {
+      "test_id": "edge_007_slower_than_4x",
+      "input_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1d00ffff",
+      "actual_timespan": 9676800,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000003fffc0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d03fffc",
+      "passed": true
+    },
+    {
+      "test_id": "edge_008_high_difficulty",
+      "input_target_hex": "00000000000404cb000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1b0404cb",
+      "actual_timespan": 604800,
+      "target_timespan": 1209600,
+      "output_target_hex": "00000000ffff0000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1d00ffff",
+      "passed": true
+    },
+    {
+      "test_id": "edge_009_low_difficulty",
+      "input_target_hex": "00000fffff000000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1e0fffff",
+      "actual_timespan": 2419200,
+      "target_timespan": 1209600,
+      "output_target_hex": "00001ffffe000000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1e1ffffe",
+      "passed": true
+    },
+    {
+      "test_id": "boundary_010_min_difficulty",
+      "input_target_hex": "00007fffff000000000000000000000000000000000000000000000000000000",
+      "input_compact": "0x1effffff",
+      "actual_timespan": 4838400,
+      "target_timespan": 1209600,
+      "output_target_hex": "0001ffff00000000000000000000000000000000000000000000000000000000",
+      "output_compact": "0x1f01ffff",
+      "passed": true
+    }
+  ]
+}
