@@ -139,14 +139,17 @@ public:
                                        std::vector<CTransactionRef>& transactions,
                                        std::string& error) const;
 
-private:
     /**
      * BuildMerkleRoot - Calculate merkle root from transactions
+     *
+     * Made public for comprehensive unit testing of this critical consensus function.
      *
      * @param transactions Vector of all transactions (coinbase first)
      * @return Merkle root hash
      */
     uint256 BuildMerkleRoot(const std::vector<CTransactionRef>& transactions) const;
+
+private:
 
     /**
      * CalculateTotalFees - Calculate total fees from all non-coinbase TXs

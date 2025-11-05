@@ -430,6 +430,9 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
                 key.append(reinterpret_cast<const char*>(&txin.prevout.n), 4);
                 batch.Delete(key);
 
+                // Remove from cache (critical: must sync cache with database state)
+                RemoveFromCache(txin.prevout);
+
                 // Update statistics
                 if (stats.nUTXOs > 0) stats.nUTXOs--;
                 if (stats.nTotalAmount >= entry.out.nValue) {
@@ -476,6 +479,10 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
             std::memcpy(ptr, txout.scriptPubKey.data(), script_len);
 
             batch.Put(key, leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
+
+            // Update cache (critical: must sync cache with database state)
+            CUTXOEntry entry(txout, height, is_coinbase);
+            UpdateCache(outpoint, entry);
 
             // Update statistics
             stats.nUTXOs++;
@@ -587,6 +594,9 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
             // Remove from database
             batch.Delete(key);
 
+            // Remove from cache (critical: must sync cache with database state)
+            RemoveFromCache(outpoint);
+
             // Update statistics
             if (stats.nUTXOs > 0) stats.nUTXOs--;
             if (stats.nTotalAmount >= txout.nValue) {
@@ -683,6 +693,11 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
         std::memcpy(value_ptr, scriptPubKey.data(), script_len);
 
         batch.Put(key, leveldb::Slice(reinterpret_cast<const char*>(value.data()), value.size()));
+
+        // Update cache (critical: must sync cache with database state)
+        CTxOut txout(nValue, scriptPubKey);
+        CUTXOEntry entry(txout, height, fCoinBase);
+        UpdateCache(outpoint, entry);
 
         // Update statistics
         stats.nUTXOs++;
@@ -802,6 +817,11 @@ bool CUTXOSet::UpdateStats() {
             continue;
         }
 
+        // Skip statistics metadata key
+        if (key == "utxo_stats") {
+            continue;
+        }
+
         // Deserialize UTXO entry
         CUTXOEntry entry;
         if (!DeserializeUTXOEntry(it->value().ToString(), entry)) {
@@ -864,8 +884,13 @@ bool CUTXOSet::VerifyConsistency() const {
     for (it->SeekToFirst(); it->Valid(); it->Next()) {
         std::string key = it->key().ToString();
 
-        // Skip non-UTXO keys
+        // Skip non-UTXO keys (including "utxo_stats" metadata key)
         if (key.empty() || key[0] != 'u') {
+            continue;
+        }
+
+        // Skip statistics metadata key
+        if (key == "utxo_stats") {
             continue;
         }
 

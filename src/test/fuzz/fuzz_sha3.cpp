@@ -33,10 +33,10 @@ FUZZ_TARGET(sha3_256)
         uint8_t output2[32];
 
         // Hash the input
-        sha3_256(output1, 32, input.data(), input.size());
+        SHA3_256(input.data(), input.size(), output1);
 
         // Hash again - should be deterministic
-        sha3_256(output2, 32, input.data(), input.size());
+        SHA3_256(input.data(), input.size(), output2);
 
         // Verify determinism
         assert(std::memcmp(output1, output2, 32) == 0);
@@ -53,7 +53,7 @@ FUZZ_TARGET(sha3_256)
         combined.insert(combined.end(), input2.begin(), input2.end());
 
         uint8_t output_combined[32];
-        sha3_256(output_combined, 32, combined.data(), combined.size());
+        SHA3_256(combined.data(), combined.size(), output_combined);
 
         // The output is a valid 32-byte hash
         // (no assertion needed, just ensure it doesn't crash)
@@ -63,7 +63,7 @@ FUZZ_TARGET(sha3_256)
     if (provider.remaining_bytes() == 0) {
         // Empty input
         uint8_t output_empty[32];
-        sha3_256(output_empty, 32, nullptr, 0);
+        SHA3_256(nullptr, 0, output_empty);
 
         // Known SHA3-256("") result - verify if desired
         // const uint8_t expected_empty[32] = {...};
@@ -75,9 +75,10 @@ FUZZ_TARGET(sha3_256)
         uint8_t output_small[16];
         std::vector<uint8_t> input = provider.ConsumeRemainingBytes();
 
-        // SHA3 can produce variable-length output
-        // Test with 16-byte output
-        sha3_256(output_small, 16, input.data(), input.size());
+        // SHA3-256 always produces 32-byte output
+        // Test with standard 32-byte output
+        uint8_t output_full[32];
+        SHA3_256(input.data(), input.size(), output_full);
     }
 
     CleanupFuzzEnvironment();

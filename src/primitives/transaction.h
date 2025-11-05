@@ -171,8 +171,15 @@ public:
     /** Serialize transaction data for hashing or transmission. */
     std::vector<uint8_t> Serialize() const;
 
-    /** Deserialize transaction data from byte stream (CS-002). */
-    bool Deserialize(const uint8_t* data, size_t len, std::string* error = nullptr);
+    /** Deserialize transaction data from byte stream (CS-002).
+     * @param data Pointer to serialized data
+     * @param len Length of data buffer
+     * @param error Optional pointer to store error message
+     * @param bytesConsumed Optional pointer to store number of bytes consumed
+     * @return true if successful
+     * Note: If bytesConsumed is provided, extra data after transaction is allowed.
+     */
+    bool Deserialize(const uint8_t* data, size_t len, std::string* error = nullptr, size_t* bytesConsumed = nullptr);
 };
 
 /** A reference to a transaction (shared pointer for efficiency). */

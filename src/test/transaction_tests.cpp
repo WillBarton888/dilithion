@@ -618,12 +618,9 @@ BOOST_AUTO_TEST_CASE(transaction_duplicate_inputs) {
 
     tx.vout.push_back(CTxOut(50 * COIN, script));
 
-    // NOTE: Current CheckBasicStructure() doesn't check for duplicate inputs
-    // This is caught later in consensus validation
-    // Test documents that duplicate inputs are structurally valid but consensus-invalid
-    BOOST_CHECK(tx.CheckBasicStructure());
-
-    // In future, consider adding duplicate input check to CheckBasicStructure()
+    // UPDATED (Week 6): Duplicate input detection now implemented in CheckBasicStructure()
+    // Duplicate inputs should be rejected at the basic structure level
+    BOOST_CHECK(!tx.CheckBasicStructure());
 }
 
 BOOST_AUTO_TEST_CASE(transaction_negative_value) {
@@ -816,6 +813,119 @@ BOOST_AUTO_TEST_CASE(transaction_boundary_locktime) {
     BOOST_CHECK(tx1.CheckBasicStructure());
     BOOST_CHECK(tx2.CheckBasicStructure());
     BOOST_CHECK(tx3.CheckBasicStructure());
+}
+
+/**
+ * WEEK 6 SECURITY FIXES: Regression Tests
+ */
+
+/**
+ * Test duplicate input detection (Week 6 Security Fix 1)
+ */
+BOOST_AUTO_TEST_CASE(transaction_duplicate_inputs_rejected) {
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    // Create same outpoint
+    uint256 hash;
+    memset(hash.data, 0x42, 32);
+    COutPoint same_outpoint(hash, 0);
+
+    // Add duplicate inputs
+    std::vector<uint8_t> sig(100, 0xAA);
+    tx.vin.push_back(CTxIn(same_outpoint, sig, CTxIn::SEQUENCE_FINAL));
+    tx.vin.push_back(CTxIn(same_outpoint, sig, CTxIn::SEQUENCE_FINAL));  // Duplicate!
+
+    // Add valid output
+    std::vector<uint8_t> scriptPubKey(50, 0xBB);
+    tx.vout.push_back(CTxOut(25 * COIN, scriptPubKey));
+
+    // Should be rejected
+    BOOST_CHECK(!tx.CheckBasicStructure());
+}
+
+/**
+ * Test explicit overflow detection pattern (Week 6 Security Fix 2)
+ */
+BOOST_AUTO_TEST_CASE(transaction_output_overflow_explicit) {
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    // Add input
+    uint256 prevHash;
+    memset(prevHash.data, 0x42, 32);
+    std::vector<uint8_t> sig(100, 0xAA);
+    tx.vin.push_back(CTxIn(COutPoint(prevHash, 0), sig, CTxIn::SEQUENCE_FINAL));
+
+    // Add outputs that would overflow
+    std::vector<uint8_t> scriptPubKey(50, 0xBB);
+    tx.vout.push_back(CTxOut(UINT64_MAX / 2 + 1, scriptPubKey));
+    tx.vout.push_back(CTxOut(UINT64_MAX / 2 + 1, scriptPubKey));
+
+    // Should be rejected due to overflow
+    BOOST_CHECK(!tx.CheckBasicStructure());
+}
+
+/**
+ * Test edge case: UINT64_MAX - 1 + 2 should overflow
+ */
+BOOST_AUTO_TEST_CASE(transaction_output_overflow_edge_case) {
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    uint256 prevHash;
+    memset(prevHash.data, 0x42, 32);
+    std::vector<uint8_t> sig(100, 0xAA);
+    tx.vin.push_back(CTxIn(COutPoint(prevHash, 0), sig, CTxIn::SEQUENCE_FINAL));
+
+    std::vector<uint8_t> scriptPubKey(50, 0xBB);
+    tx.vout.push_back(CTxOut(UINT64_MAX - 1, scriptPubKey));
+    tx.vout.push_back(CTxOut(2, scriptPubKey));
+
+    BOOST_CHECK(!tx.CheckBasicStructure());
+}
+
+/**
+ * Test zero value output is valid (Week 6 Security Fix 3)
+ */
+BOOST_AUTO_TEST_CASE(transaction_zero_value_valid) {
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    uint256 prevHash;
+    memset(prevHash.data, 0x42, 32);
+    std::vector<uint8_t> sig(100, 0xAA);
+    tx.vin.push_back(CTxIn(COutPoint(prevHash, 0), sig, CTxIn::SEQUENCE_FINAL));
+
+    std::vector<uint8_t> scriptPubKey(50, 0xBB);
+    tx.vout.push_back(CTxOut(0, scriptPubKey));  // Zero value should be valid
+
+    BOOST_CHECK(tx.CheckBasicStructure());
+}
+
+/**
+ * Test that GetValueOut() also uses explicit overflow pattern
+ */
+BOOST_AUTO_TEST_CASE(transaction_getvalueout_overflow_detection) {
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    uint256 prevHash;
+    memset(prevHash.data, 0x42, 32);
+    std::vector<uint8_t> sig(100, 0xAA);
+    tx.vin.push_back(CTxIn(COutPoint(prevHash, 0), sig, CTxIn::SEQUENCE_FINAL));
+
+    std::vector<uint8_t> scriptPubKey(50, 0xBB);
+    tx.vout.push_back(CTxOut(UINT64_MAX / 2 + 1, scriptPubKey));
+    tx.vout.push_back(CTxOut(UINT64_MAX / 2 + 1, scriptPubKey));
+
+    // Should throw runtime_error due to overflow
+    BOOST_CHECK_THROW(tx.GetValueOut(), std::runtime_error);
 }
 
 BOOST_AUTO_TEST_SUITE_END() // transaction_tests

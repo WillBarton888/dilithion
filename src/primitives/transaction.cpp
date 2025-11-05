@@ -5,6 +5,7 @@
 #include <crypto/sha3.h>
 #include <cstring>
 #include <stdexcept>
+#include <set>
 
 // Define static const members (required for C++11/14 linkage)
 const uint32_t CTxIn::SEQUENCE_FINAL;
@@ -173,12 +174,18 @@ bool CTransaction::CheckBasicStructure() const {
     // Check that outputs don't overflow
     uint64_t totalOut = 0;
     for (const CTxOut& txout : vout) {
+        // Explicit check for negative values (defense in depth)
+        // Note: nValue is uint64_t, but this check is good practice
+        if (txout.nValue < 0) {
+            return false;
+        }
+
         if (txout.nValue > 21000000ULL * 100000000ULL) {  // Max supply * satoshis
             return false;
         }
-        
-        // Check for overflow
-        if (totalOut + txout.nValue < totalOut) {
+
+        // Check for overflow using explicit pattern
+        if (txout.nValue > UINT64_MAX - totalOut) {
             return false;
         }
         totalOut += txout.nValue;
@@ -202,16 +209,24 @@ bool CTransaction::CheckBasicStructure() const {
                 return false;
             }
         }
+
+        // Check for duplicate inputs (non-coinbase only)
+        std::set<COutPoint> unique_inputs;
+        for (const CTxIn& txin : vin) {
+            if (!unique_inputs.insert(txin.prevout).second) {
+                return false;  // Duplicate input detected
+            }
+        }
     }
-    
+
     return true;
 }
 
 uint64_t CTransaction::GetValueOut() const {
     uint64_t total = 0;
     for (const CTxOut& txout : vout) {
-        // Check for overflow
-        if (total + txout.nValue < total) {
+        // Check for overflow using explicit pattern
+        if (txout.nValue > UINT64_MAX - total) {
             throw std::runtime_error("CTransaction::GetValueOut(): value out of range");
         }
         total += txout.nValue;
@@ -300,7 +315,7 @@ static bool DeserializeCompactSize(const uint8_t*& data, const uint8_t* end, uin
 // CTransaction Deserialization (CS-002)
 // ============================================================================
 
-bool CTransaction::Deserialize(const uint8_t* data, size_t len, std::string* error) {
+bool CTransaction::Deserialize(const uint8_t* data, size_t len, std::string* error, size_t* bytesConsumed) {
     // Clear current transaction state
     SetNull();
 
@@ -418,10 +433,15 @@ bool CTransaction::Deserialize(const uint8_t* data, size_t len, std::string* err
         return false;
     }
 
-    // Verify we consumed exactly the right amount of data
-    if (ptr != end) {
-        if (error) *error = "Extra data after transaction";
-        return false;
+    // If caller provided bytesConsumed, return how many bytes we read
+    if (bytesConsumed) {
+        *bytesConsumed = ptr - data;
+    } else {
+        // Otherwise, verify we consumed exactly the right amount of data
+        if (ptr != end) {
+            if (error) *error = "Extra data after transaction";
+            return false;
+        }
     }
 
     // Invalidate cached hash (will be recalculated on next GetHash())

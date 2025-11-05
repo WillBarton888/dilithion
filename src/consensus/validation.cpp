@@ -143,16 +143,15 @@ bool CBlockValidator::DeserializeBlockTransactions(
         // Deserialize transaction from remaining bytes
         CTransaction tx;
         std::string deserializeError;
+        size_t bytesConsumed = 0;
 
-        if (!tx.Deserialize(data + offset, dataSize - offset, &deserializeError)) {
+        if (!tx.Deserialize(data + offset, dataSize - offset, &deserializeError, &bytesConsumed)) {
             error = "Failed to deserialize transaction " + std::to_string(i) + ": " + deserializeError;
             return false;
         }
 
-        // Calculate how many bytes were consumed
-        // We need to re-serialize to find the size (could optimize later with a GetDeserializedSize method)
-        size_t txSize = tx.GetSerializedSize();
-        offset += txSize;
+        // Advance offset by number of bytes consumed
+        offset += bytesConsumed;
 
         // Add transaction to result vector
         transactions.push_back(MakeTransactionRef(std::move(tx)));
