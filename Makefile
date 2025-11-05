@@ -268,7 +268,7 @@ test_passphrase_validator: $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/t
 # Boost Unit Test Binaries
 # ============================================================================
 
-test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/core/chainparams.o $(DILITHIUM_OBJECTS)
+test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully (header-only)$(COLOR_RESET)"
@@ -530,10 +530,11 @@ quality: analyze
 # ============================================================================
 
 # Fuzz test compiler (requires Clang with libFuzzer support)
-FUZZ_CXX := clang++
+FUZZ_CXX := clang++-14
 FUZZ_CXXFLAGS := -fsanitize=fuzzer,address,undefined -std=c++17 -O1 -g $(INCLUDES)
 
 # Fuzz test sources (Week 3 Phase 4 - 9 harnesses, 42+ targets)
+# Week 6 Phase 3 - Added tx_validation and utxo fuzzers (11 harnesses total)
 FUZZ_SHA3_SOURCE := src/test/fuzz/fuzz_sha3.cpp
 FUZZ_TRANSACTION_SOURCE := src/test/fuzz/fuzz_transaction.cpp
 FUZZ_BLOCK_SOURCE := src/test/fuzz/fuzz_block.cpp
@@ -543,6 +544,8 @@ FUZZ_ADDRESS_SOURCE := src/test/fuzz/fuzz_address.cpp
 FUZZ_DIFFICULTY_SOURCE := src/test/fuzz/fuzz_difficulty.cpp
 FUZZ_SUBSIDY_SOURCE := src/test/fuzz/fuzz_subsidy.cpp
 FUZZ_MERKLE_SOURCE := src/test/fuzz/fuzz_merkle.cpp
+FUZZ_TX_VALIDATION_SOURCE := src/test/fuzz/fuzz_tx_validation.cpp
+FUZZ_UTXO_SOURCE := src/test/fuzz/fuzz_utxo.cpp
 
 # Fuzz test binaries
 FUZZ_SHA3 := fuzz_sha3
@@ -554,17 +557,19 @@ FUZZ_ADDRESS := fuzz_address
 FUZZ_DIFFICULTY := fuzz_difficulty
 FUZZ_SUBSIDY := fuzz_subsidy
 FUZZ_MERKLE := fuzz_merkle
+FUZZ_TX_VALIDATION := fuzz_tx_validation
+FUZZ_UTXO := fuzz_utxo
 
 # Build all fuzz tests (requires Clang with libFuzzer)
-fuzz: fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle
-	@echo "$(COLOR_GREEN)✓ All fuzz tests built successfully (9 harnesses, 42+ targets)$(COLOR_RESET)"
+fuzz: fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo
+	@echo "$(COLOR_GREEN)✓ All fuzz tests built successfully (11 harnesses, 50+ targets)$(COLOR_RESET)"
 	@echo "  Run individual: ./fuzz_sha3, ./fuzz_transaction, ./fuzz_block, etc."
-	@echo "  With corpus: ./fuzz_transaction corpus_tx/"
+	@echo "  With corpus: ./fuzz_transaction fuzz_corpus/transaction/"
 	@echo "  Time limit: ./fuzz_block -max_total_time=60"
 
 fuzz_sha3: $(FUZZ_SHA3_SOURCE) src/crypto/sha3.cpp $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@..."
-	@if command -v clang++ >/dev/null 2>&1; then \
+	@if command -v $(FUZZ_CXX) >/dev/null 2>&1; then \
 		$(FUZZ_CXX) $(FUZZ_CXXFLAGS) \
 			$(FUZZ_SHA3_SOURCE) \
 			src/crypto/sha3.cpp \
@@ -572,7 +577,7 @@ fuzz_sha3: $(FUZZ_SHA3_SOURCE) src/crypto/sha3.cpp $(DILITHIUM_OBJECTS)
 			-o $(FUZZ_SHA3); \
 		echo "$(COLOR_GREEN)✓ Fuzz harness built: $(FUZZ_SHA3)$(COLOR_RESET)"; \
 	else \
-		echo "$(COLOR_YELLOW)⚠ clang++ not found. Fuzz testing requires Clang with libFuzzer support.$(COLOR_RESET)"; \
+		echo "$(COLOR_YELLOW)⚠ $(FUZZ_CXX) not found. Fuzz testing requires Clang with libFuzzer support.$(COLOR_RESET)"; \
 		exit 1; \
 	fi
 
@@ -607,6 +612,14 @@ fuzz_subsidy: $(FUZZ_SUBSIDY_SOURCE) $(DILITHIUM_OBJECTS)
 fuzz_merkle: $(FUZZ_MERKLE_SOURCE) src/crypto/sha3.cpp $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (7 targets)..."
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+
+fuzz_tx_validation: $(FUZZ_TX_VALIDATION_SOURCE) src/primitives/transaction.cpp src/primitives/block.cpp src/consensus/tx_validation.cpp src/consensus/fees.cpp src/consensus/validation.cpp src/consensus/pow.cpp src/core/chainparams.cpp src/node/utxo_set.cpp src/crypto/sha3.cpp src/crypto/randomx_hash.cpp $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (4 targets)..."
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@ -L depends/randomx/build -lleveldb -lrandomx -lpthread
+
+fuzz_utxo: $(FUZZ_UTXO_SOURCE) src/primitives/transaction.cpp src/primitives/block.cpp src/consensus/tx_validation.cpp src/consensus/fees.cpp src/consensus/validation.cpp src/consensus/pow.cpp src/core/chainparams.cpp src/node/utxo_set.cpp src/crypto/sha3.cpp src/crypto/randomx_hash.cpp $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (4 targets)..."
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@ -L depends/randomx/build -lleveldb -lrandomx -lpthread
 
 # Run fuzz tests (short run for CI)
 run_fuzz: fuzz
