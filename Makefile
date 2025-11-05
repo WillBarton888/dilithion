@@ -530,7 +530,8 @@ quality: analyze
 # ============================================================================
 
 # Fuzz test compiler (requires Clang with libFuzzer support)
-FUZZ_CXX := clang++-14
+# Try clang++-14 first, fall back to clang++ (any version), or use environment variable
+FUZZ_CXX ?= $(shell command -v clang++-14 2>/dev/null || command -v clang++ 2>/dev/null || echo clang++)
 FUZZ_CXXFLAGS := -fsanitize=fuzzer,address,undefined -std=c++17 -O1 -g $(INCLUDES)
 
 # Fuzz test sources (Week 3 Phase 4 - 9 harnesses, 42+ targets)
