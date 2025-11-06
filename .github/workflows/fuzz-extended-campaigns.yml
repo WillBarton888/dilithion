@@ -34,21 +34,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
-      - name: Build RandomX dependency
+      - name: Build dependencies
         run: |
-          cd depends/randomx
-          mkdir -p build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
-
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
+          # Build RandomX library
+          cd depends/randomx && mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
       - name: Build fuzz_difficulty
         run: |
-          make fuzz_difficulty
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_difficulty
 
       - name: Run fuzzing campaign
         run: |
@@ -104,21 +99,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
-      - name: Build RandomX dependency
+      - name: Build dependencies
         run: |
-          cd depends/randomx
-          mkdir -p build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
-
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
+          # Build RandomX library
+          cd depends/randomx && mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
       - name: Build fuzz_tx_validation
         run: |
-          make fuzz_tx_validation
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_tx_validation
 
       - name: Run fuzzing campaign
         run: |
@@ -174,21 +164,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
-      - name: Build RandomX dependency
+      - name: Build dependencies
         run: |
-          cd depends/randomx
-          mkdir -p build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
-
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
+          # Build RandomX library
+          cd depends/randomx && mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
       - name: Build fuzz_utxo
         run: |
-          make fuzz_utxo
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_utxo
 
       - name: Run fuzzing campaign
         run: |
@@ -247,17 +232,14 @@ jobs:
 
       - name: Build dependencies
         run: |
+          # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
-
       - name: Build and run fuzzer
         run: |
-          make fuzz_block
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_block
           mkdir -p fuzz_corpus/block
           DURATION=${{ github.event.inputs.duration_hours || '4' }}
           DURATION_SECONDS=$((DURATION * 3600))
@@ -307,17 +289,14 @@ jobs:
 
       - name: Build dependencies
         run: |
+          # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
-
       - name: Build and run fuzzer
         run: |
-          make fuzz_merkle
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_merkle
           mkdir -p fuzz_corpus/merkle
           DURATION=${{ github.event.inputs.duration_hours || '4' }}
           DURATION_SECONDS=$((DURATION * 3600))
@@ -367,17 +346,14 @@ jobs:
 
       - name: Build dependencies
         run: |
+          # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
-
       - name: Build and run fuzzer
         run: |
-          make fuzz_transaction
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_transaction
           mkdir -p fuzz_corpus/transaction
           DURATION=${{ github.event.inputs.duration_hours || '4' }}
           DURATION_SECONDS=$((DURATION * 3600))
@@ -426,14 +402,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev
 
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
-
       - name: Build and run fuzzer
         run: |
-          make fuzz_subsidy
+          # Makefile automatically builds all required object files (including Dilithium)
+          FUZZ_CXX=clang++-14 make fuzz_subsidy
           mkdir -p fuzz_corpus/subsidy
           DURATION=${{ github.event.inputs.duration_hours || '2' }}
           DURATION_SECONDS=$((DURATION * 3600))
@@ -481,14 +453,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev
 
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
-
       - name: Build and run fuzzer
         run: |
-          make fuzz_compactsize
+          # Makefile automatically builds all required object files (including Dilithium)
+          FUZZ_CXX=clang++-14 make fuzz_compactsize
           mkdir -p fuzz_corpus/compactsize
           DURATION=${{ github.event.inputs.duration_hours || '2' }}
           DURATION_SECONDS=$((DURATION * 3600))
@@ -536,14 +504,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev
 
-      - name: Build Dilithium objects
-        run: |
-          cd depends/dilithium/ref
-          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
-
       - name: Build and run fuzzer
         run: |
-          make fuzz_sha3
+          # Makefile automatically builds all required object files (including Dilithium)
+          FUZZ_CXX=clang++-14 make fuzz_sha3
           mkdir -p fuzz_corpus/sha3
           DURATION=${{ github.event.inputs.duration_hours || '2' }}
           DURATION_SECONDS=$((DURATION * 3600))
