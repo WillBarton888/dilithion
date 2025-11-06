@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build RandomX dependency
         run: |
@@ -97,7 +97,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build RandomX dependency
         run: |
@@ -162,7 +162,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build RandomX dependency
         run: |
@@ -228,7 +228,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
@@ -283,7 +283,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
@@ -338,7 +338,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
