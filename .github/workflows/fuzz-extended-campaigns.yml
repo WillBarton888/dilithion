@@ -41,6 +41,11 @@ jobs:
           cmake -DCMAKE_BUILD_TYPE=Release ..
           make -j$(nproc)
 
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
+
       - name: Build fuzz_difficulty
         run: |
           make fuzz_difficulty
@@ -105,6 +110,11 @@ jobs:
           mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release ..
           make -j$(nproc)
+
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
 
       - name: Build fuzz_tx_validation
         run: |
@@ -171,6 +181,11 @@ jobs:
           cmake -DCMAKE_BUILD_TYPE=Release ..
           make -j$(nproc)
 
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
+
       - name: Build fuzz_utxo
         run: |
           make fuzz_utxo
@@ -235,6 +250,11 @@ jobs:
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
+
       - name: Build and run fuzzer
         run: |
           make fuzz_block
@@ -289,6 +309,11 @@ jobs:
         run: |
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
 
       - name: Build and run fuzzer
         run: |
@@ -345,6 +370,11 @@ jobs:
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
+
       - name: Build and run fuzzer
         run: |
           make fuzz_transaction
@@ -388,11 +418,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev
+
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
 
       - name: Build and run fuzzer
         run: |
@@ -436,11 +473,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev
+
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
 
       - name: Build and run fuzzer
         run: |
@@ -484,11 +528,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 libfuzzer-14-dev
+
+      - name: Build Dilithium objects
+        run: |
+          cd depends/dilithium/ref
+          gcc -O2 -DDILITHIUM_MODE=3 -I . -c sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c symmetric-shake.c fips202.c randombytes.c
 
       - name: Build and run fuzzer
         run: |
