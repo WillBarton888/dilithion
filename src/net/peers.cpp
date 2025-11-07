@@ -314,14 +314,32 @@ void CPeerManager::InitializeSeedNodes() {
     // Format: IPv4 mapped to IPv6
     seed_nodes.clear();
 
-    // PRODUCTION SEED NODE #1: Official Testnet Seed (DigitalOcean Australia)
-    // IP: 170.64.203.134, Port: 18444 (testnet), 24/7 uptime, Up to 117 connections
-    NetProtocol::CAddress official_seed1;
-    official_seed1.services = NetProtocol::NODE_NETWORK;
-    official_seed1.SetIPv4(0xAA40CB86);  // 170.64.203.134
-    official_seed1.port = NetProtocol::TESTNET_PORT;
-    official_seed1.time = GetTime();
-    seed_nodes.push_back(official_seed1);
+    // TESTNET SEED NODE #1: NYC (DigitalOcean NYC3)
+    // IP: 134.122.4.164, Port: 18444 (testnet)
+    NetProtocol::CAddress seed_nyc;
+    seed_nyc.services = NetProtocol::NODE_NETWORK;
+    seed_nyc.SetIPv4(0x867A04A4);  // 134.122.4.164
+    seed_nyc.port = NetProtocol::TESTNET_PORT;
+    seed_nyc.time = GetTime();
+    seed_nodes.push_back(seed_nyc);
+
+    // TESTNET SEED NODE #2: London (DigitalOcean LON1)
+    // IP: 209.97.177.197, Port: 18444 (testnet)
+    NetProtocol::CAddress seed_london;
+    seed_london.services = NetProtocol::NODE_NETWORK;
+    seed_london.SetIPv4(0xD161B1C5);  // 209.97.177.197
+    seed_london.port = NetProtocol::TESTNET_PORT;
+    seed_london.time = GetTime();
+    seed_nodes.push_back(seed_london);
+
+    // TESTNET SEED NODE #3: Singapore (DigitalOcean SGP1)
+    // IP: 188.166.255.63, Port: 18444 (testnet)
+    NetProtocol::CAddress seed_singapore;
+    seed_singapore.services = NetProtocol::NODE_NETWORK;
+    seed_singapore.SetIPv4(0xBCA6FF3F);  // 188.166.255.63
+    seed_singapore.port = NetProtocol::TESTNET_PORT;
+    seed_singapore.time = GetTime();
+    seed_nodes.push_back(seed_singapore);
 
     // FUTURE: Add more seed nodes as they become available
     // Community operators can run seed nodes and submit them via GitHub
