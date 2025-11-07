@@ -1081,6 +1081,36 @@ int main(int argc, char* argv[]) {
             std::cout << "  P2P accept thread stopping..." << std::endl;
         });
 
+        // Helper function to parse IPv4 address string to uint32_t
+        auto parseIPv4 = [](const std::string& ip) -> uint32_t {
+            if (ip == "localhost") {
+                return 0x7F000001;  // 127.0.0.1
+            }
+
+            // Parse dotted decimal notation (e.g., "134.122.4.164")
+            uint32_t result = 0;
+            int shift = 24;
+            size_t start = 0;
+            int octet_count = 0;
+
+            for (size_t i = 0; i <= ip.length(); ++i) {
+                if (i == ip.length() || ip[i] == '.') {
+                    if (i > start) {
+                        int octet = std::stoi(ip.substr(start, i - start));
+                        if (octet < 0 || octet > 255) {
+                            return 0;  // Invalid octet
+                        }
+                        result |= (static_cast<uint32_t>(octet) << shift);
+                        shift -= 8;
+                        octet_count++;
+                    }
+                    start = i + 1;
+                }
+            }
+
+            return (octet_count == 4) ? result : 0;
+        };
+
         // Initiate outbound connections for --connect nodes
         if (!config.connect_nodes.empty()) {
             std::cout << "Initiating outbound connections..." << std::endl;
@@ -1114,10 +1144,13 @@ int main(int argc, char* argv[]) {
                     addr.services = NetProtocol::NODE_NETWORK;
                     addr.port = port;
 
-                    // Simple IP parsing (127.0.0.1 style)
-                    if (ip == "127.0.0.1" || ip == "localhost") {
-                        addr.SetIPv4(0x7F000001);
+                    // Parse IPv4 address
+                    uint32_t ip_addr = parseIPv4(ip);
+                    if (ip_addr == 0) {
+                        std::cerr << "    [FAIL] Invalid IP address: " << ip << std::endl;
+                        continue;
                     }
+                    addr.SetIPv4(ip_addr);
 
                     int peer_id = connection_manager.ConnectToPeer(addr);
                     if (peer_id >= 0) {
@@ -1171,9 +1204,13 @@ int main(int argc, char* argv[]) {
                     addr.services = NetProtocol::NODE_NETWORK;
                     addr.port = port;
 
-                    if (ip == "127.0.0.1" || ip == "localhost") {
-                        addr.SetIPv4(0x7F000001);
+                    // Parse IPv4 address
+                    uint32_t ip_addr = parseIPv4(ip);
+                    if (ip_addr == 0) {
+                        std::cerr << "    [FAIL] Invalid IP address: " << ip << std::endl;
+                        continue;
                     }
+                    addr.SetIPv4(ip_addr);
 
                     int peer_id = connection_manager.ConnectToPeer(addr);
                     if (peer_id >= 0) {
