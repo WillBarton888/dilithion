@@ -1,0 +1,162 @@
+# Dilithion Testnet Monitoring - Prometheus Configuration
+# Monitors 3 testnet seed nodes: NYC, London, Singapore
+# Copyright (c) 2025 The Dilithion Core developers
+# Distributed under the MIT software license
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+  external_labels:
+    cluster: 'dilithion-testnet'
+    network: 'testnet'
+    environment: 'testnet'
+
+# ==============================================================================
+# Scrape Configurations
+# ==============================================================================
+scrape_configs:
+
+  # --------------------------------------------------------------------------
+  # Prometheus Self-Monitoring
+  # --------------------------------------------------------------------------
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          instance: 'prometheus'
+          component: 'monitoring'
+
+  # --------------------------------------------------------------------------
+  # NYC Node - System Metrics (node_exporter)
+  # --------------------------------------------------------------------------
+  - job_name: 'testnet-nyc-system'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['134.122.4.164:9100']
+        labels:
+          instance: 'testnet-nyc'
+          location: 'New York'
+          network: 'testnet'
+          node_type: 'seed-node'
+
+  # --------------------------------------------------------------------------
+  # London Node - System Metrics (node_exporter)
+  # --------------------------------------------------------------------------
+  - job_name: 'testnet-london-system'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['209.97.177.197:9100']
+        labels:
+          instance: 'testnet-london'
+          location: 'London'
+          network: 'testnet'
+          node_type: 'seed-node'
+
+  # --------------------------------------------------------------------------
+  # Singapore Node - System Metrics (node_exporter)
+  # --------------------------------------------------------------------------
+  - job_name: 'testnet-singapore-system'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['188.166.255.63:9100']
+        labels:
+          instance: 'testnet-singapore'
+          location: 'Singapore'
+          network: 'testnet'
+          node_type: 'seed-node'
+
+# ==============================================================================
+# Key Metrics to Monitor (Available via node_exporter)
+# ==============================================================================
+#
+# SYSTEM METRICS:
+#   - node_cpu_seconds_total              CPU usage
+#   - node_memory_MemAvailable_bytes      Available memory
+#   - node_memory_MemTotal_bytes          Total memory
+#   - node_disk_io_time_seconds_total     Disk I/O time
+#   - node_filesystem_avail_bytes         Disk space available
+#   - node_filesystem_size_bytes          Total disk space
+#   - node_network_receive_bytes_total    Network bytes received
+#   - node_network_transmit_bytes_total   Network bytes transmitted
+#   - node_load1                          1-minute load average
+#   - node_load5                          5-minute load average
+#   - node_load15                         15-minute load average
+#
+# USEFUL QUERIES:
+#
+# CPU usage %:
+#   100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+#
+# Memory usage %:
+#   (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+#
+# Disk usage %:
+#   (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100
+#
+# Network bandwidth (received, bytes/sec):
+#   rate(node_network_receive_bytes_total[5m])
+#
+# Network bandwidth (transmitted, bytes/sec):
+#   rate(node_network_transmit_bytes_total[5m])
+#
+# ==============================================================================
+# Setup Instructions
+# ==============================================================================
+#
+# 1. INSTALL NODE_EXPORTER ON ALL 3 NODES:
+#
+#    On each node (NYC, London, Singapore):
+#
+#    docker run -d \
+#      --name node_exporter \
+#      --restart unless-stopped \
+#      -p 9100:9100 \
+#      prom/node-exporter
+#
+#    Or install natively:
+#
+#    wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+#    tar xvfz node_exporter-1.7.0.linux-amd64.tar.gz
+#    cd node_exporter-1.7.0.linux-amd64
+#    nohup ./node_exporter &
+#
+# 2. OPEN FIREWALL ON ALL 3 NODES:
+#
+#    sudo ufw allow from 134.122.4.164 to any port 9100
+#
+# 3. DEPLOY PROMETHEUS ON NYC NODE:
+#
+#    docker run -d \
+#      --name prometheus \
+#      --restart unless-stopped \
+#      -p 9090:9090 \
+#      -v /root/dilithion/monitoring/prometheus-testnet.yml:/etc/prometheus/prometheus.yml:ro \
+#      -v prometheus-data:/prometheus \
+#      prom/prometheus
+#
+# 4. DEPLOY GRAFANA ON NYC NODE:
+#
+#    docker run -d \
+#      --name grafana \
+#      --restart unless-stopped \
+#      -p 3000:3000 \
+#      -v grafana-data:/var/lib/grafana \
+#      -e GF_SECURITY_ADMIN_PASSWORD=changeme \
+#      grafana/grafana
+#
+# 5. ACCESS GRAFANA:
+#
+#    http://134.122.4.164:3000
+#    Username: admin
+#    Password: changeme
+#
+# 6. ADD PROMETHEUS DATA SOURCE IN GRAFANA:
+#
+#    - Go to Configuration > Data Sources
+#    - Add Prometheus
+#    - URL: http://localhost:9090
+#    - Save & Test
+#
+# ==============================================================================
