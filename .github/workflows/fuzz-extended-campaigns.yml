@@ -3,8 +3,8 @@ name: Fuzzing Extended Campaigns
 on:
   workflow_dispatch:  # Manual trigger
     inputs:
-      duration_hours:
-        description: 'Campaign duration per fuzzer (hours)'
+      tier1_hours:
+        description: 'Tier 1 (Consensus-critical) duration (hours)'
         required: true
         default: '6'
         type: choice
@@ -12,6 +12,21 @@ on:
           - '2'
           - '4'
           - '6'
+      tier2_hours:
+        description: 'Tier 2 (High-priority) duration (hours)'
+        required: true
+        default: '4'
+        type: choice
+        options:
+          - '2'
+          - '4'
+      tier3_hours:
+        description: 'Tier 3 (Fast fuzzers) duration (hours)'
+        required: true
+        default: '2'
+        type: choice
+        options:
+          - '2'
   schedule:
     # Run nightly at 2 AM UTC (optional)
     - cron: '0 2 * * *'
@@ -32,28 +47,23 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
-      - name: Build RandomX dependency
+      - name: Build dependencies
         run: |
-          cd depends/randomx
-          mkdir -p build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
-
-      - name: Build Dilithium library
-        run: |
-          cd depends/dilithium
-          make -j$(nproc)
+          # Build RandomX library
+          cd depends/randomx && mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
       - name: Build fuzz_difficulty
         run: |
-          make fuzz_difficulty
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_difficulty
 
       - name: Run fuzzing campaign
         run: |
           mkdir -p fuzz_corpus/difficulty
-          DURATION=${{ github.event.inputs.duration_hours || '6' }}
+          DURATION=${{ github.event.inputs.tier1_hours || '6' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_difficulty \
@@ -102,28 +112,23 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
-      - name: Build RandomX dependency
+      - name: Build dependencies
         run: |
-          cd depends/randomx
-          mkdir -p build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
-
-      - name: Build Dilithium library
-        run: |
-          cd depends/dilithium
-          make -j$(nproc)
+          # Build RandomX library
+          cd depends/randomx && mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
       - name: Build fuzz_tx_validation
         run: |
-          make fuzz_tx_validation
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_tx_validation
 
       - name: Run fuzzing campaign
         run: |
           mkdir -p fuzz_corpus/tx_validation
-          DURATION=${{ github.event.inputs.duration_hours || '6' }}
+          DURATION=${{ github.event.inputs.tier1_hours || '6' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_tx_validation \
@@ -172,28 +177,23 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
-      - name: Build RandomX dependency
+      - name: Build dependencies
         run: |
-          cd depends/randomx
-          mkdir -p build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
-
-      - name: Build Dilithium library
-        run: |
-          cd depends/dilithium
-          make -j$(nproc)
+          # Build RandomX library
+          cd depends/randomx && mkdir -p build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
       - name: Build fuzz_utxo
         run: |
-          make fuzz_utxo
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_utxo
 
       - name: Run fuzzing campaign
         run: |
           mkdir -p fuzz_corpus/utxo
-          DURATION=${{ github.event.inputs.duration_hours || '6' }}
+          DURATION=${{ github.event.inputs.tier1_hours || '6' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_utxo \
@@ -243,19 +243,20 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
+          # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
-          cd ../../dilithium && make -j$(nproc)
 
       - name: Build and run fuzzer
         run: |
-          make fuzz_block
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_block
           mkdir -p fuzz_corpus/block
-          DURATION=${{ github.event.inputs.duration_hours || '4' }}
+          DURATION=${{ github.event.inputs.tier2_hours || '4' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_block \
@@ -299,19 +300,20 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
+          # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
-          cd ../../dilithium && make -j$(nproc)
 
       - name: Build and run fuzzer
         run: |
-          make fuzz_merkle
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_merkle
           mkdir -p fuzz_corpus/merkle
-          DURATION=${{ github.event.inputs.duration_hours || '4' }}
+          DURATION=${{ github.event.inputs.tier2_hours || '4' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_merkle \
@@ -355,19 +357,20 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential
+          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
+          # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
-          cd ../../dilithium && make -j$(nproc)
 
       - name: Build and run fuzzer
         run: |
-          make fuzz_transaction
+          # Makefile automatically builds all required object files
+          FUZZ_CXX=clang++-14 make fuzz_transaction
           mkdir -p fuzz_corpus/transaction
-          DURATION=${{ github.event.inputs.duration_hours || '4' }}
+          DURATION=${{ github.event.inputs.tier2_hours || '4' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_transaction \
@@ -406,6 +409,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
@@ -414,9 +419,10 @@ jobs:
 
       - name: Build and run fuzzer
         run: |
-          make fuzz_subsidy
+          # Makefile automatically builds all required object files (including Dilithium)
+          FUZZ_CXX=clang++-14 make fuzz_subsidy
           mkdir -p fuzz_corpus/subsidy
-          DURATION=${{ github.event.inputs.duration_hours || '2' }}
+          DURATION=${{ github.event.inputs.tier3_hours || '2' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_subsidy \
@@ -454,6 +460,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
@@ -462,9 +470,10 @@ jobs:
 
       - name: Build and run fuzzer
         run: |
-          make fuzz_compactsize
+          # Makefile automatically builds all required object files (including Dilithium)
+          FUZZ_CXX=clang++-14 make fuzz_compactsize
           mkdir -p fuzz_corpus/compactsize
-          DURATION=${{ github.event.inputs.duration_hours || '2' }}
+          DURATION=${{ github.event.inputs.tier3_hours || '2' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_compactsize \
@@ -502,6 +511,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
@@ -510,9 +521,10 @@ jobs:
 
       - name: Build and run fuzzer
         run: |
-          make fuzz_sha3
+          # Makefile automatically builds all required object files (including Dilithium)
+          FUZZ_CXX=clang++-14 make fuzz_sha3
           mkdir -p fuzz_corpus/sha3
-          DURATION=${{ github.event.inputs.duration_hours || '2' }}
+          DURATION=${{ github.event.inputs.tier3_hours || '2' }}
           DURATION_SECONDS=$((DURATION * 3600))
 
           timeout ${DURATION_SECONDS}s ./fuzz_sha3 \
@@ -560,7 +572,10 @@ jobs:
           echo "# Fuzzing Campaign Results" > summary.md
           echo "" >> summary.md
           echo "**Date:** $(date)" >> summary.md
-          echo "**Duration:** ${{ github.event.inputs.duration_hours || 'default' }} hours per tier" >> summary.md
+          echo "**Duration:**" >> summary.md
+          echo "- Tier 1 (Consensus): ${{ github.event.inputs.tier1_hours || '6' }} hours" >> summary.md
+          echo "- Tier 2 (High-priority): ${{ github.event.inputs.tier2_hours || '4' }} hours" >> summary.md
+          echo "- Tier 3 (Fast): ${{ github.event.inputs.tier3_hours || '2' }} hours" >> summary.md
           echo "" >> summary.md
 
           echo "## Results by Fuzzer" >> summary.md

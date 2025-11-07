@@ -346,7 +346,8 @@ $(OBJ_DIR)/primitives \
 $(OBJ_DIR)/rpc \
 $(OBJ_DIR)/wallet \
 $(OBJ_DIR)/util \
-$(OBJ_DIR)/test:
+$(OBJ_DIR)/test \
+$(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
@@ -363,6 +364,11 @@ $(OBJ_DIR)/%.o: %.cpp | $(OBJ_DIR)
 $(DILITHIUM_DIR)/%.o: $(DILITHIUM_DIR)/%.c
 	@echo "$(COLOR_BLUE)[CC]$(COLOR_RESET)   $<"
 	@gcc $(CFLAGS) -DDILITHIUM_MODE=3 -I $(DILITHIUM_DIR) -c $< -o $@
+
+# Fuzzer harness files (MUST compile with sanitizers for libFuzzer integration)
+$(OBJ_DIR)/test/fuzz/%.o: src/test/fuzz/%.cpp | $(OBJ_DIR)/test/fuzz
+	@echo "$(COLOR_BLUE)[FUZZ-CXX]$(COLOR_RESET) $<"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -c $< -o $@
 
 # ============================================================================
 # Dependencies
@@ -528,7 +534,32 @@ quality: analyze
 # ============================================================================
 # Fuzz Testing (libFuzzer)
 # ============================================================================
-
+#
+# ARCHITECTURE: Pre-compiled object file approach
+#
+# This build system uses pre-compiled object files to avoid linker errors in
+# CI environments. The architecture mirrors the proven test_dilithion pattern.
+#
+# STRUCTURE:
+#   1. Fuzzer harness files (.cpp) → compiled WITH sanitizers → harness.o
+#   2. Dependency files (.cpp) → compiled WITHOUT sanitizers → deps.o
+#   3. Dilithium library (.c) → compiled with gcc → dilithium/*.o
+#   4. Link: harness.o + deps.o + dilithium/*.o → fuzzer binary
+#
+# WHY THIS WORKS:
+#   - Make automatically builds all prerequisite .o files first
+#   - Fuzzer harness gets proper libFuzzer instrumentation
+#   - Dependencies use standard compilation (no ABI issues)
+#   - Works identically in local and CI (no cached state needed)
+#
+# WHY DIRECT .cpp COMPILATION FAILS:
+#   - Old approach: fuzz_block: harness.cpp block.cpp ... $(DILITHIUM_OBJECTS)
+#   - Clang compiles each .cpp separately without full instrumentation
+#   - Linker receives incomplete objects → "undefined reference" errors
+#   - Worked locally only due to cached .o files from previous builds
+#
+# FOR MORE DETAILS: See docs/FUZZING-BUILD-SYSTEM.md
+#
 # Fuzz test compiler (requires Clang with libFuzzer support)
 # Try clang++-14 first, fall back to clang++ (any version), or use environment variable
 FUZZ_CXX ?= $(shell command -v clang++-14 2>/dev/null || command -v clang++ 2>/dev/null || echo clang++)
@@ -547,6 +578,33 @@ FUZZ_SUBSIDY_SOURCE := src/test/fuzz/fuzz_subsidy.cpp
 FUZZ_MERKLE_SOURCE := src/test/fuzz/fuzz_merkle.cpp
 FUZZ_TX_VALIDATION_SOURCE := src/test/fuzz/fuzz_tx_validation.cpp
 FUZZ_UTXO_SOURCE := src/test/fuzz/fuzz_utxo.cpp
+
+# Fuzzer object files (compiled WITH sanitizers) - harness code only
+FUZZ_SHA3_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_sha3.o
+FUZZ_TRANSACTION_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_transaction.o
+FUZZ_BLOCK_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_block.o
+FUZZ_COMPACTSIZE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_compactsize.o
+FUZZ_NETWORK_MSG_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_network_message.o
+FUZZ_ADDRESS_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_address.o
+FUZZ_DIFFICULTY_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_difficulty.o
+FUZZ_SUBSIDY_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_subsidy.o
+FUZZ_MERKLE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_merkle.o
+FUZZ_TX_VALIDATION_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_tx_validation.o
+FUZZ_UTXO_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_utxo.o
+
+# Common fuzzer dependencies (compiled WITHOUT sanitizers) - linked library code
+FUZZ_COMMON_OBJECTS := $(OBJ_DIR)/crypto/sha3.o \
+                       $(OBJ_DIR)/primitives/transaction.o \
+                       $(OBJ_DIR)/primitives/block.o \
+                       $(OBJ_DIR)/core/chainparams.o \
+                       $(OBJ_DIR)/crypto/randomx_hash.o
+
+FUZZ_CONSENSUS_OBJECTS := $(OBJ_DIR)/consensus/pow.o \
+                          $(OBJ_DIR)/consensus/fees.o \
+                          $(OBJ_DIR)/consensus/tx_validation.o \
+                          $(OBJ_DIR)/consensus/validation.o
+
+FUZZ_NODE_OBJECTS := $(OBJ_DIR)/node/utxo_set.o
 
 # Fuzz test binaries
 FUZZ_SHA3 := fuzz_sha3
@@ -568,59 +626,75 @@ fuzz: fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_messag
 	@echo "  With corpus: ./fuzz_transaction fuzz_corpus/transaction/"
 	@echo "  Time limit: ./fuzz_block -max_total_time=60"
 
-fuzz_sha3: $(FUZZ_SHA3_SOURCE) src/crypto/sha3.cpp $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@..."
-	@if command -v $(FUZZ_CXX) >/dev/null 2>&1; then \
-		$(FUZZ_CXX) $(FUZZ_CXXFLAGS) \
-			$(FUZZ_SHA3_SOURCE) \
-			src/crypto/sha3.cpp \
-			$(DILITHIUM_OBJECTS) \
-			-o $(FUZZ_SHA3); \
-		echo "$(COLOR_GREEN)✓ Fuzz harness built: $(FUZZ_SHA3)$(COLOR_RESET)"; \
-	else \
-		echo "$(COLOR_YELLOW)⚠ $(FUZZ_CXX) not found. Fuzz testing requires Clang with libFuzzer support.$(COLOR_RESET)"; \
-		exit 1; \
-	fi
+# Fuzz Testing (libFuzzer) - Pre-compiled object file architecture
+# Uses proven pattern from test_dilithion: harness + dependencies as .o files
+# Avoids CI linker errors from direct .cpp compilation with sanitizers
 
-fuzz_transaction: $(FUZZ_TRANSACTION_SOURCE) $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (3 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_sha3: Minimal dependencies (SHA3 only)
+fuzz_sha3: $(FUZZ_SHA3_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_block: $(FUZZ_BLOCK_SOURCE) $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (4 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_transaction: Block + transaction dependencies
+fuzz_transaction: $(FUZZ_TRANSACTION_OBJ) $(FUZZ_COMMON_OBJECTS) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (3 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_compactsize: $(FUZZ_COMPACTSIZE_SOURCE) $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (5 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_block: Block header dependencies
+fuzz_block: $(FUZZ_BLOCK_OBJ) $(FUZZ_COMMON_OBJECTS) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_network_message: $(FUZZ_NETWORK_MSG_SOURCE) src/crypto/sha3.cpp $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (5 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_compactsize: No external dependencies
+fuzz_compactsize: $(FUZZ_COMPACTSIZE_OBJ) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (5 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_address: $(FUZZ_ADDRESS_SOURCE) src/crypto/sha3.cpp $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (5 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_network_message: SHA3 dependency
+fuzz_network_message: $(FUZZ_NETWORK_MSG_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (5 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_difficulty: $(FUZZ_DIFFICULTY_SOURCE) $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (6 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_address: SHA3 dependency
+fuzz_address: $(FUZZ_ADDRESS_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (5 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_subsidy: $(FUZZ_SUBSIDY_SOURCE) $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (7 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_difficulty: Consensus dependencies
+fuzz_difficulty: $(FUZZ_DIFFICULTY_OBJ) $(FUZZ_COMMON_OBJECTS) $(OBJ_DIR)/consensus/pow.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (6 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_merkle: $(FUZZ_MERKLE_SOURCE) src/crypto/sha3.cpp $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (7 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@
+# fuzz_subsidy: No external dependencies
+fuzz_subsidy: $(FUZZ_SUBSIDY_OBJ) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (7 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_tx_validation: $(FUZZ_TX_VALIDATION_SOURCE) src/primitives/transaction.cpp src/primitives/block.cpp src/consensus/tx_validation.cpp src/consensus/fees.cpp src/consensus/validation.cpp src/consensus/pow.cpp src/core/chainparams.cpp src/node/utxo_set.cpp src/crypto/sha3.cpp src/crypto/randomx_hash.cpp $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (4 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@ -L depends/randomx/build -lleveldb -lrandomx -lpthread
+# fuzz_merkle: SHA3 dependency
+fuzz_merkle: $(FUZZ_MERKLE_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (7 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-fuzz_utxo: $(FUZZ_UTXO_SOURCE) src/primitives/transaction.cpp src/primitives/block.cpp src/consensus/tx_validation.cpp src/consensus/fees.cpp src/consensus/validation.cpp src/consensus/pow.cpp src/core/chainparams.cpp src/node/utxo_set.cpp src/crypto/sha3.cpp src/crypto/randomx_hash.cpp $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ]$(COLOR_RESET) Building $@ (4 targets)..."
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) $^ -o $@ -L depends/randomx/build -lleveldb -lrandomx -lpthread
+# fuzz_tx_validation: Full consensus + UTXO dependencies
+fuzz_tx_validation: $(FUZZ_TX_VALIDATION_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lleveldb -lrandomx -lpthread
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_utxo: Full consensus + UTXO dependencies
+fuzz_utxo: $(FUZZ_UTXO_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lleveldb -lrandomx -lpthread
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # Run fuzz tests (short run for CI)
 run_fuzz: fuzz
