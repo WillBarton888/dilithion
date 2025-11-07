@@ -6,6 +6,7 @@
 #include <leveldb/options.h>
 #include <cstring>
 #include <iostream>
+#include <filesystem>
 
 CBlockchainDB::CBlockchainDB() : db(nullptr) {}
 
@@ -21,6 +22,16 @@ bool CBlockchainDB::Open(const std::string& path, bool create_if_missing) {
     }
 
     datadir = path;
+
+    // Create directory if it doesn't exist (LevelDB requires parent directory to exist)
+    if (create_if_missing) {
+        try {
+            std::filesystem::create_directories(path);
+        } catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "Failed to create database directory: " << e.what() << std::endl;
+            return false;
+        }
+    }
 
     leveldb::Options options;
     options.create_if_missing = create_if_missing;
