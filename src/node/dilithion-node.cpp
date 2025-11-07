@@ -1229,6 +1229,33 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Automatically connect to hardcoded seed nodes (unless --connect or --addnode specified)
+        if (config.connect_nodes.empty() && config.add_nodes.empty()) {
+            std::cout << "Connecting to seed nodes..." << std::endl;
+            auto seeds = g_peer_manager->GetSeedNodes();
+
+            for (const auto& seed_addr : seeds) {
+                std::string ip_str = seed_addr.ToStringIP();
+                uint16_t port = seed_addr.port;
+
+                std::cout << "  Connecting to " << ip_str << ":" << port << "..." << std::endl;
+
+                int peer_id = connection_manager.ConnectToPeer(seed_addr);
+                if (peer_id >= 0) {
+                    std::cout << "    [OK] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
+
+                    // Perform version/verack handshake
+                    if (connection_manager.PerformHandshake(peer_id)) {
+                        std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
+                    } else {
+                        std::cout << "    [FAIL] Failed to send version to peer " << peer_id << std::endl;
+                    }
+                } else {
+                    std::cout << "    [FAIL] Failed to connect to " << ip_str << ":" << port << std::endl;
+                }
+            }
+        }
+
         // Launch P2P message receive thread
         std::thread p2p_recv_thread([&connection_manager]() {
             std::cout << "  [OK] P2P receive thread started" << std::endl;
