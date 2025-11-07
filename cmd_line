@@ -1,0 +1,1 @@
+genhtml coverage-filtered.info --output-directory coverage-report --title 'Dilithion Coverage Report' --legend --show-details --ignore-errors mismatch

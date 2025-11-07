@@ -3,7 +3,21 @@
     "allow": [
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(gh run watch:*)"
+      "Bash(gh run watch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git add:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(ssh:*)",
+      "Bash(mkdir:*)",
+      "Bash(gh release:*)",
+      "Bash(git log:*)",
+      "Bash(gh pr list:*)",
+      "Bash(xargs -I {} bash -c 'echo \"\"\"\"=== {} ===\"\"\"\" && head -5 {}')",
+      "Bash(make test_dilithion:*)",
+      "Bash(./test_dilithion:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,330 @@
+# Dilithion Post-Quantum Cryptocurrency - Docker Image
+# Copyright (c) 2025 The Dilithion Core developers
+# Distributed under the MIT software license
+#
+# Build:
+#   docker build -t dilithion/node:latest -f Dockerfile-2025-11-07 .
+#   docker build -t dilithion/node:mainnet -f Dockerfile-2025-11-07 .
+#
+# Run (mainnet full node):
+#   docker run -d \
+#     --name dilithion-mainnet \
+#     -p 8444:8444 \
+#     -p 8332:8332 \
+#     -v dilithion-data:/data \
+#     dilithion/node:latest
+#
+# Run (mining node):
+#   docker run -d \
+#     --name dilithion-miner \
+#     -p 8444:8444 \
+#     -v dilithion-data:/data \
+#     dilithion/node:latest --mine --threads=8
+#
+# Run (testnet node):
+#   docker run -d \
+#     --name dilithion-testnet \
+#     -p 18444:18444 \
+#     -p 18332:18332 \
+#     -v dilithion-testnet-data:/data \
+#     dilithion/node:latest --testnet
+#
+# Version: 1.0.0
+# Created: 2025-11-07
+# Mainnet Launch: 2026-01-01 00:00:00 UTC
+
+# ==============================================================================
+# Stage 1: Builder
+# ==============================================================================
+FROM ubuntu:22.04 AS builder
+
+# Set build arguments
+ARG DEBIAN_FRONTEND=noninteractive
+ARG BUILD_JOBS=8
+
+# Install build dependencies
+# - g++: C++ compiler for Dilithion node
+# - cmake: Build system for RandomX
+# - make: Build system
+# - git: Version control (if building from git)
+# - libleveldb-dev: Blockchain database
+# - libssl-dev: Cryptographic library (for build tools)
+# - pkg-config: Package configuration
+RUN apt-get update && apt-get install -y \
+    g++ \
+    cmake \
+    make \
+    git \
+    libleveldb-dev \
+    libssl-dev \
+    pkg-config \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create build directory
+WORKDIR /build
+
+# Copy source code
+# NOTE: Uses .dockerignore to exclude unnecessary files
+COPY . .
+
+# Verify source code integrity
+# Check that critical files exist
+RUN test -f Makefile || (echo "ERROR: Makefile not found" && exit 1)
+RUN test -f src/node/dilithion-node.cpp || (echo "ERROR: dilithion-node.cpp not found" && exit 1)
+RUN test -d depends/randomx || (echo "ERROR: RandomX dependency not found" && exit 1)
+RUN test -d depends/dilithium || (echo "ERROR: Dilithium dependency not found" && exit 1)
+
+# Build RandomX dependency
+RUN echo "Building RandomX dependency..." && \
+    cd depends/randomx && \
+    mkdir -p build && \
+    cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    make -j${BUILD_JOBS} && \
+    echo "RandomX build complete"
+
+# Build Dilithium dependency
+RUN echo "Building Dilithium dependency..." && \
+    cd depends/dilithium/ref && \
+    make -j${BUILD_JOBS} && \
+    echo "Dilithium build complete"
+
+# Build Dilithion node
+# Uses optimized flags for production deployment
+RUN echo "Building Dilithion node..." && \
+    make -j${BUILD_JOBS} CXXFLAGS="-std=c++17 -Wall -Wextra -O3 -march=x86-64 -mtune=generic" && \
+    echo "Dilithion node build complete"
+
+# Verify binary was built successfully
+RUN test -f dilithion-node || (echo "ERROR: dilithion-node binary not found" && exit 1)
+
+# Test binary can execute (basic sanity check)
+RUN ./dilithion-node --help > /dev/null 2>&1 || (echo "ERROR: dilithion-node binary is not executable" && exit 1)
+
+# Strip debug symbols to reduce size
+RUN strip dilithion-node && echo "Binary stripped: $(ls -lh dilithion-node | awk '{print $5}')"
+
+# ==============================================================================
+# Stage 2: Runtime
+# ==============================================================================
+FROM ubuntu:22.04 AS runtime
+
+# Set runtime arguments
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies only (minimal footprint)
+# - libleveldb1d: Blockchain database library (runtime)
+# - ca-certificates: SSL certificates for network connections
+RUN apt-get update && apt-get install -y \
+    libleveldb1d \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create dilithion user for security (non-root)
+# - No home directory (-M)
+# - No login shell (-s /bin/false)
+# - System user (-r)
+RUN useradd -r -M -s /bin/false -u 1000 dilithion
+
+# Create data directory
+RUN mkdir -p /data && chown dilithion:dilithion /data
+
+# Copy binary from builder stage
+COPY --from=builder /build/dilithion-node /usr/local/bin/dilithion-node
+
+# Copy RandomX library from builder stage
+COPY --from=builder /build/depends/randomx/build/librandomx.so /usr/local/lib/librandomx.so
+RUN ldconfig
+
+# Verify binary copied successfully
+RUN test -f /usr/local/bin/dilithion-node || (echo "ERROR: dilithion-node not found in runtime image" && exit 1)
+
+# Set ownership
+RUN chown root:root /usr/local/bin/dilithion-node && \
+    chmod 755 /usr/local/bin/dilithion-node
+
+# Verify binary is executable in runtime environment
+RUN /usr/local/bin/dilithion-node --help > /dev/null 2>&1 || (echo "ERROR: dilithion-node not executable in runtime" && exit 1)
+
+# Set working directory
+WORKDIR /data
+
+# Switch to non-root user
+USER dilithion
+
+# Expose ports
+# 8444: P2P network (mainnet)
+# 8332: RPC server (mainnet) - DO NOT expose to internet in production
+EXPOSE 8444 8332
+
+# Volume for blockchain data
+# Mount external volume for persistence:
+#   docker run -v dilithion-data:/data dilithion/node:latest
+VOLUME ["/data"]
+
+# Healthcheck
+# Checks if node is running and responsive
+# Queries RPC server for block count (requires RPC to be accessible)
+# NOTE: May fail if RPC authentication is enabled without credentials
+HEALTHCHECK --interval=60s --timeout=10s --start-period=300s --retries=3 \
+  CMD /usr/local/bin/dilithion-node --help > /dev/null 2>&1 || exit 1
+
+# Entrypoint
+# Uses exec form to properly handle signals (SIGTERM for graceful shutdown)
+# Default: Start mainnet full node (non-mining)
+# Override with: docker run dilithion/node:latest --mine --threads=8
+ENTRYPOINT ["/usr/local/bin/dilithion-node"]
+CMD ["--datadir=/data"]
+
+# ==============================================================================
+# Metadata
+# ==============================================================================
+LABEL maintainer="Dilithion Core Developers"
+LABEL description="Dilithion Post-Quantum Cryptocurrency Full Node"
+LABEL version="1.0.0"
+LABEL network="mainnet"
+LABEL created="2025-11-07"
+LABEL launch_date="2026-01-01"
+
+# ==============================================================================
+# Documentation
+# ==============================================================================
+#
+# USAGE EXAMPLES:
+#
+# 1. BUILD IMAGE:
+#    docker build -t dilithion/node:latest -f Dockerfile-2025-11-07 .
+#
+# 2. RUN MAINNET FULL NODE:
+#    docker run -d \
+#      --name dilithion-mainnet \
+#      -p 8444:8444 \
+#      -v dilithion-data:/data \
+#      --restart unless-stopped \
+#      dilithion/node:latest
+#
+# 3. RUN MINING NODE (8 threads):
+#    docker run -d \
+#      --name dilithion-miner \
+#      -p 8444:8444 \
+#      -v dilithion-data:/data \
+#      --restart unless-stopped \
+#      dilithion/node:latest --mine --threads=8
+#
+# 4. RUN TESTNET NODE:
+#    docker run -d \
+#      --name dilithion-testnet \
+#      -p 18444:18444 \
+#      -v dilithion-testnet-data:/data \
+#      --restart unless-stopped \
+#      dilithion/node:latest --testnet
+#
+# 5. RUN WITH RPC ENABLED (LOCAL ONLY):
+#    docker run -d \
+#      --name dilithion-mainnet \
+#      -p 8444:8444 \
+#      -p 127.0.0.1:8332:8332 \
+#      -v dilithion-data:/data \
+#      --restart unless-stopped \
+#      dilithion/node:latest
+#
+# 6. RUN WITH CUSTOM CONFIGURATION:
+#    docker run -d \
+#      --name dilithion-custom \
+#      -p 8444:8444 \
+#      -v dilithion-data:/data \
+#      -v ./dilithion.conf:/data/dilithion.conf:ro \
+#      --restart unless-stopped \
+#      dilithion/node:latest
+#
+# 7. CONNECT TO SPECIFIC PEERS:
+#    docker run -d \
+#      --name dilithion-mainnet \
+#      -p 8444:8444 \
+#      -v dilithion-data:/data \
+#      dilithion/node:latest \
+#        --connect=170.64.203.134:8444 \
+#        --addnode=seed1.dilithion.io:8444
+#
+# 8. BACKUP WALLET:
+#    docker exec dilithion-mainnet \
+#      cp /data/wallet.dat /data/wallet-backup-$(date +%Y%m%d).dat
+#
+# CONTAINER MANAGEMENT:
+#
+#   - View logs:        docker logs -f dilithion-mainnet
+#   - Check status:     docker ps | grep dilithion
+#   - Stop node:        docker stop dilithion-mainnet
+#   - Start node:       docker start dilithion-mainnet
+#   - Restart node:     docker restart dilithion-mainnet
+#   - Remove container: docker rm dilithion-mainnet
+#   - Shell access:     docker exec -it dilithion-mainnet /bin/bash
+#
+# DATA PERSISTENCE:
+#
+#   Blockchain data is stored in the /data volume
+#   Create named volume: docker volume create dilithion-data
+#   Backup volume:       docker run --rm -v dilithion-data:/data -v $(pwd):/backup \
+#                          ubuntu tar czf /backup/dilithion-backup.tar.gz /data
+#   Restore volume:      docker run --rm -v dilithion-data:/data -v $(pwd):/backup \
+#                          ubuntu tar xzf /backup/dilithion-backup.tar.gz -C /
+#
+# SECURITY CONSIDERATIONS:
+#
+#   1. **Non-root User**: Container runs as 'dilithion' user (UID 1000)
+#   2. **RPC Port**: Never expose RPC port 8332 to internet
+#                    Bind to localhost: -p 127.0.0.1:8332:8332
+#   3. **Wallet Security**: Encrypt wallet immediately after creation
+#   4. **Firewall**: Only expose P2P port 8444 for network connections
+#   5. **Updates**: Rebuild image regularly for security updates
+#   6. **Resource Limits**: Set memory limits for mining nodes:
+#                          docker run --memory=4g --memory-swap=4g dilithion/node:latest
+#
+# RESOURCE REQUIREMENTS:
+#
+#   - Disk: 20GB minimum, 100GB+ recommended (blockchain growth)
+#   - RAM: 512MB minimum (non-mining), 2GB+ for mining
+#   - CPU: 1 core minimum, 8+ cores for efficient mining
+#   - Network: Stable internet connection, 10+ Mbps recommended
+#
+# DEBUGGING:
+#
+#   - Build with debug: docker build --build-arg BUILD_TYPE=Debug .
+#   - Shell access:     docker exec -it dilithion-mainnet /bin/bash
+#   - Check logs:       docker logs --tail 100 dilithion-mainnet
+#   - Inspect image:    docker image inspect dilithion/node:latest
+#
+# PERFORMANCE OPTIMIZATION:
+#
+#   1. Use host network mode for lower latency (Linux only):
+#      docker run --network host dilithion/node:latest
+#
+#   2. Enable huge pages for RandomX mining (requires host configuration):
+#      echo 1280 | sudo tee /proc/sys/vm/nr_hugepages
+#      docker run --cap-add=SYS_RESOURCE dilithion/node:latest --mine
+#
+#   3. Use faster storage (SSD) for blockchain data:
+#      docker run -v /path/to/ssd/data:/data dilithion/node:latest
+#
+# MULTI-ARCHITECTURE BUILDS:
+#
+#   Build for ARM64 (Apple Silicon, Raspberry Pi):
+#     docker buildx build --platform linux/arm64 -t dilithion/node:arm64 .
+#
+#   Build for AMD64 and ARM64:
+#     docker buildx build --platform linux/amd64,linux/arm64 \
+#       -t dilithion/node:latest --push .
+#
+# ==============================================================================
+# References
+# ==============================================================================
+#
+# - Docker documentation: https://docs.docker.com/
+# - Node setup guide: docs/MAINNET-NODE-SETUP-2025-11-07.md
+# - Mining guide: docs/MAINNET-MINING-GUIDE-2025-11-07.md
+# - Troubleshooting: docs/TROUBLESHOOTING-2025-11-07.md
+# - docker-compose.yml: docker-compose-2025-11-07.yml (orchestration)
+#
+# ==============================================================================

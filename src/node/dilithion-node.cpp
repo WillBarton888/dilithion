@@ -961,6 +961,8 @@ int main(int argc, char* argv[]) {
 
                     // Broadcast block to network (P2P block relay)
                     auto connected_peers = g_peer_manager->GetConnectedPeers();
+                    std::cout << "[DEBUG] Block broadcast: " << connected_peers.size() << " connected peers found" << std::endl;
+
                     if (!connected_peers.empty()) {
                         // Create inv message announcing new block
                         std::vector<NetProtocol::CInv> inv;
@@ -969,17 +971,31 @@ int main(int argc, char* argv[]) {
                         CNetMessage invMsg = message_processor.CreateInvMessage(inv);
 
                         int broadcast_count = 0;
+                        int handshake_incomplete = 0;
                         for (const auto& peer : connected_peers) {
-                            if (peer && peer->IsHandshakeComplete()) {
-                                if (connection_manager.SendMessage(peer->id, invMsg)) {
-                                    broadcast_count++;
+                            if (peer) {
+                                std::cout << "[DEBUG]   Peer " << peer->id << ": handshake_complete="
+                                          << (peer->IsHandshakeComplete() ? "YES" : "NO") << std::endl;
+                                if (peer->IsHandshakeComplete()) {
+                                    if (connection_manager.SendMessage(peer->id, invMsg)) {
+                                        broadcast_count++;
+                                    } else {
+                                        std::cout << "[DEBUG]   Failed to send to peer " << peer->id << std::endl;
+                                    }
+                                } else {
+                                    handshake_incomplete++;
                                 }
                             }
                         }
 
                         if (broadcast_count > 0) {
                             std::cout << "[P2P] Broadcasted block inv to " << broadcast_count << " peer(s)" << std::endl;
+                        } else {
+                            std::cout << "[P2P] WARNING: Block not broadcasted. Handshake incomplete: "
+                                      << handshake_incomplete << " peers" << std::endl;
                         }
+                    } else {
+                        std::cout << "[P2P] WARNING: No connected peers to broadcast block" << std::endl;
                     }
 
                     // Signal main loop to update mining template for next block

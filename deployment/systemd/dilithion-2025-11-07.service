@@ -1,0 +1,233 @@
+# Dilithion Mainnet Node - Systemd Service Unit
+# Copyright (c) 2025 The Dilithion Core developers
+# Distributed under the MIT software license
+#
+# Installation:
+#   sudo cp deployment/systemd/dilithion-2025-11-07.service /etc/systemd/system/dilithion.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable dilithion
+#   sudo systemctl start dilithion
+#
+# Management:
+#   sudo systemctl status dilithion     # Check status
+#   sudo systemctl stop dilithion       # Stop node
+#   sudo systemctl restart dilithion    # Restart node
+#   sudo journalctl -u dilithion -f     # View logs (follow)
+#
+# Version: 1.0.0
+# Created: 2025-11-07
+# Network: Mainnet
+# Mainnet Launch: 2026-01-01 00:00:00 UTC
+
+[Unit]
+Description=Dilithion Post-Quantum Cryptocurrency Full Node
+Documentation=https://github.com/your-org/dilithion
+After=network-online.target
+Wants=network-online.target
+
+# Optional: Wait for time sync before starting (prevents timestamp issues)
+After=time-sync.target
+
+[Service]
+Type=simple
+
+# User and group (run as dedicated user for security)
+# Create user with: sudo useradd -r -s /bin/false dilithion
+# Or run as your user by changing these lines:
+User=%i
+Group=%i
+
+# Working directory
+WorkingDirectory=/home/%i
+
+# Binary location (assumes installed to /usr/local/bin)
+ExecStart=/usr/local/bin/dilithion-node --datadir=/home/%i/.dilithion
+
+# Restart policy
+# - Always restart on crashes
+# - 10 second delay between restart attempts
+# - Maximum 5 restart attempts within 300 seconds (5 minutes)
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Security hardening
+# Prevents writing to most of the filesystem
+ReadWritePaths=/home/%i/.dilithion
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+# Resource limits
+# Memory: Soft limit 2GB, hard limit 4GB (RandomX mining uses ~2GB per 8 threads)
+MemoryLimit=4G
+MemoryHigh=2G
+
+# CPU: No limit (mining should use available resources)
+# To limit CPU for non-mining nodes, uncomment:
+# CPUQuota=200%  # Limits to 2 cores equivalent
+
+# Process limits
+LimitNOFILE=65536          # File descriptor limit (for network connections)
+LimitNPROC=512             # Process limit
+
+# Network configuration
+# Node will bind to all interfaces by default
+# P2P port: 8444 (mainnet)
+# RPC port: 8332 (mainnet)
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dilithion-node
+
+# Signal handling
+# SIGTERM for graceful shutdown (allows node to save state)
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=300         # Wait up to 5 minutes for graceful shutdown
+
+# Startup
+# Wait up to 30 seconds for node to start successfully
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target
+
+# ==============================================================================
+# Configuration Options
+# ==============================================================================
+#
+# To customize the node configuration, edit the ExecStart line:
+#
+# MINING NODE:
+#   ExecStart=/usr/local/bin/dilithion-node \
+#     --datadir=/home/%i/.dilithion \
+#     --mine \
+#     --threads=8
+#
+# CUSTOM DATA DIRECTORY:
+#   ExecStart=/usr/local/bin/dilithion-node \
+#     --datadir=/mnt/storage/dilithion-data
+#   (Also update ReadWritePaths above)
+#
+# CUSTOM RPC PORT:
+#   ExecStart=/usr/local/bin/dilithion-node \
+#     --datadir=/home/%i/.dilithion \
+#     --rpcport=9332
+#
+# TESTNET NODE:
+#   ExecStart=/usr/local/bin/dilithion-node \
+#     --testnet \
+#     --datadir=/home/%i/.dilithion-testnet
+#   (Update description and service name accordingly)
+#
+# CONNECT TO SPECIFIC PEERS:
+#   ExecStart=/usr/local/bin/dilithion-node \
+#     --datadir=/home/%i/.dilithion \
+#     --connect=170.64.203.134:8444 \
+#     --addnode=seed1.dilithion.io:8444
+#
+# ==============================================================================
+# Security Considerations
+# ==============================================================================
+#
+# 1. **Dedicated User**: Run as dedicated 'dilithion' user with no shell
+#    sudo useradd -r -m -d /home/dilithion -s /bin/false dilithion
+#    sudo chown -R dilithion:dilithion /home/dilithion/.dilithion
+#
+# 2. **Firewall**: Ensure P2P port 8444 is open for incoming connections
+#    sudo ufw allow 8444/tcp comment 'Dilithion P2P'
+#    DO NOT open RPC port 8332 to the internet
+#
+# 3. **RPC Authentication**: If RPC is enabled, use strong authentication
+#    Configure in ~/.dilithion/dilithion.conf:
+#      rpcuser=secure_username_here
+#      rpcpassword=secure_password_here
+#      rpcallowip=127.0.0.1
+#
+# 4. **Wallet Security**: Encrypt wallet immediately after creation
+#    Backup encrypted wallet.dat to secure offline storage
+#
+# 5. **Regular Updates**: Keep node software updated
+#    Use update-node.sh script for safe updates
+#
+# 6. **Monitoring**: Monitor node health with monitoring tools
+#    Check logs: sudo journalctl -u dilithion -f
+#    Check status: sudo systemctl status dilithion
+#
+# ==============================================================================
+# Troubleshooting
+# ==============================================================================
+#
+# SERVICE WON'T START:
+#   1. Check logs: sudo journalctl -u dilithion -xe
+#   2. Check binary exists: ls -lh /usr/local/bin/dilithion-node
+#   3. Check permissions: ls -lh /home/USER/.dilithion
+#   4. Test manually: sudo -u USER /usr/local/bin/dilithion-node --datadir=/home/USER/.dilithion
+#
+# SERVICE CRASHES REPEATEDLY:
+#   1. Check disk space: df -h
+#   2. Check memory: free -h
+#   3. Check for port conflicts: sudo netstat -tulpn | grep -E '8444|8332'
+#   4. Review logs: sudo journalctl -u dilithion --since "1 hour ago"
+#
+# HIGH MEMORY USAGE:
+#   - Normal for mining nodes (RandomX uses ~2GB for 8 threads)
+#   - For non-mining nodes, should use <500MB
+#   - Adjust MemoryLimit in service file if needed
+#
+# PERMISSION DENIED ERRORS:
+#   1. Check data directory ownership: ls -lh /home/USER/.dilithion
+#   2. Fix with: sudo chown -R USER:USER /home/USER/.dilithion
+#   3. Check SELinux (if enabled): sudo ausearch -m AVC -ts recent
+#
+# ==============================================================================
+# Advanced Configuration
+# ==============================================================================
+#
+# HUGE PAGES (10-15% mining performance boost):
+#   1. Configure huge pages (requires root):
+#      echo "vm.nr_hugepages=1280" | sudo tee -a /etc/sysctl.conf
+#      sudo sysctl -w vm.nr_hugepages=1280
+#
+#   2. Grant user access to huge pages:
+#      sudo setcap cap_sys_resource=+ep /usr/local/bin/dilithion-node
+#
+#   3. Add to service file under [Service]:
+#      AmbientCapabilities=CAP_SYS_RESOURCE
+#
+# CUSTOM LOG ROTATION:
+#   Systemd logs are rotated automatically by journald
+#   Configure in /etc/systemd/journald.conf:
+#     SystemMaxUse=1G       # Maximum journal size
+#     MaxRetentionSec=30d   # Keep logs for 30 days
+#
+# MONITORING WITH TELEGRAF/PROMETHEUS:
+#   Export metrics via RPC:
+#     curl -X POST http://localhost:8332 \
+#       -H "Content-Type: application/json" \
+#       -d '{"jsonrpc":"2.0","method":"getblockcount","params":[],"id":1}'
+#
+# ==============================================================================
+# Version History
+# ==============================================================================
+#
+# 1.0.0 (2025-11-07):
+#   - Initial systemd service configuration for mainnet launch
+#   - Security hardening with ReadWritePaths and NoNewPrivileges
+#   - Resource limits for memory and file descriptors
+#   - Automatic restart on failure
+#   - Comprehensive documentation and troubleshooting
+#
+# ==============================================================================
+# References
+# ==============================================================================
+#
+# - Systemd service documentation: man systemd.service
+# - Systemd execution environment: man systemd.exec
+# - Node setup guide: docs/MAINNET-NODE-SETUP-2025-11-07.md
+# - Mining guide: docs/MAINNET-MINING-GUIDE-2025-11-07.md
+# - Troubleshooting: docs/TROUBLESHOOTING-2025-11-07.md
+#
+# ==============================================================================
