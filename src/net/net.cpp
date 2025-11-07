@@ -697,6 +697,9 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
     peer->state = CPeer::STATE_CONNECTED;
     peer->connect_time = GetTime();
 
+    // Set socket to non-blocking mode (critical for inbound connections!)
+    socket->SetNonBlocking(true);
+
     // Set send timeout to prevent blocking on send (5 seconds)
     socket->SetSendTimeout(5000);
 
