@@ -32,20 +32,24 @@ The pre-compiled object file architecture resolved all linker errors and now wor
 | **Merkle Trees** | ✅ SUCCESS | Clean | 2 hours | 0 |
 | **Transaction Parsing** | ✅ SUCCESS | Clean | 2 hours | 0 |
 
-### ⚠️ Tier 3: Fast Fuzzers (3/3 FUNCTIONAL - Misleading Status)
+### ⚠️ Tier 3: Fast Fuzzers (3/3 CANCELLED - NOW FIXED)
 | Fuzzer | Job Status | Actual Status | Campaign | Crashes |
 |--------|------------|---------------|----------|---------|
 | **SHA3-256** | ⚠️ CANCELLED | ✅ RAN SUCCESSFULLY | 3.8M+ execs | 0 |
 | **CompactSize** | ⚠️ CANCELLED | ✅ RAN SUCCESSFULLY | 2 hours | 0 |
 | **Block Subsidy** | ⚠️ CANCELLED | ✅ RAN SUCCESSFULLY | 2 hours | 0 |
 
-**Note:** Tier 3 jobs show "cancelled" status in GitHub Actions, but:
-- All 3 fuzzers built successfully
-- All 3 executed fuzzing campaigns
-- All 3 uploaded result artifacts
-- **All 3 detected ZERO crashes**
+**Root cause identified and FIXED (Commit 02fea5c):**
+- All tiers used single `duration_hours` input
+- When user selected 6 hours, Tier 3 jobs exceeded 120-minute timeout
+- Jobs were forcibly cancelled despite uploading artifacts
 
-This is likely a GitHub Actions timeout/display quirk with combined build+run steps. The fuzzers are fully operational.
+**Solution implemented:**
+- Replaced generic input with tier-specific duration controls
+- `tier1_hours`: 2/4/6 hours (default 6)
+- `tier2_hours`: 2/4 hours (default 4)
+- `tier3_hours`: 2 hours only (default 2)
+- Prevents users from selecting incompatible durations
 
 ---
 
