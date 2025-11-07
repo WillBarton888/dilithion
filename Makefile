@@ -534,7 +534,32 @@ quality: analyze
 # ============================================================================
 # Fuzz Testing (libFuzzer)
 # ============================================================================
-
+#
+# ARCHITECTURE: Pre-compiled object file approach
+#
+# This build system uses pre-compiled object files to avoid linker errors in
+# CI environments. The architecture mirrors the proven test_dilithion pattern.
+#
+# STRUCTURE:
+#   1. Fuzzer harness files (.cpp) → compiled WITH sanitizers → harness.o
+#   2. Dependency files (.cpp) → compiled WITHOUT sanitizers → deps.o
+#   3. Dilithium library (.c) → compiled with gcc → dilithium/*.o
+#   4. Link: harness.o + deps.o + dilithium/*.o → fuzzer binary
+#
+# WHY THIS WORKS:
+#   - Make automatically builds all prerequisite .o files first
+#   - Fuzzer harness gets proper libFuzzer instrumentation
+#   - Dependencies use standard compilation (no ABI issues)
+#   - Works identically in local and CI (no cached state needed)
+#
+# WHY DIRECT .cpp COMPILATION FAILS:
+#   - Old approach: fuzz_block: harness.cpp block.cpp ... $(DILITHIUM_OBJECTS)
+#   - Clang compiles each .cpp separately without full instrumentation
+#   - Linker receives incomplete objects → "undefined reference" errors
+#   - Worked locally only due to cached .o files from previous builds
+#
+# FOR MORE DETAILS: See docs/FUZZING-BUILD-SYSTEM.md
+#
 # Fuzz test compiler (requires Clang with libFuzzer support)
 # Try clang++-14 first, fall back to clang++ (any version), or use environment variable
 FUZZ_CXX ?= $(shell command -v clang++-14 2>/dev/null || command -v clang++ 2>/dev/null || echo clang++)
