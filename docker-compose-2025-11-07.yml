@@ -1,0 +1,473 @@
+# Dilithion Post-Quantum Cryptocurrency - Docker Compose Configuration
+# Copyright (c) 2025 The Dilithion Core developers
+# Distributed under the MIT software license
+#
+# Usage:
+#   docker-compose -f docker-compose-2025-11-07.yml up -d              # Start services
+#   docker-compose -f docker-compose-2025-11-07.yml down               # Stop services
+#   docker-compose -f docker-compose-2025-11-07.yml logs -f mainnet    # View logs
+#   docker-compose -f docker-compose-2025-11-07.yml restart mainnet    # Restart service
+#
+# Version: 1.0.0
+# Created: 2025-11-07
+# Mainnet Launch: 2026-01-01 00:00:00 UTC
+
+version: '3.8'
+
+# ==============================================================================
+# Services
+# ==============================================================================
+services:
+
+  # ----------------------------------------------------------------------------
+  # Mainnet Full Node (Non-Mining)
+  # ----------------------------------------------------------------------------
+  mainnet:
+    image: dilithion/node:latest
+    container_name: dilithion-mainnet
+    build:
+      context: .
+      dockerfile: Dockerfile-2025-11-07
+      args:
+        BUILD_JOBS: 8
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Ports
+    # - 8444: P2P network port (required for blockchain sync)
+    # - 8332: RPC server port (localhost only for security)
+    ports:
+      - "8444:8444"              # P2P (exposed to internet)
+      - "127.0.0.1:8332:8332"    # RPC (localhost only)
+
+    # Volumes
+    # - Persistent blockchain data
+    # - Optional: Configuration file
+    volumes:
+      - dilithion-mainnet-data:/data
+      # - ./dilithion.conf:/data/dilithion.conf:ro  # Optional config
+
+    # Environment variables
+    # None required (configuration via command line)
+    # environment:
+    #   - DILITHION_NETWORK=mainnet
+
+    # Command
+    # Default: Non-mining full node
+    command: ["--datadir=/data"]
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'           # Maximum 4 CPU cores
+          memory: 2G            # Maximum 2GB RAM
+        reservations:
+          cpus: '1.0'           # Minimum 1 CPU core
+          memory: 512M          # Minimum 512MB RAM
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dilithion-node", "--help"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+    # Networks
+    networks:
+      - dilithion-network
+
+  # ----------------------------------------------------------------------------
+  # Mainnet Mining Node (8 threads)
+  # ----------------------------------------------------------------------------
+  mainnet-miner:
+    image: dilithion/node:latest
+    container_name: dilithion-miner
+    build:
+      context: .
+      dockerfile: Dockerfile-2025-11-07
+      args:
+        BUILD_JOBS: 8
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Ports
+    ports:
+      - "8445:8444"              # P2P (alternate port to avoid conflict)
+      - "127.0.0.1:8333:8332"    # RPC (alternate port, localhost only)
+
+    # Volumes
+    volumes:
+      - dilithion-miner-data:/data
+
+    # Command - Mining with 8 threads
+    command: ["--datadir=/data", "--mine", "--threads=8"]
+
+    # Resource limits (mining requires more resources)
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0'           # Maximum 8 CPU cores for mining
+          memory: 4G            # Maximum 4GB RAM (RandomX uses ~2GB)
+        reservations:
+          cpus: '4.0'           # Minimum 4 CPU cores
+          memory: 2G            # Minimum 2GB RAM
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dilithion-node", "--help"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+    # Networks
+    networks:
+      - dilithion-network
+
+    # Profile: Only start when explicitly requested
+    # Usage: docker-compose --profile mining up -d
+    profiles:
+      - mining
+
+  # ----------------------------------------------------------------------------
+  # Testnet Node
+  # ----------------------------------------------------------------------------
+  testnet:
+    image: dilithion/node:latest
+    container_name: dilithion-testnet
+    build:
+      context: .
+      dockerfile: Dockerfile-2025-11-07
+      args:
+        BUILD_JOBS: 8
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Ports (testnet uses different ports)
+    ports:
+      - "18444:18444"             # P2P testnet
+      - "127.0.0.1:18332:18332"   # RPC testnet (localhost only)
+
+    # Volumes
+    volumes:
+      - dilithion-testnet-data:/data
+
+    # Command - Testnet mode
+    command: ["--testnet", "--datadir=/data"]
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dilithion-node", "--help"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    # Networks
+    networks:
+      - dilithion-network
+
+    # Profile: Only start when explicitly requested
+    # Usage: docker-compose --profile testnet up -d
+    profiles:
+      - testnet
+
+  # ----------------------------------------------------------------------------
+  # Monitoring Dashboard (Optional - Prometheus/Grafana)
+  # ----------------------------------------------------------------------------
+  # Uncomment to enable monitoring
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: dilithion-prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:9090:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus-data:/prometheus
+  #   networks:
+  #     - dilithion-network
+  #   profiles:
+  #     - monitoring
+
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: dilithion-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:3000:3000"
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=changeme
+  #   networks:
+  #     - dilithion-network
+  #   profiles:
+  #     - monitoring
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  dilithion-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  # Mainnet full node data
+  dilithion-mainnet-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DILITHION_DATA_DIR:-./data/mainnet}
+
+  # Mainnet miner data
+  dilithion-miner-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DILITHION_MINER_DATA_DIR:-./data/miner}
+
+  # Testnet data
+  dilithion-testnet-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DILITHION_TESTNET_DATA_DIR:-./data/testnet}
+
+  # Monitoring data (if enabled)
+  # prometheus-data:
+  #   driver: local
+  #
+  # grafana-data:
+  #   driver: local
+
+# ==============================================================================
+# Configuration
+# ==============================================================================
+#
+# ENVIRONMENT VARIABLES:
+#
+# Create .env file in the same directory as docker-compose.yml:
+#
+#   DILITHION_DATA_DIR=/path/to/mainnet/data
+#   DILITHION_MINER_DATA_DIR=/path/to/miner/data
+#   DILITHION_TESTNET_DATA_DIR=/path/to/testnet/data
+#
+# Or set environment variables:
+#   export DILITHION_DATA_DIR=/mnt/storage/dilithion-mainnet
+#
+# ==============================================================================
+# Usage Examples
+# ==============================================================================
+#
+# START MAINNET FULL NODE:
+#   docker-compose -f docker-compose-2025-11-07.yml up -d mainnet
+#
+# START MAINNET MINING NODE:
+#   docker-compose -f docker-compose-2025-11-07.yml --profile mining up -d mainnet-miner
+#
+# START TESTNET NODE:
+#   docker-compose -f docker-compose-2025-11-07.yml --profile testnet up -d testnet
+#
+# START ALL SERVICES:
+#   docker-compose -f docker-compose-2025-11-07.yml up -d
+#
+# STOP ALL SERVICES:
+#   docker-compose -f docker-compose-2025-11-07.yml down
+#
+# VIEW LOGS (FOLLOW):
+#   docker-compose -f docker-compose-2025-11-07.yml logs -f mainnet
+#
+# RESTART SERVICE:
+#   docker-compose -f docker-compose-2025-11-07.yml restart mainnet
+#
+# CHECK STATUS:
+#   docker-compose -f docker-compose-2025-11-07.yml ps
+#
+# UPDATE TO LATEST VERSION:
+#   docker-compose -f docker-compose-2025-11-07.yml pull
+#   docker-compose -f docker-compose-2025-11-07.yml up -d
+#
+# REBUILD FROM SOURCE:
+#   docker-compose -f docker-compose-2025-11-07.yml build --no-cache
+#   docker-compose -f docker-compose-2025-11-07.yml up -d
+#
+# SCALE MINING NODES (not recommended - use single multi-threaded miner):
+#   docker-compose -f docker-compose-2025-11-07.yml --profile mining up -d --scale mainnet-miner=2
+#
+# BACKUP WALLET:
+#   docker-compose -f docker-compose-2025-11-07.yml exec mainnet \
+#     cp /data/wallet.dat /data/wallet-backup-$(date +%Y%m%d).dat
+#
+# EXECUTE RPC COMMAND:
+#   docker-compose -f docker-compose-2025-11-07.yml exec mainnet \
+#     curl -X POST http://localhost:8332 \
+#       -H "Content-Type: application/json" \
+#       -d '{"jsonrpc":"2.0","method":"getblockcount","params":[],"id":1}'
+#
+# ==============================================================================
+# Security Considerations
+# ==============================================================================
+#
+# 1. **RPC Access**: RPC ports bound to localhost only (127.0.0.1)
+#                   NEVER expose to internet
+#
+# 2. **Firewall**: Ensure only P2P ports (8444, 18444) exposed to internet
+#                 Use host firewall in addition to Docker networking
+#
+# 3. **Wallet Security**: Encrypt wallet immediately after creation
+#                        Backup encrypted wallet.dat to secure offline storage
+#
+# 4. **Resource Limits**: Prevents DoS via resource exhaustion
+#                        Adjust limits based on available hardware
+#
+# 5. **Updates**: Regularly pull latest images for security patches
+#                docker-compose pull && docker-compose up -d
+#
+# 6. **Logging**: Logs rotated automatically (max 100MB x 10 files)
+#                Review logs periodically for security events
+#
+# 7. **Network Isolation**: Services on isolated bridge network
+#                          Not accessible from host by default
+#
+# 8. **User Permissions**: Container runs as non-root user (UID 1000)
+#
+# ==============================================================================
+# Troubleshooting
+# ==============================================================================
+#
+# CONTAINER WON'T START:
+#   1. Check logs: docker-compose logs mainnet
+#   2. Check ports: netstat -tulpn | grep -E '8444|8332'
+#   3. Check volumes: docker volume ls
+#   4. Check permissions: ls -lh ./data/mainnet
+#
+# DATABASE CORRUPTION:
+#   1. Stop container: docker-compose down
+#   2. Backup data: cp -r ./data/mainnet ./data/mainnet-backup
+#   3. Remove corrupted files: rm -rf ./data/mainnet/blocks ./data/mainnet/chainstate
+#   4. Restart: docker-compose up -d
+#
+# OUT OF DISK SPACE:
+#   1. Check disk usage: df -h
+#   2. Clean Docker: docker system prune -a
+#   3. Clean logs: docker-compose down && rm -rf ./data/mainnet/debug.log
+#
+# HIGH MEMORY USAGE (MINING):
+#   - Normal: RandomX uses ~2GB for 8 threads
+#   - If excessive, reduce threads: command: ["--mine", "--threads=4"]
+#
+# NETWORK CONNECTIVITY ISSUES:
+#   1. Check firewall: sudo ufw status
+#   2. Check Docker network: docker network inspect dilithion-network
+#   3. Test connectivity: docker-compose exec mainnet ping 8.8.8.8
+#
+# ==============================================================================
+# Performance Optimization
+# ==============================================================================
+#
+# 1. FAST STORAGE:
+#    Use SSD for blockchain data, bind to SSD path:
+#      DILITHION_DATA_DIR=/mnt/ssd/dilithion
+#
+# 2. HUGE PAGES (MINING):
+#    Configure on host:
+#      echo 1280 | sudo tee /proc/sys/vm/nr_hugepages
+#    Add capability:
+#      cap_add:
+#        - SYS_RESOURCE
+#
+# 3. HOST NETWORK MODE (Linux only):
+#    Lower latency, better performance:
+#      network_mode: "host"
+#    (Remove ports section)
+#
+# 4. RESOURCE ALLOCATION:
+#    Adjust CPU and memory based on hardware:
+#      cpus: '16.0'    # All cores for dedicated mining
+#      memory: 8G      # More RAM for mining
+#
+# 5. VOLUME DRIVER:
+#    For production, use faster volume driver:
+#      driver: local
+#      driver_opts:
+#        type: none
+#        o: bind
+#        device: /mnt/nvme/dilithion-data
+#
+# ==============================================================================
+# Maintenance
+# ==============================================================================
+#
+# REGULAR BACKUPS:
+#   Schedule daily backups with cron:
+#     0 2 * * * docker-compose exec mainnet cp /data/wallet.dat /backup/wallet-$(date +\%Y\%m\%d).dat
+#
+# UPDATE CHECKS:
+#   Check for updates weekly:
+#     docker-compose pull
+#     docker-compose up -d
+#
+# LOG ROTATION:
+#   Automatic via Docker logging driver (100MB x 10 files)
+#
+# VOLUME CLEANUP:
+#   Remove unused volumes:
+#     docker volume prune
+#
+# ==============================================================================
+# References
+# ==============================================================================
+#
+# - Docker Compose documentation: https://docs.docker.com/compose/
+# - Dockerfile: Dockerfile-2025-11-07
+# - Node setup guide: docs/MAINNET-NODE-SETUP-2025-11-07.md
+# - Mining guide: docs/MAINNET-MINING-GUIDE-2025-11-07.md
+# - Troubleshooting: docs/TROUBLESHOOTING-2025-11-07.md
+#
+# ==============================================================================

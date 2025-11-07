@@ -1,0 +1,433 @@
+# Dilithion Mainnet Node - Prometheus Configuration
+# Copyright (c) 2025 The Dilithion Core developers
+# Distributed under the MIT software license
+#
+# Usage:
+#   prometheus --config.file=monitoring/prometheus-2025-11-07.yml
+#
+# With Docker:
+#   docker run -d \
+#     --name prometheus \
+#     -p 9090:9090 \
+#     -v $(pwd)/monitoring/prometheus-2025-11-07.yml:/etc/prometheus/prometheus.yml:ro \
+#     prom/prometheus
+#
+# Version: 1.0.0
+# Created: 2025-11-07
+# Mainnet Launch: 2026-01-01 00:00:00 UTC
+
+# ==============================================================================
+# Global Configuration
+# ==============================================================================
+global:
+  # Scrape interval - how often to collect metrics
+  scrape_interval: 15s
+
+  # Evaluation interval - how often to evaluate rules
+  evaluation_interval: 15s
+
+  # Scrape timeout - how long to wait for targets to respond
+  scrape_timeout: 10s
+
+  # External labels - attached to all metrics
+  external_labels:
+    cluster: 'dilithion-mainnet'
+    network: 'mainnet'
+    environment: 'production'
+
+# ==============================================================================
+# Alerting Configuration
+# ==============================================================================
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            # Alertmanager endpoint (if deployed)
+            # - 'localhost:9093'
+
+# ==============================================================================
+# Rule Files
+# ==============================================================================
+rule_files:
+  # Alert rules (create these files for alerting)
+  # - "alert_rules.yml"
+  # - "recording_rules.yml"
+
+# ==============================================================================
+# Scrape Configurations
+# ==============================================================================
+scrape_configs:
+
+  # --------------------------------------------------------------------------
+  # Prometheus Self-Monitoring
+  # --------------------------------------------------------------------------
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          instance: 'prometheus'
+          component: 'monitoring'
+
+  # --------------------------------------------------------------------------
+  # Dilithion Mainnet Node - JSON-RPC Exporter
+  # --------------------------------------------------------------------------
+  # Scrapes metrics from Dilithion RPC endpoints
+  # Uses json_exporter to convert RPC responses to Prometheus metrics
+  #
+  # Install json_exporter:
+  #   docker run -d \
+  #     --name json_exporter \
+  #     -p 7979:7979 \
+  #     prometheuscommunity/json-exporter
+  #
+  - job_name: 'dilithion-mainnet-rpc'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+    metrics_path: /probe
+
+    static_configs:
+      - targets:
+          # Mainnet node RPC endpoint
+          - 'http://localhost:8332'
+        labels:
+          instance: 'dilithion-mainnet'
+          network: 'mainnet'
+          node_type: 'full-node'
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:7979  # json_exporter address
+
+  # --------------------------------------------------------------------------
+  # Dilithion Testnet Node
+  # --------------------------------------------------------------------------
+  - job_name: 'dilithion-testnet-rpc'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+    metrics_path: /probe
+
+    static_configs:
+      - targets:
+          # Testnet node RPC endpoint
+          - 'http://localhost:18332'
+        labels:
+          instance: 'dilithion-testnet'
+          network: 'testnet'
+          node_type: 'full-node'
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:7979
+
+  # --------------------------------------------------------------------------
+  # Node Exporter - System Metrics
+  # --------------------------------------------------------------------------
+  # Collects system-level metrics (CPU, memory, disk, network)
+  #
+  # Install node_exporter:
+  #   # Linux
+  #   wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+  #   tar xvfz node_exporter-1.7.0.linux-amd64.tar.gz
+  #   cd node_exporter-1.7.0.linux-amd64
+  #   ./node_exporter &
+  #
+  #   # Docker
+  #   docker run -d \
+  #     --name node_exporter \
+  #     -p 9100:9100 \
+  #     prom/node-exporter
+  #
+  - job_name: 'node-exporter'
+    scrape_interval: 15s
+
+    static_configs:
+      - targets: ['localhost:9100']
+        labels:
+          instance: 'dilithion-host'
+          component: 'system'
+
+  # --------------------------------------------------------------------------
+  # Process Exporter - Process-Level Metrics
+  # --------------------------------------------------------------------------
+  # Monitors dilithion-node process specifically
+  #
+  # Install process-exporter:
+  #   docker run -d \
+  #     --name process_exporter \
+  #     -p 9256:9256 \
+  #     --privileged \
+  #     -v /proc:/host/proc:ro \
+  #     ncabatoff/process-exporter \
+  #       --procfs /host/proc \
+  #       -procnames dilithion-node
+  #
+  - job_name: 'process-exporter'
+    scrape_interval: 15s
+
+    static_configs:
+      - targets: ['localhost:9256']
+        labels:
+          instance: 'dilithion-process'
+          component: 'process'
+
+  # --------------------------------------------------------------------------
+  # Custom Health Check Script
+  # --------------------------------------------------------------------------
+  # Scrapes metrics from custom health-check.sh script
+  # Script exposes metrics via simple HTTP server or node_exporter textfile collector
+  #
+  # Usage:
+  #   ./scripts/health-check-2025-11-07.sh --prometheus-output /var/lib/node_exporter/textfile_collector/dilithion.prom
+  #
+  # Or run as HTTP endpoint:
+  #   while true; do
+  #     echo -e "HTTP/1.1 200 OK\n\n$(./scripts/health-check-2025-11-07.sh --prometheus-format)" | nc -l -p 9101
+  #   done
+  #
+  - job_name: 'dilithion-health'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+    static_configs:
+      - targets: ['localhost:9101']
+        labels:
+          instance: 'dilithion-health'
+          component: 'health-check'
+
+    # Optional: Disable if using textfile collector instead
+    # honor_labels: true
+
+# ==============================================================================
+# Remote Write Configuration (Optional)
+# ==============================================================================
+# Send metrics to remote Prometheus instance or cloud service
+#
+# remote_write:
+#   - url: 'https://prometheus-remote-write-endpoint.example.com/api/v1/write'
+#     basic_auth:
+#       username: 'username'
+#       password: 'password'
+
+# ==============================================================================
+# Remote Read Configuration (Optional)
+# ==============================================================================
+# Read metrics from remote Prometheus instance
+#
+# remote_read:
+#   - url: 'https://prometheus-remote-read-endpoint.example.com/api/v1/read'
+#     basic_auth:
+#       username: 'username'
+#       password: 'password'
+
+# ==============================================================================
+# Storage Configuration
+# ==============================================================================
+# Prometheus stores metrics in local TSDB (time-series database)
+# Configure retention and storage settings via command-line flags:
+#
+#   prometheus \
+#     --config.file=prometheus.yml \
+#     --storage.tsdb.path=/var/lib/prometheus \
+#     --storage.tsdb.retention.time=30d \
+#     --storage.tsdb.retention.size=10GB
+
+# ==============================================================================
+# Key Metrics to Monitor
+# ==============================================================================
+#
+# BLOCKCHAIN METRICS:
+#   - dilithion_block_height          Current blockchain height
+#   - dilithion_block_time            Time since last block
+#   - dilithion_chain_sync_progress   Sync progress (%)
+#   - dilithion_difficulty            Current mining difficulty
+#   - dilithion_total_supply          Total DIL in circulation
+#
+# MINING METRICS:
+#   - dilithion_hashrate              Current hashrate (H/s)
+#   - dilithion_blocks_mined          Blocks mined by this node
+#   - dilithion_mining_active         Mining status (1=active, 0=inactive)
+#   - dilithion_mining_threads        Number of mining threads
+#
+# MEMPOOL METRICS:
+#   - dilithion_mempool_size          Number of transactions in mempool
+#   - dilithion_mempool_bytes         Total bytes in mempool
+#   - dilithion_mempool_fee_rate      Average fee rate
+#
+# NETWORK METRICS:
+#   - dilithion_peer_count            Number of connected peers
+#   - dilithion_inbound_peers         Inbound peer connections
+#   - dilithion_outbound_peers        Outbound peer connections
+#   - dilithion_bytes_received        Network bytes received
+#   - dilithion_bytes_sent            Network bytes sent
+#
+# WALLET METRICS:
+#   - dilithion_wallet_balance        Wallet balance (DIL)
+#   - dilithion_wallet_transactions   Number of wallet transactions
+#   - dilithion_wallet_encrypted      Wallet encryption status
+#
+# RPC METRICS:
+#   - dilithion_rpc_requests_total    Total RPC requests
+#   - dilithion_rpc_errors_total      Total RPC errors
+#   - dilithion_rpc_duration_seconds  RPC request duration
+#
+# SYSTEM METRICS (from node_exporter):
+#   - node_cpu_seconds_total          CPU usage
+#   - node_memory_MemAvailable_bytes  Available memory
+#   - node_disk_io_time_seconds_total Disk I/O time
+#   - node_network_receive_bytes_total Network receive
+#   - node_network_transmit_bytes_total Network transmit
+#
+# PROCESS METRICS (from process-exporter):
+#   - namedprocess_namegroup_cpu_seconds_total      dilithion-node CPU
+#   - namedprocess_namegroup_memory_bytes           dilithion-node memory
+#   - namedprocess_namegroup_num_threads            dilithion-node threads
+#   - namedprocess_namegroup_open_filedesc          dilithion-node file descriptors
+
+# ==============================================================================
+# Example Queries (PromQL)
+# ==============================================================================
+#
+# Block height growth rate (blocks per hour):
+#   rate(dilithion_block_height[1h]) * 3600
+#
+# Mempool size over time:
+#   dilithion_mempool_size
+#
+# Mining hashrate (averaged over 5 minutes):
+#   avg_over_time(dilithion_hashrate[5m])
+#
+# Peer count alert (less than 3 peers):
+#   dilithion_peer_count < 3
+#
+# CPU usage by dilithion-node:
+#   rate(namedprocess_namegroup_cpu_seconds_total{groupname="dilithion-node"}[5m])
+#
+# Memory usage by dilithion-node:
+#   namedprocess_namegroup_memory_bytes{groupname="dilithion-node"}
+#
+# Disk space available:
+#   node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100
+#
+# Network bandwidth (received):
+#   rate(node_network_receive_bytes_total[5m])
+#
+# Time since last block (should be < 300 seconds = 5 minutes):
+#   time() - dilithion_last_block_time
+
+# ==============================================================================
+# Setup Instructions
+# ==============================================================================
+#
+# 1. INSTALL PROMETHEUS:
+#    # Docker
+#    docker run -d \
+#      --name prometheus \
+#      -p 9090:9090 \
+#      -v $(pwd)/monitoring/prometheus-2025-11-07.yml:/etc/prometheus/prometheus.yml:ro \
+#      -v prometheus-data:/prometheus \
+#      prom/prometheus
+#
+#    # Native
+#    wget https://github.com/prometheus/prometheus/releases/download/v2.48.0/prometheus-2.48.0.linux-amd64.tar.gz
+#    tar xvfz prometheus-2.48.0.linux-amd64.tar.gz
+#    cd prometheus-2.48.0.linux-amd64
+#    ./prometheus --config.file=../monitoring/prometheus-2025-11-07.yml
+#
+# 2. INSTALL EXPORTERS:
+#    # Node exporter (system metrics)
+#    docker run -d --name node_exporter -p 9100:9100 prom/node-exporter
+#
+#    # Process exporter (dilithion-node process)
+#    docker run -d --name process_exporter -p 9256:9256 \
+#      --privileged -v /proc:/host/proc:ro \
+#      ncabatoff/process-exporter \
+#        --procfs /host/proc -procnames dilithion-node
+#
+#    # JSON exporter (RPC endpoints)
+#    docker run -d --name json_exporter -p 7979:7979 \
+#      -v $(pwd)/monitoring/json_exporter.yml:/config.yml:ro \
+#      prometheuscommunity/json-exporter --config.file=/config.yml
+#
+# 3. VERIFY METRICS:
+#    # Check Prometheus targets
+#    curl http://localhost:9090/api/v1/targets
+#
+#    # Check specific metrics
+#    curl 'http://localhost:9090/api/v1/query?query=dilithion_block_height'
+#
+# 4. ACCESS WEB UI:
+#    http://localhost:9090
+#
+# 5. CONNECT GRAFANA:
+#    Add Prometheus as data source in Grafana
+#    URL: http://localhost:9090
+#    Import dashboard: monitoring/grafana-dashboard-2025-11-07.json
+
+# ==============================================================================
+# Security Considerations
+# ==============================================================================
+#
+# 1. **Network Access**: Prometheus scrapes local endpoints only by default
+#    - RPC endpoint (8332) should NOT be exposed to internet
+#    - Prometheus web UI (9090) should be firewalled or proxied with auth
+#
+# 2. **Authentication**: Enable basic auth for Prometheus web UI
+#    https://prometheus.io/docs/guides/basic-auth/
+#
+# 3. **TLS**: Use reverse proxy (nginx, caddy) with TLS for production
+#
+# 4. **Firewall**: Block Prometheus ports from external access
+#    sudo ufw deny 9090
+#    sudo ufw deny 9100
+#    sudo ufw deny 9256
+#
+# 5. **Data Retention**: Limit retention to prevent disk filling
+#    --storage.tsdb.retention.time=30d
+#    --storage.tsdb.retention.size=10GB
+
+# ==============================================================================
+# Troubleshooting
+# ==============================================================================
+#
+# TARGETS NOT RESPONDING:
+#   - Check target service is running: systemctl status dilithion
+#   - Check firewall: sudo ufw status
+#   - Check RPC port: curl http://localhost:8332
+#   - Check exporter: curl http://localhost:9100/metrics
+#
+# NO METRICS:
+#   - Check Prometheus logs: docker logs prometheus
+#   - Verify scrape targets: http://localhost:9090/targets
+#   - Check RPC authentication (if enabled)
+#
+# HIGH MEMORY USAGE:
+#   - Reduce retention time: --storage.tsdb.retention.time=7d
+#   - Reduce scrape frequency in configuration
+#   - Increase scrape interval to 60s
+#
+# DISK SPACE ISSUES:
+#   - Set retention size: --storage.tsdb.retention.size=5GB
+#   - Clean old data: rm -rf /var/lib/prometheus/data/*
+#   - Move to larger disk and update path
+
+# ==============================================================================
+# References
+# ==============================================================================
+#
+# - Prometheus documentation: https://prometheus.io/docs/
+# - PromQL query language: https://prometheus.io/docs/prometheus/latest/querying/basics/
+# - Grafana dashboard: monitoring/grafana-dashboard-2025-11-07.json
+# - Health check script: scripts/health-check-2025-11-07.sh
+# - Alert handler: scripts/alert-handler-2025-11-07.sh
+#
+# ==============================================================================
