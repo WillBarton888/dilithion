@@ -657,6 +657,9 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
     // Set socket to non-blocking mode
     socket->SetNonBlocking(true);
 
+    // Set send timeout to prevent blocking on send (5 seconds)
+    socket->SetSendTimeout(5000);
+
     // Add peer
     auto peer = peer_manager.AddPeer(addr);
     if (!peer) {
@@ -693,6 +696,9 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
 
     peer->state = CPeer::STATE_CONNECTED;
     peer->connect_time = GetTime();
+
+    // Set send timeout to prevent blocking on send (5 seconds)
+    socket->SetSendTimeout(5000);
 
     // Store socket
     {
@@ -779,11 +785,27 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
             return false;
         }
 
-        // Send to socket
+        // Send to socket (with 5-second timeout)
         int sent = it->second->Send(data.data(), data.size());
         if (sent != static_cast<int>(data.size())) {
-            std::cout << "[P2P] ERROR: Send failed to peer " << peer_id
-                      << " (sent " << sent << " of " << data.size() << " bytes)" << std::endl;
+            int error_code = it->second->GetLastError();
+            std::string error_str = it->second->GetLastErrorString();
+
+            // Check if this is a timeout error
+            bool is_timeout = false;
+#ifdef _WIN32
+            is_timeout = (error_code == WSAETIMEDOUT);
+#else
+            is_timeout = (error_code == EAGAIN || error_code == EWOULDBLOCK);
+#endif
+
+            if (is_timeout) {
+                std::cout << "[P2P] WARNING: Send timeout to peer " << peer_id
+                          << " (sent " << sent << " of " << data.size() << " bytes) - continuing to next peer" << std::endl;
+            } else {
+                std::cout << "[P2P] ERROR: Send failed to peer " << peer_id
+                          << " (sent " << sent << " of " << data.size() << " bytes, error: " << error_str << ")" << std::endl;
+            }
             return false;
         }
     }
