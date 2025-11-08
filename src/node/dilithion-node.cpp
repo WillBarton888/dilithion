@@ -669,11 +669,12 @@ int main(int argc, char* argv[]) {
         g_node_state.http_server = &http_server;
 
         // Set stats handler that returns current node statistics as JSON
-        http_server.SetStatsHandler([&blockchain, &config]() -> std::string {
-            // Get current stats
-            int block_height = blockchain.GetBestHeight();
-            uint32_t difficulty = blockchain.GetCurrentDifficulty();
-            int64_t total_supply = blockchain.GetTotalSupply();
+        http_server.SetStatsHandler([&config]() -> std::string {
+            // Get current stats from chain state
+            CBlockIndex* tip = g_chainstate.GetTip();
+            int block_height = tip ? tip->nHeight : 0;
+            uint32_t difficulty = tip ? tip->nBits : 0;
+            int64_t total_supply = block_height * 50;  // 50 coins per block
             size_t peer_count = g_peer_manager ? g_peer_manager->GetConnectedPeers().size() : 0;
 
             // Get async broadcaster stats
