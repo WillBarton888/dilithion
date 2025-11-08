@@ -2,24 +2,6 @@
 // Distributed under the MIT software license
 
 /**
- * NOTE: This file contains multiple fuzz targets wrapped in #if 0 blocks.
- * libFuzzer allows only ONE FUZZ_TARGET per binary.
- */
-
-#include "fuzz.h"
-#include "util.h"
-#include "../../net/protocol.h"
-#include "../../primitives/block.h"
-#include "../../primitives/transaction.h"
-#include "../../crypto/sha3.h"
-#include <cassert>
-#include <cstring>
-#include <vector>
-
-// Network constants
-static const size_t MAX_SIZE = 32 * 1024 * 1024;  // 32 MB
-
-/**
  * Fuzz target: Network message deserialization
  *
  * Tests:
@@ -34,13 +16,34 @@ static const size_t MAX_SIZE = 32 * 1024 * 1024;  // 32 MB
  * Message format:
  * [magic:4] [command:12] [length:4] [checksum:4] [payload:length]
  *
+ * Note: This file previously contained multiple disabled targets.
+ * They have been split into separate fuzzer binaries as part of
+ * Phase 3 fuzzing infrastructure enhancement (November 2025).
+ *
+ * Related fuzzers:
+ * - fuzz_network_create.cpp: Message serialization
+ * - fuzz_network_checksum.cpp: Checksum validation
+ * - fuzz_network_command.cpp: Command parsing
+ *
  * Coverage:
  * - src/net/protocol.h
  * - src/net/serialize.h
  *
- * Based on gap analysis: P1-4 (network message checksums)
  * Priority: HIGH (network integrity)
  */
+
+#include "fuzz.h"
+#include "util.h"
+#include "../../net/protocol.h"
+#include "../../primitives/block.h"
+#include "../../primitives/transaction.h"
+#include "../../crypto/sha3.h"
+#include <cassert>
+#include <cstring>
+#include <vector>
+
+// Network constants
+static const size_t MAX_SIZE = 32 * 1024 * 1024;  // 32 MB
 
 /**
  * Calculate message checksum (SHA3-256 based)
@@ -135,163 +138,3 @@ FUZZ_TARGET(network_message_parse)
         return;
     }
 }
-
-#if 0
-/**
- * Fuzz target: Network message serialization
- *
- * Creates a message with fuzzed data and validates format
- */
-FUZZ_TARGET(network_message_create)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    try {
-        // Create message header
-        NetProtocol::CMessageHeader header;
-
-        // Fuzz magic
-        header.magic = fuzzed_data.ConsumeIntegral<uint32_t>();
-
-        // Fuzz command (must be 12 bytes, null-padded)
-        std::string command = fuzzed_data.ConsumeRandomLengthString(11);
-        memset(header.command, 0, 12);
-        memcpy(header.command, command.c_str(), command.length());
-
-        // Fuzz payload
-        size_t payload_size = fuzzed_data.ConsumeIntegralInRange<size_t>(0, 1000);
-        std::vector<uint8_t> payload = fuzzed_data.ConsumeBytes<uint8_t>(payload_size);
-
-        header.payload_size = payload.size();
-
-        // Calculate checksum
-        header.checksum = CalculateChecksum(payload.data(), payload.size());
-
-        // Serialize message
-        std::vector<uint8_t> message;
-        message.insert(message.end(),
-                      reinterpret_cast<uint8_t*>(&header),
-                      reinterpret_cast<uint8_t*>(&header) + sizeof(header));
-        message.insert(message.end(), payload.begin(), payload.end());
-
-        // Verify we can parse it back
-        if (message.size() >= sizeof(NetProtocol::CMessageHeader)) {
-            NetProtocol::CMessageHeader parsed_header;
-            memcpy(&parsed_header, message.data(), sizeof(NetProtocol::CMessageHeader));
-
-            assert(parsed_header.magic == header.magic);
-            assert(parsed_header.payload_size == header.payload_size);
-            assert(parsed_header.checksum == header.checksum);
-        }
-
-    } catch (const std::exception& e) {
-        return;
-    }
-}
-#endif
-
-#if 0
-/**
- * Fuzz target: Network message checksum validation
- *
- * Tests checksum calculation and validation
- */
-FUZZ_TARGET(network_message_checksum)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    // Test checksum with various payload sizes
-    size_t payload_sizes[] = {0, 1, 10, 100, 1000, 10000, 100000};
-
-    for (size_t payload_size : payload_sizes) {
-        if (fuzzed_data.remaining_bytes() < payload_size) {
-            break;
-        }
-
-        std::vector<uint8_t> payload = fuzzed_data.ConsumeBytes<uint8_t>(payload_size);
-
-        // Calculate checksum
-        uint32_t checksum1 = CalculateChecksum(payload.data(), payload.size());
-
-        // Calculate again (should be deterministic)
-        uint32_t checksum2 = CalculateChecksum(payload.data(), payload.size());
-
-        assert(checksum1 == checksum2);
-
-        // Modify one byte and verify checksum changes
-        if (!payload.empty()) {
-            payload[0] ^= 0x01;
-            uint32_t checksum3 = CalculateChecksum(payload.data(), payload.size());
-
-            // Checksum should be different (collision unlikely)
-            if (checksum3 == checksum1) {
-                // Collision detected (very rare)
-            }
-        }
-    }
-}
-#endif
-
-#if 0
-/**
- * Fuzz target: Network message command parsing
- *
- * Tests command string handling
- */
-FUZZ_TARGET(network_message_command)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    // Test various command strings
-    std::vector<std::string> valid_commands = {
-        "version",
-        "verack",
-        "addr",
-        "inv",
-        "getdata",
-        "notfound",
-        "getblocks",
-        "getheaders",
-        "tx",
-        "block",
-        "headers",
-        "ping",
-        "pong",
-        "reject",
-        "mempool",
-    };
-
-    // Test valid commands
-    for (const auto& cmd : valid_commands) {
-        char command[12];
-        memset(command, 0, 12);
-        memcpy(command, cmd.c_str(), std::min(cmd.length(), size_t(12)));
-
-        // Verify null-terminated or padded
-        bool valid = false;
-        for (int i = 0; i < 12; ++i) {
-            if (command[i] == '\0') {
-                valid = true;
-                break;
-            }
-        }
-
-        assert(valid || cmd.length() == 12);
-    }
-
-    // Test fuzzed command strings
-    try {
-        std::string fuzzed_cmd = fuzzed_data.ConsumeRandomLengthString(12);
-
-        char command[12];
-        memset(command, 0, 12);
-        memcpy(command, fuzzed_cmd.c_str(), std::min(fuzzed_cmd.length(), size_t(12)));
-
-        // Should handle any command gracefully
-        // Unknown commands are typically ignored
-
-    } catch (const std::exception& e) {
-        return;
-    }
-}
-#endif

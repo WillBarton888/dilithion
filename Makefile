@@ -568,10 +568,11 @@ quality: analyze
 # Fuzz test compiler (requires Clang with libFuzzer support)
 # Try clang++-14 first, fall back to clang++ (any version), or use environment variable
 FUZZ_CXX ?= $(shell command -v clang++-14 2>/dev/null || command -v clang++ 2>/dev/null || echo clang++)
-FUZZ_CXXFLAGS := -fsanitize=fuzzer,address,undefined -std=c++17 -O1 -g $(INCLUDES)
+FUZZ_CXXFLAGS := -fsanitize=fuzzer,address,undefined -std=c++17 -O1 -g $(INCLUDES) -DDILITHIUM_MODE=3
 
 # Fuzz test sources (Week 3 Phase 4 - 9 harnesses, 42+ targets)
 # Week 6 Phase 3 - Added tx_validation and utxo fuzzers (11 harnesses total)
+# Week 7 Phase 3 - Split multi-target fuzzers (20 harnesses total)
 FUZZ_SHA3_SOURCE := src/test/fuzz/fuzz_sha3.cpp
 FUZZ_TRANSACTION_SOURCE := src/test/fuzz/fuzz_transaction.cpp
 FUZZ_BLOCK_SOURCE := src/test/fuzz/fuzz_block.cpp
@@ -583,6 +584,16 @@ FUZZ_SUBSIDY_SOURCE := src/test/fuzz/fuzz_subsidy.cpp
 FUZZ_MERKLE_SOURCE := src/test/fuzz/fuzz_merkle.cpp
 FUZZ_TX_VALIDATION_SOURCE := src/test/fuzz/fuzz_tx_validation.cpp
 FUZZ_UTXO_SOURCE := src/test/fuzz/fuzz_utxo.cpp
+# New split fuzzers (Phase 3 - Nov 2025)
+FUZZ_ADDRESS_ENCODE_SOURCE := src/test/fuzz/fuzz_address_encode.cpp
+FUZZ_ADDRESS_VALIDATE_SOURCE := src/test/fuzz/fuzz_address_validate.cpp
+FUZZ_ADDRESS_BECH32_SOURCE := src/test/fuzz/fuzz_address_bech32.cpp
+FUZZ_ADDRESS_TYPE_SOURCE := src/test/fuzz/fuzz_address_type.cpp
+FUZZ_NETWORK_CREATE_SOURCE := src/test/fuzz/fuzz_network_create.cpp
+FUZZ_NETWORK_CHECKSUM_SOURCE := src/test/fuzz/fuzz_network_checksum.cpp
+FUZZ_NETWORK_COMMAND_SOURCE := src/test/fuzz/fuzz_network_command.cpp
+FUZZ_SIGNATURE_SOURCE := src/test/fuzz/fuzz_signature.cpp
+FUZZ_BASE58_SOURCE := src/test/fuzz/fuzz_base58.cpp
 
 # Fuzzer object files (compiled WITH sanitizers) - harness code only
 FUZZ_SHA3_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_sha3.o
@@ -596,6 +607,16 @@ FUZZ_SUBSIDY_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_subsidy.o
 FUZZ_MERKLE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_merkle.o
 FUZZ_TX_VALIDATION_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_tx_validation.o
 FUZZ_UTXO_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_utxo.o
+# New split fuzzer objects
+FUZZ_ADDRESS_ENCODE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_address_encode.o
+FUZZ_ADDRESS_VALIDATE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_address_validate.o
+FUZZ_ADDRESS_BECH32_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_address_bech32.o
+FUZZ_ADDRESS_TYPE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_address_type.o
+FUZZ_NETWORK_CREATE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_network_create.o
+FUZZ_NETWORK_CHECKSUM_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_network_checksum.o
+FUZZ_NETWORK_COMMAND_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_network_command.o
+FUZZ_SIGNATURE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_signature.o
+FUZZ_BASE58_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_base58.o
 
 # Common fuzzer dependencies (compiled WITHOUT sanitizers) - linked library code
 FUZZ_COMMON_OBJECTS := $(OBJ_DIR)/crypto/sha3.o \
@@ -623,10 +644,20 @@ FUZZ_SUBSIDY := fuzz_subsidy
 FUZZ_MERKLE := fuzz_merkle
 FUZZ_TX_VALIDATION := fuzz_tx_validation
 FUZZ_UTXO := fuzz_utxo
+# New split fuzzer binaries
+FUZZ_ADDRESS_ENCODE := fuzz_address_encode
+FUZZ_ADDRESS_VALIDATE := fuzz_address_validate
+FUZZ_ADDRESS_BECH32 := fuzz_address_bech32
+FUZZ_ADDRESS_TYPE := fuzz_address_type
+FUZZ_NETWORK_CREATE := fuzz_network_create
+FUZZ_NETWORK_CHECKSUM := fuzz_network_checksum
+FUZZ_NETWORK_COMMAND := fuzz_network_command
+FUZZ_SIGNATURE := fuzz_signature
+FUZZ_BASE58 := fuzz_base58
 
 # Build all fuzz tests (requires Clang with libFuzzer)
-fuzz: fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo
-	@echo "$(COLOR_GREEN)✓ All fuzz tests built successfully (11 harnesses, 50+ targets)$(COLOR_RESET)"
+fuzz: fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo fuzz_address_encode fuzz_address_validate fuzz_address_bech32 fuzz_address_type fuzz_network_create fuzz_network_checksum fuzz_network_command fuzz_signature fuzz_base58
+	@echo "$(COLOR_GREEN)✓ All fuzz tests built successfully (20 harnesses, 70+ targets)$(COLOR_RESET)"
 	@echo "  Run individual: ./fuzz_sha3, ./fuzz_transaction, ./fuzz_block, etc."
 	@echo "  With corpus: ./fuzz_transaction fuzz_corpus/transaction/"
 	@echo "  Time limit: ./fuzz_block -max_total_time=60"
@@ -699,6 +730,64 @@ fuzz_tx_validation: $(FUZZ_TX_VALIDATION_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONS
 fuzz_utxo: $(FUZZ_UTXO_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lleveldb -lrandomx -lpthread
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# ============================================================================
+# New Split Fuzzers (Phase 3 - November 2025)
+# ============================================================================
+
+# fuzz_address_encode: Base58 encoding with SHA3 checksum
+fuzz_address_encode: $(FUZZ_ADDRESS_ENCODE_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/util/base58.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_address_validate: Address validation and checksum verification
+fuzz_address_validate: $(FUZZ_ADDRESS_VALIDATE_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/util/base58.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_address_bech32: Bech32 address decoding
+fuzz_address_bech32: $(FUZZ_ADDRESS_BECH32_OBJ) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_address_type: Address type detection
+fuzz_address_type: $(FUZZ_ADDRESS_TYPE_OBJ) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_network_create: Network message serialization
+fuzz_network_create: $(FUZZ_NETWORK_CREATE_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_network_checksum: Network checksum validation
+fuzz_network_checksum: $(FUZZ_NETWORK_CHECKSUM_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_network_command: Network command parsing
+fuzz_network_command: $(FUZZ_NETWORK_COMMAND_OBJ) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_signature: Dilithium signature verification
+fuzz_signature: $(FUZZ_SIGNATURE_OBJ) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_base58: Base58 codec testing
+fuzz_base58: $(FUZZ_BASE58_OBJ) $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # Run fuzz tests (short run for CI)

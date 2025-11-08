@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-fuzzers:
-    name: Build All Fuzzers (11 harnesses)
+    name: Build All Fuzzers (20 harnesses)
     runs-on: ubuntu-24.04
 
     steps:
@@ -47,9 +47,10 @@ jobs:
           export FUZZ_CXX=clang++-14
           make -j$(nproc) fuzz
 
-      - name: Verify all 11 fuzzers built
+      - name: Verify all 20 fuzzers built
         run: |
           echo "Verifying fuzzer binaries exist..."
+          # Original 11 fuzzers
           test -f fuzz_sha3
           test -f fuzz_transaction
           test -f fuzz_block
@@ -61,12 +62,24 @@ jobs:
           test -f fuzz_merkle
           test -f fuzz_tx_validation
           test -f fuzz_utxo
-          echo "✅ All 11 fuzzers built successfully"
+          # New split fuzzers (Phase 3)
+          test -f fuzz_address_encode
+          test -f fuzz_address_validate
+          test -f fuzz_address_bech32
+          test -f fuzz_address_type
+          test -f fuzz_network_create
+          test -f fuzz_network_checksum
+          test -f fuzz_network_command
+          test -f fuzz_signature
+          test -f fuzz_base58
+          echo "✅ All 20 fuzzers built successfully"
 
       - name: Quick fuzzing smoke tests (30s each)
         run: |
-          echo "Running smoke tests on all fuzzers..."
-          for fuzzer in fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo; do
+          echo "Running smoke tests on all 20 fuzzers..."
+          FUZZERS="fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo fuzz_address_encode fuzz_address_validate fuzz_address_bech32 fuzz_address_type fuzz_network_create fuzz_network_checksum fuzz_network_command fuzz_signature fuzz_base58"
+
+          for fuzzer in $FUZZERS; do
             if [ -x "$fuzzer" ]; then
               echo "Testing $fuzzer..."
               timeout 30 ./$fuzzer -max_total_time=30 || true
@@ -76,7 +89,7 @@ jobs:
               exit 1
             fi
           done
-          echo "✅ All fuzzer smoke tests passed"
+          echo "✅ All 20 fuzzer smoke tests passed"
 
       - name: Upload fuzzer artifacts
         uses: actions/upload-artifact@v4
