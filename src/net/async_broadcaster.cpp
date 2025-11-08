@@ -3,9 +3,19 @@
 
 #include <net/async_broadcaster.h>
 #include <net/net.h>
-#include <util/time.h>
+#include <net/protocol.h>
 #include <iostream>
 #include <chrono>
+
+// Helper function to get current time in milliseconds
+static int64_t GetTimeMillis() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+}
+
+// External message processor (defined in net.cpp)
+extern CNetMessageProcessor* g_message_processor;
 
 // Constructor
 CAsyncBroadcaster::CAsyncBroadcaster(CConnectionManager& conn_mgr)
@@ -123,31 +133,12 @@ bool CAsyncBroadcaster::QueueBroadcast(const CNetMessage& message,
 
 // Queue a block broadcast (convenience wrapper for high-priority INV)
 bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const std::vector<int>& peer_ids) {
-    // Create INV message for block
-    CNetMessage invMsg;
-    invMsg.command = "inv";
+    // Create CInv for block
+    NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, hash);
 
-    // Serialize block hash into message data
-    // Format: [count:4 bytes][type:4 bytes][hash:32 bytes]
-    invMsg.data.clear();
-    invMsg.data.reserve(40);
-
-    // Count (1 inventory item)
-    uint32_t count = 1;
-    invMsg.data.insert(invMsg.data.end(),
-                       reinterpret_cast<const uint8_t*>(&count),
-                       reinterpret_cast<const uint8_t*>(&count) + sizeof(count));
-
-    // Type (2 = MSG_BLOCK)
-    uint32_t type = 2;
-    invMsg.data.insert(invMsg.data.end(),
-                       reinterpret_cast<const uint8_t*>(&type),
-                       reinterpret_cast<const uint8_t*>(&type) + sizeof(type));
-
-    // Hash (32 bytes)
-    invMsg.data.insert(invMsg.data.end(),
-                       hash.begin(),
-                       hash.end());
+    // Create INV message using message processor
+    std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+    CNetMessage invMsg = g_message_processor->CreateInvMessage(inv_vec);
 
     // Queue with HIGH priority
     return QueueBroadcast(invMsg, peer_ids, PRIORITY_HIGH);
@@ -256,7 +247,10 @@ bool CAsyncBroadcaster::ProcessTask(const BroadcastTask& task) {
     // Calculate queue time
     int64_t queue_time = GetTimeMillis() - task.queued_time;
 
-    std::cout << "[AsyncBroadcaster] Processing task: " << task.message.command
+    // Get command from header (first 12 bytes, null-terminated)
+    std::string cmd_str = task.message.header.GetCommand();
+
+    std::cout << "[AsyncBroadcaster] Processing task: " << cmd_str
               << " to " << task.peer_ids.size() << " peers"
               << " (queued " << queue_time << "ms ago, priority " << task.priority << ")"
               << std::endl;
