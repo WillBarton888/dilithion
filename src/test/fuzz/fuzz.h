@@ -4,6 +4,7 @@
 #ifndef DILITHION_TEST_FUZZ_FUZZ_H
 #define DILITHION_TEST_FUZZ_FUZZ_H
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
