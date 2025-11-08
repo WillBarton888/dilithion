@@ -28,6 +28,7 @@
 #include <net/tx_relay.h>
 #include <net/socket.h>
 #include <net/async_broadcaster.h>
+#include <api/http_server.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
@@ -62,6 +63,7 @@ struct NodeState {
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
     CSocket* p2p_socket = nullptr;
+    CHttpServer* http_server = nullptr;
 } g_node_state;
 
 // Signal handler for graceful shutdown
@@ -77,6 +79,9 @@ void SignalHandler(int signal) {
     }
     if (g_node_state.p2p_socket) {
         g_node_state.p2p_socket->Close();
+    }
+    if (g_node_state.http_server) {
+        g_node_state.http_server->Stop();
     }
 }
 
@@ -656,6 +661,69 @@ int main(int argc, char* argv[]) {
         }
 
         std::cout << "[AsyncBroadcaster] Initialized and started" << std::endl;
+
+        // Create and start HTTP API server for dashboard
+        // Use port 8334 for testnet API
+        int api_port = config.testnet ? 8334 : 8333;
+        CHttpServer http_server(api_port);
+        g_node_state.http_server = &http_server;
+
+        // Set stats handler that returns current node statistics as JSON
+        http_server.SetStatsHandler([&blockchain, &config]() -> std::string {
+            // Get current stats
+            int block_height = blockchain.GetBestHeight();
+            uint32_t difficulty = blockchain.GetCurrentDifficulty();
+            int64_t total_supply = blockchain.GetTotalSupply();
+            size_t peer_count = g_peer_manager ? g_peer_manager->GetConnectedPeers().size() : 0;
+
+            // Get async broadcaster stats
+            size_t async_broadcasts = 0;
+            size_t async_success = 0;
+            size_t async_failed = 0;
+            if (g_async_broadcaster) {
+                auto stats = g_async_broadcaster->GetStats();
+                async_broadcasts = stats.total_queued;
+                async_success = stats.total_sent;
+                async_failed = stats.total_failed;
+            }
+
+            // Calculate success rate
+            int success_rate = (async_broadcasts > 0)
+                ? (int)((async_success * 100) / async_broadcasts)
+                : 100;
+
+            // Calculate blocks until halving
+            int blocks_until_halving = 210000 - block_height;
+
+            // Build JSON response
+            std::ostringstream json;
+            json << "{\n";
+            json << "  \"timestamp\": \"" << std::time(nullptr) << "\",\n";
+            json << "  \"network\": \"" << (config.testnet ? "testnet" : "mainnet") << "\",\n";
+            json << "  \"blockHeight\": " << block_height << ",\n";
+            json << "  \"difficulty\": " << difficulty << ",\n";
+            json << "  \"networkHashRate\": " << (difficulty / 240) << ",\n";
+            json << "  \"totalSupply\": " << total_supply << ",\n";
+            json << "  \"blockReward\": 50,\n";
+            json << "  \"blocksUntilHalving\": " << blocks_until_halving << ",\n";
+            json << "  \"peerCount\": " << peer_count << ",\n";
+            json << "  \"averageBlockTime\": 240,\n";
+            json << "  \"status\": \"live\",\n";
+            json << "  \"asyncBroadcasts\": " << async_success << ",\n";
+            json << "  \"asyncSuccessRate\": \"" << success_rate << "%\",\n";
+            json << "  \"asyncValidation\": \"" << (async_success >= 10 ? "COMPLETE" : "IN_PROGRESS") << "\"\n";
+            json << "}";
+
+            return json.str();
+        });
+
+        if (!http_server.Start()) {
+            std::cerr << "Failed to start HTTP API server on port " << api_port << std::endl;
+            return 1;
+        }
+
+        std::cout << "[HttpServer] API server started on port " << api_port << std::endl;
+        std::cout << "[HttpServer] Dashboard endpoint: http://localhost:" << api_port << "/api/stats" << std::endl;
 
         // Verify global pointers are properly initialized (audit recommendation)
         assert(g_connection_manager != nullptr && "g_connection_manager must be initialized");

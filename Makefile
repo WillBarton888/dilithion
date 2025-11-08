@@ -111,6 +111,8 @@ RPC_SOURCES := src/rpc/server.cpp \
                src/rpc/auth.cpp \
                src/rpc/ratelimiter.cpp
 
+API_SOURCES := src/api/http_server.cpp
+
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp \
                   src/wallet/passphrase_validator.cpp
@@ -126,6 +128,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(NODE_SOURCES) \
                 $(PRIMITIVES_SOURCES) \
                 $(RPC_SOURCES) \
+                $(API_SOURCES) \
                 $(UTIL_SOURCES) \
                 $(WALLET_SOURCES)
 
