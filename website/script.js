@@ -7,8 +7,9 @@
 const TESTNET_LAUNCH_DATE = 1762041600000; // Nov 2, 2025 00:00:00 UTC
 const MAINNET_LAUNCH_DATE = 1767225600000; // Jan 1, 2026 00:00:00 UTC
 const RPC_ENDPOINT = 'http://localhost:8332';
+const API_ENDPOINT = '/api/stats.php'; // PHP proxy to backend nodes
 const STATS_JSON_URL = 'https://dilithion.org/network-stats.json';
-const UPDATE_INTERVAL = 30000;
+const UPDATE_INTERVAL = 5000; // 5 seconds for live testnet updates
 
 // State
 let isNetworkLive = false;
@@ -99,10 +100,28 @@ async function fetchRPCData(method, params = []) {
 }
 
 /**
- * Fetch network stats from static JSON file
+ * Fetch network stats from live API endpoint with fallback to static JSON
  */
 async function fetchNetworkStats() {
+    // Try proxied API endpoint first
     try {
+        const response = await fetch(API_ENDPOINT, {
+            cache: 'no-store',
+            signal: AbortSignal.timeout(5000) // 5 second timeout
+        });
+
+        if (response.ok) {
+            const stats = await response.json();
+            console.log('Fetched live stats from API endpoint');
+            return stats;
+        }
+    } catch (error) {
+        console.log('API endpoint failed:', error.message);
+    }
+
+    // Fall back to static JSON file if API endpoint fails
+    try {
+        console.log('API endpoint failed, falling back to static JSON');
         const response = await fetch(STATS_JSON_URL + '?t=' + Date.now(), {
             cache: 'no-store'
         });
@@ -114,7 +133,7 @@ async function fetchNetworkStats() {
         const stats = await response.json();
         return stats;
     } catch (error) {
-        console.log('Static stats not available, trying RPC:', error.message);
+        console.log('Static stats not available:', error.message);
         return null;
     }
 }

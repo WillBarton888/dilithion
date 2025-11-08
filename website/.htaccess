@@ -1,13 +1,12 @@
-# Redirect dilithion.com to dilithion.org
-RewriteEngine On
-RewriteCond %{HTTP_HOST} ^(www\.)?dilithion\.com$ [NC]
-RewriteRule ^(.*)$ https://dilithion.org/$1 [R=301,L]
+# Disable restrictive CSP for dashboard functionality
+<IfModule mod_headers.c>
+    # Allow inline scripts and external resources for dashboard
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'"
 
-# Force HTTPS for dilithion.org
-RewriteCond %{HTTPS} off
-RewriteCond %{HTTP_HOST} ^(www\.)?dilithion\.org$ [NC]
-RewriteRule ^(.*)$ https://dilithion.org/$1 [R=301,L]
-
-# Remove www from dilithion.org
-RewriteCond %{HTTP_HOST} ^www\.dilithion\.org$ [NC]
-RewriteRule ^(.*)$ https://dilithion.org/$1 [R=301,L]
+    # Prevent caching of network-stats.json and API responses
+    <FilesMatch "network-stats\.json">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires 0
+    </FilesMatch>
+</IfModule>
