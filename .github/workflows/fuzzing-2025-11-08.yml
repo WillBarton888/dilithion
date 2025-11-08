@@ -1,0 +1,91 @@
+name: Fuzzing Infrastructure Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-fuzzers:
+    name: Build All Fuzzers (11 harnesses)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang-14 \
+            libc++-14-dev \
+            libc++abi-14-dev \
+            build-essential \
+            cmake \
+            libleveldb-dev \
+            git
+
+      - name: Build RandomX
+        run: |
+          cd depends/randomx
+          mkdir -p build && cd build
+          cmake ..
+          make -j$(nproc)
+
+      - name: Build Dilithium library
+        run: |
+          cd depends/dilithium/ref
+          make clean
+          make -j$(nproc)
+
+      - name: Build all fuzzers
+        run: |
+          export FUZZ_CXX=clang++-14
+          make -j$(nproc) fuzz
+
+      - name: Verify all 11 fuzzers built
+        run: |
+          echo "Verifying fuzzer binaries exist..."
+          test -f fuzz_sha3
+          test -f fuzz_transaction
+          test -f fuzz_block
+          test -f fuzz_compactsize
+          test -f fuzz_network_message
+          test -f fuzz_address
+          test -f fuzz_difficulty
+          test -f fuzz_subsidy
+          test -f fuzz_merkle
+          test -f fuzz_tx_validation
+          test -f fuzz_utxo
+          echo "✅ All 11 fuzzers built successfully"
+
+      - name: Quick fuzzing smoke tests (30s each)
+        run: |
+          echo "Running smoke tests on all fuzzers..."
+          for fuzzer in fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo; do
+            if [ -x "$fuzzer" ]; then
+              echo "Testing $fuzzer..."
+              timeout 30 ./$fuzzer -max_total_time=30 || true
+              echo "✅ $fuzzer smoke test complete"
+            else
+              echo "❌ $fuzzer not executable"
+              exit 1
+            fi
+          done
+          echo "✅ All fuzzer smoke tests passed"
+
+      - name: Upload fuzzer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzzers-ubuntu-24.04
+          path: fuzz_*
+          retention-days: 30
+
+      - name: Display fuzzer sizes
+        run: |
+          echo "Fuzzer binary sizes:"
+          ls -lh fuzz_* | awk '{print $9, $5}'

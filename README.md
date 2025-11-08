@@ -8,6 +8,8 @@
 [![Version](https://img.shields.io/badge/version-1.0.0--pre-orange.svg)](https://github.com/WillBarton888/dilithion)
 [![Launch](https://img.shields.io/badge/launch-Jan%201%2C%202026-red.svg)](https://dilithion.org)
 [![Status](https://img.shields.io/badge/status-experimental-yellow.svg)](https://github.com/WillBarton888/dilithion)
+[![CI](https://github.com/WillBarton888/dilithion/workflows/Dilithion%20CI/badge.svg)](https://github.com/WillBarton888/dilithion/actions)
+[![Fuzzing](https://github.com/WillBarton888/dilithion/workflows/Fuzzing%20Infrastructure%20Build/badge.svg)](https://github.com/WillBarton888/dilithion/actions)
 
 ---
 
