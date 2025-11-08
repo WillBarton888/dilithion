@@ -1,0 +1,80 @@
+# Dilithion Fuzzer Build Environment
+# Copyright (c) 2025 The Dilithion Core developers
+# Distributed under the MIT software license
+#
+# Purpose: Cross-platform fuzzer build container targeting GLIBC 2.35
+# Target: Ubuntu 22.04 LTS (GLIBC 2.35) for production testnet compatibility
+# Date: 2025-11-08
+
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    clang-14 \
+    libc++-14-dev \
+    libc++abi-14-dev \
+    build-essential \
+    cmake \
+    git \
+    libleveldb-dev \
+    libpthread-stubs0-dev \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set clang-14 as default compiler for fuzzer builds
+ENV CC=clang-14
+ENV CXX=clang++-14
+ENV FUZZ_CXX=clang++-14
+
+# Create working directory
+WORKDIR /dilithion
+
+# Copy source code (entire project)
+COPY . /dilithion/
+
+# Build dependencies (RandomX and Dilithium)
+RUN cd depends/randomx && \
+    mkdir -p build && \
+    cd build && \
+    cmake .. && \
+    make -j$(nproc)
+
+RUN cd depends/dilithium/ref && \
+    make clean && \
+    make -j$(nproc)
+
+# Build all 11 fuzzers
+RUN make clean && \
+    make -j$(nproc) fuzz
+
+# Verify all fuzzers exist
+RUN ls -lh fuzz_* && \
+    echo "Verifying fuzzer binaries..." && \
+    test -f fuzz_sha3 && \
+    test -f fuzz_transaction && \
+    test -f fuzz_block && \
+    test -f fuzz_compactsize && \
+    test -f fuzz_network_message && \
+    test -f fuzz_address && \
+    test -f fuzz_difficulty && \
+    test -f fuzz_subsidy && \
+    test -f fuzz_merkle && \
+    test -f fuzz_tx_validation && \
+    test -f fuzz_utxo && \
+    echo "All 11 fuzzers built successfully!"
+
+# Create output directory for binaries
+RUN mkdir -p /output && \
+    cp fuzz_* /output/
+
+# Verify GLIBC compatibility
+RUN echo "=== GLIBC Version ===" && \
+    ldd --version | head -n1 && \
+    echo "=== Fuzzer Dependencies ===" && \
+    ldd /output/fuzz_sha3 || true
+
+# Default command: list built fuzzers
+CMD ["ls", "-lh", "/output/"]
