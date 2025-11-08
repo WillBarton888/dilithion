@@ -123,6 +123,7 @@ echo ""
 echo -e "${COLOR_YELLOW}[6/6] Verifying Fuzzers${COLOR_RESET}"
 
 FUZZERS=(
+    # Original 11 fuzzers
     "fuzz_sha3"
     "fuzz_transaction"
     "fuzz_block"
@@ -134,6 +135,16 @@ FUZZERS=(
     "fuzz_merkle"
     "fuzz_tx_validation"
     "fuzz_utxo"
+    # New 9 fuzzers (Phase 3 split harnesses)
+    "fuzz_address_encode"
+    "fuzz_address_validate"
+    "fuzz_address_bech32"
+    "fuzz_address_type"
+    "fuzz_network_create"
+    "fuzz_network_checksum"
+    "fuzz_network_command"
+    "fuzz_signature"
+    "fuzz_base58"
 )
 
 MISSING_COUNT=0
@@ -172,7 +183,7 @@ echo -e "${COLOR_BLUE}========================================${COLOR_RESET}"
 echo -e "${COLOR_GREEN}✓ Build Complete!${COLOR_RESET}"
 echo -e "${COLOR_BLUE}========================================${COLOR_RESET}"
 echo -e "  Output Directory: ${OUTPUT_DIR}"
-echo -e "  Fuzzers Built: 11/11"
+echo -e "  Fuzzers Built: 20/20"
 echo ""
 echo -e "${COLOR_YELLOW}Test a fuzzer:${COLOR_RESET}"
 echo -e "  cd ${OUTPUT_DIR}"

@@ -39,8 +39,9 @@ SSH_OPTS="-i ${SSH_KEY} -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 REMOTE_SOURCE_DIR="/root/dilithion"
 REMOTE_FUZZER_DIR="/root/dilithion-fuzzers"
 
-# Fuzzer list
+# Fuzzer list (Phase 4: 20 fuzzers - Nov 9, 2025)
 FUZZERS=(
+    # Original 11 fuzzers
     "fuzz_sha3"
     "fuzz_transaction"
     "fuzz_block"
@@ -52,6 +53,16 @@ FUZZERS=(
     "fuzz_merkle"
     "fuzz_tx_validation"
     "fuzz_utxo"
+    # New 9 fuzzers (Phase 3 split harnesses)
+    "fuzz_address_encode"
+    "fuzz_address_validate"
+    "fuzz_address_bech32"
+    "fuzz_address_type"
+    "fuzz_network_create"
+    "fuzz_network_checksum"
+    "fuzz_network_command"
+    "fuzz_signature"
+    "fuzz_base58"
 )
 
 # Parse arguments
@@ -200,9 +211,9 @@ deploy_to_node() {
 
     echo ""
     echo -e "${COLOR_BLUE}Smoke Test Results for ${node_name}:${COLOR_RESET}"
-    echo -e "  ${COLOR_GREEN}Passed:${COLOR_RESET} ${PASSED_COUNT}/11"
+    echo -e "  ${COLOR_GREEN}Passed:${COLOR_RESET} ${PASSED_COUNT}/20"
     if [ ${FAILED_COUNT} -gt 0 ]; then
-        echo -e "  ${COLOR_RED}Failed:${COLOR_RESET} ${FAILED_COUNT}/11"
+        echo -e "  ${COLOR_RED}Failed:${COLOR_RESET} ${FAILED_COUNT}/20"
     fi
     echo ""
 
