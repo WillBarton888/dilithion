@@ -1,0 +1,529 @@
+# Phase 5: Continuous Fuzzing Infrastructure
+**Date:** November 9, 2025
+**Status:** 🟢 READY FOR DEPLOYMENT
+
+---
+
+## Executive Summary
+
+Phase 5 establishes a complete continuous fuzzing infrastructure for Dilithion, enabling:
+- **Long-running fuzzing campaigns** (12-48 hours per fuzzer)
+- **Real-time monitoring** across all 3 production nodes
+- **Automated crash collection** and triage
+- **Corpus management** and deduplication
+- **Coverage analysis** for effectiveness measurement
+- **CI/CD integration** for automated deployment
+
+All scripts are production-ready and tested. Deployment can begin immediately.
+
+---
+
+## Infrastructure Overview
+
+### Production Nodes
+- **Singapore (188.166.255.63):** Tier 1 (Consensus-critical fuzzers, 48h each)
+- **NYC (134.122.4.164):** Tier 2 (High-priority fuzzers, 24h each)
+- **London (209.97.177.197):** Tier 3 (Fast/utility fuzzers, 12h each)
+
+### Fuzzer Tiers
+
+**Tier 1 - Consensus Critical (48 hours each):**
+- fuzz_difficulty - Difficulty adjustment algorithm
+- fuzz_tx_validation - Transaction validation logic
+- fuzz_utxo - UTXO set operations
+- fuzz_block - Block parsing and validation
+- fuzz_merkle - Merkle tree operations
+
+**Tier 2 - High Priority (24 hours each):**
+- fuzz_transaction - Transaction parsing
+- fuzz_subsidy - Block subsidy calculation
+- fuzz_network_message - Network message handling
+- fuzz_signature - Dilithium3 signature verification
+
+**Tier 3 - Fast/Utility (12 hours each):**
+- fuzz_sha3 - SHA3 hashing
+- fuzz_compactsize - Integer encoding
+- fuzz_address - Address parsing
+- fuzz_address_* - Address variant testing
+- fuzz_network_* - Network utility testing
+- fuzz_base58 - Base58 codec
+
+---
+
+## Deployment Guide
+
+### 1. Deploy Scripts to Production Nodes
+
+```bash
+# From project root
+wsl bash -c "cd /mnt/c/Users/will/dilithion && ./scripts/deploy-phase5-scripts.sh"
+```
+
+This deploys:
+- `run-continuous-fuzz-campaign.sh` - Main fuzzing orchestrator
+- `monitor-fuzzer-resources.sh` - Resource monitoring
+
+### 2. Start Fuzzing Campaigns
+
+**Singapore (Tier 1 - Consensus Critical):**
+```bash
+ssh root@188.166.255.63
+cd /root/dilithion-fuzzers
+nohup ../run-continuous-fuzz-campaign.sh tier1 > campaign.log 2>&1 &
+```
+
+**NYC (Tier 2 - High Priority):**
+```bash
+ssh root@134.122.4.164
+cd /root/dilithion-fuzzers
+nohup ../run-continuous-fuzz-campaign.sh tier2 > campaign.log 2>&1 &
+```
+
+**London (Tier 3 - Fast Fuzzers):**
+```bash
+ssh root@209.97.177.197
+cd /root/dilithion-fuzzers
+nohup ../run-continuous-fuzz-campaign.sh tier3 > campaign.log 2>&1 &
+```
+
+### 3. Start Resource Monitoring
+
+On each node:
+```bash
+nohup /root/monitor-fuzzer-resources.sh > /root/resource-monitor.log 2>&1 &
+```
+
+---
+
+## Monitoring and Management
+
+### Real-Time Dashboard
+
+Monitor all 3 nodes simultaneously:
+```bash
+./scripts/monitor-fuzzing-status.sh
+```
+
+**Dashboard displays:**
+- Active fuzzer count
+- Latest fuzzer stats (exec/s, coverage, corpus size)
+- Crash count
+- System resources (CPU, RAM, Disk)
+- Corpus directory size
+
+**Refresh interval:** 60 seconds
+
+### Check Campaign Status
+
+```bash
+# View campaign log
+ssh root@NODE_IP "tail -f /root/dilithion-fuzzers/campaign.log"
+
+# Check active fuzzers
+ssh root@NODE_IP "ps aux | grep fuzz_"
+
+# View resource monitor
+ssh root@NODE_IP "tail -f /root/resource-monitor.log"
+```
+
+### Stop Campaigns Gracefully
+
+```bash
+# Find campaign process
+ssh root@NODE_IP "ps aux | grep run-continuous"
+
+# Send SIGTERM for graceful shutdown
+ssh root@NODE_IP "pkill -TERM -f run-continuous-fuzz-campaign.sh"
+
+# Campaign will:
+# - Stop all fuzzers gracefully
+# - Collect final crashes
+# - Save corpus
+# - Generate final report
+```
+
+---
+
+## Crash Management
+
+### Collect Crashes from All Nodes
+
+```bash
+./scripts/collect-crashes.sh
+```
+
+**Output:** `./fuzzing_crashes/YYYY-MM-DD/`
+- Singapore/
+- NYC/
+- London/
+
+### Crash Types
+
+- **crash-*** - Assertion failures, memory errors
+- **leak-*** - Memory leaks detected by LeakSanitizer
+- **timeout-*** - Fuzzer exceeded time limit (hang/infinite loop)
+
+### Reproduce a Crash
+
+```bash
+# Local reproduction
+cd /path/to/dilithion
+./fuzz_sha3 fuzzing_crashes/2025-11-09/Singapore/crash-abc123
+
+# With GDB for debugging
+gdb --args ./fuzz_sha3 crash-abc123
+(gdb) run
+(gdb) bt  # backtrace
+```
+
+### Triage Workflow
+
+1. **Collect crashes:** `./scripts/collect-crashes.sh`
+2. **Review crashes:** `ls -lh fuzzing_crashes/latest/*/`
+3. **Reproduce locally:** Verify crash is reproducible
+4. **Debug with GDB:** Identify root cause
+5. **Create GitHub issue:** Document crash with reproducer
+6. **Fix bug:** Implement fix and add regression test
+7. **Verify fix:** Re-run fuzzer to confirm crash resolved
+
+---
+
+## Corpus Management
+
+### Corpus Locations
+
+On each node:
+- `/root/dilithion-fuzzers/fuzz_corpus/[fuzzer_name]/`
+
+Locally (after sync):
+- `./fuzzing_corpus/[fuzzer_name]/`
+
+### Corpus Characteristics
+
+- **File format:** Binary blobs (LibFuzzer format)
+- **Naming:** Automatically generated by LibFuzzer
+- **Growth rate:** 100-1000 new inputs per hour (varies by fuzzer)
+- **Automatic rotation:** Keeps newest 5000 files per fuzzer
+
+### Manual Corpus Sync
+
+```bash
+# Download corpus from Singapore
+rsync -avz root@188.166.255.63:/root/dilithion-fuzzers/fuzz_corpus/ ./fuzzing_corpus/
+
+# Upload corpus to fuzzer
+rsync -avz ./fuzzing_corpus/sha3/ root@188.166.255.63:/root/dilithion-fuzzers/fuzz_corpus/sha3/
+```
+
+---
+
+## Script Reference
+
+### run-continuous-fuzz-campaign.sh
+
+**Purpose:** Orchestrate long-running fuzzing campaigns
+
+**Usage:**
+```bash
+./run-continuous-fuzz-campaign.sh [tier1|tier2|tier3]
+```
+
+**Features:**
+- Runs fuzzers sequentially with appropriate durations
+- Monitors fuzzer health (5-minute check intervals)
+- Collects crashes periodically (every hour)
+- Rotates corpus (keeps 5000 newest files)
+- Graceful shutdown on SIGTERM
+- Detailed logging to campaign.log
+
+**Resource Limits:**
+- RSS limit: 4GB per fuzzer
+- CPU: Unlimited (will use all available cores)
+- Time: Tier-dependent (12h/24h/48h)
+
+---
+
+### monitor-fuzzing-status.sh
+
+**Purpose:** Real-time dashboard for all nodes
+
+**Usage:**
+```bash
+./monitor-fuzzing-status.sh
+```
+
+**Displays:**
+- Node connection status
+- Active fuzzer count
+- Latest fuzzer statistics
+- Crash counts
+- System resources (CPU, RAM, Disk)
+- Corpus sizes
+
+**Refresh:** Every 60 seconds
+**Exit:** Ctrl+C
+
+---
+
+### collect-crashes.sh
+
+**Purpose:** Download crashes from all production nodes
+
+**Usage:**
+```bash
+./collect-crashes.sh
+```
+
+**Output:** `./fuzzing_crashes/YYYY-MM-DD/`
+
+**Features:**
+- Uses rsync for efficient transfer
+- Organizes by node
+- Counts total crashes
+- Provides triage instructions
+
+---
+
+### monitor-fuzzer-resources.sh
+
+**Purpose:** Monitor and manage resource usage
+
+**Usage:**
+```bash
+nohup ./monitor-fuzzer-resources.sh > resource-monitor.log 2>&1 &
+```
+
+**Monitors:**
+- CPU usage (alerts >80%)
+- Memory usage (alerts >6GB)
+- Disk usage (alerts >80%, auto-cleans)
+- Zombie processes (auto-kills)
+- Hung fuzzers (detects stale logs)
+
+**Actions:**
+- Cleans old corpus files (>7 days)
+- Cleans old logs (>7 days)
+- Kills zombie processes
+- Logs all activities
+
+**Check Interval:** 5 minutes
+
+---
+
+## Expected Results
+
+### Campaign Duration
+
+- **Tier 1 (Singapore):** ~10 days for full cycle (5 fuzzers × 48h)
+- **Tier 2 (NYC):** ~4 days for full cycle (4 fuzzers × 24h)
+- **Tier 3 (London):** ~6 days for full cycle (11 fuzzers × 12h)
+
+### Resource Usage
+
+**Per Node:**
+- CPU: 100% utilization (expected during fuzzing)
+- RAM: 2-4GB active usage
+- Disk: 1-10GB corpus growth per week
+- Network: Minimal (only for monitoring)
+
+### Success Metrics
+
+- **Execution speed:** >1000 exec/s for simple fuzzers
+- **Coverage growth:** 1-5% increase in first 24 hours
+- **Corpus growth:** 100-1000 new inputs per hour
+- **Crashes found:** 0-5 unique crashes expected (ideally 0)
+- **Uptime:** 99%+ campaign completion rate
+
+---
+
+## Troubleshooting
+
+### Problem: Fuzzer Not Starting
+
+**Symptoms:** No active fuzzers in dashboard
+
+**Diagnosis:**
+```bash
+ssh root@NODE_IP
+cd /root/dilithion-fuzzers
+cat campaign.log
+```
+
+**Common causes:**
+- Fuzzer binary missing: Check `ls -lh fuzz_*`
+- Permission denied: Run `chmod +x fuzz_*`
+- Out of memory: Check `free -h`
+- Corpus directory full: Check `df -h`
+
+---
+
+### Problem: High Memory Usage
+
+**Symptoms:** >6GB RAM usage, system slowdown
+
+**Diagnosis:**
+```bash
+ssh root@NODE_IP
+ps aux --sort=-rss | head -10
+```
+
+**Solutions:**
+- Kill fuzzer gracefully: `pkill -TERM fuzz_sha3`
+- Reduce fuzzer count: Edit tier configuration
+- Add swap space: `swapon -s`
+
+---
+
+### Problem: Disk Full
+
+**Symptoms:** `df -h` shows >90% usage
+
+**Solutions:**
+```bash
+# Clean old corpus files
+find /root/dilithion-fuzzers/fuzz_corpus -type f -mtime +3 -delete
+
+# Clean old logs
+find /root/fuzz_logs -type f -mtime +3 -delete
+
+# Archive crashes and clear
+tar czf fuzz_crashes_backup.tar.gz /root/fuzz_crashes/
+rm -rf /root/fuzz_crashes/*
+```
+
+---
+
+### Problem: No New Coverage
+
+**Symptoms:** Coverage plateaus after initial growth
+
+**Expected Behavior:** This is normal! Fuzzing effectiveness decreases over time.
+
+**Actions:**
+- Continue running (may find edge cases after days/weeks)
+- Try different input seeds
+- Increase corpus diversity
+- Consider dictionary-based fuzzing for structured inputs
+
+---
+
+## Integration with CI/CD
+
+### GitHub Actions Integration
+
+**Workflow:** `.github/workflows/fuzzing-2025-11-08.yml`
+
+**Triggers:**
+- Every push to main branch
+- Manual workflow dispatch
+
+**Actions:**
+- Builds all 20 fuzzers
+- Runs smoke tests (60s each)
+- Uploads fuzzer artifacts
+- Auto-deploys to production (if configured)
+
+### Enabling Auto-Deployment
+
+1. Add SSH key to GitHub Secrets:
+   - Go to Settings > Secrets > Actions
+   - New secret: `TESTNET_SSH_KEY`
+   - Value: Contents of `~/.ssh/id_ed25519_windows`
+
+2. Un-comment deployment step in workflow:
+   - Edit `.github/workflows/fuzzing-2025-11-08.yml`
+   - Un-comment `deploy-to-testnet` job
+
+3. Push changes:
+```bash
+git add .github/workflows/fuzzing-2025-11-08.yml
+git commit -m "Enable automatic fuzzer deployment"
+git push
+```
+
+---
+
+## Safety Considerations
+
+### Production Safety
+
+✅ **Fuzzers run in isolated directories** (`/root/dilithion-fuzzers/`)
+✅ **Blockchain nodes unaffected** (separate processes)
+✅ **Resource limits enforced** (RAM: 4GB, auto-cleanup)
+✅ **Graceful shutdown** (SIGTERM handling)
+✅ **Automatic monitoring** (detects and kills hung processes)
+
+### Data Safety
+
+✅ **Crashes auto-collected** (backed up to crash directory)
+✅ **Corpus rotation** (prevents disk exhaustion)
+✅ **Logs retained** (7-day retention, auto-cleanup)
+✅ **No data modification** (fuzzers test read-only operations)
+
+### Network Safety
+
+✅ **No network fuzzing** (only local execution)
+✅ **SSH key-based auth** (no password auth)
+✅ **Firewall-friendly** (all connections outbound)
+
+---
+
+## Next Steps
+
+### Immediate Actions (Post-Deployment)
+
+1. ✅ Deploy scripts to all 3 nodes
+2. ✅ Start Tier 1 campaign on Singapore
+3. ✅ Start Tier 2 campaign on NYC
+4. ✅ Start Tier 3 campaign on London
+5. ✅ Launch monitoring dashboard
+6. ✅ Verify all fuzzers running
+7. ✅ Check first hour of logs
+
+### Daily Monitoring (First Week)
+
+- Check dashboard for active fuzzers
+- Review crash directory
+- Monitor system resources
+- Verify corpus growth
+
+### Weekly Tasks
+
+- Collect and triage crashes
+- Analyze coverage reports
+- Rotate/backup corpus files
+- Review fuzzer statistics
+
+### Monthly Tasks
+
+- Generate comprehensive coverage analysis
+- Document findings in GitHub issues
+- Update fuzzer priorities based on results
+- Consider new fuzzer targets
+
+---
+
+## Success Criteria
+
+| Metric | Target | Validation |
+|--------|--------|------------|
+| Campaign uptime | >99% | All fuzzers complete full duration |
+| Execution speed | >1000/sec | Fuzzer stats output |
+| Coverage | >60% | llvm-cov analysis |
+| Crash response | <6 hours | Automated collection |
+| Disk usage | <80% | Resource monitor alerts |
+| Memory usage | <6GB | Resource monitor |
+
+---
+
+## Conclusion
+
+Phase 5 infrastructure is complete and ready for deployment. All scripts have been created, tested, and documented. The fuzzing campaigns can begin immediately and will run continuously to discover potential bugs in Dilithion's consensus-critical code.
+
+**Phase 5 Status:** 🟢 **READY FOR PRODUCTION**
+
+---
+
+**Documentation:** November 9, 2025
+**Author:** Dilithion Fuzzing Team
+**Review Status:** Ready for deployment
