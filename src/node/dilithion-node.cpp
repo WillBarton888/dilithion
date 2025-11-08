@@ -566,6 +566,11 @@ int main(int argc, char* argv[]) {
                         return 1;
                     }
 
+                    // If this block's previous hash is null/zero, it's the genesis block - stop here
+                    if (blockIndexFromDB.header.hashPrevBlock.IsNull()) {
+                        break;
+                    }
+
                     currentHash = blockIndexFromDB.header.hashPrevBlock;
                 }
 
