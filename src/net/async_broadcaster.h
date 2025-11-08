@@ -5,7 +5,7 @@
 #define DILITHION_NET_ASYNC_BROADCASTER_H
 
 #include <net/serialize.h>
-#include <primitives/uint256.h>
+#include <uint256.h>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
