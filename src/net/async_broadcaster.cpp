@@ -2,7 +2,7 @@
 // Distributed under the MIT software license
 
 #include <net/async_broadcaster.h>
-#include <net/connection_manager.h>
+#include <net/net.h>
 #include <util/time.h>
 #include <iostream>
 #include <chrono>
