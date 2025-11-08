@@ -27,6 +27,7 @@
 #include <net/net.h>
 #include <net/tx_relay.h>
 #include <net/socket.h>
+#include <net/async_broadcaster.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
@@ -49,6 +50,9 @@
 
 // Global chain state
 CChainState g_chainstate;
+
+// Global async broadcaster pointer (initialized in main)
+CAsyncBroadcaster* g_async_broadcaster = nullptr;
 
 // Global node state for signal handling
 struct NodeState {
@@ -642,6 +646,17 @@ int main(int argc, char* argv[]) {
         g_connection_manager = &connection_manager;
         g_message_processor = &message_processor;
 
+        // Create and start async broadcaster for non-blocking message broadcasting
+        CAsyncBroadcaster async_broadcaster(connection_manager);
+        g_async_broadcaster = &async_broadcaster;
+
+        if (!async_broadcaster.Start()) {
+            std::cerr << "Failed to start async broadcaster" << std::endl;
+            return 1;
+        }
+
+        std::cout << "[AsyncBroadcaster] Initialized and started" << std::endl;
+
         // Verify global pointers are properly initialized (audit recommendation)
         assert(g_connection_manager != nullptr && "g_connection_manager must be initialized");
         assert(g_message_processor != nullptr && "g_message_processor must be initialized");
@@ -959,62 +974,31 @@ int main(int argc, char* argv[]) {
                 } else if (g_chainstate.GetTip() == pblockIndex) {
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndex->nHeight << std::endl;
 
-                    // Broadcast block to network (P2P block relay)
-                    try {
-                        auto connected_peers = g_peer_manager->GetConnectedPeers();
-                        std::cout << "[DEBUG] Block broadcast: " << connected_peers.size() << " connected peers found" << std::endl;
+                    // Broadcast block to network (P2P block relay) - Using async broadcaster
+                    auto connected_peers = g_peer_manager->GetConnectedPeers();
 
-                        if (!connected_peers.empty()) {
-                            // Create inv message announcing new block
-                            std::vector<NetProtocol::CInv> inv;
-                            inv.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, blockHash));
-
-                            CNetMessage invMsg = message_processor.CreateInvMessage(inv);
-
-                            int broadcast_count = 0;
-                            int handshake_incomplete = 0;
-                            for (size_t i = 0; i < connected_peers.size(); i++) {
-                                try {
-                                    const auto& peer = connected_peers[i];
-                                    std::cout << "[DEBUG] Processing peer index " << i << std::endl;
-
-                                    if (!peer) {
-                                        std::cout << "[DEBUG]   Peer " << i << " is nullptr!" << std::endl;
-                                        continue;
-                                    }
-
-                                    std::cout << "[DEBUG]   Peer " << peer->id << ": handshake_complete="
-                                              << (peer->IsHandshakeComplete() ? "YES" : "NO") << std::endl;
-
-                                    if (peer->IsHandshakeComplete()) {
-                                        if (connection_manager.SendMessage(peer->id, invMsg)) {
-                                            broadcast_count++;
-                                        } else {
-                                            std::cout << "[DEBUG]   Failed to send to peer " << peer->id << std::endl;
-                                        }
-                                    } else {
-                                        handshake_incomplete++;
-                                    }
-                                } catch (const std::exception& e) {
-                                    std::cout << "[DEBUG] Exception processing peer " << i << ": " << e.what() << std::endl;
-                                } catch (...) {
-                                    std::cout << "[DEBUG] Unknown exception processing peer " << i << std::endl;
-                                }
+                    if (!connected_peers.empty()) {
+                        // Collect peer IDs with completed handshakes
+                        std::vector<int> peer_ids;
+                        for (const auto& peer : connected_peers) {
+                            if (peer && peer->IsHandshakeComplete()) {
+                                peer_ids.push_back(peer->id);
                             }
+                        }
 
-                            if (broadcast_count > 0) {
-                                std::cout << "[P2P] Broadcasted block inv to " << broadcast_count << " peer(s)" << std::endl;
+                        if (!peer_ids.empty()) {
+                            // Queue block broadcast asynchronously (non-blocking!)
+                            if (g_async_broadcaster->BroadcastBlock(blockHash, peer_ids)) {
+                                std::cout << "[P2P] Queued block broadcast to " << peer_ids.size()
+                                          << " peer(s) (async)" << std::endl;
                             } else {
-                                std::cout << "[P2P] WARNING: Block not broadcasted. Handshake incomplete: "
-                                          << handshake_incomplete << " peers" << std::endl;
+                                std::cerr << "[P2P] ERROR: Failed to queue block broadcast" << std::endl;
                             }
                         } else {
-                            std::cout << "[P2P] WARNING: No connected peers to broadcast block" << std::endl;
+                            std::cout << "[P2P] WARNING: No peers with completed handshakes" << std::endl;
                         }
-                    } catch (const std::exception& e) {
-                        std::cout << "[ERROR] Exception in block broadcast: " << e.what() << std::endl;
-                    } catch (...) {
-                        std::cout << "[ERROR] Unknown exception in block broadcast" << std::endl;
+                    } else {
+                        std::cout << "[P2P] WARNING: No connected peers to broadcast block" << std::endl;
                     }
 
                     // Signal main loop to update mining template for next block
