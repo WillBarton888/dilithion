@@ -4,6 +4,7 @@
 #include <wallet/wallet.h>
 #include <wallet/passphrase_validator.h>
 #include <crypto/sha3.h>
+#include <util/base58.h>
 #include <node/utxo_set.h>
 #include <node/mempool.h>
 #include <consensus/tx_validation.h>
@@ -26,9 +27,6 @@ extern "C" {
                                          const uint8_t *ctx, size_t ctxlen,
                                          const uint8_t *pk);
 }
-
-// Base58 alphabet
-static const char* pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 namespace WalletCrypto {
 
@@ -103,112 +101,6 @@ std::vector<uint8_t> HashPubKey(const std::vector<uint8_t>& pubkey) {
     return std::vector<uint8_t>(hash2, hash2 + 20);
 }
 
-std::string EncodeBase58Check(const std::vector<uint8_t>& data) {
-    // Add checksum (double SHA3-256 of data, first 4 bytes)
-    std::vector<uint8_t> vchChecksum(32);
-    SHA3_256(data.data(), data.size(), vchChecksum.data());
-    SHA3_256(vchChecksum.data(), 32, vchChecksum.data());
-
-    // Combine data + checksum
-    std::vector<uint8_t> vch = data;
-    vch.insert(vch.end(), vchChecksum.begin(), vchChecksum.begin() + 4);
-
-    // Convert to base58
-    // Skip leading zeroes
-    size_t zeroes = 0;
-    while (zeroes < vch.size() && vch[zeroes] == 0) {
-        zeroes++;
-    }
-
-    // Allocate enough space in base58
-    std::vector<uint8_t> b58((vch.size() - zeroes) * 138 / 100 + 1);
-    size_t length = 0;
-
-    for (size_t i = zeroes; i < vch.size(); ++i) {
-        int carry = vch[i];
-        for (size_t j = 0; j < length; ++j) {
-            carry += 256 * b58[j];
-            b58[j] = carry % 58;
-            carry /= 58;
-        }
-        while (carry > 0) {
-            b58[length++] = carry % 58;
-            carry /= 58;
-        }
-    }
-
-    // Convert to string
-    std::string str;
-    str.reserve(zeroes + length);
-    for (size_t i = 0; i < zeroes; ++i) {
-        str += pszBase58[0];
-    }
-    for (size_t i = 0; i < length; ++i) {
-        str += pszBase58[b58[length - 1 - i]];
-    }
-
-    return str;
-}
-
-bool DecodeBase58Check(const std::string& str, std::vector<uint8_t>& data) {
-    // VULN-006 FIX: Prevent DoS via excessively long Base58 strings
-    static const size_t MAX_BASE58_LEN = 1024;  // Reasonable limit for addresses
-    if (str.size() > MAX_BASE58_LEN) {
-        return false;  // Reject maliciously long input
-    }
-
-    // Simple implementation - convert from base58
-    std::vector<uint8_t> vch;
-    vch.reserve(str.size() * 138 / 100 + 1);
-
-    // Skip leading '1's
-    size_t zeroes = 0;
-    while (zeroes < str.size() && str[zeroes] == pszBase58[0]) {
-        zeroes++;
-    }
-
-    // Decode base58
-    for (size_t i = zeroes; i < str.size(); ++i) {
-        const char* p = strchr(pszBase58, str[i]);
-        if (p == nullptr) {
-            return false;
-        }
-        int carry = p - pszBase58;
-        for (size_t j = 0; j < vch.size(); ++j) {
-            carry += 58 * vch[j];
-            vch[j] = carry % 256;
-            carry /= 256;
-        }
-        while (carry > 0) {
-            vch.push_back(carry % 256);
-            carry /= 256;
-        }
-    }
-
-    // Add leading zeros
-    data.assign(zeroes, 0);
-    data.insert(data.end(), vch.rbegin(), vch.rend());
-
-    if (data.size() < 4) {
-        return false;
-    }
-
-    // Verify checksum
-    std::vector<uint8_t> payload(data.begin(), data.end() - 4);
-    std::vector<uint8_t> checksum(data.end() - 4, data.end());
-
-    uint8_t hash[32];
-    SHA3_256(payload.data(), payload.size(), hash);
-    SHA3_256(hash, 32, hash);
-
-    if (memcmp(checksum.data(), hash, 4) != 0) {
-        return false;
-    }
-
-    data = payload;
-    return true;
-}
-
 } // namespace WalletCrypto
 
 // CAddress implementation
@@ -227,11 +119,11 @@ std::string CAddress::ToString() const {
     if (!IsValid()) {
         return "";
     }
-    return WalletCrypto::EncodeBase58Check(vchData);
+    return ::EncodeBase58Check(vchData);
 }
 
 bool CAddress::SetString(const std::string& str) {
-    if (!WalletCrypto::DecodeBase58Check(str, vchData)) {
+    if (!::DecodeBase58Check(str, vchData)) {
         vchData.clear();
         return false;
     }
@@ -956,7 +848,7 @@ bool CWallet::Load(const std::string& filename) {
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
         CAddress addr;
-        if (!addr.SetString(WalletCrypto::EncodeBase58Check(addrData))) {
+        if (!addr.SetString(::EncodeBase58Check(addrData))) {
             // Fallback: construct address directly from data
             // This is needed because SetString expects Base58-encoded string
             // but we have raw bytes. We'll need a different approach.

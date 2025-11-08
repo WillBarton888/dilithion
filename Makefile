@@ -117,7 +117,8 @@ WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp \
                   src/wallet/passphrase_validator.cpp
 
-UTIL_SOURCES := src/util/strencodings.cpp
+UTIL_SOURCES := src/util/strencodings.cpp \
+                src/util/base58.cpp
 
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \
@@ -658,14 +659,14 @@ fuzz_compactsize: $(FUZZ_COMPACTSIZE_OBJ) $(DILITHIUM_OBJECTS)
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-# fuzz_network_message: SHA3 dependency
-fuzz_network_message: $(FUZZ_NETWORK_MSG_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (5 targets)"
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+# fuzz_network_message: SHA3, block, transaction dependencies
+fuzz_network_message: $(FUZZ_NETWORK_MSG_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/crypto/randomx_hash.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (1 target)"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-# fuzz_address: SHA3 dependency
-fuzz_address: $(FUZZ_ADDRESS_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+# fuzz_address: SHA3 and Base58 dependency
+fuzz_address: $(FUZZ_ADDRESS_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/util/base58.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (5 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"

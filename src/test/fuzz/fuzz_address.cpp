@@ -1,10 +1,16 @@
 // Copyright (c) 2025 The Dilithion Core developers
 // Distributed under the MIT software license
 
+/**
+ * NOTE: This file contains multiple fuzz targets wrapped in #if 0 blocks.
+ * libFuzzer allows only ONE FUZZ_TARGET per binary.
+ */
+
 #include "fuzz.h"
 #include "util.h"
 #include "../../crypto/sha3.h"
-#include "../../base58.h"
+#include "../../util/base58.h"
+#include <cassert>
 #include <vector>
 #include <string>
 
@@ -59,19 +65,11 @@ FUZZ_TARGET(address_base58_decode)
         std::vector<uint8_t> data_to_hash(decoded.begin(), decoded.end() - 4);
 
         // Dilithion may use SHA3-256 for address checksums
-        SHA3_256_CTX ctx;
-        sha3_256_init(&ctx);
-        sha3_256_update(&ctx, data_to_hash.data(), data_to_hash.size());
-
         uint8_t hash1[32];
-        sha3_256_final(&ctx, hash1);
-
-        // Second hash
-        sha3_256_init(&ctx);
-        sha3_256_update(&ctx, hash1, 32);
+        SHA3_256(data_to_hash.data(), data_to_hash.size(), hash1);
 
         uint8_t hash2[32];
-        sha3_256_final(&ctx, hash2);
+        SHA3_256(hash1, 32, hash2);
 
         uint32_t checksum_calculated = *reinterpret_cast<const uint32_t*>(hash2);
 
@@ -96,6 +94,7 @@ FUZZ_TARGET(address_base58_decode)
     }
 }
 
+#if 0
 /**
  * Fuzz target: Address encoding
  *
@@ -119,18 +118,11 @@ FUZZ_TARGET(address_base58_encode)
         address_data.insert(address_data.end(), pubkey_hash.begin(), pubkey_hash.end());
 
         // Calculate checksum
-        SHA3_256_CTX ctx;
-        sha3_256_init(&ctx);
-        sha3_256_update(&ctx, address_data.data(), address_data.size());
-
         uint8_t hash1[32];
-        sha3_256_final(&ctx, hash1);
-
-        sha3_256_init(&ctx);
-        sha3_256_update(&ctx, hash1, 32);
+        SHA3_256(address_data.data(), address_data.size(), hash1);
 
         uint8_t hash2[32];
-        sha3_256_final(&ctx, hash2);
+        SHA3_256(hash1, 32, hash2);
 
         // Append first 4 bytes as checksum
         address_data.insert(address_data.end(), hash2, hash2 + 4);
@@ -149,7 +141,9 @@ FUZZ_TARGET(address_base58_encode)
         return;
     }
 }
+#endif
 
+#if 0
 /**
  * Fuzz target: Address validation
  *
@@ -178,18 +172,11 @@ FUZZ_TARGET(address_validate)
                 std::vector<uint8_t> data_to_hash(decoded.begin(), decoded.end() - 4);
                 uint32_t checksum_provided = *reinterpret_cast<const uint32_t*>(&decoded[decoded.size() - 4]);
 
-                SHA3_256_CTX ctx;
-                sha3_256_init(&ctx);
-                sha3_256_update(&ctx, data_to_hash.data(), data_to_hash.size());
-
                 uint8_t hash1[32];
-                sha3_256_final(&ctx, hash1);
-
-                sha3_256_init(&ctx);
-                sha3_256_update(&ctx, hash1, 32);
+                SHA3_256(data_to_hash.data(), data_to_hash.size(), hash1);
 
                 uint8_t hash2[32];
-                sha3_256_final(&ctx, hash2);
+                SHA3_256(hash1, 32, hash2);
 
                 uint32_t checksum_calculated = *reinterpret_cast<const uint32_t*>(hash2);
 
@@ -205,7 +192,9 @@ FUZZ_TARGET(address_validate)
         }
     }
 }
+#endif
 
+#if 0
 /**
  * Fuzz target: Bech32 address decoding (if supported)
  *
@@ -254,7 +243,9 @@ FUZZ_TARGET(address_bech32_decode)
         return;
     }
 }
+#endif
 
+#if 0
 /**
  * Fuzz target: Address type detection
  *
@@ -295,3 +286,4 @@ FUZZ_TARGET(address_type_detect)
         return;
     }
 }
+#endif

@@ -1,13 +1,23 @@
 // Copyright (c) 2025 The Dilithion Core developers
 // Distributed under the MIT software license
 
+/**
+ * NOTE: This file contains multiple fuzz targets wrapped in #if 0 blocks.
+ * libFuzzer allows only ONE FUZZ_TARGET per binary.
+ */
+
 #include "fuzz.h"
 #include "util.h"
 #include "../../net/protocol.h"
-#include "../../net/serialize.h"
+#include "../../primitives/block.h"
+#include "../../primitives/transaction.h"
 #include "../../crypto/sha3.h"
+#include <cassert>
 #include <cstring>
 #include <vector>
+
+// Network constants
+static const size_t MAX_SIZE = 32 * 1024 * 1024;  // 32 MB
 
 /**
  * Fuzz target: Network message deserialization
@@ -32,28 +42,13 @@
  * Priority: HIGH (network integrity)
  */
 
-// Network message header structure
-struct CMessageHeader {
-    uint32_t magic;
-    char command[12];
-    uint32_t length;
-    uint32_t checksum;
-};
-
 /**
  * Calculate message checksum (SHA3-256 based)
  */
 uint32_t CalculateChecksum(const uint8_t* payload, size_t length) {
-    // Dilithion likely uses SHA3-256
-    // Bitcoin uses SHA256(SHA256(payload))
-    // Here we assume SHA3-256
-
-    SHA3_256_CTX ctx;
-    sha3_256_init(&ctx);
-    sha3_256_update(&ctx, payload, length);
-
+    // Dilithion uses SHA3-256
     uint8_t hash[32];
-    sha3_256_final(&ctx, hash);
+    SHA3_256(payload, length, hash);
 
     // Return first 4 bytes as uint32_t
     uint32_t checksum;
@@ -65,15 +60,15 @@ FUZZ_TARGET(network_message_parse)
 {
     FuzzedDataProvider fuzzed_data(data, size);
 
-    if (size < sizeof(CMessageHeader)) {
+    if (size < sizeof(NetProtocol::CMessageHeader)) {
         // Not enough data for header
         return;
     }
 
     try {
         // Parse header
-        CMessageHeader header;
-        memcpy(&header, data, sizeof(CMessageHeader));
+        NetProtocol::CMessageHeader header;
+        memcpy(&header, data, sizeof(NetProtocol::CMessageHeader));
 
         // Check magic bytes (example: 0xD9B4BEF9 for Bitcoin mainnet)
         // Dilithion will have its own magic
@@ -89,22 +84,22 @@ FUZZ_TARGET(network_message_parse)
         }
 
         // Check payload length is reasonable
-        if (header.length > MAX_SIZE) {
+        if (header.payload_size > MAX_SIZE) {
             // Payload too large
             return;
         }
 
         // Check we have enough data
-        if (size < sizeof(CMessageHeader) + header.length) {
+        if (size < sizeof(NetProtocol::CMessageHeader) + header.payload_size) {
             // Incomplete message
             return;
         }
 
         // Get payload
-        const uint8_t* payload = data + sizeof(CMessageHeader);
+        const uint8_t* payload = data + sizeof(NetProtocol::CMessageHeader);
 
         // Verify checksum
-        uint32_t calculated_checksum = CalculateChecksum(payload, header.length);
+        uint32_t calculated_checksum = CalculateChecksum(payload, header.payload_size);
 
         if (calculated_checksum != header.checksum) {
             // Checksum mismatch - reject message
@@ -128,19 +123,12 @@ FUZZ_TARGET(network_message_parse)
         } else if (command_str == "getdata") {
             // Parse getdata message
         } else if (command_str == "block") {
-            // Parse block message
-            CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
-            ss.write(reinterpret_cast<const char*>(payload), header.length);
-
-            CBlock block;
-            ss >> block;
+            // Parse block message (CBlock doesn't have Deserialize yet)
         } else if (command_str == "tx") {
-            // Parse transaction message
-            CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
-            ss.write(reinterpret_cast<const char*>(payload), header.length);
-
             CTransaction tx;
-            ss >> tx;
+            std::string error;
+            size_t bytes_consumed = 0;
+            tx.Deserialize(payload, header.payload_size, &error, &bytes_consumed);
         }
 
     } catch (const std::exception& e) {
@@ -148,6 +136,7 @@ FUZZ_TARGET(network_message_parse)
     }
 }
 
+#if 0
 /**
  * Fuzz target: Network message serialization
  *
@@ -159,7 +148,7 @@ FUZZ_TARGET(network_message_create)
 
     try {
         // Create message header
-        CMessageHeader header;
+        NetProtocol::CMessageHeader header;
 
         // Fuzz magic
         header.magic = fuzzed_data.ConsumeIntegral<uint32_t>();
@@ -173,7 +162,7 @@ FUZZ_TARGET(network_message_create)
         size_t payload_size = fuzzed_data.ConsumeIntegralInRange<size_t>(0, 1000);
         std::vector<uint8_t> payload = fuzzed_data.ConsumeBytes<uint8_t>(payload_size);
 
-        header.length = payload.size();
+        header.payload_size = payload.size();
 
         // Calculate checksum
         header.checksum = CalculateChecksum(payload.data(), payload.size());
@@ -186,12 +175,12 @@ FUZZ_TARGET(network_message_create)
         message.insert(message.end(), payload.begin(), payload.end());
 
         // Verify we can parse it back
-        if (message.size() >= sizeof(CMessageHeader)) {
-            CMessageHeader parsed_header;
-            memcpy(&parsed_header, message.data(), sizeof(CMessageHeader));
+        if (message.size() >= sizeof(NetProtocol::CMessageHeader)) {
+            NetProtocol::CMessageHeader parsed_header;
+            memcpy(&parsed_header, message.data(), sizeof(NetProtocol::CMessageHeader));
 
             assert(parsed_header.magic == header.magic);
-            assert(parsed_header.length == header.length);
+            assert(parsed_header.payload_size == header.payload_size);
             assert(parsed_header.checksum == header.checksum);
         }
 
@@ -199,7 +188,9 @@ FUZZ_TARGET(network_message_create)
         return;
     }
 }
+#endif
 
+#if 0
 /**
  * Fuzz target: Network message checksum validation
  *
@@ -239,7 +230,9 @@ FUZZ_TARGET(network_message_checksum)
         }
     }
 }
+#endif
 
+#if 0
 /**
  * Fuzz target: Network message command parsing
  *
@@ -301,3 +294,4 @@ FUZZ_TARGET(network_message_command)
         return;
     }
 }
+#endif
