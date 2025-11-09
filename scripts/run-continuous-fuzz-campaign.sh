@@ -11,7 +11,6 @@
 #   tier2: High-priority (24 hours per fuzzer)
 #   tier3: Fast fuzzers (12 hours per fuzzer)
 
-set -e
 set -u
 set -o pipefail
 
@@ -108,7 +107,7 @@ collect_crashes() {
 
   CRASH_COUNT=0
   for PATTERN in "crash-*" "leak-*" "timeout-*"; do
-    for CRASH_FILE in $PATTERN 2>/dev/null; do
+    for CRASH_FILE in $PATTERN; do
       [ -f "$CRASH_FILE" ] || continue
 
       # Move crash to crash directory
