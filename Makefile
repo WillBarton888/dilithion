@@ -85,7 +85,9 @@ CONSENSUS_SOURCES := src/consensus/fees.cpp \
 CORE_SOURCES_UTIL := src/core/chainparams.cpp
 
 CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
-                  src/crypto/sha3.cpp
+                  src/crypto/sha3.cpp \
+                  src/crypto/hmac_sha3.cpp \
+                  src/crypto/pbkdf2_sha3.cpp
 
 MINER_SOURCES := src/miner/controller.cpp
 
@@ -115,7 +117,9 @@ API_SOURCES := src/api/http_server.cpp
 
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp \
-                  src/wallet/passphrase_validator.cpp
+                  src/wallet/passphrase_validator.cpp \
+                  src/wallet/mnemonic.cpp \
+                  src/wallet/hd_derivation.cpp
 
 UTIL_SOURCES := src/util/strencodings.cpp \
                 src/util/base58.cpp
@@ -146,6 +150,7 @@ MINER_TEST_SOURCE := src/test/miner_tests.cpp
 WALLET_TEST_SOURCE := src/test/wallet_tests.cpp
 RPC_TEST_SOURCE := src/test/rpc_tests.cpp
 RPC_AUTH_TEST_SOURCE := src/test/rpc_auth_tests.cpp
+RPC_HD_WALLET_TEST_SOURCE := src/test/rpc_hd_wallet_tests.cpp
 TIMESTAMP_TEST_SOURCE := src/test/timestamp_tests.cpp
 CRYPTER_TEST_SOURCE := src/test/crypter_tests.cpp
 WALLET_ENCRYPTION_INTEGRATION_TEST_SOURCE := src/test/wallet_encryption_integration_tests.cpp
@@ -163,6 +168,9 @@ BOOST_CRYPTO_TEST_SOURCE := src/test/crypto_tests.cpp
 BOOST_TRANSACTION_TEST_SOURCE := src/test/transaction_tests.cpp
 BOOST_BLOCK_TEST_SOURCE := src/test/block_tests.cpp
 BOOST_UTIL_TEST_SOURCE := src/test/util_tests.cpp
+BOOST_MNEMONIC_TEST_SOURCE := src/test/mnemonic_tests.cpp
+BOOST_HD_DERIVATION_TEST_SOURCE := src/test/hd_derivation_tests.cpp
+BOOST_WALLET_HD_TEST_SOURCE := src/test/wallet_hd_tests.cpp
 
 # ============================================================================
 # Targets
@@ -273,7 +281,7 @@ test_passphrase_validator: $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/t
 # Boost Unit Test Binaries
 # ============================================================================
 
-test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(DILITHIUM_OBJECTS)
+test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully (header-only)$(COLOR_RESET)"

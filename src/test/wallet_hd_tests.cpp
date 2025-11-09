@@ -1,0 +1,543 @@
+// Copyright (c) 2025 The Dilithion Core developers
+// Distributed under the MIT software license
+
+#include <boost/test/unit_test.hpp>
+#include <wallet/wallet.h>
+#include <wallet/mnemonic.h>
+#include <wallet/hd_derivation.h>
+#include <cstring>
+#include <fstream>
+
+BOOST_AUTO_TEST_SUITE(wallet_hd_tests)
+
+// ============================================================================
+// HD Wallet Generation Tests
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(generate_hd_wallet_test) {
+    CWallet wallet;
+    std::string mnemonic;
+
+    // Generate new HD wallet
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Verify mnemonic is valid
+    BOOST_CHECK(CMnemonic::IsValid(mnemonic));
+
+    // Verify wallet is marked as HD
+    BOOST_CHECK(wallet.IsHDWallet());
+
+    // Verify HD wallet info
+    uint32_t account, external_idx, internal_idx;
+    BOOST_REQUIRE(wallet.GetHDWalletInfo(account, external_idx, internal_idx));
+    BOOST_CHECK_EQUAL(account, 0);
+    BOOST_CHECK_EQUAL(external_idx, 1);  // First address already generated
+    BOOST_CHECK_EQUAL(internal_idx, 0);
+}
+
+BOOST_AUTO_TEST_CASE(initialize_hd_wallet_from_mnemonic_test) {
+    CWallet wallet;
+
+    // Known mnemonic for reproducibility
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    // Initialize HD wallet
+    BOOST_REQUIRE(wallet.InitializeHDWallet(mnemonic));
+
+    // Verify wallet is HD
+    BOOST_CHECK(wallet.IsHDWallet());
+
+    // Verify initial state
+    uint32_t account, external_idx, internal_idx;
+    BOOST_REQUIRE(wallet.GetHDWalletInfo(account, external_idx, internal_idx));
+    BOOST_CHECK_EQUAL(account, 0);
+    BOOST_CHECK_EQUAL(external_idx, 1);
+    BOOST_CHECK_EQUAL(internal_idx, 0);
+}
+
+BOOST_AUTO_TEST_CASE(hd_wallet_reject_invalid_mnemonic_test) {
+    CWallet wallet;
+
+    // Invalid mnemonic (wrong checksum)
+    std::string bad_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon";
+
+    // Should fail
+    BOOST_CHECK(!wallet.InitializeHDWallet(bad_mnemonic));
+    BOOST_CHECK(!wallet.IsHDWallet());
+}
+
+BOOST_AUTO_TEST_CASE(hd_wallet_reject_duplicate_initialization_test) {
+    CWallet wallet;
+    std::string mnemonic;
+
+    // First initialization should succeed
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Second initialization should fail (wallet already has keys)
+    std::string mnemonic2;
+    BOOST_CHECK(!wallet.GenerateHDWallet(mnemonic2));
+}
+
+// ============================================================================
+// Address Derivation Tests
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(derive_receive_addresses_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Derive multiple receive addresses
+    CAddress addr1 = wallet.GetNewHDAddress();
+    CAddress addr2 = wallet.GetNewHDAddress();
+    CAddress addr3 = wallet.GetNewHDAddress();
+
+    // All should be valid and unique
+    BOOST_CHECK(addr1.IsValid());
+    BOOST_CHECK(addr2.IsValid());
+    BOOST_CHECK(addr3.IsValid());
+    BOOST_CHECK(!(addr1 == addr2));
+    BOOST_CHECK(!(addr2 == addr3));
+    BOOST_CHECK(!(addr1 == addr3));
+
+    // Verify chain index updated
+    uint32_t account, external_idx, internal_idx;
+    BOOST_REQUIRE(wallet.GetHDWalletInfo(account, external_idx, internal_idx));
+    BOOST_CHECK_EQUAL(external_idx, 4);  // 0 generated during init, then 3 more
+}
+
+BOOST_AUTO_TEST_CASE(derive_change_addresses_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Derive multiple change addresses
+    CAddress change1 = wallet.GetChangeAddress();
+    CAddress change2 = wallet.GetChangeAddress();
+
+    // All should be valid and unique
+    BOOST_CHECK(change1.IsValid());
+    BOOST_CHECK(change2.IsValid());
+    BOOST_CHECK(!(change1 == change2));
+
+    // Verify chain index updated
+    uint32_t account, external_idx, internal_idx;
+    BOOST_REQUIRE(wallet.GetHDWalletInfo(account, external_idx, internal_idx));
+    BOOST_CHECK_EQUAL(internal_idx, 2);
+}
+
+BOOST_AUTO_TEST_CASE(derive_custom_path_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Derive address at custom path
+    CAddress addr = wallet.DeriveAddress("m/44'/573'/0'/0'/5'");
+    BOOST_CHECK(addr.IsValid());
+
+    // Verify path lookup
+    CHDKeyPath path;
+    BOOST_REQUIRE(wallet.GetAddressPath(addr, path));
+    BOOST_CHECK_EQUAL(path.ToString(), "m/44'/573'/0'/0'/5'");
+}
+
+BOOST_AUTO_TEST_CASE(derive_invalid_path_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Invalid paths should return empty address
+    CAddress addr1 = wallet.DeriveAddress("m/44/573/0/0/0");  // Not hardened
+    CAddress addr2 = wallet.DeriveAddress("m/44'/999'/0'/0'/0'");  // Wrong coin type
+    CAddress addr3 = wallet.DeriveAddress("invalid");
+
+    BOOST_CHECK(!addr1.IsValid());
+    BOOST_CHECK(!addr2.IsValid());
+    BOOST_CHECK(!addr3.IsValid());
+}
+
+BOOST_AUTO_TEST_CASE(address_path_lookup_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Generate some addresses
+    CAddress receive1 = wallet.GetNewHDAddress();
+    CAddress receive2 = wallet.GetNewHDAddress();
+    CAddress change1 = wallet.GetChangeAddress();
+
+    // Verify path lookups
+    CHDKeyPath path1, path2, path3;
+    BOOST_REQUIRE(wallet.GetAddressPath(receive1, path1));
+    BOOST_REQUIRE(wallet.GetAddressPath(receive2, path2));
+    BOOST_REQUIRE(wallet.GetAddressPath(change1, path3));
+
+    BOOST_CHECK_EQUAL(path1.ToString(), "m/44'/573'/0'/0'/1'");  // Second receive address (0 was generated at init)
+    BOOST_CHECK_EQUAL(path2.ToString(), "m/44'/573'/0'/0'/2'");
+    BOOST_CHECK_EQUAL(path3.ToString(), "m/44'/573'/0'/1'/0'");
+}
+
+// ============================================================================
+// Mnemonic Export Tests
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(export_mnemonic_test) {
+    CWallet wallet;
+    std::string original_mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(original_mnemonic));
+
+    // Export mnemonic (wallet not encrypted, should work)
+    std::string exported_mnemonic;
+    BOOST_REQUIRE(wallet.ExportMnemonic(exported_mnemonic));
+
+    // Should match original
+    BOOST_CHECK_EQUAL(exported_mnemonic, original_mnemonic);
+}
+
+BOOST_AUTO_TEST_CASE(export_mnemonic_from_initialized_wallet_test) {
+    CWallet wallet;
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    BOOST_REQUIRE(wallet.InitializeHDWallet(mnemonic));
+
+    // Export should return same mnemonic
+    std::string exported;
+    BOOST_REQUIRE(wallet.ExportMnemonic(exported));
+    BOOST_CHECK_EQUAL(exported, mnemonic);
+}
+
+BOOST_AUTO_TEST_CASE(export_mnemonic_non_hd_wallet_test) {
+    CWallet wallet;
+
+    // Non-HD wallet should fail to export mnemonic
+    std::string mnemonic;
+    BOOST_CHECK(!wallet.ExportMnemonic(mnemonic));
+}
+
+// ============================================================================
+// Wallet Persistence Tests
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(save_and_load_hd_wallet_test) {
+    std::string filename = "test_hd_wallet.dat";
+    std::string original_mnemonic;
+
+    // Create and save HD wallet
+    {
+        CWallet wallet;
+        BOOST_REQUIRE(wallet.GenerateHDWallet(original_mnemonic));
+
+        // Generate some addresses
+        CAddress addr1 = wallet.GetNewHDAddress();
+        CAddress addr2 = wallet.GetNewHDAddress();
+        CAddress change1 = wallet.GetChangeAddress();
+
+        // Save wallet
+        BOOST_REQUIRE(wallet.Save(filename));
+    }
+
+    // Load wallet and verify
+    {
+        CWallet loaded_wallet;
+        BOOST_REQUIRE(loaded_wallet.Load(filename));
+
+        // Verify it's an HD wallet
+        BOOST_CHECK(loaded_wallet.IsHDWallet());
+
+        // Verify HD state
+        uint32_t account, external_idx, internal_idx;
+        BOOST_REQUIRE(loaded_wallet.GetHDWalletInfo(account, external_idx, internal_idx));
+        BOOST_CHECK_EQUAL(account, 0);
+        BOOST_CHECK_EQUAL(external_idx, 3);  // 0 at init + 2 more
+        BOOST_CHECK_EQUAL(internal_idx, 1);
+
+        // Verify mnemonic
+        std::string loaded_mnemonic;
+        BOOST_REQUIRE(loaded_wallet.ExportMnemonic(loaded_mnemonic));
+        BOOST_CHECK_EQUAL(loaded_mnemonic, original_mnemonic);
+
+        // Verify can derive more addresses
+        CAddress new_addr = loaded_wallet.GetNewHDAddress();
+        BOOST_CHECK(new_addr.IsValid());
+    }
+
+    // Cleanup
+    std::remove(filename.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(load_v1_wallet_as_non_hd_test) {
+    // This test verifies backward compatibility
+    // A v1 wallet file should load as non-HD wallet
+    // (We'd need to create a v1 wallet file for this test)
+    // For now, just verify that a newly created non-HD wallet saves as v1
+
+    std::string filename = "test_v1_wallet.dat";
+
+    // Create non-HD wallet (legacy mode)
+    {
+        CWallet wallet;
+        // Don't initialize as HD
+        wallet.GenerateNewKey();  // Generate regular key
+        BOOST_REQUIRE(wallet.Save(filename));
+    }
+
+    // Load and verify it's not HD
+    {
+        CWallet loaded;
+        BOOST_REQUIRE(loaded.Load(filename));
+        BOOST_CHECK(!loaded.IsHDWallet());
+    }
+
+    std::remove(filename.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(hd_wallet_deterministic_addresses_test) {
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    // Create first wallet
+    CWallet wallet1;
+    BOOST_REQUIRE(wallet1.InitializeHDWallet(mnemonic));
+    CAddress addr1_1 = wallet1.GetNewHDAddress();
+    CAddress addr1_2 = wallet1.GetNewHDAddress();
+
+    // Create second wallet with same mnemonic
+    CWallet wallet2;
+    BOOST_REQUIRE(wallet2.InitializeHDWallet(mnemonic));
+    CAddress addr2_1 = wallet2.GetNewHDAddress();
+    CAddress addr2_2 = wallet2.GetNewHDAddress();
+
+    // Addresses should be identical
+    BOOST_CHECK(addr1_1 == addr2_1);
+    BOOST_CHECK(addr1_2 == addr2_2);
+}
+
+// ============================================================================
+// Wallet Encryption with HD Tests
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(encrypt_hd_wallet_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Generate an address before encryption
+    CAddress addr_before = wallet.GetNewHDAddress();
+    BOOST_CHECK(addr_before.IsValid());
+
+    // Encrypt wallet
+    std::string passphrase = "TestPassphrase123!";
+    BOOST_REQUIRE(wallet.EncryptWallet(passphrase));
+
+    // Verify wallet is encrypted
+    BOOST_CHECK(wallet.IsCrypted());
+    BOOST_CHECK(wallet.IsLocked());
+
+    // Cannot generate addresses while locked
+    CAddress addr_locked = wallet.GetNewHDAddress();
+    BOOST_CHECK(!addr_locked.IsValid());
+
+    // Cannot export mnemonic while locked
+    std::string exported;
+    BOOST_CHECK(!wallet.ExportMnemonic(exported));
+
+    // Unlock wallet
+    BOOST_REQUIRE(wallet.Unlock(passphrase));
+    BOOST_CHECK(!wallet.IsLocked());
+
+    // Now can generate addresses
+    CAddress addr_after = wallet.GetNewHDAddress();
+    BOOST_CHECK(addr_after.IsValid());
+
+    // Can export mnemonic
+    BOOST_REQUIRE(wallet.ExportMnemonic(exported));
+    BOOST_CHECK_EQUAL(exported, mnemonic);
+}
+
+BOOST_AUTO_TEST_CASE(save_load_encrypted_hd_wallet_test) {
+    std::string filename = "test_encrypted_hd.dat";
+    std::string mnemonic;
+    std::string passphrase = "SecurePass456!";
+
+    // Create, encrypt, and save
+    {
+        CWallet wallet;
+        BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+        CAddress addr1 = wallet.GetNewHDAddress();
+        CAddress addr2 = wallet.GetNewHDAddress();
+
+        BOOST_REQUIRE(wallet.EncryptWallet(passphrase));
+        BOOST_REQUIRE(wallet.Save(filename));
+    }
+
+    // Load encrypted wallet
+    {
+        CWallet loaded;
+        BOOST_REQUIRE(loaded.Load(filename));
+
+        // Should be encrypted and locked
+        BOOST_CHECK(loaded.IsCrypted());
+        BOOST_CHECK(loaded.IsLocked());
+        BOOST_CHECK(loaded.IsHDWallet());
+
+        // Cannot access HD features while locked
+        CAddress addr = loaded.GetNewHDAddress();
+        BOOST_CHECK(!addr.IsValid());
+
+        // Unlock
+        BOOST_REQUIRE(loaded.Unlock(passphrase));
+
+        // Now can access
+        CAddress new_addr = loaded.GetNewHDAddress();
+        BOOST_CHECK(new_addr.IsValid());
+
+        // Verify mnemonic
+        std::string loaded_mnemonic;
+        BOOST_REQUIRE(loaded.ExportMnemonic(loaded_mnemonic));
+        BOOST_CHECK_EQUAL(loaded_mnemonic, mnemonic);
+    }
+
+    std::remove(filename.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(encrypted_hd_wallet_wrong_passphrase_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    std::string passphrase = "CorrectPassword";
+    BOOST_REQUIRE(wallet.EncryptWallet(passphrase));
+
+    // Lock wallet
+    wallet.Lock();
+    BOOST_CHECK(wallet.IsLocked());
+
+    // Try wrong passphrase
+    BOOST_CHECK(!wallet.Unlock("WrongPassword"));
+    BOOST_CHECK(wallet.IsLocked());
+
+    // Try correct passphrase
+    BOOST_REQUIRE(wallet.Unlock(passphrase));
+    BOOST_CHECK(!wallet.IsLocked());
+}
+
+// ============================================================================
+// Restore Workflow Tests
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(restore_hd_wallet_test) {
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    CWallet wallet;
+    BOOST_REQUIRE(wallet.RestoreHDWallet(mnemonic));
+
+    // Verify wallet is HD
+    BOOST_CHECK(wallet.IsHDWallet());
+
+    // Verify can generate addresses
+    CAddress addr1 = wallet.GetNewHDAddress();
+    CAddress addr2 = wallet.GetNewHDAddress();
+    BOOST_CHECK(addr1.IsValid());
+    BOOST_CHECK(addr2.IsValid());
+}
+
+// ============================================================================
+// Edge Cases and Error Handling
+// ============================================================================
+
+BOOST_AUTO_TEST_CASE(hd_wallet_empty_passphrase_test) {
+    CWallet wallet;
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    // Empty passphrase should work (BIP39 allows it)
+    BOOST_REQUIRE(wallet.InitializeHDWallet(mnemonic, ""));
+    BOOST_CHECK(wallet.IsHDWallet());
+}
+
+BOOST_AUTO_TEST_CASE(hd_wallet_with_passphrase_test) {
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    // Same mnemonic, different passphrases = different wallets
+    CWallet wallet1, wallet2;
+    BOOST_REQUIRE(wallet1.InitializeHDWallet(mnemonic, ""));
+    BOOST_REQUIRE(wallet2.InitializeHDWallet(mnemonic, "passphrase"));
+
+    CAddress addr1 = wallet1.GetNewHDAddress();
+    CAddress addr2 = wallet2.GetNewHDAddress();
+
+    // Addresses should be different (different seeds)
+    BOOST_CHECK(!(addr1 == addr2));
+}
+
+BOOST_AUTO_TEST_CASE(hd_wallet_many_addresses_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Generate many addresses to verify no issues
+    std::vector<CAddress> addresses;
+    for (int i = 0; i < 100; i++) {
+        CAddress addr = wallet.GetNewHDAddress();
+        BOOST_REQUIRE(addr.IsValid());
+        addresses.push_back(addr);
+    }
+
+    // Verify all unique
+    for (size_t i = 0; i < addresses.size(); i++) {
+        for (size_t j = i + 1; j < addresses.size(); j++) {
+            BOOST_CHECK(!(addresses[i] == addresses[j]));
+        }
+    }
+
+    // Verify chain index
+    uint32_t account, external_idx, internal_idx;
+    BOOST_REQUIRE(wallet.GetHDWalletInfo(account, external_idx, internal_idx));
+    BOOST_CHECK_EQUAL(external_idx, 101);  // 0 at init + 100 more
+}
+
+BOOST_AUTO_TEST_CASE(hd_wallet_path_validation_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Test various invalid paths
+    BOOST_CHECK(!wallet.DeriveAddress("m/44'/573'/0'/2'/0'").IsValid());  // change must be 0 or 1
+    BOOST_CHECK(!wallet.DeriveAddress("m/44'/573'/0'").IsValid());  // Too short
+    BOOST_CHECK(!wallet.DeriveAddress("m/44'/999'/0'/0'/0'").IsValid());  // Wrong coin type
+    BOOST_CHECK(!wallet.DeriveAddress("m/43'/573'/0'/0'/0'").IsValid());  // Wrong purpose
+}
+
+BOOST_AUTO_TEST_CASE(concurrent_address_generation_test) {
+    CWallet wallet;
+    std::string mnemonic;
+    BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
+
+    // Sequential generation should maintain state correctly
+    CAddress addr1 = wallet.GetNewHDAddress();
+    CAddress change1 = wallet.GetChangeAddress();
+    CAddress addr2 = wallet.GetNewHDAddress();
+    CAddress change2 = wallet.GetChangeAddress();
+    CAddress addr3 = wallet.GetNewHDAddress();
+
+    // Verify all unique
+    BOOST_CHECK(!(addr1 == addr2));
+    BOOST_CHECK(!(addr2 == addr3));
+    BOOST_CHECK(!(change1 == change2));
+    BOOST_CHECK(!(addr1 == change1));
+
+    // Verify paths
+    CHDKeyPath path1, path2, path3, pathc1, pathc2;
+    BOOST_REQUIRE(wallet.GetAddressPath(addr1, path1));
+    BOOST_REQUIRE(wallet.GetAddressPath(addr2, path2));
+    BOOST_REQUIRE(wallet.GetAddressPath(addr3, path3));
+    BOOST_REQUIRE(wallet.GetAddressPath(change1, pathc1));
+    BOOST_REQUIRE(wallet.GetAddressPath(change2, pathc2));
+
+    BOOST_CHECK_EQUAL(path1.ToString(), "m/44'/573'/0'/0'/1'");
+    BOOST_CHECK_EQUAL(path2.ToString(), "m/44'/573'/0'/0'/2'");
+    BOOST_CHECK_EQUAL(path3.ToString(), "m/44'/573'/0'/0'/3'");
+    BOOST_CHECK_EQUAL(pathc1.ToString(), "m/44'/573'/0'/1'/0'");
+    BOOST_CHECK_EQUAL(pathc2.ToString(), "m/44'/573'/0'/1'/1'");
+}
+
+BOOST_AUTO_TEST_SUITE_END()

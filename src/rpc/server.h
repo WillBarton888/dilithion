@@ -199,6 +199,13 @@ private:
     std::string RPC_WalletLock(const std::string& params);
     std::string RPC_WalletPassphraseChange(const std::string& params);
 
+    // HD Wallet methods
+    std::string RPC_CreateHDWallet(const std::string& params);
+    std::string RPC_RestoreHDWallet(const std::string& params);
+    std::string RPC_ExportMnemonic(const std::string& params);
+    std::string RPC_GetHDWalletInfo(const std::string& params);
+    std::string RPC_ListHDAddresses(const std::string& params);
+
     // Mining methods
     std::string RPC_GetMiningInfo(const std::string& params);
     std::string RPC_StartMining(const std::string& params);

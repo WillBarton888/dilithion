@@ -9,6 +9,8 @@
 #include <amount.h>
 #include <uint256.h>
 #include <wallet/crypter.h>
+#include <wallet/hd_derivation.h>
+#include <wallet/mnemonic.h>
 
 #include <string>
 #include <vector>
@@ -102,6 +104,13 @@ public:
     CAddress() {}
     explicit CAddress(const std::vector<uint8_t>& pubkey);
 
+    // Constructor from raw address data (for loading from wallet file)
+    static CAddress FromData(const std::vector<uint8_t>& data) {
+        CAddress addr;
+        addr.vchData = data;
+        return addr;
+    }
+
     std::string ToString() const;
     bool SetString(const std::string& str);
 
@@ -175,12 +184,41 @@ private:
     std::string m_walletFile;  // Current wallet file path
     bool m_autoSave;           // Auto-save after changes
 
+    // ============================================================================
+    // HD Wallet (Hierarchical Deterministic) - BIP32/BIP44
+    // ============================================================================
+
+    bool fIsHDWallet;                          // Is this an HD wallet?
+    std::vector<uint8_t> vchEncryptedMnemonic; // Encrypted BIP39 mnemonic
+    std::vector<uint8_t> vchMnemonicIV;        // IV for mnemonic encryption
+    CHDExtendedKey hdMasterKey;                // Master extended key (encrypted in memory)
+    bool fHDMasterKeyEncrypted;                // Is master key encrypted?
+    std::vector<uint8_t> vchHDMasterKeyIV;     // IV for master key encryption
+
+    // HD chain state (BIP44: m/44'/573'/account'/change'/index')
+    uint32_t nHDAccountIndex;                  // Current account (default: 0)
+    uint32_t nHDExternalChainIndex;            // Next receive address index
+    uint32_t nHDInternalChainIndex;            // Next change address index
+
+    // HD address mappings
+    std::map<CAddress, CHDKeyPath> mapAddressToPath;  // Address -> derivation path
+    std::map<CHDKeyPath, CAddress> mapPathToAddress;  // Derivation path -> address
+
+    static const uint32_t HD_GAP_LIMIT = 20;   // BIP44 gap limit
+
     // Private helper methods - assume caller already holds cs_wallet lock
     bool SaveUnlocked(const std::string& filename = "") const;
     std::vector<uint8_t> GetPubKeyHashUnlocked() const;
     std::vector<uint8_t> GetPublicKeyUnlocked() const;
     bool GetKeyUnlocked(const CAddress& address, CKey& keyOut) const;
     bool IsUnlockValid() const;  // VULN-002 FIX: Check if unlock hasn't expired
+
+    // HD wallet private helpers - assume caller already holds cs_wallet lock
+    bool DeriveAndCacheHDAddress(const CHDKeyPath& path);
+    bool EncryptHDMasterKey();
+    bool DecryptHDMasterKey(CHDExtendedKey& decrypted) const;
+    bool EncryptMnemonic(const std::string& mnemonic);
+    bool DecryptMnemonic(std::string& mnemonic) const;
 
 public:
     CWallet();
@@ -329,6 +367,125 @@ public:
      * Called periodically to enforce timeout-based locking.
      */
     void CheckUnlockTimeout();
+
+    // ============================================================================
+    // HD Wallet (Hierarchical Deterministic Wallet) - BIP32/BIP44
+    // ============================================================================
+
+    /**
+     * Initialize HD wallet from BIP39 mnemonic
+     *
+     * Creates a new HD wallet from a mnemonic phrase. The wallet will be marked
+     * as an HD wallet and subsequent address generation will use HD derivation.
+     *
+     * BIP44 path: m/44'/573'/0'/0'/0' (Dilithion coin type = 573)
+     *
+     * @param mnemonic BIP39 mnemonic phrase (12-24 words)
+     * @param passphrase Optional BIP39 passphrase (empty string if none)
+     * @return true if successful, false if wallet already initialized or invalid mnemonic
+     */
+    bool InitializeHDWallet(const std::string& mnemonic, const std::string& passphrase = "");
+
+    /**
+     * Generate new HD wallet with random mnemonic
+     *
+     * Creates new BIP39 mnemonic (24 words) and initializes HD wallet.
+     *
+     * @param mnemonic_out Output parameter for generated mnemonic (24 words)
+     * @param passphrase Optional BIP39 passphrase
+     * @return true if successful
+     */
+    bool GenerateHDWallet(std::string& mnemonic_out, const std::string& passphrase = "");
+
+    /**
+     * Restore HD wallet from mnemonic and scan for existing addresses
+     *
+     * Similar to InitializeHDWallet but also scans blockchain for existing
+     * addresses up to gap limit.
+     *
+     * @param mnemonic BIP39 mnemonic phrase
+     * @param passphrase Optional BIP39 passphrase
+     * @return true if successful
+     */
+    bool RestoreHDWallet(const std::string& mnemonic, const std::string& passphrase = "");
+
+    /**
+     * Get new HD receiving address
+     *
+     * Derives next address on external chain (m/44'/573'/account'/0'/index').
+     * Increments external chain index counter.
+     *
+     * @return New receiving address, or empty if not HD wallet or locked
+     */
+    CAddress GetNewHDAddress();
+
+    /**
+     * Get change address for HD wallet
+     *
+     * Derives address on internal chain (m/44'/573'/account'/1'/index').
+     * Used for sending change back to own wallet.
+     *
+     * @return Change address, or empty if not HD wallet or locked
+     */
+    CAddress GetChangeAddress();
+
+    /**
+     * Derive address at specific BIP44 path
+     *
+     * Advanced function for deriving addresses at custom paths.
+     * Normal users should use GetNewHDAddress() instead.
+     *
+     * @param path BIP44 path (e.g., "m/44'/573'/0'/0'/5'")
+     * @return Derived address, or empty if invalid path or locked
+     */
+    CAddress DeriveAddress(const std::string& path);
+
+    /**
+     * Export BIP39 mnemonic phrase
+     *
+     * Returns the wallet's mnemonic phrase. Wallet must be unlocked.
+     * Use with extreme caution - mnemonic provides full access to all funds.
+     *
+     * @param mnemonic_out Output parameter for mnemonic phrase
+     * @return true if successful, false if not HD wallet or wallet locked
+     */
+    bool ExportMnemonic(std::string& mnemonic_out) const;
+
+    /**
+     * Get HD wallet information
+     *
+     * @param account Output: current account index
+     * @param external_index Output: next receive address index
+     * @param internal_index Output: next change address index
+     * @return true if HD wallet, false otherwise
+     */
+    bool GetHDWalletInfo(uint32_t& account, uint32_t& external_index,
+                         uint32_t& internal_index) const;
+
+    /**
+     * Scan HD address chains for existing addresses
+     *
+     * Scans both receive and change chains up to gap limit (20 unused addresses).
+     * Used during wallet restoration to find all previously used addresses.
+     *
+     * @param utxo_set UTXO set to check for address usage
+     * @return Number of addresses found and added to wallet
+     */
+    size_t ScanHDChains(class CUTXOSet& utxo_set);
+
+    /**
+     * Check if this is an HD wallet
+     */
+    bool IsHDWallet() const { return fIsHDWallet; }
+
+    /**
+     * Get derivation path for an address
+     *
+     * @param address Address to look up
+     * @param path_out Output parameter for path
+     * @return true if address found and is HD-derived
+     */
+    bool GetAddressPath(const CAddress& address, CHDKeyPath& path_out) const;
 
     // ============================================================================
     // Persistence

@@ -149,7 +149,12 @@ CWallet::CWallet()
     : fWalletUnlocked(false),
       fWalletUnlockForStakingOnly(false),
       nUnlockTime(std::chrono::steady_clock::time_point::max()),
-      m_autoSave(false)
+      m_autoSave(false),
+      fIsHDWallet(false),
+      fHDMasterKeyEncrypted(false),
+      nHDAccountIndex(0),
+      nHDExternalChainIndex(0),
+      nHDInternalChainIndex(0)
 {
     vMasterKey.resize(WALLET_CRYPTO_KEY_SIZE);
 }
@@ -776,20 +781,26 @@ bool CWallet::Load(const std::string& filename) {
     char magic[8];
     file.read(magic, 8);
     if (!file.good()) return false;  // SEC-001: Check I/O error
-    if (std::string(magic, 8) != "DILWLT01") {
+
+    std::string magic_str(magic, 8);
+    if (magic_str != "DILWLT01" && magic_str != "DILWLT02") {
         return false;  // Invalid file format
     }
 
     uint32_t version;
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
     if (!file.good()) return false;  // SEC-001: Check I/O error
-    if (version != 1) {
+    if (version != 1 && version != 2) {
         return false;  // Unsupported version
     }
+
+    bool is_v2_format = (version == 2);
 
     uint32_t flags;
     file.read(reinterpret_cast<char*>(&flags), sizeof(flags));
     if (!file.good()) return false;  // SEC-001: Check I/O error
+
+    bool is_hd_wallet = (flags & 0x02) != 0;
 
     // Skip reserved bytes
     uint8_t reserved[16];
@@ -828,6 +839,120 @@ bool CWallet::Load(const std::string& filename) {
 
         // Wallet starts locked (encryption status determined by masterKey.IsValid())
         temp_fWalletUnlocked = false;
+    }
+
+    // Read HD wallet data (v2 only)
+    bool temp_fIsHDWallet = false;
+    std::vector<uint8_t> temp_vchEncryptedMnemonic;
+    std::vector<uint8_t> temp_vchMnemonicIV;
+    CHDExtendedKey temp_hdMasterKey;
+    bool temp_fHDMasterKeyEncrypted = false;
+    std::vector<uint8_t> temp_vchHDMasterKeyIV;
+    uint32_t temp_nHDAccountIndex = 0;
+    uint32_t temp_nHDExternalChainIndex = 0;
+    uint32_t temp_nHDInternalChainIndex = 0;
+    std::map<CAddress, CHDKeyPath> temp_mapAddressToPath;
+    std::map<CHDKeyPath, CAddress> temp_mapPathToAddress;
+
+    if (is_hd_wallet) {
+        temp_fIsHDWallet = true;
+
+        // Read encrypted mnemonic
+        uint32_t mnemonicLen;
+        file.read(reinterpret_cast<char*>(&mnemonicLen), sizeof(mnemonicLen));
+        if (!file.good()) return false;
+
+        // Validate mnemonic length
+        const uint32_t MAX_MNEMONIC_SIZE = 1024;  // Reasonable upper bound
+        if (mnemonicLen > MAX_MNEMONIC_SIZE) {
+            return false;
+        }
+
+        if (mnemonicLen > 0) {
+            temp_vchEncryptedMnemonic.resize(mnemonicLen);
+            file.read(reinterpret_cast<char*>(temp_vchEncryptedMnemonic.data()), mnemonicLen);
+            if (!file.good()) return false;
+
+            temp_vchMnemonicIV.resize(WALLET_CRYPTO_IV_SIZE);
+            file.read(reinterpret_cast<char*>(temp_vchMnemonicIV.data()), WALLET_CRYPTO_IV_SIZE);
+            if (!file.good()) return false;
+        }
+
+        // Read HD master key
+        file.read(reinterpret_cast<char*>(temp_hdMasterKey.seed), 32);
+        if (!file.good()) return false;
+        file.read(reinterpret_cast<char*>(temp_hdMasterKey.chaincode), 32);
+        if (!file.good()) return false;
+        file.read(reinterpret_cast<char*>(&temp_hdMasterKey.depth), sizeof(temp_hdMasterKey.depth));
+        if (!file.good()) return false;
+        file.read(reinterpret_cast<char*>(&temp_hdMasterKey.fingerprint), sizeof(temp_hdMasterKey.fingerprint));
+        if (!file.good()) return false;
+        file.read(reinterpret_cast<char*>(&temp_hdMasterKey.child_index), sizeof(temp_hdMasterKey.child_index));
+        if (!file.good()) return false;
+
+        // Read HD master key encryption flag
+        uint8_t encrypted_flag;
+        file.read(reinterpret_cast<char*>(&encrypted_flag), 1);
+        if (!file.good()) return false;
+        temp_fHDMasterKeyEncrypted = (encrypted_flag != 0);
+
+        if (temp_fHDMasterKeyEncrypted) {
+            temp_vchHDMasterKeyIV.resize(WALLET_CRYPTO_IV_SIZE);
+            file.read(reinterpret_cast<char*>(temp_vchHDMasterKeyIV.data()), WALLET_CRYPTO_IV_SIZE);
+            if (!file.good()) return false;
+        }
+
+        // Read HD chain state
+        file.read(reinterpret_cast<char*>(&temp_nHDAccountIndex), sizeof(temp_nHDAccountIndex));
+        if (!file.good()) return false;
+        file.read(reinterpret_cast<char*>(&temp_nHDExternalChainIndex), sizeof(temp_nHDExternalChainIndex));
+        if (!file.good()) return false;
+        file.read(reinterpret_cast<char*>(&temp_nHDInternalChainIndex), sizeof(temp_nHDInternalChainIndex));
+        if (!file.good()) return false;
+
+        // Read HD path mappings
+        uint32_t numPaths;
+        file.read(reinterpret_cast<char*>(&numPaths), sizeof(numPaths));
+        if (!file.good()) return false;
+
+        // Validate numPaths
+        const uint32_t MAX_HD_PATHS = 100000;  // Reasonable upper bound
+        if (numPaths > MAX_HD_PATHS) {
+            return false;
+        }
+
+        for (uint32_t i = 0; i < numPaths; i++) {
+            // Read path indices count
+            uint32_t numIndices;
+            file.read(reinterpret_cast<char*>(&numIndices), sizeof(numIndices));
+            if (!file.good()) return false;
+
+            // Validate numIndices (BIP44 has 5 levels)
+            const uint32_t MAX_PATH_DEPTH = 10;
+            if (numIndices > MAX_PATH_DEPTH) {
+                return false;
+            }
+
+            // Read indices
+            CHDKeyPath path;
+            path.indices.resize(numIndices);
+            for (uint32_t j = 0; j < numIndices; j++) {
+                file.read(reinterpret_cast<char*>(&path.indices[j]), sizeof(uint32_t));
+                if (!file.good()) return false;
+            }
+
+            // Read address
+            std::vector<uint8_t> addrData(21);
+            file.read(reinterpret_cast<char*>(addrData.data()), 21);
+            if (!file.good()) return false;
+
+            // Reconstruct address from raw data
+            CAddress address = CAddress::FromData(addrData);
+
+            // Store path mappings
+            temp_mapPathToAddress[path] = address;
+            temp_mapAddressToPath[address] = path;
+        }
     }
 
     // Read keys
@@ -980,6 +1105,20 @@ bool CWallet::Load(const std::string& filename) {
     defaultAddress = temp_defaultAddress;
     masterKey = temp_masterKey;
     fWalletUnlocked = temp_fWalletUnlocked;
+
+    // HD wallet data
+    fIsHDWallet = temp_fIsHDWallet;
+    vchEncryptedMnemonic = std::move(temp_vchEncryptedMnemonic);
+    vchMnemonicIV = std::move(temp_vchMnemonicIV);
+    hdMasterKey = temp_hdMasterKey;
+    fHDMasterKeyEncrypted = temp_fHDMasterKeyEncrypted;
+    vchHDMasterKeyIV = std::move(temp_vchHDMasterKeyIV);
+    nHDAccountIndex = temp_nHDAccountIndex;
+    nHDExternalChainIndex = temp_nHDExternalChainIndex;
+    nHDInternalChainIndex = temp_nHDInternalChainIndex;
+    mapAddressToPath = std::move(temp_mapAddressToPath);
+    mapPathToAddress = std::move(temp_mapPathToAddress);
+
     m_walletFile = filename;  // Set wallet file path only on successful load
 
     return true;
@@ -1009,16 +1148,19 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         return false;
     }
 
-    // Write header
-    const char magic[9] = "DILWLT01";
-    file.write(magic, 8);  // Write 8 bytes (without null terminator)
+    // Write header (v2 if HD wallet, v1 otherwise)
+    const char* magic = fIsHDWallet ? "DILWLT02" : "DILWLT01";
+    file.write(magic, 8);  // Write 8 bytes
     if (!file.good()) return false;  // SEC-001: Check I/O error
 
-    uint32_t version = 1;
+    uint32_t version = fIsHDWallet ? 2 : 1;
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
     if (!file.good()) return false;  // SEC-001: Check I/O error
 
-    uint32_t flags = masterKey.IsValid() ? 0x01 : 0x00;  // Bit 0 = encrypted
+    // Flags: bit 0 = encrypted, bit 1 = is HD wallet
+    uint32_t flags = 0;
+    if (masterKey.IsValid()) flags |= 0x01;
+    if (fIsHDWallet) flags |= 0x02;
     file.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
     if (!file.good()) return false;  // SEC-001: Check I/O error
 
@@ -1043,6 +1185,74 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&masterKey.nDeriveIterations), sizeof(masterKey.nDeriveIterations));
         if (!file.good()) return false;  // SEC-001: Check I/O error
+    }
+
+    // Write HD wallet data (v2 only)
+    if (fIsHDWallet) {
+        // Write encrypted mnemonic
+        uint32_t mnemonicLen = static_cast<uint32_t>(vchEncryptedMnemonic.size());
+        file.write(reinterpret_cast<const char*>(&mnemonicLen), sizeof(mnemonicLen));
+        if (!file.good()) return false;
+        if (mnemonicLen > 0) {
+            file.write(reinterpret_cast<const char*>(vchEncryptedMnemonic.data()), mnemonicLen);
+            if (!file.good()) return false;
+            file.write(reinterpret_cast<const char*>(vchMnemonicIV.data()), WALLET_CRYPTO_IV_SIZE);
+            if (!file.good()) return false;
+        }
+
+        // Write HD master key (seed + chaincode = 64 bytes)
+        file.write(reinterpret_cast<const char*>(hdMasterKey.seed), 32);
+        if (!file.good()) return false;
+        file.write(reinterpret_cast<const char*>(hdMasterKey.chaincode), 32);
+        if (!file.good()) return false;
+        file.write(reinterpret_cast<const char*>(&hdMasterKey.depth), sizeof(hdMasterKey.depth));
+        if (!file.good()) return false;
+        file.write(reinterpret_cast<const char*>(&hdMasterKey.fingerprint), sizeof(hdMasterKey.fingerprint));
+        if (!file.good()) return false;
+        file.write(reinterpret_cast<const char*>(&hdMasterKey.child_index), sizeof(hdMasterKey.child_index));
+        if (!file.good()) return false;
+
+        // Write HD master key encryption flag and IV
+        uint8_t encrypted_flag = fHDMasterKeyEncrypted ? 1 : 0;
+        file.write(reinterpret_cast<const char*>(&encrypted_flag), 1);
+        if (!file.good()) return false;
+        if (fHDMasterKeyEncrypted) {
+            file.write(reinterpret_cast<const char*>(vchHDMasterKeyIV.data()), WALLET_CRYPTO_IV_SIZE);
+            if (!file.good()) return false;
+        }
+
+        // Write HD chain state
+        file.write(reinterpret_cast<const char*>(&nHDAccountIndex), sizeof(nHDAccountIndex));
+        if (!file.good()) return false;
+        file.write(reinterpret_cast<const char*>(&nHDExternalChainIndex), sizeof(nHDExternalChainIndex));
+        if (!file.good()) return false;
+        file.write(reinterpret_cast<const char*>(&nHDInternalChainIndex), sizeof(nHDInternalChainIndex));
+        if (!file.good()) return false;
+
+        // Write HD path mappings
+        uint32_t numPaths = static_cast<uint32_t>(mapPathToAddress.size());
+        file.write(reinterpret_cast<const char*>(&numPaths), sizeof(numPaths));
+        if (!file.good()) return false;
+
+        for (const auto& pair : mapPathToAddress) {
+            const CHDKeyPath& path = pair.first;
+            const CAddress& address = pair.second;
+
+            // Write path indices count
+            uint32_t numIndices = static_cast<uint32_t>(path.indices.size());
+            file.write(reinterpret_cast<const char*>(&numIndices), sizeof(numIndices));
+            if (!file.good()) return false;
+
+            // Write indices
+            for (uint32_t index : path.indices) {
+                file.write(reinterpret_cast<const char*>(&index), sizeof(index));
+                if (!file.good()) return false;
+            }
+
+            // Write address
+            file.write(reinterpret_cast<const char*>(address.GetData().data()), 21);
+            if (!file.good()) return false;
+        }
     }
 
     // Write keys
@@ -1183,6 +1393,30 @@ void CWallet::Clear() {
 
     // Clear master key data
     masterKey = CMasterKey();
+
+    // Clear HD wallet data (securely wipe sensitive data)
+    fIsHDWallet = false;
+    fHDMasterKeyEncrypted = false;
+
+    // Wipe encrypted mnemonic
+    if (!vchEncryptedMnemonic.empty()) {
+        memory_cleanse(vchEncryptedMnemonic.data(), vchEncryptedMnemonic.size());
+    }
+    vchEncryptedMnemonic.clear();
+    vchMnemonicIV.clear();
+
+    // Wipe HD master key
+    hdMasterKey.Wipe();
+    vchHDMasterKeyIV.clear();
+
+    // Clear HD chain state
+    nHDAccountIndex = 0;
+    nHDExternalChainIndex = 0;
+    nHDInternalChainIndex = 0;
+
+    // Clear HD mappings
+    mapAddressToPath.clear();
+    mapPathToAddress.clear();
 }
 
 // ============================================================================
@@ -1770,6 +2004,687 @@ bool CWallet::SendTransaction(const CTransactionRef& tx,
 
     // Announce to all peers (-1 = no excluding peer)
     AnnounceTransactionToPeers(txid, -1);
+
+    return true;
+}
+
+// ============================================================================
+// HD Wallet (Hierarchical Deterministic) Implementation
+// ============================================================================
+
+extern "C" {
+    int pqcrystals_dilithium3_ref_keypair_from_seed(uint8_t *pk, uint8_t *sk, const uint8_t seed[32]);
+}
+
+bool CWallet::InitializeHDWallet(const std::string& mnemonic, const std::string& passphrase) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Check if wallet already initialized
+    if (fIsHDWallet || !mapKeys.empty() || !mapCryptedKeys.empty()) {
+        return false;
+    }
+
+    // Validate mnemonic
+    if (!CMnemonic::IsValid(mnemonic)) {
+        return false;
+    }
+
+    // Derive BIP39 seed from mnemonic
+    uint8_t bip39_seed[64];
+    if (!CMnemonic::ToSeed(mnemonic, passphrase, bip39_seed)) {
+        memory_cleanse(bip39_seed, 64);
+        return false;
+    }
+
+    // Derive master HD key
+    DeriveMaster(bip39_seed, hdMasterKey);
+
+    // Wipe BIP39 seed
+    memory_cleanse(bip39_seed, 64);
+
+    // Encrypt mnemonic if wallet is encrypted
+    if (masterKey.IsValid()) {
+        if (!EncryptMnemonic(mnemonic)) {
+            hdMasterKey.Wipe();
+            return false;
+        }
+
+        if (!EncryptHDMasterKey()) {
+            hdMasterKey.Wipe();
+            memory_cleanse(vchEncryptedMnemonic.data(), vchEncryptedMnemonic.size());
+            vchEncryptedMnemonic.clear();
+            vchMnemonicIV.clear();
+            return false;
+        }
+    } else {
+        // Store encrypted mnemonic directly (no wallet encryption yet)
+        if (!EncryptMnemonic(mnemonic)) {
+            hdMasterKey.Wipe();
+            return false;
+        }
+        fHDMasterKeyEncrypted = false;
+    }
+
+    // Initialize HD wallet state
+    fIsHDWallet = true;
+    nHDAccountIndex = 0;
+    nHDExternalChainIndex = 0;
+    nHDInternalChainIndex = 0;
+
+    // Derive first receiving address
+    CHDKeyPath firstPath = CHDKeyPath::ReceiveAddress(0, 0);
+    if (!DeriveAndCacheHDAddress(firstPath)) {
+        // Rollback on failure
+        fIsHDWallet = false;
+        hdMasterKey.Wipe();
+        memory_cleanse(vchEncryptedMnemonic.data(), vchEncryptedMnemonic.size());
+        vchEncryptedMnemonic.clear();
+        vchMnemonicIV.clear();
+        return false;
+    }
+
+    nHDExternalChainIndex = 1;  // Next address index
+
+    // Auto-save if enabled
+    if (m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+
+    return true;
+}
+
+bool CWallet::GenerateHDWallet(std::string& mnemonic_out, const std::string& passphrase) {
+    // Generate 256-bit (24-word) mnemonic
+    if (!CMnemonic::Generate(256, mnemonic_out)) {
+        return false;
+    }
+
+    // Initialize wallet with generated mnemonic
+    if (!InitializeHDWallet(mnemonic_out, passphrase)) {
+        memory_cleanse(&mnemonic_out[0], mnemonic_out.size());
+        mnemonic_out.clear();
+        return false;
+    }
+
+    return true;
+}
+
+bool CWallet::RestoreHDWallet(const std::string& mnemonic, const std::string& passphrase) {
+    // Initialize HD wallet
+    if (!InitializeHDWallet(mnemonic, passphrase)) {
+        return false;
+    }
+
+    // Note: Actual blockchain scanning would require UTXO set
+    // For now, just initialize with first address
+    // User can call ScanHDChains() separately after loading blockchain
+
+    return true;
+}
+
+CAddress CWallet::GetNewHDAddress() {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fIsHDWallet) {
+        return CAddress();  // Empty address
+    }
+
+    // Check if wallet is locked and encrypted
+    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+        return CAddress();
+    }
+
+    // Derive next address on external chain (receive)
+    CHDKeyPath path = CHDKeyPath::ReceiveAddress(nHDAccountIndex, nHDExternalChainIndex);
+
+    if (!DeriveAndCacheHDAddress(path)) {
+        return CAddress();
+    }
+
+    // Increment external chain index
+    nHDExternalChainIndex++;
+
+    // Auto-save if enabled
+    if (m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+
+    // Return the address we just derived
+    auto it = mapPathToAddress.find(path);
+    if (it != mapPathToAddress.end()) {
+        return it->second;
+    }
+
+    return CAddress();
+}
+
+CAddress CWallet::GetChangeAddress() {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fIsHDWallet) {
+        return CAddress();
+    }
+
+    // Check if wallet is locked and encrypted
+    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+        return CAddress();
+    }
+
+    // Derive next address on internal chain (change)
+    CHDKeyPath path = CHDKeyPath::ChangeAddress(nHDAccountIndex, nHDInternalChainIndex);
+
+    if (!DeriveAndCacheHDAddress(path)) {
+        return CAddress();
+    }
+
+    // Increment internal chain index
+    nHDInternalChainIndex++;
+
+    // Auto-save if enabled
+    if (m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+
+    // Return the address we just derived
+    auto it = mapPathToAddress.find(path);
+    if (it != mapPathToAddress.end()) {
+        return it->second;
+    }
+
+    return CAddress();
+}
+
+CAddress CWallet::DeriveAddress(const std::string& path_str) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fIsHDWallet) {
+        return CAddress();
+    }
+
+    // Check if wallet is locked and encrypted
+    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+        return CAddress();
+    }
+
+    // Parse path
+    CHDKeyPath path;
+    if (!path.Parse(path_str) || !path.IsValid()) {
+        return CAddress();
+    }
+
+    // Check if already cached
+    auto it = mapPathToAddress.find(path);
+    if (it != mapPathToAddress.end()) {
+        return it->second;
+    }
+
+    // Derive and cache new address
+    if (!DeriveAndCacheHDAddress(path)) {
+        return CAddress();
+    }
+
+    // Auto-save if enabled
+    if (m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+
+    // Return the address we just derived
+    it = mapPathToAddress.find(path);
+    if (it != mapPathToAddress.end()) {
+        return it->second;
+    }
+
+    return CAddress();
+}
+
+bool CWallet::ExportMnemonic(std::string& mnemonic_out) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fIsHDWallet) {
+        return false;
+    }
+
+    // Check if wallet is locked
+    if (masterKey.IsValid() && !fWalletUnlocked) {
+        return false;
+    }
+
+    // Decrypt mnemonic
+    return DecryptMnemonic(mnemonic_out);
+}
+
+bool CWallet::GetHDWalletInfo(uint32_t& account, uint32_t& external_index,
+                              uint32_t& internal_index) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fIsHDWallet) {
+        return false;
+    }
+
+    account = nHDAccountIndex;
+    external_index = nHDExternalChainIndex;
+    internal_index = nHDInternalChainIndex;
+
+    return true;
+}
+
+bool CWallet::GetAddressPath(const CAddress& address, CHDKeyPath& path_out) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fIsHDWallet) {
+        return false;
+    }
+
+    auto it = mapAddressToPath.find(address);
+    if (it == mapAddressToPath.end()) {
+        return false;
+    }
+
+    path_out = it->second;
+    return true;
+}
+
+size_t CWallet::ScanHDChains(CUTXOSet& utxo_set) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fIsHDWallet) {
+        return 0;
+    }
+
+    // Check if wallet is locked
+    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+        return 0;
+    }
+
+    size_t found_count = 0;
+    uint32_t gap_counter_external = 0;
+    uint32_t gap_counter_internal = 0;
+
+    // Scan external chain (receive addresses)
+    for (uint32_t i = nHDExternalChainIndex; gap_counter_external < HD_GAP_LIMIT; i++) {
+        CHDKeyPath path = CHDKeyPath::ReceiveAddress(nHDAccountIndex, i);
+
+        if (!DeriveAndCacheHDAddress(path)) {
+            break;  // Error deriving address
+        }
+
+        auto it = mapPathToAddress.find(path);
+        if (it == mapPathToAddress.end()) {
+            break;
+        }
+
+        // Check if this address has any UTXOs
+        bool has_utxos = false;
+        // Note: Actual UTXO checking would require iterating utxo_set
+        // For now, placeholder logic
+        // has_utxos = utxo_set.HasAddressOutputs(it->second);
+
+        if (has_utxos) {
+            found_count++;
+            gap_counter_external = 0;  // Reset gap counter
+            nHDExternalChainIndex = i + 1;  // Update index
+        } else {
+            gap_counter_external++;
+        }
+    }
+
+    // Scan internal chain (change addresses)
+    for (uint32_t i = nHDInternalChainIndex; gap_counter_internal < HD_GAP_LIMIT; i++) {
+        CHDKeyPath path = CHDKeyPath::ChangeAddress(nHDAccountIndex, i);
+
+        if (!DeriveAndCacheHDAddress(path)) {
+            break;
+        }
+
+        auto it = mapPathToAddress.find(path);
+        if (it == mapPathToAddress.end()) {
+            break;
+        }
+
+        bool has_utxos = false;
+        // has_utxos = utxo_set.HasAddressOutputs(it->second);
+
+        if (has_utxos) {
+            found_count++;
+            gap_counter_internal = 0;
+            nHDInternalChainIndex = i + 1;
+        } else {
+            gap_counter_internal++;
+        }
+    }
+
+    // Auto-save if we found any addresses
+    if (found_count > 0 && m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+
+    return found_count;
+}
+
+// ============================================================================
+// HD Wallet Private Helper Functions
+// ============================================================================
+
+bool CWallet::DeriveAndCacheHDAddress(const CHDKeyPath& path) {
+    // Assumes caller holds cs_wallet lock
+
+    // Check if already cached
+    if (mapPathToAddress.find(path) != mapPathToAddress.end()) {
+        return true;  // Already have this address
+    }
+
+    // Decrypt HD master key if encrypted
+    CHDExtendedKey master_copy;
+    if (fHDMasterKeyEncrypted) {
+        if (!DecryptHDMasterKey(master_copy)) {
+            return false;
+        }
+    } else {
+        master_copy = hdMasterKey;
+    }
+
+    // Derive extended key at path
+    CHDExtendedKey derived;
+    if (!DerivePath(master_copy, path, derived)) {
+        master_copy.Wipe();
+        return false;
+    }
+
+    // Generate Dilithium keypair
+    uint8_t pk[DILITHIUM_PUBLICKEY_SIZE];
+    uint8_t sk[DILITHIUM_SECRETKEY_SIZE];
+
+    if (!GenerateDilithiumKey(derived, pk, sk)) {
+        derived.Wipe();
+        master_copy.Wipe();
+        memory_cleanse(sk, DILITHIUM_SECRETKEY_SIZE);
+        return false;
+    }
+
+    // Create address from public key
+    CAddress address(std::vector<uint8_t>(pk, pk + DILITHIUM_PUBLICKEY_SIZE));
+
+    // Create CKey structure
+    CKey key;
+    key.vchPubKey = std::vector<uint8_t>(pk, pk + DILITHIUM_PUBLICKEY_SIZE);
+    key.vchPrivKey = std::vector<uint8_t>(sk, sk + DILITHIUM_SECRETKEY_SIZE);
+
+    // Store in wallet (encrypt if necessary)
+    if (masterKey.IsValid()) {
+        // Wallet is encrypted - encrypt the private key
+        CEncryptedKey encKey;
+        encKey.vchPubKey = key.vchPubKey;
+
+        // Generate unique IV
+        if (!GenerateIV(encKey.vchIV)) {
+            key.Clear();
+            derived.Wipe();
+            master_copy.Wipe();
+            return false;
+        }
+
+        // Encrypt with master key
+        CCrypter crypter;
+        std::vector<uint8_t> masterKeyVec(vMasterKey.data_ptr(),
+                                          vMasterKey.data_ptr() + vMasterKey.size());
+        if (!crypter.SetKey(masterKeyVec, encKey.vchIV)) {
+            memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+            key.Clear();
+            derived.Wipe();
+            master_copy.Wipe();
+            return false;
+        }
+
+        if (!crypter.Encrypt(key.vchPrivKey, encKey.vchCryptedKey)) {
+            memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+            key.Clear();
+            derived.Wipe();
+            master_copy.Wipe();
+            return false;
+        }
+
+        memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+        mapCryptedKeys[address] = encKey;
+    } else {
+        // Wallet not encrypted - store key directly
+        mapKeys[address] = key;
+    }
+
+    // Cache HD path mappings
+    mapPathToAddress[path] = address;
+    mapAddressToPath[address] = path;
+
+    // Add to address list
+    vchAddresses.push_back(address);
+
+    // Wipe sensitive data
+    key.Clear();  // This will securely wipe private key
+    derived.Wipe();
+    master_copy.Wipe();
+
+    return true;
+}
+
+bool CWallet::EncryptHDMasterKey() {
+    // Assumes caller holds cs_wallet lock
+
+    if (!masterKey.IsValid()) {
+        return false;  // Wallet not encrypted
+    }
+
+    // Generate unique IV for HD master key
+    if (!GenerateIV(vchHDMasterKeyIV)) {
+        return false;
+    }
+
+    // Prepare master key seed + chaincode (64 bytes total)
+    std::vector<uint8_t> masterKeyData(64);
+    std::memcpy(masterKeyData.data(), hdMasterKey.seed, 32);
+    std::memcpy(masterKeyData.data() + 32, hdMasterKey.chaincode, 32);
+
+    // Encrypt with wallet master key
+    CCrypter crypter;
+    std::vector<uint8_t> vMasterKeyVec(vMasterKey.data_ptr(),
+                                       vMasterKey.data_ptr() + vMasterKey.size());
+
+    if (!crypter.SetKey(vMasterKeyVec, vchHDMasterKeyIV)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        memory_cleanse(masterKeyData.data(), masterKeyData.size());
+        return false;
+    }
+
+    // Store encrypted data back in hdMasterKey structure
+    // We'll reuse the seed/chaincode fields to store encrypted data
+    std::vector<uint8_t> encrypted;
+    if (!crypter.Encrypt(masterKeyData, encrypted)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        memory_cleanse(masterKeyData.data(), masterKeyData.size());
+        return false;
+    }
+
+    // Copy encrypted data to hdMasterKey (first 32 bytes in seed, rest in chaincode)
+    if (encrypted.size() != 64) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        memory_cleanse(masterKeyData.data(), masterKeyData.size());
+        memory_cleanse(encrypted.data(), encrypted.size());
+        return false;
+    }
+
+    std::memcpy(hdMasterKey.seed, encrypted.data(), 32);
+    std::memcpy(hdMasterKey.chaincode, encrypted.data() + 32, 32);
+
+    fHDMasterKeyEncrypted = true;
+
+    // Wipe sensitive data
+    memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+    memory_cleanse(masterKeyData.data(), masterKeyData.size());
+    memory_cleanse(encrypted.data(), encrypted.size());
+
+    return true;
+}
+
+bool CWallet::DecryptHDMasterKey(CHDExtendedKey& decrypted) const {
+    // Assumes caller holds cs_wallet lock
+
+    if (!fHDMasterKeyEncrypted) {
+        // Not encrypted, just copy
+        decrypted = hdMasterKey;
+        return true;
+    }
+
+    if (!fWalletUnlocked) {
+        return false;  // Wallet locked
+    }
+
+    // Decrypt HD master key
+    CCrypter crypter;
+    std::vector<uint8_t> vMasterKeyVec(vMasterKey.data_ptr(),
+                                       vMasterKey.data_ptr() + vMasterKey.size());
+
+    if (!crypter.SetKey(vMasterKeyVec, vchHDMasterKeyIV)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        return false;
+    }
+
+    // Prepare encrypted data (64 bytes from seed + chaincode)
+    std::vector<uint8_t> encrypted(64);
+    std::memcpy(encrypted.data(), hdMasterKey.seed, 32);
+    std::memcpy(encrypted.data() + 32, hdMasterKey.chaincode, 32);
+
+    std::vector<uint8_t> decrypted_data;
+    if (!crypter.Decrypt(encrypted, decrypted_data)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        memory_cleanse(encrypted.data(), encrypted.size());
+        return false;
+    }
+
+    if (decrypted_data.size() != 64) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        memory_cleanse(encrypted.data(), encrypted.size());
+        memory_cleanse(decrypted_data.data(), decrypted_data.size());
+        return false;
+    }
+
+    // Copy decrypted data to output
+    std::memcpy(decrypted.seed, decrypted_data.data(), 32);
+    std::memcpy(decrypted.chaincode, decrypted_data.data() + 32, 32);
+    decrypted.depth = hdMasterKey.depth;
+    decrypted.fingerprint = hdMasterKey.fingerprint;
+    decrypted.child_index = hdMasterKey.child_index;
+
+    // Wipe sensitive data
+    memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+    memory_cleanse(encrypted.data(), encrypted.size());
+    memory_cleanse(decrypted_data.data(), decrypted_data.size());
+
+    return true;
+}
+
+bool CWallet::EncryptMnemonic(const std::string& mnemonic) {
+    // Assumes caller holds cs_wallet lock
+
+    // Generate unique IV
+    if (!GenerateIV(vchMnemonicIV)) {
+        return false;
+    }
+
+    std::vector<uint8_t> mnemonicBytes(mnemonic.begin(), mnemonic.end());
+
+    if (masterKey.IsValid()) {
+        // Wallet encrypted - use master key
+        CCrypter crypter;
+        std::vector<uint8_t> vMasterKeyVec(vMasterKey.data_ptr(),
+                                           vMasterKey.data_ptr() + vMasterKey.size());
+
+        if (!crypter.SetKey(vMasterKeyVec, vchMnemonicIV)) {
+            memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+            memory_cleanse(mnemonicBytes.data(), mnemonicBytes.size());
+            return false;
+        }
+
+        if (!crypter.Encrypt(mnemonicBytes, vchEncryptedMnemonic)) {
+            memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+            memory_cleanse(mnemonicBytes.data(), mnemonicBytes.size());
+            return false;
+        }
+
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+    } else {
+        // Wallet not encrypted - encrypt with temporary key
+        // This allows mnemonic to still be stored encrypted even without wallet encryption
+        // Uses a fixed derivation (not secure without wallet password, but better than plaintext)
+        std::vector<uint8_t> tempKey(WALLET_CRYPTO_KEY_SIZE, 0x42);
+
+        CCrypter crypter;
+        if (!crypter.SetKey(tempKey, vchMnemonicIV)) {
+            memory_cleanse(tempKey.data(), tempKey.size());
+            memory_cleanse(mnemonicBytes.data(), mnemonicBytes.size());
+            return false;
+        }
+
+        if (!crypter.Encrypt(mnemonicBytes, vchEncryptedMnemonic)) {
+            memory_cleanse(tempKey.data(), tempKey.size());
+            memory_cleanse(mnemonicBytes.data(), mnemonicBytes.size());
+            return false;
+        }
+
+        memory_cleanse(tempKey.data(), tempKey.size());
+    }
+
+    memory_cleanse(mnemonicBytes.data(), mnemonicBytes.size());
+    return true;
+}
+
+bool CWallet::DecryptMnemonic(std::string& mnemonic) const {
+    // Assumes caller holds cs_wallet lock
+
+    if (vchEncryptedMnemonic.empty()) {
+        return false;
+    }
+
+    std::vector<uint8_t> decrypted;
+
+    if (masterKey.IsValid()) {
+        // Wallet encrypted - decrypt with master key
+        if (!fWalletUnlocked) {
+            return false;  // Wallet locked
+        }
+
+        CCrypter crypter;
+        std::vector<uint8_t> vMasterKeyVec(vMasterKey.data_ptr(),
+                                           vMasterKey.data_ptr() + vMasterKey.size());
+
+        if (!crypter.SetKey(vMasterKeyVec, vchMnemonicIV)) {
+            memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+            return false;
+        }
+
+        if (!crypter.Decrypt(vchEncryptedMnemonic, decrypted)) {
+            memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+            return false;
+        }
+
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+    } else {
+        // Wallet not encrypted - decrypt with temporary key
+        std::vector<uint8_t> tempKey(WALLET_CRYPTO_KEY_SIZE, 0x42);
+
+        CCrypter crypter;
+        if (!crypter.SetKey(tempKey, vchMnemonicIV)) {
+            memory_cleanse(tempKey.data(), tempKey.size());
+            return false;
+        }
+
+        if (!crypter.Decrypt(vchEncryptedMnemonic, decrypted)) {
+            memory_cleanse(tempKey.data(), tempKey.size());
+            return false;
+        }
+
+        memory_cleanse(tempKey.data(), tempKey.size());
+    }
+
+    mnemonic = std::string(decrypted.begin(), decrypted.end());
+    memory_cleanse(decrypted.data(), decrypted.size());
 
     return true;
 }

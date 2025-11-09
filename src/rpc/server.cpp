@@ -131,6 +131,13 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["walletlock"] = [this](const std::string& p) { return RPC_WalletLock(p); };
     m_handlers["walletpassphrasechange"] = [this](const std::string& p) { return RPC_WalletPassphraseChange(p); };
 
+    // HD Wallet
+    m_handlers["createhdwallet"] = [this](const std::string& p) { return RPC_CreateHDWallet(p); };
+    m_handlers["restorehdwallet"] = [this](const std::string& p) { return RPC_RestoreHDWallet(p); };
+    m_handlers["exportmnemonic"] = [this](const std::string& p) { return RPC_ExportMnemonic(p); };
+    m_handlers["gethdwalletinfo"] = [this](const std::string& p) { return RPC_GetHDWalletInfo(p); };
+    m_handlers["listhdaddresses"] = [this](const std::string& p) { return RPC_ListHDAddresses(p); };
+
     // Mining
     m_handlers["getmininginfo"] = [this](const std::string& p) { return RPC_GetMiningInfo(p); };
     m_handlers["startmining"] = [this](const std::string& p) { return RPC_StartMining(p); };
@@ -1572,6 +1579,213 @@ std::string CRPCServer::RPC_WalletPassphraseChange(const std::string& params) {
         << " (" << validation.strength_score << "/100)";
 
     return "\"" + oss.str() + "\"";
+}
+
+// ============================================================================
+// HD Wallet RPC Methods
+// ============================================================================
+
+std::string CRPCServer::RPC_CreateHDWallet(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (m_wallet->IsHDWallet()) {
+        throw std::runtime_error("Error: Wallet is already an HD wallet");
+    }
+
+    if (!m_wallet->IsEmpty()) {
+        throw std::runtime_error("Error: Can only create HD wallet on an empty wallet");
+    }
+
+    // Parse optional passphrase parameter: {"passphrase":"secret"}
+    std::string passphrase;
+    if (!params.empty() && params != "null") {
+        size_t pos = params.find("\"passphrase\"");
+        if (pos != std::string::npos) {
+            pos = params.find(":", pos);
+            pos = params.find("\"", pos + 1);
+            size_t end = params.find("\"", pos + 1);
+            if (end != std::string::npos) {
+                passphrase = params.substr(pos + 1, end - pos - 1);
+            }
+        }
+    }
+
+    // Generate HD wallet
+    std::string mnemonic;
+    if (!m_wallet->GenerateHDWallet(mnemonic, passphrase)) {
+        throw std::runtime_error("Failed to generate HD wallet");
+    }
+
+    // Get first address
+    CAddress firstAddress = m_wallet->GetNewHDAddress();
+    if (!firstAddress.IsValid()) {
+        throw std::runtime_error("Failed to derive first address");
+    }
+
+    // Build response: {"mnemonic":"word1 word2 ...", "address":"addr..."}
+    std::ostringstream oss;
+    oss << "{"
+        << "\"mnemonic\":\"" << EscapeJSON(mnemonic) << "\","
+        << "\"address\":\"" << firstAddress.ToString() << "\""
+        << "}";
+
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_RestoreHDWallet(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (m_wallet->IsHDWallet()) {
+        throw std::runtime_error("Error: Wallet is already an HD wallet");
+    }
+
+    if (!m_wallet->IsEmpty()) {
+        throw std::runtime_error("Error: Can only restore HD wallet on an empty wallet");
+    }
+
+    // Parse required mnemonic parameter: {"mnemonic":"word1 word2 ...", "passphrase":"secret"}
+    size_t pos = params.find("\"mnemonic\"");
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Missing mnemonic parameter");
+    }
+
+    pos = params.find(":", pos);
+    pos = params.find("\"", pos + 1);
+    size_t end = params.find("\"", pos + 1);
+    if (end == std::string::npos) {
+        throw std::runtime_error("Invalid mnemonic parameter");
+    }
+    std::string mnemonic = params.substr(pos + 1, end - pos - 1);
+
+    // Parse optional passphrase
+    std::string passphrase;
+    pos = params.find("\"passphrase\"", end);
+    if (pos != std::string::npos) {
+        pos = params.find(":", pos);
+        pos = params.find("\"", pos + 1);
+        end = params.find("\"", pos + 1);
+        if (end != std::string::npos) {
+            passphrase = params.substr(pos + 1, end - pos - 1);
+        }
+    }
+
+    // Restore HD wallet
+    if (!m_wallet->InitializeHDWallet(mnemonic, passphrase)) {
+        throw std::runtime_error("Failed to restore HD wallet (invalid mnemonic or passphrase)");
+    }
+
+    // Get first address
+    CAddress firstAddress = m_wallet->GetNewHDAddress();
+    if (!firstAddress.IsValid()) {
+        throw std::runtime_error("Failed to derive first address");
+    }
+
+    // Build response: {"success":true, "address":"addr..."}
+    std::ostringstream oss;
+    oss << "{"
+        << "\"success\":true,"
+        << "\"address\":\"" << firstAddress.ToString() << "\""
+        << "}";
+
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ExportMnemonic(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (!m_wallet->IsHDWallet()) {
+        throw std::runtime_error("Error: Wallet is not an HD wallet");
+    }
+
+    // Export mnemonic
+    std::string mnemonic;
+    if (!m_wallet->ExportMnemonic(mnemonic)) {
+        throw std::runtime_error("Failed to export mnemonic (wallet may be locked)");
+    }
+
+    // Build response: {"mnemonic":"word1 word2 ..."}
+    std::ostringstream oss;
+    oss << "{"
+        << "\"mnemonic\":\"" << EscapeJSON(mnemonic) << "\""
+        << "}";
+
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetHDWalletInfo(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    bool isHDWallet = m_wallet->IsHDWallet();
+
+    if (!isHDWallet) {
+        // Not an HD wallet
+        return "{\"hdwallet\":false}";
+    }
+
+    // Get HD wallet info
+    uint32_t account, external_index, internal_index;
+    if (!m_wallet->GetHDWalletInfo(account, external_index, internal_index)) {
+        throw std::runtime_error("Failed to get HD wallet info");
+    }
+
+    // Build response
+    std::ostringstream oss;
+    oss << "{"
+        << "\"hdwallet\":true,"
+        << "\"account\":" << account << ","
+        << "\"external_index\":" << external_index << ","
+        << "\"internal_index\":" << internal_index
+        << "}";
+
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ListHDAddresses(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    if (!m_wallet->IsHDWallet()) {
+        throw std::runtime_error("Error: Wallet is not an HD wallet");
+    }
+
+    // Get all addresses
+    std::vector<CAddress> addresses = m_wallet->GetAddresses();
+
+    // Build JSON array of addresses with paths
+    std::ostringstream oss;
+    oss << "[";
+
+    bool first = true;
+    for (const CAddress& addr : addresses) {
+        // Get derivation path for this address
+        CHDKeyPath path;
+        if (!m_wallet->GetAddressPath(addr, path)) {
+            continue;  // Skip non-HD addresses (shouldn't happen in HD wallet)
+        }
+
+        if (!first) {
+            oss << ",";
+        }
+        first = false;
+
+        oss << "{"
+            << "\"address\":\"" << addr.ToString() << "\","
+            << "\"path\":\"" << EscapeJSON(path.ToString()) << "\""
+            << "}";
+    }
+
+    oss << "]";
+
+    return oss.str();
 }
 
 std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
