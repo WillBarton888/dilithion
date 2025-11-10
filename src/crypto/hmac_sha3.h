@@ -21,7 +21,8 @@
  *   K' = K if len(K) <= blocksize, else SHA3-512(K)
  *   opad = 0x5c repeated blocksize times
  *   ipad = 0x36 repeated blocksize times
- *   blocksize = 136 bytes for SHA3-512 (rate)
+ *   blocksize = 72 bytes for SHA3-512 (rate = 576 bits = 72 bytes)
+ *   Note: SHA3-256 uses 136 bytes (rate = 1088 bits)
  */
 
 /**

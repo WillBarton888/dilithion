@@ -4,6 +4,8 @@
 #include <crypto/hmac_sha3.h>
 #include <crypto/sha3.h>
 #include <cstring>
+#include <stdexcept>
+#include <vector>
 
 // SHA3-512 block size (rate in bytes)
 // SHA3-512 has capacity = 1024 bits, rate = 1600 - 1024 = 576 bits = 72 bytes
@@ -12,6 +14,22 @@ static const size_t SHA3_512_BLOCKSIZE = 72;
 void HMAC_SHA3_512(const uint8_t* key, size_t key_len,
                    const uint8_t* data, size_t data_len,
                    uint8_t output[64]) {
+    // Validate inputs
+    if (key == nullptr && key_len > 0) {
+        throw std::invalid_argument("HMAC_SHA3_512: key is NULL but key_len > 0");
+    }
+    if (data == nullptr && data_len > 0) {
+        throw std::invalid_argument("HMAC_SHA3_512: data is NULL but data_len > 0");
+    }
+    if (output == nullptr) {
+        throw std::invalid_argument("HMAC_SHA3_512: output buffer is NULL");
+    }
+
+    // Check for integer overflow in inner_len calculation
+    if (data_len > SIZE_MAX - SHA3_512_BLOCKSIZE) {
+        throw std::overflow_error("HMAC_SHA3_512: data_len too large (would overflow)");
+    }
+
     // Prepare key
     uint8_t key_block[SHA3_512_BLOCKSIZE];
     std::memset(key_block, 0, SHA3_512_BLOCKSIZE);
@@ -39,26 +57,28 @@ void HMAC_SHA3_512(const uint8_t* key, size_t key_len,
     uint8_t inner_hash[64];
     {
         // Concatenate ipad_key and data
+        // Use std::vector for automatic memory management (RAII)
         size_t inner_len = SHA3_512_BLOCKSIZE + data_len;
-        uint8_t* inner_data = new uint8_t[inner_len];
-        std::memcpy(inner_data, ipad_key, SHA3_512_BLOCKSIZE);
-        std::memcpy(inner_data + SHA3_512_BLOCKSIZE, data, data_len);
+        std::vector<uint8_t> inner_data(inner_len);
+        std::memcpy(inner_data.data(), ipad_key, SHA3_512_BLOCKSIZE);
+        std::memcpy(inner_data.data() + SHA3_512_BLOCKSIZE, data, data_len);
 
-        SHA3_512(inner_data, inner_len, inner_hash);
+        SHA3_512(inner_data.data(), inner_len, inner_hash);
 
-        delete[] inner_data;
+        // inner_data automatically freed here - no memory leak on exception
     }
 
     // Outer hash: SHA3-512((K ⊕ opad) || inner_hash)
     {
+        // Use std::vector for automatic memory management (RAII)
         size_t outer_len = SHA3_512_BLOCKSIZE + 64;
-        uint8_t* outer_data = new uint8_t[outer_len];
-        std::memcpy(outer_data, opad_key, SHA3_512_BLOCKSIZE);
-        std::memcpy(outer_data + SHA3_512_BLOCKSIZE, inner_hash, 64);
+        std::vector<uint8_t> outer_data(outer_len);
+        std::memcpy(outer_data.data(), opad_key, SHA3_512_BLOCKSIZE);
+        std::memcpy(outer_data.data() + SHA3_512_BLOCKSIZE, inner_hash, 64);
 
-        SHA3_512(outer_data, outer_len, output);
+        SHA3_512(outer_data.data(), outer_len, output);
 
-        delete[] outer_data;
+        // outer_data automatically freed here - no memory leak on exception
     }
 
     // Wipe sensitive data

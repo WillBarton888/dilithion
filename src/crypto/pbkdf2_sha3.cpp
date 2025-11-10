@@ -4,7 +4,8 @@
 #include <crypto/pbkdf2_sha3.h>
 #include <crypto/hmac_sha3.h>
 #include <cstring>
-#include <cassert>
+#include <stdexcept>
+#include <vector>
 
 // SHA3-512 output size in bytes
 static const size_t SHA3_512_OUTPUT_SIZE = 64;
@@ -57,15 +58,16 @@ static void pbkdf2_f(const uint8_t* password, size_t password_len,
     // First iteration: HMAC(password, salt || block_index)
     {
         // Prepare salt || INT_32_BE(block_index)
+        // Use std::vector for automatic memory management (RAII)
         size_t salt_block_len = salt_len + 4;
-        uint8_t* salt_block = new uint8_t[salt_block_len];
-        std::memcpy(salt_block, salt, salt_len);
-        INT_32_BE(block_index, salt_block + salt_len);
+        std::vector<uint8_t> salt_block(salt_block_len);
+        std::memcpy(salt_block.data(), salt, salt_len);
+        INT_32_BE(block_index, salt_block.data() + salt_len);
 
         // U1 = HMAC(password, salt || block_index)
-        HMAC_SHA3_512(password, password_len, salt_block, salt_block_len, u_current);
+        HMAC_SHA3_512(password, password_len, salt_block.data(), salt_block_len, u_current);
 
-        delete[] salt_block;
+        // salt_block automatically freed here - no memory leak on exception
     }
 
     // Initialize output with U1
@@ -92,16 +94,36 @@ void PBKDF2_SHA3_512(const uint8_t* password, size_t password_len,
                      const uint8_t* salt, size_t salt_len,
                      uint32_t iterations,
                      uint8_t* output, size_t output_len) {
-    // Validate inputs
-    assert(password != nullptr || password_len == 0);
-    assert(salt != nullptr || salt_len == 0);
-    assert(iterations > 0);
-    assert(output != nullptr);
-    assert(output_len > 0);
+    // Validate inputs (CRITICAL: Must be runtime checks, not assert())
+    // assert() is removed in release builds (-DNDEBUG), creating security vulnerabilities
+    if ((password == nullptr && password_len > 0)) {
+        throw std::invalid_argument("PBKDF2: password is NULL but password_len > 0");
+    }
+    if ((salt == nullptr && salt_len > 0)) {
+        throw std::invalid_argument("PBKDF2: salt is NULL but salt_len > 0");
+    }
+    if (iterations == 0) {
+        throw std::invalid_argument("PBKDF2: iterations must be > 0");
+    }
+    if (output == nullptr) {
+        throw std::invalid_argument("PBKDF2: output buffer is NULL");
+    }
+    if (output_len == 0) {
+        throw std::invalid_argument("PBKDF2: output_len must be > 0");
+    }
 
     // Calculate number of blocks needed
     // Each block produces SHA3_512_OUTPUT_SIZE (64) bytes
+    // Check for integer overflow in addition
+    if (output_len > SIZE_MAX - SHA3_512_OUTPUT_SIZE + 1) {
+        throw std::overflow_error("PBKDF2: output_len too large (would overflow)");
+    }
     size_t num_blocks = (output_len + SHA3_512_OUTPUT_SIZE - 1) / SHA3_512_OUTPUT_SIZE;
+
+    // Check that num_blocks fits in uint32_t (block index is 1-based, max = num_blocks)
+    if (num_blocks > UINT32_MAX) {
+        throw std::overflow_error("PBKDF2: output_len too large (num_blocks > UINT32_MAX)");
+    }
 
     // Generate each block
     for (size_t i = 0; i < num_blocks; i++) {
@@ -134,21 +156,22 @@ void BIP39_MnemonicToSeed(const char* mnemonic_phrase, size_t mnemonic_len,
     const uint32_t BIP39_ITERATIONS = 2048;
 
     // Prepare salt: "dilithion-mnemonic" + passphrase
+    // Use std::vector for automatic memory management (RAII)
     size_t salt_len = PREFIX_LEN + passphrase_len;
-    uint8_t* salt = new uint8_t[salt_len];
+    std::vector<uint8_t> salt(salt_len);
 
-    std::memcpy(salt, SALT_PREFIX, PREFIX_LEN);
+    std::memcpy(salt.data(), SALT_PREFIX, PREFIX_LEN);
     if (passphrase_len > 0 && passphrase != nullptr) {
-        std::memcpy(salt + PREFIX_LEN, passphrase, passphrase_len);
+        std::memcpy(salt.data() + PREFIX_LEN, passphrase, passphrase_len);
     }
 
     // Derive seed using PBKDF2-SHA3-512
     PBKDF2_SHA3_512(reinterpret_cast<const uint8_t*>(mnemonic_phrase), mnemonic_len,
-                    salt, salt_len,
+                    salt.data(), salt_len,
                     BIP39_ITERATIONS,
                     seed_output, 64);
 
     // Wipe sensitive data
-    std::memset(salt, 0, salt_len);
-    delete[] salt;
+    std::memset(salt.data(), 0, salt_len);
+    // salt automatically freed here - no memory leak on exception
 }

@@ -7,6 +7,7 @@
 #include <vector>
 #include <mutex>
 #include <stdexcept>
+#include <cstring>
 
 namespace {
     randomx_cache* g_randomx_cache = nullptr;
@@ -74,6 +75,14 @@ void randomx_hash(const void* input, size_t input_len, void* output,
 }
 
 void randomx_hash_fast(const void* input, size_t input_len, void* output) {
+    // Validate inputs
+    if (input == nullptr && input_len > 0) {
+        throw std::invalid_argument("randomx_hash_fast: input is NULL but input_len > 0");
+    }
+    if (output == nullptr) {
+        throw std::invalid_argument("randomx_hash_fast: output buffer is NULL");
+    }
+
     std::lock_guard<std::mutex> lock(g_randomx_mutex);
 
     if (g_randomx_vm == nullptr) {
