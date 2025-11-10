@@ -182,6 +182,17 @@ static bool Multiply256x64(const uint256& a, uint64_t b, uint8_t* result) {
  * maintaining a running remainder that is carried forward.
  */
 static uint256 Divide320x64(const uint8_t* dividend, uint64_t divisor) {
+    // LOW-C001 FIX: Add defensive check for division by zero
+    // While upstream code ensures divisor is never zero (through timespan clamping),
+    // this defensive check prevents undefined behavior if called incorrectly
+    if (divisor == 0) {
+        std::cerr << "[Difficulty] CRITICAL: Division by zero in Divide320x64!" << std::endl;
+        std::cerr << "  This should be impossible - indicates logic error in caller" << std::endl;
+        uint256 zero;
+        memset(zero.data, 0, 32);
+        return zero;  // Return zero as safe fallback
+    }
+
     uint256 quotient;
     memset(quotient.data, 0, 32);
 
@@ -279,8 +290,25 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
         pindexFirst = pindexFirst->pprev;
     }
 
+    // LOW-C002: Early blockchain edge case handling (DOCUMENTED)
+    //
+    // During the first difficulty adjustment interval (height < 2016 for Bitcoin,
+    // varies by chain params for Dilithion), there may not be enough blocks to
+    // calculate a full interval timespan.
+    //
+    // Behavior: Return current difficulty (pindexLast->nBits) without adjustment
+    //
+    // This is correct because:
+    // - Genesis block uses genesisNBits (handled at line 254-256)
+    // - Blocks 1 through (interval-1) use genesis difficulty (no adjustment needed)
+    // - First adjustment happens at block `interval` (e.g., block 2016)
+    //
+    // Alternative considered: Return genesisNBits explicitly
+    // - Not necessary - pindexLast->nBits already equals genesisNBits for early blocks
+    // - Current approach is simpler and equivalent
+    //
     if (pindexFirst == nullptr) {
-        // Not enough blocks yet, use current difficulty
+        // Not enough blocks yet, use current difficulty (no adjustment)
         return pindexLast->nBits;
     }
 
@@ -311,50 +339,14 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
     // Calculate expected timespan
     int64_t nTargetTimespan = nInterval * Dilithion::g_chainParams->blockTime;
 
-    // Limit adjustment to prevent extreme changes (4x max change)
-    // This prevents difficulty from swinging wildly
-    if (nActualTimespan < nTargetTimespan / 4)
-        nActualTimespan = nTargetTimespan / 4;
-    if (nActualTimespan > nTargetTimespan * 4)
-        nActualTimespan = nTargetTimespan * 4;
-
-    // Calculate new target (difficulty)
-    // If blocks came faster than expected, increase difficulty (smaller target)
-    // If blocks came slower than expected, decrease difficulty (larger target)
-    uint256 targetOld = CompactToBig(pindexLast->nBits);
-    uint256 targetNew;
-
-    // CRITICAL: Use integer-only arithmetic for deterministic cross-platform behavior
-    // Formula: targetNew = targetOld * nActualTimespan / nTargetTimespan
-    //
-    // FIXME: This integer-only difficulty adjustment requires extensive testnet
-    // validation to ensure it behaves correctly across all edge cases and produces
-    // the same consensus results on all platforms (x86, ARM, etc.)
-    //
-    // Old floating-point code removed due to non-determinism:
-    //   double adjustment = (double)nActualTimespan / (double)nTargetTimespan;
-    //   (byte-by-byte multiplication with floating point)
-    //
-    // New approach: 320-bit intermediate for multiplication, then 256-bit division
-    uint8_t product[40];  // 320 bits to handle overflow from multiplication
-
-    // HIGH-C002 FIX: Check for overflow in multiplication
-    if (!Multiply256x64(targetOld, static_cast<uint64_t>(nActualTimespan), product)) {
-        std::cerr << "[Difficulty] CRITICAL: Overflow in difficulty calculation!" << std::endl;
-        std::cerr << "  Returning previous difficulty (no adjustment)" << std::endl;
-        return pindexLast->nBits;  // Return old difficulty as fallback
-    }
-
-    targetNew = Divide320x64(product, static_cast<uint64_t>(nTargetTimespan));
-
-    // Convert back to compact format
-    uint32_t nBitsNew = BigToCompact(targetNew);
-
-    // Ensure new difficulty is within allowed bounds
-    if (nBitsNew < MIN_DIFFICULTY_BITS)
-        nBitsNew = MIN_DIFFICULTY_BITS;
-    if (nBitsNew > MAX_DIFFICULTY_BITS)
-        nBitsNew = MAX_DIFFICULTY_BITS;
+    // MEDIUM-C001 FIX: Remove code duplication - use CalculateNextWorkRequired()
+    // This helper function handles all the difficulty calculation logic,
+    // including clamping, overflow checks, and bounds validation
+    uint32_t nBitsNew = CalculateNextWorkRequired(
+        pindexLast->nBits,
+        nActualTimespan,
+        nTargetTimespan
+    );
 
     std::cout << "[Difficulty] Adjustment at height " << (pindexLast->nHeight + 1) << std::endl;
     std::cout << "  Actual time: " << nActualTimespan << "s, Expected: " << nTargetTimespan << "s" << std::endl;

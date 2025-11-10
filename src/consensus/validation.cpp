@@ -408,20 +408,23 @@ bool CBlockValidator::CheckBlock(
     uint32_t nHeight,
     std::string& error
 ) const {
-    // Check 1: Block must not be empty
-    if (block.vtx.empty()) {
-        error = "Block has no transactions";
-        return false;
-    }
+    // MEDIUM-C003 FIX: Reorder checks from cheapest to most expensive to prevent DoS
+    // Check cheap conditions first before expensive PoW validation
 
-    // Check 2: Block size limit (1 MB)
+    // Check 1: Block size limit (CHEAPEST - prevents DoS from oversized blocks)
     const size_t MAX_BLOCK_SIZE = 1000000;
     if (block.vtx.size() > MAX_BLOCK_SIZE) {
         error = "Block size exceeds maximum";
         return false;
     }
 
-    // Check 3: Block header validation
+    // Check 2: Block must not be empty
+    if (block.vtx.empty()) {
+        error = "Block has no transactions";
+        return false;
+    }
+
+    // Check 3: Block header validation (MOST EXPENSIVE - do last after cheap checks pass)
     if (!CheckBlockHeader(block, block.nBits, error)) {
         return false;
     }

@@ -65,7 +65,27 @@ bool CTransactionValidator::CheckTransactionBasic(const CTransaction& tx, std::s
     // Check output values are positive and within range
     CAmount totalOut = 0;
     for (const auto& txout : tx.vout) {
-        // Output value must be positive
+        // MEDIUM-C004: Zero-value output rejection policy (DESIGN DECISION)
+        //
+        // This implementation rejects ALL zero-value outputs (nValue == 0).
+        //
+        // Rationale:
+        // - Prevents UTXO set bloat from unspendable zero-value outputs
+        // - Simplifies wallet logic (no need to handle zero-value UTXOs)
+        // - Unlike Bitcoin, Dilithion does NOT support OP_RETURN for data storage
+        //
+        // Trade-offs:
+        // + Prevents bloat attacks
+        // + Simpler UTXO management
+        // - Cannot store arbitrary data in blockchain (OP_RETURN)
+        // - Less flexible than Bitcoin's approach
+        //
+        // If future requirements need data storage, consider:
+        // - Dedicated data layer (separate from UTXO set)
+        // - Witness data field (like SegWit)
+        // - Off-chain storage with on-chain hash commitments
+        //
+        // Current policy: ALL outputs must have nValue > 0
         if (txout.nValue <= 0) {
             error = "Transaction output value must be positive";
             return false;
@@ -443,20 +463,35 @@ bool CTransactionValidator::IsStandardTransaction(const CTransaction& tx) const
         }
     }
 
-    // Check scripts are standard P2PKH
+    // MEDIUM-C005 FIX: Accept both SHA3-256 (37 bytes) and legacy (25 bytes) P2PKH
+    // This aligns with VerifyScript() which accepts both formats for backward compatibility
     for (const auto& txout : tx.vout) {
-        // P2PKH scriptPubKey should be 25 bytes
-        if (txout.scriptPubKey.size() != 25) {
+        size_t scriptSize = txout.scriptPubKey.size();
+
+        // Accept both SHA3-256 P2PKH (37 bytes) and legacy P2PKH (25 bytes)
+        if (scriptSize != 37 && scriptSize != 25) {
             return false;
         }
 
-        // Check P2PKH structure
-        if (txout.scriptPubKey[0] != 0x76 ||  // OP_DUP
-            txout.scriptPubKey[1] != 0xa9 ||  // OP_HASH160
-            txout.scriptPubKey[2] != 0x14 ||  // Push 20 bytes
-            txout.scriptPubKey[23] != 0x88 || // OP_EQUALVERIFY
-            txout.scriptPubKey[24] != 0xac) { // OP_CHECKSIG
-            return false;
+        // Validate P2PKH structure based on size
+        if (scriptSize == 37) {
+            // SHA3-256 P2PKH: OP_DUP OP_HASH256 <32-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+            if (txout.scriptPubKey[0] != 0x76 ||  // OP_DUP
+                txout.scriptPubKey[1] != 0xa9 ||  // OP_HASH256 (SHA3-256)
+                txout.scriptPubKey[2] != 0x20 ||  // Push 32 bytes
+                txout.scriptPubKey[35] != 0x88 || // OP_EQUALVERIFY
+                txout.scriptPubKey[36] != 0xac) { // OP_CHECKSIG
+                return false;
+            }
+        } else {  // scriptSize == 25
+            // Legacy P2PKH: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+            if (txout.scriptPubKey[0] != 0x76 ||  // OP_DUP
+                txout.scriptPubKey[1] != 0xa9 ||  // OP_HASH160
+                txout.scriptPubKey[2] != 0x14 ||  // Push 20 bytes
+                txout.scriptPubKey[23] != 0x88 || // OP_EQUALVERIFY
+                txout.scriptPubKey[24] != 0xac) { // OP_CHECKSIG
+                return false;
+            }
         }
     }
 
