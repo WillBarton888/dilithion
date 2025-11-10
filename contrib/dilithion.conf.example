@@ -1,0 +1,171 @@
+# Dilithion Configuration File
+# Generated: 2025-11-10
+# This is the secure default configuration
+
+#
+# Wallet Settings
+#
+# Always use HD wallet
+usehd=1
+
+# Auto-lock wallet after 5 minutes of inactivity (300 seconds)
+walletlocktimeout=300
+
+#
+# Auto-Backup Settings
+#
+# Enable automatic backups
+autobackup=1
+
+# Backup directory (relative to datadir)
+autobackupdir=backups
+
+# Backup interval in minutes (1440 = 24 hours = daily)
+autobackupinterval=1440
+
+#
+# Network Settings
+#
+# Don't accept incoming connections by default (more secure)
+listen=0
+
+# Disable UPnP (security)
+upnp=0
+
+# Maximum number of outbound connections
+maxconnections=8
+
+#
+# RPC Settings (for local wallet control)
+#
+# Enable RPC server
+server=1
+
+# Bind RPC to localhost only (IMPORTANT for security)
+rpcbind=127.0.0.1
+
+# Allow RPC connections only from localhost
+rpcallowip=127.0.0.1
+
+# RPC port (default)
+rpcport=8332
+
+# RPC authentication (CHANGE THESE!)
+# Generate strong credentials:
+# rpcuser=your_unique_username
+# rpcpassword=your_very_long_random_password
+
+#
+# Logging
+#
+# Enable wallet logging
+debug=wallet
+
+# Don't log IP addresses (privacy)
+logips=0
+
+#
+# Mining Settings
+#
+# Mining disabled by default (enable manually if needed)
+gen=0
+
+# Number of cores for mining (1 = use 1 core)
+genproclimit=1
+
+# Mining address (set this if you enable mining)
+# miningaddress=dil1qyouraddresshere...
+
+#
+# Transaction Settings
+#
+# Default transaction fee (in DIL)
+paytxfee=0.0001
+
+# Minimum transaction fee
+mintxfee=0.00001
+
+#
+# Security Settings
+#
+# Disable wallet by RPC (requires restart to enable)
+# Uncomment for extra security if not using RPC
+# disablewallet=1
+
+# Require passphrase for wallet operations
+walletrequirepassphrase=1
+
+#
+# Advanced Settings
+#
+# Database cache size in MB (increase for better performance)
+dbcache=100
+
+# Maximum mempool size in MB
+maxmempool=300
+
+# Keep transactions in mempool for N hours
+mempoolexpiry=72
+
+#
+# Network Bandwidth
+#
+# Maximum upload bandwidth in KB/s (0 = unlimited)
+maxuploadtarget=0
+
+#
+# Pruning (for limited disk space)
+#
+# Enable blockchain pruning (0 = disabled, >550 = enabled with size in MB)
+# prune=0
+
+##############################################################################
+# IMPORTANT SECURITY NOTES
+##############################################################################
+#
+# 1. NEVER share your wallet.dat file
+# 2. NEVER share your recovery phrase (mnemonic)
+# 3. ALWAYS encrypt your wallet
+# 4. ALWAYS backup your recovery phrase on paper
+# 5. ALWAYS keep multiple backup copies
+# 6. KEEP your wallet locked when not in use
+# 7. USE strong, unique RPC credentials
+# 8. BIND RPC to localhost only (127.0.0.1)
+# 9. USE a firewall to block unauthorized access
+# 10. UPDATE Dilithion wallet regularly
+#
+##############################################################################
+
+##############################################################################
+# FOR MINERS
+##############################################################################
+#
+# To enable mining, uncomment and configure:
+#
+# gen=1
+# genproclimit=4  # Number of CPU cores to use
+# miningaddress=dil1qyourminingaddresshere...
+#
+# IMPORTANT:
+# - Use a separate address for mining rewards
+# - Auto-withdraw to cold storage regularly
+# - Monitor your mining node's security
+# - Keep only operational amounts in hot wallet
+#
+##############################################################################
+
+##############################################################################
+# FOR SSH/REMOTE ACCESS
+##############################################################################
+#
+# If accessing wallet via SSH:
+#
+# 1. KEEP rpcbind=127.0.0.1 (localhost only)
+# 2. USE SSH tunneling: ssh -L 8332:localhost:8332 user@server
+# 3. NEVER expose RPC to internet directly
+# 4. USE strong SSH keys (not passwords)
+# 5. ENABLE fail2ban on server
+# 6. CONFIGURE firewall (UFW/iptables)
+# 7. LIMIT SSH access to specific IPs
+#
+##############################################################################

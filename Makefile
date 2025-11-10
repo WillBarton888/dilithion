@@ -120,7 +120,9 @@ WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/passphrase_validator.cpp \
                   src/wallet/mnemonic.cpp \
                   src/wallet/hd_derivation.cpp \
-                  src/wallet/wallet_manager.cpp
+                  src/wallet/wallet_manager.cpp \
+                  src/wallet/wallet_manager_wizard.cpp \
+                  src/wallet/wallet_init.cpp
 
 UTIL_SOURCES := src/util/strencodings.cpp \
                 src/util/base58.cpp

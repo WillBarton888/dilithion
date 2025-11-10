@@ -133,6 +133,48 @@ public:
     void DisplaySecurityChecklist() const;
 
     /**
+     * Run first-time setup wizard
+     * Mandatory wizard for new users on first wallet launch
+     * Returns true if setup completed successfully, false if cancelled
+     */
+    bool RunFirstTimeSetupWizard();
+
+    /**
+     * Display welcome screen for first-time users
+     */
+    void DisplayWelcomeScreen() const;
+
+    /**
+     * Calculate security score (0-100)
+     * Based on encryption, backups, and best practices
+     */
+    int CalculateSecurityScore() const;
+
+    /**
+     * Display security score with recommendations
+     */
+    void DisplaySecurityScore() const;
+
+    /**
+     * Prompt for and encrypt wallet with strong passphrase
+     * Returns true if encryption successful
+     */
+    bool PromptAndEncryptWallet();
+
+    /**
+     * Warn user before large transaction
+     * @param amount Transaction amount
+     * @param address Recipient address
+     * Returns true if user confirms, false to cancel
+     */
+    bool WarnLargeTransaction(double amount, const std::string& address) const;
+
+    /**
+     * Check if this is first run (no wallet exists)
+     */
+    static bool IsFirstRun();
+
+    /**
      * Get backup directory
      */
     std::string GetBackupDirectory() const { return m_backup_directory; }
