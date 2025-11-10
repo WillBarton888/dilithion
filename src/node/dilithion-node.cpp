@@ -488,8 +488,8 @@ int main(int argc, char* argv[]) {
             }
             std::cout << "  [OK] Genesis block saved to database" << std::endl;
 
-            // Create genesis block index
-            CBlockIndex* pgenesisIndex = new CBlockIndex(genesis);
+            // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
+            auto pgenesisIndex = std::make_unique<CBlockIndex>(genesis);
             pgenesisIndex->phashBlock = genesisHash;
             pgenesisIndex->nHeight = 0;
             pgenesisIndex->pprev = nullptr;
@@ -500,22 +500,30 @@ int main(int argc, char* argv[]) {
             // Save to database
             if (!blockchain.WriteBlockIndex(genesisHash, *pgenesisIndex)) {
                 std::cerr << "ERROR: Failed to write genesis block index!" << std::endl;
-                delete pgenesisIndex;
+                // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 delete Dilithion::g_chainParams;
                 return 1;
             }
             std::cout << "  [OK] Genesis block index saved (height 0)" << std::endl;
 
-            // Add to chain state and set as tip
-            if (!g_chainstate.AddBlockIndex(genesisHash, pgenesisIndex)) {
+            // Add to chain state and set as tip (transfer ownership with std::move)
+            if (!g_chainstate.AddBlockIndex(genesisHash, std::move(pgenesisIndex))) {
                 std::cerr << "ERROR: Failed to add genesis to chain state!" << std::endl;
-                delete pgenesisIndex;
+                // HIGH-C001 FIX: No manual delete - ownership already transferred to map
+                delete Dilithion::g_chainParams;
+                return 1;
+            }
+
+            // HIGH-C001 FIX: After move, retrieve pointer from chain state
+            CBlockIndex* pgenesisIndexPtr = g_chainstate.GetBlockIndex(genesisHash);
+            if (pgenesisIndexPtr == nullptr) {
+                std::cerr << "ERROR: Genesis block index not found after adding!" << std::endl;
                 delete Dilithion::g_chainParams;
                 return 1;
             }
 
             bool reorgOccurred = false;
-            if (!g_chainstate.ActivateBestChain(pgenesisIndex, genesis, reorgOccurred)) {
+            if (!g_chainstate.ActivateBestChain(pgenesisIndexPtr, genesis, reorgOccurred)) {
                 std::cerr << "ERROR: Failed to activate genesis block!" << std::endl;
                 delete Dilithion::g_chainParams;
                 return 1;
@@ -537,9 +545,10 @@ int main(int argc, char* argv[]) {
             // Load genesis block index first
             CBlockIndex genesisIndexFromDB;
             if (blockchain.ReadBlockIndex(genesisHash, genesisIndexFromDB)) {
-                CBlockIndex* pgenesisIndex = new CBlockIndex(genesisIndexFromDB);
+                // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
+                auto pgenesisIndex = std::make_unique<CBlockIndex>(genesisIndexFromDB);
                 pgenesisIndex->pprev = nullptr;
-                g_chainstate.AddBlockIndex(genesisHash, pgenesisIndex);
+                g_chainstate.AddBlockIndex(genesisHash, std::move(pgenesisIndex));
                 std::cout << "  Loaded genesis block index (height 0)" << std::endl;
             } else {
                 std::cerr << "ERROR: Cannot load genesis block index from database!" << std::endl;
@@ -586,13 +595,13 @@ int main(int argc, char* argv[]) {
                         return 1;
                     }
 
-                    // Create new CBlockIndex* and link to parent
-                    CBlockIndex* pblockIndex = new CBlockIndex(blockIndexFromDB);
+                    // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
+                    auto pblockIndex = std::make_unique<CBlockIndex>(blockIndexFromDB);
                     pblockIndex->pprev = g_chainstate.GetBlockIndex(pblockIndex->header.hashPrevBlock);
 
                     if (pblockIndex->pprev == nullptr && !(blockHash == genesisHash)) {
                         std::cerr << "ERROR: Cannot find parent block for " << blockHash.GetHex().substr(0, 16) << std::endl;
-                        delete pblockIndex;
+                        // HIGH-C001 FIX: No manual delete - smart pointer auto-destructs
                         delete Dilithion::g_chainParams;
                         return 1;
                     }
@@ -600,17 +609,19 @@ int main(int argc, char* argv[]) {
                     // Rebuild chain work
                     pblockIndex->BuildChainWork();
 
-                    // Add to chain state
-                    if (!g_chainstate.AddBlockIndex(blockHash, pblockIndex)) {
+                    // Add to chain state (transfer ownership with std::move)
+                    if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
                         std::cerr << "ERROR: Failed to add block index to chain state" << std::endl;
-                        delete pblockIndex;
+                        // HIGH-C001 FIX: No manual delete - ownership transferred
                         delete Dilithion::g_chainParams;
                         return 1;
                     }
 
+                    // HIGH-C001 FIX: After move, retrieve pointer from chain state
+                    CBlockIndex* pblockIndexPtr = g_chainstate.GetBlockIndex(blockHash);
                     // Set pnext pointer on parent to maintain chain
-                    if (pblockIndex->pprev != nullptr) {
-                        pblockIndex->pprev->pnext = pblockIndex;
+                    if (pblockIndexPtr->pprev != nullptr) {
+                        pblockIndexPtr->pprev->pnext = pblockIndexPtr;
                     }
                 }
 
@@ -845,7 +856,8 @@ int main(int argc, char* argv[]) {
             std::cout << "[P2P] Block saved to database" << std::endl;
 
             // Create block index with proper chain linkage
-            CBlockIndex* pblockIndex = new CBlockIndex(block);
+            // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
+            auto pblockIndex = std::make_unique<CBlockIndex>(block);
             pblockIndex->phashBlock = blockHash;
             pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
@@ -855,7 +867,7 @@ int main(int argc, char* argv[]) {
                 std::cerr << "[P2P] ERROR: Cannot find parent block "
                           << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
                 std::cerr << "  This is an orphan block - need to download more blocks" << std::endl;
-                delete pblockIndex;
+                // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
 
@@ -868,20 +880,27 @@ int main(int argc, char* argv[]) {
             // Save block index to database
             if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
                 std::cerr << "[P2P] ERROR: Failed to save block index" << std::endl;
-                delete pblockIndex;
+                // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
 
-            // Add to chain state memory map
-            if (!g_chainstate.AddBlockIndex(blockHash, pblockIndex)) {
+            // Add to chain state memory map (transfer ownership with std::move)
+            if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
                 std::cerr << "[P2P] ERROR: Failed to add block to chain state" << std::endl;
-                delete pblockIndex;
+                // HIGH-C001 FIX: No manual delete needed - ownership transferred
+                return;
+            }
+
+            // HIGH-C001 FIX: After move, retrieve pointer from chain state
+            CBlockIndex* pblockIndexPtr = g_chainstate.GetBlockIndex(blockHash);
+            if (pblockIndexPtr == nullptr) {
+                std::cerr << "[P2P] CRITICAL ERROR: Block index not found after adding!" << std::endl;
                 return;
             }
 
             // Activate best chain (handles reorg if needed)
             bool reorgOccurred = false;
-            if (g_chainstate.ActivateBestChain(pblockIndex, block, reorgOccurred)) {
+            if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (reorgOccurred) {
                     std::cout << "[P2P] ⚠️  CHAIN REORGANIZATION occurred!" << std::endl;
                     std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
@@ -1001,7 +1020,8 @@ int main(int argc, char* argv[]) {
             std::cout << "[Blockchain] Block saved to database" << std::endl;
 
             // Create block index with proper chain linkage
-            CBlockIndex* pblockIndex = new CBlockIndex(block);
+            // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
+            auto pblockIndex = std::make_unique<CBlockIndex>(block);
             pblockIndex->phashBlock = blockHash;
             pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
@@ -1010,7 +1030,7 @@ int main(int argc, char* argv[]) {
             if (pblockIndex->pprev == nullptr) {
                 std::cerr << "[Blockchain] ERROR: Cannot find parent block "
                           << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-                delete pblockIndex;
+                // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
 
@@ -1023,20 +1043,27 @@ int main(int argc, char* argv[]) {
             // Save block index to database
             if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
                 std::cerr << "[Blockchain] ERROR: Failed to save block index" << std::endl;
-                delete pblockIndex;
+                // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
 
-            // Add to chain state memory map
-            if (!g_chainstate.AddBlockIndex(blockHash, pblockIndex)) {
+            // Add to chain state memory map (transfer ownership with std::move)
+            if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
                 std::cerr << "[Blockchain] ERROR: Failed to add block to chain state" << std::endl;
-                delete pblockIndex;
+                // HIGH-C001 FIX: No manual delete needed - ownership transferred
+                return;
+            }
+
+            // HIGH-C001 FIX: After move, retrieve pointer from chain state
+            CBlockIndex* pblockIndexPtr = g_chainstate.GetBlockIndex(blockHash);
+            if (pblockIndexPtr == nullptr) {
+                std::cerr << "[Blockchain] CRITICAL ERROR: Block index not found after adding!" << std::endl;
                 return;
             }
 
             // Activate best chain (handles reorg if needed)
             bool reorgOccurred = false;
-            if (g_chainstate.ActivateBestChain(pblockIndex, block, reorgOccurred)) {
+            if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (reorgOccurred) {
                     std::cout << "[Blockchain] ⚠️  CHAIN REORGANIZATION occurred during mining!" << std::endl;
                     std::cout << "  Our mined block triggered a reorg" << std::endl;

@@ -25,6 +25,14 @@ static const size_t DILITHIUM_PUBLICKEY_SIZE = 1952;
 static const size_t DILITHIUM_SECRETKEY_SIZE = 4032;
 static const size_t DILITHIUM_SIGNATURE_SIZE = 3309;
 
+// FIX-011 (PERSIST-001): Wallet File Format v3 with Integrity Protection
+// File format: [Magic][Version][Flags][HMAC][Salt][Data...]
+static const char WALLET_FILE_MAGIC_V3[] = "DILWLT03";
+static const uint32_t WALLET_FILE_VERSION_3 = 3;
+static const size_t WALLET_FILE_HMAC_SIZE = 32;    // HMAC-SHA3-256 output
+static const size_t WALLET_FILE_SALT_SIZE = 32;    // Salt for HMAC
+static const size_t WALLET_FILE_HEADER_SIZE = 8 + 4 + 4 + 32 + 32;  // Magic + Version + Flags + HMAC + Salt = 80 bytes
+
 /**
  * Dilithium key pair
  * WS-001: Secure memory wiping for private keys
@@ -607,6 +615,12 @@ public:
     bool IsHDWallet() const { return fIsHDWallet; }
 
     /**
+     * Check if wallet is empty (has no keys/addresses)
+     * @return true if wallet has no keys
+     */
+    bool IsEmpty() const { return vchAddresses.empty(); }
+
+    /**
      * Get derivation path for an address
      *
      * @param address Address to look up
@@ -653,6 +667,44 @@ public:
      * Clear all wallet data
      */
     void Clear();
+
+    /**
+     * FIX-012 (WALLET-002): Validate wallet structural consistency
+     *
+     * Performs comprehensive validation of wallet data structures to detect:
+     * - Address reconstruction mismatches (public key → address)
+     * - HD wallet path gaps (missing derivation indices)
+     * - Transaction addresses not belonging to wallet
+     * - Encrypted/unencrypted key count mismatches
+     * - HD path bidirectional mapping inconsistencies
+     *
+     * This method performs 5 critical checks:
+     *
+     * 1. Address Reconstruction: Verifies all addresses match their public keys
+     *    - Prevents address<→>key mismatch from file corruption
+     *    - Detects tampering with address bytes
+     *
+     * 2. HD Path Gap Detection: Ensures no missing indices in derivation chains
+     *    - External chain: [0, nHDExternalChainIndex)
+     *    - Internal chain: [0, nHDInternalChainIndex)
+     *    - Detects missing HD addresses in sequential range
+     *
+     * 3. Transaction Address Validation: All tx addresses belong to wallet
+     *    - Prevents orphaned transactions referencing foreign addresses
+     *
+     * 4. Encrypted Key Count: Encrypted wallets have matching key/address counts
+     *    - Detects incomplete encryption or decryption
+     *
+     * 5. HD Bidirectional Mapping: mapAddressToPath ↔ mapPathToAddress consistency
+     *    - Prevents one-way mapping corruption
+     *
+     * Called automatically during Load() to fail-fast on corruption.
+     *
+     * @param error_out Output parameter for detailed error description
+     * @return true if wallet passes all consistency checks, false if corruption detected
+     * @note Thread-safe (acquires cs_wallet lock internally)
+     */
+    bool ValidateConsistency(std::string& error_out) const;
 
     // ============================================================================
     // Phase 5.2: UTXO Management & Transaction Creation

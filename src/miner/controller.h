@@ -18,6 +18,11 @@
 
 /**
  * Mining statistics tracking
+ *
+ * MINE-014 FIX: Statistics use relaxed memory ordering
+ * These are monitoring values only (not used for correctness)
+ * Values may be slightly inconsistent during concurrent access
+ * but this is acceptable for display purposes.
  */
 struct CMiningStats {
     std::atomic<uint64_t> nHashesComputed{0};
@@ -27,21 +32,30 @@ struct CMiningStats {
 
     CMiningStats() = default;
 
-    // Copy constructor - loads atomic values
+    // MINE-014 FIX: Copy constructor with relaxed memory ordering
+    // Uses memory_order_relaxed for performance (stats are approximate)
     CMiningStats(const CMiningStats& other) {
-        nHashesComputed.store(other.nHashesComputed.load());
-        nBlocksFound.store(other.nBlocksFound.load());
-        nStartTime.store(other.nStartTime.load());
-        nLastHashRate.store(other.nLastHashRate.load());
+        nHashesComputed.store(other.nHashesComputed.load(std::memory_order_relaxed),
+                              std::memory_order_relaxed);
+        nBlocksFound.store(other.nBlocksFound.load(std::memory_order_relaxed),
+                          std::memory_order_relaxed);
+        nStartTime.store(other.nStartTime.load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
+        nLastHashRate.store(other.nLastHashRate.load(std::memory_order_relaxed),
+                           std::memory_order_relaxed);
     }
 
-    // Copy assignment - loads atomic values
+    // MINE-014 FIX: Copy assignment with relaxed memory ordering
     CMiningStats& operator=(const CMiningStats& other) {
         if (this != &other) {
-            nHashesComputed.store(other.nHashesComputed.load());
-            nBlocksFound.store(other.nBlocksFound.load());
-            nStartTime.store(other.nStartTime.load());
-            nLastHashRate.store(other.nLastHashRate.load());
+            nHashesComputed.store(other.nHashesComputed.load(std::memory_order_relaxed),
+                                 std::memory_order_relaxed);
+            nBlocksFound.store(other.nBlocksFound.load(std::memory_order_relaxed),
+                              std::memory_order_relaxed);
+            nStartTime.store(other.nStartTime.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+            nLastHashRate.store(other.nLastHashRate.load(std::memory_order_relaxed),
+                               std::memory_order_relaxed);
         }
         return *this;
     }
@@ -112,6 +126,13 @@ private:
     std::thread m_monitorThread;
     std::atomic<bool> m_monitoring{false};
 
+    // MINE-005 FIX: RandomX initialization synchronization
+    // Protects randomx_init_for_hashing() and randomx_cleanup() calls
+    std::mutex m_randomxMutex;
+
+    // MINE-016 FIX: Configurable RandomX key for testnet/regtest flexibility
+    std::string m_randomxKey;
+
     /**
      * Mining worker function - runs in separate thread
      * @param threadId Thread identifier (0 to m_nThreads-1)
@@ -132,8 +153,13 @@ public:
     /**
      * Constructor
      * @param nThreads Number of mining threads (0 = auto-detect CPU cores)
+     * @param randomxKey RandomX key for PoW (default: "Dilithion" for mainnet)
+     *
+     * MINE-016 FIX: RandomX key is now configurable for testnet/regtest
+     * Mainnet uses "Dilithion", testnets can use different keys
      */
-    explicit CMiningController(uint32_t nThreads = 0);
+    explicit CMiningController(uint32_t nThreads = 0,
+                               const std::string& randomxKey = "Dilithion");
 
     /**
      * Destructor - ensures clean shutdown
@@ -238,6 +264,7 @@ private:
      *
      * @param mempool Transaction mempool
      * @param utxoSet UTXO set for input validation
+     * @param nHeight Current block height (for coinbase maturity validation)
      * @param maxBlockSize Maximum block size in bytes (default: 1MB)
      * @param totalFees Output: total fees from selected transactions
      * @return Vector of selected transactions
@@ -245,6 +272,7 @@ private:
     std::vector<CTransactionRef> SelectTransactionsForBlock(
         CTxMemPool& mempool,
         CUTXOSet& utxoSet,
+        uint32_t nHeight,
         size_t maxBlockSize,
         uint64_t& totalFees
     );

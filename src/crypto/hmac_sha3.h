@@ -26,6 +26,19 @@
  */
 
 /**
+ * Compute HMAC-SHA3-256
+ *
+ * @param key Secret key
+ * @param key_len Length of key in bytes
+ * @param data Message to authenticate
+ * @param data_len Length of message in bytes
+ * @param output Output buffer for 32-byte HMAC
+ */
+void HMAC_SHA3_256(const uint8_t* key, size_t key_len,
+                   const uint8_t* data, size_t data_len,
+                   uint8_t output[32]);
+
+/**
  * Compute HMAC-SHA3-512
  *
  * @param key Secret key

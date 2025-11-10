@@ -34,11 +34,40 @@ void CHDExtendedKey::Wipe() {
 }
 
 uint32_t CHDExtendedKey::GetFingerprint() const {
+    // WL-013 FIX: Detailed documentation for fingerprint calculation edge cases
+
+    // FINGERPRINT CALCULATION PROCESS:
+    // 1. Generate Dilithium3 keypair from extended key's seed (deterministic)
+    // 2. Hash public key with SHA3-256
+    // 3. Take first 4 bytes of hash as fingerprint (big-endian uint32)
+    //
+    // EDGE CASE: Dilithium rejection sampling failure
+    // - Dilithium3 uses rejection sampling for key generation
+    // - In rare cases (<0.1%), sampling may fail and require retry
+    // - If pqcrystals_dilithium3_ref_keypair_from_seed returns non-zero:
+    //   * Buffers are wiped for security
+    //   * Return fingerprint of 0 to indicate error
+    //   * Calling code should treat 0 as invalid fingerprint
+    // - Master keys have fingerprint 0 by convention (no parent)
+    //
+    // EDGE CASE: Fingerprint collision
+    // - 32-bit fingerprint → 2^32 possible values
+    // - Birthday paradox: ~50% collision chance after 2^16 (65,536) keys
+    // - Fingerprints are for quick lookups only, NOT security-critical identifiers
+    // - Always verify full public key for security-critical operations
+
     // Generate public key from this extended key's seed
     uint8_t pk[pqcrystals_dilithium3_ref_PUBLICKEYBYTES];
     uint8_t sk[pqcrystals_dilithium3_ref_SECRETKEYBYTES];
 
-    pqcrystals_dilithium3_ref_keypair_from_seed(pk, sk, seed);
+    // WL-008 FIX: Check return value from Dilithium keygen
+    int result = pqcrystals_dilithium3_ref_keypair_from_seed(pk, sk, seed);
+    if (result != 0) {
+        // Key generation failed - wipe buffers and return zero fingerprint
+        std::memset(pk, 0, sizeof(pk));
+        std::memset(sk, 0, sizeof(sk));
+        return 0;  // Zero fingerprint indicates error (also used for master key)
+    }
 
     // Compute fingerprint
     uint32_t fp = ComputeFingerprint(pk);
@@ -229,9 +258,25 @@ void DeriveMaster(const uint8_t seed[64], CHDExtendedKey& master_key) {
 }
 
 bool DeriveChild(const CHDExtendedKey& parent, uint32_t index, CHDExtendedKey& child) {
-    // For Dilithium security, only support hardened derivation
+    // WL-013 FIX: Detailed documentation for edge case handling
+
+    // HARDENED VS NON-HARDENED DERIVATION:
+    // - Non-hardened (index < 2^31): Would allow public key derivation without private key
+    //   SECURITY RISK for Dilithium: Quantum computers could break non-hardened derivation
+    // - Hardened (index >= 2^31): Requires private key, quantum-resistant
+    // - For Dilithium security, we ONLY support hardened derivation (index >= HD_HARDENED_BIT)
+    // - This prevents any public key derivation attacks from quantum adversaries
+
+    // DERIVATION INDEX OVERFLOW HANDLING:
+    // - Valid indices: 0 to 2^32-1
+    // - Hardened indices: 2^31 to 2^32-1 (represented with ' notation, e.g., 0' = 2^31)
+    // - If index < HD_HARDENED_BIT (2^31), derivation is rejected
+    // - Maximum derivation index: 2^32-1 (hardened index 2^31-1, shown as 2147483647')
+    // - Attempting to derive with index >= 2^32 would require using a different child path level
+    //   (e.g., increment account level and reset address_index to 0')
+
     if (index < HD_HARDENED_BIT) {
-        return false;
+        return false;  // Reject non-hardened derivation for quantum security
     }
 
     // Prepare HMAC input: parent_seed || index (big-endian)

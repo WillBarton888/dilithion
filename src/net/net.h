@@ -64,6 +64,13 @@ public:
 private:
     CPeerManager& peer_manager;
 
+    // NET-006 & NET-007 FIX: Rate limiting for INV and ADDR messages
+    // Track recent INV/ADDR messages per peer to prevent flooding
+    std::map<int, std::vector<int64_t>> peer_inv_timestamps;   // peer_id -> timestamps
+    std::map<int, std::vector<int64_t>> peer_addr_timestamps;  // peer_id -> timestamps
+    mutable std::mutex cs_inv_rate_limit;
+    mutable std::mutex cs_addr_rate_limit;
+
     // Message handlers
     VersionHandler on_version;
     PingHandler on_ping;

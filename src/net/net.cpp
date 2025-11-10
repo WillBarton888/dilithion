@@ -13,6 +13,31 @@
 #include <cstring>
 #include <iostream>
 
+// Platform-specific socket headers for error codes (WSAETIMEDOUT, EAGAIN, etc.)
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+// Undefine Windows macros that conflict with our method names
+#undef SendMessage
+#else
+#include <errno.h>
+#endif
+
+// NET-003 FIX: Define consensus limits to prevent integer overflow in vector resize
+// These prevent DoS attacks via malicious size values causing heap corruption
+static const uint64_t MAX_BLOCK_TRANSACTIONS = 100000;  // Max transactions per block
+static const uint64_t MAX_TX_INPUTS = 10000;            // Max inputs per transaction
+static const uint64_t MAX_TX_OUTPUTS = 10000;           // Max outputs per transaction
+static const uint64_t MAX_SCRIPT_SIZE = 10000;          // Max script size in bytes
+
+// NET-016 FIX: Error message sanitization notes
+// Production deployment should implement proper logging framework with:
+// - Log levels (DEBUG, INFO, WARN, ERROR)
+// - Sanitized production messages (no peer IDs, internal state in ERROR level)
+// - Detailed messages only in DEBUG level
+// Current implementation uses std::cout for development convenience
+// Replace with spdlog or similar for production
+
 // Global network statistics
 CNetworkStats g_network_stats;
 
@@ -58,6 +83,45 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
     }
 
     std::string command = message.header.GetCommand();
+    uint32_t payload_size = message.header.payload_size;
+
+    // NET-003 FIX: Validate payload size before deserialization
+    // Prevents memory waste and cache pollution from oversized payloads
+    struct MessageSizeLimit {
+        uint32_t min_size;
+        uint32_t max_size;
+    };
+
+    static const std::map<std::string, MessageSizeLimit> size_limits = {
+        {"ping",       {8, 8}},                      // Exactly 8 bytes (uint64_t nonce)
+        {"pong",       {8, 8}},                      // Exactly 8 bytes (uint64_t nonce)
+        {"verack",     {0, 0}},                      // Empty message
+        {"version",    {85, 400}},                   // Min 85 bytes, max ~400 bytes with user agent
+        {"getaddr",    {0, 0}},                      // Empty message
+        {"addr",       {1, 30000 * 30}},             // Max 30k addresses * 30 bytes each
+        {"inv",        {1, 50000 * 36}},             // Max 50k inventory items * 36 bytes each
+        {"getdata",    {1, 50000 * 36}},             // Max 50k items * 36 bytes each
+        {"block",      {80, 8 * 1024 * 1024}},       // Min 80 bytes header, max 8MB blocks
+        {"tx",         {60, 1 * 1024 * 1024}},       // Min 60 bytes, max 1MB transactions
+        {"getheaders", {36, 8236}},                  // Min 36 bytes, max ~8KB with many hashes
+        {"headers",    {1, 2000 * 81}},              // Max 2000 headers * 81 bytes each
+        {"getblocks",  {36, 8236}},                  // Similar to getheaders
+        {"mempool",    {0, 0}},                      // Empty message
+        {"reject",     {1, 1024}},                   // Variable, max 1KB for reject messages
+    };
+
+    auto it = size_limits.find(command);
+    if (it != size_limits.end()) {
+        if (payload_size < it->second.min_size || payload_size > it->second.max_size) {
+            std::cout << "[P2P] ERROR: Invalid payload size for '" << command
+                      << "' from peer " << peer_id << " (got " << payload_size
+                      << " bytes, expected " << it->second.min_size << "-" << it->second.max_size << ")"
+                      << std::endl;
+            peer_manager.Misbehaving(peer_id, 20);
+            return false;
+        }
+    }
+
     CDataStream stream(message.payload);
 
     g_network_stats.messages_recv++;
@@ -106,6 +170,15 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         msg.start_height = stream.ReadInt32();
         msg.relay = stream.ReadUint8() != 0;
 
+        // NET-001 FIX: Explicit user agent length validation (defense-in-depth)
+        // Note: NET-002 already limits ReadString() to 256 bytes, but we validate explicitly
+        if (msg.user_agent.length() > 256) {
+            std::cout << "[P2P] ERROR: User agent too long from peer " << peer_id
+                      << " (" << msg.user_agent.length() << " bytes, max 256)" << std::endl;
+            peer_manager.Misbehaving(peer_id, 20);
+            return false;
+        }
+
         // Update peer info
         auto peer = peer_manager.GetPeer(peer_id);
         if (peer) {
@@ -120,7 +193,16 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         on_version(peer_id, msg);
 
         return true;
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: VERSION message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: VERSION message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
@@ -139,7 +221,16 @@ bool CNetMessageProcessor::ProcessPingMessage(int peer_id, CDataStream& stream) 
         uint64_t nonce = stream.ReadUint64();
         on_ping(peer_id, nonce);
         return true;
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: PING message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: PING message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
@@ -149,7 +240,16 @@ bool CNetMessageProcessor::ProcessPongMessage(int peer_id, CDataStream& stream) 
         uint64_t nonce = stream.ReadUint64();
         on_pong(peer_id, nonce);
         return true;
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: PONG message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: PONG message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
@@ -162,6 +262,35 @@ bool CNetMessageProcessor::ProcessGetAddrMessage(int peer_id) {
 
 bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) {
     try {
+        // NET-007 FIX: Rate limiting for ADDR messages
+        // Allow max 1 ADDR message per 10 seconds per peer (addresses change slowly)
+        const int64_t MAX_ADDR_PER_WINDOW = 1;
+        const int64_t RATE_LIMIT_WINDOW = 10;  // 10 seconds
+
+        int64_t now = GetTime();
+        {
+            std::lock_guard<std::mutex> lock(cs_addr_rate_limit);
+            auto& timestamps = peer_addr_timestamps[peer_id];
+
+            // Remove timestamps older than window
+            timestamps.erase(
+                std::remove_if(timestamps.begin(), timestamps.end(),
+                    [now, RATE_LIMIT_WINDOW](int64_t ts) { return now - ts > RATE_LIMIT_WINDOW; }),
+                timestamps.end());
+
+            // Check if peer exceeds rate limit
+            if (timestamps.size() >= static_cast<size_t>(MAX_ADDR_PER_WINDOW)) {
+                std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded ADDR rate limit ("
+                          << timestamps.size() << " messages in last " << RATE_LIMIT_WINDOW << " seconds)" << std::endl;
+                // NET-011 FIX: Penalize peer for rate limit violation
+                peer_manager.Misbehaving(peer_id, 10);
+                return false;
+            }
+
+            // Record this ADDR message
+            timestamps.push_back(now);
+        }
+
         uint64_t count = stream.ReadCompactSize();
         if (count > NetProtocol::MAX_INV_SIZE) {
             return false;
@@ -174,22 +303,67 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
             addr.services = stream.ReadUint64();
             stream.read(addr.ip, 16);
             addr.port = stream.ReadUint16();
-            addrs.push_back(addr);
+
+            // NET-015 FIX: Validate IP address before accepting
+            if (addr.IsRoutable()) {
+                addrs.push_back(addr);
+            }
+            // Silently drop non-routable addresses (loopback, private, multicast)
         }
 
         on_addr(peer_id, addrs);
         return true;
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: ADDR message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: ADDR message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
 
 bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
     try {
+        // NET-006 FIX: Rate limiting for INV messages
+        // Allow max 10 INV messages per second per peer
+        const int64_t MAX_INV_PER_SECOND = 10;
+        const int64_t RATE_LIMIT_WINDOW = 1;  // 1 second
+
+        int64_t now = GetTime();
+        {
+            std::lock_guard<std::mutex> lock(cs_inv_rate_limit);
+            auto& timestamps = peer_inv_timestamps[peer_id];
+
+            // Remove timestamps older than 1 second
+            timestamps.erase(
+                std::remove_if(timestamps.begin(), timestamps.end(),
+                    [now, RATE_LIMIT_WINDOW](int64_t ts) { return now - ts > RATE_LIMIT_WINDOW; }),
+                timestamps.end());
+
+            // Check if peer exceeds rate limit
+            if (timestamps.size() >= static_cast<size_t>(MAX_INV_PER_SECOND)) {
+                std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded INV rate limit ("
+                          << timestamps.size() << " messages in last second)" << std::endl;
+                // NET-011 FIX: Penalize peer for rate limit violation
+                peer_manager.Misbehaving(peer_id, 10);
+                return false;
+            }
+
+            // Record this INV message
+            timestamps.push_back(now);
+        }
+
         uint64_t count = stream.ReadCompactSize();
         if (count > NetProtocol::MAX_INV_SIZE) {
             std::cout << "[P2P] ERROR: INV message too large from peer " << peer_id
                       << " (count=" << count << ")" << std::endl;
+            // NET-011 FIX: Penalize peer for sending oversized message
+            peer_manager.Misbehaving(peer_id, 20);
             return false;
         }
 
@@ -237,9 +411,16 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
         // Call handler for any additional processing
         on_inv(peer_id, inv);
         return true;
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: INV message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: Exception processing INV from peer " << peer_id
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: INV message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
@@ -304,9 +485,16 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         on_getdata(peer_id, getdata);
         return true;
 
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: GETDATA message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: Exception processing GETDATA from peer " << peer_id
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: GETDATA message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
@@ -324,6 +512,14 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
 
         // Deserialize transaction data
         uint64_t vtx_size = stream.ReadCompactSize();
+
+        // NET-003 FIX: Validate size before resize to prevent integer overflow
+        if (vtx_size > MAX_BLOCK_TRANSACTIONS) {
+            // NET-011 FIX: Penalize peer for sending invalid block
+            peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
+            throw std::runtime_error("Block transaction count exceeds limit");
+        }
+
         block.vtx.resize(vtx_size);
         if (vtx_size > 0) {
             stream.read(block.vtx.data(), vtx_size);
@@ -331,7 +527,16 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
 
         on_block(peer_id, block);
         return true;
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: BLOCK message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: BLOCK message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
@@ -344,12 +549,26 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
 
         // Read inputs
         uint64_t vin_size = stream.ReadCompactSize();
+
+        // NET-003 FIX: Validate size before resize to prevent integer overflow
+        if (vin_size > MAX_TX_INPUTS) {
+            // NET-011 FIX: Penalize peer for sending invalid transaction
+            peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
+            throw std::runtime_error("Transaction input count exceeds limit");
+        }
+
         tx.vin.resize(vin_size);
         for (uint64_t i = 0; i < vin_size; i++) {
             tx.vin[i].prevout.hash = stream.ReadUint256();
             tx.vin[i].prevout.n = stream.ReadUint32();
 
             uint64_t script_size = stream.ReadCompactSize();
+
+            // NET-003 FIX: Validate script size before resize
+            if (script_size > MAX_SCRIPT_SIZE) {
+                throw std::runtime_error("Script size exceeds limit");
+            }
+
             tx.vin[i].scriptSig.resize(script_size);
             if (script_size > 0) {
                 stream.read(tx.vin[i].scriptSig.data(), script_size);
@@ -360,11 +579,23 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
 
         // Read outputs
         uint64_t vout_size = stream.ReadCompactSize();
+
+        // NET-003 FIX: Validate size before resize to prevent integer overflow
+        if (vout_size > MAX_TX_OUTPUTS) {
+            throw std::runtime_error("Transaction output count exceeds limit");
+        }
+
         tx.vout.resize(vout_size);
         for (uint64_t i = 0; i < vout_size; i++) {
             tx.vout[i].nValue = stream.ReadUint64();
 
             uint64_t script_size = stream.ReadCompactSize();
+
+            // NET-003 FIX: Validate script size before resize
+            if (script_size > MAX_SCRIPT_SIZE) {
+                throw std::runtime_error("Script size exceeds limit");
+            }
+
             tx.vout[i].scriptPubKey.resize(script_size);
             if (script_size > 0) {
                 stream.read(tx.vout[i].scriptPubKey.data(), script_size);
@@ -431,9 +662,16 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         // If global pointers not set, just call handler
         on_tx(peer_id, tx);
         return true;
+    } catch (const std::out_of_range& e) {
+        // NET-004 FIX: Specific error handling for truncated messages
+        std::cout << "[P2P] ERROR: TX message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: Exception processing TX from peer " << peer_id
+        // NET-004 FIX: Detailed error logging with misbehavior penalty
+        std::cout << "[P2P] ERROR: TX message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
         return false;
     }
 }
@@ -730,10 +968,26 @@ bool CConnectionManager::PerformHandshake(int peer_id) {
 }
 
 void CConnectionManager::DisconnectPeer(int peer_id, const std::string& reason) {
+    // NET-008 FIX: Properly cleanup socket to prevent use-after-free
+    // Remove socket from map while holding mutex to ensure no concurrent access
+    {
+        std::lock_guard<std::mutex> lock(cs_sockets);
+        auto it = peer_sockets.find(peer_id);
+        if (it != peer_sockets.end()) {
+            // Close and remove socket (unique_ptr will handle deletion)
+            it->second.reset();  // Explicitly close socket
+            peer_sockets.erase(it);
+        }
+    }
+
+    // Remove peer from peer manager
     peer_manager.RemovePeer(peer_id);
+
     if (g_network_stats.connected_peers > 0) {
         g_network_stats.connected_peers--;
     }
+
+    std::cout << "[P2P] Disconnected peer " << peer_id << " (reason: " << reason << ")" << std::endl;
 }
 
 void CConnectionManager::PeriodicMaintenance() {
@@ -764,10 +1018,14 @@ void CConnectionManager::PeriodicMaintenance() {
 }
 
 uint64_t CConnectionManager::GenerateNonce() {
-    static std::random_device rd;
-    static std::mt19937_64 gen(rd());
-    static std::uniform_int_distribution<uint64_t> dis;
-    return dis(gen);
+    // NET-014 FIX: Use cryptographically secure RNG for nonces
+    // std::random_device uses OS CSPRNG (CryptGenRandom on Windows, /dev/urandom on Unix)
+    // This is suitable for network protocol nonces that need unpredictability
+    std::random_device rd;
+
+    // Generate 64-bit nonce from two 32-bit random values
+    uint64_t nonce = static_cast<uint64_t>(rd()) << 32 | rd();
+    return nonce;
 }
 
 bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
@@ -811,12 +1069,13 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
             }
             return false;
         }
-    }
 
-    // Update peer last_send time
-    auto peer = peer_manager.GetPeer(peer_id);
-    if (peer) {
-        peer->last_send = GetTime();
+        // NET-005 FIX: Update peer last_send time INSIDE mutex to prevent race
+        // Previously this was done after releasing lock, creating TOCTOU vulnerability
+        auto peer = peer_manager.GetPeer(peer_id);
+        if (peer) {
+            peer->last_send = GetTime();
+        }
     }
 
     return true;
@@ -890,6 +1149,15 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
             std::cout << "[P2P] ERROR: Incomplete payload from peer " << peer_id
                       << " (got " << payload_received << ", expected "
                       << message.header.payload_size << " bytes)" << std::endl;
+            return;
+        }
+
+        // NET-004 FIX: Verify checksum after reading payload
+        uint32_t calculated_checksum = CDataStream::CalculateChecksum(message.payload);
+        if (calculated_checksum != message.header.checksum) {
+            std::cout << "[P2P] ERROR: Checksum mismatch from peer " << peer_id
+                      << " (got 0x" << std::hex << message.header.checksum
+                      << ", expected 0x" << calculated_checksum << std::dec << ")" << std::endl;
             return;
         }
     }

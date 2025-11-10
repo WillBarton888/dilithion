@@ -1,0 +1,72 @@
+{
+  "_comment": "Dilithion RPC Permissions Configuration",
+  "_instructions": "Copy this file to rpc_permissions.json and customize for your deployment",
+  "_security_warning": "Set file permissions to 0600 (owner read/write only): chmod 600 rpc_permissions.json",
+
+  "version": 1,
+
+  "users": {
+    "_example_admin": {
+      "_comment": "Full administrative access - use for system operators only",
+      "password_hash": "REPLACE_WITH_ACTUAL_HASH_FROM_generate_rpc_user.py",
+      "salt": "REPLACE_WITH_ACTUAL_SALT_FROM_generate_rpc_user.py",
+      "role": "admin",
+      "description": "System administrator with full access to all RPC methods including stop, encryptwallet, exportmnemonic"
+    },
+
+    "_example_wallet_bot": {
+      "_comment": "Automated payment system - can send transactions but cannot export keys or stop server",
+      "password_hash": "REPLACE_WITH_ACTUAL_HASH_FROM_generate_rpc_user.py",
+      "salt": "REPLACE_WITH_ACTUAL_SALT_FROM_generate_rpc_user.py",
+      "role": "wallet",
+      "description": "Payment bot for e-commerce or trading - has WRITE_WALLET permission"
+    },
+
+    "_example_monitor": {
+      "_comment": "Read-only dashboard - can view balances and blockchain data only",
+      "password_hash": "REPLACE_WITH_ACTUAL_HASH_FROM_generate_rpc_user.py",
+      "salt": "REPLACE_WITH_ACTUAL_SALT_FROM_generate_rpc_user.py",
+      "role": "readonly",
+      "description": "Monitoring dashboard with read-only access to blockchain and wallet data"
+    }
+  },
+
+  "roles": {
+    "_comment": "Role definitions - DO NOT MODIFY unless you understand the permission model",
+    "admin": {
+      "permissions": "0xFFFFFFFF",
+      "description": "Full access to all RPC methods",
+      "allowed_methods": ["All methods including stop, encryptwallet, exportmnemonic"]
+    },
+    "wallet": {
+      "permissions": "0x003F",
+      "description": "Read + wallet write permissions (cannot export keys or stop server)",
+      "allowed_methods": ["getbalance", "sendtoaddress", "getnewaddress", "signrawtransaction", "listtransactions", "getblock", "getblockcount", "etc."],
+      "denied_methods": ["stop", "encryptwallet", "exportmnemonic", "walletpassphrase", "startmining", "stopmining"]
+    },
+    "readonly": {
+      "permissions": "0x000F",
+      "description": "Read-only access (no state modification)",
+      "allowed_methods": ["getbalance", "getblockcount", "getblock", "getmempoolinfo", "getmininginfo", "etc."],
+      "denied_methods": ["sendtoaddress", "getnewaddress", "stop", "encryptwallet", "all write operations"]
+    }
+  },
+
+  "_usage_instructions": {
+    "step_1": "Generate user credentials using: python3 contrib/generate_rpc_user.py <username> <role>",
+    "step_2": "Copy the output JSON and replace the _example_* entries above",
+    "step_3": "Remove all entries starting with underscore (_comment, _example_*, etc.)",
+    "step_4": "Set file permissions: chmod 600 rpc_permissions.json",
+    "step_5": "Restart the Dilithion node",
+    "step_6": "Verify with: curl -u username:password http://localhost:8332/ -d '{\"method\":\"getblockcount\"}'"
+  },
+
+  "_security_best_practices": {
+    "passwords": "Use strong passwords (16+ characters, mixed case, numbers, symbols)",
+    "file_permissions": "Always set rpc_permissions.json to 0600 (owner read/write only)",
+    "role_assignment": "Use readonly role for monitoring, wallet role for payment bots, admin role ONLY for trusted operators",
+    "password_rotation": "Rotate passwords regularly, especially after employee departures",
+    "audit_logs": "Monitor /var/log/dilithion/debug.log for [RPC-AUTHORIZATION-DENIED] events",
+    "network_security": "Use firewall rules, VPN, or SSH tunnels - never expose RPC to public internet"
+  }
+}

@@ -4,6 +4,8 @@
 #include <wallet/wallet.h>
 #include <wallet/passphrase_validator.h>
 #include <crypto/sha3.h>
+#include <crypto/hmac_sha3.h>  // FIX-011: For file integrity HMAC
+#include <rpc/auth.h>  // FIX-011/FIX-012: For SecureCompare
 #include <util/base58.h>
 #include <node/utxo_set.h>
 #include <node/mempool.h>
@@ -971,14 +973,15 @@ bool CWallet::Load(const std::string& filename) {
     if (!file.good()) return false;  // SEC-001: Check I/O error
 
     std::string magic_str(magic, 8);
-    if (magic_str != "DILWLT01" && magic_str != "DILWLT02") {
+    // FIX-011 (PERSIST-001): Support DILWLT03 format with file integrity HMAC
+    if (magic_str != "DILWLT01" && magic_str != "DILWLT02" && magic_str != "DILWLT03") {
         return false;  // Invalid file format
     }
 
     uint32_t version;
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
     if (!file.good()) return false;  // SEC-001: Check I/O error
-    if (version != 1 && version != 2) {
+    if (version != 1 && version != 2 && version != 3) {
         return false;  // Unsupported version
     }
 
@@ -988,10 +991,32 @@ bool CWallet::Load(const std::string& filename) {
 
     bool is_hd_wallet = (flags & 0x02) != 0;
 
-    // Skip reserved bytes
-    uint8_t reserved[16];
-    file.read(reinterpret_cast<char*>(reserved), 16);
-    if (!file.good()) return false;  // SEC-001: Check I/O error
+    // FIX-011 (PERSIST-001): Read HMAC and salt for v3 format
+    std::vector<uint8_t> stored_hmac;
+    std::vector<uint8_t> hmac_salt;
+    std::streampos data_start_pos;  // Position where HMAC-protected data starts (salt position)
+
+    if (version == 3) {
+        // v3 format: [Magic][Version][Flags][HMAC][Salt][Data...]
+        // Read stored HMAC
+        stored_hmac.resize(WALLET_FILE_HMAC_SIZE);
+        file.read(reinterpret_cast<char*>(stored_hmac.data()), WALLET_FILE_HMAC_SIZE);
+        if (!file.good()) return false;
+
+        // Remember position where HMAC-protected data starts (before reading salt)
+        // HMAC covers [Salt][Data...], not [HMAC][Salt][Data...]
+        data_start_pos = file.tellg();
+
+        // Read HMAC salt
+        hmac_salt.resize(WALLET_FILE_SALT_SIZE);
+        file.read(reinterpret_cast<char*>(hmac_salt.data()), WALLET_FILE_SALT_SIZE);
+        if (!file.good()) return false;
+    } else {
+        // v1/v2 format: Skip reserved bytes (no HMAC)
+        uint8_t reserved[16];
+        file.read(reinterpret_cast<char*>(reserved), 16);
+        if (!file.good()) return false;  // SEC-001: Check I/O error
+    }
 
     // Read master key if encrypted
     bool isEncrypted = (flags & 0x01) != 0;
@@ -1341,6 +1366,80 @@ bool CWallet::Load(const std::string& filename) {
         return false;  // File error occurred, temp data discarded
     }
 
+    // FIX-011 (PERSIST-001): Verify HMAC for v3 format
+    if (version == 3) {
+        // Remember current position (end of data)
+        std::streampos end_pos = file.tellg();
+
+        // Seek back to start of HMAC-protected data (salt position)
+        file.seekg(data_start_pos);
+
+        // Read all data from salt to end
+        size_t data_size = static_cast<size_t>(end_pos - data_start_pos);
+        std::vector<uint8_t> file_data(data_size);
+        file.read(reinterpret_cast<char*>(file_data.data()), data_size);
+        if (!file.good()) {
+            return false;  // Failed to read data for HMAC verification
+        }
+
+        // Derive HMAC key (same strategy as SaveUnlocked)
+        std::vector<uint8_t> hmac_key(32);
+        if (temp_masterKey.IsValid()) {
+            // Use first 32 bytes of master key salt as HMAC key (available without passphrase)
+            memcpy(hmac_key.data(), temp_masterKey.vchSalt.data(),
+                   std::min(hmac_key.size(), temp_masterKey.vchSalt.size()));
+        } else {
+            // For unencrypted wallets, derive HMAC key from wallet content (deterministic)
+            // Use SHA3-256 of (first address + default address) as key
+            std::vector<uint8_t> key_material;
+            if (!temp_vchAddresses.empty()) {
+                std::vector<uint8_t> addr_data = temp_vchAddresses[0].GetData();
+                key_material.insert(key_material.end(), addr_data.begin(), addr_data.end());
+            }
+            std::vector<uint8_t> default_data = temp_defaultAddress.GetData();
+            key_material.insert(key_material.end(), default_data.begin(), default_data.end());
+
+            SHA3_256(key_material.data(), key_material.size(), hmac_key.data());
+        }
+
+        // Compute HMAC-SHA3-256 over the data
+        std::vector<uint8_t> computed_hmac(32);
+        HMAC_SHA3_256(hmac_key.data(), hmac_key.size(),
+                      file_data.data(), file_data.size(),
+                      computed_hmac.data());
+
+        // Constant-time comparison to prevent timing attacks (FIX-001)
+        if (!RPCAuth::SecureCompare(stored_hmac.data(), computed_hmac.data(), WALLET_FILE_HMAC_SIZE)) {
+            return false;  // HMAC verification failed - file has been tampered with!
+        }
+
+        // HMAC verification passed - file integrity confirmed
+    }
+
+    // FIX-012 (WALLET-002): Validate wallet consistency before committing
+    // This detects corruption/tampering beyond just HMAC failures
+    // Create temporary wallet to test consistency before modifying this wallet
+    CWallet temp_wallet_for_validation;
+    temp_wallet_for_validation.mapKeys = temp_mapKeys;
+    temp_wallet_for_validation.mapCryptedKeys = temp_mapCryptedKeys;
+    temp_wallet_for_validation.vchAddresses = temp_vchAddresses;
+    temp_wallet_for_validation.mapWalletTx = temp_mapWalletTx;
+    temp_wallet_for_validation.fIsHDWallet = temp_fIsHDWallet;
+    temp_wallet_for_validation.mapAddressToPath = temp_mapAddressToPath;
+    temp_wallet_for_validation.mapPathToAddress = temp_mapPathToAddress;
+    temp_wallet_for_validation.nHDExternalChainIndex = temp_nHDExternalChainIndex;
+    temp_wallet_for_validation.nHDInternalChainIndex = temp_nHDInternalChainIndex;
+    temp_wallet_for_validation.nHDAccountIndex = temp_nHDAccountIndex;
+    temp_wallet_for_validation.masterKey = temp_masterKey;
+
+    std::string consistency_error;
+    if (!temp_wallet_for_validation.ValidateConsistency(consistency_error)) {
+        // Consistency check failed - wallet is corrupted
+        std::cerr << "ERROR: Wallet consistency validation failed: "
+                  << consistency_error << std::endl;
+        return false;  // Reject corrupted wallet
+    }
+
     // All data loaded successfully - now atomically replace wallet contents
     mapKeys = std::move(temp_mapKeys);
     mapCryptedKeys = std::move(temp_mapCryptedKeys);
@@ -1409,26 +1508,39 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         return false;
     }
 
-    // Write header (v2 if HD wallet, v1 otherwise)
-    const char* magic = fIsHDWallet ? "DILWLT02" : "DILWLT01";
-    file.write(magic, 8);  // Write 8 bytes
-    if (!file.good()) return false;  // SEC-001: Check I/O error
+    // FIX-011 (PERSIST-001): Write header with file integrity HMAC (v3 format)
+    // Format: [Magic][Version][Flags][HMAC-placeholder][Salt][Data...]
+    file.write(WALLET_FILE_MAGIC_V3, 8);  // "DILWLT03"
+    if (!file.good()) return false;
 
-    uint32_t version = fIsHDWallet ? 2 : 1;
+    uint32_t version = WALLET_FILE_VERSION_3;
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
-    if (!file.good()) return false;  // SEC-001: Check I/O error
+    if (!file.good()) return false;
 
     // Flags: bit 0 = encrypted, bit 1 = is HD wallet
     uint32_t flags = 0;
     if (masterKey.IsValid()) flags |= 0x01;
     if (fIsHDWallet) flags |= 0x02;
     file.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
-    if (!file.good()) return false;  // SEC-001: Check I/O error
+    if (!file.good()) return false;
 
-    // Reserved bytes
-    uint8_t reserved[16] = {0};
-    file.write(reinterpret_cast<const char*>(reserved), 16);
-    if (!file.good()) return false;  // SEC-001: Check I/O error
+    // FIX-011: Remember position for HMAC (will write real HMAC later)
+    std::streampos hmac_pos = file.tellp();
+
+    // Write placeholder HMAC (zeros for now, will compute and write later)
+    std::vector<uint8_t> placeholder_hmac(WALLET_FILE_HMAC_SIZE, 0);
+    file.write(reinterpret_cast<const char*>(placeholder_hmac.data()), WALLET_FILE_HMAC_SIZE);
+    if (!file.good()) return false;
+
+    // FIX-011: Generate random salt for HMAC
+    std::vector<uint8_t> hmac_salt(WALLET_FILE_SALT_SIZE);
+    if (!GenerateIV(hmac_salt)) {
+        return false;
+    }
+    // FIX-011: Remember position before writing salt (HMAC covers [Salt][Data...])
+    std::streampos data_start_pos = file.tellp();
+    file.write(reinterpret_cast<const char*>(hmac_salt.data()), WALLET_FILE_SALT_SIZE);
+    if (!file.good()) return false;
 
     // Write master key if encrypted
     if (masterKey.IsValid()) {
@@ -1620,16 +1732,85 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         if (!file.good()) return false;  // SEC-001: Check I/O error
     }
 
-    // FIX-004 (PERSIST-002): Flush and sync data before closing
+    // FIX-011 (PERSIST-001): Compute and write file integrity HMAC
+    // HMAC covers all data from HMAC field onwards (includes salt and all wallet data)
+    std::streampos end_pos = file.tellp();
+
+    // FIX-004 (PERSIST-002): Flush data before reopening for read
     file.flush();
     file.close();
 
-    // SEC-001 FIX: Check if write was successful before committing
-    if (!file.good()) {
-        // Write failed - clean up temp file and return error
+    // Reopen file for reading to compute HMAC
+    std::ifstream read_file(tempFile, std::ios::binary);
+    if (!read_file.is_open()) {
         std::remove(tempFile.c_str());
         return false;
     }
+
+    // Seek to start of HMAC-protected data
+    read_file.seekg(data_start_pos);
+    if (!read_file.good()) {
+        read_file.close();
+        std::remove(tempFile.c_str());
+        return false;
+    }
+
+    // Read all data from salt position to end
+    size_t data_size = static_cast<size_t>(end_pos - data_start_pos);
+    std::vector<uint8_t> file_data(data_size);
+    read_file.read(reinterpret_cast<char*>(file_data.data()), data_size);
+    if (!read_file.good()) {
+        read_file.close();
+        std::remove(tempFile.c_str());
+        return false;
+    }
+    read_file.close();
+
+    // Compute HMAC-SHA3-256 over the data
+    // Using masterKey as HMAC key if encrypted, or derive from wallet content if not
+    std::vector<uint8_t> hmac_key(32);
+    if (masterKey.IsValid()) {
+        // Use first 32 bytes of master key salt as HMAC key (available without passphrase)
+        memcpy(hmac_key.data(), masterKey.vchSalt.data(), std::min(hmac_key.size(), masterKey.vchSalt.size()));
+    } else {
+        // For unencrypted wallets, derive HMAC key from wallet content (deterministic)
+        // Use SHA3-256 of (first address + default address) as key
+        std::vector<uint8_t> key_material;
+        if (!vchAddresses.empty()) {
+            std::vector<uint8_t> addr_data = vchAddresses[0].GetData();
+            key_material.insert(key_material.end(), addr_data.begin(), addr_data.end());
+        }
+        std::vector<uint8_t> default_data = defaultAddress.GetData();
+        key_material.insert(key_material.end(), default_data.begin(), default_data.end());
+
+        SHA3_256(key_material.data(), key_material.size(), hmac_key.data());
+    }
+
+    // Compute HMAC-SHA3-256
+    std::vector<uint8_t> computed_hmac(32);
+    HMAC_SHA3_256(hmac_key.data(), hmac_key.size(),
+                  file_data.data(), file_data.size(),
+                  computed_hmac.data());
+
+    // Reopen file in update mode to write HMAC
+    std::fstream update_file(tempFile, std::ios::binary | std::ios::in | std::ios::out);
+    if (!update_file.is_open()) {
+        std::remove(tempFile.c_str());
+        return false;
+    }
+
+    // Write the computed HMAC
+    update_file.seekp(hmac_pos);
+    update_file.write(reinterpret_cast<const char*>(computed_hmac.data()), WALLET_FILE_HMAC_SIZE);
+    if (!update_file.good()) {
+        update_file.close();
+        std::remove(tempFile.c_str());
+        return false;
+    }
+
+    // FIX-004 (PERSIST-002): Flush and sync data before closing
+    update_file.flush();
+    update_file.close();
 
     // FIX-004 (PERSIST-002): Force data to disk before atomic rename
     // This prevents data loss if power failure occurs between close() and rename()
@@ -1734,6 +1915,170 @@ void CWallet::Clear() {
     // Clear HD mappings
     mapAddressToPath.clear();
     mapPathToAddress.clear();
+}
+
+// FIX-012 (WALLET-002): Wallet Consistency Validation
+bool CWallet::ValidateConsistency(std::string& error_out) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // ========================================================================
+    // Check #1: Address Reconstruction Verification
+    // ========================================================================
+    // Verify that all addresses can be correctly reconstructed from their public keys
+
+    // Check unencrypted keys
+    for (const auto& pair : mapKeys) {
+        const CAddress& address = pair.first;
+        const CKey& key = pair.second;
+        CAddress reconstructed(key.vchPubKey);
+        if (!(reconstructed == address)) {
+            error_out = "[ADDRESS_RECONSTRUCTION] Mismatch for unencrypted key: expected " +
+                       reconstructed.ToString() + ", got " + address.ToString();
+            return false;
+        }
+    }
+
+    // Check encrypted keys (public key is not encrypted, so we can reconstruct)
+    for (const auto& pair : mapCryptedKeys) {
+        const CAddress& address = pair.first;
+        const CEncryptedKey& encKey = pair.second;
+        CAddress reconstructed(encKey.vchPubKey);
+        if (!(reconstructed == address)) {
+            error_out = "[ADDRESS_RECONSTRUCTION] Mismatch for encrypted key: expected " +
+                       reconstructed.ToString() + ", got " + address.ToString();
+            return false;
+        }
+    }
+
+    // ========================================================================
+    // Check #3: Transaction Address Validation
+    // ========================================================================
+    // Verify all transaction addresses belong to wallet
+    // (Check #3 is simpler than #2, so we do it before the complex HD check)
+
+    // Optimization: Convert vchAddresses to set for O(log n) lookup
+    std::set<CAddress> address_set(vchAddresses.begin(), vchAddresses.end());
+
+    for (const auto& pair : mapWalletTx) {
+        const COutPoint& outpoint = pair.first;
+        const CWalletTx& wtx = pair.second;
+        if (address_set.find(wtx.address) == address_set.end()) {
+            error_out = "[TX_ADDRESS_VALIDATION] Transaction (" +
+                       outpoint.hash.GetHex() + ":" + std::to_string(outpoint.n) +
+                       ") references unknown address " + wtx.address.ToString();
+            return false;
+        }
+    }
+
+    // ========================================================================
+    // Check #4: Encrypted Key Count Consistency
+    // ========================================================================
+    // When encrypted, verify key/address counts match
+
+    if (IsCrypted()) {
+        // Encrypted wallet should have no unencrypted keys
+        if (!mapKeys.empty()) {
+            error_out = "[KEY_COUNT] Encrypted wallet has " +
+                       std::to_string(mapKeys.size()) + " unencrypted keys (should be 0)";
+            return false;
+        }
+
+        // Count of encrypted keys should match address count
+        if (mapCryptedKeys.size() != vchAddresses.size()) {
+            error_out = "[KEY_COUNT] Address count (" +
+                       std::to_string(vchAddresses.size()) +
+                       ") != encrypted key count (" +
+                       std::to_string(mapCryptedKeys.size()) + ")";
+            return false;
+        }
+    }
+
+    // ========================================================================
+    // Check #2: HD Path Gap Detection
+    // ========================================================================
+    // Detect gaps in HD derivation paths (missing indices)
+
+    if (fIsHDWallet) {
+        // External chain: Check indices [0, nHDExternalChainIndex)
+        for (uint32_t i = 0; i < nHDExternalChainIndex; i++) {
+            // Construct expected path: m/44'/573'/account'/0/i
+            CHDKeyPath expected;
+            expected.indices.push_back(44 | 0x80000000);  // BIP44 purpose (hardened)
+            expected.indices.push_back(573 | 0x80000000); // Dilithion coin type (hardened)
+            expected.indices.push_back(nHDAccountIndex | 0x80000000); // Account (hardened)
+            expected.indices.push_back(0);  // External chain (not hardened)
+            expected.indices.push_back(i);  // Address index (not hardened)
+
+            if (mapPathToAddress.find(expected) == mapPathToAddress.end()) {
+                error_out = "[HD_PATH_GAPS] Missing external chain address at index " +
+                           std::to_string(i) + " (path: m/44'/573'/" +
+                           std::to_string(nHDAccountIndex) + "'/0/" + std::to_string(i) + ")";
+                return false;
+            }
+        }
+
+        // Internal chain: Check indices [0, nHDInternalChainIndex)
+        for (uint32_t i = 0; i < nHDInternalChainIndex; i++) {
+            // Construct expected path: m/44'/573'/account'/1/i
+            CHDKeyPath expected;
+            expected.indices.push_back(44 | 0x80000000);  // BIP44 purpose (hardened)
+            expected.indices.push_back(573 | 0x80000000); // Dilithion coin type (hardened)
+            expected.indices.push_back(nHDAccountIndex | 0x80000000); // Account (hardened)
+            expected.indices.push_back(1);  // Internal chain (change addresses, not hardened)
+            expected.indices.push_back(i);  // Address index (not hardened)
+
+            if (mapPathToAddress.find(expected) == mapPathToAddress.end()) {
+                error_out = "[HD_PATH_GAPS] Missing internal chain address at index " +
+                           std::to_string(i) + " (path: m/44'/573'/" +
+                           std::to_string(nHDAccountIndex) + "'/1/" + std::to_string(i) + ")";
+                return false;
+            }
+        }
+    }
+
+    // ========================================================================
+    // Check #5: HD Path Bidirectional Mapping Verification
+    // ========================================================================
+    // Ensure mapAddressToPath and mapPathToAddress are consistent
+
+    if (fIsHDWallet) {
+        // Check Address→Path mapping completeness
+        for (const auto& pair : mapAddressToPath) {
+            const CAddress& addr = pair.first;
+            const CHDKeyPath& path = pair.second;
+            auto it = mapPathToAddress.find(path);
+            if (it == mapPathToAddress.end()) {
+                error_out = "[HD_BIDIRECTIONAL] Address→Path exists for " +
+                           addr.ToString() + " but Path→Address mapping is missing";
+                return false;
+            }
+            if (!(it->second == addr)) {
+                error_out = std::string("[HD_BIDIRECTIONAL] Path→Address maps to different address: ") +
+                           "expected " + addr.ToString() + ", got " + it->second.ToString();
+                return false;
+            }
+        }
+
+        // Check Path→Address mapping completeness
+        for (const auto& pair : mapPathToAddress) {
+            const CHDKeyPath& path = pair.first;
+            const CAddress& addr = pair.second;
+            auto it = mapAddressToPath.find(addr);
+            if (it == mapAddressToPath.end()) {
+                error_out = "[HD_BIDIRECTIONAL] Path→Address exists for address " +
+                           addr.ToString() + " but Address→Path mapping is missing";
+                return false;
+            }
+            if (!(it->second == path)) {
+                error_out = "[HD_BIDIRECTIONAL] Address→Path maps to different path than expected";
+                return false;
+            }
+        }
+    }
+
+    // All checks passed
+    error_out = "";
+    return true;
 }
 
 // ============================================================================

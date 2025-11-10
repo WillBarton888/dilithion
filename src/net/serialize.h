@@ -214,11 +214,21 @@ public:
     }
 
     // Read string
-    std::string ReadString() {
+    // NET-002 FIX: Reduce default limit to prevent DoS, add configurable limit
+    std::string ReadString(size_t max_len = 256) {
         uint64_t len = ReadCompactSize();
-        if (len > 1024 * 1024) {  // 1 MB limit
-            throw std::runtime_error("String too large");
+
+        // NET-002 FIX: Much stricter limits to prevent memory exhaustion
+        // Default 256 bytes for user agents, pass larger limit explicitly if needed
+        // Absolute maximum: 10KB (prevents DoS from 1000s of 1MB allocations)
+        if (len > 10 * 1024) {
+            throw std::runtime_error("String exceeds absolute limit (10KB)");
         }
+
+        if (len > max_len) {
+            throw std::runtime_error("String too large for context");
+        }
+
         std::vector<uint8_t> buf = read(len);
         return std::string(buf.begin(), buf.end());
     }
@@ -287,7 +297,17 @@ public:
 
     // Get total message size
     size_t GetTotalSize() const {
-        return 24 + payload.size();
+        // NET-001 FIX: Check for integer overflow before addition
+        // If payload.size() > SIZE_MAX - 24, addition would overflow
+        const size_t header_size = 24;
+        size_t payload_sz = payload.size();
+
+        // Check if addition would overflow
+        if (payload_sz > SIZE_MAX - header_size) {
+            throw std::runtime_error("Message size overflow: payload too large");
+        }
+
+        return header_size + payload_sz;
     }
 
     // Serialize to bytes

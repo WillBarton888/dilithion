@@ -42,22 +42,44 @@ namespace RPCAuth {
 bool GenerateSalt(std::vector<uint8_t>& salt);
 
 /**
- * @brief Hash password with salt using SHA-3-256
+ * @brief Hash password with PBKDF2-HMAC-SHA3-256
  *
- * Creates a salted hash of the password for secure storage.
- * Uses: hash = SHA3-256(salt || password)
+ * Creates a secure password hash using PBKDF2 key derivation function.
+ * Uses: hash = PBKDF2-HMAC-SHA3-256(password, salt, 100000 iterations)
  *
  * @param password Plain text password
  * @param salt Random salt (32 bytes recommended)
  * @param hashOut Output hash (32 bytes)
  * @return true if successful, false on error
  *
- * @note This is a simple salted hash, not a KDF
- *       For production, consider PBKDF2 or Argon2
+ * @note RPC-005 FIX: Uses PBKDF2 with 100,000 iterations (OWASP recommendation)
+ *       Resistant to GPU brute-force attacks. Each hash takes ~100ms.
  */
 bool HashPassword(const std::string& password,
                   const std::vector<uint8_t>& salt,
                   std::vector<uint8_t>& hashOut);
+
+/**
+ * @brief PBKDF2-HMAC-SHA3-256 key derivation function
+ *
+ * Implements PBKDF2 (Password-Based Key Derivation Function 2) using HMAC-SHA3-256
+ * as the pseudorandom function. Resistant to brute-force attacks.
+ *
+ * @param password Plain text password
+ * @param passwordLen Length of password in bytes
+ * @param salt Random salt
+ * @param saltLen Length of salt in bytes
+ * @param iterations Number of PBKDF2 iterations (100,000+ recommended)
+ * @param dkOut Output derived key buffer (must be allocated)
+ * @param dkLen Length of derived key to generate
+ * @return true if successful, false on error
+ *
+ * @note RPC-005 FIX: Replaces weak single-round SHA3-256 hashing
+ */
+bool PBKDF2_HMAC_SHA3(const uint8_t* password, size_t passwordLen,
+                       const uint8_t* salt, size_t saltLen,
+                       uint32_t iterations,
+                       uint8_t* dkOut, size_t dkLen);
 
 /**
  * @brief Verify password against stored hash

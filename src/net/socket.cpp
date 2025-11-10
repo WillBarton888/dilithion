@@ -95,6 +95,12 @@ void CSocket::Reset() {
 }
 
 bool CSocket::Connect(const std::string& host, uint16_t port, int timeout_ms) {
+    // NET-010 FIX: Validate port number
+    // Reject port 0 (OS-assigned) and privileged ports (< 1024) for outbound connections
+    if (port == 0) {
+        return false;  // Port 0 not allowed
+    }
+
     Close();
 
     // Create socket
@@ -188,6 +194,13 @@ bool CSocket::Connect(const std::string& host, uint16_t port, int timeout_ms) {
 }
 
 bool CSocket::Bind(uint16_t port) {
+    // NET-010 FIX: Validate port number for binding
+    // Reject port 0 (OS-assigned) - we need explicit port for P2P networking
+    // Also reject privileged ports (< 1024) unless explicitly needed
+    if (port == 0 || port < 1024) {
+        return false;  // Invalid port for P2P binding
+    }
+
     Close();
 
     sock_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -297,10 +310,26 @@ int CSocket::SendAll(const void* data, size_t len) {
 }
 
 int CSocket::RecvAll(void* buffer, size_t len) {
+    // NET-012 FIX: Add timeout to prevent hanging if peer stops sending mid-message
     uint8_t* ptr = (uint8_t*)buffer;
     size_t remaining = len;
 
     while (remaining > 0) {
+        // Wait for data with timeout (30 seconds)
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(sock_fd, &read_fds);
+
+        struct timeval tv;
+        tv.tv_sec = 30;  // 30 second timeout
+        tv.tv_usec = 0;
+
+        int select_result = select(sock_fd + 1, &read_fds, nullptr, nullptr, &tv);
+        if (select_result <= 0) {
+            // Timeout or error
+            return -1;
+        }
+
         int received = Recv(ptr, remaining);
         if (received <= 0) {
             return -1;

@@ -28,6 +28,16 @@ namespace TxValidation {
 
     /** Maximum number of signature operations per transaction */
     static const size_t MAX_TX_SIGOPS = 20000;
+
+    /**
+     * Maximum number of inputs per transaction (DoS protection)
+     *
+     * SCRIPT-008 FIX: Rate limiting for signature verification
+     * Dilithium3 signature verification takes ~2ms per input.
+     * Limiting to 10,000 inputs caps verification time at ~20 seconds.
+     * This prevents computational DoS attacks via high-input-count transactions.
+     */
+    static const size_t MAX_INPUT_COUNT_PER_TX = 10000;
 }
 
 /**

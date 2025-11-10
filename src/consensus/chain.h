@@ -8,6 +8,7 @@
 #include <primitives/block.h>
 #include <map>
 #include <vector>
+#include <memory>
 
 // Forward declarations
 class CBlockchainDB;
@@ -20,9 +21,11 @@ class CUTXOSet;
 class CChainState
 {
 private:
-    // In-memory block index: hash -> CBlockIndex*
+    // HIGH-C001 FIX: Use smart pointers for RAII memory management
+    // In-memory block index: hash -> unique_ptr<CBlockIndex>
     // This provides O(1) lookup for any block by hash
-    std::map<uint256, CBlockIndex*> mapBlockIndex;
+    // Smart pointers ensure automatic cleanup, preventing memory leaks
+    std::map<uint256, std::unique_ptr<CBlockIndex>> mapBlockIndex;
 
     // Active chain tip (block with most cumulative work)
     CBlockIndex* pindexTip;
@@ -59,9 +62,9 @@ public:
 
     /**
      * Add block index to in-memory map
-     * Takes ownership of pindex pointer
+     * HIGH-C001 FIX: Now takes unique_ptr for automatic ownership transfer
      */
-    bool AddBlockIndex(const uint256& hash, CBlockIndex* pindex);
+    bool AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex> pindex);
 
     /**
      * Get block index by hash

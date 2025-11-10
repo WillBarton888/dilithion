@@ -18,6 +18,11 @@
 
 namespace RPCAuth {
 
+// Forward declarations
+static void HMAC_SHA3_256(const uint8_t* key, size_t keyLen,
+                          const uint8_t* data, size_t dataLen,
+                          uint8_t* macOut);
+
 // Global authentication configuration
 static std::string g_rpcUser;
 static std::string g_rpcPassword;
@@ -36,17 +41,34 @@ bool GenerateSalt(std::vector<uint8_t>& salt) {
     salt.resize(32);
 
 #ifdef _WIN32
-    // Windows: Use CryptGenRandom
-    HCRYPTPROV hProvider = 0;
-    if (!CryptAcquireContextW(&hProvider, nullptr, nullptr,
-                              PROV_RSA_FULL, CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) {
-        return false;
-    }
+    // RPC-015 FIX: Use BCryptGenRandom instead of deprecated CryptGenRandom
+    // BCryptGenRandom is the modern Windows cryptographic RNG (Windows Vista+)
+    // Falls back to CryptGenRandom only if BCryptGenRandom unavailable
+    #if defined(_WIN32_WINNT) && _WIN32_WINNT >= 0x0600
+        // Windows Vista+ : Use BCryptGenRandom (preferred)
+        #include <bcrypt.h>
+        #pragma comment(lib, "bcrypt.lib")
 
-    BOOL result = CryptGenRandom(hProvider, 32, salt.data());
-    CryptReleaseContext(hProvider, 0);
+        NTSTATUS status = BCryptGenRandom(
+            NULL,                   // Use default RNG algorithm
+            salt.data(),            // Output buffer
+            32,                     // Number of bytes
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG  // Use system-preferred RNG
+        );
+        return status == 0;  // STATUS_SUCCESS = 0
+    #else
+        // Windows XP fallback: Use CryptGenRandom (deprecated but necessary for old systems)
+        HCRYPTPROV hProvider = 0;
+        if (!CryptAcquireContextW(&hProvider, nullptr, nullptr,
+                                  PROV_RSA_FULL, CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) {
+            return false;
+        }
 
-    return result != 0;
+        BOOL result = CryptGenRandom(hProvider, 32, salt.data());
+        CryptReleaseContext(hProvider, 0);
+
+        return result != 0;
+    #endif
 #else
     // Unix: Use /dev/urandom
     int fd = open("/dev/urandom", O_RDONLY);
@@ -61,30 +83,153 @@ bool GenerateSalt(std::vector<uint8_t>& salt) {
 #endif
 }
 
+// RPC-005 FIX: PBKDF2-HMAC-SHA3-256 implementation
+// Replaces weak single-round SHA3-256 with proper key derivation function
+bool PBKDF2_HMAC_SHA3(const uint8_t* password, size_t passwordLen,
+                       const uint8_t* salt, size_t saltLen,
+                       uint32_t iterations,
+                       uint8_t* dkOut, size_t dkLen) {
+    // PBKDF2 algorithm (RFC 2898):
+    // DK = PBKDF2(PRF, Password, Salt, iterations, dkLen)
+    // where PRF = HMAC-SHA3-256
+
+    if (!password || !salt || !dkOut || passwordLen == 0 || saltLen == 0 ||
+        iterations == 0 || dkLen == 0) {
+        return false;
+    }
+
+    const size_t hLen = 32;  // SHA3-256 output size
+    uint32_t numBlocks = (dkLen + hLen - 1) / hLen;
+
+    std::vector<uint8_t> derivedKey;
+    derivedKey.reserve(numBlocks * hLen);
+
+    // For each block
+    for (uint32_t blockIndex = 1; blockIndex <= numBlocks; blockIndex++) {
+        // U_1 = HMAC(password, salt || INT_32_BE(blockIndex))
+        std::vector<uint8_t> saltBlock(salt, salt + saltLen);
+        saltBlock.push_back((blockIndex >> 24) & 0xFF);
+        saltBlock.push_back((blockIndex >> 16) & 0xFF);
+        saltBlock.push_back((blockIndex >> 8) & 0xFF);
+        saltBlock.push_back(blockIndex & 0xFF);
+
+        // Compute initial U_1 = HMAC-SHA3-256(password, salt || blockIndex)
+        std::vector<uint8_t> U(hLen);
+        HMAC_SHA3_256(password, passwordLen, saltBlock.data(), saltBlock.size(), U.data());
+
+        // T = U_1
+        std::vector<uint8_t> T = U;
+
+        // For iterations 2..c: U_i = HMAC(password, U_{i-1}), T = T XOR U_i
+        for (uint32_t iter = 1; iter < iterations; iter++) {
+            HMAC_SHA3_256(password, passwordLen, U.data(), U.size(), U.data());
+            for (size_t j = 0; j < hLen; j++) {
+                T[j] ^= U[j];
+            }
+        }
+
+        // Append T to derived key
+        derivedKey.insert(derivedKey.end(), T.begin(), T.end());
+
+        // RPC-022 FIX: Secure memory cleanup
+        memset(U.data(), 0, U.size());
+        memset(T.data(), 0, T.size());
+        memset(saltBlock.data(), 0, saltBlock.size());
+    }
+
+    // Copy requested length to output
+    memcpy(dkOut, derivedKey.data(), dkLen);
+
+    // RPC-022 FIX: Secure erase derived key from memory
+    memset(derivedKey.data(), 0, derivedKey.size());
+
+    return true;
+}
+
+// Helper: HMAC-SHA3-256 (used by PBKDF2)
+static void HMAC_SHA3_256(const uint8_t* key, size_t keyLen,
+                          const uint8_t* data, size_t dataLen,
+                          uint8_t* macOut) {
+    const size_t blockSize = 136;  // SHA3-256 block size (1088 bits / 8)
+    const size_t hashSize = 32;     // SHA3-256 output size
+
+    // Prepare key
+    std::vector<uint8_t> keyPadded(blockSize, 0);
+    if (keyLen <= blockSize) {
+        memcpy(keyPadded.data(), key, keyLen);
+    } else {
+        // If key > blockSize, hash it first
+        SHA3_256(key, keyLen, keyPadded.data());
+    }
+
+    // Compute o_key_pad = key XOR 0x5c
+    std::vector<uint8_t> oKeyPad(blockSize);
+    for (size_t i = 0; i < blockSize; i++) {
+        oKeyPad[i] = keyPadded[i] ^ 0x5c;
+    }
+
+    // Compute i_key_pad = key XOR 0x36
+    std::vector<uint8_t> iKeyPad(blockSize);
+    for (size_t i = 0; i < blockSize; i++) {
+        iKeyPad[i] = keyPadded[i] ^ 0x36;
+    }
+
+    // Inner hash: H(i_key_pad || data)
+    std::vector<uint8_t> innerInput;
+    innerInput.reserve(blockSize + dataLen);
+    innerInput.insert(innerInput.end(), iKeyPad.begin(), iKeyPad.end());
+    innerInput.insert(innerInput.end(), data, data + dataLen);
+
+    uint8_t innerHash[hashSize];
+    SHA3_256(innerInput.data(), innerInput.size(), innerHash);
+
+    // Outer hash: H(o_key_pad || innerHash)
+    std::vector<uint8_t> outerInput;
+    outerInput.reserve(blockSize + hashSize);
+    outerInput.insert(outerInput.end(), oKeyPad.begin(), oKeyPad.end());
+    outerInput.insert(outerInput.end(), innerHash, innerHash + hashSize);
+
+    SHA3_256(outerInput.data(), outerInput.size(), macOut);
+
+    // RPC-022 FIX: Secure memory cleanup
+    memset(keyPadded.data(), 0, keyPadded.size());
+    memset(oKeyPad.data(), 0, oKeyPad.size());
+    memset(iKeyPad.data(), 0, iKeyPad.size());
+    memset(innerInput.data(), 0, innerInput.size());
+    memset(innerHash, 0, hashSize);
+    memset(outerInput.data(), 0, outerInput.size());
+}
+
 bool HashPassword(const std::string& password,
                   const std::vector<uint8_t>& salt,
                   std::vector<uint8_t>& hashOut) {
+    // RPC-005 FIX: Use PBKDF2-HMAC-SHA3-256 with 100,000 iterations
+    // OWASP recommendation: 100,000 iterations for PBKDF2-HMAC-SHA256
+    // Provides strong resistance to brute-force and GPU attacks
+
     // Input validation
     if (password.empty() || salt.empty()) {
         return false;
     }
 
-    // Combine salt and password: salt || password
-    std::vector<uint8_t> combined;
-    combined.reserve(salt.size() + password.length());
-    combined.insert(combined.end(), salt.begin(), salt.end());
-    combined.insert(combined.end(), password.begin(), password.end());
+    const uint32_t PBKDF2_ITERATIONS = 100000;  // OWASP recommendation (2023)
 
-    // Hash with SHA-3-256 (quantum-resistant)
+    // Derive 32-byte key using PBKDF2
     hashOut.resize(32);
-    SHA3_256(combined.data(), combined.size(), hashOut.data());
+    bool result = PBKDF2_HMAC_SHA3(
+        reinterpret_cast<const uint8_t*>(password.c_str()),
+        password.length(),
+        salt.data(),
+        salt.size(),
+        PBKDF2_ITERATIONS,
+        hashOut.data(),
+        32
+    );
 
-    // Secure erase combined data from memory
-    if (!combined.empty()) {
-        memset(combined.data(), 0, combined.size());
-    }
+    // RPC-022 FIX: Note - password parameter will be cleared by caller
+    // No local sensitive data to clean (password is const reference)
 
-    return true;
+    return result;
 }
 
 bool VerifyPassword(const std::string& password,
@@ -252,23 +397,38 @@ bool AuthenticateRequest(const std::string& username,
         return false;
     }
 
-    // Check username (constant-time comparison)
-    if (username.length() != g_rpcUser.length()) {
-        return false;
-    }
+    // RPC-010 FIX: Constant-time username comparison (prevents username enumeration)
+    // Old code leaked username length via early return, allowing timing attacks
+    // New code always performs full comparison regardless of length mismatch
 
-    bool usernameMatch = SecureCompare(
-        reinterpret_cast<const uint8_t*>(username.c_str()),
-        reinterpret_cast<const uint8_t*>(g_rpcUser.c_str()),
-        username.length()
-    );
+    // Prepare username buffers with padding for constant-time comparison
+    const size_t MAX_USERNAME_LEN = 256;
+    uint8_t usernamePadded[MAX_USERNAME_LEN] = {0};
+    uint8_t storedUserPadded[MAX_USERNAME_LEN] = {0};
 
-    if (!usernameMatch) {
-        return false;
-    }
+    // Copy usernames to padded buffers (truncate if too long)
+    size_t userLen = std::min(username.length(), MAX_USERNAME_LEN);
+    size_t storedLen = std::min(g_rpcUser.length(), MAX_USERNAME_LEN);
+    memcpy(usernamePadded, username.c_str(), userLen);
+    memcpy(storedUserPadded, g_rpcUser.c_str(), storedLen);
 
-    // Verify password
-    return VerifyPassword(password, g_passwordSalt, g_passwordHash);
+    // Constant-time comparison of full buffers (including padding)
+    // This prevents leaking username length information
+    bool usernameMatch = SecureCompare(usernamePadded, storedUserPadded, MAX_USERNAME_LEN);
+
+    // Also check lengths match (after constant-time buffer comparison)
+    usernameMatch = usernameMatch && (username.length() == g_rpcUser.length());
+
+    // RPC-022 FIX: Clear sensitive username buffers
+    memset(usernamePadded, 0, MAX_USERNAME_LEN);
+    memset(storedUserPadded, 0, MAX_USERNAME_LEN);
+
+    // CRITICAL: Always verify password even if username wrong (prevent timing leak)
+    // This ensures constant-time behavior regardless of username match
+    bool passwordMatch = VerifyPassword(password, g_passwordSalt, g_passwordHash);
+
+    // Only return true if BOTH username and password match
+    return usernameMatch && passwordMatch;
 }
 
 bool SecureCompare(const uint8_t* a, const uint8_t* b, size_t len) {

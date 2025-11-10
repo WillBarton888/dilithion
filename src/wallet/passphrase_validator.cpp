@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <wallet/passphrase_validator.h>
+#include <rpc/auth.h>  // FIX-001 (CRYPT-003): Constant-time comparison
 #include <algorithm>
 #include <cctype>
 #include <set>
@@ -58,9 +59,19 @@ bool PassphraseValidator::IsCommonPassword(const std::string& passphrase) const 
                   lower_passphrase.begin(),
                   [](unsigned char c) { return std::tolower(c); });
 
-    // Check if it matches any common password
+    // FIX-001 (CRYPT-003): Check if it matches any common password
+    // Use constant-time comparison for defense-in-depth
     for (const auto& common : COMMON_PASSWORDS) {
-        if (lower_passphrase == common) {
+        // Skip if lengths don't match (optimization, lengths are public)
+        if (lower_passphrase.length() != common.length()) {
+            continue;
+        }
+
+        // Constant-time comparison
+        if (RPCAuth::SecureCompare(
+                (const uint8_t*)lower_passphrase.data(),
+                (const uint8_t*)common.data(),
+                common.length())) {
             return true;
         }
     }

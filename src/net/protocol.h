@@ -77,9 +77,28 @@ struct CMessageHeader {
     }
 
     bool IsValid(uint32_t expected_magic) const {
-        return magic == expected_magic &&
-               payload_size <= MAX_MESSAGE_SIZE &&
-               command[11] == 0;  // Ensure null-terminated
+        // NET-017 FIX: Validate no embedded null bytes in command
+        // Commands like "version\0xxxx" should be rejected
+
+        // Check magic and payload size
+        if (magic != expected_magic) return false;
+        if (payload_size > MAX_MESSAGE_SIZE) return false;
+
+        // Ensure last byte is null-terminated
+        if (command[11] != 0) return false;
+
+        // Check for embedded null bytes before the end
+        // Find the actual string length
+        size_t cmd_len = strnlen(command, 12);
+
+        // If there are any non-null bytes after the first null, reject
+        for (size_t i = cmd_len; i < 11; i++) {
+            if (command[i] != 0) {
+                return false;  // Embedded null followed by non-null data
+            }
+        }
+
+        return true;
     }
 
     std::string GetCommand() const {
@@ -133,6 +152,44 @@ struct CAddress {
         ip[13] = (ipv4 >> 16) & 0xFF;
         ip[14] = (ipv4 >> 8) & 0xFF;
         ip[15] = ipv4 & 0xFF;
+    }
+
+    // NET-015 FIX: Validate IP address for P2P networking
+    bool IsRoutable() const {
+        // Check if IPv4-mapped address
+        if (memcmp(ip, "\0\0\0\0\0\0\0\0\0\0\xff\xff", 12) == 0) {
+            // Extract IPv4 address
+            uint32_t ipv4 = (ip[12] << 24) | (ip[13] << 16) | (ip[14] << 8) | ip[15];
+
+            // Reject loopback (127.0.0.0/8)
+            if ((ipv4 & 0xFF000000) == 0x7F000000) return false;
+
+            // Reject private networks
+            if ((ipv4 & 0xFF000000) == 0x0A000000) return false;  // 10.0.0.0/8
+            if ((ipv4 & 0xFFF00000) == 0xAC100000) return false;  // 172.16.0.0/12
+            if ((ipv4 & 0xFFFF0000) == 0xC0A80000) return false;  // 192.168.0.0/16
+
+            // Reject multicast (224.0.0.0/4)
+            if ((ipv4 & 0xF0000000) == 0xE0000000) return false;
+
+            // Reject broadcast
+            if (ipv4 == 0xFFFFFFFF) return false;
+
+            // Reject 0.0.0.0
+            if (ipv4 == 0) return false;
+
+            return true;
+        }
+
+        // For pure IPv6, reject loopback (::1)
+        static const uint8_t ipv6_loopback[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
+        if (memcmp(ip, ipv6_loopback, 16) == 0) return false;
+
+        // Reject all-zeros
+        static const uint8_t ipv6_zero[16] = {0};
+        if (memcmp(ip, ipv6_zero, 16) == 0) return false;
+
+        return true;  // Accept other IPv6 addresses
     }
 
     std::string ToStringIP() const;

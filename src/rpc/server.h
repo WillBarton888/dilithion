@@ -8,6 +8,7 @@
 #include <miner/controller.h>
 #include <net/net.h>
 #include <rpc/ratelimiter.h>
+#include <rpc/permissions.h>
 
 #include <string>
 #include <map>
@@ -109,6 +110,9 @@ private:
 
     // Rate limiting
     CRateLimiter m_rateLimiter;
+
+    // FIX-014: Role-based access control (RBAC)
+    std::unique_ptr<CRPCPermissions> m_permissions;
 
     // Server socket
     int m_serverSocket;
@@ -304,6 +308,26 @@ public:
      * Stop RPC server
      */
     void Stop();
+
+    /**
+     * FIX-014: Initialize permission system
+     *
+     * Loads user permissions from configuration file. If file doesn't exist
+     * or cannot be loaded, falls back to legacy mode (single admin user).
+     *
+     * This must be called before Start() to enable authorization checking.
+     *
+     * @param configPath Path to rpc_permissions.json (e.g., "~/.dilithion/rpc_permissions.json")
+     * @param legacyUser Legacy username (used if config file missing)
+     * @param legacyPassword Legacy password (used if config file missing)
+     * @return true if initialized successfully, false on error
+     *
+     * Example:
+     *   server.InitializePermissions("~/.dilithion/rpc_permissions.json", "admin", "password");
+     */
+    bool InitializePermissions(const std::string& configPath,
+                              const std::string& legacyUser,
+                              const std::string& legacyPassword);
 
     /**
      * Check if server is running

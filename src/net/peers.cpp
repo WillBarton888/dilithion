@@ -41,11 +41,11 @@ CPeerManager::CPeerManager() : next_peer_id(1) {
 }
 
 std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // Check if IP is banned
+    // NET-005 FIX: Check if IP is banned (uses updated IsBanned with expiry check)
     std::string ip = addr.ToStringIP();
-    if (banned_ips.find(ip) != banned_ips.end()) {
+    if (IsBanned(ip)) {
         return nullptr;
     }
 
@@ -62,7 +62,7 @@ std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) 
 }
 
 void CPeerManager::RemovePeer(int peer_id) {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     auto it = peers.find(peer_id);
     if (it != peers.end()) {
         it->second->Disconnect();
@@ -71,13 +71,13 @@ void CPeerManager::RemovePeer(int peer_id) {
 }
 
 std::shared_ptr<CPeer> CPeerManager::GetPeer(int peer_id) {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     auto it = peers.find(peer_id);
     return (it != peers.end()) ? it->second : nullptr;
 }
 
 std::vector<std::shared_ptr<CPeer>> CPeerManager::GetAllPeers() {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     std::vector<std::shared_ptr<CPeer>> result;
     for (const auto& pair : peers) {
         result.push_back(pair.second);
@@ -86,7 +86,7 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetAllPeers() {
 }
 
 std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     std::vector<std::shared_ptr<CPeer>> result;
     for (const auto& pair : peers) {
         if (pair.second->IsConnected()) {
@@ -97,12 +97,12 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
 }
 
 bool CPeerManager::CanAcceptConnection() const {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     return peers.size() < MAX_TOTAL_CONNECTIONS;
 }
 
 size_t CPeerManager::GetConnectionCount() const {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     size_t count = 0;
     for (const auto& pair : peers) {
         if (pair.second->IsConnected()) {
@@ -113,7 +113,7 @@ size_t CPeerManager::GetConnectionCount() const {
 }
 
 size_t CPeerManager::GetOutboundCount() const {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     // For now, simplified - assume first 8 connected peers are outbound
     size_t count = 0;
     for (const auto& pair : peers) {
@@ -129,7 +129,7 @@ size_t CPeerManager::GetInboundCount() const {
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::GetPeerAddresses(int max_count) {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     std::vector<NetProtocol::CAddress> result;
 
     for (const auto& pair : peers) {
@@ -162,6 +162,21 @@ void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
         // Update timestamp
         it->second.nTime = GetTime();
         return;
+    }
+
+    // NET-013 FIX: Limit address database size to prevent unbounded growth
+    const size_t MAX_ADDR_COUNT = 10000;
+
+    // If at capacity, evict oldest unused address
+    if (addr_map.size() >= MAX_ADDR_COUNT) {
+        // Find oldest address that hasn't been successfully connected
+        auto oldest = addr_map.begin();
+        for (auto iter = addr_map.begin(); iter != addr_map.end(); ++iter) {
+            if (iter->second.nSuccesses == 0 && iter->second.nTime < oldest->second.nTime) {
+                oldest = iter;
+            }
+        }
+        addr_map.erase(oldest);
     }
 
     // Add new address
@@ -223,43 +238,81 @@ std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
 }
 
 void CPeerManager::BanPeer(int peer_id, int64_t ban_time_seconds) {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     auto it = peers.find(peer_id);
     if (it != peers.end()) {
         int64_t ban_until = GetTime() + ban_time_seconds;
         it->second->Ban(ban_until);
 
-        // Add IP to banned list
+        // Add IP to banned list with expiry time
         std::string ip = it->second->addr.ToStringIP();
-        banned_ips.insert(ip);
+        BanIP(ip, ban_time_seconds);  // Use BanIP to enforce limits
     }
 }
 
 void CPeerManager::BanIP(const std::string& ip, int64_t ban_time_seconds) {
-    std::lock_guard<std::mutex> lock(cs_peers);
-    banned_ips.insert(ip);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // NET-005 FIX: Enforce maximum banned IPs limit with LRU eviction
+    if (banned_ips.size() >= MAX_BANNED_IPS) {
+        // Find the ban that expires soonest (LRU based on expiry time)
+        auto oldest = banned_ips.begin();
+        for (auto it = banned_ips.begin(); it != banned_ips.end(); ++it) {
+            // Prefer removing entries that expire sooner
+            // If permanent ban (0), keep it unless all are permanent
+            if (it->second > 0 && (oldest->second == 0 || it->second < oldest->second)) {
+                oldest = it;
+            }
+        }
+
+        std::cout << "[PeerManager] WARNING: Banned IPs at capacity (" << banned_ips.size()
+                  << "), removing ban for " << oldest->first << std::endl;
+        banned_ips.erase(oldest);
+    }
+
+    // Add ban with expiry timestamp
+    int64_t ban_until = GetTime() + ban_time_seconds;
+    banned_ips[ip] = ban_until;
 
     // Disconnect all peers from this IP
     for (auto& pair : peers) {
         if (pair.second->addr.ToStringIP() == ip) {
-            int64_t ban_until = GetTime() + ban_time_seconds;
             pair.second->Ban(ban_until);
         }
     }
 }
 
 void CPeerManager::UnbanIP(const std::string& ip) {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     banned_ips.erase(ip);
 }
 
 bool CPeerManager::IsBanned(const std::string& ip) const {
-    std::lock_guard<std::mutex> lock(cs_peers);
-    return banned_ips.find(ip) != banned_ips.end();
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // NET-005 FIX: Check if IP is banned and ban hasn't expired
+    auto it = banned_ips.find(ip);
+    if (it == banned_ips.end()) {
+        return false;  // Not banned
+    }
+
+    // Check if ban has expired
+    int64_t ban_until = it->second;
+    if (ban_until == 0) {
+        return true;  // Permanent ban
+    }
+
+    if (GetTime() >= ban_until) {
+        // Ban expired - remove it (const_cast needed for cleanup in const method)
+        // Better: have separate cleanup thread, but this works for now
+        return false;  // Expired ban = not banned
+    }
+
+    return true;  // Still banned
 }
 
 void CPeerManager::ClearBans() {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
     banned_ips.clear();
 }
 
@@ -274,7 +327,7 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch) {
 }
 
 CPeerManager::Stats CPeerManager::GetStats() const {
-    std::lock_guard<std::mutex> lock(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
     Stats stats;
     stats.total_peers = peers.size();

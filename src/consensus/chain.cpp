@@ -16,15 +16,14 @@ CChainState::~CChainState() {
 }
 
 void CChainState::Cleanup() {
-    // Delete all block index pointers
-    for (auto& pair : mapBlockIndex) {
-        delete pair.second;
-    }
+    // HIGH-C001 FIX: Smart pointers automatically destruct when map is cleared
+    // No need for manual delete - RAII handles cleanup
     mapBlockIndex.clear();
     pindexTip = nullptr;
 }
 
-bool CChainState::AddBlockIndex(const uint256& hash, CBlockIndex* pindex) {
+bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex> pindex) {
+    // HIGH-C001 FIX: Accept unique_ptr for automatic ownership transfer
     if (pindex == nullptr) {
         return false;
     }
@@ -36,14 +35,16 @@ bool CChainState::AddBlockIndex(const uint256& hash, CBlockIndex* pindex) {
         return false;
     }
 
-    mapBlockIndex[hash] = pindex;
+    // Transfer ownership to map using move semantics
+    mapBlockIndex[hash] = std::move(pindex);
     return true;
 }
 
 CBlockIndex* CChainState::GetBlockIndex(const uint256& hash) {
+    // HIGH-C001 FIX: Return raw pointer (non-owning) via .get()
     auto it = mapBlockIndex.find(hash);
     if (it != mapBlockIndex.end()) {
-        return it->second;
+        return it->second.get();  // Extract raw pointer from unique_ptr
     }
     return nullptr;
 }

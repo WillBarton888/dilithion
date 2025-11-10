@@ -79,9 +79,16 @@ public:
  */
 class CPeerManager {
 private:
-    mutable std::mutex cs_peers;
+    // NET-009 FIX: Use recursive_mutex to prevent deadlock on recursive acquisition
+    // Some operations (like GetStats calling IsConnected) may need to reacquire the lock
+    mutable std::recursive_mutex cs_peers;
     std::map<int, std::shared_ptr<CPeer>> peers;
-    std::set<std::string> banned_ips;
+
+    // NET-005 FIX: Track ban expiry times instead of just banned status
+    // Maps IP address -> ban expiry timestamp (0 = permanent ban)
+    // This allows proper LRU eviction when limit is reached
+    std::map<std::string, int64_t> banned_ips;
+
     int next_peer_id;
 
     // DNS seeds for peer discovery
@@ -111,6 +118,9 @@ private:
     static const int MAX_OUTBOUND_CONNECTIONS = 8;
     static const int MAX_INBOUND_CONNECTIONS = 117;
     static const int MAX_TOTAL_CONNECTIONS = 125;
+
+    // NET-005 FIX: Ban list limit to prevent unbounded memory growth
+    static const size_t MAX_BANNED_IPS = 10000;
 
 public:
     // DoS protection thresholds (public so CPeer can access)

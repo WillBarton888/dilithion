@@ -18,6 +18,9 @@ private:
     mutable std::mutex cs_db;
     std::string datadir;
 
+    // DB-004 FIX: Path validation helper
+    bool ValidateDatabasePath(const std::string& path, std::string& canonical_path);
+
 public:
     CBlockchainDB();
     ~CBlockchainDB();
@@ -25,6 +28,8 @@ public:
     bool Open(const std::string& path, bool create_if_missing = true);
     void Close();
     bool IsOpen() const;
+
+    // Original single-operation methods
     bool WriteBlock(const uint256& hash, const CBlock& block);
     bool ReadBlock(const uint256& hash, CBlock& block);
     bool WriteBlockIndex(const uint256& hash, const CBlockIndex& index);
@@ -33,6 +38,13 @@ public:
     bool ReadBestBlock(uint256& hash);
     bool BlockExists(const uint256& hash);
     bool EraseBlock(const uint256& hash);
+
+    // DB-002 FIX: Atomic batch write for block + index
+    bool WriteBlockWithIndex(const uint256& hash, const CBlock& block,
+                             const CBlockIndex& index, bool setBest = false);
+
+    // DB-010 FIX: Disk space checking
+    bool CheckDiskSpace(uint64_t min_bytes = 1ULL * 1024 * 1024 * 1024) const;
 };
 
 #endif

@@ -4,6 +4,7 @@
 #include <wallet/wallet_manager.h>
 #include <wallet/wallet.h>
 #include <util/strencodings.h>
+#include <rpc/auth.h>  // FIX-001 (CRYPT-003): Constant-time passphrase comparison
 #include <iostream>
 #include <fstream>
 #include <sys/stat.h>
@@ -24,6 +25,28 @@
 #define COLOR_MAGENTA "\033[35m"
 #define COLOR_CYAN    "\033[36m"
 #define COLOR_BOLD    "\033[1m"
+
+// FIX-001 (CRYPT-003): Constant-time string comparison helper
+// Prevents timing attacks on passphrase comparison
+static bool SecureStringCompare(const std::string& a, const std::string& b) {
+    // Length check must also be constant-time
+    size_t len_a = a.length();
+    size_t len_b = b.length();
+
+    // Pad to max length for constant-time comparison
+    const size_t MAX_LEN = 256;
+    uint8_t buf_a[MAX_LEN] = {0};
+    uint8_t buf_b[MAX_LEN] = {0};
+
+    memcpy(buf_a, a.data(), std::min(len_a, MAX_LEN));
+    memcpy(buf_b, b.data(), std::min(len_b, MAX_LEN));
+
+    // Constant-time buffer comparison
+    bool match = RPCAuth::SecureCompare(buf_a, buf_b, MAX_LEN);
+
+    // Length must also match
+    return match && (len_a == len_b);
+}
 
 bool CWalletManager::IsFirstRun() {
     // Check if wallet.dat exists
@@ -274,7 +297,8 @@ bool CWalletManager::PromptAndEncryptWallet() {
     std::cout << "Confirm passphrase: ";
     std::getline(std::cin, passphrase_confirm);
 
-    if (passphrase != passphrase_confirm) {
+    // FIX-001 (CRYPT-003): Use constant-time comparison to prevent timing attacks
+    if (!SecureStringCompare(passphrase, passphrase_confirm)) {
         PrintError("Passphrases don't match!");
         return false;
     }
