@@ -49,6 +49,25 @@ else ifneq (,$(findstring MSYS,$(UNAME_S)))
     LIBS += -lws2_32
 endif
 
+# Fix for Windows: Set temp directories to avoid C:\WINDOWS\ permission issues
+# This must be set BEFORE any compilation happens
+ifeq ($(UNAME_S),Windows)
+    export TMP := /c/tmp
+    export TEMP := /c/tmp
+    export TMPDIR := /c/tmp
+    $(shell mkdir -p /c/tmp 2>/dev/null)
+else ifneq (,$(findstring MINGW,$(UNAME_S)))
+    export TMP := /c/tmp
+    export TEMP := /c/tmp
+    export TMPDIR := /c/tmp
+    $(shell mkdir -p /c/tmp 2>/dev/null)
+else ifneq (,$(findstring MSYS,$(UNAME_S)))
+    export TMP := /c/tmp
+    export TEMP := /c/tmp
+    export TMPDIR := /c/tmp
+    $(shell mkdir -p /c/tmp 2>/dev/null)
+endif
+
 # Dilithium C files (compiled separately)
 DILITHIUM_DIR := depends/dilithium/ref
 DILITHIUM_SOURCES := $(DILITHIUM_DIR)/sign.c \
