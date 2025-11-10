@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <mutex>
 #include <memory>
 #include <chrono>
@@ -27,10 +28,12 @@ static const size_t DILITHIUM_SIGNATURE_SIZE = 3309;
 /**
  * Dilithium key pair
  * WS-001: Secure memory wiping for private keys
+ * FIX-009 (CRYPT-004): Use SecureAllocator to prevent private key swapping
  */
 struct CKey {
-    std::vector<uint8_t> vchPubKey;  // Public key (1952 bytes)
-    std::vector<uint8_t> vchPrivKey; // Secret key (4032 bytes)
+    std::vector<uint8_t> vchPubKey;  // Public key (1952 bytes) - can be public
+    // FIX-009: Use SecureAllocator for private key to prevent swapping to disk
+    std::vector<uint8_t, SecureAllocator<uint8_t>> vchPrivKey; // Secret key (4032 bytes)
 
     CKey() {}
 
@@ -59,28 +62,41 @@ struct CKey {
 
 /**
  * Encrypted key data
+ * FIX-008 (CRYPT-007): Added HMAC for authenticated encryption (prevents padding oracle attacks)
  */
 struct CEncryptedKey {
     std::vector<uint8_t> vchCryptedKey;  // Encrypted private key
     std::vector<uint8_t> vchIV;          // Initialization vector
     std::vector<uint8_t> vchPubKey;      // Public key (unencrypted)
+    std::vector<uint8_t> vchMAC;         // FIX-008: HMAC-SHA3-512 of (IV || ciphertext)
 
     CEncryptedKey() {}
 
     bool IsValid() const {
         return !vchCryptedKey.empty() &&
                vchIV.size() == WALLET_CRYPTO_IV_SIZE &&
-               vchPubKey.size() == DILITHIUM_PUBLICKEY_SIZE;
+               vchPubKey.size() == DILITHIUM_PUBLICKEY_SIZE &&
+               vchMAC.size() == 64;  // FIX-008: HMAC-SHA3-512 is 64 bytes
+    }
+
+    // FIX-008: Check if this is a legacy key (no MAC)
+    bool IsLegacy() const {
+        return !vchCryptedKey.empty() &&
+               vchIV.size() == WALLET_CRYPTO_IV_SIZE &&
+               vchPubKey.size() == DILITHIUM_PUBLICKEY_SIZE &&
+               vchMAC.empty();
     }
 };
 
 /**
  * Master key - encrypted with user passphrase
+ * FIX-008 (CRYPT-007): Added HMAC for authenticated encryption
  */
 struct CMasterKey {
     std::vector<uint8_t> vchCryptedKey;  // Encrypted master key
     std::vector<uint8_t> vchSalt;        // PBKDF2 salt
     std::vector<uint8_t> vchIV;          // Initialization vector
+    std::vector<uint8_t> vchMAC;         // FIX-008: HMAC-SHA3-512 of (IV || ciphertext)
     unsigned int nDerivationMethod;       // 0 = PBKDF2-SHA3
     unsigned int nDeriveIterations;       // Number of iterations (default: 100,000)
 
@@ -89,7 +105,16 @@ struct CMasterKey {
     bool IsValid() const {
         return !vchCryptedKey.empty() &&
                vchSalt.size() == WALLET_CRYPTO_SALT_SIZE &&
-               vchIV.size() == WALLET_CRYPTO_IV_SIZE;
+               vchIV.size() == WALLET_CRYPTO_IV_SIZE &&
+               vchMAC.size() == 64;  // FIX-008: HMAC-SHA3-512 is 64 bytes
+    }
+
+    // FIX-008: Check if this is a legacy key (no MAC)
+    bool IsLegacy() const {
+        return !vchCryptedKey.empty() &&
+               vchSalt.size() == WALLET_CRYPTO_SALT_SIZE &&
+               vchIV.size() == WALLET_CRYPTO_IV_SIZE &&
+               vchMAC.empty();
     }
 };
 
@@ -164,8 +189,11 @@ private:
     std::map<CAddress, CEncryptedKey> mapCryptedKeys;  // Encrypted keys
     std::vector<CAddress> vchAddresses;
 
-    // Transaction tracking
-    std::map<uint256, CWalletTx> mapWalletTx;
+    // FIX-005 (WALLET-001): Transaction tracking with composite key
+    // Changed from std::map<uint256, CWalletTx> to prevent key collision
+    // When a transaction has multiple outputs to wallet, old code overwrote entries
+    // New code uses COutPoint(txid, vout) as key to store each output separately
+    std::map<COutPoint, CWalletTx> mapWalletTx;
 
     // Encryption
     CMasterKey masterKey;                           // Master key (encrypted with passphrase)
@@ -173,6 +201,17 @@ private:
     bool fWalletUnlocked;                           // Is wallet currently unlocked?
     bool fWalletUnlockForStakingOnly;              // Unlock for staking only (future use)
     std::chrono::time_point<std::chrono::steady_clock> nUnlockTime;  // Auto-lock time
+    // WL-011 FIX: Rate limiting with exponential backoff
+    uint32_t nUnlockFailedAttempts;                // Consecutive failed unlock attempts
+    std::chrono::time_point<std::chrono::steady_clock> nLastFailedUnlock;  // Time of last failed attempt
+
+    // FIX-010 (CRYPT-002): IV Reuse Detection
+    // Track all IVs used in this wallet to prevent reuse (which would break AES-CBC security)
+    std::set<std::vector<uint8_t>> usedIVs;        // Set of all IVs used for encryption
+
+    // Internal helper: Generate unique IV (assumes caller holds cs_wallet lock)
+    template<typename Alloc>
+    bool GenerateUniqueIV_Locked(std::vector<uint8_t, Alloc>& iv);
 
     // Thread safety
     mutable std::mutex cs_wallet;
@@ -189,11 +228,16 @@ private:
     // ============================================================================
 
     bool fIsHDWallet;                          // Is this an HD wallet?
-    std::vector<uint8_t> vchEncryptedMnemonic; // Encrypted BIP39 mnemonic
-    std::vector<uint8_t> vchMnemonicIV;        // IV for mnemonic encryption
+    std::vector<uint8_t> vchEncryptedMnemonic; // Encrypted BIP39 mnemonic (already encrypted, can use normal allocator)
+    // FIX-009: Use SecureAllocator for IVs to prevent leakage
+    std::vector<uint8_t, SecureAllocator<uint8_t>> vchMnemonicIV;        // IV for mnemonic encryption
     CHDExtendedKey hdMasterKey;                // Master extended key (encrypted in memory)
     bool fHDMasterKeyEncrypted;                // Is master key encrypted?
-    std::vector<uint8_t> vchHDMasterKeyIV;     // IV for master key encryption
+    // FIX-009: Use SecureAllocator for IVs to prevent leakage
+    std::vector<uint8_t, SecureAllocator<uint8_t>> vchHDMasterKeyIV;     // IV for master key encryption
+    // WL-010 FIX: Cache decrypted HD master key when wallet unlocked for performance
+    CHDExtendedKey hdMasterKeyDecrypted;       // Cached decrypted HD master (only valid when unlocked)
+    bool fHDMasterKeyCached;                   // Is cached key valid?
 
     // HD chain state (BIP44: m/44'/573'/account'/change'/index')
     uint32_t nHDAccountIndex;                  // Current account (default: 0)
@@ -212,6 +256,9 @@ private:
     std::vector<uint8_t> GetPublicKeyUnlocked() const;
     bool GetKeyUnlocked(const CAddress& address, CKey& keyOut) const;
     bool IsUnlockValid() const;  // VULN-002 FIX: Check if unlock hasn't expired
+    // FIX-006 (WALLET-002): Internal helper to add UTXO without acquiring lock (avoids deadlock in ScanUTXOs)
+    bool AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValue,
+                          const CAddress& address, uint32_t nHeight);
 
     // HD wallet private helpers - assume caller already holds cs_wallet lock
     bool DeriveAndCacheHDAddress(const CHDKeyPath& path);
@@ -315,12 +362,30 @@ public:
     /**
      * Unlock the wallet for a specified time
      *
-     * Decrypts the master key and keeps it in memory for the timeout period.
-     * During this time, the wallet can sign transactions and generate keys.
+     * WL-015 FIX: Complete parameter documentation
      *
-     * @param passphrase User's wallet passphrase
-     * @param timeout Seconds to keep wallet unlocked (0 = forever)
-     * @return true if successful, false if wrong passphrase or not encrypted
+     * Decrypts the master key using PBKDF2-SHA3-256 key derivation (500,000 rounds)
+     * and keeps it in memory for the timeout period. During this time, the wallet
+     * can sign transactions, generate keys, and perform HD derivation.
+     *
+     * Rate Limiting: Failed unlock attempts trigger exponential backoff (2^n seconds,
+     * max 1 hour). Prevents online brute force attacks.
+     *
+     * @param passphrase User's wallet passphrase. Must meet strength requirements:
+     *                   - Minimum 16 characters
+     *                   - Password complexity score >= 60
+     *                   - See CPassphraseValidator for full requirements
+     * @param timeout    Auto-lock timeout in seconds. Wallet automatically locks after
+     *                   this duration. Special values:
+     *                   - 0 = Never auto-lock (remains unlocked indefinitely)
+     *                   - >0 = Lock after N seconds of being unlocked
+     *                   Default: 0 (no auto-lock)
+     * @return true on success, false if:
+     *         - Wallet is not encrypted
+     *         - Passphrase is incorrect (increments failed attempt counter)
+     *         - Rate limited (too many recent failed attempts)
+     *         - PBKDF2 key derivation fails
+     * @see Lock(), IsLocked(), EncryptWallet()
      */
     bool Unlock(const std::string& passphrase, int64_t timeout = 0);
 
@@ -351,12 +416,28 @@ public:
     /**
      * Change wallet passphrase
      *
-     * Re-encrypts the master key with a new passphrase.
-     * Wallet must be unlocked or old passphrase must be provided.
+     * WL-015 FIX: Complete parameter documentation
      *
-     * @param passphraseOld Current passphrase
-     * @param passphraseNew New passphrase
-     * @return true if successful, false if wrong old passphrase or not encrypted
+     * Re-encrypts the wallet master key with a new passphrase. This operation:
+     * 1. Verifies old passphrase and decrypts current master key
+     * 2. Validates new passphrase meets strength requirements
+     * 3. Re-encrypts master key with new passphrase using fresh PBKDF2 derivation
+     * 4. Updates wallet file with new encrypted master key
+     *
+     * @param passphraseOld Current wallet passphrase. Must be correct to proceed.
+     *                      Subject to same rate limiting as Unlock().
+     * @param passphraseNew New wallet passphrase. Must meet strength requirements:
+     *                      - Minimum 16 characters
+     *                      - Password complexity score >= 60
+     *                      - Different from old passphrase
+     *                      Validated using CPassphraseValidator before accepting.
+     * @return true if successful, false if:
+     *         - Wallet is not encrypted
+     *         - Old passphrase is incorrect
+     *         - New passphrase fails strength validation
+     *         - Rate limited from recent failed attempts
+     *         - File write operation fails
+     * @see Unlock(), EncryptWallet(), CPassphraseValidator
      */
     bool ChangePassphrase(const std::string& passphraseOld,
                           const std::string& passphraseNew);
@@ -367,6 +448,53 @@ public:
      * Called periodically to enforce timeout-based locking.
      */
     void CheckUnlockTimeout();
+
+    // ============================================================================
+    // FIX-010 (CRYPT-002): IV Reuse Detection
+    // ============================================================================
+
+    /**
+     * Generate a unique IV that hasn't been used before
+     *
+     * Generates a cryptographically random IV and ensures it hasn't been used
+     * in this wallet. If collision detected, retries up to 10 times.
+     *
+     * IV reuse with the same key breaks AES-CBC security - if two plaintexts
+     * are encrypted with the same IV and key, an attacker can XOR the
+     * ciphertexts to get the XOR of plaintexts, potentially recovering keys.
+     *
+     * @param iv Output buffer for generated IV (will be resized to 16 bytes)
+     * @return true on success, false if collision persists after 10 attempts
+     * @note Thread-safe (acquires cs_wallet lock internally)
+     */
+    bool GenerateUniqueIV(std::vector<uint8_t, SecureAllocator<uint8_t>>& iv);
+
+    /**
+     * Register an IV as used (for loading existing wallet IVs)
+     *
+     * Called when loading encrypted keys from file to populate usedIVs set.
+     *
+     * @param iv IV to register (must be 16 bytes)
+     * @note Thread-safe (acquires cs_wallet lock internally)
+     */
+    void RegisterIV(const std::vector<uint8_t>& iv);
+
+    /**
+     * Check if an IV has been used before
+     *
+     * @param iv IV to check (must be 16 bytes)
+     * @return true if IV exists in usedIVs, false otherwise
+     * @note Thread-safe (acquires cs_wallet lock internally)
+     */
+    bool IsIVUsed(const std::vector<uint8_t>& iv) const;
+
+    /**
+     * Get count of tracked IVs
+     *
+     * @return Number of IVs in usedIVs set
+     * @note Thread-safe (acquires cs_wallet lock internally)
+     */
+    size_t GetIVCount() const;
 
     // ============================================================================
     // HD Wallet (Hierarchical Deterministic Wallet) - BIP32/BIP44

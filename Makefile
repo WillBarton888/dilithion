@@ -13,7 +13,8 @@ UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
 CXX := g++
 # Use ?= to allow environment variables (e.g., --coverage) to completely override defaults
 # If not set by environment, use optimized defaults
-CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2
+# Note: -pipe avoids temp file issues on Windows
+CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2 -pipe
 CFLAGS ?= -O2
 
 # Include paths (base)
@@ -28,7 +29,8 @@ LDFLAGS ?=
 LDFLAGS += -L depends/randomx/build \
            -L depends/dilithium/ref
 
-LIBS := -lrandomx -lleveldb -lpthread
+# FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
+LIBS := -lrandomx -lleveldb -lpthread -lssl -lcrypto
 
 # Platform-specific configuration
 ifeq ($(UNAME_S),Darwin)

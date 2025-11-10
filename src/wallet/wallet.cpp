@@ -15,6 +15,14 @@
 #include <iostream>
 #include <limits>
 
+// FIX-002 (PERSIST-003): File permissions
+// FIX-004 (PERSIST-002): fsync for atomic writes
+#ifndef _WIN32
+    #include <sys/stat.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+#endif
+
 // Dilithium3 API
 extern "C" {
     int pqcrystals_dilithium3_ref_keypair(uint8_t *pk, uint8_t *sk);
@@ -149,9 +157,12 @@ CWallet::CWallet()
     : fWalletUnlocked(false),
       fWalletUnlockForStakingOnly(false),
       nUnlockTime(std::chrono::steady_clock::time_point::max()),
+      nUnlockFailedAttempts(0),  // WL-011: Initialize rate limiting
+      nLastFailedUnlock(std::chrono::steady_clock::time_point::min()),
       m_autoSave(false),
       fIsHDWallet(false),
       fHDMasterKeyEncrypted(false),
+      fHDMasterKeyCached(false),  // WL-010: Initialize cache flag
       nHDAccountIndex(0),
       nHDExternalChainIndex(0),
       nHDInternalChainIndex(0)
@@ -183,8 +194,8 @@ bool CWallet::GenerateNewKey() {
         CEncryptedKey encKey;
         encKey.vchPubKey = key.vchPubKey;
 
-        // Generate unique IV
-        if (!GenerateIV(encKey.vchIV)) {
+        // FIX-010: Generate unique IV
+        if (!GenerateUniqueIV_Locked(encKey.vchIV)) {
             return false;
         }
 
@@ -287,6 +298,15 @@ bool CWallet::GetKeyUnlocked(const CAddress& address, CKey& keyOut) const {
         return false;
     }
 
+    // FIX-008 (CRYPT-007): Verify MAC before decryption (prevents padding oracle)
+    // For legacy keys without MAC, skip verification
+    if (!encKey.IsLegacy()) {
+        if (!crypter.VerifyMAC(encKey.vchCryptedKey, encKey.vchMAC)) {
+            memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+            return false;  // MAC verification failed - corrupted or tampered key
+        }
+    }
+
     std::vector<uint8_t> decryptedPrivKey;
     if (!crypter.Decrypt(encKey.vchCryptedKey, decryptedPrivKey)) {
         memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
@@ -295,7 +315,8 @@ bool CWallet::GetKeyUnlocked(const CAddress& address, CKey& keyOut) const {
 
     // Construct decrypted key
     keyOut.vchPubKey = encKey.vchPubKey;
-    keyOut.vchPrivKey = decryptedPrivKey;
+    // FIX-009: Use assign() to copy from regular vector to SecureAllocator vector
+    keyOut.vchPrivKey.assign(decryptedPrivKey.begin(), decryptedPrivKey.end());
 
     // Wipe sensitive data
     memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
@@ -314,12 +335,11 @@ bool CWallet::SignHash(const CAddress& address, const uint256& hash,
     return WalletCrypto::Sign(key, hash.begin(), 32, signature);
 }
 
-bool CWallet::AddTxOut(const uint256& txid, uint32_t vout, int64_t nValue,
-                       const CAddress& address, uint32_t nHeight) {
-    std::lock_guard<std::mutex> lock(cs_wallet);
-
-    // Note: Caller should verify address ownership before calling
-    // We don't check HasKey() here to avoid nested locking
+// FIX-006 (WALLET-002): Internal helper that assumes lock is already held
+// Used by ScanUTXOs to avoid deadlock
+bool CWallet::AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValue,
+                                const CAddress& address, uint32_t nHeight) {
+    // REQUIRES: cs_wallet must be held by caller
 
     CWalletTx wtx;
     wtx.txid = txid;
@@ -329,21 +349,30 @@ bool CWallet::AddTxOut(const uint256& txid, uint32_t vout, int64_t nValue,
     wtx.fSpent = false;
     wtx.nHeight = nHeight;
 
-    mapWalletTx[txid] = wtx;
+    // FIX-005 (WALLET-001): Use COutPoint as key to prevent collision
+    // Old bug: mapWalletTx[txid] overwrites when same tx has multiple outputs
+    COutPoint outpoint(txid, vout);
+    mapWalletTx[outpoint] = wtx;
     return true;
+}
+
+bool CWallet::AddTxOut(const uint256& txid, uint32_t vout, int64_t nValue,
+                       const CAddress& address, uint32_t nHeight) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return AddTxOutUnlocked(txid, vout, nValue, address, nHeight);
 }
 
 bool CWallet::MarkSpent(const uint256& txid, uint32_t vout) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
-    auto it = mapWalletTx.find(txid);
+    // FIX-005 (WALLET-001): Use COutPoint to find exact output
+    COutPoint outpoint(txid, vout);
+    auto it = mapWalletTx.find(outpoint);
     if (it == mapWalletTx.end()) {
         return false;
     }
 
-    if (it->second.vout != vout) {
-        return false;
-    }
+    // No need to check vout - COutPoint key already identifies exact output
 
     it->second.fSpent = true;
     return true;
@@ -407,6 +436,12 @@ bool CWallet::IsLocked() const {
 // VULN-002 FIX: Helper to check if unlock is still valid (not expired)
 // Assumes caller holds cs_wallet lock
 bool CWallet::IsUnlockValid() const {
+    // WL-005 FIX: Add mutex protection to prevent race condition
+    // Without this lock, concurrent calls to CheckUnlockTimeout() or Lock()
+    // could modify fWalletUnlocked/nUnlockTime while we're reading them,
+    // leading to inconsistent state and potential security issues
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
     // If wallet is not encrypted, it doesn't need to be unlocked
     if (!masterKey.IsValid()) {
         return true;  // Unencrypted wallet is always "unlocked"
@@ -444,7 +479,72 @@ void CWallet::CheckUnlockTimeout() {
         if (!vMasterKey.empty()) {
             memory_cleanse(vMasterKey.data_ptr(), vMasterKey.size());
         }
+        // WL-010 FIX: Clear cached decrypted HD master key
+        if (fHDMasterKeyCached) {
+            memory_cleanse(hdMasterKeyDecrypted.seed, 32);
+            memory_cleanse(hdMasterKeyDecrypted.chaincode, 32);
+            fHDMasterKeyCached = false;
+        }
     }
+}
+
+// ============================================================================
+// FIX-010 (CRYPT-002): IV Reuse Detection
+// ============================================================================
+
+// Internal helper: Generate unique IV (assumes caller holds cs_wallet lock)
+template<typename Alloc>
+bool CWallet::GenerateUniqueIV_Locked(std::vector<uint8_t, Alloc>& iv) {
+    // Try up to 10 times to generate a unique IV
+    // If we hit a collision after 10 attempts, the RNG is broken
+    for (int attempts = 0; attempts < 10; attempts++) {
+        // Generate random IV
+        if (!GenerateIV(iv)) {
+            return false;  // RNG failure
+        }
+
+        // Convert to std::vector for set lookup
+        std::vector<uint8_t> iv_std(iv.begin(), iv.end());
+
+        // Check if this IV has been used before
+        if (usedIVs.find(iv_std) == usedIVs.end()) {
+            // Unique IV found, register it
+            usedIVs.insert(iv_std);
+            return true;
+        }
+
+        // Collision detected, retry
+        // Note: With a good RNG, probability of collision is ~2^-128 for 16-byte IVs
+        // If we see collisions here, it indicates RNG failure
+    }
+
+    // Failed to generate unique IV after 10 attempts
+    // This should NEVER happen with a properly functioning RNG
+    return false;
+}
+
+bool CWallet::GenerateUniqueIV(std::vector<uint8_t, SecureAllocator<uint8_t>>& iv) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return GenerateUniqueIV_Locked(iv);
+}
+
+void CWallet::RegisterIV(const std::vector<uint8_t>& iv) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Only register if IV is correct size (16 bytes for AES)
+    if (iv.size() == WALLET_CRYPTO_IV_SIZE) {
+        usedIVs.insert(iv);
+    }
+}
+
+bool CWallet::IsIVUsed(const std::vector<uint8_t>& iv) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return usedIVs.find(iv) != usedIVs.end();
+}
+
+size_t CWallet::GetIVCount() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return usedIVs.size();
 }
 
 bool CWallet::Lock() {
@@ -462,6 +562,13 @@ bool CWallet::Lock() {
         memory_cleanse(vMasterKey.data_ptr(), vMasterKey.size());
     }
 
+    // WL-010 FIX: Clear cached decrypted HD master key
+    if (fHDMasterKeyCached) {
+        memory_cleanse(hdMasterKeyDecrypted.seed, 32);
+        memory_cleanse(hdMasterKeyDecrypted.chaincode, 32);
+        fHDMasterKeyCached = false;
+    }
+
     return true;
 }
 
@@ -476,6 +583,26 @@ bool CWallet::Unlock(const std::string& passphrase, int64_t timeout) {
         return false;
     }
 
+    // WL-011 FIX: Rate limiting with exponential backoff
+    // Delay = 2^(attempts-1) seconds, capped at 1 hour
+    // Attempts:  1→0s, 2→1s, 3→2s, 4→4s, 5→8s, 10→512s, 15+→3600s
+    if (nUnlockFailedAttempts > 0) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            now - nLastFailedUnlock).count();
+
+        // Calculate required delay: 2^(attempts-1) seconds, max 3600s (1 hour)
+        int64_t required_delay = 1LL << (nUnlockFailedAttempts - 1);
+        if (required_delay > 3600) required_delay = 3600;
+
+        if (elapsed < required_delay) {
+            std::cerr << "[Wallet] Rate limit: " << (required_delay - elapsed)
+                     << " seconds remaining (attempt " << (nUnlockFailedAttempts + 1)
+                     << ")" << std::endl;
+            return false;
+        }
+    }
+
     // Derive key from passphrase
     std::vector<uint8_t> derivedKey;
     if (!DeriveKey(passphrase, masterKey.vchSalt, masterKey.nDeriveIterations, derivedKey)) {
@@ -488,8 +615,22 @@ bool CWallet::Unlock(const std::string& passphrase, int64_t timeout) {
         return false;
     }
 
+    // FIX-008 (CRYPT-007): Verify MAC before decryption (prevents padding oracle)
+    // For legacy keys without MAC, skip verification
+    if (!masterKey.IsLegacy()) {
+        if (!crypter.VerifyMAC(masterKey.vchCryptedKey, masterKey.vchMAC)) {
+            // WL-011 FIX: Track failed unlock attempt
+            nUnlockFailedAttempts++;
+            nLastFailedUnlock = std::chrono::steady_clock::now();
+            return false;  // MAC verification failed - wrong passphrase or tampered data
+        }
+    }
+
     std::vector<uint8_t> decryptedKey;
     if (!crypter.Decrypt(masterKey.vchCryptedKey, decryptedKey)) {
+        // WL-011 FIX: Track failed unlock attempt
+        nUnlockFailedAttempts++;
+        nLastFailedUnlock = std::chrono::steady_clock::now();
         return false;  // Wrong passphrase
     }
 
@@ -501,6 +642,19 @@ bool CWallet::Unlock(const std::string& passphrase, int64_t timeout) {
     memcpy(vMasterKey.data_ptr(), decryptedKey.data(), WALLET_CRYPTO_KEY_SIZE);
 
     fWalletUnlocked = true;
+
+    // WL-011 FIX: Reset failed attempt counter on successful unlock
+    nUnlockFailedAttempts = 0;
+
+    // WL-010 FIX: Decrypt and cache HD master key for performance
+    if (fIsHDWallet && fHDMasterKeyEncrypted) {
+        // Decrypt HD master key into cache
+        if (DecryptHDMasterKey(hdMasterKeyDecrypted)) {
+            fHDMasterKeyCached = true;
+        }
+        // Note: If decryption fails, cache remains invalid (fHDMasterKeyCached = false)
+        // This is acceptable - DecryptHDMasterKey will decrypt on-demand if cache invalid
+    }
 
     // Set unlock timeout
     if (timeout > 0) {
@@ -568,8 +722,8 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
         return false;
     }
 
-    // Generate IV for master key encryption
-    if (!GenerateIV(masterKey.vchIV)) {
+    // FIX-010: Generate unique IV for master key encryption
+    if (!GenerateUniqueIV_Locked(masterKey.vchIV)) {
         memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
         memory_cleanse(derivedKey.data(), derivedKey.size());
         return false;
@@ -589,6 +743,13 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
         return false;
     }
 
+    // FIX-008 (CRYPT-007): Compute MAC for authenticated encryption
+    if (!masterCrypter.ComputeMAC(masterKey.vchCryptedKey, masterKey.vchMAC)) {
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+        memory_cleanse(derivedKey.data(), derivedKey.size());
+        return false;
+    }
+
     masterKey.nDerivationMethod = 0;  // PBKDF2-SHA3
     masterKey.nDeriveIterations = WALLET_CRYPTO_PBKDF2_ROUNDS;
 
@@ -600,8 +761,8 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
         CEncryptedKey encKey;
         encKey.vchPubKey = key.vchPubKey;  // Public key stays unencrypted
 
-        // Generate unique IV for this key
-        if (!GenerateIV(encKey.vchIV)) {
+        // FIX-010: Generate unique IV for this key
+        if (!GenerateUniqueIV_Locked(encKey.vchIV)) {
             memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
             memory_cleanse(derivedKey.data(), derivedKey.size());
             return false;
@@ -616,6 +777,13 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
         }
 
         if (!keyCrypter.Encrypt(key.vchPrivKey, encKey.vchCryptedKey)) {
+            memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+            memory_cleanse(derivedKey.data(), derivedKey.size());
+            return false;
+        }
+
+        // FIX-008 (CRYPT-007): Compute MAC for authenticated encryption
+        if (!keyCrypter.ComputeMAC(encKey.vchCryptedKey, encKey.vchMAC)) {
             memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
             memory_cleanse(derivedKey.data(), derivedKey.size());
             return false;
@@ -689,6 +857,15 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
         return false;
     }
 
+    // FIX-008 (CRYPT-007): Verify MAC before decryption (prevents padding oracle)
+    // For legacy keys without MAC, skip verification
+    if (!masterKey.IsLegacy()) {
+        if (!crypterOld.VerifyMAC(masterKey.vchCryptedKey, masterKey.vchMAC)) {
+            memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+            return false;  // MAC verification failed - wrong passphrase or tampered data
+        }
+    }
+
     std::vector<uint8_t> vMasterKeyPlain;
     if (!crypterOld.Decrypt(masterKey.vchCryptedKey, vMasterKeyPlain)) {
         memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
@@ -711,9 +888,9 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
         return false;
     }
 
-    // Generate new IV
+    // FIX-010: Generate unique IV for re-encryption
     std::vector<uint8_t> newIV;
-    if (!GenerateIV(newIV)) {
+    if (!GenerateUniqueIV_Locked(newIV)) {
         memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
         memory_cleanse(derivedKeyNew.data(), derivedKeyNew.size());
         memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
@@ -737,9 +914,19 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
         return false;
     }
 
+    // FIX-008 (CRYPT-007): Compute MAC for authenticated encryption
+    std::vector<uint8_t> newMAC;
+    if (!crypterNew.ComputeMAC(newCryptedKey, newMAC)) {
+        memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
+        memory_cleanse(derivedKeyNew.data(), derivedKeyNew.size());
+        memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+        return false;
+    }
+
     // Update master key
     masterKey.vchCryptedKey = newCryptedKey;
     masterKey.vchSalt = newSalt;
+    masterKey.vchMAC = newMAC;  // FIX-008: Store MAC
     masterKey.vchIV = newIV;
 
     // Wipe sensitive data
@@ -772,7 +959,8 @@ bool CWallet::Load(const std::string& filename) {
     std::map<CAddress, CKey> temp_mapKeys;
     std::map<CAddress, CEncryptedKey> temp_mapCryptedKeys;
     std::vector<CAddress> temp_vchAddresses;
-    std::map<uint256, CWalletTx> temp_mapWalletTx;
+    // FIX-005 (WALLET-001): Changed to COutPoint key for v3 format
+    std::map<COutPoint, CWalletTx> temp_mapWalletTx;
     CAddress temp_defaultAddress;
     CMasterKey temp_masterKey;
     bool temp_fWalletUnlocked = true;
@@ -793,8 +981,6 @@ bool CWallet::Load(const std::string& filename) {
     if (version != 1 && version != 2) {
         return false;  // Unsupported version
     }
-
-    bool is_v2_format = (version == 2);
 
     uint32_t flags;
     file.read(reinterpret_cast<char*>(&flags), sizeof(flags));
@@ -832,10 +1018,35 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(temp_masterKey.vchIV.data()), WALLET_CRYPTO_IV_SIZE);
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
+        // FIX-010: Register master key IV to prevent reuse
+        usedIVs.insert(temp_masterKey.vchIV);
+
         file.read(reinterpret_cast<char*>(&temp_masterKey.nDerivationMethod), sizeof(temp_masterKey.nDerivationMethod));
         if (!file.good()) return false;  // SEC-001: Check I/O error
         file.read(reinterpret_cast<char*>(&temp_masterKey.nDeriveIterations), sizeof(temp_masterKey.nDeriveIterations));
         if (!file.good()) return false;  // SEC-001: Check I/O error
+
+        // FIX-008 (CRYPT-007): Load MAC for authenticated encryption
+        // For legacy wallets (v2 without MAC), this field won't exist
+        // Check if there's more data to read
+        uint32_t macLen = 0;
+        std::streampos pos_before = file.tellg();
+        file.read(reinterpret_cast<char*>(&macLen), sizeof(macLen));
+        if (file.good() && macLen > 0 && macLen <= 64) {  // HMAC-SHA3-512 is 64 bytes
+            temp_masterKey.vchMAC.resize(macLen);
+            file.read(reinterpret_cast<char*>(temp_masterKey.vchMAC.data()), macLen);
+            if (!file.good()) {
+                // Failed to read MAC - might be EOF, treat as legacy wallet
+                file.clear();  // Clear error state
+                file.seekg(pos_before);  // Restore position
+                temp_masterKey.vchMAC.clear();
+            }
+        } else {
+            // No MAC or invalid length - legacy wallet
+            file.clear();  // Clear error state if EOF
+            file.seekg(pos_before);  // Restore position
+            temp_masterKey.vchMAC.clear();
+        }
 
         // Wallet starts locked (encryption status determined by masterKey.IsValid())
         temp_fWalletUnlocked = false;
@@ -876,6 +1087,9 @@ bool CWallet::Load(const std::string& filename) {
             temp_vchMnemonicIV.resize(WALLET_CRYPTO_IV_SIZE);
             file.read(reinterpret_cast<char*>(temp_vchMnemonicIV.data()), WALLET_CRYPTO_IV_SIZE);
             if (!file.good()) return false;
+
+            // FIX-010: Register mnemonic IV to prevent reuse
+            usedIVs.insert(temp_vchMnemonicIV);
         }
 
         // Read HD master key
@@ -900,6 +1114,9 @@ bool CWallet::Load(const std::string& filename) {
             temp_vchHDMasterKeyIV.resize(WALLET_CRYPTO_IV_SIZE);
             file.read(reinterpret_cast<char*>(temp_vchHDMasterKeyIV.data()), WALLET_CRYPTO_IV_SIZE);
             if (!file.good()) return false;
+
+            // FIX-010: Register HD master key IV to prevent reuse
+            usedIVs.insert(temp_vchHDMasterKeyIV);
         }
 
         // Read HD chain state
@@ -1006,6 +1223,30 @@ bool CWallet::Load(const std::string& filename) {
             file.read(reinterpret_cast<char*>(encKey.vchIV.data()), 16);
             if (!file.good()) return false;  // SEC-001: Check I/O error
 
+            // FIX-010: Register encrypted key IV to prevent reuse
+            usedIVs.insert(encKey.vchIV);
+
+            // FIX-008 (CRYPT-007): Load MAC for authenticated encryption
+            // For legacy wallets (v2 without MAC), this field won't exist
+            uint32_t macLen = 0;
+            std::streampos pos_before = file.tellg();
+            file.read(reinterpret_cast<char*>(&macLen), sizeof(macLen));
+            if (file.good() && macLen > 0 && macLen <= 64) {  // HMAC-SHA3-512 is 64 bytes
+                encKey.vchMAC.resize(macLen);
+                file.read(reinterpret_cast<char*>(encKey.vchMAC.data()), macLen);
+                if (!file.good()) {
+                    // Failed to read MAC - might be EOF, treat as legacy wallet
+                    file.clear();  // Clear error state
+                    file.seekg(pos_before);  // Restore position
+                    encKey.vchMAC.clear();
+                }
+            } else {
+                // No MAC or invalid length - legacy wallet
+                file.clear();  // Clear error state if EOF
+                file.seekg(pos_before);  // Restore position
+                encKey.vchMAC.clear();
+            }
+
             // Create address from public key
             CAddress keyAddr(encKey.vchPubKey);
             temp_mapCryptedKeys[keyAddr] = encKey;
@@ -1088,7 +1329,10 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(&wtx.nHeight), sizeof(wtx.nHeight));
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        temp_mapWalletTx[wtx.txid] = wtx;
+        // FIX-005 (WALLET-001): Use COutPoint as composite key to prevent collision
+        // When a transaction has multiple outputs to wallet, using only txid causes overwrites
+        COutPoint outpoint(wtx.txid, wtx.vout);
+        temp_mapWalletTx[outpoint] = wtx;
     }
 
     // SEC-001 FIX: Only if ALL data loaded successfully, swap into wallet
@@ -1109,10 +1353,12 @@ bool CWallet::Load(const std::string& filename) {
     // HD wallet data
     fIsHDWallet = temp_fIsHDWallet;
     vchEncryptedMnemonic = std::move(temp_vchEncryptedMnemonic);
-    vchMnemonicIV = std::move(temp_vchMnemonicIV);
+    // FIX-009: Use assign() for SecureAllocator vectors
+    vchMnemonicIV.assign(temp_vchMnemonicIV.begin(), temp_vchMnemonicIV.end());
     hdMasterKey = temp_hdMasterKey;
     fHDMasterKeyEncrypted = temp_fHDMasterKeyEncrypted;
-    vchHDMasterKeyIV = std::move(temp_vchHDMasterKeyIV);
+    // FIX-009: Use assign() for SecureAllocator vectors
+    vchHDMasterKeyIV.assign(temp_vchHDMasterKeyIV.begin(), temp_vchHDMasterKeyIV.end());
     nHDAccountIndex = temp_nHDAccountIndex;
     nHDExternalChainIndex = temp_nHDExternalChainIndex;
     nHDInternalChainIndex = temp_nHDInternalChainIndex;
@@ -1143,7 +1389,22 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     // This prevents corruption if write fails mid-operation
     std::string tempFile = saveFile + ".tmp";
 
+    // FIX-002 (PERSIST-003): Set secure file permissions before creating file
+    // Only owner can read/write (0600), prevents other users from reading private keys
+    #ifndef _WIN32
+        mode_t old_umask = umask(0077);  // Remove all group/other permissions
+    #endif
+
     std::ofstream file(tempFile, std::ios::binary);
+
+    #ifndef _WIN32
+        umask(old_umask);  // Restore original umask
+        // Double-check permissions were applied correctly
+        if (file.is_open()) {
+            chmod(tempFile.c_str(), S_IRUSR | S_IWUSR);  // 0600: owner read/write only
+        }
+    #endif
+
     if (!file.is_open()) {
         return false;
     }
@@ -1185,6 +1446,15 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&masterKey.nDeriveIterations), sizeof(masterKey.nDeriveIterations));
         if (!file.good()) return false;  // SEC-001: Check I/O error
+
+        // FIX-008 (CRYPT-007): Save MAC for authenticated encryption
+        uint32_t macLen = static_cast<uint32_t>(masterKey.vchMAC.size());
+        file.write(reinterpret_cast<const char*>(&macLen), sizeof(macLen));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
+        if (macLen > 0) {
+            file.write(reinterpret_cast<const char*>(masterKey.vchMAC.data()), macLen);
+            if (!file.good()) return false;  // SEC-001: Check I/O error
+        }
     }
 
     // Write HD wallet data (v2 only)
@@ -1284,6 +1554,15 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
             // Write IV
             file.write(reinterpret_cast<const char*>(encKey.vchIV.data()), 16);
             if (!file.good()) return false;  // SEC-001: Check I/O error
+
+            // FIX-008 (CRYPT-007): Save MAC for authenticated encryption
+            uint32_t macLen = static_cast<uint32_t>(encKey.vchMAC.size());
+            file.write(reinterpret_cast<const char*>(&macLen), sizeof(macLen));
+            if (!file.good()) return false;  // SEC-001: Check I/O error
+            if (macLen > 0) {
+                file.write(reinterpret_cast<const char*>(encKey.vchMAC.data()), macLen);
+                if (!file.good()) return false;  // SEC-001: Check I/O error
+            }
         }
     } else {
         // Unencrypted wallet - write unencrypted keys
@@ -1341,6 +1620,8 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         if (!file.good()) return false;  // SEC-001: Check I/O error
     }
 
+    // FIX-004 (PERSIST-002): Flush and sync data before closing
+    file.flush();
     file.close();
 
     // SEC-001 FIX: Check if write was successful before committing
@@ -1350,19 +1631,55 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         return false;
     }
 
-    // SEC-001 FIX: Atomically replace old file with new file
-    // On most OS, rename() is atomic - either fully succeeds or fully fails
-    // This ensures we never have a half-written wallet file
-    #ifdef _WIN32
-    // On Windows, need to remove target file first
-    std::remove(saveFile.c_str());
-    #endif
+    // FIX-004 (PERSIST-002): Force data to disk before atomic rename
+    // This prevents data loss if power failure occurs between close() and rename()
+    #ifndef _WIN32
+        // Linux/Unix: fsync() ensures data written to physical disk
+        int fd = open(tempFile.c_str(), O_RDONLY);
+        if (fd >= 0) {
+            fsync(fd);  // Sync file data and metadata to disk
+            close(fd);
+        }
 
-    if (std::rename(tempFile.c_str(), saveFile.c_str()) != 0) {
-        // Rename failed - clean up temp file
-        std::remove(tempFile.c_str());
-        return false;
-    }
+        // Also sync parent directory to persist rename operation metadata
+        size_t last_slash = saveFile.find_last_of("/\\");
+        if (last_slash != std::string::npos) {
+            std::string parent_dir = saveFile.substr(0, last_slash);
+            if (parent_dir.empty()) parent_dir = ".";
+            int dirfd = open(parent_dir.c_str(), O_RDONLY);
+            if (dirfd >= 0) {
+                fsync(dirfd);
+                close(dirfd);
+            }
+        }
+    #endif
+    // Windows already uses MOVEFILE_WRITE_THROUGH (ensures disk write)
+
+    // WL-012 FIX: Atomically replace old file with new file
+    // On Unix, rename() is atomic
+    // On Windows, use MoveFileEx with MOVEFILE_REPLACE_EXISTING for atomic replace
+    #ifdef _WIN32
+        // Windows: Use MoveFileExW for atomic file replacement
+        // This is ATOMIC - either fully succeeds or fully fails (no partial writes)
+        std::wstring wTempFile(tempFile.begin(), tempFile.end());
+        std::wstring wSaveFile(saveFile.begin(), saveFile.end());
+
+        // MOVEFILE_REPLACE_EXISTING: Replace existing file atomically
+        // MOVEFILE_WRITE_THROUGH: Ensure data written to disk before returning
+        if (!MoveFileExW(wTempFile.c_str(), wSaveFile.c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            // Move failed - clean up temp file
+            std::remove(tempFile.c_str());
+            return false;
+        }
+    #else
+        // Unix/Linux: std::rename() is already atomic
+        if (std::rename(tempFile.c_str(), saveFile.c_str()) != 0) {
+            // Rename failed - clean up temp file
+            std::remove(tempFile.c_str());
+            return false;
+        }
+    #endif
 
     return true;
 }
@@ -1580,10 +1897,15 @@ std::vector<uint8_t> CWallet::GetPublicKeyUnlocked() const {
 }
 
 bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
+    // FIX-006 (WALLET-002): Hold wallet lock for entire scan operation
+    // Prevents TOCTOU race: GetAddresses() → AddTxOut() gap where wallet could be modified
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
     std::cout << "[Wallet] Scanning UTXO set for wallet outputs..." << std::endl;
 
     // Step 1: Get all wallet addresses and their pubkey hashes
-    std::vector<CAddress> addresses = GetAddresses();
+    // FIX-006: Access vchAddresses directly since we hold lock (avoid deadlock with GetAddresses())
+    const std::vector<CAddress>& addresses = vchAddresses;
     if (addresses.empty()) {
         std::cout << "[Wallet] No addresses in wallet - nothing to scan" << std::endl;
         return true;
@@ -1617,8 +1939,8 @@ bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
             for (const auto& addr : addresses) {
                 std::vector<uint8_t> addrHash = GetPubKeyHashFromAddress(addr);
                 if (addrHash == scriptPubKeyHash) {
-                    // Add to wallet (this acquires lock internally)
-                    AddTxOut(outpoint.hash, outpoint.n, entry.out.nValue, addr, entry.nHeight);
+                    // FIX-006 (WALLET-002): Use unlocked version since we hold lock
+                    AddTxOutUnlocked(outpoint.hash, outpoint.n, entry.out.nValue, addr, entry.nHeight);
                     utxosFound++;
 
                     std::cout << "[Wallet] Found UTXO: " << outpoint.hash.GetHex().substr(0, 16)
@@ -2025,22 +2347,28 @@ bool CWallet::InitializeHDWallet(const std::string& mnemonic, const std::string&
     }
 
     // Validate mnemonic
-    if (!CMnemonic::IsValid(mnemonic)) {
+    if (!CMnemonic::Validate(mnemonic)) {
         return false;
     }
 
-    // Derive BIP39 seed from mnemonic
-    uint8_t bip39_seed[64];
-    if (!CMnemonic::ToSeed(mnemonic, passphrase, bip39_seed)) {
-        memory_cleanse(bip39_seed, 64);
-        return false;
+    // WL-002 FIX: Use RAII for BIP39 seed to prevent memory leak on exception
+    //
+    // CRITICAL: If DeriveMaster() throws an exception or crashes, the seed
+    // must still be wiped from memory. Using CKeyingMaterial ensures the
+    // destructor wipes memory even on abnormal exit paths.
+    //
+    // This prevents seed extraction from core dumps if the node crashes.
+    //
+    CKeyingMaterial bip39_seed(64);  // RAII: auto-wipes on scope exit
+    if (!CMnemonic::ToSeed(mnemonic, passphrase, bip39_seed.data_ptr())) {
+        return false;  // RAII automatically wipes seed
     }
 
-    // Derive master HD key
-    DeriveMaster(bip39_seed, hdMasterKey);
+    // Derive master HD key (if this throws, RAII still wipes seed)
+    DeriveMaster(bip39_seed.data_ptr(), hdMasterKey);
 
-    // Wipe BIP39 seed
-    memory_cleanse(bip39_seed, 64);
+    // Seed will be automatically wiped when bip39_seed goes out of scope
+    // (no explicit memory_cleanse needed)
 
     // Encrypt mnemonic if wallet is encrypted
     if (masterKey.IsValid()) {
@@ -2407,7 +2735,8 @@ bool CWallet::DeriveAndCacheHDAddress(const CHDKeyPath& path) {
     // Create CKey structure
     CKey key;
     key.vchPubKey = std::vector<uint8_t>(pk, pk + DILITHIUM_PUBLICKEY_SIZE);
-    key.vchPrivKey = std::vector<uint8_t>(sk, sk + DILITHIUM_SECRETKEY_SIZE);
+    // FIX-009: Use assign() for SecureAllocator vector
+    key.vchPrivKey.assign(sk, sk + DILITHIUM_SECRETKEY_SIZE);
 
     // Store in wallet (encrypt if necessary)
     if (masterKey.IsValid()) {
@@ -2415,8 +2744,8 @@ bool CWallet::DeriveAndCacheHDAddress(const CHDKeyPath& path) {
         CEncryptedKey encKey;
         encKey.vchPubKey = key.vchPubKey;
 
-        // Generate unique IV
-        if (!GenerateIV(encKey.vchIV)) {
+        // FIX-010: Generate unique IV
+        if (!GenerateUniqueIV_Locked(encKey.vchIV)) {
             key.Clear();
             derived.Wipe();
             master_copy.Wipe();
@@ -2472,8 +2801,8 @@ bool CWallet::EncryptHDMasterKey() {
         return false;  // Wallet not encrypted
     }
 
-    // Generate unique IV for HD master key
-    if (!GenerateIV(vchHDMasterKeyIV)) {
+    // FIX-010: Generate unique IV for HD master key
+    if (!GenerateUniqueIV_Locked(vchHDMasterKeyIV)) {
         return false;
     }
 
@@ -2536,7 +2865,13 @@ bool CWallet::DecryptHDMasterKey(CHDExtendedKey& decrypted) const {
         return false;  // Wallet locked
     }
 
-    // Decrypt HD master key
+    // WL-010 FIX: Use cached decrypted key if available
+    if (fHDMasterKeyCached) {
+        decrypted = hdMasterKeyDecrypted;
+        return true;
+    }
+
+    // Cache miss - decrypt HD master key
     CCrypter crypter;
     std::vector<uint8_t> vMasterKeyVec(vMasterKey.data_ptr(),
                                        vMasterKey.data_ptr() + vMasterKey.size());
@@ -2583,8 +2918,8 @@ bool CWallet::DecryptHDMasterKey(CHDExtendedKey& decrypted) const {
 bool CWallet::EncryptMnemonic(const std::string& mnemonic) {
     // Assumes caller holds cs_wallet lock
 
-    // Generate unique IV
-    if (!GenerateIV(vchMnemonicIV)) {
+    // FIX-010: Generate unique IV
+    if (!GenerateUniqueIV_Locked(vchMnemonicIV)) {
         return false;
     }
 
@@ -2610,10 +2945,31 @@ bool CWallet::EncryptMnemonic(const std::string& mnemonic) {
 
         memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
     } else {
-        // Wallet not encrypted - encrypt with temporary key
-        // This allows mnemonic to still be stored encrypted even without wallet encryption
-        // Uses a fixed derivation (not secure without wallet password, but better than plaintext)
-        std::vector<uint8_t> tempKey(WALLET_CRYPTO_KEY_SIZE, 0x42);
+        // WL-003 FIX: Wallet not encrypted - derive obfuscation key from wallet-unique data
+        //
+        // CRITICAL SECURITY FIX: Old code used fixed key (0x42...) = trivially decryptable
+        //
+        // New approach: Derive obfuscation key from HD master key fingerprint
+        // This creates a unique key per wallet that's not easily guessable.
+        //
+        // Security properties:
+        // - Unique per wallet (derived from HD master key)
+        // - Not plaintext or fixed key
+        // - Attacker needs both wallet file AND swap/memory dump
+        // - Still weaker than passphrase encryption (user should encrypt wallet!)
+        //
+        // WL-007 FIX: Use HKDF for proper key derivation with domain separation
+        // Derive obfuscation key from HD master key using HKDF-SHA3-256
+        std::vector<uint8_t> tempKey(WALLET_CRYPTO_KEY_SIZE);
+        std::vector<uint8_t> hdSeed(hdMasterKey.seed,
+                                    hdMasterKey.seed + 32);
+
+        // Derive encryption key using HKDF with "mnemonic" context
+        // This provides cryptographic domain separation from other derived keys
+        DeriveEncryptionKey(hdSeed, "mnemonic", tempKey);
+
+        // Wipe temporary HD seed copy
+        memory_cleanse(hdSeed.data(), hdSeed.size());
 
         CCrypter crypter;
         if (!crypter.SetKey(tempKey, vchMnemonicIV)) {
@@ -2666,8 +3022,14 @@ bool CWallet::DecryptMnemonic(std::string& mnemonic) const {
 
         memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
     } else {
-        // Wallet not encrypted - decrypt with temporary key
-        std::vector<uint8_t> tempKey(WALLET_CRYPTO_KEY_SIZE, 0x42);
+        // WL-003 FIX: Wallet not encrypted - derive same obfuscation key as EncryptMnemonic
+        // WL-007 FIX: Use HKDF (must match EncryptMnemonic key derivation)
+        std::vector<uint8_t> tempKey(WALLET_CRYPTO_KEY_SIZE);
+        std::vector<uint8_t> hdSeed(hdMasterKey.seed,
+                                    hdMasterKey.seed + 32);
+
+        DeriveEncryptionKey(hdSeed, "mnemonic", tempKey);
+        memory_cleanse(hdSeed.data(), hdSeed.size());
 
         CCrypter crypter;
         if (!crypter.SetKey(tempKey, vchMnemonicIV)) {
