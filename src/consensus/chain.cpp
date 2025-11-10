@@ -219,6 +219,60 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     std::cout << "  Connect " << connectBlocks.size() << " block(s)" << std::endl;
 
     // ============================================================================
+    // CRITICAL-C002 FIX: Pre-validate ALL blocks exist before starting reorg
+    // ============================================================================
+    // This prevents the most common cause of rollback failure: missing block data.
+    // By validating ALL blocks can be loaded BEFORE making any changes, we ensure
+    // that if the reorg fails, it fails cleanly without corrupting the database.
+    //
+    // This is a defense-in-depth measure. The ultimate fix requires database-level
+    // atomic transactions or write-ahead logging, but this significantly reduces
+    // the risk of corruption.
+
+    std::cout << "[Chain] PRE-VALIDATION: Checking all blocks can be loaded..." << std::endl;
+
+    // Validate all disconnect blocks exist in database
+    for (size_t i = 0; i < disconnectBlocks.size(); ++i) {
+        CBlockIndex* pindexCheck = disconnectBlocks[i];
+        CBlock blockCheck;
+
+        if (pdb == nullptr) {
+            std::cerr << "[Chain] ERROR: No database connection - cannot perform reorg" << std::endl;
+            return false;
+        }
+
+        if (!pdb->ReadBlock(pindexCheck->GetBlockHash(), blockCheck)) {
+            std::cerr << "[Chain] ERROR: Cannot load block for disconnect (PRE-VALIDATION FAILED)" << std::endl;
+            std::cerr << "  Block: " << pindexCheck->GetBlockHash().GetHex() << std::endl;
+            std::cerr << "  Height: " << pindexCheck->nHeight << std::endl;
+            std::cerr << "  Aborting reorg - database may be corrupted" << std::endl;
+            return false;
+        }
+    }
+
+    // Validate all connect blocks exist in database (except the new tip which we already have)
+    for (size_t i = 0; i < connectBlocks.size(); ++i) {
+        CBlockIndex* pindexCheck = connectBlocks[i];
+
+        // Skip the new tip - we already have its block data in 'block' parameter
+        if (pindexCheck == pindexNew) {
+            continue;
+        }
+
+        CBlock blockCheck;
+        if (!pdb->ReadBlock(pindexCheck->GetBlockHash(), blockCheck)) {
+            std::cerr << "[Chain] ERROR: Cannot load block for connect (PRE-VALIDATION FAILED)" << std::endl;
+            std::cerr << "  Block: " << pindexCheck->GetBlockHash().GetHex() << std::endl;
+            std::cerr << "  Height: " << pindexCheck->nHeight << std::endl;
+            std::cerr << "  Aborting reorg - missing block data" << std::endl;
+            return false;
+        }
+    }
+
+    std::cout << "[Chain] ✅ PRE-VALIDATION PASSED: All " << (disconnectBlocks.size() + connectBlocks.size())
+              << " blocks can be loaded" << std::endl;
+
+    // ============================================================================
     // CS-005: Chain Reorganization Rollback - Atomic Reorg with Rollback
     // ============================================================================
 
@@ -240,12 +294,31 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                 CBlockIndex* pindexReconnect = disconnectBlocks[j];
                 CBlock reconnectBlock;
 
-                if (pdb != nullptr && pdb->ReadBlock(pindexReconnect->GetBlockHash(), reconnectBlock)) {
-                    if (!ConnectTip(pindexReconnect, reconnectBlock)) {
-                        std::cerr << "[Chain] CRITICAL: Rollback failed! Chain state corrupted!" << std::endl;
-                        // Database corruption - manual intervention required
-                        return false;
-                    }
+                // CRITICAL-C002 FIX: Explicit error handling for block read failures
+                // Since we pre-validated all blocks exist, if ReadBlock fails here,
+                // it indicates database corruption or disk failure.
+                if (pdb == nullptr) {
+                    std::cerr << "[Chain] CRITICAL: No database during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  Failed at block: " << pindexReconnect->GetBlockHash().GetHex() << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
+                }
+
+                if (!pdb->ReadBlock(pindexReconnect->GetBlockHash(), reconnectBlock)) {
+                    std::cerr << "[Chain] CRITICAL: Cannot read block during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  Block: " << pindexReconnect->GetBlockHash().GetHex() << std::endl;
+                    std::cerr << "  Height: " << pindexReconnect->nHeight << std::endl;
+                    std::cerr << "  This should be impossible - block passed pre-validation!" << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
+                }
+
+                if (!ConnectTip(pindexReconnect, reconnectBlock)) {
+                    std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  Block: " << pindexReconnect->GetBlockHash().GetHex() << std::endl;
+                    std::cerr << "  Height: " << pindexReconnect->nHeight << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
                 }
             }
 
@@ -292,11 +365,27 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " old blocks..." << std::endl;
             for (int j = disconnectedCount - 1; j >= 0; --j) {
                 CBlock reconnectBlock;
-                if (pdb != nullptr && pdb->ReadBlock(disconnectBlocks[j]->GetBlockHash(), reconnectBlock)) {
-                    if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
-                        std::cerr << "[Chain] CRITICAL: Rollback failed! Chain state corrupted!" << std::endl;
-                        return false;
-                    }
+
+                // CRITICAL-C002 FIX: Explicit error handling
+                if (pdb == nullptr) {
+                    std::cerr << "[Chain] CRITICAL: No database during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
+                }
+
+                if (!pdb->ReadBlock(disconnectBlocks[j]->GetBlockHash(), reconnectBlock)) {
+                    std::cerr << "[Chain] CRITICAL: Cannot read block during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
+                    std::cerr << "  This should be impossible - block passed pre-validation!" << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
+                }
+
+                if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
+                    std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
                 }
             }
 
@@ -320,11 +409,27 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " old blocks..." << std::endl;
             for (int j = disconnectedCount - 1; j >= 0; --j) {
                 CBlock reconnectBlock;
-                if (pdb != nullptr && pdb->ReadBlock(disconnectBlocks[j]->GetBlockHash(), reconnectBlock)) {
-                    if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
-                        std::cerr << "[Chain] CRITICAL: Rollback failed! Chain state corrupted!" << std::endl;
-                        return false;
-                    }
+
+                // CRITICAL-C002 FIX: Explicit error handling
+                if (pdb == nullptr) {
+                    std::cerr << "[Chain] CRITICAL: No database during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
+                }
+
+                if (!pdb->ReadBlock(disconnectBlocks[j]->GetBlockHash(), reconnectBlock)) {
+                    std::cerr << "[Chain] CRITICAL: Cannot read block during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
+                    std::cerr << "  This should be impossible - block passed pre-validation!" << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
+                }
+
+                if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
+                    std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
+                    std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
+                    std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    return false;
                 }
             }
 

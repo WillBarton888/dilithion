@@ -105,7 +105,7 @@ bool CheckProofOfWork(uint256 hash, uint32_t nBits) {
  * Algorithm: Standard long multiplication in base 256
  * Each byte of 'a' is multiplied by 'b', and results are accumulated with carry.
  */
-static void Multiply256x64(const uint256& a, uint64_t b, uint8_t* result) {
+static bool Multiply256x64(const uint256& a, uint64_t b, uint8_t* result) {
     // Initialize result to zero
     memset(result, 0, 40);
 
@@ -113,8 +113,41 @@ static void Multiply256x64(const uint256& a, uint64_t b, uint8_t* result) {
     // and accumulate results with proper carry handling
     uint64_t carry = 0;
     for (int i = 0; i < 32; i++) {
-        // Multiply byte i of 'a' by 'b', add previous carry
-        uint64_t product = (uint64_t)a.data[i] * b + carry;
+        // ====================================================================
+        // HIGH-C002 FIX: Check for integer overflow before multiplication
+        // ====================================================================
+        // We need to compute: product = a.data[i] * b + carry
+        //
+        // This could overflow if:
+        //   - a.data[i] = 255 (max uint8_t)
+        //   - b = UINT64_MAX
+        //   - carry = large value from previous iteration
+        //
+        // Check overflow in two steps:
+        //   1. Check if a.data[i] * b would overflow
+        //   2. Check if (a.data[i] * b) + carry would overflow
+
+        uint64_t byte_val = a.data[i];
+        uint64_t mul_result;
+
+        // Step 1: Multiply with overflow check
+        // For uint64_t multiplication, overflow occurs if a * b > UINT64_MAX
+        // We can check this by: if (a != 0 && b > UINT64_MAX / a) → overflow
+        if (byte_val != 0 && b > UINT64_MAX / byte_val) {
+            std::cerr << "[Difficulty] ERROR: Integer overflow in Multiply256x64 (multiplication)" << std::endl;
+            std::cerr << "  byte_val: " << byte_val << ", b: " << b << std::endl;
+            return false;
+        }
+        mul_result = byte_val * b;
+
+        // Step 2: Add carry with overflow check
+        // Check if adding carry would overflow
+        if (carry > UINT64_MAX - mul_result) {
+            std::cerr << "[Difficulty] ERROR: Integer overflow in Multiply256x64 (addition)" << std::endl;
+            std::cerr << "  mul_result: " << mul_result << ", carry: " << carry << std::endl;
+            return false;
+        }
+        uint64_t product = mul_result + carry;
 
         // Store low byte in result
         result[i] = product & 0xFF;
@@ -128,6 +161,14 @@ static void Multiply256x64(const uint256& a, uint64_t b, uint8_t* result) {
         result[i] = carry & 0xFF;
         carry >>= 8;
     }
+
+    // Final sanity check: carry should be zero after 40 bytes
+    if (carry > 0) {
+        std::cerr << "[Difficulty] ERROR: Result exceeds 320 bits in Multiply256x64" << std::endl;
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -186,7 +227,14 @@ uint32_t CalculateNextWorkRequired(
     // CRITICAL: Use integer-only arithmetic for deterministic behavior
     // Formula: targetNew = targetOld * nActualTimespan / nTargetTimespan
     uint8_t product[40];  // 320 bits to handle overflow
-    Multiply256x64(targetOld, static_cast<uint64_t>(nActualTimespan), product);
+
+    // HIGH-C002 FIX: Check for overflow in multiplication
+    if (!Multiply256x64(targetOld, static_cast<uint64_t>(nActualTimespan), product)) {
+        std::cerr << "[Difficulty] CRITICAL: Overflow in difficulty calculation!" << std::endl;
+        std::cerr << "  Returning previous difficulty (no adjustment)" << std::endl;
+        return nCompactOld;  // Return old difficulty as fallback
+    }
+
     targetNew = Divide320x64(product, static_cast<uint64_t>(nTargetTimespan));
 
     // Convert back to compact format
@@ -239,6 +287,27 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
     // Calculate actual time taken for this interval
     int64_t nActualTimespan = pindexLast->nTime - pindexFirst->nTime;
 
+    // ========================================================================
+    // HIGH-C003 FIX: Validate timespan is positive (timestamps must increase)
+    // ========================================================================
+    // If nActualTimespan <= 0, it indicates:
+    // 1. Timestamps going backwards (clock skew or attack)
+    // 2. Blocks with identical timestamps
+    //
+    // This would cause difficulty calculation errors when cast to uint64_t later.
+    // Use target timespan as fallback (no difficulty adjustment).
+    if (nActualTimespan <= 0) {
+        std::cerr << "[Difficulty] WARNING: Invalid timespan detected (timestamps not increasing)" << std::endl;
+        std::cerr << "  pindexFirst time: " << pindexFirst->nTime << " (height " << pindexFirst->nHeight << ")" << std::endl;
+        std::cerr << "  pindexLast time:  " << pindexLast->nTime << " (height " << pindexLast->nHeight << ")" << std::endl;
+        std::cerr << "  Calculated timespan: " << nActualTimespan << " seconds" << std::endl;
+        std::cerr << "  Using target timespan instead (no difficulty adjustment)" << std::endl;
+
+        // Fallback: Use target timespan (maintains current difficulty)
+        int64_t nTargetTimespan = nInterval * Dilithion::g_chainParams->blockTime;
+        nActualTimespan = nTargetTimespan;
+    }
+
     // Calculate expected timespan
     int64_t nTargetTimespan = nInterval * Dilithion::g_chainParams->blockTime;
 
@@ -268,7 +337,14 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
     //
     // New approach: 320-bit intermediate for multiplication, then 256-bit division
     uint8_t product[40];  // 320 bits to handle overflow from multiplication
-    Multiply256x64(targetOld, static_cast<uint64_t>(nActualTimespan), product);
+
+    // HIGH-C002 FIX: Check for overflow in multiplication
+    if (!Multiply256x64(targetOld, static_cast<uint64_t>(nActualTimespan), product)) {
+        std::cerr << "[Difficulty] CRITICAL: Overflow in difficulty calculation!" << std::endl;
+        std::cerr << "  Returning previous difficulty (no adjustment)" << std::endl;
+        return pindexLast->nBits;  // Return old difficulty as fallback
+    }
+
     targetNew = Divide320x64(product, static_cast<uint64_t>(nTargetTimespan));
 
     // Convert back to compact format
