@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <map>
+#include <list>
 
 /**
  * UTXO (Unspent Transaction Output) entry
@@ -58,12 +59,19 @@ class CUTXOSet
 {
 private:
     std::unique_ptr<leveldb::DB> db;
-    mutable std::mutex cs_utxo;
+    // TX-001 FIX: Changed to recursive_mutex to prevent deadlock when ApplyBlock/UndoBlock
+    // call other member functions (like GetUTXO) that also acquire the lock
+    mutable std::recursive_mutex cs_utxo;
     std::string datadir;
 
-    // Memory cache for frequently accessed UTXOs
-    // Maps COutPoint to UTXO entry
-    mutable std::map<COutPoint, CUTXOEntry> cache;
+    // TX-004 FIX: Proper LRU cache implementation
+    // Memory cache for frequently accessed UTXOs with LRU eviction policy
+    // Using list for LRU ordering (front = most recently used, back = least recently used)
+    // and map for O(1) lookup with iterator to list position
+    mutable std::list<COutPoint> lru_list;
+    mutable std::map<COutPoint, std::pair<CUTXOEntry, std::list<COutPoint>::iterator>> cache;
+
+    static const size_t MAX_CACHE_SIZE = 10000;
 
     // Track modifications for batch updates
     std::map<COutPoint, CUTXOEntry> cache_additions;
@@ -218,7 +226,7 @@ public:
 
     /**
      * Get the total amount in all UTXOs (monetary supply)
-     * @return Total amount in satoshis
+     * @return Total amount in ions
      */
     uint64_t GetTotalAmount() const { return stats.nTotalAmount; }
 };
@@ -229,7 +237,7 @@ public:
 
 template<typename Callback>
 size_t CUTXOSet::ForEach(Callback callback) const {
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     if (!db) {
         return 0;

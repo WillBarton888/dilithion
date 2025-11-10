@@ -187,7 +187,7 @@ bool TestWalletIntegration() {
 
     // Add a fake UTXO
     uint256 txid;
-    wallet.AddTxOut(txid, 0, 1000000, addresses[0], 0);  // 1M satoshis
+    wallet.AddTxOut(txid, 0, 1000000, addresses[0], 0);  // 1M ions
 
     if (wallet.GetBalance() != 1000000) {
         cout << "  ✗ Expected balance 1000000, got " << wallet.GetBalance() << endl;

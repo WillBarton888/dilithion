@@ -8,6 +8,7 @@
 #include <amount.h>
 #include <set>
 #include <algorithm>
+#include <iostream>
 
 uint64_t CBlockValidator::CalculateBlockSubsidy(uint32_t nHeight) {
     // Initial subsidy: 50 DIL = 50 * COIN = 50 * 100,000,000 ions
@@ -533,7 +534,16 @@ bool CBlockValidator::CheckBlock(
     uint64_t blockSubsidy = CalculateBlockSubsidy(nHeight);
     uint64_t maxCoinbaseValue = blockSubsidy + totalFees;
 
-    uint64_t coinbaseValue = transactions[0]->GetValueOut();
+    // TX-002 FIX: Wrap GetValueOut() in try-catch to handle overflow exceptions
+    uint64_t coinbaseValue;
+    try {
+        coinbaseValue = transactions[0]->GetValueOut();
+    } catch (const std::runtime_error& e) {
+        error = "Coinbase transaction output value overflow: ";
+        error += e.what();
+        return false;
+    }
+
     if (coinbaseValue > maxCoinbaseValue) {
         error = "Coinbase value exceeds subsidy + fees (" +
                 std::to_string(coinbaseValue) + " > " +

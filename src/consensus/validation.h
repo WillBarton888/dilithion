@@ -88,7 +88,7 @@ public:
      * Implements halving schedule: 50 DIL initial, halving every 210,000 blocks
      *
      * @param nHeight Block height
-     * @return Subsidy amount in ions (satoshis)
+     * @return Subsidy amount in ions
      */
     static uint64_t CalculateBlockSubsidy(uint32_t nHeight);
 

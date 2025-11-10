@@ -27,7 +27,7 @@ CUTXOSet::~CUTXOSet() {
 // ============================================================================
 
 bool CUTXOSet::Open(const std::string& path, bool create_if_missing) {
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     if (db != nullptr) {
         return true;  // Already open
@@ -74,7 +74,7 @@ bool CUTXOSet::Open(const std::string& path, bool create_if_missing) {
 }
 
 void CUTXOSet::Close() {
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // Flush any pending changes
     if (db != nullptr) {
@@ -89,13 +89,14 @@ void CUTXOSet::Close() {
     }
 
     cache.clear();
+    lru_list.clear();  // TX-004: Clear LRU list
     cache_additions.clear();
     cache_deletions.clear();
     db.reset();
 }
 
 bool CUTXOSet::IsOpen() const {
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
     return db != nullptr;
 }
 
@@ -191,22 +192,45 @@ bool CUTXOSet::DeserializeUTXOEntry(const std::string& data, CUTXOEntry& entry) 
 // ============================================================================
 
 void CUTXOSet::UpdateCache(const COutPoint& outpoint, const CUTXOEntry& entry) const {
-    // Keep cache size reasonable (10000 entries max)
-    if (cache.size() >= 10000) {
-        // Simple eviction: remove first element
-        cache.erase(cache.begin());
+    // TX-004 FIX: Proper LRU cache with eviction of least recently used entry
+    auto it = cache.find(outpoint);
+
+    if (it != cache.end()) {
+        // Already in cache - move to front (most recently used)
+        lru_list.erase(it->second.second);  // Remove old list position
+        lru_list.push_front(outpoint);       // Add to front
+        it->second.first = entry;            // Update value
+        it->second.second = lru_list.begin(); // Update list iterator
+    } else {
+        // Not in cache - add new entry
+        if (cache.size() >= MAX_CACHE_SIZE) {
+            // Evict least recently used (back of list)
+            COutPoint lru = lru_list.back();
+            lru_list.pop_back();
+            cache.erase(lru);
+        }
+
+        // Add to front of list and cache
+        lru_list.push_front(outpoint);
+        cache[outpoint] = std::make_pair(entry, lru_list.begin());
     }
-    cache[outpoint] = entry;
 }
 
 void CUTXOSet::RemoveFromCache(const COutPoint& outpoint) const {
-    cache.erase(outpoint);
+    // TX-004 FIX: Remove from both LRU list and cache map
+    auto it = cache.find(outpoint);
+    if (it != cache.end()) {
+        lru_list.erase(it->second.second);  // Remove from LRU list
+        cache.erase(it);                    // Remove from cache map
+    }
 }
 
 bool CUTXOSet::GetFromCache(const COutPoint& outpoint, CUTXOEntry& entry) const {
+    // TX-004 FIX: Access cache value from pair (first element is CUTXOEntry, second is list iterator)
     auto it = cache.find(outpoint);
     if (it != cache.end()) {
-        entry = it->second;
+        entry = it->second.first;  // Extract CUTXOEntry from pair
+        // Note: Not updating LRU on read to avoid complexity - UpdateCache handles LRU on writes
         return true;
     }
     return false;
@@ -222,7 +246,7 @@ bool CUTXOSet::GetUTXO(const COutPoint& outpoint, CUTXOEntry& entry) const {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // Check if marked for deletion in pending changes
     if (cache_deletions.find(outpoint) != cache_deletions.end()) {
@@ -272,7 +296,7 @@ bool CUTXOSet::AddUTXO(const COutPoint& outpoint, const CTxOut& out, uint32_t he
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // Create UTXO entry
     CUTXOEntry entry(out, height, fCoinBase);
@@ -299,7 +323,7 @@ bool CUTXOSet::SpendUTXO(const COutPoint& outpoint) {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // Get the UTXO to update statistics
     CUTXOEntry entry;
@@ -349,6 +373,11 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
         std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Database not open" << std::endl;
         return false;
     }
+
+    // TX-001 FIX: Lock for entire block application to prevent cache races
+    // Using recursive_mutex allows this to call other member functions (like GetUTXO)
+    // that also acquire the lock
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // ============================================================================
     // CS-004: UTXO Set Updates - ApplyBlock Implementation
@@ -527,6 +556,11 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
         std::cerr << "[ERROR] CUTXOSet::UndoBlock: Database not open" << std::endl;
         return false;
     }
+
+    // TX-001 FIX: Lock for entire block undo to prevent cache races
+    // Using recursive_mutex allows this to call other member functions
+    // that also acquire the lock
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // ============================================================================
     // CS-004: UTXO Set Updates - UndoBlock Implementation
@@ -737,7 +771,7 @@ bool CUTXOSet::Flush() {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // Use batch write for efficiency
     leveldb::WriteBatch batch;
@@ -790,7 +824,7 @@ bool CUTXOSet::Flush() {
 // ============================================================================
 
 CUTXOStats CUTXOSet::GetStats() const {
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
     return stats;
 }
 
@@ -800,7 +834,7 @@ bool CUTXOSet::UpdateStats() {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     // Reset statistics
     uint64_t utxo_count = 0;
@@ -873,7 +907,7 @@ bool CUTXOSet::VerifyConsistency() const {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     uint64_t utxo_count = 0;
     uint64_t total_amount = 0;
@@ -938,7 +972,7 @@ bool CUTXOSet::Clear() {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(cs_utxo);
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
     std::cout << "[WARNING] CUTXOSet::Clear: Clearing entire UTXO set!" << std::endl;
 
@@ -971,6 +1005,7 @@ bool CUTXOSet::Clear() {
 
     // Clear caches
     cache.clear();
+    lru_list.clear();  // TX-004: Clear LRU list
     cache_additions.clear();
     cache_deletions.clear();
 

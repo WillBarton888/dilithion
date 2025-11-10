@@ -653,7 +653,7 @@ BOOST_AUTO_TEST_CASE(transaction_value_exceeds_max_money) {
 
     tx.vin.push_back(CTxIn(hash, 0, script, CTxIn::SEQUENCE_FINAL));
 
-    // MAX_MONEY is 21,000,000 * COIN (100,000,000 satoshis)
+    // MAX_MONEY is 21,000,000 * COIN (100,000,000 ions)
     // Add output exceeding this
     tx.vout.push_back(CTxOut(TxValidation::MAX_MONEY + 1, script));
 

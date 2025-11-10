@@ -174,13 +174,13 @@ bool CTransaction::CheckBasicStructure() const {
     // Check that outputs don't overflow
     uint64_t totalOut = 0;
     for (const CTxOut& txout : vout) {
-        // Explicit check for negative values (defense in depth)
-        // Note: nValue is uint64_t, but this check is good practice
-        if (txout.nValue < 0) {
-            return false;
-        }
+        // TX-006 FIX: Removed impossible negative check on unsigned type
+        // nValue is uint64_t (unsigned), so it can never be negative
+        // Static assert ensures this remains true if type changes in future
+        static_assert(std::is_unsigned<decltype(txout.nValue)>::value,
+                      "CTxOut::nValue must be unsigned type");
 
-        if (txout.nValue > 21000000ULL * 100000000ULL) {  // Max supply * satoshis
+        if (txout.nValue > 21000000ULL * 100000000ULL) {  // Max supply * ions
             return false;
         }
 
@@ -341,6 +341,22 @@ bool CTransaction::Deserialize(const uint8_t* data, size_t len, std::string* err
         return false;
     }
 
+    // TX-003 FIX: Estimate minimum transaction size before allocating
+    // This prevents DoS from malformed transactions that claim huge counts
+    // but don't have the data to back it up
+    //
+    // Minimum size per input: 32 (hash) + 4 (index) + 1 (scriptSig len=0) + 4 (sequence) = 41 bytes
+    // Minimum size per output: 8 (value) + 1 (scriptPubKey len=0) = 9 bytes
+    const size_t MIN_TX_INPUT_SIZE = 41;
+    const size_t MIN_TX_OUTPUT_SIZE = 9;
+
+    // Check if we have enough data remaining for claimed input count
+    size_t min_inputs_size = vin_count * MIN_TX_INPUT_SIZE;
+    if (min_inputs_size > static_cast<size_t>(end - ptr)) {
+        if (error) *error = "Transaction claims more inputs than data available";
+        return false;
+    }
+
     // Deserialize each input
     vin.resize(vin_count);
     for (size_t i = 0; i < vin_count; i++) {
@@ -394,6 +410,13 @@ bool CTransaction::Deserialize(const uint8_t* data, size_t len, std::string* err
     // Sanity check: max 100k outputs
     if (vout_count > 100000) {
         if (error) *error = "Too many outputs";
+        return false;
+    }
+
+    // TX-003 FIX: Check if we have enough data remaining for claimed output count
+    size_t min_outputs_size = vout_count * MIN_TX_OUTPUT_SIZE;
+    if (min_outputs_size > static_cast<size_t>(end - ptr)) {
+        if (error) *error = "Transaction claims more outputs than data available";
         return false;
     }
 

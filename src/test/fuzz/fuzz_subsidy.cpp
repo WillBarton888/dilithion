@@ -25,7 +25,7 @@
  */
 
 // Constants
-static const int64_t COIN = 100000000; // 1 DIL = 100,000,000 satoshis
+static const int64_t COIN = 100000000; // 1 DIL = 100,000,000 ions
 static const int64_t INITIAL_SUBSIDY = 50 * COIN;
 static const int HALVING_INTERVAL = 210000;
 
@@ -102,7 +102,7 @@ FUZZ_TARGET(subsidy_calculate)
  * - subsidy_total_supply (21M supply convergence)
  * - subsidy_bit_shift (right shift correctness)
  * - subsidy_coinbase_validation (coinbase value validation)
- * - subsidy_precision (satoshi precision)
+ * - subsidy_precision (ion precision)
  * - subsidy_extreme_heights (INT_MAX handling)
  *
  * For now, keeping only "subsidy_calculate" as the primary test.
@@ -144,7 +144,7 @@ FUZZ_TARGET(subsidy_halving_schedule)
         int64_t diff = subsidy - test.expected_subsidy;
         if (diff < 0) diff = -diff;
 
-        assert(diff <= 1); // Within 1 satoshi
+        assert(diff <= 1); // Within 1 ion
     }
 }
 
@@ -274,19 +274,19 @@ FUZZ_TARGET(subsidy_coinbase_validation)
 /**
  * Fuzz target: Subsidy precision
  *
- * Tests that subsidy calculations maintain satoshi precision
+ * Tests that subsidy calculations maintain ion precision
  */
 FUZZ_TARGET(subsidy_precision)
 {
-    // Test that all subsidy values are exact satoshi amounts
+    // Test that all subsidy values are exact ion amounts
 
     for (int height = 0; height < 1000000; height += 1000) {
         int64_t subsidy = GetBlockSubsidy(height);
 
-        // Subsidy should always be whole satoshis
+        // Subsidy should always be whole ions
         assert(subsidy >= 0);
 
-        // Should be divisible by 1 satoshi (trivially true, but checks for corruption)
+        // Should be divisible by 1 ion (trivially true, but checks for corruption)
         assert((subsidy % 1) == 0);
 
         // For non-zero subsidy, check it's a proper halving

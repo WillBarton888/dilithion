@@ -24,12 +24,12 @@ BOOST_AUTO_TEST_SUITE(util_tests)
 BOOST_AUTO_TEST_SUITE(amount_tests)
 
 BOOST_AUTO_TEST_CASE(coin_definition) {
-    // 1 DIL = 100,000,000 satoshis
+    // 1 DIL = 100,000,000 ions
     BOOST_CHECK_EQUAL(COIN, 100000000);
 }
 
 BOOST_AUTO_TEST_CASE(cent_definition) {
-    // 1 cent = 1,000,000 satoshis
+    // 1 cent = 1,000,000 ions
     BOOST_CHECK_EQUAL(CENT, 1000000);
     BOOST_CHECK_EQUAL(CENT * 100, COIN);
 }
@@ -45,15 +45,15 @@ BOOST_AUTO_TEST_CASE(amount_arithmetic) {
     BOOST_CHECK_EQUAL(COIN / 10, 10000000);  // 0.1 DIL
 }
 
-BOOST_AUTO_TEST_CASE(satoshi_conversion) {
-    // Convert from DIL to satoshis
+BOOST_AUTO_TEST_CASE(ion_conversion) {
+    // Convert from DIL to ions
     uint64_t one_dil = 1 * COIN;
     BOOST_CHECK_EQUAL(one_dil, 100000000);
 
     uint64_t half_dil = COIN / 2;
     BOOST_CHECK_EQUAL(half_dil, 50000000);
 
-    // 0.001 DIL = 100,000 satoshis
+    // 0.001 DIL = 100,000 ions
     uint64_t milli_dil = COIN / 1000;
     BOOST_CHECK_EQUAL(milli_dil, 100000);
 }
