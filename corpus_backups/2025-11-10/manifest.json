@@ -1,0 +1,30 @@
+{
+  "backup_date": "2025-11-09T20:47:04Z",
+  "total_files": 55,
+  "total_size_bytes": 3422,
+  "max_files_per_fuzzer": 100,
+  "max_file_size_kb": 1024,
+  "fuzzers": [
+    {
+      "name": "fuzz_difficulty",
+      "file_count": 3,
+      "size_bytes": 17,
+      "node": "singapore"
+    }
+,
+    {
+      "name": "fuzz_transaction",
+      "file_count": 37,
+      "size_bytes": 1348,
+      "node": "nyc"
+    }
+,
+    {
+      "name": "fuzz_sha3",
+      "file_count": 15,
+      "size_bytes": 2057,
+      "node": "london"
+    }
+
+  ]
+}
