@@ -20,6 +20,7 @@
 
 #include <node/blockchain_storage.h>
 #include <node/mempool.h>
+#include <node/utxo_set.h>
 #include <node/genesis.h>
 #include <node/block_index.h>
 #include <consensus/params.h>
@@ -455,9 +456,19 @@ int main(int argc, char* argv[]) {
         CTxMemPool mempool;
         std::cout << "  [OK] Mempool initialized" << std::endl;
 
+        // Initialize UTXO set
+        std::cout << "Initializing UTXO set..." << std::endl;
+        CUTXOSet utxo_set;
+        if (!utxo_set.Open(config.datadir + "/chainstate")) {
+            std::cerr << "Failed to open UTXO database" << std::endl;
+            return 1;
+        }
+        std::cout << "  [OK] UTXO set opened" << std::endl;
+
         // Initialize chain state
         std::cout << "Initializing chain state..." << std::endl;
         g_chainstate.SetDatabase(&blockchain);
+        g_chainstate.SetUTXOSet(&utxo_set);
         std::cout << "  [OK] Chain state initialized" << std::endl;
 
         // Initialize RandomX (required for block hashing)
@@ -1432,6 +1443,7 @@ int main(int argc, char* argv[]) {
         rpc_server.RegisterBlockchain(&blockchain);
         rpc_server.RegisterChainState(&g_chainstate);
         rpc_server.RegisterMempool(&mempool);
+        rpc_server.RegisterUTXOSet(&utxo_set);
 
         if (!rpc_server.Start()) {
             std::cerr << "Failed to start RPC server on port " << config.rpcport << std::endl;
@@ -1549,6 +1561,9 @@ int main(int argc, char* argv[]) {
 
         std::cout << "  Stopping RPC server..." << std::endl;
         rpc_server.Stop();
+
+        std::cout << "  Closing UTXO database..." << std::endl;
+        utxo_set.Close();
 
         std::cout << "  Closing blockchain database..." << std::endl;
         blockchain.Close();
