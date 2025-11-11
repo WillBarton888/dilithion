@@ -11,47 +11,88 @@
 
 namespace {
     randomx_cache* g_randomx_cache = nullptr;
+    randomx_dataset* g_randomx_dataset = nullptr;
     randomx_vm* g_randomx_vm = nullptr;
     std::mutex g_randomx_mutex;
     std::vector<uint8_t> g_current_key;
+    bool g_is_light_mode = false;
 }
 
 extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode) {
     std::lock_guard<std::mutex> lock(g_randomx_mutex);
 
     std::vector<uint8_t> new_key((const uint8_t*)key, (const uint8_t*)key + key_len);
-    if (g_randomx_cache != nullptr && g_current_key == new_key) {
+    if (g_randomx_cache != nullptr && g_current_key == new_key && g_is_light_mode == (bool)light_mode) {
         return;
     }
 
+    // Cleanup existing resources
     if (g_randomx_vm != nullptr) {
         randomx_destroy_vm(g_randomx_vm);
         g_randomx_vm = nullptr;
+    }
+    if (g_randomx_dataset != nullptr) {
+        randomx_release_dataset(g_randomx_dataset);
+        g_randomx_dataset = nullptr;
     }
     if (g_randomx_cache != nullptr) {
         randomx_release_cache(g_randomx_cache);
         g_randomx_cache = nullptr;
     }
 
-    // Use light mode for testing/CI environments with limited memory
-    // RANDOMX_FLAG_DEFAULT uses ~256MB vs full mode ~2GB
-    randomx_flags flags = light_mode ? RANDOMX_FLAG_DEFAULT : randomx_get_flags();
+    // Set flags based on mode
+    // Light mode: RANDOMX_FLAG_DEFAULT (~256MB, cache-based, faster init)
+    // Full mode: RANDOMX_FLAG_FULL_MEM (~2GB, dataset-based, slower init but correct hashes)
+    randomx_flags flags;
+    if (light_mode) {
+        flags = RANDOMX_FLAG_DEFAULT;
+    } else {
+        // Full mode: Use hardware-specific optimizations plus full dataset
+        flags = static_cast<randomx_flags>(randomx_get_flags() | RANDOMX_FLAG_FULL_MEM);
+    }
+
+    // Allocate and initialize cache (required for both modes)
     g_randomx_cache = randomx_alloc_cache(flags);
     if (g_randomx_cache == nullptr) {
         throw std::runtime_error("Failed to allocate RandomX cache");
     }
-
-    // Call the actual RandomX library function to initialize the cache
     randomx_init_cache(g_randomx_cache, key, key_len);
 
-    g_randomx_vm = randomx_create_vm(flags, g_randomx_cache, nullptr);
-    if (g_randomx_vm == nullptr) {
-        randomx_release_cache(g_randomx_cache);
-        g_randomx_cache = nullptr;
-        throw std::runtime_error("Failed to create RandomX VM");
+    if (light_mode) {
+        // LIGHT MODE: Create VM from cache (fast init, slower hashing)
+        g_randomx_vm = randomx_create_vm(flags, g_randomx_cache, nullptr);
+        if (g_randomx_vm == nullptr) {
+            randomx_release_cache(g_randomx_cache);
+            g_randomx_cache = nullptr;
+            throw std::runtime_error("Failed to create RandomX VM in light mode");
+        }
+    } else {
+        // FULL MODE: Allocate dataset, initialize it from cache, create VM from dataset
+        // This is the correct mode for production mining and consensus verification
+        g_randomx_dataset = randomx_alloc_dataset(flags);
+        if (g_randomx_dataset == nullptr) {
+            randomx_release_cache(g_randomx_cache);
+            g_randomx_cache = nullptr;
+            throw std::runtime_error("Failed to allocate RandomX dataset");
+        }
+
+        // Initialize dataset from cache (this is the slow part - ~2 seconds)
+        unsigned long dataset_item_count = randomx_dataset_item_count();
+        randomx_init_dataset(g_randomx_dataset, g_randomx_cache, 0, dataset_item_count);
+
+        // Create VM with dataset (cache is still needed for some operations)
+        g_randomx_vm = randomx_create_vm(flags, g_randomx_cache, g_randomx_dataset);
+        if (g_randomx_vm == nullptr) {
+            randomx_release_dataset(g_randomx_dataset);
+            randomx_release_cache(g_randomx_cache);
+            g_randomx_dataset = nullptr;
+            g_randomx_cache = nullptr;
+            throw std::runtime_error("Failed to create RandomX VM in full mode");
+        }
     }
 
     g_current_key = new_key;
+    g_is_light_mode = light_mode;
 }
 
 void randomx_cleanup() {
@@ -61,11 +102,16 @@ void randomx_cleanup() {
         randomx_destroy_vm(g_randomx_vm);
         g_randomx_vm = nullptr;
     }
+    if (g_randomx_dataset != nullptr) {
+        randomx_release_dataset(g_randomx_dataset);
+        g_randomx_dataset = nullptr;
+    }
     if (g_randomx_cache != nullptr) {
         randomx_release_cache(g_randomx_cache);
         g_randomx_cache = nullptr;
     }
     g_current_key.clear();
+    g_is_light_mode = false;
 }
 
 void randomx_hash(const void* input, size_t input_len, void* output,

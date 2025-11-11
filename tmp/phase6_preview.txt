@@ -1,0 +1,56 @@
+## 🎯 Next Task: Phase 6 - Wallet Security Review
+
+**Scope:** HD wallet implementation (BIP32/BIP39/BIP44), key management, transaction signing
+
+**Priority:** HIGH - Wallet security is critical for user fund safety
+
+### Key Areas to Audit:
+
+1. **BIP39 Mnemonic Generation & Validation**
+   - Entropy quality (randomness source)
+   - Wordlist validation
+   - Checksum verification
+   - Passphrase handling
+
+2. **BIP32 HD Wallet Key Derivation**
+   - Master key generation from seed
+   - Child key derivation (hardened vs non-hardened)
+   - Extended key serialization
+   - Key path validation
+
+3. **BIP44 Account Structure**
+   - Purpose/Coin type/Account/Change/Index hierarchy
+   - Address generation
+   - Gap limit handling
+
+4. **Private Key Management**
+   - Key storage security
+   - Memory zeroing after use
+   - Access controls
+   - Encryption at rest
+
+5. **Transaction Signing**
+   - Dilithium3 signature generation
+   - Input selection
+   - Change address handling
+   - Fee calculation
+
+6. **Address Generation**
+   - P2PKH address derivation
+   - Public key to address conversion
+   - Address validation
+
+### Files to Review:
+- `src/wallet/hdwallet.h` - HD wallet interface
+- `src/wallet/hdwallet.cpp` - HD wallet implementation
+- `src/wallet/bip32.h/cpp` - BIP32 key derivation
+- `src/wallet/bip39.h/cpp` - BIP39 mnemonic handling
+- `src/wallet/bip44.h/cpp` - BIP44 account structure
+- `src/wallet/keys.h/cpp` - Key management
+- `src/wallet/wallet.h/cpp` - Wallet database operations
+
+**Estimated Effort:** 4-6 hours
+**Expected Issues:** 3-5 (typical for wallet implementations)
+**Security Focus:** Fund safety, key leakage prevention, proper cryptographic practices
+
+---

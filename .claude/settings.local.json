@@ -36,7 +36,18 @@
       "Bash(export PATH=\"/c/msys64/mingw64/bin:/c/msys64/usr/bin:$PATH\")",
       "Bash(CXXFLAGS=\"-std=c++17 -Wall -Wextra -O2 -fsanitize=address,undefined -fno-omit-frame-pointer\" LDFLAGS=\"-fsanitize=address,undefined\" make:*)",
       "Bash(export CXXFLAGS=\"-std=c++17 -Wall -Wextra -O2\")",
-      "Bash(export LDFLAGS=\"\")"
+      "Bash(export LDFLAGS=\"\")",
+      "Bash(git rev-parse:*)",
+      "Bash(git archive:*)",
+      "Bash(tar:*)",
+      "Bash(git clone:*)",
+      "Bash(/c/Users/will/dilithion/tmp/sign.c)",
+      "Bash(/c/Users/will/dilithion/tmp/sign.h)",
+      "Bash(/c/Users/will/dilithion/tmp/api.h)",
+      "Bash(/c/Users/will/dilithion/tmp/randombytes.c)",
+      "Bash(/c/Users/will/dilithion/tmp/randombytes.h)",
+      "Bash(/c/msys64/usr/bin/make build/obj/crypto/randomx_hash.o)",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []
