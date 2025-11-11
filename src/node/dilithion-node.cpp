@@ -1429,6 +1429,9 @@ int main(int argc, char* argv[]) {
         // Register components with RPC server
         rpc_server.RegisterWallet(&wallet);
         rpc_server.RegisterMiner(&miner);
+        rpc_server.RegisterBlockchain(&blockchain);
+        rpc_server.RegisterChainState(&g_chainstate);
+        rpc_server.RegisterMempool(&mempool);
 
         if (!rpc_server.Start()) {
             std::cerr << "Failed to start RPC server on port " << config.rpcport << std::endl;
