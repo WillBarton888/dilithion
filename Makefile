@@ -26,7 +26,20 @@ INCLUDES := -I src \
 # Use ?= to allow environment to set initial LDFLAGS (e.g., --coverage)
 # Then append our library paths
 LDFLAGS ?=
-LDFLAGS += -L depends/randomx/build-windows \
+
+# Platform-specific RandomX build directory
+ifeq ($(UNAME_S),Windows)
+    RANDOMX_BUILD_DIR := depends/randomx/build-windows
+else ifneq (,$(findstring MINGW,$(UNAME_S)))
+    RANDOMX_BUILD_DIR := depends/randomx/build-windows
+else ifneq (,$(findstring MSYS,$(UNAME_S)))
+    RANDOMX_BUILD_DIR := depends/randomx/build-windows
+else
+    # Linux, macOS, and other Unix-like systems
+    RANDOMX_BUILD_DIR := depends/randomx/build
+endif
+
+LDFLAGS += -L $(RANDOMX_BUILD_DIR) \
            -L depends/dilithium/ref
 
 # FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
