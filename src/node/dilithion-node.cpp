@@ -463,8 +463,11 @@ int main(int argc, char* argv[]) {
         // Initialize RandomX (required for block hashing)
         std::cout << "Initializing RandomX..." << std::endl;
         const char* rx_key = "Dilithion";
-        randomx_init_for_hashing(rx_key, strlen(rx_key), 0 /* use full mode for production */);
-        std::cout << "  [OK] RandomX initialized" << std::endl;
+        // Testnet: LIGHT mode (~256MB, for 2GB RAM nodes)
+        // Mainnet: FULL mode (~2GB, for 4GB+ RAM nodes, more secure)
+        int light_mode = Dilithion::g_chainParams->IsTestnet() ? 1 : 0;
+        randomx_init_for_hashing(rx_key, strlen(rx_key), light_mode);
+        std::cout << "  [OK] RandomX initialized (" << (light_mode ? "LIGHT" : "FULL") << " mode)" << std::endl;
 
         // Load and verify genesis block
         std::cout << "Loading genesis block..." << std::endl;

@@ -84,8 +84,10 @@ int main(int argc, char* argv[]) {
     }
 
     // Initialize RandomX VM for proof-of-work hashing
+    // IMPORTANT: Use LIGHT mode (1) for compatibility with 2GB RAM nodes
+    // Light mode uses ~256MB vs full mode ~2GB
     const char* rx_key = "Dilithion-RandomX-v1";
-    randomx_init_for_hashing(rx_key, strlen(rx_key), 0);  // full_mode=0 for faster genesis mining
+    randomx_init_for_hashing(rx_key, strlen(rx_key), 1);  // light_mode=1 for low-memory nodes
 
     // Initialize chain parameters
     if (isTestnet) {
