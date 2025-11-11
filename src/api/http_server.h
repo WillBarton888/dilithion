@@ -9,6 +9,14 @@
 #include <atomic>
 #include <functional>
 
+// Forward declare SOCKET type (cross-platform)
+#ifdef _WIN32
+    #include <winsock2.h>
+    // SOCKET is already defined by winsock2.h
+#else
+    typedef int SOCKET;
+#endif
+
 /**
  * CHttpServer - Lightweight HTTP server for REST API
  *
@@ -87,7 +95,7 @@ private:
      * Handle a single HTTP request
      * @param client_socket Socket file descriptor for client connection
      */
-    void HandleRequest(int client_socket);
+    void HandleRequest(SOCKET client_socket);
 
     /**
      * Parse HTTP request and extract method and path
@@ -105,7 +113,7 @@ private:
      * @param content_type Content-Type header value
      * @param body Response body
      */
-    void SendResponse(int client_socket, int status_code,
+    void SendResponse(SOCKET client_socket, int status_code,
                      const std::string& content_type,
                      const std::string& body);
 
@@ -113,13 +121,13 @@ private:
      * Send 404 Not Found response
      * @param client_socket Socket file descriptor
      */
-    void Send404(int client_socket);
+    void Send404(SOCKET client_socket);
 
     /**
      * Send 500 Internal Server Error response
      * @param client_socket Socket file descriptor
      */
-    void Send500(int client_socket);
+    void Send500(SOCKET client_socket);
 
     // Configuration
     int m_port;                          // Server port
@@ -128,7 +136,11 @@ private:
     // Server state
     std::thread m_server_thread;          // Server worker thread
     std::atomic<bool> m_running{false};   // Running flag
-    int m_server_socket{-1};              // Server socket file descriptor
+#ifdef _WIN32
+    SOCKET m_server_socket{INVALID_SOCKET}; // Server socket file descriptor
+#else
+    SOCKET m_server_socket{-1};             // Server socket file descriptor
+#endif
 };
 
 /**

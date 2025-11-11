@@ -5,10 +5,28 @@
 #include <iostream>
 #include <cstring>
 #include <sstream>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <fcntl.h>
+
+// Cross-platform socket headers
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
+
+    // Windows socket compatibility
+    typedef int socklen_t;
+    #define SHUT_RDWR SD_BOTH
+    #define close closesocket
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <unistd.h>
+    #include <fcntl.h>
+
+    // Linux socket compatibility
+    typedef int SOCKET;
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
+#endif
 
 // Constructor
 CHttpServer::CHttpServer(int port)
@@ -32,18 +50,38 @@ bool CHttpServer::Start() {
         return false;
     }
 
+#ifdef _WIN32
+    // Initialize Winsock on Windows
+    WSADATA wsaData;
+    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (result != 0) {
+        std::cerr << "[HttpServer] WSAStartup failed: " << result << std::endl;
+        return false;
+    }
+#endif
+
     // Create server socket
     m_server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_server_socket < 0) {
+    if (m_server_socket == INVALID_SOCKET) {
         std::cerr << "[HttpServer] Failed to create socket" << std::endl;
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
     // Set socket options to allow reuse
     int opt = 1;
+#ifdef _WIN32
+    if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)) == SOCKET_ERROR) {
+#else
     if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+#endif
         std::cerr << "[HttpServer] Failed to set socket options" << std::endl;
         close(m_server_socket);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
@@ -53,16 +91,22 @@ bool CHttpServer::Start() {
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(m_port);
 
-    if (bind(m_server_socket, (struct sockaddr*)&address, sizeof(address)) < 0) {
+    if (bind(m_server_socket, (struct sockaddr*)&address, sizeof(address)) == SOCKET_ERROR) {
         std::cerr << "[HttpServer] Failed to bind to port " << m_port << std::endl;
         close(m_server_socket);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
     // Listen for connections
-    if (listen(m_server_socket, 10) < 0) {
+    if (listen(m_server_socket, 10) == SOCKET_ERROR) {
         std::cerr << "[HttpServer] Failed to listen on port " << m_port << std::endl;
         close(m_server_socket);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
@@ -76,6 +120,9 @@ bool CHttpServer::Start() {
     } catch (const std::exception& e) {
         m_running.store(false);
         close(m_server_socket);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         std::cerr << "[HttpServer] Failed to start server thread: " << e.what() << std::endl;
         return false;
     }
@@ -93,16 +140,21 @@ void CHttpServer::Stop() {
     m_running.store(false);
 
     // Close server socket to unblock accept()
-    if (m_server_socket >= 0) {
+    if (m_server_socket != INVALID_SOCKET) {
         shutdown(m_server_socket, SHUT_RDWR);
         close(m_server_socket);
-        m_server_socket = -1;
+        m_server_socket = INVALID_SOCKET;
     }
 
     // Wait for server thread to finish
     if (m_server_thread.joinable()) {
         m_server_thread.join();
     }
+
+#ifdef _WIN32
+    // Cleanup Winsock on Windows
+    WSACleanup();
+#endif
 
     std::cout << "[HttpServer] Stopped" << std::endl;
 }
@@ -115,11 +167,11 @@ void CHttpServer::ServerThread() {
         // Accept connection
         struct sockaddr_in client_address;
         socklen_t client_len = sizeof(client_address);
-        int client_socket = accept(m_server_socket,
-                                   (struct sockaddr*)&client_address,
-                                   &client_len);
+        SOCKET client_socket = accept(m_server_socket,
+                                       (struct sockaddr*)&client_address,
+                                       &client_len);
 
-        if (client_socket < 0) {
+        if (client_socket == INVALID_SOCKET) {
             if (m_running.load()) {
                 std::cerr << "[HttpServer] Failed to accept connection" << std::endl;
             }
@@ -141,10 +193,14 @@ void CHttpServer::ServerThread() {
 }
 
 // Handle a single HTTP request
-void CHttpServer::HandleRequest(int client_socket) {
+void CHttpServer::HandleRequest(SOCKET client_socket) {
     // Read request
     char buffer[4096];
+#ifdef _WIN32
+    int bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+#else
     ssize_t bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+#endif
 
     if (bytes_read <= 0) {
         return;
@@ -203,7 +259,7 @@ bool CHttpServer::ParseRequest(const std::string& request,
 }
 
 // Send HTTP response
-void CHttpServer::SendResponse(int client_socket,
+void CHttpServer::SendResponse(SOCKET client_socket,
                                int status_code,
                                const std::string& content_type,
                                const std::string& body) {
@@ -239,13 +295,13 @@ void CHttpServer::SendResponse(int client_socket,
 }
 
 // Send 404 Not Found
-void CHttpServer::Send404(int client_socket) {
+void CHttpServer::Send404(SOCKET client_socket) {
     std::string body = R"({"error": "Not Found"})";
     SendResponse(client_socket, 404, "application/json", body);
 }
 
 // Send 500 Internal Server Error
-void CHttpServer::Send500(int client_socket) {
+void CHttpServer::Send500(SOCKET client_socket) {
     std::string body = R"({"error": "Internal Server Error"})";
     SendResponse(client_socket, 500, "application/json", body);
 }

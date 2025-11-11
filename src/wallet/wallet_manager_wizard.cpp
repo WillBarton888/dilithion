@@ -4,9 +4,13 @@
 #include <wallet/wallet_manager.h>
 #include <wallet/wallet.h>
 #include <util/strencodings.h>
+#include <util/system.h>  // For GetDataDir()
 #include <rpc/auth.h>  // FIX-001 (CRYPT-003): Constant-time passphrase comparison
 #include <iostream>
 #include <fstream>
+#include <iomanip>  // For std::setw
+#include <thread>    // For std::this_thread::sleep_for
+#include <chrono>    // For std::chrono::seconds
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -48,11 +52,62 @@ static bool SecureStringCompare(const std::string& a, const std::string& b) {
     return match && (len_a == len_b);
 }
 
+/**
+ * PERSIST-004 FIX: Race-condition-free first run check
+ *
+ * OLD CODE (VULNERABLE):
+ *   Check if wallet.dat exists → another process could create it before we do
+ *   This is a classic TOCTOU (Time-Of-Check Time-Of-Use) vulnerability
+ *
+ * NEW CODE (SECURE):
+ *   Use atomic file creation to ensure only ONE process can win the "first run" race
+ *   The filesystem guarantees atomicity of the create-if-not-exists operation
+ *
+ * Race Scenario Prevented:
+ *   Process A: IsFirstRun() → true (file doesn't exist)
+ *   Process B: IsFirstRun() → true (file doesn't exist) ← BOTH SEE "FIRST RUN"!
+ *   Process A: Creates wallet, saves to wallet.dat
+ *   Process B: Creates wallet, OVERWRITES wallet.dat ← FUNDS LOST!
+ *
+ * With Atomic Creation:
+ *   Process A: AtomicCreateFile(".wallet_init") → true (won race)
+ *   Process B: AtomicCreateFile(".wallet_init") → false (file exists, abort)
+ *   Process A: Creates wallet safely
+ *   Process B: Exits with error message
+ */
 bool CWalletManager::IsFirstRun() {
-    // Check if wallet.dat exists
+    // First, check if wallet.dat already exists (fast path for existing wallets)
     std::string wallet_path = GetDataDir() + "/wallet.dat";
     std::ifstream file(wallet_path);
-    return !file.good();
+    if (file.good()) {
+        // Wallet already exists - not first run
+        return false;
+    }
+
+    // Wallet doesn't exist - attempt atomic first-run lock
+    // This prevents race condition where two processes both try to create wallet
+    std::string lock_file = GetDataDir() + "/.wallet_init_lock";
+
+    if (AtomicCreateFile(lock_file)) {
+        // We successfully created the lock file - we won the race
+        // This process is authorized to create the wallet
+        return true;
+    } else {
+        // Lock file already exists - another process is creating the wallet
+        // We lost the race and must abort
+        std::cerr << std::endl;
+        std::cerr << "ERROR: Another instance of Dilithion is already creating a wallet." << std::endl;
+        std::cerr << "       Please wait for the other instance to complete setup." << std::endl;
+        std::cerr << std::endl;
+        std::cerr << "If you believe this is an error (crashed during setup):" << std::endl;
+        std::cerr << "  1. Ensure no other Dilithion processes are running" << std::endl;
+        std::cerr << "  2. Delete: " << lock_file << std::endl;
+        std::cerr << "  3. Try again" << std::endl;
+        std::cerr << std::endl;
+
+        // Not first run (another process is handling it)
+        return false;
+    }
 }
 
 void CWalletManager::DisplayWelcomeScreen() const {
@@ -476,7 +531,7 @@ bool CWalletManager::WarnLargeTransaction(double amount, const std::string& addr
         std::cout << COLOR_YELLOW << "Please wait 10 seconds (safety cooldown)..." << COLOR_RESET << std::endl;
         for (int i = 10; i > 0; --i) {
             std::cout << "\r" << i << " seconds remaining... " << std::flush;
-            sleep(1);
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         std::cout << "\r                          \r" << std::flush;
     }

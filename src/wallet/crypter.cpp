@@ -220,51 +220,9 @@ bool CCrypter::VerifyMAC(const std::vector<uint8_t>& ciphertext,
  *   where PRF = HMAC-SHA3-256
  */
 
-// HMAC-SHA3-256
-static void HMAC_SHA3_256(const uint8_t* key, size_t keyLen,
-                          const uint8_t* data, size_t dataLen,
-                          uint8_t* out) {
-    const size_t blockSize = 136;  // SHA3-256 rate in bytes
-    uint8_t keyPad[blockSize];
-    memory_cleanse(keyPad, blockSize);
-
-    if (keyLen <= blockSize) {
-        memcpy(keyPad, key, keyLen);
-    } else {
-        SHA3_256(key, keyLen, keyPad);  // Hash long keys
-    }
-
-    // Inner hash: H((key XOR ipad) || data)
-    uint8_t ipad[blockSize];
-    for (size_t i = 0; i < blockSize; i++) {
-        ipad[i] = keyPad[i] ^ 0x36;
-    }
-
-    std::vector<uint8_t> inner;
-    inner.insert(inner.end(), ipad, ipad + blockSize);
-    inner.insert(inner.end(), data, data + dataLen);
-
-    uint8_t innerHash[32];
-    SHA3_256(inner.data(), inner.size(), innerHash);
-
-    // Outer hash: H((key XOR opad) || innerHash)
-    uint8_t opad[blockSize];
-    for (size_t i = 0; i < blockSize; i++) {
-        opad[i] = keyPad[i] ^ 0x5c;
-    }
-
-    std::vector<uint8_t> outer;
-    outer.insert(outer.end(), opad, opad + blockSize);
-    outer.insert(outer.end(), innerHash, innerHash + 32);
-
-    SHA3_256(outer.data(), outer.size(), out);
-
-    // Wipe sensitive data
-    memory_cleanse(keyPad, blockSize);
-    memory_cleanse(ipad, blockSize);
-    memory_cleanse(opad, blockSize);
-    memory_cleanse(innerHash, 32);
-}
+// NOTE: HMAC_SHA3_256 is already implemented in src/crypto/hmac_sha3.cpp
+//       (included via #include <crypto/hmac_sha3.h> at line 6)
+//       Removed duplicate static implementation to avoid linkage conflicts
 
 // WL-007 FIX: HKDF-SHA3-256 for key derivation with domain separation
 // Implements HKDF-Expand from RFC 5869, adapted for SHA3-256

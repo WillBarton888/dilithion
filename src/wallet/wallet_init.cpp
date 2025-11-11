@@ -23,6 +23,21 @@ bool InitializeWallet(CWallet** wallet_out) {
         // Create new wallet
         CWallet* new_wallet = new CWallet();
 
+        // PERSIST-008 FIX: Initialize WAL before multi-step operations
+        std::string wallet_path = GetDataDir() + "/wallet.dat";
+        if (!new_wallet->InitializeWAL(wallet_path)) {
+            std::cerr << "ERROR: Failed to initialize WAL" << std::endl;
+            delete new_wallet;
+            return false;
+        }
+
+        // PERSIST-008 FIX: Check for incomplete operations from previous crash
+        if (!new_wallet->RecoverFromWAL()) {
+            std::cerr << "ERROR: WAL recovery failed" << std::endl;
+            delete new_wallet;
+            return false;
+        }
+
         // Run first-time setup wizard
         CWalletManager manager(new_wallet);
 
@@ -40,8 +55,7 @@ bool InitializeWallet(CWallet** wallet_out) {
         std::cout << "Saving wallet..." << std::endl;
 
         // Save wallet
-        std::string wallet_path = GetDataDir() + "/wallet.dat";
-        if (!new_wallet->SaveWallet(wallet_path)) {
+        if (!new_wallet->Save(wallet_path)) {
             std::cerr << "ERROR: Failed to save wallet!" << std::endl;
             delete new_wallet;
             return false;
@@ -55,7 +69,7 @@ bool InitializeWallet(CWallet** wallet_out) {
     std::string wallet_path = GetDataDir() + "/wallet.dat";
     CWallet* existing_wallet = new CWallet();
 
-    if (!existing_wallet->LoadWallet(wallet_path)) {
+    if (!existing_wallet->Load(wallet_path)) {
         std::cerr << "ERROR: Failed to load wallet from " << wallet_path << std::endl;
         std::cerr << "Wallet file may be corrupted." << std::endl;
         std::cerr << std::endl;
@@ -82,7 +96,7 @@ bool InitializeWallet(CWallet** wallet_out) {
             if (manager.PromptAndEncryptWallet()) {
                 std::cout << "Wallet encrypted successfully!" << std::endl;
                 // Save encrypted wallet
-                existing_wallet->SaveWallet(wallet_path);
+                existing_wallet->Save(wallet_path);
             }
         } else {
             std::cout << "RECOMMENDATION: Encrypt your wallet as soon as possible" << std::endl;
@@ -120,7 +134,7 @@ void ShutdownWallet(CWallet* wallet) {
 
     // Save wallet
     std::string wallet_path = GetDataDir() + "/wallet.dat";
-    if (!wallet->SaveWallet(wallet_path)) {
+    if (!wallet->Save(wallet_path)) {
         std::cerr << "WARNING: Failed to save wallet on shutdown!" << std::endl;
     }
 

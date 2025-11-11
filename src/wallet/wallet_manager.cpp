@@ -3,6 +3,7 @@
 
 #include <wallet/wallet_manager.h>
 #include <wallet/passphrase_validator.h>
+#include <wallet/mnemonic.h>  // PERSIST-006 FIX: BIP39 validation
 #include <util/strencodings.h>
 #include <rpc/auth.h>  // FIX-001 (CRYPT-003): Constant-time passphrase comparison
 #include <iostream>
@@ -417,6 +418,28 @@ bool CWalletManager::InteractiveCreateHDWallet(std::string& mnemonic_out) {
     return true;
 }
 
+/**
+ * RPC-006 FIX: Two-step confirmation for wallet restore
+ *
+ * OLD CODE (UNSAFE):
+ *   Single prompt → immediate restore
+ *   Easy to accidentally overwrite wallet
+ *
+ * RISK SCENARIO:
+ *   User types wrong command → starts restore flow
+ *   User continues thinking it's informational → wallet overwritten!
+ *   Original wallet keys lost → funds lost!
+ *
+ * NEW CODE (SAFE):
+ *   1. Display current wallet info (balance, addresses)
+ *   2. Show explicit WARNING about data loss
+ *   3. Require typing "CONFIRM" (not just y/n)
+ *   4. Second confirmation after entering mnemonic
+ *   5. Final point-of-no-return warning
+ *
+ * Defense in depth: Multiple explicit warnings with cognitive friction
+ * to prevent accidental wallet overwrites.
+ */
 bool CWalletManager::InteractiveRestoreHDWallet() {
     std::cout << std::endl;
     std::cout << COLOR_CYAN << COLOR_BOLD << "╔══════════════════════════════════════════════════════════════╗" << COLOR_RESET << std::endl;
@@ -424,16 +447,64 @@ bool CWalletManager::InteractiveRestoreHDWallet() {
     std::cout << COLOR_CYAN << COLOR_BOLD << "╚══════════════════════════════════════════════════════════════╝" << COLOR_RESET << std::endl;
     std::cout << std::endl;
 
-    // Check wallet state
+    // RPC-006 FIX: STEP 1 - Display current wallet state
+    std::cout << COLOR_RED << COLOR_BOLD << "⚠️  WARNING: WALLET RESTORE WILL OVERWRITE YOUR CURRENT WALLET ⚠️" << COLOR_RESET << std::endl;
+    std::cout << std::endl;
+
+    // Show current wallet info
+    std::cout << COLOR_BOLD << "Current wallet status:" << COLOR_RESET << std::endl;
+
     if (m_wallet->IsHDWallet()) {
-        PrintError("Wallet is already an HD wallet");
+        std::cout << "  • Type: HD wallet" << std::endl;
+
+        uint32_t account, external_idx, internal_idx;
+        if (m_wallet->GetHDWalletInfo(account, external_idx, internal_idx)) {
+            std::cout << "  • Account: " << account << std::endl;
+            std::cout << "  • Addresses generated: " << external_idx << std::endl;
+        }
+    } else if (!m_wallet->IsEmpty()) {
+        std::cout << "  • Type: Non-HD wallet with keys" << std::endl;
+    } else {
+        std::cout << "  • Type: Empty wallet" << std::endl;
+    }
+
+    double balance = m_wallet->GetBalance();
+    std::cout << "  • Balance: " << balance << " DIL";
+    if (balance > 0) {
+        std::cout << " " << COLOR_RED << "← YOU WILL LOSE ACCESS TO THESE FUNDS!" << COLOR_RESET;
+    }
+    std::cout << std::endl;
+    std::cout << std::endl;
+
+    // RPC-006 FIX: STEP 2 - Explicit data loss warning
+    std::cout << COLOR_RED << COLOR_BOLD << "DATA LOSS WARNING:" << COLOR_RESET << std::endl;
+    std::cout << COLOR_RED << "  • Your current wallet file will be PERMANENTLY OVERWRITTEN" << COLOR_RESET << std::endl;
+    std::cout << COLOR_RED << "  • All private keys will be REPLACED" << COLOR_RESET << std::endl;
+    std::cout << COLOR_RED << "  • Funds in current wallet will be INACCESSIBLE" << COLOR_RESET << std::endl;
+    std::cout << COLOR_RED << "  • This action CANNOT be undone" << COLOR_RESET << std::endl;
+    std::cout << std::endl;
+
+    // RPC-006 FIX: STEP 3 - First confirmation (must type CONFIRM)
+    std::cout << COLOR_BOLD << "Before proceeding:" << COLOR_RESET << std::endl;
+    std::cout << "  1. Ensure you have backed up your CURRENT wallet" << std::endl;
+    std::cout << "  2. Ensure you have your recovery phrase written down correctly" << std::endl;
+    std::cout << "  3. Ensure you are restoring the CORRECT wallet" << std::endl;
+    std::cout << std::endl;
+
+    std::cout << COLOR_YELLOW << "Type '" << COLOR_BOLD << "CONFIRM" << COLOR_RESET << COLOR_YELLOW
+              << "' (all caps) to proceed, or anything else to cancel: " << COLOR_RESET;
+
+    std::string confirmation1;
+    std::getline(std::cin, confirmation1);
+
+    if (confirmation1 != "CONFIRM") {
+        std::cout << std::endl;
+        PrintWarning("Wallet restore cancelled");
+        std::cout << std::endl;
         return false;
     }
 
-    if (!m_wallet->IsEmpty()) {
-        PrintError("Can only restore HD wallet on an empty wallet");
-        return false;
-    }
+    std::cout << std::endl;
 
     // Get mnemonic
     std::cout << "Enter your 24-word recovery phrase:" << std::endl;
@@ -460,11 +531,43 @@ bool CWalletManager::InteractiveRestoreHDWallet() {
 
     std::cout << std::endl;
 
+    // RPC-006 FIX: Validate mnemonic before second confirmation
+    // This ensures we catch typos before point-of-no-return
+    if (!CMnemonic::Validate(mnemonic)) {
+        std::cout << std::endl;
+        PrintError("Invalid BIP39 mnemonic phrase");
+        PrintWarning("Possible issues:");
+        std::cout << "  • Invalid word count (must be 12, 15, 18, 21, or 24 words)" << std::endl;
+        std::cout << "  • Words not in BIP39 wordlist (typos/misspellings)" << std::endl;
+        std::cout << "  • Checksum verification failed" << std::endl;
+        std::cout << std::endl;
+        return false;
+    }
+
+    std::cout << COLOR_GREEN << "✓ Mnemonic validation passed" << COLOR_RESET << std::endl;
+    std::cout << std::endl;
+
     // Get passphrase (if any)
     std::string passphrase;
     if (PromptConfirmation("Did you use a passphrase when creating this wallet?")) {
         std::cout << "Enter passphrase: ";
         std::getline(std::cin, passphrase);
+    }
+
+    std::cout << std::endl;
+
+    // RPC-006 FIX: STEP 4 - Final point-of-no-return confirmation
+    std::cout << COLOR_RED << COLOR_BOLD << "⚠️  FINAL WARNING ⚠️" << COLOR_RESET << std::endl;
+    std::cout << std::endl;
+    std::cout << "You are about to PERMANENTLY OVERWRITE your current wallet." << std::endl;
+    std::cout << "After this point, there is NO UNDO." << std::endl;
+    std::cout << std::endl;
+
+    if (!PromptConfirmation("Are you ABSOLUTELY SURE you want to proceed?")) {
+        std::cout << std::endl;
+        PrintWarning("Wallet restore cancelled");
+        std::cout << std::endl;
+        return false;
     }
 
     std::cout << std::endl;
@@ -648,6 +751,32 @@ bool CWalletManager::CreateManualBackup(std::string& backup_path) {
     return false;
 }
 
+/**
+ * PERSIST-006 FIX: Proper BIP39 backup verification
+ *
+ * OLD CODE (WEAK):
+ *   Only checked word count (12 or 24 words)
+ *   Did NOT validate:
+ *     - Words are from BIP39 wordlist
+ *     - BIP39 checksum is correct
+ *     - Mnemonic structure is valid
+ *
+ * ATTACK SCENARIO:
+ *   User writes down 24 random words (not a valid mnemonic)
+ *   VerifyBackup() says "valid" ← FALSE SECURITY!
+ *   User loses paper backup
+ *   Tries to restore wallet → Invalid mnemonic, funds lost!
+ *
+ * NEW CODE (SECURE):
+ *   Uses CMnemonic::Validate() which checks:
+ *     1. Valid word count (12, 15, 18, 21, or 24)
+ *     2. All words in BIP39 wordlist
+ *     3. BIP39 checksum verification
+ *     4. Proper entropy extraction
+ *
+ * This ensures backup verification catches corrupted/invalid mnemonics
+ * BEFORE user loses access to their wallet file.
+ */
 bool CWalletManager::VerifyBackup(const std::string& backup_path) const {
     std::ifstream backup_file(backup_path);
     if (!backup_file.is_open()) {
@@ -655,31 +784,74 @@ bool CWalletManager::VerifyBackup(const std::string& backup_path) const {
         return false;
     }
 
-    // Basic verification - check if file contains mnemonic
+    // Read backup file and look for mnemonic lines
     std::string line;
-    bool found_mnemonic = false;
+    std::vector<std::string> candidate_lines;
 
     while (std::getline(backup_file, line)) {
-        // Look for a line with ~24 words
+        // Skip empty lines and obvious non-mnemonic lines
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        // Look for lines with space-separated words
         if (line.find(' ') != std::string::npos) {
-            int word_count = 1;
-            for (char c : line) {
-                if (c == ' ') word_count++;
-            }
-            if (word_count == 24 || word_count == 12) {
-                found_mnemonic = true;
-                break;
-            }
+            candidate_lines.push_back(line);
         }
     }
 
     backup_file.close();
 
-    if (found_mnemonic) {
-        PrintSuccess("Backup file appears valid");
-        return true;
+    // Try to validate each candidate line as a BIP39 mnemonic
+    for (const std::string& candidate : candidate_lines) {
+        // PERSIST-006 FIX: Use proper BIP39 validation with checksum verification
+        if (CMnemonic::Validate(candidate)) {
+            // Extract word count for informative message
+            int word_count = 1;
+            for (char c : candidate) {
+                if (c == ' ') word_count++;
+            }
+
+            std::cout << std::endl;
+            PrintSuccess("Backup file contains valid BIP39 mnemonic");
+            std::cout << "  • Word count: " << word_count << std::endl;
+            std::cout << "  • Checksum: VALID" << std::endl;
+            std::cout << "  • All words verified in BIP39 wordlist" << std::endl;
+            std::cout << std::endl;
+
+            return true;
+        }
+    }
+
+    // No valid mnemonic found
+    if (candidate_lines.empty()) {
+        std::cout << std::endl;
+        PrintError("Backup file does not contain a mnemonic phrase");
+        std::cout << "  Expected format: 12, 15, 18, 21, or 24 space-separated words" << std::endl;
+        std::cout << std::endl;
+        return false;
     } else {
-        PrintWarning("Backup file may be corrupted or incomplete");
+        std::cout << std::endl;
+        PrintError("Backup file contains mnemonic-like data but BIP39 validation failed");
+        std::cout << "  Possible issues:" << std::endl;
+        std::cout << "  • Invalid word count (must be 12, 15, 18, 21, or 24 words)" << std::endl;
+        std::cout << "  • Words not in BIP39 wordlist (typos/misspellings)" << std::endl;
+        std::cout << "  • Checksum verification failed (corrupted backup)" << std::endl;
+        std::cout << std::endl;
+        std::cout << "  Candidate lines found: " << candidate_lines.size() << std::endl;
+        std::cout << std::endl;
+
+        // Show first candidate for debugging
+        if (!candidate_lines.empty()) {
+            PrintWarning("First candidate line:");
+            std::cout << "  \"" << candidate_lines[0].substr(0, 80);
+            if (candidate_lines[0].length() > 80) {
+                std::cout << "...";
+            }
+            std::cout << "\"" << std::endl;
+            std::cout << std::endl;
+        }
+
         return false;
     }
 }

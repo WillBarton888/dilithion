@@ -20,6 +20,9 @@
 #include <memory>
 #include <chrono>
 
+// Forward declarations for PERSIST-008 FIX (WAL)
+class CWalletWAL;
+
 // Dilithium3 parameters (balanced security/performance)
 static const size_t DILITHIUM_PUBLICKEY_SIZE = 1952;
 static const size_t DILITHIUM_SECRETKEY_SIZE = 4032;
@@ -231,6 +234,12 @@ private:
     std::string m_walletFile;  // Current wallet file path
     bool m_autoSave;           // Auto-save after changes
 
+    // PERSIST-008 FIX: Write-Ahead Log for atomic multi-step operations
+    std::unique_ptr<CWalletWAL> m_wal;  // WAL instance (nullptr if not initialized)
+
+    // WALLET-006 FIX: UTXO locking mechanism to prevent concurrent transaction conflicts
+    std::set<COutPoint> setLockedCoins;  // UTXOs locked for transaction creation (protected by cs_wallet)
+
     // ============================================================================
     // HD Wallet (Hierarchical Deterministic) - BIP32/BIP44
     // ============================================================================
@@ -343,6 +352,24 @@ public:
      * Get unspent transaction outputs
      */
     std::vector<CWalletTx> GetUnspentTxOuts() const;
+
+    /**
+     * WALLET-008 FIX: Clean up stale UTXOs after blockchain reorganization
+     *
+     * After a blockchain reorg, some UTXOs in the wallet may no longer exist in the
+     * current chain. This function checks all wallet UTXOs against the current UTXO set
+     * and removes those that are no longer valid.
+     *
+     * Should be called:
+     * - After detecting a blockchain reorganization
+     * - Periodically during wallet rescan
+     * - On wallet startup (to recover from interrupted reorg handling)
+     *
+     * @param utxo_set Current UTXO set from blockchain
+     * @return Number of stale UTXOs removed
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    size_t CleanupStaleUTXOs(class CUTXOSet& utxo_set);
 
     /**
      * Get number of keys in wallet
@@ -669,6 +696,34 @@ public:
     void Clear();
 
     /**
+     * PERSIST-008 FIX: Initialize Write-Ahead Log for atomic operations
+     *
+     * Must be called before using AtomicOperation(). Sets up WAL file path
+     * and prepares wallet for multi-step atomic operations.
+     *
+     * @param wallet_path Path to wallet.dat file
+     * @return true if WAL initialized successfully, false on error
+     */
+    bool InitializeWAL(const std::string& wallet_path);
+
+    /**
+     * PERSIST-008 FIX: Check for incomplete WAL operations and recover
+     *
+     * Called on wallet startup to detect crashes during previous operations.
+     * If incomplete operations found, executes recovery (rollback or complete).
+     *
+     * @return true if recovery successful or no recovery needed, false on error
+     */
+    bool RecoverFromWAL();
+
+    /**
+     * PERSIST-008 FIX: Get WAL instance (for advanced operations)
+     *
+     * @return Pointer to WAL instance, or nullptr if not initialized
+     */
+    CWalletWAL* GetWAL() const { return m_wal.get(); }
+
+    /**
      * FIX-012 (WALLET-002): Validate wallet structural consistency
      *
      * Performs comprehensive validation of wallet data structures to detect:
@@ -740,15 +795,65 @@ public:
      *
      * @param utxo_set UTXO set to query
      * @param current_height Current blockchain height
+     * @param min_confirmations Minimum confirmations required (default 1) - WALLET-003 FIX
      * @return Vector of wallet transaction outputs
      */
-    std::vector<CWalletTx> ListUnspentOutputs(class CUTXOSet& utxo_set, unsigned int current_height) const;
+    std::vector<CWalletTx> ListUnspentOutputs(class CUTXOSet& utxo_set, unsigned int current_height, unsigned int min_confirmations = 1) const;
+
+    // ========================================================================
+    // WALLET-006 FIX: UTXO Locking Mechanism
+    // ========================================================================
+
+    /**
+     * Lock a UTXO to prevent it from being selected in concurrent transactions
+     *
+     * @param outpoint The UTXO to lock (txid + vout)
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    void LockCoin(const COutPoint& outpoint);
+
+    /**
+     * Unlock a previously locked UTXO
+     *
+     * @param outpoint The UTXO to unlock
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    void UnlockCoin(const COutPoint& outpoint);
+
+    /**
+     * Check if a UTXO is currently locked
+     *
+     * @param outpoint The UTXO to check
+     * @return true if locked, false otherwise
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    bool IsLocked(const COutPoint& outpoint) const;
+
+    /**
+     * Get list of all locked UTXOs
+     *
+     * @return Vector of locked COutPoints
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    std::vector<COutPoint> ListLockedCoins() const;
+
+    /**
+     * Unlock all locked UTXOs
+     *
+     * Useful for recovery or manual intervention
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    void UnlockAllCoins();
+
+    // ========================================================================
 
     /**
      * Select coins to fund a transaction (coin selection algorithm)
      *
      * Uses simple greedy algorithm: selects largest UTXOs first until target is reached.
      * Future versions can implement more sophisticated algorithms (knapsack, branch & bound).
+     *
+     * WALLET-006 FIX: Now skips locked UTXOs to prevent concurrent transaction conflicts
      *
      * @param target_value Amount needed (including fee)
      * @param selected_coins Output vector of selected UTXOs

@@ -49,6 +49,13 @@
 #include <atomic>
 #include <optional>
 
+// Windows API macro conflicts - undef after including headers
+#ifdef _WIN32
+    #ifdef SendMessage
+        #undef SendMessage  // Windows defines this as SendMessageA/SendMessageW
+    #endif
+#endif
+
 // Global chain state
 CChainState g_chainstate;
 
@@ -912,7 +919,7 @@ int main(int argc, char* argv[]) {
                     std::cout << "[P2P] Block activated successfully" << std::endl;
 
                     // Check if this became the new tip
-                    if (g_chainstate.GetTip() == pblockIndex) {
+                    if (g_chainstate.GetTip() == pblockIndex.get()) {
                         std::cout << "[P2P] Updated best block to height " << pblockIndex->nHeight << std::endl;
                         g_node_state.new_block_found = true;
                     } else {
@@ -1072,7 +1079,7 @@ int main(int argc, char* argv[]) {
 
                     // Stop mining - need to reassess chain state
                     g_node_state.new_block_found = true;
-                } else if (g_chainstate.GetTip() == pblockIndex) {
+                } else if (g_chainstate.GetTip() == pblockIndex.get()) {
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndex->nHeight << std::endl;
 
                     // Broadcast block to network (P2P block relay) - Using async broadcaster

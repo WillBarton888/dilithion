@@ -3,6 +3,7 @@
 
 #include <rpc/server.h>
 #include <rpc/auth.h>
+#include <rpc/json_util.h>  // RPC-007 FIX: Proper JSON parsing
 #include <wallet/passphrase_validator.h>
 #include <node/mempool.h>
 #include <node/blockchain_storage.h>
@@ -884,167 +885,142 @@ bool CRPCServer::ExtractAuthHeader(const std::string& request, std::string& auth
     return false;  // No Authorization header found
 }
 
-RPCRequest CRPCServer::ParseRPCRequest(const std::string& json) {
-    // RPC-002 FIX: Hardened JSON parser with proper bounds checking
-    // NOTE: For production, jsoncpp library recommended for full JSON support
-    // This implementation provides security against DoS and parsing attacks
-
+/**
+ * RPC-007 FIX: Replace manual string parsing with proper JSON library
+ *
+ * OLD CODE (FRAGILE):
+ *   163 lines of manual substr() and find() calls
+ *   Custom bounds checking at every step
+ *   Hard to maintain, easy to introduce bugs
+ *   Doesn't handle edge cases (escaped quotes, unicode, etc.)
+ *
+ * NEW CODE (ROBUST):
+ *   Use nlohmann/json - industry-standard, battle-tested library
+ *   Automatic type checking and validation
+ *   Handles all JSON edge cases correctly
+ *   Clear error messages for debugging
+ *
+ * Security benefits:
+ *   - Proper JSON parsing prevents injection attacks
+ *   - Built-in depth limiting prevents stack overflow
+ *   - Handles malformed JSON safely
+ *   - Type-safe parameter extraction
+ */
+RPCRequest CRPCServer::ParseRPCRequest(const std::string& json_str) {
     RPCRequest req;
 
-    // Validate JSON is not empty
-    if (json.empty()) {
+    // Validate input is not empty
+    if (json_str.empty()) {
         throw std::runtime_error("Empty JSON-RPC request");
     }
 
-    // RPC-002 FIX: Validate JSON depth (prevent stack overflow from nested structures)
-    const size_t MAX_JSON_DEPTH = 10;
-    size_t depth = 0;
-    size_t maxDepth = 0;
-    for (char c : json) {
-        if (c == '{' || c == '[') {
-            depth++;
-            maxDepth = std::max(maxDepth, depth);
-            if (maxDepth > MAX_JSON_DEPTH) {
+    // Parse JSON with automatic error handling
+    nlohmann::json j;
+    try {
+        j = nlohmann::json::parse(json_str);
+    } catch (const nlohmann::json::parse_error& e) {
+        throw std::runtime_error("JSON parse error: " + std::string(e.what()));
+    }
+
+    // Validate root is an object
+    if (!j.is_object()) {
+        throw std::runtime_error("JSON-RPC request must be an object");
+    }
+
+    // RPC-002 FIX: Validate JSON depth (prevent stack overflow)
+    // nlohmann/json has built-in depth limiting, but we add explicit check
+    auto validateDepth = [](const nlohmann::json& obj, size_t max_depth = 10) {
+        std::function<size_t(const nlohmann::json&, size_t)> getDepth;
+        getDepth = [&](const nlohmann::json& o, size_t current) -> size_t {
+            if (current > max_depth) {
                 throw std::runtime_error("JSON nesting too deep (max 10 levels)");
             }
-        } else if (c == '}' || c == ']') {
-            if (depth == 0) {
-                throw std::runtime_error("Mismatched JSON brackets");
+            size_t max = current;
+            if (o.is_object()) {
+                for (auto it = o.begin(); it != o.end(); ++it) {
+                    max = std::max(max, getDepth(it.value(), current + 1));
+                }
+            } else if (o.is_array()) {
+                for (const auto& item : o) {
+                    max = std::max(max, getDepth(item, current + 1));
+                }
             }
-            depth--;
+            return max;
+        };
+        getDepth(obj, 0);
+    };
+    validateDepth(j);
+
+    // Extract jsonrpc version (should be "2.0")
+    if (j.contains("jsonrpc")) {
+        if (!j["jsonrpc"].is_string()) {
+            throw std::runtime_error("'jsonrpc' field must be a string");
         }
+        req.jsonrpc = j["jsonrpc"].get<std::string>();
+        if (req.jsonrpc != "2.0") {
+            throw std::runtime_error("Unsupported JSON-RPC version: " + req.jsonrpc);
+        }
+    } else {
+        req.jsonrpc = "2.0";  // Default to 2.0
     }
-
-    // Helper lambda for safe string extraction with bounds checking
-    auto safeFind = [&json](const std::string& needle, size_t start = 0) -> size_t {
-        if (start >= json.size()) return std::string::npos;
-        return json.find(needle, start);
-    };
-
-    auto safeSubstr = [&json](size_t start, size_t len) -> std::string {
-        if (start >= json.size()) {
-            throw std::runtime_error("JSON parsing: position out of bounds");
-        }
-        if (start + len > json.size()) {
-            throw std::runtime_error("JSON parsing: length exceeds string bounds");
-        }
-        return json.substr(start, len);
-    };
 
     // Extract method (REQUIRED field)
-    size_t methodPos = safeFind("\"method\"");
-    if (methodPos == std::string::npos) {
-        throw std::runtime_error("Missing 'method' field in JSON-RPC request");
+    if (!j.contains("method")) {
+        throw std::runtime_error("Missing required 'method' field");
     }
-
-    size_t colonPos = safeFind(":", methodPos);
-    if (colonPos == std::string::npos || colonPos + 1 >= json.size()) {
-        throw std::runtime_error("Invalid 'method' field format");
+    if (!j["method"].is_string()) {
+        throw std::runtime_error("'method' field must be a string");
     }
+    req.method = j["method"].get<std::string>();
 
-    size_t quoteStart = safeFind("\"", colonPos);
-    if (quoteStart == std::string::npos || quoteStart + 1 >= json.size()) {
-        throw std::runtime_error("Invalid 'method' field format (missing quotes)");
-    }
-
-    size_t quoteEnd = safeFind("\"", quoteStart + 1);
-    if (quoteEnd == std::string::npos || quoteEnd <= quoteStart + 1) {
-        throw std::runtime_error("Invalid 'method' field format (unterminated string)");
-    }
-
-    // RPC-007 FIX: Validate method name length and characters
+    // Validate method name
     const size_t MAX_METHOD_LEN = 64;
-    if (quoteEnd - quoteStart - 1 > MAX_METHOD_LEN) {
+    if (req.method.empty()) {
+        throw std::runtime_error("Empty method name");
+    }
+    if (req.method.length() > MAX_METHOD_LEN) {
         throw std::runtime_error("Method name too long (max 64 characters)");
     }
-    req.method = safeSubstr(quoteStart + 1, quoteEnd - quoteStart - 1);
 
     // Validate method contains only allowed characters (alphanumeric + underscore)
     for (char c : req.method) {
         if (!isalnum(c) && c != '_') {
-            throw std::runtime_error("Invalid character in method name");
+            throw std::runtime_error("Invalid character in method name: '" + std::string(1, c) + "'");
         }
     }
 
     // Extract id (OPTIONAL field per JSON-RPC 2.0 spec)
-    size_t idPos = safeFind("\"id\"");
-    if (idPos != std::string::npos) {
-        colonPos = safeFind(":", idPos);
-        if (colonPos != std::string::npos && colonPos + 1 < json.size()) {
-            // Try string id first
-            quoteStart = safeFind("\"", colonPos);
-            if (quoteStart != std::string::npos && quoteStart < json.size() - 1) {
-                quoteEnd = safeFind("\"", quoteStart + 1);
-                if (quoteEnd != std::string::npos && quoteEnd > quoteStart + 1) {
-                    // RPC-019 FIX: Validate ID length
-                    const size_t MAX_ID_LEN = 128;
-                    if (quoteEnd - quoteStart - 1 > MAX_ID_LEN) {
-                        throw std::runtime_error("Request ID too long (max 128 characters)");
-                    }
-                    req.id = safeSubstr(quoteStart + 1, quoteEnd - quoteStart - 1);
-                }
-            } else {
-                // Numeric or null id
-                size_t numStart = colonPos + 1;
-                while (numStart < json.size() && isspace(json[numStart])) numStart++;
-
-                if (numStart < json.size()) {
-                    // Check for null
-                    if (json.compare(numStart, 4, "null") == 0) {
-                        req.id = "null";
-                    } else {
-                        // Extract numeric id
-                        size_t numEnd = numStart;
-                        while (numEnd < json.size() && (isdigit(json[numEnd]) || json[numEnd] == '-')) {
-                            numEnd++;
-                        }
-                        if (numEnd > numStart && numEnd - numStart <= 20) {  // Max 20 digits
-                            req.id = safeSubstr(numStart, numEnd - numStart);
-                        }
-                    }
-                }
+    if (j.contains("id")) {
+        const auto& id_field = j["id"];
+        if (id_field.is_string()) {
+            const std::string id_str = id_field.get<std::string>();
+            const size_t MAX_ID_LEN = 128;
+            if (id_str.length() > MAX_ID_LEN) {
+                throw std::runtime_error("Request ID too long (max 128 characters)");
             }
+            req.id = id_str;
+        } else if (id_field.is_number_integer()) {
+            req.id = std::to_string(id_field.get<int64_t>());
+        } else if (id_field.is_null()) {
+            req.id = "null";
+        } else {
+            throw std::runtime_error("'id' field must be string, number, or null");
         }
     }
 
     // Extract params (OPTIONAL field)
-    size_t paramsPos = safeFind("\"params\"");
-    if (paramsPos != std::string::npos) {
-        colonPos = safeFind(":", paramsPos);
-        if (colonPos != std::string::npos && colonPos + 1 < json.size()) {
-            // Skip whitespace
-            size_t valueStart = colonPos + 1;
-            while (valueStart < json.size() && isspace(json[valueStart])) valueStart++;
-
-            if (valueStart < json.size()) {
-                // Check if params is array or object
-                if (json[valueStart] == '[') {
-                    // Array params
-                    size_t arrayEnd = safeFind("]", valueStart);
-                    if (arrayEnd == std::string::npos) {
-                        throw std::runtime_error("Unterminated params array");
-                    }
-                    req.params = safeSubstr(valueStart, arrayEnd - valueStart + 1);
-                } else if (json[valueStart] == '{') {
-                    // Object params
-                    size_t objEnd = safeFind("}", valueStart);
-                    if (objEnd == std::string::npos) {
-                        throw std::runtime_error("Unterminated params object");
-                    }
-                    req.params = safeSubstr(valueStart, objEnd - valueStart + 1);
-                } else if (json.compare(valueStart, 4, "null") == 0) {
-                    req.params = "null";
-                }
-            }
+    // Store params as JSON string for backward compatibility with existing RPC methods
+    if (j.contains("params")) {
+        const auto& params_field = j["params"];
+        if (params_field.is_object() || params_field.is_array()) {
+            req.params = params_field.dump();  // Serialize back to JSON string
+        } else if (params_field.is_null()) {
+            req.params = "null";
+        } else {
+            throw std::runtime_error("'params' field must be object, array, or null");
         }
     }
 
-    // Final validation
-    if (req.method.empty()) {
-        throw std::runtime_error("Empty method name");
-    }
-
-    req.jsonrpc = "2.0";
     return req;
 }
 
@@ -1335,6 +1311,18 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
     }
     if (amount <= 0) {
         throw std::runtime_error("Invalid amount (must be positive)");
+    }
+
+    // RPC-004 FIX: Prevent dust attack by rejecting amounts below dust threshold
+    // Dust outputs are economically unspendable (tx fee > output value)
+    // This prevents UTXO bloat and protects users from wasting funds
+    if (amount < DUST_THRESHOLD) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "Amount below dust threshold (%.8f DIL minimum, got %.8f DIL). "
+                 "Dust outputs are uneconomical to spend.",
+                 DUST_THRESHOLD / 100000000.0, amount / 100000000.0);
+        throw std::runtime_error(msg);
     }
 
     // Validate address

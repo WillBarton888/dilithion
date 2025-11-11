@@ -3,6 +3,8 @@
 
 #include <wallet/wallet.h>
 #include <wallet/passphrase_validator.h>
+#include <wallet/wal.h>  // PERSIST-008 FIX
+#include <wallet/wal_recovery.h>  // PERSIST-008 FIX
 #include <crypto/sha3.h>
 #include <crypto/hmac_sha3.h>  // FIX-011: For file integrity HMAC
 #include <rpc/auth.h>  // FIX-011/FIX-012: For SecureCompare
@@ -10,8 +12,10 @@
 #include <node/utxo_set.h>
 #include <node/mempool.h>
 #include <consensus/tx_validation.h>
+#include <consensus/sighash.h>  // WALLET-015 FIX: SIGHASH types
 
 #include <algorithm>
+#include <random>  // WALLET-007 FIX: For std::shuffle
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -162,6 +166,7 @@ CWallet::CWallet()
       nUnlockFailedAttempts(0),  // WL-011: Initialize rate limiting
       nLastFailedUnlock(std::chrono::steady_clock::time_point::min()),
       m_autoSave(false),
+      m_wal(nullptr),  // PERSIST-008 FIX: Initialize WAL
       fIsHDWallet(false),
       fHDMasterKeyEncrypted(false),
       fHDMasterKeyCached(false),  // WL-010: Initialize cache flag
@@ -412,6 +417,65 @@ std::vector<CWalletTx> CWallet::GetUnspentTxOuts() const {
 
     return vUnspent;
 }
+
+// ============================================================================
+// WALLET-008 FIX: Stale UTXO Cleanup
+// ============================================================================
+
+size_t CWallet::CleanupStaleUTXOs(CUTXOSet& utxo_set) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    size_t removed_count = 0;
+    std::vector<COutPoint> to_mark_spent;
+
+    // Iterate through all wallet transactions to find stale UTXOs
+    for (auto& pair : mapWalletTx) {
+        CWalletTx& wtx = pair.second;
+
+        // Skip already spent outputs
+        if (wtx.fSpent) {
+            continue;
+        }
+
+        // Check if this UTXO still exists in the current blockchain UTXO set
+        COutPoint outpoint(wtx.txid, wtx.vout);
+
+        // Query the UTXO set to see if this output still exists
+        // If the UTXO doesn't exist in the set, it's stale (invalidated by reorg)
+        if (!utxo_set.HaveUTXO(outpoint)) {
+            // UTXO no longer exists in blockchain - mark for removal
+            to_mark_spent.push_back(outpoint);
+            removed_count++;
+
+            std::cout << "[WALLET] Detected stale UTXO at index " << outpoint.n
+                      << " (amount: " << wtx.nValue << " ions)"
+                      << std::endl;
+        }
+    }
+
+    // Mark stale UTXOs as spent
+    // Note: We don't delete them from mapWalletTx to preserve transaction history,
+    // just mark them as spent so they won't be selected for new transactions
+    for (const COutPoint& outpoint : to_mark_spent) {
+        auto it = mapWalletTx.find(outpoint);
+        if (it != mapWalletTx.end()) {
+            it->second.fSpent = true;
+        }
+    }
+
+    if (removed_count > 0) {
+        std::cout << "[WALLET] Cleaned up " << removed_count << " stale UTXO(s)" << std::endl;
+
+        // Mark wallet as needing save
+        if (m_autoSave && !m_walletFile.empty()) {
+            Save(m_walletFile);
+        }
+    }
+
+    return removed_count;
+}
+
+// ============================================================================
 
 size_t CWallet::GetKeyPoolSize() const {
     std::lock_guard<std::mutex> lock(cs_wallet);
@@ -1871,6 +1935,68 @@ void CWallet::SetWalletFile(const std::string& filename) {
     m_autoSave = true;  // Enable auto-save when wallet file is set
 }
 
+// PERSIST-008 FIX: Write-Ahead Log (WAL) integration
+bool CWallet::InitializeWAL(const std::string& wallet_path) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Create WAL instance
+    m_wal = std::make_unique<CWalletWAL>();
+
+    // Initialize WAL with wallet path
+    if (!m_wal->Initialize(wallet_path)) {
+        std::cerr << "[WALLET ERROR] Failed to initialize WAL" << std::endl;
+        m_wal.reset();
+        return false;
+    }
+
+    std::cout << "[WALLET] WAL initialized for " << wallet_path << std::endl;
+    return true;
+}
+
+bool CWallet::RecoverFromWAL() {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Check if WAL is initialized
+    if (!m_wal) {
+        std::cerr << "[WALLET ERROR] WAL not initialized - call InitializeWAL() first" << std::endl;
+        return false;
+    }
+
+    // Check for incomplete operations
+    std::vector<std::string> incomplete_ops;
+    if (!m_wal->HasIncompleteOperations(incomplete_ops)) {
+        std::cerr << "[WALLET ERROR] Failed to check for incomplete operations" << std::endl;
+        return false;
+    }
+
+    if (incomplete_ops.empty()) {
+        std::cout << "[WALLET] No incomplete WAL operations found" << std::endl;
+        return true;  // Nothing to recover
+    }
+
+    // Recover each incomplete operation
+    std::cout << "[WALLET RECOVERY] Found " << incomplete_ops.size() << " incomplete operations" << std::endl;
+
+    for (const auto& op_id : incomplete_ops) {
+        RecoveryPlan plan;
+        if (!CWalletRecovery::AnalyzeOperation(*m_wal, op_id, plan)) {
+            std::cerr << "[WALLET RECOVERY ERROR] Failed to analyze operation " << op_id << std::endl;
+            return false;
+        }
+
+        // Execute recovery
+        if (!CWalletRecovery::ExecuteRecovery(this, *m_wal, plan)) {
+            std::cerr << "[WALLET RECOVERY ERROR] Failed to recover operation " << op_id << std::endl;
+            return false;
+        }
+
+        std::cout << "[WALLET RECOVERY] Successfully recovered operation " << op_id.substr(0, 8) << "..." << std::endl;
+    }
+
+    std::cout << "[WALLET RECOVERY] All operations recovered successfully" << std::endl;
+    return true;
+}
+
 void CWallet::Clear() {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
@@ -2351,7 +2477,7 @@ CAmount CWallet::GetAvailableBalance(CUTXOSet& utxo_set, unsigned int current_he
     return balance;
 }
 
-std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned int current_height) const {
+std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned int current_height, unsigned int min_confirmations) const {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     std::vector<CWalletTx> unspent;
@@ -2372,6 +2498,22 @@ std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned 
             continue;
         }
 
+        // WALLET-003 FIX: Check confirmation depth to prevent spending unconfirmed transactions
+        // Without this check, wallet spends 0-conf transactions which are vulnerable to:
+        // - Double-spend attacks (attacker replaces transaction before it confirms)
+        // - Chain reorganizations (transaction may disappear from chain)
+        // Impact: Protects against double-spend and ensures funds are safe from reorgs
+        // Confirmations = (current_height - tx_height) + 1
+        // For unconfirmed txs (height = 0 or not in chain), depth = 0
+        unsigned int depth = 0;
+        if (entry.nHeight > 0 && current_height >= entry.nHeight) {
+            depth = current_height - entry.nHeight + 1;
+        }
+
+        if (depth < min_confirmations) {
+            continue;  // Insufficient confirmations
+        }
+
         // Check coinbase maturity
         if (entry.fCoinBase) {
             if (current_height < entry.nHeight + COINBASE_MATURITY) {
@@ -2384,6 +2526,37 @@ std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned 
 
     return unspent;
 }
+
+// ============================================================================
+// WALLET-006 FIX: UTXO Locking Mechanism
+// ============================================================================
+
+void CWallet::LockCoin(const COutPoint& outpoint) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    setLockedCoins.insert(outpoint);
+}
+
+void CWallet::UnlockCoin(const COutPoint& outpoint) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    setLockedCoins.erase(outpoint);
+}
+
+bool CWallet::IsLocked(const COutPoint& outpoint) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return setLockedCoins.count(outpoint) > 0;
+}
+
+std::vector<COutPoint> CWallet::ListLockedCoins() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return std::vector<COutPoint>(setLockedCoins.begin(), setLockedCoins.end());
+}
+
+void CWallet::UnlockAllCoins() {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    setLockedCoins.clear();
+}
+
+// ============================================================================
 
 bool CWallet::SelectCoins(CAmount target_value,
                           std::vector<CWalletTx>& selected_coins,
@@ -2402,15 +2575,35 @@ bool CWallet::SelectCoins(CAmount target_value,
         return false;
     }
 
-    // Simple greedy algorithm: Select largest UTXOs first
-    // Sort by value (descending)
-    std::sort(unspent.begin(), unspent.end(),
-              [](const CWalletTx& a, const CWalletTx& b) {
-                  return a.nValue > b.nValue;
-              });
+    // WALLET-007 FIX: Randomize coin selection for privacy
+    // Previous code used deterministic greedy algorithm (largest first), which creates
+    // wallet fingerprinting vulnerability. Attackers observing blockchain can identify
+    // transactions from same wallet by consistent UTXO selection patterns.
+    // Fix: Shuffle UTXOs randomly before selection to prevent fingerprinting.
+    // Impact: Improves user privacy, prevents wallet identification attacks
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(unspent.begin(), unspent.end(), g);
 
     // Select coins until we reach target
     for (const CWalletTx& wtx : unspent) {
+        // WALLET-006 FIX: Skip locked UTXOs to prevent concurrent transaction conflicts
+        COutPoint outpoint(wtx.txid, wtx.vout);
+        if (IsLocked(outpoint)) {
+            continue;  // Skip this UTXO - it's locked by another transaction
+        }
+
+        // WALLET-004 FIX: Check for integer overflow when summing coin values
+        // Without this check, selecting many large UTXOs could cause total_value to overflow,
+        // resulting in an invalid negative or wrapped-around value that bypasses target_value check
+        // Impact: Could create invalid transactions or select insufficient funds
+        if (total_value > INT64_MAX - wtx.nValue) {
+            error = "Selected coins value would overflow (exceeds maximum amount)";
+            selected_coins.clear();
+            total_value = 0;
+            return false;
+        }
+
         selected_coins.push_back(wtx);
         total_value += wtx.nValue;
 
@@ -2450,6 +2643,20 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
         return false;
     }
 
+    // WALLET-009 FIX: Validate fee meets network minimum relay fee
+    // Without this check, transactions with too-low fees will be created and signed,
+    // but then rejected by the network, wasting user's time and effort
+    // Impact: Prevents transaction relay failures, improves UX
+    if (fee < MIN_RELAY_FEE) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "Fee below minimum relay fee (%.8f DIL minimum, got %.8f DIL). "
+                 "Transaction will be rejected by the network.",
+                 MIN_RELAY_FEE / 100000000.0, fee / 100000000.0);
+        error = msg;
+        return false;
+    }
+
     // Calculate total needed
     CAmount total_needed = amount + fee;
     if (total_needed < amount) {  // Overflow check
@@ -2462,6 +2669,27 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
     CAmount total_selected = 0;
 
     if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error)) {
+        return false;
+    }
+
+    // WALLET-006 FIX: Lock selected coins to prevent concurrent transaction conflicts
+    // Lock coins immediately after selection to ensure they won't be used by another
+    // concurrent transaction. If this transaction fails, we'll unlock them before returning.
+    for (const CWalletTx& wtx : selected_coins) {
+        LockCoin(COutPoint(wtx.txid, wtx.vout));
+    }
+
+    // WALLET-012 FIX: Validate input count before creating transaction
+    // Creating and signing large transactions wastes CPU/bandwidth if they'll be rejected anyway
+    // Impact: Prevents unnecessary signing of oversized transactions
+    if (selected_coins.size() > TxValidation::MAX_INPUT_COUNT_PER_TX) {
+        error = "Too many inputs selected (" + std::to_string(selected_coins.size()) +
+                " > " + std::to_string(TxValidation::MAX_INPUT_COUNT_PER_TX) + " max). " +
+                "Transaction would be rejected by network.";
+        // Unlock coins before returning
+        for (const CWalletTx& wtx : selected_coins) {
+            UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+        }
         return false;
     }
 
@@ -2481,6 +2709,10 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
     std::vector<uint8_t> recipient_hash = GetPubKeyHashFromAddress(recipient_address);
     if (recipient_hash.empty()) {
         error = "Failed to extract recipient public key hash";
+        // WALLET-006 FIX: Unlock coins on failure
+        for (const CWalletTx& wtx : selected_coins) {
+            UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+        }
         return false;
     }
 
@@ -2490,20 +2722,81 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
 
     // Create change output if needed
     CAmount change = total_selected - total_needed;
-    if (change > 0) {
-        std::vector<uint8_t> change_hash = GetPubKeyHash();
-        if (change_hash.empty()) {
-            error = "Failed to get wallet public key hash for change";
-            return false;
+
+    // WALLET-005 FIX: Prevent dust output creation (economically unspendable UTXOs)
+    // Dust outputs are smaller than the cost to spend them (tx fee > output value)
+    // If change < DUST_THRESHOLD, add it to miner fee instead of creating dust output
+    // Impact: Prevents UTXO bloat, saves blockchain space, improves user experience
+    // DUST_THRESHOLD = 50,000 ions = 0.0005 DIL (defined in amount.h)
+    if (change >= DUST_THRESHOLD) {
+        // Change is economically spendable - create change output
+        std::vector<uint8_t> change_hash;
+
+        // WALLET-011 FIX: Use HD change address for privacy
+        // For HD wallets, generate a new change address from internal chain (m/44'/573'/0'/1'/index')
+        // instead of reusing the default address. This prevents address reuse and improves privacy.
+        // Impact: Prevents transaction graph analysis and wallet fingerprinting
+        if (IsHDWallet()) {
+            CAddress change_address = GetChangeAddress();
+            if (!change_address.IsValid()) {
+                error = "Failed to generate HD change address (wallet may be locked)";
+                // WALLET-006 FIX: Unlock coins on failure
+                for (const CWalletTx& wtx : selected_coins) {
+                    UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+                }
+                return false;
+            }
+            change_hash = GetPubKeyHashFromAddress(change_address);
+        } else {
+            // Non-HD wallet: Use default address (legacy behavior)
+            change_hash = GetPubKeyHash();
+            if (change_hash.empty()) {
+                error = "Failed to get wallet public key hash for change";
+                // WALLET-006 FIX: Unlock coins on failure
+                for (const CWalletTx& wtx : selected_coins) {
+                    UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+                }
+                return false;
+            }
         }
 
         std::vector<uint8_t> change_scriptPubKey = WalletCrypto::CreateScriptPubKey(change_hash);
         CTxOut txout_change(change, change_scriptPubKey);
         tx.vout.push_back(txout_change);
     }
+    // else: change < DUST_THRESHOLD - add to miner fee (implicit, not creating output)
 
     // Sign transaction
     if (!SignTransaction(tx, utxo_set, error)) {
+        // WALLET-006 FIX: Unlock coins on failure
+        for (const CWalletTx& wtx : selected_coins) {
+            UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+        }
+        return false;
+    }
+
+    // WALLET-013 FIX: Verify fee is sufficient for actual transaction size
+    // Without this check, transactions with insufficient fees will be created and signed,
+    // but then rejected during validation/relay, wasting user's time
+    // Impact: Prevents transaction relay failures due to insufficient fees
+    // Calculate minimum fee based on transaction size (fee per KB model)
+    static const CAmount MIN_FEE_PER_KB = MIN_RELAY_FEE * 10;  // 0.001 DIL per KB
+    size_t tx_size = tx.GetSerializedSize();
+    CAmount required_fee = ((tx_size / 1000) + 1) * MIN_FEE_PER_KB;
+
+    if (fee < required_fee) {
+        char msg[512];
+        snprintf(msg, sizeof(msg),
+                 "Fee insufficient for transaction size (%zu bytes). "
+                 "Required: %.8f DIL, Provided: %.8f DIL",
+                 tx_size,
+                 required_fee / 100000000.0,
+                 fee / 100000000.0);
+        error = msg;
+        // WALLET-006 FIX: Unlock coins on failure
+        for (const CWalletTx& wtx : selected_coins) {
+            UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+        }
         return false;
     }
 
@@ -2514,11 +2807,21 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
 
     if (!validator.CheckTransaction(tx, utxo_set, current_height, calculated_fee, validation_error)) {
         error = "Transaction validation failed: " + validation_error;
+        // WALLET-006 FIX: Unlock coins on failure
+        for (const CWalletTx& wtx : selected_coins) {
+            UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+        }
         return false;
     }
 
     // Create transaction reference
     tx_out = MakeTransactionRef(std::move(tx));
+
+    // WALLET-006 FIX: On success, keep coins locked until transaction is confirmed or manually unlocked
+    // Caller should unlock coins when:
+    // - Transaction is confirmed (spent UTXOs automatically removed from wallet)
+    // - Transaction is abandoned/cancelled (call UnlockCoin for each input)
+    // - Wallet shutdown (call UnlockAllCoins for recovery)
 
     return true;
 }
@@ -2569,10 +2872,17 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
             return false;
         }
 
+        // WALLET-015 FIX: Use SIGHASH_ALL for transaction signing
+        // SIGHASH flags control which parts of the transaction are signed
+        // SIGHASH_ALL (default): Signs all inputs and all outputs (most secure)
+        // Future enhancement: Allow caller to specify SIGHASH type for advanced use cases
+        uint8_t sighash_type = SIGHASH_ALL;
+
         // VULN-003 FIX: Create signature message with version (must match validation)
-        // signature message: tx_hash + input_index + tx_version
+        // WALLET-015 FIX: Include SIGHASH type in signature message
+        // signature message: tx_hash + input_index + tx_version + sighash_type
         std::vector<uint8_t> sig_message;
-        sig_message.reserve(32 + 4 + 4);  // hash + index + version
+        sig_message.reserve(32 + 4 + 4 + 1);  // hash + index + version + sighash
         sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
 
         // Add input index (4 bytes, little-endian)
@@ -2588,6 +2898,10 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
         sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
         sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
         sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
+
+        // WALLET-015 FIX: Add SIGHASH type to signature message
+        // This enables verification of the signature type and prevents type substitution attacks
+        sig_message.push_back(sighash_type);
 
         // Hash the signature message
         uint8_t sig_hash[32];
@@ -2629,6 +2943,29 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
         txin.scriptSig = scriptSig;
     }
 
+    // WALLET-014 FIX: Verify signatures immediately after signing (defense-in-depth)
+    // This catches any bugs in the signing process before the transaction propagates
+    // Impact: Prevents invalid transactions from being broadcast to the network
+    CTransactionValidator validator;
+    for (size_t i = 0; i < tx.vin.size(); i++) {
+        const CTxIn& txin = tx.vin[i];
+
+        // Lookup the UTXO to get scriptPubKey
+        CUTXOEntry utxo_entry;
+        if (!utxo_set.GetUTXO(txin.prevout, utxo_entry)) {
+            error = "Post-sign verification failed: UTXO not found for input " + std::to_string(i);
+            return false;
+        }
+
+        // Verify the signature
+        std::string verify_error;
+        if (!validator.VerifyScript(tx, i, txin.scriptSig, utxo_entry.out.scriptPubKey, verify_error)) {
+            error = "Post-sign verification failed for input " + std::to_string(i) + ": " + verify_error;
+            return false;
+        }
+    }
+
+    // All signatures verified successfully
     return true;
 }
 
@@ -2802,8 +3139,14 @@ CAddress CWallet::GetNewHDAddress() {
         return CAddress();  // Empty address
     }
 
-    // Check if wallet is locked and encrypted
+    // RPC-003 FIX: Enforce wallet lock check with explicit error logging
+    // Deriving new addresses when wallet is locked is a privacy/security issue:
+    // - Attacker can enumerate future addresses without passphrase
+    // - Breaks expectation that locked wallet doesn't expose sensitive operations
+    // Impact: Prevents address enumeration attacks, protects user privacy
     if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+        std::cerr << "[ERROR] Cannot generate new address: wallet is locked. "
+                  << "Please unlock wallet first." << std::endl;
         return CAddress();
     }
 
@@ -2838,8 +3181,11 @@ CAddress CWallet::GetChangeAddress() {
         return CAddress();
     }
 
-    // Check if wallet is locked and encrypted
+    // RPC-003 FIX: Enforce wallet lock check with explicit error logging
+    // Same security issue as GetNewHDAddress() - prevents change address enumeration
     if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+        std::cerr << "[ERROR] Cannot generate change address: wallet is locked. "
+                  << "Please unlock wallet first." << std::endl;
         return CAddress();
     }
 
