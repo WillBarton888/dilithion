@@ -1,6 +1,0 @@
-[submodule "depends/dilithium"]
-	path = depends/dilithium
-	url = https://github.com/pq-crystals/dilithium.git
-[submodule "depends/randomx"]
-	path = depends/randomx
-	url = https://github.com/tevador/RandomX.git
