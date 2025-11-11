@@ -157,14 +157,23 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
 bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& stream) {
     try {
         NetProtocol::CVersionMessage msg;
+
+        // Basic fields
         msg.version = stream.ReadInt32();
         msg.services = stream.ReadUint64();
         msg.timestamp = stream.ReadInt64();
 
-        // Read addresses (simplified - skip for now)
-        // msg.addr_recv = ...
-        // msg.addr_from = ...
+        // addr_recv - receiver's network address (26 bytes)
+        msg.addr_recv.services = stream.ReadUint64();
+        stream.read(msg.addr_recv.ip, 16);
+        msg.addr_recv.port = stream.ReadUint16();
 
+        // addr_from - sender's network address (26 bytes)
+        msg.addr_from.services = stream.ReadUint64();
+        stream.read(msg.addr_from.ip, 16);
+        msg.addr_from.port = stream.ReadUint16();
+
+        // Remaining fields
         msg.nonce = stream.ReadUint64();
         msg.user_agent = stream.ReadString();
         msg.start_height = stream.ReadInt32();
@@ -820,14 +829,29 @@ std::vector<uint8_t> CNetMessageProcessor::SerializeVersionMessage(
     const NetProtocol::CVersionMessage& msg)
 {
     CDataStream stream;
+
+    // Basic fields
     stream.WriteInt32(msg.version);
     stream.WriteUint64(msg.services);
     stream.WriteInt64(msg.timestamp);
-    // Addresses (simplified)
+
+    // addr_recv - receiver's network address (26 bytes)
+    // Note: CAddress has time field, but version message format doesn't include it
+    stream.WriteUint64(msg.addr_recv.services);
+    stream.write(msg.addr_recv.ip, 16);
+    stream.WriteUint16(msg.addr_recv.port);
+
+    // addr_from - sender's network address (26 bytes)
+    stream.WriteUint64(msg.addr_from.services);
+    stream.write(msg.addr_from.ip, 16);
+    stream.WriteUint16(msg.addr_from.port);
+
+    // Remaining fields
     stream.WriteUint64(msg.nonce);
     stream.WriteString(msg.user_agent);
     stream.WriteInt32(msg.start_height);
     stream.WriteUint8(msg.relay ? 1 : 0);
+
     return stream.GetData();
 }
 
