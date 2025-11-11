@@ -434,7 +434,7 @@ int main() {
 
     // Initialize RandomX VM for proof-of-work hashing
     const char* key = "dilithion_integration_test";
-    randomx_init_for_hashing(key, strlen(key));
+    randomx_init_for_hashing(key, strlen(key), 1);  // light_mode=1 for tests
     cout << "✓ RandomX VM initialized" << endl;
     cout << endl;
 

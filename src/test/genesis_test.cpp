@@ -21,10 +21,12 @@
 #include <primitives/block.h>
 #include <consensus/pow.h>
 #include <core/chainparams.h>
+#include <crypto/randomx_hash.h>
 
 #include <iostream>
 #include <iomanip>
 #include <ctime>
+#include <cstring>
 
 using namespace std;
 using namespace Dilithion;
@@ -80,6 +82,10 @@ int main(int argc, char* argv[]) {
             return 0;
         }
     }
+
+    // Initialize RandomX VM for proof-of-work hashing
+    const char* rx_key = "Dilithion-RandomX-v1";
+    randomx_init_for_hashing(rx_key, strlen(rx_key), 1);  // light_mode=1 for tests
 
     // Initialize chain parameters
     if (isTestnet) {

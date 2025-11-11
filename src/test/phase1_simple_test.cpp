@@ -123,7 +123,7 @@ int main() {
 
     // Initialize RandomX VM for hashing tests
     const char* key = "dilithion_test_key";
-    randomx_init_for_hashing(key, strlen(key));
+    randomx_init_for_hashing(key, strlen(key), 1);  // light_mode=1 for tests
 
     try {
         test_fee_calculation();
