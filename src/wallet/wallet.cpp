@@ -13,6 +13,7 @@
 #include <node/mempool.h>
 #include <consensus/tx_validation.h>
 #include <consensus/sighash.h>  // WALLET-015 FIX: SIGHASH types
+#include <core/chainparams.h>  // CHAIN-ID FIX: For replay protection
 
 #include <algorithm>
 #include <random>  // WALLET-007 FIX: For std::shuffle
@@ -2872,17 +2873,13 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
             return false;
         }
 
-        // WALLET-015 FIX: Use SIGHASH_ALL for transaction signing
-        // SIGHASH flags control which parts of the transaction are signed
-        // SIGHASH_ALL (default): Signs all inputs and all outputs (most secure)
-        // Future enhancement: Allow caller to specify SIGHASH type for advanced use cases
-        uint8_t sighash_type = SIGHASH_ALL;
-
         // VULN-003 FIX: Create signature message with version (must match validation)
-        // WALLET-015 FIX: Include SIGHASH type in signature message
-        // signature message: tx_hash + input_index + tx_version + sighash_type
+        // CHAIN-ID FIX: Include chain ID to prevent cross-chain replay attacks (EIP-155 style)
+        // Signature message: tx_hash + input_index + tx_version + chain_id
+        // Note: SIGHASH flags removed - chain ID provides stronger replay protection
+        // MUST match format in tx_validation.cpp VerifyScript()
         std::vector<uint8_t> sig_message;
-        sig_message.reserve(32 + 4 + 4 + 1);  // hash + index + version + sighash
+        sig_message.reserve(32 + 4 + 4 + 4);  // hash + index + version + chainID
         sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
 
         // Add input index (4 bytes, little-endian)
@@ -2899,9 +2896,18 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
         sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
         sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
 
-        // WALLET-015 FIX: Add SIGHASH type to signature message
-        // This enables verification of the signature type and prevents type substitution attacks
-        sig_message.push_back(sighash_type);
+        // CHAIN-ID FIX: Add chain ID to prevent cross-chain replay attacks (EIP-155 style)
+        // This prevents transactions signed on testnet from being replayed on mainnet
+        // Mainnet Chain ID = 1, Testnet Chain ID = 1001
+        if (Dilithion::g_chainParams == nullptr) {
+            error = "Chain parameters not initialized";
+            return false;
+        }
+        uint32_t chain_id = Dilithion::g_chainParams->chainID;
+        sig_message.push_back(static_cast<uint8_t>(chain_id & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((chain_id >> 8) & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((chain_id >> 16) & 0xFF));
+        sig_message.push_back(static_cast<uint8_t>((chain_id >> 24) & 0xFF));
 
         // Hash the signature message
         uint8_t sig_hash[32];

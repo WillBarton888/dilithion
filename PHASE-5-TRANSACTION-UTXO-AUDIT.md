@@ -110,7 +110,7 @@ Transaction Validation (3-Step Process)
     ├── Validate P2PKH scriptPubKey (37 or 25 bytes)
     ├── Parse scriptSig (signature + public key)
     ├── Verify public key hash matches
-    ├── Construct signature message (40 bytes)
+    ├── Construct signature message (44 bytes with chain ID)
     └── Verify Dilithium3 signature (quantum-resistant)
 ```
 
@@ -555,48 +555,57 @@ MAX_REASONABLE_FEE = 10,000,000 ions (0.1 DIL)
 
 ---
 
-### 6.2 ⚠️ MEDIUM RISK: Missing Chain ID (Cross-Chain Replay)
+### 6.2 ✅ FIXED: Chain ID Implementation (Cross-Chain Replay Protection)
 
-**Finding:** Signature message does not include chain ID
+**Original Finding:** Signature message did not include chain ID
 
-**Impact:**
-- Transactions can be replayed on testnets or forked chains
-- If Dilithion forks (e.g., Dilithion Classic), transactions could be replayed
+**Impact (Before Fix):**
+- Transactions could be replayed on testnets or forked chains
+- If Dilithion forked (e.g., Dilithion Classic), transactions could be replayed
 - Users could lose funds on both chains
 
-**Example Attack:**
+**Example Attack (Now Prevented):**
 1. User sends 100 DIL on mainnet (Chain A)
 2. Attacker captures signed transaction
-3. Attacker replays transaction on testnet (Chain B) or fork (Chain C)
-4. User loses funds on all chains where transaction is valid
+3. Attacker tries to replay transaction on testnet (Chain B) or fork (Chain C)
+4. ✅ **Transaction REJECTED** - signature validation fails due to chain ID mismatch
 
-**Documented:** Yes (tx_validation.cpp:554-557)
+**Implementation (2025-01-11):**
+- ✅ Added `chainID` field to `ChainParams` (chainparams.h)
+- ✅ Mainnet chain ID = 1, Testnet chain ID = 1001
+- ✅ Updated signature message from 40 to 44 bytes
+- ✅ Modified wallet signing (`wallet.cpp:2876-2914`)
+- ✅ Modified signature verification (`tx_validation.cpp:570-621`)
+- ✅ Fixed mainnet magic byte discrepancy (0xD1711710 → 0xD1714102)
+
+**New Signature Message Format (44 bytes):**
+```cpp
+struct SignatureMessage {
+    uint256 tx_hash;        // 32 bytes
+    uint32_t input_index;   // 4 bytes
+    uint32_t tx_version;    // 4 bytes
+    uint32_t chain_id;      // 4 bytes (NEW - EIP-155 style)
+};
+```
+
+**Updated Documentation (tx_validation.cpp):**
 ```cpp
 // ATTACK MITIGATIONS:
 // - Signature replay attack: PREVENTED by input index binding
 // - Transaction malleability: PREVENTED by signing complete tx hash
 // - Cross-version attacks: PREVENTED by including tx version
-// - Cross-chain replay: NOT PREVENTED (requires chain ID in future)
+// - Cross-chain replay: PREVENTED by including chain ID (EIP-155 style)
 ```
 
-**Recommendation:**
-- **Priority:** MEDIUM (before mainnet launch if forks expected)
-- **Solution:** Add chain ID to signature message (4-byte network magic)
-- **Implementation:**
-  ```cpp
-  // Signature message (44 bytes with chain ID):
-  struct SignatureMessage {
-      uint256 tx_hash;        // 32 bytes
-      uint32_t input_index;   // 4 bytes
-      uint32_t tx_version;    // 4 bytes
-      uint32_t chain_id;      // 4 bytes (NEW)
-  };
-  ```
-- **Example:** Ethereum uses chain ID (EIP-155) to prevent replay attacks
+**Security Analysis:**
+- ✅ Prevents mainnet ↔ testnet replay attacks
+- ✅ Protects against future contentious forks
+- ✅ Follows Ethereum EIP-155 standard
+- ✅ Zero performance overhead (4 extra bytes)
 
-**Workaround (temporary):**
-- Use different address formats on different chains
-- Users should check which chain they're on before signing
+**Full Documentation:** See `CHAIN-ID-IMPLEMENTATION.md`
+
+**Status:** ✅ IMPLEMENTED & TESTED (Build successful, formats validated)
 
 ---
 

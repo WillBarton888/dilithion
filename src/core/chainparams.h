@@ -17,6 +17,7 @@ public:
 
     // Network identification
     uint32_t networkMagic;          // Message start bytes for P2P protocol
+    uint32_t chainID;               // Chain ID for replay protection (included in tx signatures)
 
     // Genesis block parameters
     uint32_t genesisTime;           // Genesis block timestamp

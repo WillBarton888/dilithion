@@ -4,6 +4,7 @@
 #include <consensus/tx_validation.h>
 #include <consensus/fees.h>
 #include <crypto/sha3.h>
+#include <core/chainparams.h>
 #include <set>
 #include <algorithm>
 #include <cstdio>
@@ -551,12 +552,12 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
     // - Signature replay attack: PREVENTED by input index binding
     // - Transaction malleability: PREVENTED by signing complete tx hash
     // - Cross-version attacks: PREVENTED by including tx version
-    // - Cross-chain replay: NOT PREVENTED (requires chain ID in future)
+    // - Cross-chain replay: PREVENTED by including chain ID (EIP-155 style)
     //
     // FUTURE CONSIDERATIONS:
-    // - Add chain ID to signature message for cross-chain replay protection
     // - Support for partial signatures (SIGHASH flags) if needed
     // - Consider block height commitment for time-locked transactions
+    // - Additional chain parameters if multiple forks emerge
     //
     // ========================================================================
 
@@ -568,10 +569,12 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
     // This ensures signature message construction uses the correct hash size
 
     // VULN-003 FIX: Canonical signature message construction
-    // Create signature message: tx_hash + input_index + tx_version
-    // Adding tx version prevents cross-transaction signature reuse
+    // CHAIN-ID FIX: Added chain ID to prevent cross-chain replay attacks
+    // Create signature message: tx_hash + input_index + tx_version + chain_id
+    // - tx_version prevents cross-version signature reuse
+    // - chain_id prevents cross-chain replay (mainnet <-> testnet)
     std::vector<uint8_t> sig_message;
-    sig_message.reserve(32 + 4 + 4);  // hash + index + version
+    sig_message.reserve(32 + 4 + 4 + 4);  // hash + index + version + chainID
 
     sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
 
@@ -605,8 +608,22 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
     sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
     sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
 
+    // CHAIN-ID FIX: Add chain ID to prevent cross-chain replay attacks (EIP-155 style)
+    // This prevents transactions signed on testnet from being replayed on mainnet and vice versa.
+    // Mainnet Chain ID = 1, Testnet Chain ID = 1001
+    if (Dilithion::g_chainParams == nullptr) {
+        error = "Internal error: Chain parameters not initialized";
+        return false;
+    }
+    uint32_t chain_id = Dilithion::g_chainParams->chainID;
+    sig_message.push_back(static_cast<uint8_t>(chain_id & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 8) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 16) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 24) & 0xFF));
+
     // VULN-003 FIX: Validate message construction
-    if (sig_message.size() != 40) {  // 32 (hash) + 4 (index) + 4 (version)
+    // CHAIN-ID FIX: Updated from 40 to 44 bytes (added 4-byte chain ID)
+    if (sig_message.size() != 44) {  // 32 (hash) + 4 (index) + 4 (version) + 4 (chainID)
         error = "Internal error: Invalid signature message size";
         return false;
     }

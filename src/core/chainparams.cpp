@@ -10,8 +10,13 @@ ChainParams ChainParams::Mainnet() {
     params.network = MAINNET;
 
     // Network identification
-    // Magic bytes: 0xD1711710 (DIL in hex-ish, plus 1710 for Dilithium)
-    params.networkMagic = 0xD1711710;
+    // Magic bytes: 0xD1714102 (DIL in hex-ish, plus version)
+    // BUGFIX: Was 0xD1711710, but protocol.h had 0xD1714102. Unified to protocol.h value.
+    params.networkMagic = 0xD1714102;
+
+    // Chain ID for replay protection (EIP-155 style)
+    // Included in transaction signatures to prevent cross-chain replay attacks
+    params.chainID = 1;  // Mainnet Chain ID
 
     // Genesis block parameters
     params.genesisTime = 1767225600;   // January 1, 2026 00:00:00 UTC
@@ -46,6 +51,10 @@ ChainParams ChainParams::Testnet() {
     // Network identification
     // Different magic bytes to prevent testnet/mainnet cross-contamination
     params.networkMagic = 0xDAB5BFFA;
+
+    // Chain ID for replay protection (EIP-155 style)
+    // Different from mainnet to prevent transaction replay between networks
+    params.chainID = 1001;  // Testnet Chain ID
 
     // Genesis block parameters
     params.genesisTime = 1730000000;   // October 27, 2025 (testnet launch)
