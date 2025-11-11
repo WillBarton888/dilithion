@@ -58,9 +58,9 @@ ChainParams ChainParams::Testnet() {
 
     // Genesis block parameters
     params.genesisTime = 1730000000;   // October 27, 2025 (testnet launch)
-    params.genesisNonce = 82393330;    // Mined successfully
-    params.genesisNBits = 0x1f060000;  // TEST: target=0x060000..., ~10,800 hashes = 3 min at 60 H/s
-    params.genesisHash = "00000005a5311314b1b466839c495e841d5e0db02972216d3a8a6fdddaebf56f";
+    params.genesisNonce = 26738;       // Mined with Chain ID implementation (November 11, 2025)
+    params.genesisNBits = 0x1f060000;  // TEST: target=0x060000..., ~26,738 hashes
+    params.genesisHash = "000380c6c6993b61d28e435fe693e38f691689d092d85a01691ff1c0e9d13526";
     params.genesisCoinbaseMsg = "Dilithion Testnet Genesis - Testing post-quantum cryptocurrency before mainnet launch";
 
     // Network ports (different from mainnet to allow running both simultaneously)

@@ -85,7 +85,7 @@ int main(int argc, char* argv[]) {
 
     // Initialize RandomX VM for proof-of-work hashing
     const char* rx_key = "Dilithion-RandomX-v1";
-    randomx_init_for_hashing(rx_key, strlen(rx_key), 1);  // light_mode=1 for tests
+    randomx_init_for_hashing(rx_key, strlen(rx_key), 0);  // full_mode=0 for faster genesis mining
 
     // Initialize chain parameters
     if (isTestnet) {
