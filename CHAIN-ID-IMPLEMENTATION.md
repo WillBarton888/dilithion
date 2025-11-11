@@ -407,32 +407,33 @@ To fully validate this implementation, perform these tests:
 
 ### Recommended Deployment Strategy
 
-#### For Testnet (Existing Network):
-1. **Coordinate Hard Fork:**
-   - Choose activation block height (e.g., block 10,000)
-   - Before activation: Old signature format (40 bytes, no chain ID)
-   - After activation: New signature format (44 bytes, with chain ID)
-   - Implement version check in consensus code
+#### For Testnet (Existing Network): **RESET APPROACH** ✅
+**Decision:** Reset testnet with new genesis block (simplest and cleanest)
 
-2. **Migration Code Example:**
-   ```cpp
-   bool VerifyScript(...) {
-       // Determine expected signature format based on block height
-       size_t expected_sig_message_size;
-       if (current_block_height < CHAIN_ID_ACTIVATION_HEIGHT) {
-           expected_sig_message_size = 40;  // Old format
-           // Don't include chain ID
-       } else {
-           expected_sig_message_size = 44;  // New format
-           // Include chain ID
-       }
-       // ... rest of validation ...
-   }
-   ```
+**Why Reset vs Hard Fork:**
+- Testnet is for testing breaking changes
+- Testnet coins have no real value
+- Simpler than coordinating hard fork activation
+- Clean start with chain ID from block 0
+- No legacy code needed for old format
+
+**Testnet Reset Process:**
+1. **Announce reset** 7+ days in advance to all participants
+2. **Coordinate shutdown** at specific time
+3. **All nodes delete** `~/.dilithion-testnet` directory
+4. **Mine new genesis block** with chain ID implementation
+5. **Update chainparams.cpp** with new genesis parameters:
+   - New genesisTime, genesisNonce, genesisHash
+   - Keep chainID = 1001
+   - Update genesisCoinbaseMsg with reset date
+6. **Restart testnet** with all nodes on new chain
+7. **Users create new wallets** (old wallets incompatible)
+
+**See:** `TESTNET-RESET-GUIDE.md` for complete step-by-step instructions
 
 #### For Mainnet (Not Yet Launched):
 1. **Include Chain ID from Genesis:**
-   - No migration needed
+   - No migration or reset needed
    - All transactions from block 0 use chain ID format
    - Clean implementation without legacy code
 
