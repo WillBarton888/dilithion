@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <node/genesis.h>
+#include <primitives/transaction.h>
 #include <crypto/randomx_hash.h>
 #include <crypto/sha3.h>
 #include <consensus/pow.h>
@@ -28,18 +29,54 @@ CBlock CreateGenesisBlock() {
     genesis.nBits = Dilithion::g_chainParams->genesisNBits;
     genesis.nNonce = Dilithion::g_chainParams->genesisNonce;
 
-    // Create coinbase message
-    // Store the message in the block's transaction data
-    const char* msg = Dilithion::g_chainParams->genesisCoinbaseMsg.c_str();
-    size_t msgLen = strlen(msg);
-    genesis.vtx.resize(msgLen);
-    memcpy(genesis.vtx.data(), msg, msgLen);
+    // =========================================================================
+    // BUG #4 FIX: Create proper coinbase transaction
+    // =========================================================================
+    // Following Bitcoin Core's pattern, genesis coinbase is a real transaction
+    // that can be deserialized and validated like any other coinbase.
+    //
+    // Structure:
+    // - 1 input with null prevout (standard for coinbase)
+    // - scriptSig contains block height (0) + genesis message
+    // - 1 output with 5 billion satoshi subsidy to unspendable address
+    // - Transaction is serialized and stored in block.vtx
+    // - Merkle root = hash of this single transaction
 
-    // Calculate merkle root (hash of coinbase message)
-    // For simplicity, we just hash the transaction data
-    uint8_t hash[32];
-    SHA3_256(genesis.vtx.data(), genesis.vtx.size(), hash);
-    memcpy(genesis.hashMerkleRoot.data, hash, 32);
+    CTransaction coinbaseTx;
+    coinbaseTx.nVersion = 1;
+
+    // Input: Null prevout (standard for coinbase)
+    coinbaseTx.vin.resize(1);
+    coinbaseTx.vin[0].prevout.SetNull();  // Marks this as coinbase
+    coinbaseTx.vin[0].nSequence = 0xFFFFFFFF;
+
+    // scriptSig: Height (0) + genesis message
+    // Following BIP34 pattern for height encoding
+    std::vector<uint8_t> scriptSigData;
+    scriptSigData.push_back(0);  // Height 0 for genesis
+    const std::string& genesisMsg = Dilithion::g_chainParams->genesisCoinbaseMsg;
+    scriptSigData.insert(scriptSigData.end(), genesisMsg.begin(), genesisMsg.end());
+    coinbaseTx.vin[0].scriptSig = scriptSigData;
+
+    // Output: 5 billion ions (matching miner subsidy)
+    coinbaseTx.vout.resize(1);
+    coinbaseTx.vout[0].nValue = 5000000000ULL;  // 50 DLT (5 billion ions)
+
+    // scriptPubKey: OP_RETURN (unspendable)
+    // Genesis coins are traditionally unspendable
+    coinbaseTx.vout[0].scriptPubKey.push_back(0x6a);  // OP_RETURN opcode
+
+    coinbaseTx.nLockTime = 0;
+
+    // Serialize the transaction
+    std::vector<uint8_t> serializedTx = coinbaseTx.Serialize();
+
+    // Store serialized transaction in vtx
+    genesis.vtx.assign(serializedTx.begin(), serializedTx.end());
+
+    // Calculate merkle root from transaction hash
+    // Genesis block has only 1 transaction, so merkle root = transaction hash
+    genesis.hashMerkleRoot = coinbaseTx.GetHash();
 
     return genesis;
 }
