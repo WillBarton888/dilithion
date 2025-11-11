@@ -26,7 +26,7 @@ INCLUDES := -I src \
 # Use ?= to allow environment to set initial LDFLAGS (e.g., --coverage)
 # Then append our library paths
 LDFLAGS ?=
-LDFLAGS += -L depends/randomx/build \
+LDFLAGS += -L depends/randomx/build-windows \
            -L depends/dilithium/ref
 
 # FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
@@ -39,14 +39,14 @@ ifeq ($(UNAME_S),Darwin)
     INCLUDES += -I$(HOMEBREW_PREFIX)/opt/leveldb/include
     LDFLAGS += -L$(HOMEBREW_PREFIX)/opt/leveldb/lib
 else ifeq ($(UNAME_S),Windows)
-    # Windows requires ws2_32 for sockets
-    LIBS += -lws2_32
+    # Windows requires ws2_32 for sockets and bcrypt for secure RNG
+    LIBS += -lws2_32 -lbcrypt
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
     # MinGW/MSYS2 on Windows
-    LIBS += -lws2_32
+    LIBS += -lws2_32 -lbcrypt
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
     # MSYS on Windows
-    LIBS += -lws2_32
+    LIBS += -lws2_32 -lbcrypt
 endif
 
 # Fix for Windows: Set temp directories to avoid C:\WINDOWS\ permission issues
@@ -132,7 +132,8 @@ PRIMITIVES_SOURCES := src/primitives/block.cpp \
 
 RPC_SOURCES := src/rpc/server.cpp \
                src/rpc/auth.cpp \
-               src/rpc/ratelimiter.cpp
+               src/rpc/ratelimiter.cpp \
+               src/rpc/permissions.cpp
 
 API_SOURCES := src/api/http_server.cpp
 
@@ -143,10 +144,13 @@ WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/hd_derivation.cpp \
                   src/wallet/wallet_manager.cpp \
                   src/wallet/wallet_manager_wizard.cpp \
-                  src/wallet/wallet_init.cpp
+                  src/wallet/wallet_init.cpp \
+                  src/wallet/wal.cpp \
+                  src/wallet/wal_recovery.cpp
 
 UTIL_SOURCES := src/util/strencodings.cpp \
-                src/util/base58.cpp
+                src/util/base58.cpp \
+                src/util/system.cpp
 
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \
@@ -417,7 +421,7 @@ $(OBJ_DIR)/test/fuzz/%.o: src/test/fuzz/%.cpp | $(OBJ_DIR)/test/fuzz
 depends:
 	@echo "$(COLOR_YELLOW)Building dependencies...$(COLOR_RESET)"
 	@echo "$(COLOR_BLUE)[RandomX]$(COLOR_RESET) Building RandomX library..."
-	@cd depends/randomx && mkdir -p build && cd build && cmake .. && make
+	@cd depends/randomx && mkdir -p build-windows && cd build-windows && cmake -DCMAKE_SYSTEM_PROCESSOR=x86_64 -G "MSYS Makefiles" .. && make
 	@echo "$(COLOR_BLUE)[Dilithium]$(COLOR_RESET) Building Dilithium library..."
 	@cd depends/dilithium/ref && make
 	@echo "$(COLOR_GREEN)✓ Dependencies built$(COLOR_RESET)"
@@ -710,13 +714,13 @@ fuzz_sha3: $(FUZZ_SHA3_OBJ) $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
 # fuzz_transaction: Block + transaction dependencies
 fuzz_transaction: $(FUZZ_TRANSACTION_OBJ) $(FUZZ_COMMON_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (3 targets)"
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build-windows -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_block: Block header dependencies
 fuzz_block: $(FUZZ_BLOCK_OBJ) $(FUZZ_COMMON_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build-windows -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_compactsize: No external dependencies
@@ -728,7 +732,7 @@ fuzz_compactsize: $(FUZZ_COMPACTSIZE_OBJ) $(DILITHIUM_OBJECTS)
 # fuzz_network_message: SHA3, block, transaction dependencies
 fuzz_network_message: $(FUZZ_NETWORK_MSG_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/crypto/randomx_hash.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (1 target)"
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build-windows -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_address: SHA3 and Base58 dependency
@@ -740,7 +744,7 @@ fuzz_address: $(FUZZ_ADDRESS_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/util/base5
 # fuzz_difficulty: Consensus dependencies
 fuzz_difficulty: $(FUZZ_DIFFICULTY_OBJ) $(FUZZ_COMMON_OBJECTS) $(OBJ_DIR)/consensus/pow.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (6 targets)"
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build -lrandomx -lpthread
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L depends/randomx/build-windows -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_subsidy: No external dependencies
