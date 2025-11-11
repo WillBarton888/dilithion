@@ -99,7 +99,17 @@ bool CBlockchainDB::Open(const std::string& path, bool create_if_missing) {
 
     datadir = validated_path;
 
-    // DB-010 FIX: Check available disk space before opening
+    // Create directory if it doesn't exist
+    if (create_if_missing) {
+        try {
+            std::filesystem::create_directories(validated_path);
+        } catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "[ERROR] Failed to create database directory" << std::endl;
+            return false;
+        }
+    }
+
+    // DB-010 FIX: Check available disk space after directory creation
     try {
         std::error_code ec;
         auto space = std::filesystem::space(validated_path, ec);
@@ -113,16 +123,6 @@ bool CBlockchainDB::Open(const std::string& path, bool create_if_missing) {
     } catch (const std::filesystem::filesystem_error& e) {
         std::cerr << "[ERROR] Cannot check disk space" << std::endl;
         return false;
-    }
-
-    // Create directory if it doesn't exist
-    if (create_if_missing) {
-        try {
-            std::filesystem::create_directories(validated_path);
-        } catch (const std::filesystem::filesystem_error& e) {
-            std::cerr << "[ERROR] Failed to create database directory" << std::endl;
-            return false;
-        }
     }
 
     leveldb::Options options;
