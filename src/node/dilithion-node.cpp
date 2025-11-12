@@ -1120,8 +1120,8 @@ int main(int argc, char* argv[]) {
 
                     // Stop mining - need to reassess chain state
                     g_node_state.new_block_found = true;
-                } else if (g_chainstate.GetTip() == pblockIndex.get()) {
-                    std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndex->nHeight << std::endl;
+                } else if (g_chainstate.GetTip() == pblockIndexPtr) {
+                    std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
 
                     // Broadcast block to network (P2P block relay) - Using async broadcaster
                     auto connected_peers = g_peer_manager->GetConnectedPeers();
