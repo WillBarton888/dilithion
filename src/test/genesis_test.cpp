@@ -84,11 +84,11 @@ int main(int argc, char* argv[]) {
     }
 
     // Initialize RandomX VM for proof-of-work hashing
-    // IMPORTANT: Use LIGHT mode (1) for 2GB RAM nodes
-    // Light mode uses ~256MB vs full mode ~2.5GB
-    // Genesis mining will be slower (~2 H/s) but compatible with 2GB VPS nodes
+    // For genesis mining: Use FULL mode (0) for ~50x faster mining
+    // FULL mode requires ~2.5GB RAM but mines much faster (~100 H/s vs ~2 H/s)
+    // NYC node upgraded to 4GB RAM specifically for this task
     const char* rx_key = "Dilithion-RandomX-v1";
-    randomx_init_for_hashing(rx_key, strlen(rx_key), 1);  // light_mode=1 for 2GB RAM compatibility
+    randomx_init_for_hashing(rx_key, strlen(rx_key), 0);  // full_mode=0 for fast genesis mining
 
     // Initialize chain parameters
     if (isTestnet) {
