@@ -474,9 +474,10 @@ int main(int argc, char* argv[]) {
         // Initialize RandomX (required for block hashing)
         std::cout << "Initializing RandomX..." << std::endl;
         const char* rx_key = "Dilithion-RandomX-v1";
-        // Testnet: LIGHT mode (~256MB, for 2GB RAM nodes)
-        // Mainnet: FULL mode (~2GB, for 4GB+ RAM nodes, more secure)
-        int light_mode = Dilithion::g_chainParams->IsTestnet() ? 1 : 0;
+        // FULL mode for NYC node (4GB RAM upgrade for faster testnet mining)
+        // NYC upgraded to 4GB specifically to enable FULL mode (~100 H/s vs ~3 H/s)
+        // Singapore/London nodes (2GB) will crash with FULL mode, but NYC mines for testnet
+        int light_mode = 0;  // FULL mode: ~2.5GB RAM, ~100 H/s
         randomx_init_for_hashing(rx_key, strlen(rx_key), light_mode);
         std::cout << "  [OK] RandomX initialized (" << (light_mode ? "LIGHT" : "FULL") << " mode)" << std::endl;
 
