@@ -90,14 +90,15 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
 
     // MINE-005 FIX: Initialize RandomX cache with thread synchronization
     // MINE-016 FIX: Use configurable RandomX key instead of hardcoded value
-    // FULL mode for NYC node (4GB RAM upgrade for faster testnet mining)
-    // NYC upgraded to 4GB specifically to enable FULL mode (~100 H/s vs ~3 H/s)
+    // LIGHT mode: ~256MB RAM, ~3-10 H/s (suitable for 2GB nodes)
+    // FULL mode: ~2.5GB RAM, ~100 H/s (requires 4GB+ nodes like NYC)
+    // Using LIGHT mode for broader compatibility across testnet nodes
     {
         std::lock_guard<std::mutex> rxLock(m_randomxMutex);
         try {
             randomx_init_for_hashing(m_randomxKey.c_str(),
                                     m_randomxKey.length(),
-                                    0 /* FULL mode: ~2.5GB RAM, ~100 H/s */);
+                                    1 /* LIGHT mode: ~256MB RAM, compatible with 2GB nodes */);
         } catch (...) {
             m_mining = false;  // Reset flag on error
             throw;  // Re-throw exception
