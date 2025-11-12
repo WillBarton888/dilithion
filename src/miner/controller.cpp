@@ -12,6 +12,7 @@
 #include <util/time.h>
 #include <amount.h>
 
+#include <iostream>
 #include <thread>
 #include <chrono>
 #include <algorithm>
