@@ -21,6 +21,18 @@
 #include <algorithm>
 #include <chrono>
 
+// BUG #10 FIX: Declare NodeState for g_node_state access
+struct NodeState {
+    std::atomic<bool> running;
+    std::atomic<bool> new_block_found;
+    std::atomic<bool> mining_enabled;
+    void* rpc_server;
+    void* miner;
+    void* p2p_socket;
+    void* http_server;
+};
+extern NodeState g_node_state;
+
 #ifdef _WIN32
     #include <winsock2.h>
     #pragma comment(lib, "ws2_32.lib")
@@ -2262,6 +2274,9 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         throw std::runtime_error("Failed to start mining");
     }
 
+    // BUG #10 FIX: Set mining_enabled flag so main loop will restart mining after blocks found
+    g_node_state.mining_enabled = true;
+
     return "true";
 }
 
@@ -2271,6 +2286,10 @@ std::string CRPCServer::RPC_StopMining(const std::string& params) {
     }
 
     m_miner->StopMining();
+
+    // BUG #10 FIX: Clear mining_enabled flag so main loop won't restart mining
+    g_node_state.mining_enabled = false;
+
     return "true";
 }
 
