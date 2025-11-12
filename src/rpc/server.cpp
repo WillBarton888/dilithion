@@ -10,6 +10,7 @@
 #include <node/utxo_set.h>
 #include <consensus/chain.h>
 #include <consensus/tx_validation.h>
+#include <consensus/pow.h>
 #include <util/strencodings.h>
 #include <amount.h>
 
@@ -2227,7 +2228,11 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
     }
 
     uint32_t nHeight = m_chainstate->GetHeight() + 1;
-    uint32_t nBits = 0x1f00ffff;  // Initial difficulty (will be adjusted by difficulty algorithm later)
+
+    // BUG #8 FIX: Use GetNextWorkRequired() to get proper difficulty instead of hardcoded value
+    // The hardcoded 0x1f00ffff was ~42x harder than testnet genesis (0x1f060000)
+    CBlockIndex* pindexPrev = m_chainstate->GetTip();
+    uint32_t nBits = GetNextWorkRequired(pindexPrev);
 
     // Get miner address from wallet
     std::vector<CAddress> addresses = m_wallet->GetAddresses();
