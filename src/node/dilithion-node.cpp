@@ -327,8 +327,15 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         g_currentCoinbase = MakeTransactionRef(coinbaseTx);
     }
 
-    // Serialize coinbase for block
-    block.vtx = coinbaseTx.Serialize();
+    // BUG #11 FIX: Serialize coinbase for block with transaction count prefix
+    // Must match format expected by DeserializeBlockTransactions: [count][tx1][tx2]...
+    // This bug only affected BuildMiningTemplate (used after first block found).
+    // RPC CreateBlockTemplate in controller.cpp already had this correct.
+    std::vector<uint8_t> coinbaseData = coinbaseTx.Serialize();
+    block.vtx.clear();
+    block.vtx.reserve(1 + coinbaseData.size());
+    block.vtx.push_back(1);  // Transaction count = 1 (only coinbase)
+    block.vtx.insert(block.vtx.end(), coinbaseData.begin(), coinbaseData.end());
 
     // Calculate merkle root (SHA3-256 hash of serialized coinbase)
     uint8_t merkleHash[32];
