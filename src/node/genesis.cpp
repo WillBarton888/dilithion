@@ -71,8 +71,12 @@ CBlock CreateGenesisBlock() {
     // Serialize the transaction
     std::vector<uint8_t> serializedTx = coinbaseTx.Serialize();
 
-    // Store serialized transaction in vtx
-    genesis.vtx.assign(serializedTx.begin(), serializedTx.end());
+    // BUG #7 FIX: Store transaction with count prefix
+    // DeserializeBlockTransactions expects: [count][tx1][tx2]...
+    // Genesis has 1 transaction, so prefix with count=1
+    genesis.vtx.clear();
+    genesis.vtx.push_back(1);  // Transaction count = 1
+    genesis.vtx.insert(genesis.vtx.end(), serializedTx.begin(), serializedTx.end());
 
     // Calculate merkle root from transaction hash
     // Genesis block has only 1 transaction, so merkle root = transaction hash
