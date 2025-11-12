@@ -39,6 +39,7 @@
 #include <crypto/randomx_hash.h>
 
 #include <iostream>
+#include <fstream>
 #include <iomanip>
 #include <string>
 #include <memory>
