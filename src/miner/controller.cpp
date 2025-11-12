@@ -13,6 +13,7 @@
 #include <amount.h>
 
 #include <iostream>
+#include <fstream>
 #include <thread>
 #include <chrono>
 #include <algorithm>
@@ -90,15 +91,36 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
 
     // MINE-005 FIX: Initialize RandomX cache with thread synchronization
     // MINE-016 FIX: Use configurable RandomX key instead of hardcoded value
-    // LIGHT mode: ~256MB RAM, ~3-10 H/s (suitable for 2GB nodes)
-    // FULL mode: ~2.5GB RAM, ~100 H/s (requires 4GB+ nodes like NYC)
-    // Using LIGHT mode for broader compatibility across testnet nodes
+    // Auto-detect RAM to choose appropriate RandomX mode
+    // LIGHT mode: ~256MB RAM, ~3-10 H/s (works on 2GB nodes)
+    // FULL mode: ~2.5GB RAM, ~100 H/s (requires 4GB+ nodes)
+
+    // Detect available RAM
+    size_t total_ram_mb = 0;
+    std::ifstream meminfo("/proc/meminfo");
+    if (meminfo.is_open()) {
+        std::string line;
+        while (std::getline(meminfo, line)) {
+            if (line.substr(0, 9) == "MemTotal:") {
+                size_t ram_kb = std::stoull(line.substr(9));
+                total_ram_mb = ram_kb / 1024;
+                break;
+            }
+        }
+        meminfo.close();
+    }
+
+    // Use FULL mode if RAM >= 3GB, otherwise LIGHT mode
+    int light_mode = (total_ram_mb >= 3072) ? 0 : 1;
+    std::cout << "[Mining] Detected RAM: " << total_ram_mb << " MB" << std::endl;
+    std::cout << "[Mining] Using RandomX " << (light_mode ? "LIGHT" : "FULL") << " mode" << std::endl;
+
     {
         std::lock_guard<std::mutex> rxLock(m_randomxMutex);
         try {
             randomx_init_for_hashing(m_randomxKey.c_str(),
                                     m_randomxKey.length(),
-                                    1 /* LIGHT mode: ~256MB RAM, compatible with 2GB nodes */);
+                                    light_mode);
         } catch (...) {
             m_mining = false;  // Reset flag on error
             throw;  // Re-throw exception

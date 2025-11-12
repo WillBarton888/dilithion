@@ -481,12 +481,32 @@ int main(int argc, char* argv[]) {
         // Initialize RandomX (required for block hashing)
         std::cout << "Initializing RandomX..." << std::endl;
         const char* rx_key = "Dilithion-RandomX-v1";
-        // LIGHT mode for broader compatibility (2GB RAM nodes)
-        // LIGHT mode: ~256MB RAM, ~3-10 H/s (works on all testnet nodes)
+
+        // Auto-detect RAM to choose appropriate RandomX mode
+        // LIGHT mode: ~256MB RAM, ~3-10 H/s (works on 2GB nodes)
         // FULL mode: ~2.5GB RAM, ~100 H/s (requires 4GB+ nodes)
-        int light_mode = 1;  // LIGHT mode: ~256MB RAM, compatible with 2GB nodes
+        size_t total_ram_mb = 0;
+        std::ifstream meminfo("/proc/meminfo");
+        if (meminfo.is_open()) {
+            std::string line;
+            while (std::getline(meminfo, line)) {
+                if (line.substr(0, 9) == "MemTotal:") {
+                    size_t ram_kb = std::stoull(line.substr(9));
+                    total_ram_mb = ram_kb / 1024;
+                    break;
+                }
+            }
+            meminfo.close();
+        }
+
+        // Use FULL mode if RAM >= 3GB, otherwise LIGHT mode
+        int light_mode = (total_ram_mb >= 3072) ? 0 : 1;
+        std::cout << "  Detected RAM: " << total_ram_mb << " MB" << std::endl;
+        std::cout << "  Selected mode: " << (light_mode ? "LIGHT" : "FULL") << " ("
+                  << (light_mode ? "~3-10 H/s" : "~100 H/s") << ")" << std::endl;
+
         randomx_init_for_hashing(rx_key, strlen(rx_key), light_mode);
-        std::cout << "  [OK] RandomX initialized (" << (light_mode ? "LIGHT" : "FULL") << " mode)" << std::endl;
+        std::cout << "  [OK] RandomX initialized" << std::endl;
 
         // Load and verify genesis block
         std::cout << "Loading genesis block..." << std::endl;
