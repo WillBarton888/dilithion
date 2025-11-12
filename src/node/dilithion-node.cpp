@@ -1031,8 +1031,10 @@ int main(int argc, char* argv[]) {
 
                 // Verify this coinbase belongs to our wallet
                 if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
-                    // Construct address from the verified public key hash
-                    CAddress our_address(pubkey_hash);
+                    // BUG #6 FIX: Use wallet's actual address instead of reconstructing from hash
+                    // The CAddress constructor expects a public key, not a hash, so we use GetNewAddress()
+                    // which returns the correct address that matches the coinbase scriptPubKey
+                    CAddress our_address = wallet.GetNewAddress();
 
                     // Get block height for UTXO tracking
                     uint32_t block_height = 0;
