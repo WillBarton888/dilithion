@@ -579,7 +579,31 @@ int main(int argc, char* argv[]) {
 
             // Load current best block
             uint256 hashBestBlock;
-            if (blockchain.ReadBestBlock(hashBestBlock)) {
+
+            // BUG #5 FIX: If best block not set, initialize it to genesis
+            // This handles the case where genesis block exists but best block pointer is missing
+            if (!blockchain.ReadBestBlock(hashBestBlock)) {
+                std::cout << "  Best block not set, initializing to genesis..." << std::endl;
+                if (!blockchain.WriteBestBlock(genesisHash)) {
+                    std::cerr << "ERROR: Failed to set genesis as best block!" << std::endl;
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
+                hashBestBlock = genesisHash;
+                std::cout << "  [OK] Genesis set as best block" << std::endl;
+            }
+
+            if (hashBestBlock == genesisHash) {
+                // Only genesis block exists - set it as tip
+                CBlockIndex* pgenesisIndexPtr = g_chainstate.GetBlockIndex(genesisHash);
+                if (pgenesisIndexPtr == nullptr) {
+                    std::cerr << "ERROR: Genesis block index not found in chain state!" << std::endl;
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
+                g_chainstate.SetTip(pgenesisIndexPtr);
+                std::cout << "  [OK] Loaded chain state: 1 block (height 0)" << std::endl;
+            } else if (!(hashBestBlock.IsNull())) {
                 std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
 
                 // Load best block index and rebuild chain backwards to genesis
