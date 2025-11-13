@@ -1119,15 +1119,16 @@ int main(int argc, char* argv[]) {
                             }
 
                             // Create block index
-                            auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock.GetHeader());
-                            pOrphanIndex->nHeight = g_chainstate.GetHeight() + 1;
+                            auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock);
+                            pOrphanIndex->phashBlock = orphanBlockHash;
+                            pOrphanIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
                             // Link to parent
                             CBlockIndex* pOrphanParent = g_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
                             if (pOrphanParent) {
                                 pOrphanIndex->pprev = pOrphanParent;
                                 pOrphanIndex->nHeight = pOrphanParent->nHeight + 1;
-                                pOrphanIndex->nChainWork = CalculateChainWork(pOrphanParent->nChainWork, orphanBlock.nBits);
+                                pOrphanIndex->BuildChainWork();
 
                                 // Add to chain state
                                 CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
@@ -1136,8 +1137,8 @@ int main(int argc, char* argv[]) {
                                     bool reorg = false;
                                     if (g_chainstate.ActivateBestChain(pOrphanIndexRaw, orphanBlock, reorg)) {
                                         // Save to database
-                                        if (g_blockchain_db) {
-                                            g_blockchain_db->WriteBlock(orphanBlockHash, orphanBlock);
+                                        if (!blockchain.WriteBlock(orphanBlockHash, orphanBlock)) {
+                                            std::cerr << "[Orphan] ERROR: Failed to save orphan block to database" << std::endl;
                                         }
 
                                         // Queue this block's orphan children for processing
