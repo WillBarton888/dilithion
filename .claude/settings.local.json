@@ -59,7 +59,9 @@
       "Bash(do echo \"=== Disabling $node ===\")",
       "Bash(do echo \"=== Killing $node ===\")",
       "Bash(do echo \"=== Verifying $node config ===\")",
-      "Bash(do echo \"=== Wiping $node blockchain data ===\")"
+      "Bash(do echo \"=== Wiping $node blockchain data ===\")",
+      "Bash(do)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

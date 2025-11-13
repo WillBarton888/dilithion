@@ -40,15 +40,23 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
         g_randomx_cache = nullptr;
     }
 
-    // Set flags based on mode
-    // Light mode: RANDOMX_FLAG_DEFAULT (~256MB, cache-based, faster init)
-    // Full mode: RANDOMX_FLAG_FULL_MEM (~2GB, dataset-based, slower init but correct hashes)
-    randomx_flags flags;
-    if (light_mode) {
-        flags = RANDOMX_FLAG_DEFAULT;
-    } else {
-        // Full mode: Use hardware-specific optimizations plus full dataset
-        flags = static_cast<randomx_flags>(randomx_get_flags() | RANDOMX_FLAG_FULL_MEM);
+    // BUG #13 FIX: Force deterministic RandomX flags for consensus
+    // CRITICAL: All nodes must use identical flags to produce identical hashes
+    //
+    // Root Cause: randomx_get_flags() returns CPU-specific optimizations (SSSE3, AVX2, etc.)
+    // which can cause different hash outputs on different hardware, breaking consensus.
+    //
+    // Solution: Use only RANDOMX_FLAG_DEFAULT for all nodes to ensure deterministic hashing.
+    // Trade-off: Slightly slower hashing (~10-20%), but guaranteed consensus.
+    //
+    // Note: LIGHT vs FULL mode only affects memory usage and speed, NOT hash output.
+    // However, to maximize compatibility, we enforce RANDOMX_FLAG_DEFAULT for both modes.
+    randomx_flags flags = RANDOMX_FLAG_DEFAULT;
+
+    if (!light_mode) {
+        // Full mode: Add FULL_MEM flag for 2GB dataset (faster hashing)
+        // Still using DEFAULT as base to avoid hardware-specific variations
+        flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
     }
 
     // Allocate and initialize cache (required for both modes)
