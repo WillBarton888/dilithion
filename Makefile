@@ -132,7 +132,10 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/socket.cpp \
                src/net/dns.cpp \
                src/net/tx_relay.cpp \
-               src/net/async_broadcaster.cpp
+               src/net/async_broadcaster.cpp \
+               src/net/headers_manager.cpp \
+               src/net/orphan_manager.cpp \
+               src/net/block_fetcher.cpp
 
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \
