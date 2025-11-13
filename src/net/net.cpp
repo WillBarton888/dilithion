@@ -75,6 +75,8 @@ CNetMessageProcessor::CNetMessageProcessor(CPeerManager& peer_mgr)
     on_getdata = [](int, const std::vector<NetProtocol::CInv>&) {};
     on_block = [](int, const CBlock&) {};
     on_tx = [](int, const CTransaction&) {};
+    on_getheaders = [](int, const NetProtocol::CGetHeadersMessage&) {};
+    on_headers = [](int, const std::vector<CBlockHeader>&) {};
 }
 
 bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& message) {
@@ -148,6 +150,10 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         return ProcessBlockMessage(peer_id, stream);
     } else if (command == "tx") {
         return ProcessTxMessage(peer_id, stream);
+    } else if (command == "getheaders") {
+        return ProcessGetHeadersMessage(peer_id, stream);
+    } else if (command == "headers") {
+        return ProcessHeadersMessage(peer_id, stream);
     }
 
     // Unknown message type
@@ -685,6 +691,106 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
     }
 }
 
+bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& stream) {
+    try {
+        NetProtocol::CGetHeadersMessage msg;
+
+        // Read locator size
+        uint64_t locator_size = stream.ReadCompactSize();
+
+        // Validate locator size (max 32 hashes in locator)
+        if (locator_size > 32) {
+            std::cout << "[P2P] ERROR: GETHEADERS locator size too large: " << locator_size << std::endl;
+            peer_manager.Misbehaving(peer_id, 20);
+            return false;
+        }
+
+        // Read locator hashes
+        msg.locator.resize(locator_size);
+        for (uint64_t i = 0; i < locator_size; i++) {
+            msg.locator[i] = stream.ReadUint256();
+        }
+
+        // Read stop hash
+        msg.hashStop = stream.ReadUint256();
+
+        std::cout << "[P2P] Received GETHEADERS from peer " << peer_id
+                  << " (locator size: " << locator_size << ")" << std::endl;
+
+        // Call handler
+        if (on_getheaders) {
+            on_getheaders(peer_id, msg);
+        }
+
+        return true;
+    } catch (const std::out_of_range& e) {
+        std::cout << "[P2P] ERROR: GETHEADERS message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: GETHEADERS message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& stream) {
+    try {
+        // Read header count
+        uint64_t header_count = stream.ReadCompactSize();
+
+        // Validate count (Bitcoin Core max is 2000)
+        if (header_count > NetProtocol::MAX_HEADERS_SIZE) {
+            std::cout << "[P2P] ERROR: HEADERS count too large: " << header_count << std::endl;
+            peer_manager.Misbehaving(peer_id, 20);
+            return false;
+        }
+
+        std::vector<CBlockHeader> headers;
+        headers.reserve(header_count);
+
+        // Read each header
+        for (uint64_t i = 0; i < header_count; i++) {
+            CBlockHeader header;
+            header.nVersion = stream.ReadInt32();
+            header.hashPrevBlock = stream.ReadUint256();
+            header.hashMerkleRoot = stream.ReadUint256();
+            header.nTime = stream.ReadUint32();
+            header.nBits = stream.ReadUint32();
+            header.nNonce = stream.ReadUint32();
+
+            // Skip transaction count (headers message has 0 txs per header)
+            uint64_t tx_count = stream.ReadCompactSize();
+            if (tx_count != 0) {
+                std::cout << "[P2P] ERROR: HEADERS message with tx_count != 0" << std::endl;
+                peer_manager.Misbehaving(peer_id, 20);
+                return false;
+            }
+
+            headers.push_back(header);
+        }
+
+        std::cout << "[P2P] Received " << header_count << " headers from peer " << peer_id << std::endl;
+
+        // Call handler
+        if (on_headers) {
+            on_headers(peer_id, headers);
+        }
+
+        return true;
+    } catch (const std::out_of_range& e) {
+        std::cout << "[P2P] ERROR: HEADERS message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: HEADERS message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
 // Create messages
 
 CNetMessage CNetMessageProcessor::CreateVersionMessage() {
@@ -821,6 +927,49 @@ CNetMessage CNetMessageProcessor::CreateTxMessage(const CTransaction& tx) {
     g_network_stats.bytes_sent += 24 + stream.size();
 
     return CNetMessage("tx", stream.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateGetHeadersMessage(const NetProtocol::CGetHeadersMessage& msg) {
+    CDataStream stream;
+
+    // Serialize locator size and hashes
+    stream.WriteCompactSize(msg.locator.size());
+    for (const uint256& hash : msg.locator) {
+        stream.WriteUint256(hash);
+    }
+
+    // Serialize stop hash
+    stream.WriteUint256(msg.hashStop);
+
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+
+    return CNetMessage("getheaders", stream.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateHeadersMessage(const std::vector<CBlockHeader>& headers) {
+    CDataStream stream;
+
+    // Serialize header count
+    stream.WriteCompactSize(headers.size());
+
+    // Serialize each header
+    for (const CBlockHeader& header : headers) {
+        stream.WriteInt32(header.nVersion);
+        stream.WriteUint256(header.hashPrevBlock);
+        stream.WriteUint256(header.hashMerkleRoot);
+        stream.WriteUint32(header.nTime);
+        stream.WriteUint32(header.nBits);
+        stream.WriteUint32(header.nNonce);
+
+        // Transaction count (always 0 for headers message)
+        stream.WriteCompactSize(0);
+    }
+
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+
+    return CNetMessage("headers", stream.GetData());
 }
 
 // Serialization helpers

@@ -220,6 +220,25 @@ struct CPingPong {
     CPingPong(uint64_t nonce_in) : nonce(nonce_in) {}
 };
 
+/** GETHEADERS message - request block headers */
+struct CGetHeadersMessage {
+    std::vector<uint256> locator;  // Block locator hashes (exponential backoff)
+    uint256 hashStop;              // Stop hash (0 = get all)
+
+    CGetHeadersMessage() {}
+    CGetHeadersMessage(const std::vector<uint256>& locator_in, const uint256& hashStop_in = uint256())
+        : locator(locator_in), hashStop(hashStop_in) {}
+};
+
+/** HEADERS message - block headers response */
+struct CHeadersMessage {
+    std::vector<CBlockHeader> headers;  // Block headers (max 2000)
+
+    CHeadersMessage() {}
+    explicit CHeadersMessage(const std::vector<CBlockHeader>& headers_in)
+        : headers(headers_in) {}
+};
+
 /** Message command strings */
 inline const char* GetMessageCommand(MessageType type) {
     switch (type) {

@@ -33,6 +33,8 @@ public:
     using GetDataHandler = std::function<void(int peer_id, const std::vector<NetProtocol::CInv>&)>;
     using BlockHandler = std::function<void(int peer_id, const CBlock&)>;
     using TxHandler = std::function<void(int peer_id, const CTransaction&)>;
+    using GetHeadersHandler = std::function<void(int peer_id, const NetProtocol::CGetHeadersMessage&)>;
+    using HeadersHandler = std::function<void(int peer_id, const std::vector<CBlockHeader>&)>;
 
     CNetMessageProcessor(CPeerManager& peer_mgr);
 
@@ -50,6 +52,8 @@ public:
     CNetMessage CreateGetDataMessage(const std::vector<NetProtocol::CInv>& inv);
     CNetMessage CreateBlockMessage(const CBlock& block);
     CNetMessage CreateTxMessage(const CTransaction& tx);
+    CNetMessage CreateGetHeadersMessage(const NetProtocol::CGetHeadersMessage& msg);
+    CNetMessage CreateHeadersMessage(const std::vector<CBlockHeader>& headers);
 
     // Register handlers
     void SetVersionHandler(VersionHandler handler) { on_version = handler; }
@@ -60,6 +64,8 @@ public:
     void SetGetDataHandler(GetDataHandler handler) { on_getdata = handler; }
     void SetBlockHandler(BlockHandler handler) { on_block = handler; }
     void SetTxHandler(TxHandler handler) { on_tx = handler; }
+    void SetGetHeadersHandler(GetHeadersHandler handler) { on_getheaders = handler; }
+    void SetHeadersHandler(HeadersHandler handler) { on_headers = handler; }
 
 private:
     CPeerManager& peer_manager;
@@ -80,6 +86,8 @@ private:
     GetDataHandler on_getdata;
     BlockHandler on_block;
     TxHandler on_tx;
+    GetHeadersHandler on_getheaders;
+    HeadersHandler on_headers;
 
     // Process specific message types
     bool ProcessVersionMessage(int peer_id, CDataStream& stream);
@@ -92,6 +100,8 @@ private:
     bool ProcessGetDataMessage(int peer_id, CDataStream& stream);
     bool ProcessBlockMessage(int peer_id, CDataStream& stream);
     bool ProcessTxMessage(int peer_id, CDataStream& stream);
+    bool ProcessGetHeadersMessage(int peer_id, CDataStream& stream);
+    bool ProcessHeadersMessage(int peer_id, CDataStream& stream);
 
     // Serialization helpers
     std::vector<uint8_t> SerializeVersionMessage(const NetProtocol::CVersionMessage& msg);
