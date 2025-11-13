@@ -9,6 +9,7 @@
 #include <map>
 #include <vector>
 #include <memory>
+#include <mutex>
 
 // Forward declarations
 class CBlockchainDB;
@@ -36,6 +37,10 @@ private:
     // UTXO set reference for chain validation (CS-005)
     CUTXOSet* pUTXOSet;
 
+    // CRITICAL-1 FIX: Mutex for thread-safe access to chain state
+    // Protects mapBlockIndex, pindexTip, and all chain operations
+    mutable std::mutex cs_main;
+
 public:
     CChainState();
     ~CChainState();
@@ -52,13 +57,15 @@ public:
 
     /**
      * Get current chain tip (most work)
+     * CRITICAL-1 FIX: Now implemented in .cpp with mutex protection
      */
-    CBlockIndex* GetTip() const { return pindexTip; }
+    CBlockIndex* GetTip() const;
 
     /**
      * Set chain tip (used during initialization)
+     * CRITICAL-1 FIX: Now implemented in .cpp with mutex protection
      */
-    void SetTip(CBlockIndex* pindex) { pindexTip = pindex; }
+    void SetTip(CBlockIndex* pindex);
 
     /**
      * Add block index to in-memory map
@@ -120,17 +127,15 @@ public:
 
     /**
      * Get blockchain height (height of current tip)
+     * CRITICAL-1 FIX: Now implemented in .cpp with mutex protection
      */
-    int GetHeight() const {
-        return pindexTip ? pindexTip->nHeight : -1;
-    }
+    int GetHeight() const;
 
     /**
      * Get total chain work (cumulative PoW)
+     * CRITICAL-1 FIX: Now implemented in .cpp with mutex protection
      */
-    uint256 GetChainWork() const {
-        return pindexTip ? pindexTip->nChainWork : uint256();
-    }
+    uint256 GetChainWork() const;
 
     /**
      * Get all block hashes at a specific height

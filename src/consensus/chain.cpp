@@ -16,6 +16,9 @@ CChainState::~CChainState() {
 }
 
 void CChainState::Cleanup() {
+    // CRITICAL-1 FIX: Acquire lock before accessing shared state
+    std::lock_guard<std::mutex> lock(cs_main);
+
     // HIGH-C001 FIX: Smart pointers automatically destruct when map is cleared
     // No need for manual delete - RAII handles cleanup
     mapBlockIndex.clear();
@@ -23,6 +26,9 @@ void CChainState::Cleanup() {
 }
 
 bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex> pindex) {
+    // CRITICAL-1 FIX: Acquire lock before accessing shared state
+    std::lock_guard<std::mutex> lock(cs_main);
+
     // HIGH-C001 FIX: Accept unique_ptr for automatic ownership transfer
     if (pindex == nullptr) {
         return false;
@@ -41,6 +47,9 @@ bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex
 }
 
 CBlockIndex* CChainState::GetBlockIndex(const uint256& hash) {
+    // CRITICAL-1 FIX: Acquire lock before accessing shared state
+    std::lock_guard<std::mutex> lock(cs_main);
+
     // HIGH-C001 FIX: Return raw pointer (non-owning) via .get()
     auto it = mapBlockIndex.find(hash);
     if (it != mapBlockIndex.end()) {
@@ -50,6 +59,9 @@ CBlockIndex* CChainState::GetBlockIndex(const uint256& hash) {
 }
 
 bool CChainState::HasBlockIndex(const uint256& hash) const {
+    // CRITICAL-1 FIX: Acquire lock before accessing shared state
+    std::lock_guard<std::mutex> lock(cs_main);
+
     return mapBlockIndex.count(hash) > 0;
 }
 
@@ -86,6 +98,10 @@ CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
 }
 
 bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block, bool& reorgOccurred) {
+    // CRITICAL-1 FIX: Acquire lock before accessing shared state
+    // This protects pindexTip, mapBlockIndex, and all chain operations
+    std::lock_guard<std::mutex> lock(cs_main);
+
     reorgOccurred = false;
 
     if (pindexNew == nullptr) {
@@ -540,6 +556,9 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex) {
 }
 
 std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {
+    // CRITICAL-1 FIX: Acquire lock before accessing shared state
+    std::lock_guard<std::mutex> lock(cs_main);
+
     std::vector<uint256> result;
 
     for (const auto& pair : mapBlockIndex) {
@@ -549,4 +568,26 @@ std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {
     }
 
     return result;
+}
+
+// CRITICAL-1 FIX: Thread-safe accessor methods moved from inline to .cpp
+
+CBlockIndex* CChainState::GetTip() const {
+    std::lock_guard<std::mutex> lock(cs_main);
+    return pindexTip;
+}
+
+void CChainState::SetTip(CBlockIndex* pindex) {
+    std::lock_guard<std::mutex> lock(cs_main);
+    pindexTip = pindex;
+}
+
+int CChainState::GetHeight() const {
+    std::lock_guard<std::mutex> lock(cs_main);
+    return pindexTip ? pindexTip->nHeight : -1;
+}
+
+uint256 CChainState::GetChainWork() const {
+    std::lock_guard<std::mutex> lock(cs_main);
+    return pindexTip ? pindexTip->nChainWork : uint256();
 }

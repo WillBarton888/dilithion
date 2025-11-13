@@ -39,6 +39,7 @@
 #include <core/chainparams.h>
 #include <consensus/pow.h>
 #include <consensus/chain.h>
+#include <consensus/validation.h>  // CRITICAL-3 FIX: For CBlockValidator
 #include <crypto/randomx_hash.h>
 
 #include <iostream>
@@ -53,6 +54,7 @@
 #include <chrono>
 #include <atomic>
 #include <optional>
+#include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
 
 // Windows API macro conflicts - undef after including headers
 #ifdef _WIN32
@@ -959,7 +961,51 @@ int main(int argc, char* argv[]) {
                 std::cout << "[P2P] Parent block not found: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
                 std::cout << "[P2P] Storing block as orphan and requesting parent" << std::endl;
 
-                // Add block to orphan manager
+                // CRITICAL-3 FIX: Validate orphan block before storing
+                // Cannot do full UTXO validation without parent, but we can verify:
+                // - Merkle root matches transactions (prevents tampering)
+                // - Block structure is valid (has coinbase, no duplicates)
+                CBlockValidator validator;
+                std::vector<CTransactionRef> transactions;
+                std::string validationError;
+
+                // Deserialize and verify merkle root
+                if (!validator.DeserializeBlockTransactions(block, transactions, validationError)) {
+                    std::cerr << "[Orphan] ERROR: Failed to deserialize orphan block transactions" << std::endl;
+                    std::cerr << "  Error: " << validationError << std::endl;
+                    std::cerr << "  Rejecting invalid block from peer " << peer_id << std::endl;
+                    g_peer_manager->Misbehaving(peer_id, 100);  // Ban peer sending invalid blocks
+                    return;
+                }
+
+                if (!validator.VerifyMerkleRoot(block, transactions, validationError)) {
+                    std::cerr << "[Orphan] ERROR: Orphan block has invalid merkle root" << std::endl;
+                    std::cerr << "  Error: " << validationError << std::endl;
+                    std::cerr << "  Block merkle root: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cerr << "  Rejecting invalid block from peer " << peer_id << std::endl;
+                    g_peer_manager->Misbehaving(peer_id, 100);  // Ban peer sending invalid blocks
+                    return;
+                }
+
+                // Check for duplicate transactions
+                if (!validator.CheckNoDuplicateTransactions(transactions, validationError)) {
+                    std::cerr << "[Orphan] ERROR: Orphan block contains duplicate transactions" << std::endl;
+                    std::cerr << "  Error: " << validationError << std::endl;
+                    g_peer_manager->Misbehaving(peer_id, 100);
+                    return;
+                }
+
+                // Check for double-spends within block
+                if (!validator.CheckNoDoubleSpends(transactions, validationError)) {
+                    std::cerr << "[Orphan] ERROR: Orphan block contains double-spend" << std::endl;
+                    std::cerr << "  Error: " << validationError << std::endl;
+                    g_peer_manager->Misbehaving(peer_id, 100);
+                    return;
+                }
+
+                std::cout << "[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)" << std::endl;
+
+                // Add block to orphan manager (now validated)
                 if (g_orphan_manager->AddOrphanBlock(peer_id, block)) {
                     std::cout << "[Orphan] Block added to orphan pool (count: "
                               << g_orphan_manager->GetOrphanCount() << ")" << std::endl;
@@ -1030,33 +1076,93 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // BUG #12 FIX (Phase 4.3): Try to resolve orphan blocks
+                // CRITICAL-2 FIX: Iterative orphan resolution with depth limit
+                // Prevents stack overflow from unbounded recursion
                 // Check if any orphan blocks are now valid children of this block
-                std::vector<uint256> orphanChildren = g_orphan_manager->GetOrphanChildren(blockHash);
 
-                if (!orphanChildren.empty()) {
-                    std::cout << "[Orphan] Found " << orphanChildren.size()
+                static const int MAX_ORPHAN_CHAIN_DEPTH = 100;  // DoS protection
+                std::queue<uint256> orphanQueue;
+                int processedCount = 0;
+
+                // Seed queue with direct children of this block
+                std::vector<uint256> orphanChildren = g_orphan_manager->GetOrphanChildren(blockHash);
+                for (const uint256& orphanHash : orphanChildren) {
+                    orphanQueue.push(orphanHash);
+                }
+
+                if (!orphanQueue.empty()) {
+                    std::cout << "[Orphan] Found " << orphanQueue.size()
                               << " orphan block(s) that can now be processed" << std::endl;
 
-                    // Process each orphan child recursively
-                    for (const uint256& orphanHash : orphanChildren) {
+                    // Iterative processing instead of recursion
+                    while (!orphanQueue.empty() && processedCount < MAX_ORPHAN_CHAIN_DEPTH) {
+                        uint256 orphanHash = orphanQueue.front();
+                        orphanQueue.pop();
+
                         CBlock orphanBlock;
                         if (g_orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
                             std::cout << "[Orphan] Processing orphan: "
-                                      << orphanHash.GetHex().substr(0, 16) << "..." << std::endl;
+                                      << orphanHash.GetHex().substr(0, 16) << "..."
+                                      << " (depth: " << processedCount + 1 << ")" << std::endl;
 
                             // Remove from orphan pool
                             g_orphan_manager->EraseOrphanBlock(orphanHash);
 
-                            // Recursively process the orphan block by calling the block handler
-                            // Note: This will trigger another round of orphan resolution if needed
-                            message_processor.ProcessMessage(peer_id,
-                                message_processor.CreateBlockMessage(orphanBlock));
+                            // Process the orphan block inline (instead of recursive call)
+                            uint256 orphanBlockHash = orphanBlock.GetHash();
+
+                            // Validate PoW
+                            if (!CheckProofOfWork(orphanBlockHash, orphanBlock.nBits)) {
+                                std::cerr << "[Orphan] ERROR: Orphan block has invalid PoW" << std::endl;
+                                processedCount++;
+                                continue;
+                            }
+
+                            // Create block index
+                            auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock.GetHeader());
+                            pOrphanIndex->nHeight = g_chainstate.GetHeight() + 1;
+
+                            // Link to parent
+                            CBlockIndex* pOrphanParent = g_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
+                            if (pOrphanParent) {
+                                pOrphanIndex->pprev = pOrphanParent;
+                                pOrphanIndex->nHeight = pOrphanParent->nHeight + 1;
+                                pOrphanIndex->nChainWork = CalculateChainWork(pOrphanParent->nChainWork, orphanBlock.nBits);
+
+                                // Add to chain state
+                                CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
+                                if (g_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
+                                    // Activate in chain
+                                    bool reorg = false;
+                                    if (g_chainstate.ActivateBestChain(pOrphanIndexRaw, orphanBlock, reorg)) {
+                                        // Save to database
+                                        if (g_blockchain_db) {
+                                            g_blockchain_db->WriteBlock(orphanBlockHash, orphanBlock);
+                                        }
+
+                                        // Queue this block's orphan children for processing
+                                        std::vector<uint256> nextOrphans = g_orphan_manager->GetOrphanChildren(orphanBlockHash);
+                                        for (const uint256& nextHash : nextOrphans) {
+                                            orphanQueue.push(nextHash);
+                                        }
+                                    }
+                                }
+                            }
+
+                            processedCount++;
                         }
                     }
 
-                    std::cout << "[Orphan] Orphan resolution complete (remaining: "
-                              << g_orphan_manager->GetOrphanCount() << ")" << std::endl;
+                    if (processedCount >= MAX_ORPHAN_CHAIN_DEPTH) {
+                        std::cerr << "[Orphan] WARNING: Orphan chain depth limit reached ("
+                                  << MAX_ORPHAN_CHAIN_DEPTH << " blocks)" << std::endl;
+                        std::cerr << "  Remaining in queue: " << orphanQueue.size() << std::endl;
+                        std::cerr << "  This may indicate a DoS attack or network partition" << std::endl;
+                    }
+
+                    std::cout << "[Orphan] Orphan resolution complete" << std::endl;
+                    std::cout << "  Processed: " << processedCount << " block(s)" << std::endl;
+                    std::cout << "  Remaining orphans: " << g_orphan_manager->GetOrphanCount() << std::endl;
                 }
             } else {
                 std::cerr << "[P2P] ERROR: Failed to activate block in chain" << std::endl;
