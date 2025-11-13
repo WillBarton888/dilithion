@@ -540,6 +540,17 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
             stream.read(block.vtx.data(), vtx_size);
         }
 
+        // DEBUG-BUG13: Log header values after deserialization
+        std::cout << "[DEBUG-BUG13] ProcessBlockMessage() - Deserialized block:" << std::endl;
+        std::cout << "  Hash (recalculated): " << block.GetHash().GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "  nVersion: " << block.nVersion << std::endl;
+        std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "  nTime: " << block.nTime << std::endl;
+        std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
+        std::cout << "  nNonce: " << block.nNonce << std::endl;
+        std::cout << "  vtx.size(): " << block.vtx.size() << " bytes" << std::endl;
+
         on_block(peer_id, block);
         return true;
     } catch (const std::out_of_range& e) {
@@ -870,6 +881,18 @@ CNetMessage CNetMessageProcessor::CreateGetDataMessage(
 
 CNetMessage CNetMessageProcessor::CreateBlockMessage(const CBlock& block) {
     CDataStream stream;
+
+    // DEBUG-BUG13: Log header values before serialization
+    std::cout << "[DEBUG-BUG13] CreateBlockMessage() - Serializing block:" << std::endl;
+    std::cout << "  Hash: " << block.GetHash().GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "  nVersion: " << block.nVersion << std::endl;
+    std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "  nTime: " << block.nTime << std::endl;
+    std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
+    std::cout << "  nNonce: " << block.nNonce << std::endl;
+    std::cout << "  vtx.size(): " << block.vtx.size() << " bytes" << std::endl;
+
     stream.WriteInt32(block.nVersion);
     stream.WriteUint256(block.hashPrevBlock);
     stream.WriteUint256(block.hashMerkleRoot);
@@ -882,6 +905,8 @@ CNetMessage CNetMessageProcessor::CreateBlockMessage(const CBlock& block) {
     if (!block.vtx.empty()) {
         stream.write(block.vtx.data(), block.vtx.size());
     }
+
+    std::cout << "[DEBUG-BUG13] Total serialized size: " << stream.size() << " bytes" << std::endl;
 
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();

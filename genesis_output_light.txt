@@ -1,0 +1,30 @@
+======================================
+Dilithion Genesis Block Generator
+Post-Quantum Cryptocurrency
+======================================
+
+Network: TESTNET
+Difficulty: 256x easier than mainnet
+
+Genesis block created with default parameters.
+
+Genesis Block Information:
+=========================
+Version:       1
+Previous Hash: 0000000000000000000000000000000000000000000000000000000000000000
+Merkle Root:   080a2ba50d759c2ccdf81c67dc26db7d7341e2383e7b1e32030f3de470be840e
+Timestamp:     1730000000 (Sun Oct 27 14:03:20 2024
+)Bits (nBits):  0x1f060000
+Nonce:         26738
+Hash:          000380c6c6993b61d28e435fe693e38f691689d092d85a01691ff1c0e9d13526
+
+Coinbase Message:
+Dilithion Testnet Genesis - Testing post-quantum cryptocurrency before mainnet launch
+
+======================================
+Mining Genesis Block
+======================================
+
+Mining genesis block...
+Target: 0006000000000000000000000000000000000000000000000000000000000000
+This may take a while...
