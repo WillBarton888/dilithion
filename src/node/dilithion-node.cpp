@@ -29,6 +29,9 @@
 #include <net/tx_relay.h>
 #include <net/socket.h>
 #include <net/async_broadcaster.h>
+#include <net/headers_manager.h>
+#include <net/orphan_manager.h>
+#include <net/block_fetcher.h>
 #include <api/http_server.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
@@ -63,6 +66,11 @@ CChainState g_chainstate;
 
 // Global async broadcaster pointer (initialized in main)
 CAsyncBroadcaster* g_async_broadcaster = nullptr;
+
+// Global IBD manager pointers (Bug #12 - Phase 4.1)
+CHeadersManager* g_headers_manager = nullptr;
+COrphanManager* g_orphan_manager = nullptr;
+CBlockFetcher* g_block_fetcher = nullptr;
 
 // Global node state for signal handling
 struct NodeState {
@@ -733,6 +741,15 @@ int main(int argc, char* argv[]) {
         // Initialize transaction relay manager (global)
         g_tx_relay_manager = new CTxRelayManager();
 
+        // Initialize IBD managers (Bug #12 - Phase 4.1)
+        std::cout << "Initializing IBD managers..." << std::endl;
+        g_headers_manager = new CHeadersManager();
+        g_orphan_manager = new COrphanManager();
+        g_block_fetcher = new CBlockFetcher();
+        std::cout << "  [OK] Headers manager initialized" << std::endl;
+        std::cout << "  [OK] Orphan manager initialized (max 100 blocks / 100 MB)" << std::endl;
+        std::cout << "  [OK] Block fetcher initialized (max 16 blocks in-flight)" << std::endl;
+
         // Create message processor and connection manager (local, using global peer manager)
         CNetMessageProcessor message_processor(*g_peer_manager);
         CConnectionManager connection_manager(*g_peer_manager, message_processor);
@@ -938,9 +955,28 @@ int main(int argc, char* argv[]) {
             // Link to parent block
             pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
             if (pblockIndex->pprev == nullptr) {
-                std::cerr << "[P2P] ERROR: Cannot find parent block "
-                          << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-                std::cerr << "  This is an orphan block - need to download more blocks" << std::endl;
+                // BUG #12 FIX (Phase 4.3): Orphan block handling
+                std::cout << "[P2P] Parent block not found: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cout << "[P2P] Storing block as orphan and requesting parent" << std::endl;
+
+                // Add block to orphan manager
+                if (g_orphan_manager->AddOrphanBlock(block, peer_id)) {
+                    std::cout << "[Orphan] Block added to orphan pool (count: "
+                              << g_orphan_manager->GetOrphanCount() << ")" << std::endl;
+
+                    // Request the missing parent block from the peer
+                    std::vector<NetProtocol::CInv> getdata;
+                    getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock));
+
+                    std::cout << "[P2P] Requesting parent block from peer " << peer_id << std::endl;
+                    CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
+                    connection_manager.SendMessage(peer_id, msg);
+                } else {
+                    std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;
+                    std::cerr << "  Pool may be full or block already exists" << std::endl;
+                }
+
+                // Cannot process orphan block yet - return early
                 // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
@@ -986,15 +1022,122 @@ int main(int argc, char* argv[]) {
                     std::cout << "[P2P] Block activated successfully" << std::endl;
 
                     // Check if this became the new tip
-                    if (g_chainstate.GetTip() == pblockIndex.get()) {
-                        std::cout << "[P2P] Updated best block to height " << pblockIndex->nHeight << std::endl;
+                    if (g_chainstate.GetTip() == pblockIndexPtr) {
+                        std::cout << "[P2P] Updated best block to height " << pblockIndexPtr->nHeight << std::endl;
                         g_node_state.new_block_found = true;
                     } else {
-                        std::cout << "[P2P] Block is valid but not on best chain (orphan)" << std::endl;
+                        std::cout << "[P2P] Block is valid but not on best chain" << std::endl;
                     }
+                }
+
+                // BUG #12 FIX (Phase 4.3): Try to resolve orphan blocks
+                // Check if any orphan blocks are now valid children of this block
+                std::vector<uint256> orphanChildren = g_orphan_manager->GetOrphanChildren(blockHash);
+
+                if (!orphanChildren.empty()) {
+                    std::cout << "[Orphan] Found " << orphanChildren.size()
+                              << " orphan block(s) that can now be processed" << std::endl;
+
+                    // Process each orphan child recursively
+                    for (const uint256& orphanHash : orphanChildren) {
+                        CBlock orphanBlock;
+                        if (g_orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
+                            std::cout << "[Orphan] Processing orphan: "
+                                      << orphanHash.GetHex().substr(0, 16) << "..." << std::endl;
+
+                            // Remove from orphan pool
+                            g_orphan_manager->EraseOrphanBlock(orphanHash);
+
+                            // Recursively process the orphan block by calling the block handler
+                            // Note: This will trigger another round of orphan resolution if needed
+                            message_processor.ProcessMessage(peer_id,
+                                message_processor.CreateBlockMessage(orphanBlock));
+                        }
+                    }
+
+                    std::cout << "[Orphan] Orphan resolution complete (remaining: "
+                              << g_orphan_manager->GetOrphanCount() << ")" << std::endl;
                 }
             } else {
                 std::cerr << "[P2P] ERROR: Failed to activate block in chain" << std::endl;
+            }
+        });
+
+        // Register GETHEADERS handler - respond with block headers from our chain (Bug #12 - Phase 4.2)
+        message_processor.SetGetHeadersHandler([&blockchain, &connection_manager, &message_processor](
+            int peer_id, const NetProtocol::CGetHeadersMessage& msg) {
+
+            std::cout << "[IBD] Peer " << peer_id << " requested headers (locator size: "
+                      << msg.locator.size() << ")" << std::endl;
+
+            // Find the best common block between us and the peer
+            uint256 hashStart;
+            bool found = false;
+
+            // Search through locator hashes to find first one we have
+            for (const uint256& hash : msg.locator) {
+                if (g_chainstate.HasBlockIndex(hash)) {
+                    hashStart = hash;
+                    found = true;
+                    std::cout << "[IBD] Found common block: " << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                    break;
+                }
+            }
+
+            if (!found) {
+                std::cout << "[IBD] No common block found with peer " << peer_id << std::endl;
+                return;
+            }
+
+            // Collect up to 2000 headers starting from hashStart
+            std::vector<CBlockHeader> headers;
+            CBlockIndex* pindex = g_chainstate.GetBlockIndex(hashStart);
+
+            if (pindex && pindex->pnext) {
+                pindex = pindex->pnext;  // Start from next block
+
+                while (pindex && headers.size() < 2000) {
+                    headers.push_back(pindex->header);
+                    pindex = pindex->pnext;
+
+                    // Stop if we reach the stop hash
+                    if (!msg.hashStop.IsNull() && pindex && pindex->GetBlockHash() == msg.hashStop) {
+                        break;
+                    }
+                }
+            }
+
+            if (!headers.empty()) {
+                std::cout << "[IBD] Sending " << headers.size() << " header(s) to peer " << peer_id << std::endl;
+                CNetMessage headersMsg = message_processor.CreateHeadersMessage(headers);
+                connection_manager.SendMessage(peer_id, headersMsg);
+            } else {
+                std::cout << "[IBD] No headers to send to peer " << peer_id << std::endl;
+            }
+        });
+
+        // Register HEADERS handler - process received headers (Bug #12 - Phase 4.2)
+        message_processor.SetHeadersHandler([](int peer_id, const std::vector<CBlockHeader>& headers) {
+            if (headers.empty()) {
+                return;
+            }
+
+            std::cout << "[IBD] Received " << headers.size() << " header(s) from peer " << peer_id << std::endl;
+
+            // Pass headers to headers manager for validation and storage
+            if (g_headers_manager->ProcessHeaders(peer_id, headers)) {
+                // Headers were valid and processed successfully
+                int bestHeight = g_headers_manager->GetBestHeight();
+                uint256 bestHash = g_headers_manager->GetBestHeaderHash();
+
+                std::cout << "[IBD] Headers processed successfully" << std::endl;
+                std::cout << "[IBD] Best header height: " << bestHeight << std::endl;
+                std::cout << "[IBD] Best header hash: " << bestHash.GetHex().substr(0, 16) << "..." << std::endl;
+
+                // TODO Phase 4.5: Trigger block downloads based on header chain
+            } else {
+                std::cerr << "[IBD] ERROR: Failed to process headers from peer " << peer_id << std::endl;
+                std::cerr << "  Headers may be invalid or disconnected from our chain" << std::endl;
             }
         });
 
@@ -1623,6 +1766,20 @@ int main(int argc, char* argv[]) {
         std::cout << "  Closing blockchain database..." << std::endl;
         blockchain.Close();
 
+        std::cout << "  Cleaning up IBD managers..." << std::endl;
+        if (g_block_fetcher) {
+            delete g_block_fetcher;
+            g_block_fetcher = nullptr;
+        }
+        if (g_orphan_manager) {
+            delete g_orphan_manager;
+            g_orphan_manager = nullptr;
+        }
+        if (g_headers_manager) {
+            delete g_headers_manager;
+            g_headers_manager = nullptr;
+        }
+
         std::cout << "  Cleaning up chain parameters..." << std::endl;
         delete Dilithion::g_chainParams;
         Dilithion::g_chainParams = nullptr;
@@ -1639,6 +1796,20 @@ int main(int argc, char* argv[]) {
             g_tx_relay_manager = nullptr;
         }
         g_peer_manager.reset();
+
+        // Clean up IBD managers
+        if (g_block_fetcher) {
+            delete g_block_fetcher;
+            g_block_fetcher = nullptr;
+        }
+        if (g_orphan_manager) {
+            delete g_orphan_manager;
+            g_orphan_manager = nullptr;
+        }
+        if (g_headers_manager) {
+            delete g_headers_manager;
+            g_headers_manager = nullptr;
+        }
 
         if (Dilithion::g_chainParams) {
             delete Dilithion::g_chainParams;
