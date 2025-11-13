@@ -914,7 +914,7 @@ int main(int argc, char* argv[]) {
         });
 
         // Register block handler to validate and save received blocks
-        message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
+        message_processor.SetBlockHandler([&blockchain, &message_processor, &connection_manager](int peer_id, const CBlock& block) {
             uint256 blockHash = block.GetHash();
 
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
@@ -960,7 +960,7 @@ int main(int argc, char* argv[]) {
                 std::cout << "[P2P] Storing block as orphan and requesting parent" << std::endl;
 
                 // Add block to orphan manager
-                if (g_orphan_manager->AddOrphanBlock(block, peer_id)) {
+                if (g_orphan_manager->AddOrphanBlock(peer_id, block)) {
                     std::cout << "[Orphan] Block added to orphan pool (count: "
                               << g_orphan_manager->GetOrphanCount() << ")" << std::endl;
 
