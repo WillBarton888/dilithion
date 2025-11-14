@@ -23,6 +23,11 @@ public:
         return true;
     }
     
+    // CRITICAL-6 FIX: Document operator< byte order to prevent PoW misuse
+    // WARNING: This operator uses LITTLE-ENDIAN byte order (memcmp)
+    // ONLY use for STL containers (std::map, std::set, etc.)
+    // NEVER use for PoW validation - use HashLessThan() instead
+    // PoW requires BIG-ENDIAN comparison (MSB first)
     bool operator<(const uint256& other) const {
         return memcmp(data, other.data, 32) < 0;
     }

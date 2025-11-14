@@ -159,14 +159,23 @@ void randomx_hash_fast(const void* input, size_t input_len, void* output) {
 // Async initialization (Monero-style)
 // Returns immediately, initialization happens in background thread
 extern "C" void randomx_init_async(const void* key, size_t key_len, int light_mode) {
-    // Check if already initializing or ready
-    if (g_randomx_initializing.load() || g_randomx_ready.load()) {
+    // CRITICAL-3 FIX: Atomic compare-exchange to prevent TOCTOU race condition
+    // Two threads could both pass the check and start duplicate initialization threads
+    bool expected = false;
+    if (!g_randomx_initializing.compare_exchange_strong(expected, true)) {
+        // Another thread is already initializing or initialization failed to start
         std::cout << "  RandomX already initializing or ready" << std::endl;
         return;
     }
 
-    // Start background initialization thread
-    g_randomx_initializing = true;
+    // Check if already ready (after winning the race)
+    if (g_randomx_ready.load()) {
+        g_randomx_initializing = false;  // Release the lock
+        std::cout << "  RandomX already initialized" << std::endl;
+        return;
+    }
+
+    // Start background initialization thread (we won the race)
     g_randomx_ready = false;
     g_randomx_progress = 0;
 

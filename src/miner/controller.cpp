@@ -115,17 +115,16 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
     std::cout << "[Mining] Detected RAM: " << total_ram_mb << " MB" << std::endl;
     std::cout << "[Mining] Using RandomX " << (light_mode ? "LIGHT" : "FULL") << " mode" << std::endl;
 
-    {
-        std::lock_guard<std::mutex> rxLock(m_randomxMutex);
-        try {
-            randomx_init_for_hashing(m_randomxKey.c_str(),
-                                    m_randomxKey.length(),
-                                    light_mode);
-        } catch (...) {
-            m_mining = false;  // Reset flag on error
-            throw;  // Re-throw exception
-        }
+    // CRITICAL-5 FIX: Don't re-initialize RandomX if already done by async init
+    // The node's main function already called randomx_init_async(), so we just wait for it
+    if (!randomx_is_ready()) {
+        std::cout << "[Mining] Waiting for RandomX async initialization..." << std::endl;
+        randomx_wait_for_init();
+        std::cout << "[Mining] RandomX ready" << std::endl;
+    } else {
+        std::cout << "[Mining] RandomX already initialized" << std::endl;
     }
+    // Note: RAM mode detection above is for logging only; actual mode was set during async init
 
     // Store block template
     {
@@ -267,8 +266,9 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             uint256 hash;
             std::memcpy(hash.begin(), hashBuffer, RANDOMX_HASH_SIZE);
 
-            // Update hash counter
-            m_stats.nHashesComputed++;
+            // Update hash counter (CRITICAL-1 FIX: Use atomic fetch_add for thread safety)
+            // Multiple mining threads increment this counter; operator++ is NOT atomic for atomic types
+            m_stats.nHashesComputed.fetch_add(1, std::memory_order_relaxed);
 
             // Check if valid block
             if (CheckProofOfWork(hash, hashTarget)) {
@@ -294,8 +294,15 @@ void CMiningController::MiningWorker(uint32_t threadId) {
 
                 // Continue mining (in production, would update template)
             }
+        } catch (const std::exception& e) {
+            // CRITICAL-4 FIX: Log RandomX exceptions instead of silently continuing
+            // This helps identify VM corruption or initialization failures
+            std::cerr << "[Mining] Thread " << threadId << " RandomX error: " << e.what() << std::endl;
+            // Continue mining - may be transient error
         } catch (...) {
-            // RandomX error - continue mining
+            // CRITICAL-4 FIX: Log unknown exceptions
+            std::cerr << "[Mining] Thread " << threadId << " unknown RandomX error" << std::endl;
+            // Continue mining
         }
 
             // Increment nonce for this thread

@@ -144,10 +144,12 @@ uint256 COrphanManager::GetOrphanRoot(const uint256& hash) const
             break;
         }
 
-        // Check for cycles
+        // Check for cycles (CRITICAL-7 FIX)
         if (visited.count(current) > 0) {
-            std::cerr << "[OrphanManager] WARNING: Cycle detected in orphan chain" << std::endl;
-            break;
+            std::cerr << "[OrphanManager] ERROR: Cycle detected in orphan chain, returning original hash" << std::endl;
+            // Return the original hash, not a corrupted root from the cycle
+            // This prevents IBD from stalling while waiting for a non-existent parent
+            return hash;
         }
         visited.insert(current);
 
