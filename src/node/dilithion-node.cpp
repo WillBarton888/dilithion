@@ -521,6 +521,12 @@ int main(int argc, char* argv[]) {
         randomx_init_async(rx_key, strlen(rx_key), light_mode);
         std::cout << "  [ASYNC] RandomX initialization started (continuing startup...)" << std::endl;
 
+        // Wait for RandomX to complete before loading genesis (genesis hash computation needs RandomX)
+        if (!randomx_is_ready()) {
+            std::cout << "  [WAIT] Waiting for RandomX initialization..." << std::endl;
+            randomx_wait_for_init();
+        }
+
         // Load and verify genesis block
         std::cout << "Loading genesis block..." << std::endl;
         CBlock genesis = Genesis::CreateGenesisBlock();
