@@ -16,6 +16,7 @@ Description=Dilithion Testnet Node
 Documentation=https://github.com/yourusername/dilithion
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -29,7 +30,6 @@ ExecStart=/root/dilithion/dilithion-node --testnet --mine --threads=2
 # Restart policy (following Ethereum/Monero: aggressive restart for mining nodes)
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=0
 
 # Graceful shutdown (CRITICAL for blockchain integrity)
 # Allow 5 minutes for blockchain database flush to disk
