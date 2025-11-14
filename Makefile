@@ -560,26 +560,6 @@ memcheck: tests
 		echo "$(COLOR_YELLOW)⚠ valgrind not installed. See docs/STATIC-ANALYSIS.md$(COLOR_RESET)"; \
 	fi
 
-# Code coverage
-coverage:
-	@echo "$(COLOR_YELLOW)Building with coverage...$(COLOR_RESET)"
-	@if command -v lcov >/dev/null 2>&1; then \
-		$(MAKE) clean; \
-		CXXFLAGS="$(CXXFLAGS) --coverage" $(MAKE) tests; \
-		echo "$(COLOR_YELLOW)Running tests...$(COLOR_RESET)"; \
-		./phase1_test || true; \
-		./wallet_tests || true; \
-		./crypter_tests || true; \
-		./wallet_encryption_integration_tests || true; \
-		echo "$(COLOR_YELLOW)Generating coverage report...$(COLOR_RESET)"; \
-		lcov --capture --directory . --output-file coverage.info; \
-		lcov --remove coverage.info '/usr/*' 'depends/*' 'src/test/*' --output-file coverage-filtered.info; \
-		genhtml coverage-filtered.info --output-directory coverage-report; \
-		echo "$(COLOR_GREEN)✓ Coverage report: coverage-report/index.html$(COLOR_RESET)"; \
-	else \
-		echo "$(COLOR_YELLOW)⚠ lcov not installed. See docs/STATIC-ANALYSIS.md$(COLOR_RESET)"; \
-	fi
-
 # Generate API documentation
 docs:
 	@echo "$(COLOR_YELLOW)Generating API documentation...$(COLOR_RESET)"
