@@ -8,6 +8,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <cstring>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include <iostream>
 
 namespace {
     randomx_cache* g_randomx_cache = nullptr;
@@ -16,6 +20,12 @@ namespace {
     std::mutex g_randomx_mutex;
     std::vector<uint8_t> g_current_key;
     bool g_is_light_mode = false;
+
+    // Async initialization state (Monero-style)
+    std::atomic<bool> g_randomx_ready{false};
+    std::atomic<bool> g_randomx_initializing{false};
+    std::thread g_randomx_init_thread;
+    std::atomic<int> g_randomx_progress{0};  // 0-100%
 }
 
 extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode) {
@@ -144,4 +154,70 @@ void randomx_hash_fast(const void* input, size_t input_len, void* output) {
     }
 
     randomx_calculate_hash(g_randomx_vm, input, input_len, output);
+}
+
+// Async initialization (Monero-style)
+// Returns immediately, initialization happens in background thread
+extern "C" void randomx_init_async(const void* key, size_t key_len, int light_mode) {
+    // Check if already initializing or ready
+    if (g_randomx_initializing.load() || g_randomx_ready.load()) {
+        std::cout << "  RandomX already initializing or ready" << std::endl;
+        return;
+    }
+
+    // Start background initialization thread
+    g_randomx_initializing = true;
+    g_randomx_ready = false;
+    g_randomx_progress = 0;
+
+    // Join any existing thread
+    if (g_randomx_init_thread.joinable()) {
+        g_randomx_init_thread.join();
+    }
+
+    // Copy key data for thread safety
+    std::vector<uint8_t> key_copy((const uint8_t*)key, (const uint8_t*)key + key_len);
+
+    // Launch async initialization thread
+    g_randomx_init_thread = std::thread([key_copy, light_mode]() {
+        try {
+            std::cout << "  [ASYNC] RandomX initialization started in background thread" << std::endl;
+            std::cout << "  [ASYNC] Mode: " << (light_mode ? "LIGHT" : "FULL") << std::endl;
+
+            auto start_time = std::chrono::steady_clock::now();
+
+            // Call existing blocking init
+            randomx_init_for_hashing(key_copy.data(), key_copy.size(), light_mode);
+
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
+
+            g_randomx_ready = true;
+            g_randomx_progress = 100;
+
+            std::cout << "  [OK] RandomX initialized (async, " << duration.count() << "s)" << std::endl;
+
+        } catch (const std::exception& e) {
+            std::cerr << "  [ERROR] RandomX async init failed: " << e.what() << std::endl;
+            g_randomx_ready = false;
+            g_randomx_progress = 0;
+        }
+        g_randomx_initializing = false;
+    });
+
+    std::cout << "  [ASYNC] RandomX initialization thread launched (non-blocking)" << std::endl;
+}
+
+// Check if RandomX is ready for hashing
+extern "C" int randomx_is_ready() {
+    return g_randomx_ready.load() ? 1 : 0;
+}
+
+// Wait for RandomX initialization to complete
+extern "C" void randomx_wait_for_init() {
+    if (g_randomx_init_thread.joinable()) {
+        std::cout << "  [WAIT] Waiting for RandomX initialization to complete..." << std::endl;
+        g_randomx_init_thread.join();
+        std::cout << "  [WAIT] RandomX initialization complete" << std::endl;
+    }
 }

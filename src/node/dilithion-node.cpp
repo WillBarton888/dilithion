@@ -516,8 +516,10 @@ int main(int argc, char* argv[]) {
         std::cout << "  Selected mode: " << (light_mode ? "LIGHT" : "FULL") << " ("
                   << (light_mode ? "~3-10 H/s" : "~100 H/s") << ")" << std::endl;
 
-        randomx_init_for_hashing(rx_key, strlen(rx_key), light_mode);
-        std::cout << "  [OK] RandomX initialized" << std::endl;
+        // BUG #14 FIX: Async RandomX initialization (Monero-style)
+        // This allows RPC server to start immediately while RandomX initializes in background
+        randomx_init_async(rx_key, strlen(rx_key), light_mode);
+        std::cout << "  [ASYNC] RandomX initialization started (continuing startup...)" << std::endl;
 
         // Load and verify genesis block
         std::cout << "Loading genesis block..." << std::endl;
@@ -1761,6 +1763,15 @@ int main(int argc, char* argv[]) {
             g_node_state.mining_enabled = true;  // Track that mining was requested
             std::cout << std::endl;
             std::cout << "Starting mining..." << std::endl;
+
+            // BUG #14 FIX: Wait for RandomX to complete initialization before mining
+            if (!randomx_is_ready()) {
+                std::cout << "  [WAIT] RandomX still initializing, waiting..." << std::endl;
+                randomx_wait_for_init();
+                std::cout << "  [OK] RandomX ready for mining" << std::endl;
+            } else {
+                std::cout << "  [OK] RandomX already ready" << std::endl;
+            }
 
             auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
             if (!templateOpt) {

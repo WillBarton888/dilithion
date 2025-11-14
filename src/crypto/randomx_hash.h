@@ -22,6 +22,16 @@ void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode);
 
 void randomx_cleanup();
 
+// Async initialization (Monero-style)
+// Returns immediately, initialization happens in background thread
+void randomx_init_async(const void* key, size_t key_len, int light_mode);
+
+// Check if RandomX is ready for hashing
+int randomx_is_ready();
+
+// Wait for RandomX initialization to complete
+void randomx_wait_for_init();
+
 #ifdef __cplusplus
 }
 #endif
