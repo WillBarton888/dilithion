@@ -1,0 +1,58 @@
+# Dilithion Testnet Node - Production Systemd Service
+# Based on Bitcoin Core, Ethereum Geth, and Monero monerod best practices
+#
+# Installation:
+#   sudo cp systemd/dilithion-testnet.service /etc/systemd/system/
+#   sudo systemd daemon-reload
+#   sudo systemctl enable dilithion-testnet.service
+#   sudo systemctl start dilithion-testnet.service
+#
+# Monitoring:
+#   systemctl status dilithion-testnet.service
+#   journalctl -u dilithion-testnet.service -f
+
+[Unit]
+Description=Dilithion Testnet Node
+Documentation=https://github.com/yourusername/dilithion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/dilithion
+
+# Start command - thread count will be node-specific
+# Override with: systemctl edit dilithion-testnet.service
+ExecStart=/root/dilithion/dilithion-node --testnet --mine --threads=2
+
+# Restart policy (following Ethereum/Monero: aggressive restart for mining nodes)
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0
+
+# Graceful shutdown (CRITICAL for blockchain integrity)
+# Allow 5 minutes for blockchain database flush to disk
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=300
+FinalKillSignal=SIGKILL
+
+# Logging
+StandardOutput=append:/root/dilithion/node.log
+StandardError=append:/root/dilithion/node.log
+SyslogIdentifier=dilithion-node
+
+# Security hardening (following Bitcoin Core best practices)
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits (following Ethereum Geth)
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# OOM protection (moderate priority - survive memory pressure)
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
