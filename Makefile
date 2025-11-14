@@ -113,6 +113,7 @@ COLOR_YELLOW := \033[33m
 CONSENSUS_SOURCES := src/consensus/fees.cpp \
                      src/consensus/pow.cpp \
                      src/consensus/chain.cpp \
+                     src/consensus/chain_verifier.cpp \
                      src/consensus/tx_validation.cpp \
                      src/consensus/validation.cpp
 

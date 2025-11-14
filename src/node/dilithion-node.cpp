@@ -40,6 +40,7 @@
 #include <consensus/pow.h>
 #include <consensus/chain.h>
 #include <consensus/validation.h>  // CRITICAL-3 FIX: For CBlockValidator
+#include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 #include <crypto/randomx_hash.h>
 
 #include <iostream>
@@ -733,6 +734,70 @@ int main(int argc, char* argv[]) {
                 delete Dilithion::g_chainParams;
                 return 1;
             }
+        }
+
+        // ========================================================================
+        // CHAIN INTEGRITY VALIDATION (Bug #17)
+        // Following Bitcoin Core, Ethereum Geth, Monero best practices
+        // Prevents "Cannot find parent block" errors during systemd auto-restart
+        // ========================================================================
+        {
+            std::cout << "Validating blockchain integrity..." << std::endl;
+
+            CChainVerifier verifier;
+            std::string error;
+
+            // Quick validation on every startup (1-10 seconds)
+            // Checks: genesis exists, best block valid, no missing parents
+            if (!verifier.VerifyChainIntegrity(CChainVerifier::LEVEL_QUICK, error)) {
+
+                if (config.testnet) {
+                    // TESTNET: Auto-wipe corrupted data (following Ethereum Geth pattern)
+                    std::cout << "==========================================================" << std::endl;
+                    std::cout << "TESTNET: Chain corruption detected" << std::endl;
+                    std::cout << "Error: " << error << std::endl;
+                    std::cout << "TESTNET: Attempting automatic recovery..." << std::endl;
+                    std::cout << "==========================================================" << std::endl;
+
+                    if (!verifier.RepairChain(true)) {
+                        std::cerr << "ERROR: Failed to repair testnet blockchain data" << std::endl;
+                        delete Dilithion::g_chainParams;
+                        return 1;
+                    }
+
+                    std::cout << "==========================================================" << std::endl;
+                    std::cout << "TESTNET: Blockchain data wiped successfully" << std::endl;
+                    std::cout << "TESTNET: Please restart the node" << std::endl;
+                    std::cout << "TESTNET: Node will rebuild from genesis block" << std::endl;
+                    std::cout << "TESTNET: This is normal after code updates" << std::endl;
+                    std::cout << "==========================================================" << std::endl;
+
+                    // Exit gracefully - systemd will auto-restart
+                    delete Dilithion::g_chainParams;
+                    return 0;  // Clean exit for systemd restart
+
+                } else {
+                    // MAINNET: Conservative approach (following Bitcoin Core pattern)
+                    std::cerr << "\n==========================================================" << std::endl;
+                    std::cerr << "ERROR: Corrupted blockchain database detected" << std::endl;
+                    std::cerr << "Error: " << error << std::endl;
+                    std::cerr << "==========================================================" << std::endl;
+                    std::cerr << "\nThis usually indicates:" << std::endl;
+                    std::cerr << "  1. Database corruption from unclean shutdown" << std::endl;
+                    std::cerr << "  2. Incomplete blockchain download" << std::endl;
+                    std::cerr << "  3. Disk corruption" << std::endl;
+                    std::cerr << "\nTo recover:" << std::endl;
+                    std::cerr << "  Option 1: Delete blockchain data for full re-sync" << std::endl;
+                    std::cerr << "    rm -rf ~/.dilithion/blocks ~/.dilithion/chainstate" << std::endl;
+                    std::cerr << "    ./dilithion-node" << std::endl;
+                    std::cerr << "\nFor more information, see docs/troubleshooting.md\n" << std::endl;
+
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
+            }
+
+            std::cout << "  [OK] Chain integrity validation passed" << std::endl;
         }
 
         // Set network magic for P2P protocol
