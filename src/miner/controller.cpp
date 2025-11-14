@@ -178,11 +178,13 @@ void CMiningController::StopMining() {
         m_monitorThread.join();
     }
 
-    // MINE-005 FIX: Cleanup RandomX resources with thread synchronization
-    {
-        std::lock_guard<std::mutex> rxLock(m_randomxMutex);
-        randomx_cleanup();
-    }
+    // CRITICAL-8 FIX: Do NOT cleanup RandomX when stopping mining!
+    // RandomX VM is initialized once at node startup and persists across mining restarts.
+    // This allows template updates (when new blocks are found) without destroying the VM.
+    // RandomX cleanup only happens at node shutdown via global cleanup handlers.
+    //
+    // Old code (BUG): randomx_cleanup() here caused "RandomX VM not initialized" errors
+    // after finding blocks, because template update calls StopMining() then StartMining().
 }
 
 void CMiningController::UpdateTemplate(const CBlockTemplate& blockTemplate) {
