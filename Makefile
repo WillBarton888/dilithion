@@ -117,7 +117,8 @@ CONSENSUS_SOURCES := src/consensus/fees.cpp \
                      src/consensus/tx_validation.cpp \
                      src/consensus/validation.cpp
 
-CORE_SOURCES_UTIL := src/core/chainparams.cpp
+CORE_SOURCES_UTIL := src/core/chainparams.cpp \
+                     src/core/globals.cpp
 
 CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/sha3.cpp \
