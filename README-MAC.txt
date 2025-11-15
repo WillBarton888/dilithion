@@ -181,9 +181,11 @@ A: Yes, but MacBooks may get warm. Use the wizard to choose
    1-2 cores for light mining. Mac desktops (iMac, Mac Studio)
    handle mining better.
 
-Q: What's the official seed node?
-A: 170.64.203.134:18444
-   All launcher scripts connect to this automatically.
+Q: What are the official seed nodes?
+A: NYC: 134.122.4.164:18444 (Primary)
+   Singapore: 188.166.255.63:18444 (Asia-Pacific)
+   London: 209.97.177.197:18444 (Europe)
+   All launcher scripts connect to these automatically.
 
 ================================================================
   SYSTEM REQUIREMENTS

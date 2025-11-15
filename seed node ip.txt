@@ -1,4 +1,13 @@
-seed node ip
-170.64.203.134
+Dilithion Testnet Seed Nodes
+=============================
+
+NYC (Primary):
+134.122.4.164:18444
+
+Singapore (Asia-Pacific):
+188.166.255.63:18444
+
+London (Europe):
+209.97.177.197:18444
 
 Armata$413614
