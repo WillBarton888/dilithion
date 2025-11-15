@@ -88,7 +88,7 @@ echo -e "${NC}"
 echo ""
 echo -e "${GREEN}Your Settings:${NC}"
 echo "    - Network:     TESTNET"
-echo "    - Seed Node:   170.64.203.134:18444 (official)"
+echo "    - Seed Nodes:  NYC, Singapore, London (auto-connect)"
 echo "    - Mining:      ENABLED"
 echo "    - CPU Threads: $threads_display"
 echo ""
@@ -168,7 +168,7 @@ fi
 echo -e "${GREEN}✓ All dependencies found${NC}"
 echo ""
 
-./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=$threads
+./dilithion-node --testnet --mine --threads=$threads
 
 echo ""
 echo -e "${YELLOW}"

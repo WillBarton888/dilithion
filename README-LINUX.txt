@@ -108,8 +108,8 @@ The node will shut down gracefully.
 When you start mining, you'll see:
 
 1. CONNECTION MESSAGES
-   - "Connected to peer: 170.64.203.134:18444"
-   - This means you've connected to the official seed node
+   - "Connected to peer: 134.122.4.164:18444" (or Singapore/London)
+   - This means you've connected to one of the official seed nodes
 
 2. BLOCKCHAIN SYNC
    - "Downloading blocks..."
