@@ -1,0 +1,73 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-leveldb
+          mingw-w64-x86_64-openssl
+          make
+
+    - name: Build RandomX
+      shell: msys2 {0}
+      run: |
+        cd depends/randomx
+        mkdir -p build
+        cd build
+        cmake .. -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release
+        make -j$(nproc)
+        ls -lh librandomx.a
+
+    - name: Build Dilithium
+      shell: msys2 {0}
+      run: |
+        cd depends/dilithium/ref
+        make clean
+        make -j$(nproc)
+
+    - name: Build Dilithion
+      shell: msys2 {0}
+      run: |
+        make clean
+        make -j$(nproc) CXXFLAGS="-O3 -DNDEBUG" dilithion-node.exe genesis_gen.exe check-wallet-balance.exe
+        ls -lh dilithion-node.exe check-wallet-balance.exe genesis_gen.exe
+
+    - name: Create release package
+      shell: bash
+      run: |
+        chmod +x package-windows-release.sh
+        ./package-windows-release.sh
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dilithion-windows-package
+        path: releases/dilithion-testnet-v1.0.0-windows-x64.zip
+
+    - name: Upload to release (if tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: releases/dilithion-testnet-v1.0.0-windows-x64.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
