@@ -35,7 +35,7 @@ jobs:
         OPENSSL_PREFIX=$(brew --prefix openssl@3 2>/dev/null || brew --prefix openssl 2>/dev/null || echo "/opt/homebrew/opt/openssl@3")
         echo "Using OpenSSL at: $OPENSSL_PREFIX"
         export CPPFLAGS="-I$OPENSSL_PREFIX/include"
-        export LDFLAGS="-L$OPENSSL_PREFIX/lib -Ldepends/randomx/build"
+        export LDFLAGS="-L$OPENSSL_PREFIX/lib -Ldepends/randomx/build -L$(brew --prefix leveldb)/lib"
         export CFLAGS="-I$OPENSSL_PREFIX/include"
         export CXXFLAGS="-std=c++17 -I$OPENSSL_PREFIX/include"
         make clean
