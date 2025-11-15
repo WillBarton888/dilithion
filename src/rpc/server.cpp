@@ -1532,8 +1532,125 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
         return oss.str();
     }
 
-    // TODO: Search blockchain for confirmed transactions
-    throw std::runtime_error("Transaction not found in mempool (blockchain search not yet implemented)");
+    // Transaction not in mempool - search blockchain
+    // Note: Without txindex, this requires scanning blocks (slow for large chains)
+    // For testnet with low block count, this is acceptable
+
+    std::cout << "[RPC] Transaction " << txid.GetHex() << " not in mempool, searching blockchain..." << std::endl;
+
+    // Get chain tip
+    CBlockIndex* pTip = m_chainstate->GetTip();
+    if (pTip == nullptr) {
+        throw std::runtime_error("Chain state not initialized");
+    }
+
+    // Walk backwards through chain looking for transaction
+    // Limit search to last 1000 blocks for performance
+    const int MAX_BLOCKS_TO_SEARCH = 1000;
+    int blocksSearched = 0;
+
+    CBlockIndex* pCurrent = pTip;
+    while (pCurrent != nullptr && blocksSearched < MAX_BLOCKS_TO_SEARCH) {
+        // Read block data
+        CBlock block;
+        uint256 blockHash = pCurrent->GetBlockHash();
+
+        if (!m_blockchain->ReadBlock(blockHash, block)) {
+            std::cerr << "[RPC] Warning: Failed to read block " << blockHash.GetHex() << std::endl;
+            pCurrent = pCurrent->pprev;
+            blocksSearched++;
+            continue;
+        }
+
+        // Parse transactions from block.vtx
+        // block.vtx contains multiple serialized transactions concatenated together
+        const uint8_t* ptr = block.vtx.data();
+        const uint8_t* end = block.vtx.data() + block.vtx.size();
+
+        while (ptr < end) {
+            // Deserialize one transaction
+            CTransaction tx;
+            size_t bytesConsumed = 0;
+            std::string deserializeError;
+
+            if (!tx.Deserialize(ptr, end - ptr, &deserializeError, &bytesConsumed)) {
+                // Failed to parse transaction - skip rest of this block
+                std::cerr << "[RPC] Warning: Failed to parse transaction in block "
+                          << blockHash.GetHex() << ": " << deserializeError << std::endl;
+                break;
+            }
+
+            // Move pointer forward
+            ptr += bytesConsumed;
+
+            // Check if this transaction matches
+            uint256 foundTxid = tx.GetHash();
+            if (foundTxid == txid) {
+                // Found it! Calculate confirmations
+                int confirmations = (pTip->nHeight - pCurrent->nHeight) + 1;
+
+                std::cout << "[RPC] Found transaction " << txid.GetHex()
+                          << " in block " << blockHash.GetHex()
+                          << " (height " << pCurrent->nHeight << ", "
+                          << confirmations << " confirmations)" << std::endl;
+
+                // Build JSON response
+                std::ostringstream oss;
+                oss << "{";
+                oss << "\"txid\":\"" << foundTxid.GetHex() << "\",";
+                oss << "\"version\":" << tx.nVersion << ",";
+
+                // Inputs
+                oss << "\"vin\":[";
+                for (size_t i = 0; i < tx.vin.size(); i++) {
+                    if (i > 0) oss << ",";
+                    const CTxIn& txin = tx.vin[i];
+                    oss << "{";
+                    oss << "\"txid\":\"" << txin.prevout.hash.GetHex() << "\",";
+                    oss << "\"vout\":" << txin.prevout.n << ",";
+                    oss << "\"scriptSig\":\"" << HexStr(txin.scriptSig) << "\",";
+                    oss << "\"sequence\":" << txin.nSequence;
+                    oss << "}";
+                }
+                oss << "],";
+
+                // Outputs
+                oss << "\"vout\":[";
+                for (size_t i = 0; i < tx.vout.size(); i++) {
+                    if (i > 0) oss << ",";
+                    const CTxOut& txout = tx.vout[i];
+                    oss << "{";
+                    oss << "\"value\":" << txout.nValue << ",";
+                    oss << "\"n\":" << i << ",";
+                    oss << "\"scriptPubKey\":\"" << HexStr(txout.scriptPubKey) << "\"";
+                    oss << "}";
+                }
+                oss << "],";
+
+                oss << "\"locktime\":" << tx.nLockTime << ",";
+                oss << "\"blockhash\":\"" << blockHash.GetHex() << "\",";
+                oss << "\"blockheight\":" << pCurrent->nHeight << ",";
+                oss << "\"confirmations\":" << confirmations << ",";
+                oss << "\"in_mempool\":false";
+                oss << "}";
+
+                return oss.str();
+            }
+        }
+
+        blocksSearched++;
+        pCurrent = pCurrent->pprev;
+    }
+
+    // Transaction not found after searching
+    std::ostringstream error;
+    error << "Transaction not found.\\n";
+    error << "Searched mempool and last " << blocksSearched << " blocks.\\n";
+    error << "\\n";
+    error << "Note: Without transaction index, only recent blocks are searched.\\n";
+    error << "For older transactions, use block explorer or getblock RPC.";
+
+    throw std::runtime_error(error.str());
 }
 
 std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
