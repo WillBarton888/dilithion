@@ -31,12 +31,10 @@ jobs:
       shell: msys2 {0}
       run: |
         cd depends/randomx
-        mkdir -p build
-        cd build
+        mkdir -p build-windows
+        cd build-windows
         cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release ..
         mingw32-make -j4
-        # Copy library to where Dilithion expects it
-        cp librandomx.a ../../
 
     - name: Build Dilithion
       shell: msys2 {0}
