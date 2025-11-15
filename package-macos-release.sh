@@ -5,7 +5,7 @@
 #  This script packages the macOS binary release
 ################################################################
 
-VERSION="v1.0.0"
+VERSION="v1.0.9"
 RELEASE_NAME="dilithion-testnet-${VERSION}-macos-x64"
 RELEASE_DIR="releases/${RELEASE_NAME}"
 

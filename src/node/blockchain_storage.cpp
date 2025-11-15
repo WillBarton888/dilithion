@@ -55,11 +55,31 @@ bool CBlockchainDB::ValidateDatabasePath(const std::string& path, std::string& c
         }
 
         // DB-004 FIX: Check for forbidden characters (Windows)
+        // Note: On Windows, we need to allow colon in drive letters (e.g., C:)
         const std::string forbidden = "<>:\"|?*";
-        if (canonical.string().find_first_of(forbidden) != std::string::npos) {
+        std::string path_str = canonical.string();
+
+#ifdef _WIN32
+        // On Windows, skip drive letter check (e.g., "C:" at position 1)
+        size_t start_pos = 0;
+        if (path_str.length() >= 2 && path_str[1] == ':' &&
+            ((path_str[0] >= 'A' && path_str[0] <= 'Z') ||
+             (path_str[0] >= 'a' && path_str[0] <= 'z'))) {
+            // Valid Windows drive letter, check from position 2 onwards
+            start_pos = 2;
+        }
+
+        if (path_str.find_first_of(forbidden, start_pos) != std::string::npos) {
             std::cerr << "[ERROR] Database path contains forbidden characters" << std::endl;
             return false;
         }
+#else
+        // On Unix systems, colon is forbidden everywhere
+        if (path_str.find_first_of(forbidden) != std::string::npos) {
+            std::cerr << "[ERROR] Database path contains forbidden characters" << std::endl;
+            return false;
+        }
+#endif
 
         // DB-004 FIX: Verify no symbolic links in resolved path
         std::filesystem::path check_path = canonical;

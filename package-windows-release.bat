@@ -5,7 +5,7 @@ REM ================================================================
 REM  This script packages the Windows binary release
 REM ================================================================
 
-set VERSION=v1.0.0
+set VERSION=v1.0.9
 set RELEASE_NAME=dilithion-testnet-%VERSION%-windows-x64
 set RELEASE_DIR=releases\%RELEASE_NAME%
 

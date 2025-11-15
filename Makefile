@@ -54,32 +54,35 @@ ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Windows)
     # Windows requires ws2_32 for sockets and bcrypt for secure RNG
     LIBS += -lws2_32 -lbcrypt
+    INCLUDES += -I depends/leveldb/include -I depends/openssl/include
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
     # MinGW/MSYS2 on Windows
     LIBS += -lws2_32 -lbcrypt
+    INCLUDES += -I depends/leveldb/include -I depends/openssl/include
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
     # MSYS on Windows
     LIBS += -lws2_32 -lbcrypt
+    INCLUDES += -I depends/leveldb/include -I depends/openssl/include
 endif
 
-# Fix for Windows: Set temp directories to avoid C:\WINDOWS\ permission issues
-# This must be set BEFORE any compilation happens
-ifeq ($(UNAME_S),Windows)
-    export TMP := /c/tmp
-    export TEMP := /c/tmp
-    export TMPDIR := /c/tmp
-    $(shell mkdir -p /c/tmp 2>/dev/null)
-else ifneq (,$(findstring MINGW,$(UNAME_S)))
-    export TMP := /c/tmp
-    export TEMP := /c/tmp
-    export TMPDIR := /c/tmp
-    $(shell mkdir -p /c/tmp 2>/dev/null)
-else ifneq (,$(findstring MSYS,$(UNAME_S)))
-    export TMP := /c/tmp
-    export TEMP := /c/tmp
-    export TMPDIR := /c/tmp
-    $(shell mkdir -p /c/tmp 2>/dev/null)
-endif
+# Fix for Windows: Use system default temp directories
+# Commenting out hardcoded /c/tmp as it causes issues
+# ifeq ($(UNAME_S),Windows)
+#     export TMP := /c/tmp
+#     export TEMP := /c/tmp
+#     export TMPDIR := /c/tmp
+#     $(shell mkdir -p /c/tmp 2>/dev/null)
+# else ifneq (,$(findstring MINGW,$(UNAME_S)))
+#     export TMP := /c/tmp
+#     export TEMP := /c/tmp
+#     export TMPDIR := /c/tmp
+#     $(shell mkdir -p /c/tmp 2>/dev/null)
+# else ifneq (,$(findstring MSYS,$(UNAME_S)))
+#     export TMP := /c/tmp
+#     export TEMP := /c/tmp
+#     export TMPDIR := /c/tmp
+#     $(shell mkdir -p /c/tmp 2>/dev/null)
+# endif
 
 # Dilithium C files (compiled separately)
 DILITHIUM_DIR := depends/dilithium/ref
