@@ -10,6 +10,10 @@ jobs:
   build-macos:
     runs-on: macos-latest
 
+    env:
+      CPPFLAGS: -I/opt/homebrew/opt/openssl@3/include -I/usr/local/opt/openssl@3/include
+      LDFLAGS: -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -31,8 +35,6 @@ jobs:
 
     - name: Build Dilithion
       run: |
-        export CPPFLAGS="-I$(brew --prefix openssl)/include"
-        export LDFLAGS="-L$(brew --prefix openssl)/lib"
         make clean
         make -j$(sysctl -n hw.ncpu)
         ls -lh dilithion-node check-wallet-balance genesis_gen
