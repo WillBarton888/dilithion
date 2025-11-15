@@ -511,11 +511,11 @@ int main(int argc, char* argv[]) {
             meminfo.close();
         }
 
-        // BUG #18 FIX: Use LIGHT mode for all production nodes
-        // FULL mode has unresolved deadlock in randomx_init_dataset() on some systems
-        // LIGHT mode is proven stable on all 3 testnet nodes with acceptable hashrate (3-10 H/s)
-        // For production use with high RAM (>=16GB), FULL mode threshold can be adjusted after testing
-        int light_mode = (total_ram_mb >= 16384) ? 0 : 1;  // 16GB threshold for FULL mode
+        // BUG #18 FIX: Multi-threaded RandomX dataset initialization enables FULL mode
+        // FULL mode (>=3GB RAM): ~100 H/s with 2GB dataset, multi-threaded init (30-60s startup)
+        // LIGHT mode (<3GB RAM): ~3-10 H/s, fast init (1-2s startup)
+        // NYC (3.9GB) will use FULL mode for production mining hashrate
+        int light_mode = (total_ram_mb >= 3072) ? 0 : 1;  // 3GB threshold for FULL mode
         std::cout << "  Detected RAM: " << total_ram_mb << " MB" << std::endl;
         std::cout << "  Selected mode: " << (light_mode ? "LIGHT" : "FULL") << " ("
                   << (light_mode ? "~3-10 H/s" : "~100 H/s") << ")" << std::endl;
