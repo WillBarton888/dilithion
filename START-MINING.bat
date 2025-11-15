@@ -15,7 +15,7 @@ echo  ================================================
 echo.
 echo  Starting Dilithion testnet mining...
 echo  - Network: TESTNET (coins have NO value)
-echo  - Seed Node: 170.64.203.134:18444
+echo  - Seed Nodes: NYC, Singapore, London (auto-connect)
 echo  - Mining: ENABLED (auto-detecting CPU threads)
 echo.
 echo  EXPECT 2 WINDOWS FIREWALL PROMPTS:
@@ -340,7 +340,7 @@ timeout /t 2 /nobreak >nul
 REM =======================================================
 REM CRITICAL FIX #1: Execute node and capture exit code
 REM =======================================================
-dilithion-node.exe --testnet --addnode=170.64.203.134:18444 --mine --threads=auto
+dilithion-node.exe --testnet --mine --threads=auto
 set NODE_EXIT_CODE=%errorlevel%
 
 REM Check if node exited with error

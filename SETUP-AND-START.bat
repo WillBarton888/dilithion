@@ -297,7 +297,7 @@ echo  ========================================================
 echo.
 echo  Your Settings:
 echo    - Network:     TESTNET
-echo    - Seed Node:   170.64.203.134:18444 (official)
+echo    - Seed Nodes:  NYC, Singapore, London (auto-connect)
 echo    - Mining:      ENABLED
 echo    - CPU Threads: %threads_display%
 echo.
@@ -395,7 +395,7 @@ timeout /t 3 /nobreak >nul
 REM =======================================================
 REM CRITICAL FIX #1: Execute node and capture exit code
 REM =======================================================
-dilithion-node.exe --testnet --addnode=170.64.203.134:18444 --mine --threads=%threads%
+dilithion-node.exe --testnet --mine --threads=%threads%
 set NODE_EXIT_CODE=%errorlevel%
 
 REM Check if node exited with error

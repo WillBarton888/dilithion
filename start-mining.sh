@@ -21,7 +21,7 @@ echo -e "${NC}"
 echo ""
 echo -e "${BLUE}Starting Dilithion testnet mining...${NC}"
 echo "  - Network: TESTNET (coins have NO value)"
-echo "  - Seed Node: 170.64.203.134:18444"
+echo "  - Seed Nodes: NYC, Singapore, London (auto-connect)"
 echo "  - Mining: ENABLED (auto-detecting CPU threads)"
 echo ""
 echo -e "${YELLOW}Mining will start in 3 seconds...${NC}"
@@ -195,7 +195,7 @@ fi
 echo -e "${GREEN}✓ All dependencies found${NC}"
 echo ""
 
-./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=auto
+./dilithion-node --testnet --mine --threads=auto
 
 # If node exits, show message
 echo ""
