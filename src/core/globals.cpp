@@ -9,8 +9,8 @@
  * to link without requiring the full node implementation.
  */
 
-#include <consensus/chain_verifier.h>
-#include <node/blockchain_storage.h>
+#include <consensus/chain.h>
+#include <atomic>
 
 // Global chain state
 CChainState g_chainstate;
