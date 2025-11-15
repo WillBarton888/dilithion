@@ -64,18 +64,10 @@
     #endif
 #endif
 
-// Global chain state
-CChainState g_chainstate;
+// Global chain state (defined in src/core/globals.cpp)
+extern CChainState g_chainstate;
 
-// Global async broadcaster pointer (initialized in main)
-CAsyncBroadcaster* g_async_broadcaster = nullptr;
-
-// Global IBD manager pointers (Bug #12 - Phase 4.1)
-CHeadersManager* g_headers_manager = nullptr;
-COrphanManager* g_orphan_manager = nullptr;
-CBlockFetcher* g_block_fetcher = nullptr;
-
-// Global node state for signal handling
+// Global node state for signal handling (defined in src/core/globals.cpp)
 struct NodeState {
     std::atomic<bool> running{false};
     std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
@@ -84,7 +76,16 @@ struct NodeState {
     CMiningController* miner = nullptr;
     CSocket* p2p_socket = nullptr;
     CHttpServer* http_server = nullptr;
-} g_node_state;
+};
+extern NodeState g_node_state;
+
+// Global async broadcaster pointer (initialized in main)
+CAsyncBroadcaster* g_async_broadcaster = nullptr;
+
+// Global IBD manager pointers (Bug #12 - Phase 4.1)
+CHeadersManager* g_headers_manager = nullptr;
+COrphanManager* g_orphan_manager = nullptr;
+CBlockFetcher* g_block_fetcher = nullptr;
 
 // Signal handler for graceful shutdown
 void SignalHandler(int signal) {

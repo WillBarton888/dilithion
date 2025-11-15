@@ -1,0 +1,54 @@
+name: Build Windows v1.0.9
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: fix/genesis-transaction-serialization
+        submodules: recursive
+
+    - name: Set up MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-make
+          mingw-w64-x86_64-leveldb
+          mingw-w64-x86_64-openssl
+          mingw-w64-x86_64-cmake
+          git
+          make
+
+    - name: Build RandomX
+      shell: msys2 {0}
+      run: |
+        cd depends/randomx
+        mkdir -p build
+        cd build
+        cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release ..
+        mingw32-make -j4
+
+    - name: Build Dilithion
+      shell: msys2 {0}
+      run: |
+        mingw32-make clean
+        mingw32-make -j4
+
+    - name: Package Windows Release
+      shell: msys2 {0}
+      run: |
+        ./package-windows-release.bat
+
+    - name: Upload Windows Binary
+      uses: actions/upload-artifact@v3
+      with:
+        name: dilithion-testnet-v1.0.9-windows-x64
+        path: releases/dilithion-testnet-v1.0.9-windows-x64.zip
