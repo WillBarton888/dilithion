@@ -694,9 +694,48 @@ int main(int argc, char* argv[]) {
 
                     if (pblockIndex->pprev == nullptr && !(blockHash == genesisHash)) {
                         std::cerr << "ERROR: Cannot find parent block for " << blockHash.GetHex().substr(0, 16) << std::endl;
-                        // HIGH-C001 FIX: No manual delete - smart pointer auto-destructs
-                        delete Dilithion::g_chainParams;
-                        return 1;
+
+                        // CHAIN INTEGRITY: Auto-wipe for testnet, manual intervention for mainnet
+                        if (config.testnet) {
+                            std::cout << "\n==========================================================" << std::endl;
+                            std::cout << "TESTNET: Chain corruption detected during startup" << std::endl;
+                            std::cout << "TESTNET: Missing parent block - database inconsistent" << std::endl;
+                            std::cout << "TESTNET: Attempting automatic recovery..." << std::endl;
+                            std::cout << "==========================================================" << std::endl;
+
+                            CChainVerifier verifier;
+                            if (!verifier.RepairChain(true)) {
+                                std::cerr << "ERROR: Failed to repair testnet blockchain data" << std::endl;
+                                delete Dilithion::g_chainParams;
+                                return 1;
+                            }
+
+                            std::cout << "==========================================================" << std::endl;
+                            std::cout << "TESTNET: Blockchain data wiped successfully" << std::endl;
+                            std::cout << "TESTNET: Node will restart and rebuild from genesis" << std::endl;
+                            std::cout << "TESTNET: This is normal after code updates" << std::endl;
+                            std::cout << "==========================================================" << std::endl;
+
+                            delete Dilithion::g_chainParams;
+                            return 0;  // Clean exit for systemd restart
+                        } else {
+                            std::cerr << "\n==========================================================" << std::endl;
+                            std::cerr << "ERROR: Corrupted blockchain database detected" << std::endl;
+                            std::cerr << "Missing parent block - database inconsistent" << std::endl;
+                            std::cerr << "==========================================================" << std::endl;
+                            std::cerr << "\nThis usually indicates:" << std::endl;
+                            std::cerr << "  1. Database corruption from unclean shutdown" << std::endl;
+                            std::cerr << "  2. Incomplete blockchain download" << std::endl;
+                            std::cerr << "  3. Running different code versions" << std::endl;
+                            std::cerr << "\nTo recover:" << std::endl;
+                            std::cerr << "  Delete blockchain data for full re-sync:" << std::endl;
+                            std::cerr << "    rm -rf ~/.dilithion/blocks ~/.dilithion/chainstate" << std::endl;
+                            std::cerr << "    ./dilithion-node" << std::endl;
+                            std::cerr << "\nFor more information, see docs/troubleshooting.md\n" << std::endl;
+
+                            delete Dilithion::g_chainParams;
+                            return 1;
+                        }
                     }
 
                     // Rebuild chain work
