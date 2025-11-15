@@ -48,7 +48,7 @@ jobs:
         ./package-windows-release.bat
 
     - name: Upload Windows Binary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: dilithion-testnet-v1.0.9-windows-x64
         path: releases/dilithion-testnet-v1.0.9-windows-x64.zip
