@@ -37,9 +37,9 @@ jobs:
         export CPPFLAGS="-I$OPENSSL_PREFIX/include"
         export LDFLAGS="-L$OPENSSL_PREFIX/lib"
         export CFLAGS="-I$OPENSSL_PREFIX/include"
-        export CXXFLAGS="-I$OPENSSL_PREFIX/include"
+        export CXXFLAGS="-std=c++17 -I$OPENSSL_PREFIX/include"
         make clean
-        make -j$(sysctl -n hw.ncpu) CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
+        make -j$(sysctl -n hw.ncpu) CXXFLAGS="$CXXFLAGS" CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
         ls -lh dilithion-node check-wallet-balance genesis_gen
 
     - name: Create release package
