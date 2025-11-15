@@ -1729,13 +1729,57 @@ std::string CRPCServer::RPC_GetBlockchainInfo(const std::string& params) {
         throw std::runtime_error("Failed to read best block");
     }
 
+    // Calculate difficulty from best block's nBits
+    double difficulty = 0.0;
+    CBlock bestBlock;
+    if (m_blockchain->ReadBlock(bestBlockHash, bestBlock)) {
+        // difficulty = max_target / current_target
+        // For Dilithion, max target is 0x1f060000 (testnet-friendly)
+        uint256 maxTarget = CompactToBig(0x1f060000);
+        uint256 currentTarget = CompactToBig(bestBlock.nBits);
+
+        // Calculate difficulty as double: max_target / current_target
+        // Simplified: we compare the compact representations
+        if (bestBlock.nBits != 0) {
+            uint64_t maxMantissa = maxTarget.data[0] | (uint64_t(maxTarget.data[1]) << 8) |
+                                  (uint64_t(maxTarget.data[2]) << 16) | (uint64_t(maxTarget.data[3]) << 24);
+            uint64_t curMantissa = currentTarget.data[0] | (uint64_t(currentTarget.data[1]) << 8) |
+                                  (uint64_t(currentTarget.data[2]) << 16) | (uint64_t(currentTarget.data[3]) << 24);
+
+            if (curMantissa > 0) {
+                difficulty = double(maxMantissa) / double(curMantissa);
+            }
+        }
+    }
+
+    // Calculate median time of last 11 blocks (Bitcoin standard)
+    int64_t mediantime = 0;
+    CBlockIndex* pTip = m_chainstate->GetTip();
+    if (pTip != nullptr) {
+        std::vector<int64_t> timestamps;
+        CBlockIndex* pCurrent = pTip;
+
+        // Collect last 11 block timestamps (or fewer if chain is shorter)
+        for (int i = 0; i < 11 && pCurrent != nullptr; i++) {
+            timestamps.push_back(pCurrent->nTime);
+            pCurrent = pCurrent->pprev;
+        }
+
+        // Calculate median
+        if (!timestamps.empty()) {
+            std::sort(timestamps.begin(), timestamps.end());
+            size_t mid = timestamps.size() / 2;
+            mediantime = timestamps[mid];
+        }
+    }
+
     std::ostringstream oss;
     oss << "{";
     oss << "\"chain\":\"main\",";
     oss << "\"blocks\":" << height << ",";
     oss << "\"bestblockhash\":\"" << bestBlockHash.GetHex() << "\",";
-    oss << "\"difficulty\":0,";  // TODO: Calculate difficulty from nBits
-    oss << "\"mediantime\":0,";  // TODO: Calculate median time
+    oss << "\"difficulty\":" << std::fixed << std::setprecision(8) << difficulty << ",";
+    oss << "\"mediantime\":" << mediantime << ",";
     oss << "\"chainwork\":\"" << m_chainstate->GetChainWork().GetHex() << "\"";
     oss << "}";
     return oss.str();
