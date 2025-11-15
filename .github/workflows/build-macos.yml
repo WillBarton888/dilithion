@@ -18,7 +18,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install leveldb cmake
+        brew install leveldb cmake openssl
 
     - name: Build RandomX
       run: |
@@ -31,6 +31,8 @@ jobs:
 
     - name: Build Dilithion
       run: |
+        export CPPFLAGS="-I$(brew --prefix openssl)/include"
+        export LDFLAGS="-L$(brew --prefix openssl)/lib"
         make clean
         make -j$(sysctl -n hw.ncpu)
         ls -lh dilithion-node check-wallet-balance genesis_gen
