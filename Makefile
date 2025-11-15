@@ -244,7 +244,7 @@ dilithion-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilithion-node.o $(DILITHIUM_OBJ
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ dilithion-node built successfully$(COLOR_RESET)"
 
-genesis_gen: $(CORE_OBJECTS) $(OBJ_DIR)/test/genesis_test.o $(DILITHIUM_OBJECTS)
+genesis_gen: $(CORE_OBJECTS) $(OBJ_DIR)/test/genesis_test.o $(OBJ_DIR)/util/global_stubs.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ genesis_gen built successfully$(COLOR_RESET)"
@@ -254,7 +254,7 @@ inspect_db: $(CORE_OBJECTS) $(OBJ_DIR)/tools/inspect_db.o $(DILITHIUM_OBJECTS)
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ inspect_db built successfully$(COLOR_RESET)"
 
-check-wallet-balance: $(CORE_OBJECTS) $(OBJ_DIR)/check-wallet-balance.o $(DILITHIUM_OBJECTS)
+check-wallet-balance: $(CORE_OBJECTS) $(OBJ_DIR)/check-wallet-balance.o $(OBJ_DIR)/util/global_stubs.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ check-wallet-balance built successfully$(COLOR_RESET)"
