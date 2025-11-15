@@ -44,12 +44,12 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: dilithion-macos-package
-        path: releases/dilithion-testnet-v1.0.0-macos-x64.tar.gz
+        path: releases/dilithion-testnet-v1.0.8-macos-x64.tar.gz
 
     - name: Upload to release (if tag)
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: releases/dilithion-testnet-v1.0.0-macos-x64.tar.gz
+        files: releases/dilithion-testnet-v1.0.8-macos-x64.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
