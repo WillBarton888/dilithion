@@ -237,7 +237,7 @@ struct NodeConfig {
         std::cout << "Examples:" << std::endl;
         std::cout << "  " << program << "                                                    (Quick start testnet)" << std::endl;
         std::cout << "  " << program << " --testnet --mine --threads=auto                     (Same as above)" << std::endl;
-        std::cout << "  " << program << " --testnet --addnode=170.64.203.134:18444 --mine     (Connect to seed)" << std::endl;
+        std::cout << "  " << program << " --testnet --addnode=134.122.4.164:18444 --mine     (Connect to seed)" << std::endl;
         std::cout << "  " << program << " --testnet --mine --threads=4                        (4 CPU cores)" << std::endl;
         std::cout << std::endl;
         std::cout << "Post-Quantum Security Stack:" << std::endl;
@@ -387,7 +387,7 @@ int main(int argc, char* argv[]) {
         std::cout << "\033[0m" << std::endl;  // Reset color
         std::cout << "No arguments detected - using beginner-friendly defaults:" << std::endl;
         std::cout << "  • Testnet:    ENABLED (coins have no value)" << std::endl;
-        std::cout << "  • Seed node:  170.64.203.134:18444 (official)" << std::endl;
+        std::cout << "  • Seed node:  134.122.4.164:18444 (NYC - official)" << std::endl;
         std::cout << "  • Mining:     ENABLED" << std::endl;
         std::cout << "  • Threads:    AUTO-DETECT (50-75% of your CPU)" << std::endl;
         std::cout << std::endl;
@@ -402,7 +402,7 @@ int main(int argc, char* argv[]) {
         config.testnet = true;
         config.start_mining = true;
         config.mining_threads = 0;  // 0 = auto-detect
-        config.add_nodes.push_back("170.64.203.134:18444");
+        config.add_nodes.push_back("134.122.4.164:18444");  // NYC seed node
     }
     else if (!config.ParseArgs(argc, argv)) {
         config.PrintUsage(argv[0]);
