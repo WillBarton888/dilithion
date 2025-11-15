@@ -49,8 +49,10 @@ LIBS := -lrandomx -lleveldb -lpthread -lssl -lcrypto
 ifeq ($(UNAME_S),Darwin)
     # macOS with Homebrew
     HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
-    INCLUDES += -I$(HOMEBREW_PREFIX)/opt/leveldb/include
-    LDFLAGS += -L$(HOMEBREW_PREFIX)/opt/leveldb/lib
+    INCLUDES += -I$(HOMEBREW_PREFIX)/opt/leveldb/include \
+                -I$(HOMEBREW_PREFIX)/opt/openssl/include
+    LDFLAGS += -L$(HOMEBREW_PREFIX)/opt/leveldb/lib \
+               -L$(HOMEBREW_PREFIX)/opt/openssl/lib
 else ifeq ($(UNAME_S),Windows)
     # Windows requires ws2_32 for sockets and bcrypt for secure RNG
     LIBS += -lws2_32 -lbcrypt
