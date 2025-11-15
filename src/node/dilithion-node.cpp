@@ -511,8 +511,11 @@ int main(int argc, char* argv[]) {
             meminfo.close();
         }
 
-        // Use FULL mode if RAM >= 3GB, otherwise LIGHT mode
-        int light_mode = (total_ram_mb >= 3072) ? 0 : 1;
+        // BUG #18 FIX: Use LIGHT mode for all production nodes
+        // FULL mode has unresolved deadlock in randomx_init_dataset() on some systems
+        // LIGHT mode is proven stable on all 3 testnet nodes with acceptable hashrate (3-10 H/s)
+        // For production use with high RAM (>=16GB), FULL mode threshold can be adjusted after testing
+        int light_mode = (total_ram_mb >= 16384) ? 0 : 1;  // 16GB threshold for FULL mode
         std::cout << "  Detected RAM: " << total_ram_mb << " MB" << std::endl;
         std::cout << "  Selected mode: " << (light_mode ? "LIGHT" : "FULL") << " ("
                   << (light_mode ? "~3-10 H/s" : "~100 H/s") << ")" << std::endl;

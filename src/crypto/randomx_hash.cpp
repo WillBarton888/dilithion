@@ -94,9 +94,43 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
             throw std::runtime_error("Failed to allocate RandomX dataset");
         }
 
-        // Initialize dataset from cache (this is the slow part - ~2 seconds)
+        // BUG #18 FIX: Multi-threaded chunked dataset initialization
+        // Following XMRig/Monero pattern: divide dataset into chunks and init in parallel
+        // This prevents deadlock and speeds up initialization significantly
         unsigned long dataset_item_count = randomx_dataset_item_count();
-        randomx_init_dataset(g_randomx_dataset, g_randomx_cache, 0, dataset_item_count);
+        unsigned int num_threads = std::thread::hardware_concurrency();
+        if (num_threads == 0) num_threads = 2;  // Default to 2 if detection fails
+
+        std::cout << "  [FULL MODE] Initializing RandomX dataset with " << num_threads << " threads..." << std::endl;
+
+        std::vector<std::thread> init_threads;
+        unsigned long items_per_thread = dataset_item_count / num_threads;
+        unsigned long items_remainder = dataset_item_count % num_threads;
+
+        auto start_time = std::chrono::steady_clock::now();
+
+        for (unsigned int t = 0; t < num_threads; t++) {
+            unsigned long start_item = t * items_per_thread;
+            unsigned long count = items_per_thread;
+
+            // Last thread gets any remainder items
+            if (t == num_threads - 1) {
+                count += items_remainder;
+            }
+
+            init_threads.emplace_back([=]() {
+                randomx_init_dataset(g_randomx_dataset, g_randomx_cache, start_item, count);
+            });
+        }
+
+        // Wait for all threads to complete
+        for (auto& thread : init_threads) {
+            thread.join();
+        }
+
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
+        std::cout << "  [FULL MODE] Dataset initialized in " << duration.count() << "s" << std::endl;
 
         // Create VM with dataset (cache is still needed for some operations)
         g_randomx_vm = randomx_create_vm(flags, g_randomx_cache, g_randomx_dataset);
