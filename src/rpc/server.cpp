@@ -13,6 +13,7 @@
 #include <consensus/pow.h>
 #include <util/strencodings.h>
 #include <amount.h>
+#include <net/peers.h>  // For CPeerManager and g_peer_manager
 
 #include <sstream>
 #include <cstring>
@@ -160,6 +161,7 @@ CRPCServer::CRPCServer(uint16_t port)
     // Network and general
     m_handlers["getnetworkinfo"] = [this](const std::string& p) { return RPC_GetNetworkInfo(p); };
     m_handlers["getpeerinfo"] = [this](const std::string& p) { return RPC_GetPeerInfo(p); };
+    m_handlers["getconnectioncount"] = [this](const std::string& p) { return RPC_GetConnectionCount(p); };
     m_handlers["help"] = [this](const std::string& p) { return RPC_Help(p); };
     m_handlers["stop"] = [this](const std::string& p) { return RPC_Stop(p); };
 
@@ -2465,8 +2467,56 @@ std::string CRPCServer::RPC_GetNetworkInfo(const std::string& params) {
 }
 
 std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
-    // TODO: Get from network manager
-    return "[]";
+    // Return detailed information about connected peers
+    // Following Bitcoin Core's getpeerinfo format for compatibility
+
+    // Check if peer manager is available
+    if (!g_peer_manager) {
+        return "[]";  // Return empty array if peer manager not initialized
+    }
+
+    // Get all connected peers
+    auto peers = g_peer_manager->GetConnectedPeers();
+
+    std::ostringstream oss;
+    oss << "[";
+
+    bool first = true;
+    for (const auto& peer : peers) {
+        if (!first) {
+            oss << ",";
+        }
+        first = false;
+
+        oss << "{";
+        oss << "\"id\":" << peer->id << ",";
+        oss << "\"addr\":\"" << peer->addr.ToString() << "\",";
+        oss << "\"conntime\":" << peer->connect_time << ",";
+        oss << "\"lastsend\":" << peer->last_send << ",";
+        oss << "\"lastrecv\":" << peer->last_recv << ",";
+        oss << "\"version\":" << peer->version << ",";
+        oss << "\"subver\":\"" << peer->user_agent << "\",";
+        oss << "\"startingheight\":" << peer->start_height << ",";
+        oss << "\"relaytxes\":" << (peer->relay ? "true" : "false") << ",";
+        oss << "\"misbehavior\":" << peer->misbehavior_score;
+        oss << "}";
+    }
+
+    oss << "]";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetConnectionCount(const std::string& params) {
+    // Return the number of connections to other nodes
+    // Following Bitcoin Core's getconnectioncount format
+
+    // Check if peer manager is available
+    if (!g_peer_manager) {
+        return "0";  // Return 0 if peer manager not initialized
+    }
+
+    size_t count = g_peer_manager->GetConnectionCount();
+    return std::to_string(count);
 }
 
 std::string CRPCServer::RPC_Help(const std::string& params) {
@@ -2508,7 +2558,8 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
 
     // Network and general
     oss << "\"getnetworkinfo - Get network information\",";
-    oss << "\"getpeerinfo - Get peer information\",";
+    oss << "\"getpeerinfo - Get detailed information about connected peers\",";
+    oss << "\"getconnectioncount - Get number of connections to other nodes\",";
     oss << "\"help - This help message\",";
     oss << "\"stop - Stop the Dilithion node\"";
 

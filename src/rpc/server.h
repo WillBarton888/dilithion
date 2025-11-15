@@ -218,6 +218,7 @@ private:
     // Network methods
     std::string RPC_GetNetworkInfo(const std::string& params);
     std::string RPC_GetPeerInfo(const std::string& params);
+    std::string RPC_GetConnectionCount(const std::string& params);
 
     // General methods
     std::string RPC_Help(const std::string& params);
