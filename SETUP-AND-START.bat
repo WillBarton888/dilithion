@@ -37,8 +37,8 @@ echo  ========================================================
 echo    SYSTEM CHECK: Validating installation
 echo  ========================================================
 echo.
-echo %CD% | findstr /I "Temp\\Rar Temp\\7z Temp\\zip" >nul
-if %errorlevel% equ 0 (
+echo %CD% | findstr /I /C:"Temp\Rar" /C:"Temp\7z" /C:"Temp\Zip" >nul
+if errorlevel 1 goto :not_in_zip
     color 0C
     cls
     echo.
@@ -159,13 +159,19 @@ if not exist "dilithion-node.exe" (
 echo    [32m✓[0m Binary found
 
 REM =======================================================
-REM CRITICAL FIX #6: Check for required DLL dependencies
+REM CRITICAL FIX #6: Check for required DLL dependencies (ALL 6 DLLs)
 REM =======================================================
 set "MISSING_DLLS="
 
+REM MinGW runtime DLLs
 if not exist "libgcc_s_seh-1.dll" set "MISSING_DLLS=%MISSING_DLLS% libgcc_s_seh-1.dll"
 if not exist "libstdc++-6.dll" set "MISSING_DLLS=%MISSING_DLLS% libstdc++-6.dll"
 if not exist "libwinpthread-1.dll" set "MISSING_DLLS=%MISSING_DLLS% libwinpthread-1.dll"
+
+REM Database and cryptography DLLs
+if not exist "libleveldb.dll" set "MISSING_DLLS=%MISSING_DLLS% libleveldb.dll"
+if not exist "libcrypto-3-x64.dll" set "MISSING_DLLS=%MISSING_DLLS% libcrypto-3-x64.dll"
+if not exist "libssl-3-x64.dll" set "MISSING_DLLS=%MISSING_DLLS% libssl-3-x64.dll"
 
 if not "%MISSING_DLLS%"=="" (
     color 0C
@@ -177,10 +183,16 @@ if not "%MISSING_DLLS%"=="" (
     echo  Required files are missing:
     echo  %MISSING_DLLS%
     echo.
-    echo  Please ensure you:
-    echo    1. Extracted the COMPLETE zip file
-    echo    2. Did not move/delete any files
-    echo    3. Downloaded official Windows release
+    echo  This usually means:
+    echo    1. Incomplete ZIP extraction
+    echo    2. ANTIVIRUS QUARANTINED THE FILES (most common!)
+    echo    3. Files were manually deleted
+    echo.
+    echo  If antivirus blocked the files:
+    echo    - Check your antivirus quarantine/history
+    echo    - Add exception for dilithion folder: %CD%
+    echo    - Restore files from quarantine
+    echo    - Re-download from: github.com/WillBarton888/dilithion
     echo.
     echo  ========================================================
     echo.
@@ -188,7 +200,7 @@ if not "%MISSING_DLLS%"=="" (
     exit /b 1
 )
 
-echo    [32m✓[0m DLL dependencies OK
+echo    [32m✓[0m All 6 DLL dependencies OK
 
 REM =======================================================
 REM Check if another instance is running
