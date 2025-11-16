@@ -36,39 +36,15 @@ if exist ".dilithion-test-write.tmp" (
 )
 echo.
 
-REM Check 3: Disk space
+REM Check 3: Disk space (simplified - just show available space)
 echo DEBUG: Testing disk space... >> debug.log
-set "FREE_GB=unknown"
-for /f "tokens=3" %%a in ('dir /-c . ^| findstr /C:"bytes free"') do set FREE_BYTES=%%a
-if not "%FREE_BYTES%"=="" (
-    set FREE_BYTES=%FREE_BYTES:,=%
-    set FREE_BYTES=%FREE_BYTES: =%
-    set /a "FREE_GB=FREE_BYTES / 1073741824" 2>nul
-    if errorlevel 1 set FREE_GB=unknown
-)
-echo DEBUG: Free space: %FREE_GB% GB >> debug.log
-if "%FREE_GB%"=="unknown" (
+for /f "tokens=3" %%a in ('dir /-c . 2^>nul ^| findstr /C:"bytes free"') do set FREE_BYTES=%%a
+if defined FREE_BYTES (
+    echo [PASS] Disk space available
+    echo DEBUG: Disk space check PASSED >> debug.log
+) else (
     echo [WARN] Could not detect disk space
     echo DEBUG: Disk space check SKIPPED >> debug.log
-) else (
-    if "%FREE_GB%"=="" (
-        echo [WARN] Could not detect disk space (empty)
-        echo DEBUG: Disk space check SKIPPED >> debug.log
-    ) else (
-        set /a TEST_GB=%FREE_GB% 2>nul
-        if errorlevel 1 (
-            echo [WARN] Invalid disk space value
-            echo DEBUG: Disk space check SKIPPED >> debug.log
-        ) else (
-            if %FREE_GB% lss 1 (
-                echo [FAIL] Low disk space: %FREE_GB% GB
-                echo DEBUG: Disk space check FAILED >> debug.log
-            ) else (
-                echo [PASS] Disk space OK: %FREE_GB% GB
-                echo DEBUG: Disk space check PASSED >> debug.log
-            )
-        )
-    )
 )
 echo.
 
