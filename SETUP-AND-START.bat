@@ -62,8 +62,8 @@ if errorlevel 1 goto :not_in_zip
     echo.
     pause
     exit /b 1
-)
 
+:not_in_zip
 echo    [32m✓[0m Extraction verified
 
 REM =======================================================
