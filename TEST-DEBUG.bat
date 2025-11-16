@@ -26,13 +26,13 @@ echo.
 REM Check 2: Write permission
 echo DEBUG: Testing write permission... >> debug.log
 echo test > ".dilithion-test-write.tmp" 2>nul
-if errorlevel 1 (
-    echo [FAIL] No write permission
-    echo DEBUG: Write check FAILED >> debug.log
-) else (
+if exist ".dilithion-test-write.tmp" (
     echo [PASS] Write permission OK
     echo DEBUG: Write check PASSED >> debug.log
     del ".dilithion-test-write.tmp" 2>nul
+) else (
+    echo [FAIL] No write permission
+    echo DEBUG: Write check FAILED >> debug.log
 )
 echo.
 
