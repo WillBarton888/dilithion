@@ -58,9 +58,9 @@ echo    - All scripts and documentation copied successfully
 
 REM Create the ZIP archive
 echo [5/5] Creating ZIP archive...
-cd releases
-powershell -command "Compress-Archive -Path '%RELEASE_NAME%' -DestinationPath '%RELEASE_NAME%.zip' -Force"
-cd ..
+cd releases\%RELEASE_NAME%
+powershell -command "Compress-Archive -Path '*' -DestinationPath '..\%RELEASE_NAME%.zip' -Force"
+cd ..\..
 
 REM Show results
 echo.
