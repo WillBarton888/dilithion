@@ -59,7 +59,7 @@ if not exist "dilithion-node.exe" (
 )
 echo.
 
-REM Check 5: DLLs exist (ALL 5 required DLLs)
+REM Check 5: DLLs exist (ALL 6 required DLLs)
 echo DEBUG: Testing DLL files... >> debug.log
 set "MISSING_DLLS="
 REM MinGW runtime DLLs
@@ -69,11 +69,12 @@ if not exist "libwinpthread-1.dll" set "MISSING_DLLS=%MISSING_DLLS% libwinpthrea
 REM Database and cryptography DLLs
 if not exist "libleveldb.dll" set "MISSING_DLLS=%MISSING_DLLS% libleveldb.dll"
 if not exist "libcrypto-3-x64.dll" set "MISSING_DLLS=%MISSING_DLLS% libcrypto-3-x64.dll"
+if not exist "libssl-3-x64.dll" set "MISSING_DLLS=%MISSING_DLLS% libssl-3-x64.dll"
 if not "%MISSING_DLLS%"=="" (
     echo [FAIL] Missing DLLs:%MISSING_DLLS%
     echo DEBUG: DLL check FAILED:%MISSING_DLLS% >> debug.log
 ) else (
-    echo [PASS] All 5 DLLs found
+    echo [PASS] All 6 DLLs found
     echo DEBUG: DLL check PASSED >> debug.log
 )
 echo.
