@@ -42,7 +42,20 @@ jobs:
         make -j$(sysctl -n hw.ncpu) CXXFLAGS="$CXXFLAGS" CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
         ls -lh dilithion-node check-wallet-balance genesis_gen
 
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+        else
+          VERSION="v1.0.10"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+
     - name: Create release package
+      env:
+        VERSION: ${{ steps.get_version.outputs.version }}
       run: |
         chmod +x package-macos-release.sh
         ./package-macos-release.sh
@@ -50,13 +63,13 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dilithion-macos-package
-        path: releases/dilithion-testnet-v1.0.8-macos-x64.tar.gz
+        name: dilithion-testnet-${{ steps.get_version.outputs.version }}-macos-x64
+        path: releases/dilithion-testnet-${{ steps.get_version.outputs.version }}-macos-x64.tar.gz
 
     - name: Upload to release (if tag)
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: releases/dilithion-testnet-v1.0.8-macos-x64.tar.gz
+        files: releases/dilithion-testnet-${{ steps.get_version.outputs.version }}-macos-x64.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

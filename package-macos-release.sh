@@ -5,7 +5,10 @@
 #  This script packages the macOS binary release
 ################################################################
 
-VERSION="v1.0.9"
+# Use VERSION from environment if set, otherwise default to v1.0.10
+if [ -z "$VERSION" ]; then
+    VERSION="v1.0.10"
+fi
 RELEASE_NAME="dilithion-testnet-${VERSION}-macos-x64"
 RELEASE_DIR="releases/${RELEASE_NAME}"
 
