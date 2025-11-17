@@ -722,6 +722,9 @@ int main(int argc, char* argv[]) {
                             std::cout << "TESTNET: Attempting automatic recovery..." << std::endl;
                             std::cout << "==========================================================" << std::endl;
 
+                            // Bug #25 FIX: Close database before wiping to release file locks (Windows)
+                            blockchain.Close();
+
                             CChainVerifier verifier;
                             if (!verifier.RepairChain(true)) {
                                 std::cerr << "ERROR: Failed to repair testnet blockchain data" << std::endl;
@@ -816,6 +819,9 @@ int main(int argc, char* argv[]) {
                     std::cout << "Error: " << error << std::endl;
                     std::cout << "TESTNET: Attempting automatic recovery..." << std::endl;
                     std::cout << "==========================================================" << std::endl;
+
+                    // Bug #25 FIX: Close database before wiping to release file locks (Windows)
+                    blockchain.Close();
 
                     if (!verifier.RepairChain(true)) {
                         std::cerr << "ERROR: Failed to repair testnet blockchain data" << std::endl;
