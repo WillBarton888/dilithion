@@ -40,7 +40,9 @@ else
 endif
 
 LDFLAGS += -L $(RANDOMX_BUILD_DIR) \
-           -L depends/dilithium/ref
+           -L depends/dilithium/ref \
+           -L C:/ProgramData/mingw64/mingw64/opt/lib \
+           -L .
 
 # FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
 LIBS := -lrandomx -lleveldb -lpthread -lssl -lcrypto
@@ -54,15 +56,15 @@ ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Windows)
     # Windows requires ws2_32 for sockets and bcrypt for secure RNG
     LIBS += -lws2_32 -lbcrypt
-    INCLUDES += -I depends/leveldb/include -I depends/openssl/include
+    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
-    # MinGW/MSYS2 on Windows
+    # MinGW/MSYS2 on Windows - use system OpenSSL 3.x
     LIBS += -lws2_32 -lbcrypt
-    INCLUDES += -I depends/leveldb/include -I depends/openssl/include
+    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
-    # MSYS on Windows
+    # MSYS on Windows - use system OpenSSL 3.x
     LIBS += -lws2_32 -lbcrypt
-    INCLUDES += -I depends/leveldb/include -I depends/openssl/include
+    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include
 endif
 
 # Fix for Windows: Use system default temp directories

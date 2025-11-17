@@ -37,11 +37,10 @@ echo    - Copying MinGW runtime DLLs from local...
 copy libwinpthread-1.dll %RELEASE_DIR%\ || (echo FAILED: libwinpthread-1.dll && goto :copy_error)
 copy libgcc_s_seh-1.dll %RELEASE_DIR%\ || (echo FAILED: libgcc_s_seh-1.dll && goto :copy_error)
 copy libleveldb.dll %RELEASE_DIR%\ || (echo FAILED: libleveldb.dll && goto :copy_error)
-echo    - Copying MinGW/OpenSSL DLLs from Git installation...
+echo    - Copying MinGW/OpenSSL DLLs from MinGW installation...
 copy "C:\Program Files\Git\mingw64\bin\libstdc++-6.dll" %RELEASE_DIR%\ || (echo FAILED: libstdc++-6.dll && goto :copy_error)
-copy "C:\Program Files\Git\mingw64\bin\libcrypto-3-x64.dll" %RELEASE_DIR%\ || (echo FAILED: libcrypto-3-x64.dll && goto :copy_error)
-copy "C:\Program Files\Git\mingw64\bin\libssl-3-x64.dll" %RELEASE_DIR%\ || (echo FAILED: libssl-3-x64.dll && goto :copy_error)
-echo    [SUCCESS] All 6 DLLs copied successfully
+copy "C:\ProgramData\mingw64\mingw64\opt\bin\libcrypto-3-x64.dll" %RELEASE_DIR%\ || (echo FAILED: libcrypto-3-x64.dll && goto :copy_error)
+echo    [SUCCESS] All 5 DLLs copied successfully (Note: libssl not needed)
 
 REM Copy launcher scripts and debug tools
 echo [4/5] Copying launcher scripts and documentation...
