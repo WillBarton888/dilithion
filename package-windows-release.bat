@@ -5,9 +5,9 @@ REM ================================================================
 REM  This script packages the Windows binary release
 REM ================================================================
 
-REM Use VERSION from environment if set, otherwise default to v1.0.11
+REM Use VERSION from environment if set, otherwise default to v1.0.12
 if "%VERSION%"=="" (
-    set VERSION=v1.0.11
+    set VERSION=v1.0.12
 )
 set RELEASE_NAME=dilithion-testnet-%VERSION%-windows-x64
 set RELEASE_DIR=releases\%RELEASE_NAME%
