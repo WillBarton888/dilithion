@@ -61,7 +61,8 @@ jobs:
       env:
         VERSION: ${{ steps.get_version.outputs.version }}
       run: |
-        ./package-windows-release.bat
+        chmod +x package-windows-release-github.sh
+        ./package-windows-release-github.sh
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
