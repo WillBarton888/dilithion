@@ -1090,7 +1090,7 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
     }
 
     // Check if we're already connected to this exact address (prevents duplicate connections)
-    auto existing_peers = peer_manager.GetPeers();
+    auto existing_peers = peer_manager.GetAllPeers();
     for (const auto& existing_peer : existing_peers) {
         if (existing_peer->IsConnected() && existing_peer->addr.ToString() == addr.ToString()) {
             std::cout << "[P2P] Already connected to " << ip_str << ":" << addr.port << ", skipping" << std::endl;
