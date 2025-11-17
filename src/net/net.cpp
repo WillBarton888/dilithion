@@ -1075,9 +1075,6 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
         return -1;
     }
 
-    // Create socket for outbound connection
-    auto socket = std::make_unique<CSocket>();
-
     // Extract IP from IPv6-mapped IPv4 address (bytes 12-15)
     std::string ip_str = strprintf("%d.%d.%d.%d",
                                     addr.ip[12],
@@ -1085,8 +1082,44 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
                                     addr.ip[14],
                                     addr.ip[15]);
 
+    // ANTI-SELF-CONNECTION FIX (Bug #20): Prevent nodes from connecting to themselves
+    // Skip localhost addresses
+    if (ip_str == "127.0.0.1" || ip_str == "::1" || ip_str == "0.0.0.0") {
+        std::cout << "[P2P] Skipping localhost address: " << ip_str << ":" << addr.port << std::endl;
+        return -1;
+    }
+
+    // Check if we're already connected to this exact address (prevents duplicate connections)
+    auto existing_peers = peer_manager.GetAllPeers();
+    for (const auto& existing_peer : existing_peers) {
+        if (existing_peer->IsConnected() && existing_peer->addr.ToString() == addr.ToString()) {
+            std::cout << "[P2P] Already connected to " << ip_str << ":" << addr.port << ", skipping" << std::endl;
+            return -1;
+        }
+    }
+
+    // Create socket for outbound connection
+    auto socket = std::make_unique<CSocket>();
+
     // Connect to peer
     if (!socket->Connect(ip_str, addr.port)) {
+        return -1;
+    }
+
+    // ANTI-SELF-CONNECTION: Check if we connected to our own listening socket
+    // This happens when a seed node tries to connect to itself via its external IP
+    std::string local_addr = socket->GetLocalAddress();
+    std::string peer_addr = socket->GetPeerAddress();
+
+    // If local and peer addresses are the same IP (different ports), we may have connected to ourselves
+    // Extract just the IP part (before the colon)
+    std::string local_ip = local_addr.substr(0, local_addr.find(':'));
+    std::string peer_ip = peer_addr.substr(0, peer_addr.find(':'));
+
+    if (!local_ip.empty() && local_ip == peer_ip) {
+        std::cout << "[P2P] Detected self-connection: local=" << local_addr
+                  << ", peer=" << peer_addr << " - disconnecting" << std::endl;
+        socket->Close();
         return -1;
     }
 
