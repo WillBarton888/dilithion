@@ -1,4 +1,5 @@
 #include "chainparams.h"
+#include <util/system.h>
 
 namespace Dilithion {
 
@@ -29,8 +30,8 @@ ChainParams ChainParams::Mainnet() {
     params.p2pPort = 8444;             // P2P network port
     params.rpcPort = 8332;             // RPC server port
 
-    // Data directory
-    params.dataDir = ".dilithion";
+    // Data directory (use absolute path from utility function)
+    params.dataDir = GetDataDir(false);
 
     // Consensus parameters
     params.blockTime = 240;                // 4 minutes (240 seconds)
@@ -67,8 +68,8 @@ ChainParams ChainParams::Testnet() {
     params.p2pPort = 18444;            // Testnet P2P port
     params.rpcPort = 18332;            // Testnet RPC port
 
-    // Data directory (separate from mainnet)
-    params.dataDir = ".dilithion-testnet";
+    // Data directory (use absolute path from utility function - separate from mainnet)
+    params.dataDir = GetDataDir(true);
 
     // Consensus parameters (same as mainnet for realistic testing)
     params.blockTime = 240;                // 4 minutes (same as mainnet)
