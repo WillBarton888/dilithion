@@ -1,0 +1,70 @@
+# Dilithion Testnet Node - CRASH-LOOP RESISTANT Configuration
+# Fixed: 2025-11-17 - Added rate limiting to prevent infinite restart loops
+#
+# Installation:
+#   sudo cp systemd/dilithion-testnet-fixed.service /etc/systemd/system/dilithion-testnet.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl reset-failed dilithion-testnet
+#   sudo systemctl restart dilithion-testnet
+#
+# Monitoring:
+#   systemctl status dilithion-testnet
+#   journalctl -u dilithion-testnet -f
+#
+# Check if rate limited:
+#   systemctl status dilithion-testnet | grep "Start request repeated"
+#
+# Reset rate limit after fixing issues:
+#   systemctl reset-failed dilithion-testnet
+#   systemctl start dilithion-testnet
+
+[Unit]
+Description=Dilithion Testnet Seed Node
+Documentation=https://github.com/WillBarton888/dilithion
+After=network-online.target
+Wants=network-online.target
+
+# CRASH-LOOP PROTECTION: Stop after 10 failures in 10 minutes
+StartLimitBurst=10
+StartLimitIntervalSec=600
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/dilithion
+
+# Pre-start validation: Wait for old processes and locks to clear
+ExecStartPre=/bin/bash -c 'echo "[PRE-START] Waiting for old processes..."; for i in {1..20}; do pgrep -x dilithion-node || break; echo "  Attempt $i/20: Process still running, waiting..."; sleep 3; done; pgrep -x dilithion-node && { echo "ERROR: Process still running after 60s"; exit 1; } || echo "  Processes cleared ✓"'
+ExecStartPre=/bin/bash -c 'echo "[PRE-START] Checking DB lock..."; LOCK_FILE="/root/.dilithion-testnet/blocks/LOCK"; if [ -f "$LOCK_FILE" ]; then if fuser "$LOCK_FILE" 2>/dev/null; then echo "ERROR: LOCK file still held"; exit 1; else echo "  Removing stale LOCK file..."; rm -f "$LOCK_FILE"; fi; fi; echo "  DB lock check passed ✓"'
+
+# Start command
+ExecStart=/root/dilithion/dilithion-node --testnet --mine --threads=2
+
+# Restart policy with 60 second delays
+Restart=on-failure
+RestartSec=60
+
+# Graceful shutdown (60 seconds for DB flush)
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=60
+FinalKillSignal=SIGKILL
+
+# Logging
+StandardOutput=append:/root/dilithion/node.log
+StandardError=append:/root/dilithion/node.log
+SyslogIdentifier=dilithion-node
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# OOM protection
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
