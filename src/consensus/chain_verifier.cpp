@@ -400,12 +400,11 @@ bool CChainVerifier::WipeBlockchainData(bool testnet)
 
 std::string CChainVerifier::GetDataDirectory(bool testnet)
 {
-    // Use utility function to get base data directory
-    std::string baseDir = GetDataDir();
+    // Use utility function to get data directory for the specified network
+    // GetDataDir(testnet) returns:
+    //   - testnet=true:  ~/.dilithion-testnet
+    //   - testnet=false: ~/.dilithion
+    std::string dataDir = GetDataDir(testnet);
 
-    // Note: GetDataDir() already returns the correct directory based on
-    // the network (testnet vs mainnet) that was configured at startup.
-    // We don't need to modify it here.
-
-    return baseDir;
+    return dataDir;
 }
