@@ -41,7 +41,8 @@ ExecStartPre=/bin/bash -c 'echo "[PRE-START] Checking DB lock..."; LOCK_FILE="/r
 ExecStart=/root/dilithion/dilithion-node --testnet --mine --threads=2
 
 # Restart policy with 60 second delays
-Restart=on-failure
+# NOTE: Using 'always' (not 'on-failure') to auto-restart after blockchain wipe recovery
+Restart=always
 RestartSec=60
 
 # Graceful shutdown (60 seconds for DB flush)
