@@ -97,6 +97,16 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
 
     // Detect available RAM
     size_t total_ram_mb = 0;
+
+#ifdef _WIN32
+    // Windows: Use GlobalMemoryStatusEx()
+    MEMORYSTATUSEX memInfo;
+    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    if (GlobalMemoryStatusEx(&memInfo)) {
+        total_ram_mb = memInfo.ullTotalPhys / (1024 * 1024);  // Convert bytes to MB
+    }
+#else
+    // Linux: Read /proc/meminfo
     std::ifstream meminfo("/proc/meminfo");
     if (meminfo.is_open()) {
         std::string line;
@@ -109,6 +119,7 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
         }
         meminfo.close();
     }
+#endif
 
     // Use FULL mode if RAM >= 3GB, otherwise LIGHT mode
     int light_mode = (total_ram_mb >= 3072) ? 0 : 1;
