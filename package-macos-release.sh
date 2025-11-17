@@ -48,7 +48,7 @@ chmod +x "${RELEASE_DIR}/setup-and-start.sh"
 
 # Copy documentation
 cp README-MAC.txt "${RELEASE_DIR}/README.txt"
-cp TESTNET-SETUP-GUIDE.md "${RELEASE_DIR}/TESTNET-GUIDE.md"
+cp TESTNET-GUIDE.md "${RELEASE_DIR}/TESTNET-GUIDE.md"
 
 # Create the tar.gz archive
 echo "[4/4] Creating tar.gz archive..."
