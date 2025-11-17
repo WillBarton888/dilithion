@@ -190,7 +190,7 @@ If you encounter blockchain corruption, the node should now automatically:
 ### SHA-256 Checksums
 
 ```
-c5fffedf9f835bdb567475980cbba9998973d20b7995d7b0a60b3cf8283aaf24  dilithion-testnet-v1.0.12-windows-x64.zip
+f738d46f9050793abb0532028e1879422a06785140553de03b4cbd35a9c3dd21  dilithion-testnet-v1.0.12-windows-x64.zip
 [macOS and Linux checksums pending GitHub Actions builds]
 ```
 
