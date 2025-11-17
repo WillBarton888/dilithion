@@ -233,6 +233,14 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         // Hash buffer
         uint8_t hashBuffer[RANDOMX_HASH_SIZE];
 
+        // BUG #24 FIX: Pre-allocated header buffer (reused across all hash attempts)
+        // CRITICAL PERFORMANCE: Avoids vector allocations in hot loop
+        // Header format: version(4) + prevBlock(32) + merkleRoot(32) + time(4) + bits(4) + nonce(4) = 80 bytes
+        uint8_t header[80];
+        uint256 lastHashTarget;
+        CBlock cachedBlock;
+        bool headerInitialized = false;
+
         while (m_mining) {
         // MINE-009 FIX: Check for nonce space exhaustion
         // If we've wrapped around the 32-bit space, request new template
@@ -242,6 +250,7 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             nonce64 = threadId;  // Reset to start of this thread's range
         }
+
         // Get current template
         CBlock block;
         uint256 hashTarget;
@@ -255,29 +264,48 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             hashTarget = m_pTemplate->hashTarget;
         }
 
-        // Try nonce (use lower 32 bits for block header)
-        block.nNonce = static_cast<uint32_t>(nonce64 & 0xFFFFFFFF);
+        // BUG #24 FIX: Only re-serialize header when template changes
+        // Check if template changed (compare prevBlock hash as quick indicator)
+        if (!headerInitialized || !(block.hashPrevBlock == cachedBlock.hashPrevBlock)) {
+            // Template changed - re-serialize the static parts of header
+            // Format: version(4) + prevBlock(32) + merkleRoot(32) + time(4) + bits(4) + nonce(4)
+            size_t offset = 0;
 
-        // Serialize block header for hashing
-        std::vector<uint8_t> header;
-        header.reserve(80); // Standard block header size
+            // Version (4 bytes)
+            std::memcpy(header + offset, &block.nVersion, 4);
+            offset += 4;
 
-        // Serialize: version (4) + prevBlock (32) + merkleRoot (32) + time (4) + bits (4) + nonce (4)
-        // Simple serialization - in production would use CDataStream
-        const uint8_t* versionBytes = reinterpret_cast<const uint8_t*>(&block.nVersion);
-        header.insert(header.end(), versionBytes, versionBytes + 4);
-        header.insert(header.end(), block.hashPrevBlock.begin(), block.hashPrevBlock.end());
-        header.insert(header.end(), block.hashMerkleRoot.begin(), block.hashMerkleRoot.end());
-        const uint8_t* timeBytes = reinterpret_cast<const uint8_t*>(&block.nTime);
-        header.insert(header.end(), timeBytes, timeBytes + 4);
-        const uint8_t* bitsBytes = reinterpret_cast<const uint8_t*>(&block.nBits);
-        header.insert(header.end(), bitsBytes, bitsBytes + 4);
-        const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&block.nNonce);
-        header.insert(header.end(), nonceBytes, nonceBytes + 4);
+            // Previous block hash (32 bytes)
+            std::memcpy(header + offset, block.hashPrevBlock.begin(), 32);
+            offset += 32;
+
+            // Merkle root (32 bytes)
+            std::memcpy(header + offset, block.hashMerkleRoot.begin(), 32);
+            offset += 32;
+
+            // Time (4 bytes)
+            std::memcpy(header + offset, &block.nTime, 4);
+            offset += 4;
+
+            // Difficulty bits (4 bytes)
+            std::memcpy(header + offset, &block.nBits, 4);
+            offset += 4;
+
+            // Nonce will be updated in hot loop (last 4 bytes at offset 76)
+
+            cachedBlock = block;
+            lastHashTarget = hashTarget;
+            headerInitialized = true;
+        }
+
+        // BUG #24 FIX: Fast nonce update (only 4 bytes, no allocations)
+        // Update nonce in place at offset 76 (last 4 bytes of 80-byte header)
+        uint32_t nonce32 = static_cast<uint32_t>(nonce64 & 0xFFFFFFFF);
+        std::memcpy(header + 76, &nonce32, 4);
 
         // Compute RandomX hash
         try {
-            randomx_hash_fast(header.data(), header.size(), hashBuffer);
+            randomx_hash_fast(header, 80, hashBuffer);
 
             // Convert to uint256
             uint256 hash;
@@ -298,6 +326,9 @@ void CMiningController::MiningWorker(uint32_t threadId) {
 
                 // Found valid block!
                 m_stats.nBlocksFound++;
+
+                // BUG #24 FIX: Set the winning nonce in the block before callback
+                block.nNonce = nonce32;
 
                 // MINE-015 FIX: Safely call callback with null check
                 // Always check callback exists before invoking (prevents null dereference)
