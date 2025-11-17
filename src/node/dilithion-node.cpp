@@ -57,6 +57,10 @@
 #include <optional>
 #include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
 
+#ifdef _WIN32
+    #include <windows.h>  // For GlobalMemoryStatusEx (Bug #23 fix)
+#endif
+
 // Windows API macro conflicts - undef after including headers
 #ifdef _WIN32
     #ifdef SendMessage
@@ -499,6 +503,16 @@ int main(int argc, char* argv[]) {
         // LIGHT mode: ~256MB RAM, ~3-10 H/s (works on 2GB nodes)
         // FULL mode: ~2.5GB RAM, ~100 H/s (requires 4GB+ nodes)
         size_t total_ram_mb = 0;
+
+#ifdef _WIN32
+        // Windows: Use GlobalMemoryStatusEx()
+        MEMORYSTATUSEX memInfo;
+        memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+        if (GlobalMemoryStatusEx(&memInfo)) {
+            total_ram_mb = memInfo.ullTotalPhys / (1024 * 1024);  // Convert bytes to MB
+        }
+#else
+        // Linux: Read /proc/meminfo
         std::ifstream meminfo("/proc/meminfo");
         if (meminfo.is_open()) {
             std::string line;
@@ -511,6 +525,7 @@ int main(int argc, char* argv[]) {
             }
             meminfo.close();
         }
+#endif
 
         // BUG #18 FIX: Multi-threaded RandomX dataset initialization enables FULL mode
         // FULL mode (>=3GB RAM): ~100 H/s with 2GB dataset, multi-threaded init (30-60s startup)
