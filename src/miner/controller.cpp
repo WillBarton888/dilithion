@@ -21,6 +21,10 @@
 #include <set>
 #include <stdexcept>
 
+#ifdef _WIN32
+    #include <windows.h>  // For GlobalMemoryStatusEx
+#endif
+
 // Get current time in milliseconds
 static uint64_t GetTimeMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(

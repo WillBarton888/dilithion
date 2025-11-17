@@ -57,6 +57,10 @@
 #include <optional>
 #include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
 
+#ifdef _WIN32
+    #include <windows.h>  // For GlobalMemoryStatusEx (Bug #23 fix)
+#endif
+
 // Windows API macro conflicts - undef after including headers
 #ifdef _WIN32
     #ifdef SendMessage
