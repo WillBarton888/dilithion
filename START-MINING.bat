@@ -25,32 +25,7 @@ timeout /t 3 /nobreak >nul
 echo  Starting node...
 echo.
 
-REM Only check if binary exists - THAT'S IT!
-if not exist "dilithion-node.exe" (
-    color 0C
-    echo.
-    echo  ================================================
-    echo    ERROR: dilithion-node.exe not found
-    echo  ================================================
-    echo.
-    echo  ANTIVIRUS likely quarantined the file!
-    echo.
-    echo  Fix:
-    echo    1. Open Windows Security
-    echo    2. Go to "Protection history"
-    echo    3. Find and RESTORE dilithion-node.exe
-    echo    4. Add folder exclusion: %CD%
-    echo.
-    echo  Current directory: %CD%
-    echo.
-    echo  For support: https://discord.gg/dilithion
-    echo  ================================================
-    echo.
-    pause
-    exit /b 1
-)
-
-REM Just run it - let the binary handle everything else!
+REM File check removed (causes false positives on some Windows systems)
 dilithion-node.exe --testnet --mine --threads=auto
 
 REM If node exits, show message

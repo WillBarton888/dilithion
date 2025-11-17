@@ -117,38 +117,7 @@ echo  ========================================================
 echo.
 timeout /t 2 /nobreak >nul
 
-REM Only check if binary exists - THAT'S IT!
-if not exist "dilithion-node.exe" (
-    cls
-    color 0C
-    echo.
-    echo  ========================================================
-    echo    ERROR: dilithion-node.exe not found
-    echo  ========================================================
-    echo.
-    echo  The dilithion-node.exe binary is missing!
-    echo.
-    echo  Common causes:
-    echo    1. ANTIVIRUS quarantined the file (most common)
-    echo    2. Incomplete zip extraction
-    echo    3. Running from wrong folder
-    echo.
-    echo  If antivirus blocked it:
-    echo    - Open Windows Security
-    echo    - Go to "Protection history"
-    echo    - Find and RESTORE dilithion-node.exe
-    echo    - Add folder exclusion: %CD%
-    echo.
-    echo  Current directory: %CD%
-    echo.
-    echo  For support: https://discord.gg/dilithion
-    echo  ========================================================
-    echo.
-    pause
-    exit /b 1
-)
-
-REM Just run it - let the binary handle everything else!
+REM Run the node - file check removed (causes false positives on some Windows systems)
 dilithion-node.exe --testnet --mine --threads=%threads%
 
 echo.
