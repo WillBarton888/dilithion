@@ -2,6 +2,8 @@
 // Distributed under the MIT software license
 
 #include <net/headers_manager.h>
+#include <net/net.h>
+#include <net/protocol.h>
 #include <consensus/params.h>
 #include <util/time.h>
 #include <algorithm>
@@ -161,17 +163,28 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
 void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
 {
-    std::lock_guard<std::mutex> lock(cs_headers);
+    std::cout << "[HeadersManager] RequestHeaders for peer " << peer << std::endl;
 
-    // Generate locator from starting hash
+    // Build locator (holds cs_headers briefly, DOES NOT access blockchain)
     std::vector<uint256> locator = GetLocator(hashStart);
+    // cs_headers is now released
 
-    std::cout << "[HeadersManager] Requesting headers from peer " << peer
-              << " with locator of " << locator.size() << " hashes" << std::endl;
+    if (locator.empty()) {
+        std::cout << "[HeadersManager] Empty locator, peer will send from genesis" << std::endl;
+    } else {
+        std::cout << "[HeadersManager] Sending GETHEADERS with "
+                  << locator.size() << " locator hashes" << std::endl;
+    }
 
-    // In a real implementation, this would send a GETHEADERS message via P2P
-    // For now, this is a stub that the message handler will call
-    // The actual message sending will be implemented in Phase 1.4
+    // Send message (no locks held - safe for network I/O)
+    if (g_connection_manager && g_message_processor) {
+        NetProtocol::CGetHeadersMessage msg(locator, uint256());
+        CNetMessage getheaders = g_message_processor->CreateGetHeadersMessage(msg);
+        g_connection_manager->SendMessage(peer, getheaders);
+        std::cout << "[HeadersManager] Sent GETHEADERS to peer " << peer << std::endl;
+    } else {
+        std::cerr << "[HeadersManager] ERROR: Cannot send GETHEADERS - networking not initialized" << std::endl;
+    }
 }
 
 std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
@@ -179,36 +192,45 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
     std::lock_guard<std::mutex> lock(cs_headers);
 
     std::vector<uint256> locator;
+    locator.reserve(32);  // Pre-allocate for efficiency
 
-    // Find the starting header
+    // Find the starting header in our headers map
     auto it = mapHeaders.find(hashTip);
     if (it == mapHeaders.end()) {
-        // If we don't have this hash, start from our best
+        // If we don't have this hash, start from our best header
         if (!hashBestHeader.IsNull()) {
             it = mapHeaders.find(hashBestHeader);
         }
     }
 
     if (it == mapHeaders.end()) {
-        return locator;  // Empty locator if we have no headers
+        // No headers yet - return empty locator (peer will send from genesis)
+        std::cout << "[HeadersManager] No headers yet, returning empty locator" << std::endl;
+        return locator;
     }
 
+    // Save starting height for logging
+    int startHeight = it->second.height;
+
     // Bitcoin Core exponential backoff algorithm
-    // Add: 0, -1, -2, -4, -8, -16, -32, -64, -128, -256, -512, -1024...
-    int height = it->second.height;
+    // Adds headers at: current, -1, -2, -4, -8, -16, -32, -64, -128, -256, -512, -1024...
+    int height = startHeight;
     int step = 1;
     int nStep = 0;
 
     while (height >= 0) {
-        // Get hash at this height
+        // Get hash at this height from our height index
         auto heightIt = mapHeightIndex.find(height);
         if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-            // Use the first hash at this height (our main chain)
-            // In case of forks, we use whichever we saw first
+            // Use the first hash at this height (our best chain)
             locator.push_back(*heightIt->second.begin());
         }
 
-        // Exponential backoff
+        // Stop at genesis
+        if (height == 0)
+            break;
+
+        // Exponential backoff after 10 entries
         if (nStep >= 10) {
             step *= 2;
         }
@@ -216,22 +238,25 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
         height -= step;
         nStep++;
 
-        // Limit total locator size (shouldn't hit this normally)
+        // Limit total locator size (safety check)
         if (locator.size() >= 32) {
             break;
         }
     }
 
-    // Always add genesis (height 0) if we didn't already
-    if (locator.empty() || (height > 0 && locator.back() != uint256())) {
+    // Ensure genesis is always included
+    if (!locator.empty() && locator.back() != uint256()) {
         auto genesisIt = mapHeightIndex.find(0);
         if (genesisIt != mapHeightIndex.end() && !genesisIt->second.empty()) {
-            locator.push_back(*genesisIt->second.begin());
+            uint256 genesisHash = *genesisIt->second.begin();
+            if (locator.back() != genesisHash) {
+                locator.push_back(genesisHash);
+            }
         }
     }
 
     std::cout << "[HeadersManager] Generated locator with " << locator.size()
-              << " hashes for height " << it->second.height << std::endl;
+              << " hashes (starting from height " << startHeight << ")" << std::endl;
 
     return locator;
 }

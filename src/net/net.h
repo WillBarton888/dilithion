@@ -26,6 +26,7 @@ class CNetMessageProcessor {
 public:
     // Message handler callbacks
     using VersionHandler = std::function<void(int peer_id, const NetProtocol::CVersionMessage&)>;
+    using VerackHandler = std::function<void(int peer_id)>;
     using PingHandler = std::function<void(int peer_id, uint64_t nonce)>;
     using PongHandler = std::function<void(int peer_id, uint64_t nonce)>;
     using AddrHandler = std::function<void(int peer_id, const std::vector<NetProtocol::CAddress>&)>;
@@ -57,6 +58,7 @@ public:
 
     // Register handlers
     void SetVersionHandler(VersionHandler handler) { on_version = handler; }
+    void SetVerackHandler(VerackHandler handler) { on_verack = handler; }
     void SetPingHandler(PingHandler handler) { on_ping = handler; }
     void SetPongHandler(PongHandler handler) { on_pong = handler; }
     void SetAddrHandler(AddrHandler handler) { on_addr = handler; }
@@ -79,6 +81,7 @@ private:
 
     // Message handlers
     VersionHandler on_version;
+    VerackHandler on_verack;
     PingHandler on_ping;
     PongHandler on_pong;
     AddrHandler on_addr;

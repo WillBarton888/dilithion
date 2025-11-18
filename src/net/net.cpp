@@ -227,6 +227,11 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
     if (peer && peer->state == CPeer::STATE_VERSION_SENT) {
         peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
         g_network_stats.handshake_complete++;
+
+        // Trigger VERACK handler (for IBD initialization)
+        if (on_verack) {
+            on_verack(peer_id);
+        }
     }
     return true;
 }

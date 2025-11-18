@@ -357,4 +357,9 @@ private:
     void RemoveFromHeightIndex(const uint256& hash, int height);
 };
 
+/**
+ * Global IBD manager pointer (Bug #12)
+ */
+extern CHeadersManager* g_headers_manager;
+
 #endif // DILITHION_NET_HEADERS_MANAGER_H
