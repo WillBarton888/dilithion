@@ -213,7 +213,7 @@ struct NodeConfig {
     }
 
     void PrintUsage(const char* program) {
-        std::cout << "Dilithion Node v1.0.13 - Post-Quantum Cryptocurrency" << std::endl;
+        std::cout << "Dilithion Node v1.0.14 - Post-Quantum Cryptocurrency" << std::endl;
         std::cout << std::endl;
         std::cout << "Usage: " << program << " [options]" << std::endl;
         std::cout << std::endl;
@@ -415,7 +415,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "======================================" << std::endl;
-    std::cout << "Dilithion Node v1.0.13" << std::endl;
+    std::cout << "Dilithion Node v1.0.14" << std::endl;
     std::cout << "Post-Quantum Cryptocurrency" << std::endl;
     std::cout << "======================================" << std::endl;
     std::cout << std::endl;

@@ -58,11 +58,13 @@ ChainParams ChainParams::Testnet() {
     params.chainID = 1001;  // Testnet Chain ID
 
     // Genesis block parameters
+    // V1.0.14: Increased difficulty 6x (0x1f060000 → 0x1f010000) to match v1.0.13 performance
+    // With per-thread RandomX VMs (~600 H/s), this produces ~60 second block times
     params.genesisTime = 1730000000;   // October 27, 2025 (testnet launch)
-    params.genesisNonce = 28661;       // Mined with Bug #4 fix (proper tx serialization), FULL RandomX mode
-    params.genesisNBits = 0x1f060000;  // TEST: target=0x060000...
-    params.genesisHash = "00022c79303274086852c750c509908aa01dfefb810d25b42b7fad720a897f14";
-    params.genesisCoinbaseMsg = "Dilithion Testnet Genesis - Testing post-quantum cryptocurrency before mainnet launch";
+    params.genesisNonce = 15178;       // Mined on 2025-11-18
+    params.genesisNBits = 0x1f010000;  // 6x harder (target=0x010000...)
+    params.genesisHash = "0000ee281e9c4a9216ed662146da376ff20fd2b3cc516bc4346cedb2a330e6d3";
+    params.genesisCoinbaseMsg = "Dilithion Testnet v1.0.14 - 6x difficulty increase for 60s block times";
 
     // Network ports (different from mainnet to allow running both simultaneously)
     params.p2pPort = 18444;            // Testnet P2P port
