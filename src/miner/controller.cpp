@@ -25,6 +25,33 @@
     #include <windows.h>  // For GlobalMemoryStatusEx
 #endif
 
+// BUG #28 FIX: RAII wrapper for RandomX VM (prevents leaks)
+namespace {
+    class RandomXVMGuard {
+    private:
+        void* m_vm;
+
+    public:
+        RandomXVMGuard() : m_vm(randomx_create_thread_vm()) {
+            if (!m_vm) {
+                throw std::runtime_error("Failed to create RandomX VM for mining thread");
+            }
+        }
+
+        ~RandomXVMGuard() {
+            if (m_vm) {
+                randomx_destroy_thread_vm(m_vm);
+            }
+        }
+
+        // Prevent copying (VM is owned by this guard)
+        RandomXVMGuard(const RandomXVMGuard&) = delete;
+        RandomXVMGuard& operator=(const RandomXVMGuard&) = delete;
+
+        void* get() const { return m_vm; }
+    };
+}
+
 // Get current time in milliseconds
 static uint64_t GetTimeMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -223,6 +250,12 @@ bool CMiningController::CheckProofOfWork(const uint256& hash, const uint256& tar
 void CMiningController::MiningWorker(uint32_t threadId) {
     // MINE-011 FIX: Comprehensive exception handling to prevent silent thread termination
     try {
+        // BUG #28 FIX: Create per-thread RandomX VM (eliminates global mutex bottleneck)
+        // Each thread gets its own VM, enabling true parallel mining
+        // The VM shares the read-only 2GB dataset but has its own ~200MB VM state
+        // RAII pattern ensures automatic cleanup when thread exits
+        RandomXVMGuard vm;
+
         // MINE-009 FIX: Extended nonce space to prevent collisions
         // Use 64-bit counter internally, wrap to 32-bit for header
         // Each thread gets its own range to avoid collisions between threads
@@ -241,6 +274,12 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         CBlock cachedBlock;
         bool headerInitialized = false;
 
+        // BUG #27 FIX: Cache block copy outside hot loop (only copy on template change)
+        // CRITICAL: Copying CBlock on every iteration is the REAL bottleneck
+        CBlock currentBlock;
+        uint256 currentHashTarget;
+        bool templateValid = false;
+
         // DEBUG: Counters to diagnose Bug #24 fix performance
         uint64_t debug_serializations = 0;
         uint64_t debug_hashes = 0;
@@ -255,55 +294,63 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             nonce64 = threadId;  // Reset to start of this thread's range
         }
 
-        // Get current template
-        CBlock block;
-        uint256 hashTarget;
+        // BUG #27 FIX: Only fetch template when changed (check pointer, not copy block)
+        // This eliminates millions of block copies per second
+        bool needNewTemplate = false;
         {
             std::lock_guard<std::mutex> lock(m_templateMutex);
             if (!m_pTemplate) {
+                templateValid = false;
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
-            block = m_pTemplate->block;
-            hashTarget = m_pTemplate->hashTarget;
+
+            // Check if template changed by comparing header fields
+            if (!templateValid ||
+                !(m_pTemplate->block.hashPrevBlock == currentBlock.hashPrevBlock) ||
+                !(m_pTemplate->block.hashMerkleRoot == currentBlock.hashMerkleRoot) ||
+                m_pTemplate->block.nTime != currentBlock.nTime ||
+                m_pTemplate->block.nBits != currentBlock.nBits) {
+
+                // Template changed - copy it once
+                currentBlock = m_pTemplate->block;
+                currentHashTarget = m_pTemplate->hashTarget;
+                templateValid = true;
+                needNewTemplate = true;
+            }
         }
 
-        // BUG #24 FIX: Only re-serialize header when template changes
-        // Check if ANY part of template changed (prevBlock, merkleRoot, time, or bits)
-        // Bug #26: Must check ALL header fields, not just prevBlock (Bug #11 serialization changes merkleRoot)
-        if (!headerInitialized ||
-            !(block.hashPrevBlock == cachedBlock.hashPrevBlock) ||
-            !(block.hashMerkleRoot == cachedBlock.hashMerkleRoot) ||
-            block.nTime != cachedBlock.nTime ||
-            block.nBits != cachedBlock.nBits) {
+        // BUG #24 + #26 + #27 FIX: Only re-serialize header when template changes
+        // Template change already detected above, just use the flag
+        if (needNewTemplate) {
             // Template changed - re-serialize the static parts of header
             // Format: version(4) + prevBlock(32) + merkleRoot(32) + time(4) + bits(4) + nonce(4)
             size_t offset = 0;
 
             // Version (4 bytes)
-            std::memcpy(header + offset, &block.nVersion, 4);
+            std::memcpy(header + offset, &currentBlock.nVersion, 4);
             offset += 4;
 
             // Previous block hash (32 bytes)
-            std::memcpy(header + offset, block.hashPrevBlock.begin(), 32);
+            std::memcpy(header + offset, currentBlock.hashPrevBlock.begin(), 32);
             offset += 32;
 
             // Merkle root (32 bytes)
-            std::memcpy(header + offset, block.hashMerkleRoot.begin(), 32);
+            std::memcpy(header + offset, currentBlock.hashMerkleRoot.begin(), 32);
             offset += 32;
 
             // Time (4 bytes)
-            std::memcpy(header + offset, &block.nTime, 4);
+            std::memcpy(header + offset, &currentBlock.nTime, 4);
             offset += 4;
 
             // Difficulty bits (4 bytes)
-            std::memcpy(header + offset, &block.nBits, 4);
+            std::memcpy(header + offset, &currentBlock.nBits, 4);
             offset += 4;
 
             // Nonce will be updated in hot loop (last 4 bytes at offset 76)
 
-            cachedBlock = block;
-            lastHashTarget = hashTarget;
+            cachedBlock = currentBlock;
+            lastHashTarget = currentHashTarget;
             headerInitialized = true;
 
             // DEBUG: Count header serializations
@@ -317,7 +364,9 @@ void CMiningController::MiningWorker(uint32_t threadId) {
 
         // Compute RandomX hash
         try {
-            randomx_hash_fast(header, 80, hashBuffer);
+            // BUG #28 FIX: Use thread-local VM (no mutex, fully parallel)
+            // This eliminates the global mutex bottleneck that was serializing all threads
+            randomx_hash_thread(vm.get(), header, 80, hashBuffer);
 
             // Convert to uint256
             uint256 hash;
@@ -337,7 +386,7 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             }
 
             // Check if valid block
-            if (CheckProofOfWork(hash, hashTarget)) {
+            if (CheckProofOfWork(hash, currentHashTarget)) {
                 // Double-check mining flag to prevent race during shutdown
                 // If StopMining() was called between finding block and this check,
                 // discard the block to prevent database corruption
@@ -349,14 +398,14 @@ void CMiningController::MiningWorker(uint32_t threadId) {
                 m_stats.nBlocksFound++;
 
                 // BUG #24 FIX: Set the winning nonce in the block before callback
-                block.nNonce = nonce32;
+                currentBlock.nNonce = nonce32;
 
                 // MINE-015 FIX: Safely call callback with null check
                 // Always check callback exists before invoking (prevents null dereference)
                 {
                     std::lock_guard<std::mutex> lock(m_callbackMutex);
                     if (m_blockFoundCallback) {
-                        m_blockFoundCallback(block);
+                        m_blockFoundCallback(currentBlock);
                     }
                     // If no callback set, block is found but not reported (silent mining)
                 }

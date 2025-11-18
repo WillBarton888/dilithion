@@ -5,9 +5,9 @@ REM ================================================================
 REM  This script packages the Windows binary release
 REM ================================================================
 
-REM Use VERSION from environment if set, otherwise default to v1.0.12
+REM Use VERSION from environment if set, otherwise default to v1.0.13
 if "%VERSION%"=="" (
-    set VERSION=v1.0.12
+    set VERSION=v1.0.13
 )
 set RELEASE_NAME=dilithion-testnet-%VERSION%-windows-x64
 set RELEASE_DIR=releases\%RELEASE_NAME%
@@ -36,12 +36,13 @@ echo    - All binaries copied successfully
 
 REM Copy required DLLs
 echo [3/5] Copying runtime libraries (DLLs)...
-echo    - Copying MinGW runtime DLLs from local...
-copy libwinpthread-1.dll %RELEASE_DIR%\ || (echo FAILED: libwinpthread-1.dll && goto :copy_error)
-copy libgcc_s_seh-1.dll %RELEASE_DIR%\ || (echo FAILED: libgcc_s_seh-1.dll && goto :copy_error)
-copy libleveldb.dll %RELEASE_DIR%\ || (echo FAILED: libleveldb.dll && goto :copy_error)
 echo    - Copying ALL DLLs from C:\ProgramData\mingw64\mingw64 (matching build toolchain)...
+REM PERMANENT FIX: Always copy ALL runtime DLLs from current MinGW installation
+REM This ensures DLL versions match the compiler used to build the binary
+copy "C:\ProgramData\mingw64\mingw64\bin\libwinpthread-1.dll" %RELEASE_DIR%\ || (echo FAILED: libwinpthread-1.dll && goto :copy_error)
+copy "C:\ProgramData\mingw64\mingw64\bin\libgcc_s_seh-1.dll" %RELEASE_DIR%\ || (echo FAILED: libgcc_s_seh-1.dll && goto :copy_error)
 copy "C:\ProgramData\mingw64\mingw64\bin\libstdc++-6.dll" %RELEASE_DIR%\ || (echo FAILED: libstdc++-6.dll && goto :copy_error)
+copy libleveldb.dll %RELEASE_DIR%\ || (echo FAILED: libleveldb.dll && goto :copy_error)
 copy "C:\ProgramData\mingw64\mingw64\opt\bin\libcrypto-3-x64.dll" %RELEASE_DIR%\ || (echo FAILED: libcrypto-3-x64.dll && goto :copy_error)
 copy "C:\ProgramData\mingw64\mingw64\opt\bin\libssl-3-x64.dll" %RELEASE_DIR%\ || (echo FAILED: libssl-3-x64.dll && goto :copy_error)
 echo    [SUCCESS] All 6 DLLs copied successfully

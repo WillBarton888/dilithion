@@ -213,7 +213,7 @@ struct NodeConfig {
     }
 
     void PrintUsage(const char* program) {
-        std::cout << "Dilithion Node v1.0.0 - Post-Quantum Cryptocurrency" << std::endl;
+        std::cout << "Dilithion Node v1.0.13 - Post-Quantum Cryptocurrency" << std::endl;
         std::cout << std::endl;
         std::cout << "Usage: " << program << " [options]" << std::endl;
         std::cout << std::endl;
@@ -415,7 +415,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "======================================" << std::endl;
-    std::cout << "Dilithion Node v1.0.0" << std::endl;
+    std::cout << "Dilithion Node v1.0.13" << std::endl;
     std::cout << "Post-Quantum Cryptocurrency" << std::endl;
     std::cout << "======================================" << std::endl;
     std::cout << std::endl;
@@ -722,8 +722,9 @@ int main(int argc, char* argv[]) {
                             std::cout << "TESTNET: Attempting automatic recovery..." << std::endl;
                             std::cout << "==========================================================" << std::endl;
 
-                            // Bug #25 FIX: Close database before wiping to release file locks (Windows)
+                            // Bug #25 FIX: Close ALL databases before wiping to release file locks (Windows)
                             blockchain.Close();
+                            utxo_set.Close();  // CRITICAL: Also close UTXO database (chainstate directory)
 
                             CChainVerifier verifier;
                             if (!verifier.RepairChain(true)) {
@@ -820,8 +821,9 @@ int main(int argc, char* argv[]) {
                     std::cout << "TESTNET: Attempting automatic recovery..." << std::endl;
                     std::cout << "==========================================================" << std::endl;
 
-                    // Bug #25 FIX: Close database before wiping to release file locks (Windows)
+                    // Bug #25 FIX: Close ALL databases before wiping to release file locks (Windows)
                     blockchain.Close();
+                    utxo_set.Close();  // CRITICAL: Also close UTXO database (chainstate directory)
 
                     if (!verifier.RepairChain(true)) {
                         std::cerr << "ERROR: Failed to repair testnet blockchain data" << std::endl;

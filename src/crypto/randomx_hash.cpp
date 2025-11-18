@@ -264,3 +264,70 @@ extern "C" void randomx_wait_for_init() {
         std::cout << "  [WAIT] RandomX initialization complete" << std::endl;
     }
 }
+
+// BUG #28 FIX: Per-Thread RandomX VM Implementation
+// Each mining thread creates its own VM for true parallel mining
+
+extern "C" void* randomx_create_thread_vm() {
+    // Wait for initialization to complete (prevents race during startup)
+    while (!g_randomx_ready.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    std::lock_guard<std::mutex> lock(g_randomx_mutex);
+
+    // Validate dataset/cache exists
+    if (!g_randomx_dataset && !g_randomx_cache) {
+        std::cerr << "[ERROR] RandomX not initialized before VM creation" << std::endl;
+        return nullptr;
+    }
+
+    // Create VM with appropriate flags
+    randomx_flags flags = RANDOMX_FLAG_DEFAULT;
+    randomx_vm* vm = nullptr;
+
+    if (g_is_light_mode) {
+        // LIGHT mode: VM uses cache (slower, less RAM)
+        vm = randomx_create_vm(flags, g_randomx_cache, nullptr);
+        if (!vm) {
+            std::cerr << "[ERROR] Failed to create thread VM (LIGHT mode)" << std::endl;
+            return nullptr;
+        }
+    } else {
+        // FULL mode: VM uses dataset (faster, shares 2GB dataset across all VMs)
+        flags = static_cast<randomx_flags>(flags | RANDOMX_FLAG_FULL_MEM);
+        vm = randomx_create_vm(flags, g_randomx_cache, g_randomx_dataset);
+        if (!vm) {
+            std::cerr << "[ERROR] Failed to create thread VM (FULL mode, OOM?)" << std::endl;
+            return nullptr;
+        }
+    }
+
+    return static_cast<void*>(vm);
+}
+
+extern "C" void randomx_destroy_thread_vm(void* vm) {
+    if (!vm) return;
+
+    randomx_vm* rx_vm = static_cast<randomx_vm*>(vm);
+    randomx_destroy_vm(rx_vm);
+}
+
+extern "C" void randomx_hash_thread(void* vm, const void* input, size_t input_len, void* output) {
+    // Validate inputs
+    if (!vm) {
+        throw std::invalid_argument("randomx_hash_thread: vm is NULL");
+    }
+    if (input == nullptr && input_len > 0) {
+        throw std::invalid_argument("randomx_hash_thread: input is NULL but input_len > 0");
+    }
+    if (output == nullptr) {
+        throw std::invalid_argument("randomx_hash_thread: output buffer is NULL");
+    }
+
+    // NO MUTEX NEEDED! Each thread owns its VM, enabling true parallel mining
+    // This is the key fix: instead of serializing on g_randomx_mutex,
+    // each thread hashes independently using its own VM
+    randomx_vm* rx_vm = static_cast<randomx_vm*>(vm);
+    randomx_calculate_hash(rx_vm, input, input_len, output);
+}
