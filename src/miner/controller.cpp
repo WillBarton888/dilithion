@@ -241,6 +241,10 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         CBlock cachedBlock;
         bool headerInitialized = false;
 
+        // DEBUG: Counters to diagnose Bug #24 fix performance
+        uint64_t debug_serializations = 0;
+        uint64_t debug_hashes = 0;
+
         while (m_mining) {
         // MINE-009 FIX: Check for nonce space exhaustion
         // If we've wrapped around the 32-bit space, request new template
@@ -265,8 +269,13 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         }
 
         // BUG #24 FIX: Only re-serialize header when template changes
-        // Check if template changed (compare prevBlock hash as quick indicator)
-        if (!headerInitialized || !(block.hashPrevBlock == cachedBlock.hashPrevBlock)) {
+        // Check if ANY part of template changed (prevBlock, merkleRoot, time, or bits)
+        // Bug #26: Must check ALL header fields, not just prevBlock (Bug #11 serialization changes merkleRoot)
+        if (!headerInitialized ||
+            !(block.hashPrevBlock == cachedBlock.hashPrevBlock) ||
+            !(block.hashMerkleRoot == cachedBlock.hashMerkleRoot) ||
+            block.nTime != cachedBlock.nTime ||
+            block.nBits != cachedBlock.nBits) {
             // Template changed - re-serialize the static parts of header
             // Format: version(4) + prevBlock(32) + merkleRoot(32) + time(4) + bits(4) + nonce(4)
             size_t offset = 0;
@@ -296,6 +305,9 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             cachedBlock = block;
             lastHashTarget = hashTarget;
             headerInitialized = true;
+
+            // DEBUG: Count header serializations
+            debug_serializations++;
         }
 
         // BUG #24 FIX: Fast nonce update (only 4 bytes, no allocations)
@@ -314,6 +326,15 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             // Update hash counter (CRITICAL-1 FIX: Use atomic fetch_add for thread safety)
             // Multiple mining threads increment this counter; operator++ is NOT atomic for atomic types
             m_stats.nHashesComputed.fetch_add(1, std::memory_order_relaxed);
+
+            // DEBUG: Count hashes and periodically report serialization ratio
+            debug_hashes++;
+            if (debug_hashes % 1000 == 0) {
+                std::cout << "[DEBUG Thread " << threadId << "] Hashes: " << debug_hashes
+                          << ", Serializations: " << debug_serializations
+                          << " (Ratio: 1 serialization per " << (debug_hashes / std::max((uint64_t)1, debug_serializations)) << " hashes)"
+                          << std::endl;
+            }
 
             // Check if valid block
             if (CheckProofOfWork(hash, hashTarget)) {
