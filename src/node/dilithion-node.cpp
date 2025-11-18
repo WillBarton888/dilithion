@@ -548,6 +548,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Load and verify genesis block
+load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "Loading genesis block..." << std::endl;
         CBlock genesis = Genesis::CreateGenesisBlock();
 
@@ -735,12 +736,39 @@ int main(int argc, char* argv[]) {
 
                             std::cout << "==========================================================" << std::endl;
                             std::cout << "TESTNET: Blockchain data wiped successfully" << std::endl;
-                            std::cout << "TESTNET: Node will restart and rebuild from genesis" << std::endl;
-                            std::cout << "TESTNET: This is normal after code updates" << std::endl;
+                            std::cout << "TESTNET: Reopening databases and continuing..." << std::endl;
                             std::cout << "==========================================================" << std::endl;
 
-                            delete Dilithion::g_chainParams;
-                            return 0;  // Clean exit for systemd restart
+                            // Bug #29 Fix: Close and reopen databases instead of exiting
+                            // Close existing databases first
+                            blockchain.Close();
+                            utxo_set.Close();
+
+                            // Reopen blockchain database
+                            std::string blocksPath = config.datadir + "/blocks";
+                            if (!blockchain.Open(blocksPath)) {
+                                std::cerr << "ERROR: Failed to reopen blockchain database after wipe" << std::endl;
+                                delete Dilithion::g_chainParams;
+                                return 1;
+                            }
+
+                            // Clear mempool
+                            g_mempool->Clear();
+
+                            // Reopen UTXO set database
+                            std::string chainstatePath = config.datadir + "/chainstate";
+                            if (!utxo_set.Open(chainstatePath)) {
+                                std::cerr << "ERROR: Failed to reopen UTXO database after wipe" << std::endl;
+                                delete Dilithion::g_chainParams;
+                                return 1;
+                            }
+
+                            // Reset chain state
+                            g_chainstate.Cleanup();
+                            g_chainstate.SetTip(nullptr);
+
+                            // Jump back to genesis loading (will trigger IBD after handshake)
+                            goto load_genesis_block;
                         } else {
                             std::cerr << "\n==========================================================" << std::endl;
                             std::cerr << "ERROR: Corrupted blockchain database detected" << std::endl;
@@ -986,11 +1014,37 @@ int main(int argc, char* argv[]) {
 
             // Send verack in response
             connection_manager.SendVerackMessage(peer_id);
+        });
 
-            // Check if handshake is now complete (both sides sent verack)
-            auto peer = g_peer_manager->GetPeer(peer_id);
-            if (peer && peer->IsHandshakeComplete()) {
-                std::cout << "[P2P] Handshake complete with peer " << peer_id << std::endl;
+        // Register verack handler to trigger IBD when handshake completes
+        message_processor.SetVerackHandler([](int peer_id) {
+            std::cout << "[P2P] Handshake complete with peer " << peer_id << std::endl;
+
+            // Debug: Check if g_headers_manager is initialized
+            if (!g_headers_manager) {
+                std::cerr << "[P2P] ERROR: g_headers_manager is null!" << std::endl;
+                return;
+            }
+
+            std::cout << "[P2P] Triggering IBD for peer " << peer_id << std::endl;
+
+            // Trigger IBD - request headers from this peer to sync blockchain
+            uint256 ourBestBlock;
+            if (g_chainstate.GetTip()) {
+                ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
+            } else {
+                ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
+            }
+
+            std::cout << "[P2P] Requesting headers from peer " << peer_id << std::endl;
+
+            try {
+                g_headers_manager->RequestHeaders(peer_id, ourBestBlock);
+                std::cout << "[P2P] Headers request sent" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "[P2P] EXCEPTION in RequestHeaders: " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "[P2P] UNKNOWN EXCEPTION in RequestHeaders" << std::endl;
             }
         });
 
@@ -1331,8 +1385,15 @@ int main(int argc, char* argv[]) {
             }
 
             if (!found) {
-                std::cout << "[IBD] No common block found with peer " << peer_id << std::endl;
-                return;
+                // Bitcoin Core approach: empty locator means "send from genesis"
+                if (msg.locator.empty()) {
+                    std::cout << "[IBD] Empty locator - sending from genesis" << std::endl;
+                    hashStart.SetHex(Dilithion::g_chainParams->genesisHash);
+                    found = true;
+                } else {
+                    std::cout << "[IBD] No common block found with peer " << peer_id << std::endl;
+                    return;
+                }
             }
 
             // Collect up to 2000 headers starting from hashStart
@@ -1908,6 +1969,45 @@ int main(int argc, char* argv[]) {
                 std::cout << "  [OK] RandomX ready for mining" << std::endl;
             } else {
                 std::cout << "  [OK] RandomX already ready" << std::endl;
+            }
+
+            // Wait for initial sync before mining (check if we need to sync from network)
+            std::cout << "  [WAIT] Checking for network sync..." << std::endl;
+
+            unsigned int initial_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+            std::cout << "  [SYNC] Current height: " << initial_height << std::endl;
+
+            // If we're at genesis (height 0), wait for IBD to sync blocks
+            if (initial_height == 0 && g_peer_manager->GetConnectedPeers().size() > 0) {
+                std::cout << "  [SYNC] At genesis - waiting for network sync (max 15s)..." << std::endl;
+
+                int wait_seconds = 0;
+                bool synced = false;
+
+                while (wait_seconds < 15 && !synced) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    wait_seconds++;
+
+                    // Check if chain height has increased
+                    unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+
+                    if (current_height > initial_height) {
+                        std::cout << "  [SYNC] Synced to height " << current_height << " in " << wait_seconds << "s" << std::endl;
+                        synced = true;
+                        break;
+                    }
+
+                    if (wait_seconds % 3 == 0) {
+                        std::cout << "  [SYNC] Waiting for blocks... (" << wait_seconds << "s elapsed)" << std::endl;
+                    }
+                }
+
+                if (!synced) {
+                    std::cout << "  [SYNC] No blocks received after 15s - starting at genesis" << std::endl;
+                    std::cout << "  [SYNC] This is normal for new testnets or if network is down" << std::endl;
+                }
+            } else {
+                std::cout << "  [OK] Already synced (height " << initial_height << ")" << std::endl;
             }
 
             auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
