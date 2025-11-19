@@ -214,7 +214,7 @@ struct NodeConfig {
     }
 
     void PrintUsage(const char* program) {
-        std::cout << "Dilithion Node v1.0.14 - Post-Quantum Cryptocurrency" << std::endl;
+        std::cout << "Dilithion Node v1.0.15 - Post-Quantum Cryptocurrency" << std::endl;
         std::cout << std::endl;
         std::cout << "Usage: " << program << " [options]" << std::endl;
         std::cout << std::endl;
@@ -226,7 +226,7 @@ struct NodeConfig {
         std::cout << "                            • Start mining immediately" << std::endl;
         std::cout << std::endl;
         std::cout << "Options:" << std::endl;
-        std::cout << "  --testnet             Use testnet (256x easier difficulty)" << std::endl;
+        std::cout << "  --testnet             Use testnet (production difficulty, ~60s blocks)" << std::endl;
         std::cout << "  --datadir=<path>      Data directory (default: network-specific)" << std::endl;
         std::cout << "  --port=<port>         P2P network port (default: network-specific)" << std::endl;
         std::cout << "  --rpcport=<port>      RPC server port (default: network-specific)" << std::endl;
@@ -416,7 +416,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "======================================" << std::endl;
-    std::cout << "Dilithion Node v1.0.14" << std::endl;
+    std::cout << "Dilithion Node v1.0.15" << std::endl;
     std::cout << "Post-Quantum Cryptocurrency" << std::endl;
     std::cout << "======================================" << std::endl;
     std::cout << std::endl;
@@ -424,7 +424,7 @@ int main(int argc, char* argv[]) {
     // Initialize chain parameters based on network
     if (config.testnet) {
         Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::Testnet());
-        std::cout << "Network: TESTNET (256x easier difficulty)" << std::endl;
+        std::cout << "Network: TESTNET (production difficulty, ~60s blocks)" << std::endl;
     } else {
         Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::Mainnet());
         std::cout << "Network: MAINNET" << std::endl;
@@ -1476,7 +1476,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "[IBD] Best header height: " << bestHeight << std::endl;
                 std::cout << "[IBD] Best header hash: " << bestHash.GetHex().substr(0, 16) << "..." << std::endl;
 
-                // TODO Phase 4.5: Trigger block downloads based on header chain
+                // Bug #34 fix: Queue received blocks for download
+                // After headers are validated, tell BlockFetcher to download the actual blocks
+                if (g_block_fetcher) {
+                    // Calculate starting height for this batch of headers
+                    // If we received N headers and best height is now H, first header is at H-N+1
+                    int startHeight = bestHeight - static_cast<int>(headers.size()) + 1;
+
+                    for (size_t i = 0; i < headers.size(); i++) {
+                        uint256 hash = headers[i].GetHash();
+                        int height = startHeight + static_cast<int>(i);
+
+                        g_block_fetcher->QueueBlockForDownload(hash, height);
+                        std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16)
+                                  << "... (height " << height << ") for download" << std::endl;
+                    }
+                }
             } else {
                 std::cerr << "[IBD] ERROR: Failed to process headers from peer " << peer_id << std::endl;
                 std::cerr << "  Headers may be invalid or disconnected from our chain" << std::endl;
@@ -2019,44 +2034,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "  [OK] RandomX already ready" << std::endl;
             }
 
-            // Wait for initial sync before mining (check if we need to sync from network)
-            std::cout << "  [WAIT] Checking for network sync..." << std::endl;
-
-            unsigned int initial_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
-            std::cout << "  [SYNC] Current height: " << initial_height << std::endl;
-
-            // If we're at genesis (height 0), wait for IBD to sync blocks
-            if (initial_height == 0 && g_peer_manager->GetConnectedPeers().size() > 0) {
-                std::cout << "  [SYNC] At genesis - waiting for network sync (max 15s)..." << std::endl;
-
-                int wait_seconds = 0;
-                bool synced = false;
-
-                while (wait_seconds < 15 && !synced) {
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                    wait_seconds++;
-
-                    // Check if chain height has increased
-                    unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
-
-                    if (current_height > initial_height) {
-                        std::cout << "  [SYNC] Synced to height " << current_height << " in " << wait_seconds << "s" << std::endl;
-                        synced = true;
-                        break;
-                    }
-
-                    if (wait_seconds % 3 == 0) {
-                        std::cout << "  [SYNC] Waiting for blocks... (" << wait_seconds << "s elapsed)" << std::endl;
-                    }
-                }
-
-                if (!synced) {
-                    std::cout << "  [SYNC] No blocks received after 15s - starting at genesis" << std::endl;
-                    std::cout << "  [SYNC] This is normal for new testnets or if network is down" << std::endl;
-                }
-            } else {
-                std::cout << "  [OK] Already synced (height " << initial_height << ")" << std::endl;
-            }
+            // Mining will start immediately - IBD block download happens continuously in main loop
+            // (Bug #32 fix ensures mining template updates when blocks arrive)
+            unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+            std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
             auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
             if (!templateOpt) {
@@ -2122,30 +2103,48 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // ========================================
             // BLOCK DOWNLOAD COORDINATION (IBD)
             // ========================================
-            // Check if we need to download blocks (headers ahead of chain)
+            // BUG #33 DEBUG: Add comprehensive logging to diagnose why blocks aren't downloading
             if (g_headers_manager && g_block_fetcher) {
                 int headerHeight = g_headers_manager->GetBestHeight();
                 int chainHeight = g_chainstate.GetHeight();
 
+                // DEBUG: Log every iteration to see if this code even runs
+                static int debug_iteration = 0;
+                debug_iteration++;
+                if (debug_iteration % 10 == 1) {  // Log every 10 seconds
+                    std::cout << "[IBD-DEBUG] Iteration " << debug_iteration
+                              << ": headerHeight=" << headerHeight
+                              << " chainHeight=" << chainHeight << std::endl;
+                }
+
                 // If headers are ahead, we need to download blocks
                 if (headerHeight > chainHeight) {
+                    std::cout << "[IBD] Headers ahead of chain - downloading blocks (header="
+                              << headerHeight << " chain=" << chainHeight << ")" << std::endl;
+
                     // Queue missing blocks for download (only queue next batch to avoid memory issues)
                     int blocksToQueue = std::min(100, headerHeight - chainHeight);  // Queue max 100 at a time
+                    std::cout << "[IBD] Queueing " << blocksToQueue << " blocks for download..." << std::endl;
+
                     for (int h = chainHeight + 1; h <= chainHeight + blocksToQueue; h++) {
                         // Get header hash at this height
                         std::vector<uint256> hashesAtHeight = g_headers_manager->GetHeadersAtHeight(h);
+                        std::cout << "[IBD-DEBUG] Height " << h << ": found " << hashesAtHeight.size() << " header(s)" << std::endl;
+
                         for (const uint256& hash : hashesAtHeight) {
                             // Only queue if we don't already have the block
                             if (!g_chainstate.HasBlockIndex(hash) &&
                                 !g_block_fetcher->IsQueued(hash) &&
                                 !g_block_fetcher->IsDownloading(hash)) {
                                 g_block_fetcher->QueueBlockForDownload(hash, h, false);
+                                std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16) << "... at height " << h << std::endl;
                             }
                         }
                     }
 
                     // Get next blocks to fetch (respects 16 in-flight limit)
                     auto blocksToFetch = g_block_fetcher->GetNextBlocksToFetch(16);
+                    std::cout << "[IBD] Fetching " << blocksToFetch.size() << " blocks (max 16 in-flight)..." << std::endl;
 
                     // For each block, select peer and send GETDATA
                     for (const auto& [hash, height] : blocksToFetch) {
@@ -2160,6 +2159,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                                 CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
                                 connection_manager.SendMessage(peer, msg);
+                                std::cout << "[IBD] Sent GETDATA for block " << hash.GetHex().substr(0, 16) << "... (height " << height << ") to peer " << peer << std::endl;
                             }
                         }
                     }
