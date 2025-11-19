@@ -1272,6 +1272,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                 }
 
+                // Notify BlockFetcher that block was successfully received and activated
+                if (g_block_fetcher) {
+                    g_block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                }
+
                 // CRITICAL-2 FIX: Iterative orphan resolution with depth limit
                 // Prevents stack overflow from unbounded recursion
                 // Check if any orphan blocks are now valid children of this block
@@ -2074,6 +2079,61 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // - Update mempool
             // - Process P2P messages
             // - Update mining stats
+            // - Block download coordination (IBD)
+
+            // ========================================
+            // BLOCK DOWNLOAD COORDINATION (IBD)
+            // ========================================
+            // Check if we need to download blocks (headers ahead of chain)
+            if (g_headers_manager && g_block_fetcher) {
+                int headerHeight = g_headers_manager->GetBestHeight();
+                int chainHeight = g_chainstate.GetHeight();
+
+                // If headers are ahead, we need to download blocks
+                if (headerHeight > chainHeight) {
+                    // Queue missing blocks for download (only queue next batch to avoid memory issues)
+                    int blocksToQueue = std::min(100, headerHeight - chainHeight);  // Queue max 100 at a time
+                    for (int h = chainHeight + 1; h <= chainHeight + blocksToQueue; h++) {
+                        // Get header hash at this height
+                        std::vector<uint256> hashesAtHeight = g_headers_manager->GetHeadersAtHeight(h);
+                        for (const uint256& hash : hashesAtHeight) {
+                            // Only queue if we don't already have the block
+                            if (!g_chainstate.HasBlockIndex(hash) &&
+                                !g_block_fetcher->IsQueued(hash) &&
+                                !g_block_fetcher->IsDownloading(hash)) {
+                                g_block_fetcher->QueueBlockForDownload(hash, h, false);
+                            }
+                        }
+                    }
+
+                    // Get next blocks to fetch (respects 16 in-flight limit)
+                    auto blocksToFetch = g_block_fetcher->GetNextBlocksToFetch(16);
+
+                    // For each block, select peer and send GETDATA
+                    for (const auto& [hash, height] : blocksToFetch) {
+                        // Select best peer for download
+                        NodeId peer = g_block_fetcher->SelectPeerForDownload(hash);
+                        if (peer != -1) {
+                            // Request block from fetcher (updates in-flight tracking)
+                            if (g_block_fetcher->RequestBlock(peer, hash, height)) {
+                                // Send GETDATA message
+                                std::vector<NetProtocol::CInv> getdata;
+                                getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, hash));
+
+                                CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
+                                connection_manager.SendMessage(peer, msg);
+                            }
+                        }
+                    }
+
+                    // Check for timed-out block requests (60 second timeout)
+                    auto timedOut = g_block_fetcher->CheckTimeouts();
+                    if (!timedOut.empty()) {
+                        std::cout << "[BlockFetcher] " << timedOut.size() << " block(s) timed out, retrying..." << std::endl;
+                        g_block_fetcher->RetryTimedOutBlocks(timedOut);
+                    }
+                }
+            }
 
             // Print mining stats every 10 seconds if mining
             static int counter = 0;
