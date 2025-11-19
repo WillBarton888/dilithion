@@ -149,7 +149,11 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
         // Persist to database
         if (pdb != nullptr) {
-            pdb->WriteBestBlock(pindexNew->GetBlockHash());
+            std::cout << "[Chain] DEBUG: Writing best block to DB: " << pindexNew->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+            bool success = pdb->WriteBestBlock(pindexNew->GetBlockHash());
+            std::cout << "[Chain] DEBUG: WriteBestBlock returned: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+        } else {
+            std::cerr << "[Chain] ERROR: pdb is nullptr! Cannot write best block!" << std::endl;
         }
 
         return true;

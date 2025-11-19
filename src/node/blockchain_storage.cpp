@@ -447,6 +447,10 @@ bool CBlockchainDB::WriteBlockIndex(const uint256& hash, const CBlockIndex& inde
     std::string hashHex = index.phashBlock.GetHex();
     data.append(hashHex);
 
+    // Serialize previous block hash (64 bytes hex string) - CRITICAL for chain reconstruction
+    std::string hashPrevHex = index.header.hashPrevBlock.GetHex();
+    data.append(hashPrevHex);
+
     // Write data length
     uint32_t data_length = static_cast<uint32_t>(data.size());
     value.append(reinterpret_cast<const char*>(&data_length), sizeof(data_length));
@@ -461,7 +465,12 @@ bool CBlockchainDB::WriteBlockIndex(const uint256& hash, const CBlockIndex& inde
     }
     value.append(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
 
-    leveldb::Status status = db->Put(leveldb::WriteOptions(), key, value);
+    // CRITICAL: Use sync=true to ensure block index is flushed to disk
+    // Without this, Ctrl+C can lose the index even though blocks are saved
+    leveldb::WriteOptions options;
+    options.sync = true;
+
+    leveldb::Status status = db->Put(options, key, value);
     return status.ok();
 }
 
@@ -563,18 +572,25 @@ bool CBlockchainDB::ReadBlockIndex(const uint256& hash, CBlockIndex& index) {
     index.nVersion = read_int32();
     index.nTx = read_uint32();
 
-    // Deserialize block hash (remaining bytes are hex string)
-    if (data_offset < data.size()) {
-        std::string hashHex = data.substr(data_offset);
-        if (hashHex.length() != 64) {
-            std::cerr << "[ERROR] ReadBlockIndex: Invalid hash length " << hashHex.length() << std::endl;
-            return false;
-        }
-        index.phashBlock.SetHex(hashHex);
-    } else {
-        std::cerr << "[ERROR] ReadBlockIndex: No hash data" << std::endl;
+    // Deserialize block hash (64 bytes hex string)
+    if (data_offset + 64 > data.size()) {
+        std::cerr << "[ERROR] ReadBlockIndex: No hash data (offset=" << data_offset
+                  << ", size=" << data.size() << ")" << std::endl;
         return false;
     }
+    std::string hashHex = data.substr(data_offset, 64);
+    index.phashBlock.SetHex(hashHex);
+    data_offset += 64;
+
+    // Deserialize previous block hash (64 bytes hex string) - CRITICAL for chain reconstruction
+    if (data_offset + 64 > data.size()) {
+        std::cerr << "[ERROR] ReadBlockIndex: No previous hash data (offset=" << data_offset
+                  << ", size=" << data.size() << ")" << std::endl;
+        return false;
+    }
+    std::string hashPrevHex = data.substr(data_offset, 64);
+    index.header.hashPrevBlock.SetHex(hashPrevHex);
+    data_offset += 64;
 
     return true;
 }
@@ -587,7 +603,12 @@ bool CBlockchainDB::WriteBestBlock(const uint256& hash) {
     std::string key = "bestblock";
     std::string value = hash.GetHex();
 
-    leveldb::Status status = db->Put(leveldb::WriteOptions(), key, value);
+    // CRITICAL: Use sync=true to ensure best block pointer is flushed to disk
+    // Without this, Ctrl+C can lose the pointer even though blocks are saved
+    leveldb::WriteOptions options;
+    options.sync = true;
+
+    leveldb::Status status = db->Put(options, key, value);
     if (!status.ok()) {
         std::cerr << "[Error] WriteBestBlock: LevelDB Put failed: " << status.ToString() << std::endl;
     }

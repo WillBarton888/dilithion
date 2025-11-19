@@ -376,14 +376,14 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             // Multiple mining threads increment this counter; operator++ is NOT atomic for atomic types
             m_stats.nHashesComputed.fetch_add(1, std::memory_order_relaxed);
 
-            // DEBUG: Count hashes and periodically report serialization ratio
-            debug_hashes++;
-            if (debug_hashes % 1000 == 0) {
-                std::cout << "[DEBUG Thread " << threadId << "] Hashes: " << debug_hashes
-                          << ", Serializations: " << debug_serializations
-                          << " (Ratio: 1 serialization per " << (debug_hashes / std::max((uint64_t)1, debug_serializations)) << " hashes)"
-                          << std::endl;
-            }
+            // DEBUG: Count hashes and periodically report serialization ratio (DISABLED - too spammy)
+            // debug_hashes++;
+            // if (debug_hashes % 1000 == 0) {
+            //     std::cout << "[DEBUG Thread " << threadId << "] Hashes: " << debug_hashes
+            //               << ", Serializations: " << debug_serializations
+            //               << " (Ratio: 1 serialization per " << (debug_hashes / std::max((uint64_t)1, debug_serializations)) << " hashes)"
+            //               << std::endl;
+            // }
 
             // Check if valid block
             if (CheckProofOfWork(hash, currentHashTarget)) {

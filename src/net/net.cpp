@@ -105,7 +105,7 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         {"getdata",    {1, 50000 * 36}},             // Max 50k items * 36 bytes each
         {"block",      {80, 8 * 1024 * 1024}},       // Min 80 bytes header, max 8MB blocks
         {"tx",         {60, 1 * 1024 * 1024}},       // Min 60 bytes, max 1MB transactions
-        {"getheaders", {36, 8236}},                  // Min 36 bytes, max ~8KB with many hashes
+        {"getheaders", {33, 8236}},                  // Min 33 bytes (empty locator + stop hash), max ~8KB
         {"headers",    {1, 2000 * 81}},              // Max 2000 headers * 81 bytes each
         {"getblocks",  {36, 8236}},                  // Similar to getheaders
         {"mempool",    {0, 0}},                      // Empty message

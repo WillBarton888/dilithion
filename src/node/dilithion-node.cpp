@@ -701,12 +701,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 for (auto it = chainHashes.rbegin(); it != chainHashes.rend(); ++it) {
                     const uint256& blockHash = *it;
 
+                    std::cout << "[Startup] DEBUG: Attempting to load block index for " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
                     CBlockIndex blockIndexFromDB;
                     if (!blockchain.ReadBlockIndex(blockHash, blockIndexFromDB)) {
                         std::cerr << "ERROR: Cannot load block index " << blockHash.GetHex().substr(0, 16) << std::endl;
+                        std::cerr << "[Startup] DEBUG: ReadBlockIndex FAILED for this hash" << std::endl;
                         delete Dilithion::g_chainParams;
                         return 1;
                     }
+                    std::cout << "[Startup] DEBUG: Successfully loaded block index (height " << blockIndexFromDB.nHeight << ")" << std::endl;
 
                     // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
                     auto pblockIndex = std::make_unique<CBlockIndex>(blockIndexFromDB);
@@ -1567,11 +1570,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "[Blockchain] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
 
             // Save block index to database
+            std::cout << "[Blockchain] DEBUG: Calling WriteBlockIndex for " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
             if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
                 std::cerr << "[Blockchain] ERROR: Failed to save block index" << std::endl;
                 // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
+            std::cout << "[Blockchain] DEBUG: WriteBlockIndex succeeded" << std::endl;
 
             // Add to chain state memory map (transfer ownership with std::move)
             if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
