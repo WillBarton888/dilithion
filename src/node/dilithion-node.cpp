@@ -78,6 +78,7 @@ struct NodeState {
     std::atomic<bool> mining_enabled{false};   // Whether user requested --mine
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
+    CWallet* wallet = nullptr;
     CSocket* p2p_socket = nullptr;
     CHttpServer* http_server = nullptr;
 };
@@ -1260,6 +1261,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                     // Signal main loop to update mining template
                     g_node_state.new_block_found = true;
+
+                    // BUG #32 FIX: Immediately update mining template when reorg occurs
+                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
+                        std::cout << "[Mining] Reorg detected - updating template immediately..." << std::endl;
+                        auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
+                        if (templateOpt) {
+                            g_node_state.miner->UpdateTemplate(*templateOpt);
+                            std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
+                        }
+                    }
                 } else {
                     std::cout << "[P2P] Block activated successfully" << std::endl;
 
@@ -1267,6 +1278,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (g_chainstate.GetTip() == pblockIndexPtr) {
                         std::cout << "[P2P] Updated best block to height " << pblockIndexPtr->nHeight << std::endl;
                         g_node_state.new_block_found = true;
+
+                        // BUG #32 FIX: Immediately update mining template when IBD block becomes new tip
+                        std::cout << "[BUG32-DEBUG] Checking immediate template update conditions:" << std::endl;
+                        std::cout << "[BUG32-DEBUG]   miner = " << (g_node_state.miner ? "valid" : "NULL") << std::endl;
+                        std::cout << "[BUG32-DEBUG]   wallet = " << (g_node_state.wallet ? "valid" : "NULL") << std::endl;
+                        std::cout << "[BUG32-DEBUG]   mining_enabled = " << (g_node_state.mining_enabled.load() ? "true" : "false") << std::endl;
+
+                        if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
+                            std::cout << "[Mining] IBD block became new tip - updating template immediately..." << std::endl;
+                            auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
+                            if (templateOpt) {
+                                g_node_state.miner->UpdateTemplate(*templateOpt);
+                                std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
+                            } else {
+                                std::cout << "[BUG32-DEBUG] BuildMiningTemplate returned empty" << std::endl;
+                            }
+                        } else {
+                            std::cout << "[BUG32-DEBUG] Conditions not met - template NOT updated immediately" << std::endl;
+                        }
                     } else {
                         std::cout << "[P2P] Block is valid but not on best chain" << std::endl;
                     }
@@ -1467,6 +1497,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 4: Initialize wallet (before mining callback setup)
         std::cout << "Initializing wallet..." << std::endl;
         CWallet wallet;
+        g_node_state.wallet = &wallet;
 
         // Generate initial key if wallet is empty
         if (wallet.GetAddresses().empty()) {
@@ -1607,6 +1638,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     g_node_state.new_block_found = true;
                 } else if (g_chainstate.GetTip() == pblockIndexPtr) {
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
+
+                    // BUG #32 FIX: Immediately update mining template for locally mined blocks
+                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
+                        std::cout << "[Mining] Locally mined block became new tip - updating template immediately..." << std::endl;
+                        auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
+                        if (templateOpt) {
+                            g_node_state.miner->UpdateTemplate(*templateOpt);
+                            std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
+                        }
+                    }
 
                     // Broadcast block to network (P2P block relay) - Using async broadcaster
                     auto connected_peers = g_peer_manager->GetConnectedPeers();
