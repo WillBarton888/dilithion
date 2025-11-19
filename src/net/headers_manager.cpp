@@ -5,6 +5,7 @@
 #include <net/net.h>
 #include <net/protocol.h>
 #include <consensus/params.h>
+#include <consensus/pow.h>
 #include <util/time.h>
 #include <algorithm>
 #include <cstring>
@@ -46,11 +47,16 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         uint256 hash = header.GetHash();
 
         // Skip if we already have this header
-        if (HaveHeader(hash)) {
+        // NOTE: We already hold cs_headers, so check mapHeaders directly instead of calling HaveHeader()
+        // to avoid deadlock (ProcessHeaders already holds cs_headers)
+        if (mapHeaders.find(hash) != mapHeaders.end()) {
             auto it = mapHeaders.find(hash);
             if (it != mapHeaders.end()) {
                 pprev = &it->second;
                 heightStart = it->second.height;
+                // BUG #33 FIX: Update best header even for existing headers
+                // so that nBestHeight is set correctly after restart
+                UpdateBestHeader(hash);
             }
             continue;
         }
@@ -59,13 +65,20 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         if (pprev == nullptr || pprev->header.GetHash() != header.hashPrevBlock) {
             auto parentIt = mapHeaders.find(header.hashPrevBlock);
             if (parentIt == mapHeaders.end()) {
-                std::cerr << "[HeadersManager] ERROR: Cannot find parent "
-                          << header.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-                std::cerr << "  for header " << hash.GetHex().substr(0, 16) << "..." << std::endl;
-                std::cerr << "  This header chain is disconnected from our chain" << std::endl;
-                return false;  // Parent not found - disconnected chain
+                // Special case: During first IBD, the parent will be the genesis block
+                // which exists in the blockchain but not in mapHeaders yet
+                if (mapHeaders.empty()) {
+                    pprev = nullptr;  // Will validate against nullptr (genesis) parent
+                } else {
+                    std::cerr << "[HeadersManager] ERROR: Cannot find parent "
+                              << header.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cerr << "  for header " << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cerr << "  This header chain is disconnected from our chain" << std::endl;
+                    return false;  // Parent not found - disconnected chain
+                }
+            } else {
+                pprev = &parentIt->second;
             }
-            pprev = &parentIt->second;
         }
 
         // Validate header
@@ -505,7 +518,10 @@ bool CHeadersManager::CheckProofOfWork(const uint256& hash, uint32_t nBits) cons
     uint256 target = GetTarget(nBits);
 
     // Check: hash < target
-    return hash < target;
+    // CRITICAL: Must use HashLessThan(), NOT operator<
+    // operator< uses memcmp (little-endian byte order)
+    // PoW requires big-endian comparison (MSB first)
+    return HashLessThan(hash, target);
 }
 
 bool CHeadersManager::CheckTimestamp(const CBlockHeader& header, const HeaderWithChainWork* pprev) const
