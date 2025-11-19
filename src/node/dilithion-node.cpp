@@ -1408,8 +1408,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::vector<CBlockHeader> headers;
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(hashStart);
 
-            if (pindex && pindex->pnext) {
-                pindex = pindex->pnext;  // Start from next block
+            if (pindex) {
+                pindex = pindex->pnext;  // Start from next block (may be NULL if at tip)
 
                 while (pindex && headers.size() < 2000) {
                     headers.push_back(pindex->header);
@@ -1422,13 +1422,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             }
 
-            if (!headers.empty()) {
-                std::cout << "[IBD] Sending " << headers.size() << " header(s) to peer " << peer_id << std::endl;
-                CNetMessage headersMsg = message_processor.CreateHeadersMessage(headers);
-                connection_manager.SendMessage(peer_id, headersMsg);
-            } else {
-                std::cout << "[IBD] No headers to send to peer " << peer_id << std::endl;
-            }
+            // Always send HEADERS response, even if empty (Bitcoin Core protocol requirement)
+            std::cout << "[IBD] Sending " << headers.size() << " header(s) to peer " << peer_id << std::endl;
+            CNetMessage headersMsg = message_processor.CreateHeadersMessage(headers);
+            connection_manager.SendMessage(peer_id, headersMsg);
         });
 
         // Register HEADERS handler - process received headers (Bug #12 - Phase 4.2)
