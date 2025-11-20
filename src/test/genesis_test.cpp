@@ -94,7 +94,7 @@ int main(int argc, char* argv[]) {
     if (isTestnet) {
         g_chainParams = new ChainParams(ChainParams::Testnet());
         cout << "Network: TESTNET" << endl;
-        cout << "Difficulty: 256x easier than mainnet" << endl;
+        cout << "Difficulty: Production (~60s blocks)" << endl;
     } else {
         g_chainParams = new ChainParams(ChainParams::Mainnet());
         cout << "Network: MAINNET" << endl;

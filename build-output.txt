@@ -1,0 +1,328 @@
+\033[34m[CXX]\033[0m  src/consensus/fees.cpp
+\033[34m[CXX]\033[0m  src/consensus/pow.cpp
+\033[34m[CXX]\033[0m  src/consensus/chain.cpp
+\033[34m[CXX]\033[0m  src/consensus/chain_verifier.cpp
+In file included from src/consensus/chain_verifier.cpp:4:
+src/consensus/chain_verifier.h:194:16: warning: '/*' within comment [-Wcomment]
+  194 |      * - blocks/* (block data)
+src/consensus/chain_verifier.h:195:20: warning: '/*' within comment [-Wcomment]
+  195 |      * - chainstate/* (UTXO set)
+\033[34m[CXX]\033[0m  src/consensus/tx_validation.cpp
+\033[34m[CXX]\033[0m  src/consensus/validation.cpp
+src/consensus/validation.cpp: In member function 'bool CBlockValidator::CalculateTotalFees(const std::vector<std::shared_ptr<const CTransaction> >&, CUTXOSet&, CAmount&, std::string&) const':
+src/consensus/validation.cpp:395:31: warning: comparison of integer expressions of different signedness: 'long long unsigned int' and 'CAmount' {aka 'long long int'} [-Wsign-compare]
+  395 |         if (totalFees + txFee < totalFees) {
+      |             ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+\033[34m[CXX]\033[0m  src/core/chainparams.cpp
+\033[34m[CXX]\033[0m  src/core/globals.cpp
+\033[34m[CXX]\033[0m  src/crypto/randomx_hash.cpp
+\033[34m[CXX]\033[0m  src/crypto/sha3.cpp
+\033[34m[CXX]\033[0m  src/crypto/hmac_sha3.cpp
+\033[34m[CXX]\033[0m  src/crypto/pbkdf2_sha3.cpp
+\033[34m[CXX]\033[0m  src/miner/controller.cpp
+src/miner/controller.cpp: In member function 'void CMiningController::MiningWorker(uint32_t)':
+src/miner/controller.cpp:264:18: warning: unused variable 'templateVersion' [-Wunused-variable]
+  264 |         uint32_t templateVersion = 0;  // Track template changes
+      |                  ^~~~~~~~~~~~~~~
+src/miner/controller.cpp:275:14: warning: variable 'headerInitialized' set but not used [-Wunused-but-set-variable]
+  275 |         bool headerInitialized = false;
+      |              ^~~~~~~~~~~~~~~~~
+src/miner/controller.cpp:285:18: warning: unused variable 'debug_hashes' [-Wunused-variable]
+  285 |         uint64_t debug_hashes = 0;
+      |                  ^~~~~~~~~~~~
+src/miner/controller.cpp: In member function 'std::vector<std::shared_ptr<const CTransaction> > CMiningController::SelectTransactionsForBlock(CTxMemPool&, CUTXOSet&, uint32_t, size_t, uint64_t&)':
+src/miner/controller.cpp:723:19: warning: comparison of integer expressions of different signedness: 'CAmount' {aka 'long long int'} and 'const uint64_t' {aka 'const long long unsigned int'} [-Wsign-compare]
+  723 |         if (txFee > MAX_REASONABLE_FEE) {
+      |             ~~~~~~^~~~~~~~~~~~~~~~~~~~
+\033[34m[CXX]\033[0m  src/net/protocol.cpp
+\033[34m[CXX]\033[0m  src/net/serialize.cpp
+\033[34m[CXX]\033[0m  src/net/net.cpp
+In file included from src/net/net.h:10,
+                 from src/net/net.cpp:4:
+src/net/socket.h: In member function 'bool CSocket::IsValid() const':
+src/net/socket.h:50:43: warning: comparison of unsigned expression in '>= 0' is always true [-Wtype-limits]
+   50 |     bool IsValid() const { return sock_fd >= 0; }
+      |                                   ~~~~~~~~^~~~
+src/net/net.cpp: In member function 'bool CNetMessageProcessor::ProcessGetAddrMessage(int)':
+src/net/net.cpp:277:54: warning: unused parameter 'peer_id' [-Wunused-parameter]
+  277 | bool CNetMessageProcessor::ProcessGetAddrMessage(int peer_id) {
+      |                                                  ~~~~^~~~~~~
+\033[34m[CXX]\033[0m  src/net/peers.cpp
+\033[34m[CXX]\033[0m  src/net/socket.cpp
+src/net/socket.cpp:10: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   10 | #pragma comment(lib, "ws2_32.lib")
+In file included from src/net/socket.cpp:4:
+src/net/socket.h: In member function 'bool CSocket::IsValid() const':
+src/net/socket.h:50:43: warning: comparison of unsigned expression in '>= 0' is always true [-Wtype-limits]
+   50 |     bool IsValid() const { return sock_fd >= 0; }
+      |                                   ~~~~~~~~^~~~
+\033[34m[CXX]\033[0m  src/net/dns.cpp
+\033[34m[CXX]\033[0m  src/net/tx_relay.cpp
+\033[34m[CXX]\033[0m  src/net/async_broadcaster.cpp
+In file included from src/net/net.h:10,
+                 from src/net/async_broadcaster.cpp:5:
+src/net/socket.h: In member function 'bool CSocket::IsValid() const':
+src/net/socket.h:50:43: warning: comparison of unsigned expression in '>= 0' is always true [-Wtype-limits]
+   50 |     bool IsValid() const { return sock_fd >= 0; }
+      |                                   ~~~~~~~~^~~~
+\033[34m[CXX]\033[0m  src/net/headers_manager.cpp
+In file included from src/net/net.h:10,
+                 from src/net/headers_manager.cpp:5:
+src/net/socket.h: In member function 'bool CSocket::IsValid() const':
+src/net/socket.h:50:43: warning: comparison of unsigned expression in '>= 0' is always true [-Wtype-limits]
+   50 |     bool IsValid() const { return sock_fd >= 0; }
+      |                                   ~~~~~~~~^~~~
+src/net/headers_manager.cpp: In member function 'uint256 CHeadersManager::GetBlockWork(uint32_t) const':
+src/net/headers_manager.cpp:497:13: warning: variable 'target' set but not used [-Wunused-but-set-variable]
+  497 |     uint256 target = GetTarget(nBits);
+      |             ^~~~~~
+\033[34m[CXX]\033[0m  src/net/orphan_manager.cpp
+\033[34m[CXX]\033[0m  src/net/block_fetcher.cpp
+src/net/block_fetcher.cpp: In member function 'NodeId CBlockFetcher::SelectPeerForDownload(const uint256&)':
+src/net/block_fetcher.cpp:268:60: warning: unused parameter 'hash' [-Wunused-parameter]
+  268 | NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
+      |                                             ~~~~~~~~~~~~~~~^~~~
+\033[34m[CXX]\033[0m  src/node/block_index.cpp
+\033[34m[CXX]\033[0m  src/node/blockchain_storage.cpp
+src/node/blockchain_storage.cpp: In member function 'bool CBlockchainDB::WriteBlockWithIndex(const uint256&, const CBlock&, const CBlockIndex&, bool)':
+src/node/blockchain_storage.cpp:700:76: warning: unused parameter 'block' [-Wunused-parameter]
+  700 | bool CBlockchainDB::WriteBlockWithIndex(const uint256& hash, const CBlock& block,
+      |                                                              ~~~~~~~~~~~~~~^~~~~
+src/node/blockchain_storage.cpp:701:61: warning: unused parameter 'index' [-Wunused-parameter]
+  701 |                                          const CBlockIndex& index, bool setBest) {
+      |                                          ~~~~~~~~~~~~~~~~~~~^~~~~
+\033[34m[CXX]\033[0m  src/node/mempool.cpp
+\033[34m[CXX]\033[0m  src/node/genesis.cpp
+\033[34m[CXX]\033[0m  src/node/utxo_set.cpp
+\033[34m[CXX]\033[0m  src/primitives/block.cpp
+\033[34m[CXX]\033[0m  src/primitives/transaction.cpp
+\033[34m[CXX]\033[0m  src/rpc/server.cpp
+In file included from src/rpc/server.cpp:38:
+C:/ProgramData/mingw64/mingw64/x86_64-w64-mingw32/include/winsock2.h:15:2: warning: #warning Please include winsock2.h before windows.h [-Wcpp]
+   15 | #warning Please include winsock2.h before windows.h
+      |  ^~~~~~~
+src/rpc/server.cpp:39: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   39 |     #pragma comment(lib, "ws2_32.lib")
+In file included from src/net/net.h:10,
+                 from src/rpc/server.h:9,
+                 from src/rpc/server.cpp:4:
+src/net/socket.h: In member function 'bool CSocket::IsValid() const':
+src/net/socket.h:50:43: warning: comparison of unsigned expression in '>= 0' is always true [-Wtype-limits]
+   50 |     bool IsValid() const { return sock_fd >= 0; }
+      |                                   ~~~~~~~~^~~~
+src/rpc/server.h: In constructor 'CRPCServer::CRPCServer(uint16_t)':
+src/rpc/server.h:118:9: warning: 'CRPCServer::m_serverSocket' will be initialized after [-Wreorder]
+  118 |     int m_serverSocket;
+      |         ^~~~~~~~~~~~~~
+src/rpc/server.h:115:38: warning:   'std::unique_ptr<CRPCPermissions> CRPCServer::m_permissions' [-Wreorder]
+  115 |     std::unique_ptr<CRPCPermissions> m_permissions;
+      |                                      ^~~~~~~~~~~~~
+src/rpc/server.cpp:116:1: warning:   when initialized here [-Wreorder]
+  116 | CRPCServer::CRPCServer(uint16_t port)
+      | ^~~~~~~~~~
+src/rpc/server.cpp:119:22: warning: overflow in conversion from 'SOCKET' {aka 'long long unsigned int'} to 'int' changes value from '18446744073709551615' to '-1' [-Woverflow]
+  119 |       m_serverSocket(INVALID_SOCKET), m_permissions(nullptr)
+      |                      ^~~~~~~~~~~~~~
+src/rpc/server.cpp: In member function 'bool CRPCServer::Start()':
+src/rpc/server.cpp:197:24: warning: comparison of integer expressions of different signedness: 'int' and 'SOCKET' {aka 'long long unsigned int'} [-Wsign-compare]
+  197 |     if (m_serverSocket == INVALID_SOCKET) {
+      |                        ^
+src/rpc/server.cpp:222:26: warning: overflow in conversion from 'SOCKET' {aka 'long long unsigned int'} to 'int' changes value from '18446744073709551615' to '-1' [-Woverflow]
+  222 |         m_serverSocket = INVALID_SOCKET;
+      |                          ^~~~~~~~~~~~~~
+src/rpc/server.cpp:233:26: warning: overflow in conversion from 'SOCKET' {aka 'long long unsigned int'} to 'int' changes value from '18446744073709551615' to '-1' [-Woverflow]
+  233 |         m_serverSocket = INVALID_SOCKET;
+      |                          ^~~~~~~~~~~~~~
+src/rpc/server.cpp: In member function 'void CRPCServer::Stop()':
+src/rpc/server.cpp:262:24: warning: comparison of integer expressions of different signedness: 'int' and 'SOCKET' {aka 'long long unsigned int'} [-Wsign-compare]
+  262 |     if (m_serverSocket != INVALID_SOCKET) {
+      |                        ^
+src/rpc/server.cpp:271:26: warning: overflow in conversion from 'SOCKET' {aka 'long long unsigned int'} to 'int' changes value from '18446744073709551615' to '-1' [-Woverflow]
+  271 |         m_serverSocket = INVALID_SOCKET;
+      |                          ^~~~~~~~~~~~~~
+src/rpc/server.cpp: In member function 'void CRPCServer::ServerThread()':
+src/rpc/server.cpp:331:26: warning: comparison of integer expressions of different signedness: 'int' and 'SOCKET' {aka 'long long unsigned int'} [-Wsign-compare]
+  331 |         if (clientSocket == INVALID_SOCKET) {
+      |                          ^
+src/rpc/server.cpp: In member function 'void CRPCServer::WorkerThread()':
+src/rpc/server.cpp:354:28: warning: overflow in conversion from 'SOCKET' {aka 'long long unsigned int'} to 'int' changes value from '18446744073709551615' to '-1' [-Woverflow]
+  354 |         int clientSocket = INVALID_SOCKET;
+      |                            ^~~~~~~~~~~~~~
+src/rpc/server.cpp:378:26: warning: comparison of integer expressions of different signedness: 'int' and 'SOCKET' {aka 'long long unsigned int'} [-Wsign-compare]
+  378 |         if (clientSocket != INVALID_SOCKET) {
+      |                          ^
+src/rpc/server.cpp: In member function 'void CRPCServer::HandleClient(int)':
+src/rpc/server.cpp:475:49: warning: comparison of integer expressions of different signedness: 'std::vector<char>::size_type' {aka 'long long unsigned int'} and 'int' [-Wsign-compare]
+  475 |             size_t searchStart = (buffer.size() > bytesRead + 3) ? buffer.size() - bytesRead - 3 : 0;
+      |                                   ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetNewAddress(const std::string&)':
+src/rpc/server.cpp:1158:62: warning: unused parameter 'params' [-Wunused-parameter]
+ 1158 | std::string CRPCServer::RPC_GetNewAddress(const std::string& params) {
+      |                                           ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetBalance(const std::string&)':
+src/rpc/server.cpp:1171:59: warning: unused parameter 'params' [-Wunused-parameter]
+ 1171 | std::string CRPCServer::RPC_GetBalance(const std::string& params) {
+      |                                        ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetAddresses(const std::string&)':
+src/rpc/server.cpp:1217:61: warning: unused parameter 'params' [-Wunused-parameter]
+ 1217 | std::string CRPCServer::RPC_GetAddresses(const std::string& params) {
+      |                                          ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_ListUnspent(const std::string&)':
+src/rpc/server.cpp:1234:60: warning: unused parameter 'params' [-Wunused-parameter]
+ 1234 | std::string CRPCServer::RPC_ListUnspent(const std::string& params) {
+      |                                         ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_ListTransactions(const std::string&)':
+src/rpc/server.cpp:1658:65: warning: unused parameter 'params' [-Wunused-parameter]
+ 1658 | std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
+      |                                              ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetMempoolInfo(const std::string&)':
+src/rpc/server.cpp:1696:63: warning: unused parameter 'params' [-Wunused-parameter]
+ 1696 | std::string CRPCServer::RPC_GetMempoolInfo(const std::string& params) {
+      |                                            ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetBlockchainInfo(const std::string&)':
+src/rpc/server.cpp:1720:66: warning: unused parameter 'params' [-Wunused-parameter]
+ 1720 | std::string CRPCServer::RPC_GetBlockchainInfo(const std::string& params) {
+      |                                               ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_WalletLock(const std::string&)':
+src/rpc/server.cpp:2079:59: warning: unused parameter 'params' [-Wunused-parameter]
+ 2079 | std::string CRPCServer::RPC_WalletLock(const std::string& params) {
+      |                                        ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_ExportMnemonic(const std::string&)':
+src/rpc/server.cpp:2266:63: warning: unused parameter 'params' [-Wunused-parameter]
+ 2266 | std::string CRPCServer::RPC_ExportMnemonic(const std::string& params) {
+      |                                            ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetHDWalletInfo(const std::string&)':
+src/rpc/server.cpp:2290:64: warning: unused parameter 'params' [-Wunused-parameter]
+ 2290 | std::string CRPCServer::RPC_GetHDWalletInfo(const std::string& params) {
+      |                                             ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_ListHDAddresses(const std::string&)':
+src/rpc/server.cpp:2320:64: warning: unused parameter 'params' [-Wunused-parameter]
+ 2320 | std::string CRPCServer::RPC_ListHDAddresses(const std::string& params) {
+      |                                             ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetMiningInfo(const std::string&)':
+src/rpc/server.cpp:2360:62: warning: unused parameter 'params' [-Wunused-parameter]
+ 2360 | std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
+      |                                           ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_StartMining(const std::string&)':
+src/rpc/server.cpp:2374:60: warning: unused parameter 'params' [-Wunused-parameter]
+ 2374 | std::string CRPCServer::RPC_StartMining(const std::string& params) {
+      |                                         ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_StopMining(const std::string&)':
+src/rpc/server.cpp:2446:59: warning: unused parameter 'params' [-Wunused-parameter]
+ 2446 | std::string CRPCServer::RPC_StopMining(const std::string& params) {
+      |                                        ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetNetworkInfo(const std::string&)':
+src/rpc/server.cpp:2459:63: warning: unused parameter 'params' [-Wunused-parameter]
+ 2459 | std::string CRPCServer::RPC_GetNetworkInfo(const std::string& params) {
+      |                                            ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetPeerInfo(const std::string&)':
+src/rpc/server.cpp:2469:60: warning: unused parameter 'params' [-Wunused-parameter]
+ 2469 | std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
+      |                                         ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetConnectionCount(const std::string&)':
+src/rpc/server.cpp:2509:67: warning: unused parameter 'params' [-Wunused-parameter]
+ 2509 | std::string CRPCServer::RPC_GetConnectionCount(const std::string& params) {
+      |                                                ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_Help(const std::string&)':
+src/rpc/server.cpp:2522:53: warning: unused parameter 'params' [-Wunused-parameter]
+ 2522 | std::string CRPCServer::RPC_Help(const std::string& params) {
+      |                                  ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetBlockCount(const std::string&)':
+src/rpc/server.cpp:2604:62: warning: unused parameter 'params' [-Wunused-parameter]
+ 2604 | std::string CRPCServer::RPC_GetBlockCount(const std::string& params) {
+      |                                           ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetBestBlockHash(const std::string&)':
+src/rpc/server.cpp:2613:65: warning: unused parameter 'params' [-Wunused-parameter]
+ 2613 | std::string CRPCServer::RPC_GetBestBlockHash(const std::string& params) {
+      |                                              ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetChainTips(const std::string&)':
+src/rpc/server.cpp:2626:61: warning: unused parameter 'params' [-Wunused-parameter]
+ 2626 | std::string CRPCServer::RPC_GetChainTips(const std::string& params) {
+      |                                          ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetRawMempool(const std::string&)':
+src/rpc/server.cpp:2653:62: warning: unused parameter 'params' [-Wunused-parameter]
+ 2653 | std::string CRPCServer::RPC_GetRawMempool(const std::string& params) {
+      |                                           ~~~~~~~~~~~~~~~~~~~^~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GetRawTransaction(const std::string&)':
+src/rpc/server.cpp:2693:9: warning: variable 'verbosity' set but not used [-Wunused-but-set-variable]
+ 2693 |     int verbosity = 0;
+      |         ^~~~~~~~~
+src/rpc/server.cpp: In member function 'std::string CRPCServer::RPC_GenerateToAddress(const std::string&)':
+src/rpc/server.cpp:2800:9: warning: variable 'nblocks' set but not used [-Wunused-but-set-variable]
+ 2800 |     int nblocks = 1;
+      |         ^~~~~~~
+\033[34m[CXX]\033[0m  src/rpc/auth.cpp
+src/rpc/auth.cpp:50: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   50 |         #pragma comment(lib, "bcrypt.lib")
+\033[34m[CXX]\033[0m  src/rpc/ratelimiter.cpp
+\033[34m[CXX]\033[0m  src/rpc/permissions.cpp
+src/rpc/permissions.cpp: In member function 'bool CRPCPermissions::ParseJSONConfig(const std::string&)':
+src/rpc/permissions.cpp:225:10: warning: variable 'hexToBytes' set but not used [-Wunused-but-set-variable]
+  225 |     auto hexToBytes = [](const std::string& hex) -> std::vector<uint8_t> {
+      |          ^~~~~~~~~~
+src/rpc/permissions.cpp:239:10: warning: variable 'extractStringValue' set but not used [-Wunused-but-set-variable]
+  239 |     auto extractStringValue = [](const std::string& json, const std::string& key) -> std::string {
+      |          ^~~~~~~~~~~~~~~~~~
+\033[34m[CXX]\033[0m  src/api/http_server.cpp
+src/api/http_server.cpp:13: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   13 |     #pragma comment(lib, "ws2_32.lib")
+\033[34m[CXX]\033[0m  src/util/strencodings.cpp
+\033[34m[CXX]\033[0m  src/util/base58.cpp
+\033[34m[CXX]\033[0m  src/util/system.cpp
+\033[34m[CXX]\033[0m  src/wallet/wallet.cpp
+src/wallet/wallet.cpp: In member function 'size_t CWallet::ScanHDChains(CUTXOSet&)':
+src/wallet/wallet.cpp:3312:40: warning: unused parameter 'utxo_set' [-Wunused-parameter]
+ 3312 | size_t CWallet::ScanHDChains(CUTXOSet& utxo_set) {
+      |                              ~~~~~~~~~~^~~~~~~~
+\033[34m[CXX]\033[0m  src/wallet/crypter.cpp
+\033[34m[CXX]\033[0m  src/wallet/passphrase_validator.cpp
+\033[34m[CXX]\033[0m  src/wallet/mnemonic.cpp
+\033[34m[CXX]\033[0m  src/wallet/hd_derivation.cpp
+\033[34m[CXX]\033[0m  src/wallet/wallet_manager.cpp
+\033[34m[CXX]\033[0m  src/wallet/wallet_manager_wizard.cpp
+\033[34m[CXX]\033[0m  src/wallet/wallet_init.cpp
+\033[34m[CXX]\033[0m  src/wallet/wal.cpp
+\033[34m[CXX]\033[0m  src/wallet/wal_recovery.cpp
+src/wallet/wal_recovery.cpp: In static member function 'static void CWalletRecovery::AnalyzeEncryption(const std::vector<WALEntry>&, RecoveryPlan&)':
+src/wallet/wal_recovery.cpp:161:10: warning: unused variable 'has_encrypt_keys' [-Wunused-variable]
+  161 |     bool has_encrypt_keys = HasCheckpoint(steps, "encrypt_keys");
+      |          ^~~~~~~~~~~~~~~~
+src/wallet/wal_recovery.cpp: In static member function 'static bool CWalletRecovery::RollbackInitialization(CWallet*, CWalletWAL&, const std::string&)':
+src/wallet/wal_recovery.cpp:321:55: warning: unused parameter 'wallet' [-Wunused-parameter]
+  321 | bool CWalletRecovery::RollbackInitialization(CWallet* wallet,
+      |                                              ~~~~~~~~~^~~~~~
+\033[34m[CXX]\033[0m  src/node/dilithion-node.cpp
+In file included from src/node/dilithion-node.cpp:43:
+src/consensus/chain_verifier.h:194:16: warning: '/*' within comment [-Wcomment]
+  194 |      * - blocks/* (block data)
+src/consensus/chain_verifier.h:195:20: warning: '/*' within comment [-Wcomment]
+  195 |      * - chainstate/* (UTXO set)
+In file included from src/net/net.h:10,
+                 from src/node/dilithion-node.cpp:28:
+src/net/socket.h: In member function 'bool CSocket::IsValid() const':
+src/net/socket.h:50:43: warning: comparison of unsigned expression in '>= 0' is always true [-Wtype-limits]
+   50 |     bool IsValid() const { return sock_fd >= 0; }
+      |                                   ~~~~~~~~^~~~
+src/node/dilithion-node.cpp: In lambda function:
+src/node/dilithion-node.cpp:963:20: warning: variable 'async_failed' set but not used [-Wunused-but-set-variable]
+  963 |             size_t async_failed = 0;
+      |                    ^~~~~~~~~~~~
+src/node/dilithion-node.cpp: In lambda function:
+src/node/dilithion-node.cpp:1067:49: warning: unused parameter 'peer_id' [-Wunused-parameter]
+ 1067 |         message_processor.SetPongHandler([](int peer_id, uint64_t nonce) {
+      |                                             ~~~~^~~~~~~
+src/node/dilithion-node.cpp:1067:67: warning: unused parameter 'nonce' [-Wunused-parameter]
+ 1067 |         message_processor.SetPongHandler([](int peer_id, uint64_t nonce) {
+      |                                                          ~~~~~~~~~^~~~~
+\033[34m[CC]\033[0m   depends/dilithium/ref/sign.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/packing.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/polyvec.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/poly.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/ntt.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/reduce.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/rounding.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/symmetric-shake.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/fips202.c
+\033[34m[CC]\033[0m   depends/dilithium/ref/randombytes.c
+\033[34m[LINK]\033[0m dilithion-node
+\033[32mâœ“ dilithion-node built successfully\033[0m

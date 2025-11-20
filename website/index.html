@@ -195,8 +195,8 @@
     </nav>
 
     <!-- URGENT UPDATE NOTICE -->
-    <div style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; padding: 15px 20px; text-align: center; font-weight: 600; box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);">
-        ✅ LATEST VERSION (Nov 15, 2025): <strong>v1.0.9 for all platforms is now available!</strong> Critical bugfix release - Windows path validation fixed, works from Desktop now! Download below! 🎉
+    <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); color: white; padding: 15px 20px; text-align: center; font-weight: 600; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);">
+        🚨 CRITICAL UPDATE (Nov 19, 2025): <strong>v1.0.15 is now available!</strong> MANDATORY UPGRADE - Fixes Bug #32 (blockchain forks) and Bug #33 (IBD completely broken). ALL v1.0.14 users must upgrade immediately! Download below! 🚨
     </div>
 
     <!-- Hero Section with Countdown -->
@@ -525,28 +525,37 @@
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-windows"/></svg></div>
                     <h3>Windows</h3>
-                    <p>Windows 10/11 (64-bit x86-64) - ✅ Latest: v1.0.9 (Nov 15)</p>
+                    <p>Windows 10/11 (64-bit x86-64) - 🚨 Latest: v1.0.15 (Nov 19) - CRITICAL UPDATE</p>
                     <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip" class="btn btn-download" style="flex: 1;">✅ Download ZIP (2.6 MB)</a>
-                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0.9" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.15/dilithion-testnet-v1.0.15-windows-x64.zip" class="btn btn-download" style="flex: 1;">✅ Download ZIP (4.6 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0.15" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
                     </div>
-                    <span class="version">v1.0.9-testnet • x64 • CRITICAL BUGFIX • Works from Desktop!</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-MINING.bat, SETUP-AND-START.bat, README, Binaries, Runtime DLLs</p>
-                    <p style="margin-top: 10px; font-size: 0.85rem; color: #22c55e;">
-                        <span style="font-weight: 500;">🔧 Fixed in v1.0.9:</span> Windows path validation bug - now works from ANY location including Desktop! No more "forbidden characters" errors. Clean launcher scripts without old seed nodes.
+                    <span class="version">v1.0.15-testnet • x64 • CRITICAL FIX - Bug #32 & Bug #33</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-MINING.bat, SETUP-AND-START.bat, dilithion-wallet.bat, README, Binaries, Runtime DLLs</p>
+                    <p style="margin-top: 10px; font-size: 0.85rem; color: #dc2626;">
+                        <span style="font-weight: 600;">🚨 CRITICAL v1.0.15 Update:</span> Fixes Bug #32 (mining template not updating - causes blockchain forks) and Bug #33 (IBD completely broken - new nodes cannot sync). ALL v1.0.14 users MUST upgrade immediately!
+                    </p>
+                    <p style="margin-top: 5px; font-size: 0.85rem; color: #f59e0b;">
+                        <span style="font-weight: 500;">⚠️ Blockchain Wipe Required:</span> After upgrading to v1.0.15, you MUST delete your blockchain data (blocks and chainstate folders) due to serialization format changes. The node will re-sync from seed nodes via IBD.
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">d46cd1bcff5f6e7949e1de0fe565baf659f273bfa9216c053370c0380b886b5a</code>
+                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">9d9b77d77c1977ded920672c46c0233ee2a3373c4320810b7fa49ad4dcf8453c</code>
                     </p>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-linux"/></svg></div>
                     <h3>Linux</h3>
-                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - ✅ Latest: v1.0.9 (Nov 15)</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-linux-x64.tar.gz" class="btn btn-download">✅ Download TAR.GZ (2.0 MB)</a>
-                    <span class="version">v1.0.9-testnet • x64 • Database path fixes • Clean launcher scripts</span>
+                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - 🚨 Latest: v1.0.15 (Nov 19) - CRITICAL UPDATE</p>
+                    <div style="display: flex; gap: 10px; margin: 15px 0;">
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.15/dilithion-testnet-v1.0.15-linux-x64.tar.gz" class="btn btn-download" style="flex: 1;">✅ Download TAR.GZ (1.1 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0.15" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                    </div>
+                    <span class="version">v1.0.15-testnet • x64 • CRITICAL FIX - Bug #32 & Bug #33</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: start-mining.sh, setup-and-start.sh, dilithion-wallet, README, Binaries</p>
+                    <p style="margin-top: 10px; font-size: 0.85rem; color: #dc2626;">
+                        <span style="font-weight: 600;">🚨 CRITICAL v1.0.15 Update:</span> Fixes Bug #32 (mining template not updating - causes blockchain forks) and Bug #33 (IBD completely broken - new nodes cannot sync). ALL v1.0.14 users MUST upgrade immediately!
+                    </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
                         <strong>Install dependencies:</strong><br>
                         Ubuntu/Debian: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo apt install libleveldb-dev libsnappy-dev</code><br>
@@ -554,24 +563,30 @@
                         Arch: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo pacman -S leveldb snappy</code>
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">c519466f6e383b3a31612d6368cd685ae30302f555bc390140999620b06a0052</code>
+                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">f2e9c34469c36d3884d383bd970d8c24492638a1c0712bbd58524688a5e68f03</code>
                     </p>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-macos"/></svg></div>
                     <h3>macOS</h3>
-                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3 & Intel) - ✅ Latest: v1.0.9 (Nov 15)</p>
-                    <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-macos-x64.tar.gz" class="btn btn-download">✅ Download TAR.GZ (1.7 MB)</a>
-                    <span class="version">v1.0.9-testnet • x64 • Database path fixes • Clean launcher scripts</span>
+                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3 & Intel) - 🚨 Latest: v1.0.15 (Nov 19) - CRITICAL UPDATE</p>
+                    <div style="display: flex; gap: 10px; margin: 15px 0;">
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.15/dilithion-testnet-v1.0.15-macos-x64.tar.gz" class="btn btn-download" style="flex: 1;">✅ Download TAR.GZ (3.1 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0.15" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                    </div>
+                    <span class="version">v1.0.15-testnet • x64 • CRITICAL FIX - Bug #32 & Bug #33</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: start-mining.sh, setup-and-start.sh, dilithion-wallet, README, Binaries</p>
-                    <p style="margin-top: 10px; font-size: 0.85rem; color: var(--text-muted);">
+                    <p style="margin-top: 10px; font-size: 0.85rem; color: #dc2626;">
+                        <span style="font-weight: 600;">🚨 CRITICAL v1.0.15 Update:</span> Fixes Bug #32 (mining template not updating - causes blockchain forks) and Bug #33 (IBD completely broken - new nodes cannot sync). ALL v1.0.14 users MUST upgrade immediately!
+                    </p>
+                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
                         <span style="color: #f59e0b;">⚠️ macOS Gatekeeper: Unsigned files may show "cannot be verified" warning.</span><br>
                         <strong>Fix:</strong> Right-click file → Open, or System Settings → Privacy & Security → Allow Anyway
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">Requires: leveldb (install via Homebrew: brew install leveldb)</p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">18607e9b0735854fc14992c412505c1a37003d5f168791bcc36d51401a56745c</code>
+                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">17c415f071bca40a66bef4b351022c14f54764f74722ace815f1f9588cfe9960</code>
                     </p>
                 </div>
             </div>
@@ -870,7 +885,7 @@
                     <ul>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank">Testnet Guide</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/CLI-WALLET-GUIDE.md" target="_blank">CLI Wallet Guide</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0.8-testnet" target="_blank">Latest Release (v1.0.8)</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/v1.0.15" target="_blank">Latest Release (v1.0.15)</a></li>
                         <li><a href="WHITEPAPER.html" target="_blank">Whitepaper (HTML)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md" target="_blank">Whitepaper (Markdown)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion" target="_blank">GitHub Repository</a></li>

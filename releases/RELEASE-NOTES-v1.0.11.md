@@ -136,7 +136,8 @@ If you still see ~60 H/s, ensure you downloaded v1.0.11, not v1.0.10.
 
 ### SHA-256 Checksums
 ```
-[checksums will be added after build]
+7893157eff38e16d4285ae5d6f79b84896c6061574a7db34c32715e15edf58d2  dilithion-testnet-v1.0.11-windows-x64.zip
+[macOS and Linux checksums pending GitHub Actions builds]
 ```
 
 ---

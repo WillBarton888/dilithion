@@ -450,6 +450,9 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         // Read number of inv items
         uint64_t count = stream.ReadCompactSize();
 
+        std::cout << "[P2P] Received GETDATA from peer " << peer_id
+                  << " requesting " << count << " item(s)" << std::endl;
+
         if (count > NetProtocol::MAX_INV_SIZE) {
             std::cout << "[P2P] ERROR: GETDATA message too large from peer " << peer_id
                       << " (count=" << count << ")" << std::endl;
@@ -465,6 +468,9 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             inv.type = stream.ReadUint32();
             inv.hash = stream.ReadUint256();
             getdata.push_back(inv);
+
+            std::cout << "[P2P] GETDATA item " << i << ": type=" << inv.type
+                      << " hash=" << inv.hash.GetHex().substr(0, 16) << "..." << std::endl;
         }
 
         // Phase 5.3: Handle transaction data requests
@@ -502,7 +508,10 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         }
 
         // Call handler to serve requested data
+        std::cout << "[P2P] Calling on_getdata handler for peer " << peer_id
+                  << " with " << getdata.size() << " items" << std::endl;
         on_getdata(peer_id, getdata);
+        std::cout << "[P2P] on_getdata handler returned" << std::endl;
         return true;
 
     } catch (const std::out_of_range& e) {

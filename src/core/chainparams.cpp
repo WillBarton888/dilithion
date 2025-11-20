@@ -64,7 +64,7 @@ ChainParams ChainParams::Testnet() {
     params.genesisNonce = 15178;       // Mined on 2025-11-18
     params.genesisNBits = 0x1f010000;  // 6x harder (target=0x010000...)
     params.genesisHash = "0000ee281e9c4a9216ed662146da376ff20fd2b3cc516bc4346cedb2a330e6d3";
-    params.genesisCoinbaseMsg = "Dilithion Testnet v1.0.14 - 6x difficulty increase for 60s block times";
+    params.genesisCoinbaseMsg = "Dilithion Testnet v1.0.15 - Bug #32 & #33 fixes (mining template + IBD)";
 
     // Network ports (different from mainnet to allow running both simultaneously)
     params.p2pPort = 18444;            // Testnet P2P port
