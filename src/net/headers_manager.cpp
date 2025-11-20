@@ -89,7 +89,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         }
 
         // Calculate height and chain work
-        int height = pprev ? (pprev->height + 1) : 0;
+        // Bug #38 fix: When pprev is nullptr during first IBD, this is block 1 (height 1, not 0)
+        // nullptr means parent is genesis (height 0), so this header is height 1
+        int height = pprev ? (pprev->height + 1) : 1;
         uint256 chainWork = CalculateChainWork(header, pprev);
 
         // Store header
