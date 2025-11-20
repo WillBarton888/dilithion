@@ -2155,6 +2155,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     for (const auto& [hash, height] : blocksToFetch) {
                         // Select best peer for download
                         NodeId peer = g_block_fetcher->SelectPeerForDownload(hash);
+                        std::cout << "[IBD-DEBUG] SelectPeerForDownload returned peer_id=" << peer << " for block " << hash.GetHex().substr(0, 16) << "..." << std::endl;
                         if (peer != -1) {
                             // Request block from fetcher (updates in-flight tracking)
                             if (g_block_fetcher->RequestBlock(peer, hash, height)) {
