@@ -87,9 +87,6 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
     std::string command = message.header.GetCommand();
     uint32_t payload_size = message.header.payload_size;
 
-    std::cout << "[DEBUG-RECV] ProcessMessage called: command='" << command
-              << "', peer=" << peer_id << ", payload_size=" << payload_size << std::endl;
-
     // NET-003 FIX: Validate payload size before deserialization
     // Prevents memory waste and cache pollution from oversized payloads
     struct MessageSizeLimit {
@@ -453,8 +450,6 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         // Read number of inv items
         uint64_t count = stream.ReadCompactSize();
 
-        std::cout << "[GETDATA-DEBUG] Received GETDATA from peer " << peer_id << " with " << count << " items" << std::endl;
-
         if (count > NetProtocol::MAX_INV_SIZE) {
             std::cout << "[P2P] ERROR: GETDATA message too large from peer " << peer_id
                       << " (count=" << count << ")" << std::endl;
@@ -470,8 +465,6 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             inv.type = stream.ReadUint32();
             inv.hash = stream.ReadUint256();
             getdata.push_back(inv);
-            std::cout << "[GETDATA-DEBUG]   Item " << i << ": type=" << inv.type
-                      << " hash=" << inv.hash.GetHex().substr(0, 16) << "..." << std::endl;
         }
 
         // Phase 5.3: Handle transaction data requests
@@ -551,17 +544,6 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
         if (vtx_size > 0) {
             stream.read(block.vtx.data(), vtx_size);
         }
-
-        // DEBUG-BUG13: Log header values after deserialization
-        std::cout << "[DEBUG-BUG13] ProcessBlockMessage() - Deserialized block:" << std::endl;
-        std::cout << "  Hash (recalculated): " << block.GetHash().GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "  nVersion: " << block.nVersion << std::endl;
-        std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "  nTime: " << block.nTime << std::endl;
-        std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
-        std::cout << "  nNonce: " << block.nNonce << std::endl;
-        std::cout << "  vtx.size(): " << block.vtx.size() << " bytes" << std::endl;
 
         on_block(peer_id, block);
         return true;
@@ -759,12 +741,9 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
 }
 
 bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& stream) {
-    std::cout << "[DEBUG-HEADERS] ProcessHeadersMessage called for peer " << peer_id
-              << ", stream size=" << stream.size() << std::endl;
     try {
         // Read header count
         uint64_t header_count = stream.ReadCompactSize();
-        std::cout << "[DEBUG-HEADERS] Read header_count=" << header_count << std::endl;
 
         // Validate count (Bitcoin Core max is 2000)
         if (header_count > NetProtocol::MAX_HEADERS_SIZE) {
@@ -897,17 +876,6 @@ CNetMessage CNetMessageProcessor::CreateGetDataMessage(
 CNetMessage CNetMessageProcessor::CreateBlockMessage(const CBlock& block) {
     CDataStream stream;
 
-    // DEBUG-BUG13: Log header values before serialization
-    std::cout << "[DEBUG-BUG13] CreateBlockMessage() - Serializing block:" << std::endl;
-    std::cout << "  Hash: " << block.GetHash().GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  nVersion: " << block.nVersion << std::endl;
-    std::cout << "  hashPrevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  hashMerkleRoot: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  nTime: " << block.nTime << std::endl;
-    std::cout << "  nBits: 0x" << std::hex << block.nBits << std::dec << std::endl;
-    std::cout << "  nNonce: " << block.nNonce << std::endl;
-    std::cout << "  vtx.size(): " << block.vtx.size() << " bytes" << std::endl;
-
     stream.WriteInt32(block.nVersion);
     stream.WriteUint256(block.hashPrevBlock);
     stream.WriteUint256(block.hashMerkleRoot);
@@ -920,8 +888,6 @@ CNetMessage CNetMessageProcessor::CreateBlockMessage(const CBlock& block) {
     if (!block.vtx.empty()) {
         stream.write(block.vtx.data(), block.vtx.size());
     }
-
-    std::cout << "[DEBUG-BUG13] Total serialized size: " << stream.size() << " bytes" << std::endl;
 
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();
@@ -1008,9 +974,6 @@ CNetMessage CNetMessageProcessor::CreateHeadersMessage(const std::vector<CBlockH
 
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();
-
-    std::cout << "[DEBUG-SEND] Created HEADERS message: " << headers.size() << " headers, "
-              << stream.size() << " bytes payload" << std::endl;
 
     return CNetMessage("headers", stream.GetData());
 }
@@ -1325,12 +1288,6 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
         if (peer) {
             peer->last_send = GetTime();
         }
-    }
-
-    std::string cmd = message.header.GetCommand();
-    if (cmd == "headers") {
-        std::cout << "[DEBUG-SEND] Successfully sent HEADERS message to peer " << peer_id
-                  << " (" << data.size() << " bytes total)" << std::endl;
     }
 
     return true;

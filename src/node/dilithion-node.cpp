@@ -2113,15 +2113,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 int headerHeight = g_headers_manager->GetBestHeight();
                 int chainHeight = g_chainstate.GetHeight();
 
-                // DEBUG: Log every iteration to see if this code even runs
-                static int debug_iteration = 0;
-                debug_iteration++;
-                if (debug_iteration % 10 == 1) {  // Log every 10 seconds
-                    std::cout << "[IBD-DEBUG] Iteration " << debug_iteration
-                              << ": headerHeight=" << headerHeight
-                              << " chainHeight=" << chainHeight << std::endl;
-                }
-
                 // If headers are ahead, we need to download blocks
                 if (headerHeight > chainHeight) {
                     std::cout << "[IBD] Headers ahead of chain - downloading blocks (header="
@@ -2134,7 +2125,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     for (int h = chainHeight + 1; h <= chainHeight + blocksToQueue; h++) {
                         // Get header hash at this height
                         std::vector<uint256> hashesAtHeight = g_headers_manager->GetHeadersAtHeight(h);
-                        std::cout << "[IBD-DEBUG] Height " << h << ": found " << hashesAtHeight.size() << " header(s)" << std::endl;
 
                         for (const uint256& hash : hashesAtHeight) {
                             // Only queue if we don't already have the block
@@ -2155,7 +2145,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     for (const auto& [hash, height] : blocksToFetch) {
                         // Select best peer for download
                         NodeId peer = g_block_fetcher->SelectPeerForDownload(hash);
-                        std::cout << "[IBD-DEBUG] SelectPeerForDownload returned peer_id=" << peer << " for block " << hash.GetHex().substr(0, 16) << "..." << std::endl;
                         if (peer != -1) {
                             // Request block from fetcher (updates in-flight tracking)
                             if (g_block_fetcher->RequestBlock(peer, hash, height)) {

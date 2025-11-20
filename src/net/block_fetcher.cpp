@@ -269,9 +269,6 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    std::cout << "[DEBUG-SELECT] SelectPeerForDownload called, mapPeerStates.size()=" << mapPeerStates.size() << std::endl;
-    std::cout.flush();
-
     // Find best peer based on:
     // 1. Has available capacity
     // 2. Low stall count
@@ -285,33 +282,17 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
         NodeId peer = entry.first;
         const PeerDownloadState& state = entry.second;
 
-        std::cout << "[DEBUG-SELECT] Checking peer " << peer << std::endl;
-        std::cout.flush();
-
         // Must have capacity
         int availableSlots = GetAvailableSlotsForPeer(peer);
-        std::cout << "[DEBUG-SELECT]   GetAvailableSlotsForPeer=" << availableSlots
-                  << " (nBlocksInFlight=" << state.nBlocksInFlight << ")" << std::endl;
-        std::cout.flush();
         if (availableSlots <= 0) {
-            std::cout << "[DEBUG-SELECT]   REJECTED: no available slots" << std::endl;
-            std::cout.flush();
             continue;
         }
 
         // Must be suitable (not stalled too often)
         bool suitable = IsPeerSuitable(peer);
-        std::cout << "[DEBUG-SELECT]   IsPeerSuitable=" << (suitable ? "true" : "false")
-                  << " (nStalls=" << state.nStalls << ")" << std::endl;
-        std::cout.flush();
         if (!suitable) {
-            std::cout << "[DEBUG-SELECT]   REJECTED: not suitable" << std::endl;
-            std::cout.flush();
             continue;
         }
-
-        std::cout << "[DEBUG-SELECT]   Peer " << peer << " PASSED checks, calculating score..." << std::endl;
-        std::cout.flush();
 
         // Calculate score (higher is better)
         int score = 1000;
@@ -335,19 +316,11 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
         // Penalize if already has many blocks in-flight (spread load)
         score -= state.nBlocksInFlight * 50;
 
-        std::cout << "[DEBUG-SELECT]   Peer " << peer << " score=" << score << std::endl;
-        std::cout.flush();
-
         if (score > bestScore) {
             bestScore = score;
             bestPeer = peer;
-            std::cout << "[DEBUG-SELECT]   New best peer: " << bestPeer << " with score " << bestScore << std::endl;
-            std::cout.flush();
         }
     }
-
-    std::cout << "[DEBUG-SELECT] SelectPeerForDownload returning peer_id=" << bestPeer << std::endl;
-    std::cout.flush();
 
     if (bestPeer != -1) {
         std::cout << "[BlockFetcher] Selected peer " << bestPeer
