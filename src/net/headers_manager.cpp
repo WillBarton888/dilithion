@@ -110,18 +110,24 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         }
     }
 
+    std::cerr << "[DEBUG] ProcessHeaders: Loop complete, about to update peer state" << std::endl;
+
     // Update peer state
     if (!headers.empty()) {
         uint256 lastHash = headers.back().GetHash();
         auto it = mapHeaders.find(lastHash);
         if (it != mapHeaders.end()) {
+            std::cerr << "[DEBUG] Calling UpdatePeerState for peer " << peer << std::endl;
             UpdatePeerState(peer, lastHash, it->second.height);
+            std::cerr << "[DEBUG] UpdatePeerState returned successfully" << std::endl;
         }
     }
 
+    std::cerr << "[DEBUG] About to print success message" << std::endl;
     std::cout << "[HeadersManager] Successfully processed " << headers.size()
               << " headers. Best height: " << nBestHeight << std::endl;
 
+    std::cerr << "[DEBUG] Returning true from ProcessHeaders" << std::endl;
     return true;
 }
 
