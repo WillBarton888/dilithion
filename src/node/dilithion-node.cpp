@@ -1024,6 +1024,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         message_processor.SetVerackHandler([](int peer_id) {
             std::cout << "[P2P] Handshake complete with peer " << peer_id << std::endl;
 
+            // BUG #36 FIX: Register peer with BlockFetcher so it can download blocks
+            if (g_block_fetcher) {
+                g_block_fetcher->OnPeerConnected(peer_id);
+            }
+
             // Debug: Check if g_headers_manager is initialized
             if (!g_headers_manager) {
                 std::cerr << "[P2P] ERROR: g_headers_manager is null!" << std::endl;
