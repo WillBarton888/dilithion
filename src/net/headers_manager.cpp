@@ -422,7 +422,9 @@ bool CHeadersManager::ShouldFetchHeaders(NodeId peer) const
 
 void CHeadersManager::UpdatePeerState(NodeId peer, const uint256& hash, int height)
 {
-    std::lock_guard<std::mutex> lock(cs_headers);
+    // BUG #35 FIX: Do NOT lock here - ProcessHeaders already holds cs_headers
+    // Locking again causes deadlock since std::mutex is not recursive
+    // NOTE: This function is ONLY called from ProcessHeaders which holds the lock
 
     auto it = mapPeerStates.find(peer);
     if (it == mapPeerStates.end()) {
