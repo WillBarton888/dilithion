@@ -923,6 +923,42 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "  [OK] Orphan manager initialized (max 100 blocks / 100 MB)" << std::endl;
         std::cout << "  [OK] Block fetcher initialized (max 16 blocks in-flight)" << std::endl;
 
+        // Bug #40 fix: Register HeadersManager callback for chain tip updates
+        g_chainstate.RegisterTipUpdateCallback([](const CBlockIndex* pindex) {
+            if (g_headers_manager && pindex) {
+                g_headers_manager->OnBlockActivated(pindex->header, pindex->GetBlockHash());
+            }
+        });
+        std::cout << "  [OK] Chain tip callback registered for HeadersManager" << std::endl;
+
+        // Bug #41 fix: Initialize HeadersManager with existing chain from database
+        // This ensures HeadersManager can serve historical headers, not just newly mined ones
+        {
+            std::cout << "Populating HeadersManager with existing chain..." << std::endl;
+            CBlockIndex* pindexTip = g_chainstate.GetTip();
+
+            if (pindexTip != nullptr) {
+                // Build chain from tip to genesis
+                std::vector<CBlockIndex*> chain;
+                CBlockIndex* pindex = pindexTip;
+                while (pindex != nullptr) {
+                    chain.push_back(pindex);
+                    pindex = pindex->pprev;
+                }
+
+                // Add headers to HeadersManager from genesis to tip
+                // This populates HeadersManager with all historical blocks
+                for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+                    g_headers_manager->OnBlockActivated((*it)->header, (*it)->GetBlockHash());
+                }
+
+                std::cout << "  [OK] Populated HeadersManager with " << chain.size()
+                          << " header(s) from height 0 to " << pindexTip->nHeight << std::endl;
+            } else {
+                std::cout << "  [WARN] No chain tip - HeadersManager empty (expected for fresh node)" << std::endl;
+            }
+        }
+
         // Create message processor and connection manager (local, using global peer manager)
         CNetMessageProcessor message_processor(*g_peer_manager);
         CConnectionManager connection_manager(*g_peer_manager, message_processor);

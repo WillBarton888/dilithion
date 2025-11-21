@@ -10,6 +10,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <functional>
 
 // Forward declarations
 class CBlockchainDB;
@@ -40,6 +41,11 @@ private:
     // CRITICAL-1 FIX: Mutex for thread-safe access to chain state
     // Protects mapBlockIndex, pindexTip, and all chain operations
     mutable std::mutex cs_main;
+
+    // Bug #40 fix: Callback mechanism for tip updates
+    // Allows HeadersManager and other components to be notified when chain tip changes
+    using TipUpdateCallback = std::function<void(const CBlockIndex*)>;
+    std::vector<TipUpdateCallback> m_tipCallbacks;
 
 public:
     CChainState();
@@ -148,6 +154,23 @@ public:
      * Deletes all CBlockIndex pointers
      */
     void Cleanup();
+
+    /**
+     * Register callback for chain tip updates (Bug #40)
+     * Called whenever ActivateBestChain successfully updates the tip
+     *
+     * @param callback Function to call with new tip index
+     */
+    void RegisterTipUpdateCallback(TipUpdateCallback callback);
+
+private:
+    /**
+     * Notify registered callbacks of tip update (Bug #40)
+     * Called after tip successfully updated in ActivateBestChain
+     *
+     * @param pindex New chain tip
+     */
+    void NotifyTipUpdate(const CBlockIndex* pindex);
 };
 
 #endif // DILITHION_CONSENSUS_CHAIN_H

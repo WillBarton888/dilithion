@@ -156,6 +156,9 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             std::cerr << "[Chain] ERROR: pdb is nullptr! Cannot write best block!" << std::endl;
         }
 
+        // Bug #40 fix: Notify registered callbacks of tip update
+        NotifyTipUpdate(pindexTip);
+
         return true;
     }
 
@@ -473,6 +476,9 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     std::cout << "  New tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
               << " (height " << pindexTip->nHeight << ")" << std::endl;
 
+    // Bug #40 fix: Notify registered callbacks of tip update after reorg
+    NotifyTipUpdate(pindexTip);
+
     reorgOccurred = true;
     return true;
 }
@@ -594,4 +600,34 @@ int CChainState::GetHeight() const {
 uint256 CChainState::GetChainWork() const {
     std::lock_guard<std::mutex> lock(cs_main);
     return pindexTip ? pindexTip->nChainWork : uint256();
+}
+
+// Bug #40 fix: Callback registration and notification
+
+void CChainState::RegisterTipUpdateCallback(TipUpdateCallback callback) {
+    std::lock_guard<std::mutex> lock(cs_main);
+    m_tipCallbacks.push_back(callback);
+    std::cout << "[Chain] Registered tip update callback (total: " << m_tipCallbacks.size() << ")" << std::endl;
+}
+
+void CChainState::NotifyTipUpdate(const CBlockIndex* pindex) {
+    // NOTE: Caller must already hold cs_main lock
+    // This is always called from within ActivateBestChain which holds the lock
+
+    if (pindex == nullptr) {
+        return;
+    }
+
+    // Execute all registered callbacks with exception handling
+    for (size_t i = 0; i < m_tipCallbacks.size(); ++i) {
+        try {
+            m_tipCallbacks[i](pindex);
+        } catch (const std::exception& e) {
+            std::cerr << "[Chain] ERROR: Tip callback " << i << " threw exception: " << e.what() << std::endl;
+            // Continue executing other callbacks even if one fails
+        } catch (...) {
+            std::cerr << "[Chain] ERROR: Tip callback " << i << " threw unknown exception" << std::endl;
+            // Continue executing other callbacks even if one fails
+        }
+    }
 }

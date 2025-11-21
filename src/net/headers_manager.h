@@ -87,6 +87,17 @@ public:
     void RequestHeaders(NodeId peer, const uint256& hashStart);
 
     /**
+     * @brief Add header when block is activated in chain (Bug #40)
+     *
+     * Called by CChainState when a new block becomes the chain tip.
+     * Updates HeadersManager's internal state to track newly activated blocks.
+     *
+     * @param header Block header that was activated
+     * @param hash Hash of the activated block
+     */
+    void OnBlockActivated(const CBlockHeader& header, const uint256& hash);
+
+    /**
      * @brief Generate block locator for sync
      *
      * Bitcoin Core exponential backoff algorithm:

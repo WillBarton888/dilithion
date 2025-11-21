@@ -208,6 +208,63 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 }
 
+void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256& hash)
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    std::cout << "[HeadersManager] OnBlockActivated: " << hash.GetHex().substr(0, 16)
+              << "..." << std::endl;
+
+    // Check if we already have this header
+    auto it = mapHeaders.find(hash);
+    if (it != mapHeaders.end()) {
+        // Already have header - just update best header tracking
+        std::cout << "[HeadersManager] Header already exists at height " << it->second.height
+                  << ", updating best header" << std::endl;
+        UpdateBestHeader(hash);
+        return;
+    }
+
+    // Find parent to determine height
+    auto parentIt = mapHeaders.find(header.hashPrevBlock);
+    int height = 1;  // Default for block 1 (parent is genesis at height 0)
+    const HeaderWithChainWork* pprev = nullptr;
+
+    if (parentIt != mapHeaders.end()) {
+        pprev = &parentIt->second;
+        height = pprev->height + 1;
+        std::cout << "[HeadersManager] Found parent at height " << pprev->height
+                  << ", new height: " << height << std::endl;
+    } else {
+        // Parent not in map - this could be genesis (height 0) or block 1 (height 1)
+        // If this is genesis block, height should be 0
+        if (header.hashPrevBlock.IsNull()) {
+            height = 0;  // Genesis block
+            std::cout << "[HeadersManager] Genesis block detected (height 0)" << std::endl;
+        } else {
+            std::cout << "[HeadersManager] Parent not in map, assuming height 1" << std::endl;
+        }
+    }
+
+    // Calculate chain work
+    uint256 chainWork = CalculateChainWork(header, pprev);
+
+    // Store header
+    HeaderWithChainWork headerData(header, height);
+    headerData.chainWork = chainWork;
+    mapHeaders[hash] = headerData;
+
+    // Add to height index
+    AddToHeightIndex(hash, height);
+
+    // Update best header
+    UpdateBestHeader(hash);
+
+    std::cout << "[HeadersManager] Added header at height " << height
+              << ", total headers: " << mapHeaders.size()
+              << ", best height: " << nBestHeight << std::endl;
+}
+
 std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
 {
     std::lock_guard<std::mutex> lock(cs_headers);
