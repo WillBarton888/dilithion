@@ -13,8 +13,10 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        submodules: true
+
+    - name: Checkout RandomX submodule
+      run: |
+        git submodule update --init depends/randomx
 
     - name: Install dependencies
       run: |
