@@ -1350,6 +1350,33 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         } else {
                             std::cout << "[BUG32-DEBUG] Conditions not met - template NOT updated immediately" << std::endl;
                         }
+
+                        // BUG #43 FIX: Relay received blocks to other peers (Bitcoin Core standard)
+                        // When we receive a block that becomes the new tip, relay it to all connected peers
+                        // (except the peer that sent it to us) to propagate blocks network-wide
+                        if (g_peer_manager && g_async_broadcaster) {
+                            auto connected_peers = g_peer_manager->GetConnectedPeers();
+                            std::vector<int> relay_peer_ids;
+
+                            // Collect peers with completed handshakes, excluding the sender
+                            for (const auto& peer : connected_peers) {
+                                if (peer && peer->IsHandshakeComplete() && peer->id != peer_id) {
+                                    relay_peer_ids.push_back(peer->id);
+                                }
+                            }
+
+                            if (!relay_peer_ids.empty()) {
+                                // Queue block relay asynchronously (non-blocking!)
+                                if (g_async_broadcaster->BroadcastBlock(blockHash, relay_peer_ids)) {
+                                    std::cout << "[P2P] Relaying block to " << relay_peer_ids.size()
+                                              << " peer(s) (excluding sender peer " << peer_id << ")" << std::endl;
+                                } else {
+                                    std::cerr << "[P2P] ERROR: Failed to queue block relay" << std::endl;
+                                }
+                            } else {
+                                std::cout << "[P2P] No other peers to relay block to" << std::endl;
+                            }
+                        }
                     } else {
                         std::cout << "[P2P] Block is valid but not on best chain" << std::endl;
                     }
