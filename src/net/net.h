@@ -43,7 +43,7 @@ public:
     bool ProcessMessage(int peer_id, const CNetMessage& message);
 
     // Create outgoing messages
-    CNetMessage CreateVersionMessage();
+    CNetMessage CreateVersionMessage(const NetProtocol::CAddress& addr_recv, const NetProtocol::CAddress& addr_from);
     CNetMessage CreateVerackMessage();
     CNetMessage CreatePingMessage(uint64_t nonce);
     CNetMessage CreatePongMessage(uint64_t nonce);

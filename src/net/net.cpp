@@ -823,8 +823,19 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
 
 // Create messages
 
-CNetMessage CNetMessageProcessor::CreateVersionMessage() {
+CNetMessage CNetMessageProcessor::CreateVersionMessage(const NetProtocol::CAddress& addr_recv, const NetProtocol::CAddress& addr_from) {
     NetProtocol::CVersionMessage msg;
+
+    // Populate address fields (Bitcoin Core standard)
+    msg.addr_recv = addr_recv;  // Peer's address (where we're sending to)
+    msg.addr_from = addr_from;  // Our address (what we believe our external IP to be)
+
+    // Generate random nonce to prevent self-connections (Bitcoin Core standard)
+    // Use time + random for uniqueness
+    static std::random_device rd;
+    static std::mt19937_64 gen(rd());
+    msg.nonce = gen();
+
     std::vector<uint8_t> payload = SerializeVersionMessage(msg);
 
     g_network_stats.messages_sent++;
@@ -1421,7 +1432,26 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
 
 bool CConnectionManager::SendVersionMessage(int peer_id) {
     std::cout << "[HANDSHAKE-DIAG] Sending VERSION message to peer " << peer_id << std::endl;
-    CNetMessage msg = message_processor.CreateVersionMessage();
+
+    // Get peer address
+    auto peer = peer_manager.GetPeer(peer_id);
+    if (!peer) {
+        std::cout << "[HANDSHAKE-DIAG] ERROR: Cannot send VERSION to unknown peer " << peer_id << std::endl;
+        return false;
+    }
+
+    // Build local address (addr_from)
+    // For outbound connections, we use 0.0.0.0:0 since we don't know our external IP
+    // Bitcoin Core does the same - the remote peer ignores this field anyway
+    NetProtocol::CAddress local_addr;
+    local_addr.services = NetProtocol::NODE_NETWORK;
+    local_addr.SetIPv4(0);  // 0.0.0.0
+    local_addr.port = 0;
+
+    // Remote address (addr_recv) is the peer's address
+    NetProtocol::CAddress remote_addr = peer->addr;
+
+    CNetMessage msg = message_processor.CreateVersionMessage(remote_addr, local_addr);
     bool result = SendMessage(peer_id, msg);
     if (result) {
         std::cout << "[HANDSHAKE-DIAG] VERSION message sent successfully to peer " << peer_id << std::endl;
