@@ -58,11 +58,7 @@
 #include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
 
 #ifdef _WIN32
-    #include <winsock2.h>   // For socket functions
-    #include <ws2tcpip.h>   // For inet_pton
-    #include <windows.h>    // For GlobalMemoryStatusEx (Bug #23 fix)
-#else
-    #include <arpa/inet.h>  // For inet_pton on Unix
+    #include <windows.h>  // For GlobalMemoryStatusEx (Bug #23 fix)
 #endif
 
 // Windows API macro conflicts - undef after including headers
@@ -1164,11 +1160,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
                       << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
 
-            // [CONVERGENCE-DIAG] Log BLOCK message
-            std::cout << "[CONVERGENCE-DIAG] BLOCK message received from peer " << peer_id << std::endl;
-            std::cout << "[CONVERGENCE-DIAG]   Block hash: " << blockHash.GetHex().substr(0,16) << "..." << std::endl;
-            std::cout << "[CONVERGENCE-DIAG]   Prev block: " << block.hashPrevBlock.GetHex().substr(0,16) << "..." << std::endl;
-
             // Basic validation: Check PoW
             if (!CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[P2P] ERROR: Block from peer " << peer_id << " has invalid PoW" << std::endl;
@@ -1308,9 +1299,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "[P2P] ⚠️  CHAIN REORGANIZATION occurred!" << std::endl;
                     std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
                               << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
-
-                    // [CONVERGENCE-DIAG] Log reorg completion after receiving block
-                    std::cout << "[CONVERGENCE-DIAG] ✅ REORG COMPLETED after receiving block from peer " << peer_id << std::endl;
 
                     // Signal main loop to update mining template
                     g_node_state.new_block_found = true;
@@ -1519,10 +1507,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             std::cout << "[IBD] Received " << headers.size() << " header(s) from peer " << peer_id << std::endl;
 
-            // [CONVERGENCE-DIAG] Log HEADERS message
-            std::cout << "[CONVERGENCE-DIAG] HEADERS message received from peer " << peer_id
-                      << " (" << headers.size() << " headers)" << std::endl;
-
             // Pass headers to headers manager for validation and storage
             if (g_headers_manager->ProcessHeaders(peer_id, headers)) {
                 // Headers were valid and processed successfully
@@ -1706,9 +1690,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
                               << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
 
-                    // [CONVERGENCE-DIAG] Log reorg completion from locally mined block
-                    std::cout << "[CONVERGENCE-DIAG] ✅ REORG COMPLETED after locally mined block" << std::endl;
-
                     // Stop mining - need to reassess chain state
                     g_node_state.new_block_found = true;
                 } else if (g_chainstate.GetTip() == pblockIndexPtr) {
@@ -1820,26 +1801,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     addr.services = NetProtocol::NODE_NETWORK;
                     addr.port = peer_port;
 
-                    // Parse IPv4 address using inet_pton (Bitcoin Core standard)
-                    struct in_addr ipv4_addr;
-                    if (inet_pton(AF_INET, peer_addr.c_str(), &ipv4_addr) == 1) {
-                        // Convert from network byte order to host byte order
-                        uint32_t ipv4 = ntohl(ipv4_addr.s_addr);
-                        addr.SetIPv4(ipv4);
-
-                        // Bitcoin Core-style validation: IsRoutable() check
-                        if (!addr.IsRoutable()) {
-                            std::cout << "[P2P] Rejecting non-routable inbound connection from "
-                                      << peer_addr << " (loopback/private/multicast)" << std::endl;
-                            continue; // Drop non-routable addresses (Bitcoin Core behavior)
-                        }
-
-                        std::cout << "[HANDSHAKE-DIAG] Accepted routable inbound peer: " << peer_addr
-                                  << " (0x" << std::hex << ipv4 << std::dec << ")" << std::endl;
-                    } else {
-                        std::cout << "[P2P] ERROR: Failed to parse inbound peer IPv4: " << peer_addr
-                                  << " (invalid format)" << std::endl;
-                        continue; // Invalid IP format - drop connection
+                    // Parse IPv4 address (simple implementation for 127.0.0.1 style addresses)
+                    // TODO: More robust IP parsing
+                    if (peer_addr == "127.0.0.1" || peer_addr == "localhost") {
+                        addr.SetIPv4(0x7F000001); // 127.0.0.1
                     }
 
                     // Handle connection via connection manager

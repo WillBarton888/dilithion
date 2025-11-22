@@ -45,27 +45,18 @@ std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) 
 
     // NET-005 FIX: Check if IP is banned (uses updated IsBanned with expiry check)
     std::string ip = addr.ToStringIP();
-    std::cout << "[HANDSHAKE-DIAG] AddPeer called for " << addr.ToString()
-              << " (IP: " << ip << ", current peers: " << peers.size() << "/" << MAX_TOTAL_CONNECTIONS << ")"
-              << std::endl;
-
     if (IsBanned(ip)) {
-        std::cout << "[HANDSHAKE-DIAG] REJECT: IP " << ip << " is banned" << std::endl;
         return nullptr;
     }
 
     // Check connection limit
     if (peers.size() >= MAX_TOTAL_CONNECTIONS) {
-        std::cout << "[HANDSHAKE-DIAG] REJECT: Connection limit reached ("
-                  << peers.size() << "/" << MAX_TOTAL_CONNECTIONS << ")" << std::endl;
         return nullptr;
     }
 
     // Create new peer
     auto peer = std::make_shared<CPeer>(next_peer_id++, addr);
     peers[peer->id] = peer;
-
-    std::cout << "[HANDSHAKE-DIAG] ✅ Peer " << peer->id << " added successfully" << std::endl;
 
     return peer;
 }
