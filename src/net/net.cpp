@@ -1340,10 +1340,13 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
 }
 
 void CConnectionManager::ReceiveMessages(int peer_id) {
-    uint8_t header_buf[24];
+    // BUG #45 FIX: Properly handle partial reads on non-blocking sockets
+    // Previous code discarded partial data, causing stream misalignment
+
+    // Step 1: Read available data from socket into temporary buffer
+    uint8_t temp_buf[4096];
     int received = 0;
 
-    // Read message header (hold lock during receive)
     {
         std::lock_guard<std::mutex> lock(cs_sockets);
         auto it = peer_sockets.find(peer_id);
@@ -1351,83 +1354,123 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
             return;  // Socket not found - normal, skip silently
         }
 
-        received = it->second->Recv(header_buf, 24);
+        received = it->second->Recv(temp_buf, sizeof(temp_buf));
     }
 
     if (received <= 0) {
         return;  // No data or error - normal for non-blocking sockets
     }
 
-    if (received != 24) {
-        std::cout << "[P2P] ERROR: Incomplete header from peer " << peer_id
-                  << " (" << received << " bytes)" << std::endl;
-        return;
+    // Step 2: Append received data to peer's receive buffer
+    {
+        std::lock_guard<std::mutex> lock(cs_recv_buffers);
+        auto& buffer = peer_recv_buffers[peer_id];
+        buffer.insert(buffer.end(), temp_buf, temp_buf + received);
+
+        // Limit buffer size to prevent memory exhaustion attacks
+        if (buffer.size() > NetProtocol::MAX_MESSAGE_SIZE * 2) {
+            std::cout << "[P2P] ERROR: Receive buffer overflow for peer " << peer_id
+                      << " (" << buffer.size() << " bytes), disconnecting" << std::endl;
+            buffer.clear();
+            DisconnectPeer(peer_id, "receive buffer overflow");
+            return;
+        }
     }
 
-    // Parse header (manual deserialization)
-    CNetMessage message;
-    std::memcpy(&message.header.magic, header_buf, 4);
-    std::memcpy(message.header.command, header_buf + 4, 12);
-    std::memcpy(&message.header.payload_size, header_buf + 16, 4);
-    std::memcpy(&message.header.checksum, header_buf + 20, 4);
+    // Step 3: Try to extract and process complete messages from buffer
+    while (true) {
+        std::vector<uint8_t> buffer_copy;
 
-    // Validate header
-    if (!message.header.IsValid(NetProtocol::g_network_magic)) {
-        std::cout << "[P2P] ERROR: Invalid magic from peer " << peer_id
-                  << " (got 0x" << std::hex << message.header.magic
-                  << ", expected 0x" << NetProtocol::g_network_magic << std::dec << ")" << std::endl;
-        return;
-    }
+        {
+            std::lock_guard<std::mutex> lock(cs_recv_buffers);
+            auto& buffer = peer_recv_buffers[peer_id];
 
-    // Read payload if present
-    if (message.header.payload_size > 0) {
+            // Need at least 24 bytes for header
+            if (buffer.size() < 24) {
+                return;  // Not enough data yet, wait for more
+            }
+
+            buffer_copy = buffer;  // Work with copy to avoid holding lock
+        }
+
+        // Parse header from buffer
+        CNetMessage message;
+        std::memcpy(&message.header.magic, buffer_copy.data(), 4);
+        std::memcpy(message.header.command, buffer_copy.data() + 4, 12);
+        std::memcpy(&message.header.payload_size, buffer_copy.data() + 16, 4);
+        std::memcpy(&message.header.checksum, buffer_copy.data() + 20, 4);
+
+        // Validate header
+        if (!message.header.IsValid(NetProtocol::g_network_magic)) {
+            std::cout << "[P2P] ERROR: Invalid magic from peer " << peer_id
+                      << " (got 0x" << std::hex << message.header.magic
+                      << ", expected 0x" << NetProtocol::g_network_magic << std::dec << ")" << std::endl;
+
+            // Clear buffer and disconnect on invalid magic
+            std::lock_guard<std::mutex> lock(cs_recv_buffers);
+            peer_recv_buffers[peer_id].clear();
+            DisconnectPeer(peer_id, "invalid message magic");
+            return;
+        }
+
+        // Check payload size
         if (message.header.payload_size > NetProtocol::MAX_MESSAGE_SIZE) {
             std::cout << "[P2P] ERROR: Payload too large from peer " << peer_id
                       << " (" << message.header.payload_size << " bytes)" << std::endl;
+
+            // Clear buffer and disconnect on oversized message
+            std::lock_guard<std::mutex> lock(cs_recv_buffers);
+            peer_recv_buffers[peer_id].clear();
+            DisconnectPeer(peer_id, "oversized message");
             return;
         }
 
-        message.payload.resize(message.header.payload_size);
+        // Calculate total message size
+        size_t total_size = 24 + message.header.payload_size;
 
-        // Read payload (hold lock during receive)
-        int payload_received = 0;
-        {
-            std::lock_guard<std::mutex> lock(cs_sockets);
-            auto it = peer_sockets.find(peer_id);
-            if (it == peer_sockets.end() || !it->second || !it->second->IsValid()) {
-                std::cout << "[P2P] ERROR: Socket disappeared while reading from peer " << peer_id << std::endl;
+        // Check if we have the complete message
+        if (buffer_copy.size() < total_size) {
+            return;  // Not enough data yet, wait for more
+        }
+
+        // Extract payload if present
+        if (message.header.payload_size > 0) {
+            message.payload.assign(buffer_copy.begin() + 24,
+                                  buffer_copy.begin() + 24 + message.header.payload_size);
+
+            // Verify checksum
+            uint32_t calculated_checksum = CDataStream::CalculateChecksum(message.payload);
+            if (calculated_checksum != message.header.checksum) {
+                std::cout << "[P2P] ERROR: Checksum mismatch from peer " << peer_id
+                          << " (got 0x" << std::hex << message.header.checksum
+                          << ", expected 0x" << calculated_checksum << std::dec << ")" << std::endl;
+
+                // Clear buffer and disconnect on checksum failure
+                std::lock_guard<std::mutex> lock(cs_recv_buffers);
+                peer_recv_buffers[peer_id].clear();
+                DisconnectPeer(peer_id, "checksum mismatch");
                 return;
             }
-
-            payload_received = it->second->Recv(message.payload.data(),
-                                                 message.header.payload_size);
         }
 
-        if (payload_received != static_cast<int>(message.header.payload_size)) {
-            std::cout << "[P2P] ERROR: Incomplete payload from peer " << peer_id
-                      << " (got " << payload_received << ", expected "
-                      << message.header.payload_size << " bytes)" << std::endl;
-            return;
+        // Remove processed message from buffer
+        {
+            std::lock_guard<std::mutex> lock(cs_recv_buffers);
+            auto& buffer = peer_recv_buffers[peer_id];
+            buffer.erase(buffer.begin(), buffer.begin() + total_size);
         }
 
-        // NET-004 FIX: Verify checksum after reading payload
-        uint32_t calculated_checksum = CDataStream::CalculateChecksum(message.payload);
-        if (calculated_checksum != message.header.checksum) {
-            std::cout << "[P2P] ERROR: Checksum mismatch from peer " << peer_id
-                      << " (got 0x" << std::hex << message.header.checksum
-                      << ", expected 0x" << calculated_checksum << std::dec << ")" << std::endl;
-            return;
+        // Update peer last_recv time
+        auto peer = peer_manager.GetPeer(peer_id);
+        if (peer) {
+            peer->last_recv = GetTime();
         }
+
+        // Process message
+        message_processor.ProcessMessage(peer_id, message);
+
+        // Loop to process next message if available
     }
-
-    // Update peer last_recv time
-    auto peer = peer_manager.GetPeer(peer_id);
-    if (peer) {
-        peer->last_recv = GetTime();
-    }
-
-    // Process message
-    message_processor.ProcessMessage(peer_id, message);
 }
 
 bool CConnectionManager::SendVersionMessage(int peer_id) {

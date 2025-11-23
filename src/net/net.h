@@ -156,6 +156,11 @@ private:
     std::map<int, std::unique_ptr<CSocket>> peer_sockets;
     mutable std::mutex cs_sockets;
 
+    // BUG #45 FIX: Per-peer receive buffers for partial read handling
+    // Non-blocking sockets can return partial data, we must accumulate it
+    std::map<int, std::vector<uint8_t>> peer_recv_buffers;
+    mutable std::mutex cs_recv_buffers;
+
     // Ping tracking
     struct PingInfo {
         uint64_t nonce;
