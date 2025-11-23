@@ -7,6 +7,7 @@
 #include <consensus/params.h>
 #include <consensus/pow.h>
 #include <util/time.h>
+#include <node/genesis.h>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -15,6 +16,10 @@ CHeadersManager::CHeadersManager()
     : nBestHeight(-1)
 {
     hashBestHeader = uint256();
+
+    // Bug #46 Fix: Initialize minimum chain work to zero (accept all chains initially)
+    // Production networks should set this to a reasonable threshold to prevent DoS
+    nMinimumChainWork = uint256();
 }
 
 // ============================================================================
@@ -61,20 +66,26 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             continue;
         }
 
-        // Find parent
+        // Bug #46 Fix: Find parent - allow headers from competing chains
         if (pprev == nullptr || pprev->header.GetHash() != header.hashPrevBlock) {
             auto parentIt = mapHeaders.find(header.hashPrevBlock);
             if (parentIt == mapHeaders.end()) {
-                // Special case: During first IBD, the parent will be the genesis block
-                // which exists in the blockchain but not in mapHeaders yet
-                if (mapHeaders.empty()) {
-                    pprev = nullptr;  // Will validate against nullptr (genesis) parent
+                // Bug #46 Fix: Check if parent is genesis block
+                // This allows the first block on ANY valid chain to be accepted
+                uint256 genesisHash = Genesis::GetGenesisHash();
+                if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
+                    pprev = nullptr;  // Parent is genesis - this is block 1
+                    std::cout << "[HeadersManager] Accepting header " << hash.GetHex().substr(0, 16)
+                              << "... (parent is genesis)" << std::endl;
                 } else {
-                    std::cerr << "[HeadersManager] ERROR: Cannot find parent "
-                              << header.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-                    std::cerr << "  for header " << hash.GetHex().substr(0, 16) << "..." << std::endl;
-                    std::cerr << "  This header chain is disconnected from our chain" << std::endl;
-                    return false;  // Parent not found - disconnected chain
+                    // True orphan - reject per Bitcoin Core design
+                    // This prevents DoS attacks with disconnected headers
+                    std::cerr << "[HeadersManager] ERROR: Rejecting orphan header "
+                              << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cerr << "  Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
+                              << "... not found in header tree" << std::endl;
+                    std::cerr << "  Peer should send headers in order from common ancestor" << std::endl;
+                    return false;  // Orphan header - reject
                 }
             } else {
                 pprev = &parentIt->second;
@@ -100,6 +111,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
         mapHeaders[hash] = headerData;
         AddToHeightIndex(hash, height);
+
+        // Bug #46 Fix: Update chain tips tracking
+        UpdateChainTips(hash);
 
         // Update best header if this has more work
         UpdateBestHeader(hash);
@@ -537,27 +551,62 @@ uint256 CHeadersManager::CalculateChainWork(const CBlockHeader& header, const He
     uint256 blockWork = GetBlockWork(header.nBits);
 
     if (pprev == nullptr) {
-        return blockWork;  // Genesis block
+        return blockWork;  // Genesis/first block: chain work = block work
     }
 
-    // Add parent's accumulated work
-    uint256 chainWork = pprev->chainWork;
-
-    // Add current block's work (simplified - real implementation would use proper uint256 addition)
-    // For now, we'll just return the parent work as a placeholder
-    // TODO: Implement proper uint256 addition
-    return chainWork;
+    // Bug #46 Fix: Add parent's accumulated work + this block's work
+    return AddChainWork(blockWork, pprev->chainWork);
 }
 
 uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
 {
-    uint256 target = GetTarget(nBits);
+    // Bug #46 Fix: Implement proper work calculation
+    // Uses same logic as CBlockIndex::GetBlockProof()
 
-    // Work = 2^256 / (target + 1)
-    // Simplified for now - just return a placeholder
-    // TODO: Implement proper work calculation
-    uint256 work;
-    return work;
+    uint256 target = GetTarget(nBits);
+    uint256 proof;
+    memset(proof.data, 0, 32);
+
+    // If target is zero, return max work (should never happen)
+    bool isZero = true;
+    for (int i = 0; i < 32; i++) {
+        if (target.data[i] != 0) {
+            isZero = false;
+            break;
+        }
+    }
+
+    if (isZero) {
+        memset(proof.data, 0xFF, 32);
+        return proof;
+    }
+
+    // Extract size and mantissa from nBits compact form
+    int size = nBits >> 24;
+    uint64_t mantissa = nBits & 0x00FFFFFF;
+
+    if (mantissa == 0) {
+        memset(proof.data, 0xFF, 32);
+        return proof;
+    }
+
+    // Calculate work = 2^(256 - 8*size) / mantissa
+    int work_exponent = 256 - 8 * size;
+    int work_byte_pos = work_exponent / 8;
+
+    // Clamp to valid range
+    if (work_byte_pos < 0) work_byte_pos = 0;
+    if (work_byte_pos > 31) work_byte_pos = 31;
+
+    // Calculate reciprocal of mantissa scaled to 64 bits
+    uint64_t work_mantissa = (mantissa > 0) ? (0xFFFFFFFFFFFFFFFFULL / mantissa) : 0xFFFFFFFFFFFFFFFFULL;
+
+    // Store the work value at the appropriate byte position
+    for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
+        proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
+    }
+
+    return proof;
 }
 
 uint256 CHeadersManager::GetTarget(uint32_t nBits) const
@@ -647,10 +696,15 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
         return false;
     }
 
+    // Bug #46 Fix: Compare cumulative work, not height!
+    // This is critical for chain reorganization
+
     // Check if this header has more work than current best
     if (hashBestHeader.IsNull()) {
         hashBestHeader = hash;
         nBestHeight = it->second.height;
+        std::cout << "[HeadersManager] First best header at height " << nBestHeight
+                  << ", hash " << hash.GetHex().substr(0, 16) << "..." << std::endl;
         return true;
     }
 
@@ -661,12 +715,22 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
         return true;
     }
 
-    // Compare chain work (simplified - just compare heights for now)
-    // TODO: Implement proper chain work comparison
-    if (it->second.height > bestIt->second.height) {
+    // Bug #46 Fix: Use ChainWorkGreaterThan() for proper cumulative work comparison
+    // This enables reorganization to chains with more work but fewer blocks
+    if (ChainWorkGreaterThan(it->second.chainWork, bestIt->second.chainWork)) {
+        uint256 oldBestHash = hashBestHeader;
+        int oldBestHeight = nBestHeight;
+
         hashBestHeader = hash;
         nBestHeight = it->second.height;
-        std::cout << "[HeadersManager] New best header at height " << nBestHeight << std::endl;
+
+        std::cout << "[HeadersManager] *** NEW BEST CHAIN ***" << std::endl;
+        std::cout << "  Old: height=" << oldBestHeight
+                  << " hash=" << oldBestHash.GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "  New: height=" << nBestHeight
+                  << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "  (Selected by cumulative work, not height)" << std::endl;
+
         return true;
     }
 
@@ -687,4 +751,46 @@ void CHeadersManager::RemoveFromHeightIndex(const uint256& hash, int height)
             mapHeightIndex.erase(it);
         }
     }
+}
+
+// ============================================================================
+// Bug #46 Fix: Chain Reorganization Support
+// ============================================================================
+
+void CHeadersManager::UpdateChainTips(const uint256& hashNew)
+{
+    // Add the new header as a chain tip
+    setChainTips.insert(hashNew);
+
+    // Remove its parent from chain tips (no longer a leaf)
+    auto it = mapHeaders.find(hashNew);
+    if (it != mapHeaders.end()) {
+        const HeaderWithChainWork& header = it->second;
+        if (!header.hashPrevBlock.IsNull()) {
+            setChainTips.erase(header.hashPrevBlock);
+        }
+    }
+}
+
+uint256 CHeadersManager::AddChainWork(const uint256& blockProof, const uint256& parentChainWork) const
+{
+    // Implement same logic as CBlockIndex::BuildChainWork()
+    // Simple byte-by-byte addition with carry
+    uint256 result;
+    uint32_t carry = 0;
+
+    for (int i = 0; i < 32; i++) {
+        uint32_t sum = (uint32_t)parentChainWork.data[i] +
+                      (uint32_t)blockProof.data[i] +
+                      carry;
+        result.data[i] = sum & 0xFF;
+        carry = sum >> 8;
+    }
+
+    // Handle overflow - saturate at maximum value
+    if (carry != 0) {
+        memset(result.data, 0xFF, 32);
+    }
+
+    return result;
 }

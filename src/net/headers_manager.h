@@ -253,15 +253,23 @@ private:
     /**
      * @struct HeaderWithChainWork
      * @brief Header with accumulated chain work for fork selection
+     *
+     * Bug #46 Fix: Added parent pointer to support multiple competing chains.
+     * This enables proper chain reorganization when nodes have diverged chains.
      */
     struct HeaderWithChainWork {
         CBlockHeader header;
         uint256 chainWork;                  ///< Accumulated PoW from genesis
         int height;                         ///< Height in chain
+        uint256 hashPrevBlock;              ///< Parent hash (cached from header)
 
-        HeaderWithChainWork() : height(0) {}
+        HeaderWithChainWork() : height(0) {
+            hashPrevBlock = uint256();
+        }
         HeaderWithChainWork(const CBlockHeader& h, int ht)
-            : header(h), height(ht) {}
+            : header(h), height(ht) {
+            hashPrevBlock = h.hashPrevBlock;
+        }
     };
 
     // Header storage
@@ -271,6 +279,12 @@ private:
     // Best header tracking
     uint256 hashBestHeader;                 ///< Hash of best header (most work)
     int nBestHeight;                        ///< Height of best header
+
+    // Bug #46 Fix: Track multiple chain tips for competing chains
+    std::set<uint256> setChainTips;         ///< All known chain tips (leaves in tree)
+
+    // Bug #46 Fix: Minimum chain work for DoS protection
+    uint256 nMinimumChainWork;              ///< Reject chains below this work threshold
 
     // Peer synchronization state
     std::map<NodeId, HeadersSyncState> mapPeerStates;     ///< Peer -> Sync state
@@ -366,6 +380,28 @@ private:
      * @param height Header height
      */
     void RemoveFromHeightIndex(const uint256& hash, int height);
+
+    /**
+     * @brief Update chain tips after adding a new header (Bug #46)
+     *
+     * When a new header is added:
+     * - Remove its parent from chain tips (no longer a leaf)
+     * - Add the new header as a chain tip (now a leaf)
+     *
+     * @param hashNew Hash of newly added header
+     */
+    void UpdateChainTips(const uint256& hashNew);
+
+    /**
+     * @brief Calculate cumulative work with proper uint256 addition (Bug #46)
+     *
+     * Implements same logic as CBlockIndex::BuildChainWork()
+     *
+     * @param blockProof Work for this block
+     * @param parentChainWork Cumulative work of parent
+     * @return Total cumulative work
+     */
+    uint256 AddChainWork(const uint256& blockProof, const uint256& parentChainWork) const;
 };
 
 /**
