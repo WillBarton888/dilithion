@@ -318,13 +318,8 @@ private:
      */
     uint256 GetBlockWork(uint32_t nBits) const;
 
-    /**
-     * @brief Get compact target from difficulty bits
-     *
-     * @param nBits Compact bits representation
-     * @return Full 256-bit target
-     */
-    uint256 GetTarget(uint32_t nBits) const;
+    // Bug #47 Fix: Removed GetTarget() - now using consensus CompactToBig() instead
+    // The custom GetTarget() had incorrect byte ordering due to memcpy usage
 
     /**
      * @brief Check if block hash meets target (PoW validation)

@@ -592,6 +592,14 @@ bool CBlockchainDB::ReadBlockIndex(const uint256& hash, CBlockIndex& index) {
     index.header.hashPrevBlock.SetHex(hashPrevHex);
     data_offset += 64;
 
+    // Bug #47 Fix: Populate ALL header fields, not just hashPrevBlock
+    // Without this, OnBlockActivated gets a header with nBits=0 causing "Invalid nSize 0" error
+    index.header.nVersion = index.nVersion;
+    index.header.nTime = index.nTime;
+    index.header.nBits = index.nBits;
+    index.header.nNonce = index.nNonce;
+    // hashMerkleRoot is not stored in the index, will be 0 (OK for header-only operations)
+
     return true;
 }
 

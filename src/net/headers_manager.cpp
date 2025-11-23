@@ -151,10 +151,15 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 {
     uint256 hash = header.GetHash();
 
+    // Debug: Log the actual nBits value we received
+    std::cout << "[HeadersManager] ValidateHeader: hash=" << hash.GetHex().substr(0, 16)
+              << "... nBits=0x" << std::hex << header.nBits << std::dec << std::endl;
+
     // 1. Check Proof of Work
     if (!CheckProofOfWork(hash, header.nBits)) {
         std::cerr << "[HeadersManager] Invalid PoW for header "
-                  << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                  << hash.GetHex().substr(0, 16) << "..."
+                  << " nBits=0x" << std::hex << header.nBits << std::dec << std::endl;
         return false;
     }
 
@@ -562,8 +567,9 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
 {
     // Bug #46 Fix: Implement proper work calculation
     // Uses same logic as CBlockIndex::GetBlockProof()
+    // Bug #47 Fix: Use consensus CompactToBig instead of custom GetTarget
 
-    uint256 target = GetTarget(nBits);
+    uint256 target = CompactToBig(nBits);
     uint256 proof;
     memset(proof.data, 0, 32);
 
@@ -609,35 +615,15 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
     return proof;
 }
 
-uint256 CHeadersManager::GetTarget(uint32_t nBits) const
-{
-    // Extract target from compact representation
-    // Format: 0xNNTTTTTT where NN is size, TTTTTT is mantissa
-
-    uint256 target;
-
-    int nSize = nBits >> 24;
-    uint32_t nWord = nBits & 0x007fffff;
-
-    if (nSize <= 3) {
-        nWord >>= 8 * (3 - nSize);
-        memcpy(target.data, &nWord, sizeof(uint32_t));
-    } else {
-        memcpy(target.data + (nSize - 3), &nWord, sizeof(uint32_t));
-    }
-
-    return target;
-}
-
+// Bug #47 Fix: Use consensus PoW functions instead of custom implementation
+// The custom GetTarget() had incorrect byte ordering due to memcpy usage
 bool CHeadersManager::CheckProofOfWork(const uint256& hash, uint32_t nBits) const
 {
-    uint256 target = GetTarget(nBits);
-
-    // Check: hash < target
-    // CRITICAL: Must use HashLessThan(), NOT operator<
-    // operator< uses memcmp (little-endian byte order)
-    // PoW requires big-endian comparison (MSB first)
-    return HashLessThan(hash, target);
+    // Use the consensus CheckProofOfWork which:
+    // 1. Validates nBits range (MIN_DIFFICULTY_BITS to MAX_DIFFICULTY_BITS)
+    // 2. Uses CompactToBig() for correct target expansion
+    // 3. Performs proper big-endian comparison
+    return ::CheckProofOfWork(hash, nBits);
 }
 
 bool CHeadersManager::CheckTimestamp(const CBlockHeader& header, const HeaderWithChainWork* pprev) const

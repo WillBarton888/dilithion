@@ -40,12 +40,31 @@ uint256 CompactToBig(uint32_t nCompact) {
     int nSize = nCompact >> 24;
     uint32_t nWord = nCompact & 0x007fffff;
 
-    // Validate size is within bounds [1, 32]
-    if (nSize < 1 || nSize > 32) {
-        std::cerr << "CompactToBig: Invalid nSize " << nSize << " (must be 1-32)" << std::endl;
+    // Bug #47 Fix Part 2: Match Bitcoin Core's SetCompact() behavior
+    // Bitcoin Core gracefully handles edge cases and returns zero target:
+    // - nCompact=0 → nSize=0, nWord=0 → returns zero target
+    // - nWord=0 → returns zero target
+    // - nSize > 32 → overflow, returns zero target
+    //
+    // The zero target is then rejected by CheckProofOfWork()
+    // This is Bitcoin Core's two-stage validation approach
+
+    // Handle zero word (including when nCompact is fully zero)
+    if (nWord == 0) {
         return result;  // Return zero target
     }
 
+    // Handle zero size (can happen if nCompact has zero size byte)
+    if (nSize == 0) {
+        return result;  // Return zero target
+    }
+
+    // Handle overflow (size too large)
+    if (nSize > 32) {
+        return result;  // Return zero target
+    }
+
+    // Normal case: Expand compact format to full 256-bit target
     if (nSize <= 3) {
         nWord >>= 8 * (3 - nSize);
         result.data[0] = nWord & 0xff;
@@ -84,12 +103,24 @@ uint32_t BigToCompact(const uint256& target) {
 }
 
 bool CheckProofOfWork(uint256 hash, uint32_t nBits) {
-    // Check if bits are within valid range
-    if (nBits < MIN_DIFFICULTY_BITS || nBits > MAX_DIFFICULTY_BITS)
-        return false;
+    // Bug #47 Fix: Match Bitcoin Core approach
+    // Don't reject based on arbitrary MIN/MAX_DIFFICULTY_BITS
+    // Instead, validate target expansion and check against powLimit
 
     // Convert compact difficulty to full target
     uint256 target = CompactToBig(nBits);
+
+    // Check for zero target (invalid)
+    bool isZero = true;
+    for (int i = 0; i < 32; i++) {
+        if (target.data[i] != 0) {
+            isZero = false;
+            break;
+        }
+    }
+    if (isZero) {
+        return false;
+    }
 
     // Check if hash is less than target
     return HashLessThan(hash, target);
