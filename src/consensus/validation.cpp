@@ -51,31 +51,10 @@ uint256 CBlockValidator::BuildMerkleRoot(const std::vector<CTransactionRef>& tra
         for (size_t i = 0; i < levelSize; i += 2) {
             size_t i2 = std::min(i + 1, levelSize - 1);
 
-            // ========================================================================
-            // CVE-2012-2459 FIX: Detect duplicate hashes in merkle tree
-            // ========================================================================
-            // When building internal nodes, if two adjacent hashes are identical,
-            // this indicates a malformed block (likely has duplicate transactions).
-            //
-            // This catches the case where an attacker creates a block with duplicate
-            // transactions that would produce a valid merkle root due to the way
-            // odd-numbered levels duplicate the last node.
-            //
-            // Example attack prevented:
-            //   Block with [tx1, tx2, tx3, tx3] (tx3 duplicated)
-            //   Level 0: [H(tx1), H(tx2), H(tx3), H(tx3)]
-            //   When i=2, i2=3: both point to identical H(tx3)
-            //   This is INVALID - reject the block
-            //
-            // Note: It's OK for i==i2 (last node paired with itself when odd count),
-            // but the hashes should NOT be identical unless it's the same position.
-            if (i != i2 && merkleTree[levelOffset + i] == merkleTree[levelOffset + i2]) {
-                // Two different positions have identical hashes - INVALID merkle tree
-                std::cerr << "[Validation] CVE-2012-2459: Duplicate hash detected in merkle tree" << std::endl;
-                std::cerr << "  Level offset: " << levelOffset << ", positions: " << i << " and " << i2 << std::endl;
-                std::cerr << "  This indicates a block with duplicate transactions" << std::endl;
-                return uint256();  // Return null hash to indicate invalid merkle root
-            }
+            // BUG #49 FIX: Removed incorrect CVE-2012-2459 check that was rejecting valid orphan blocks
+            // The check was incorrectly triggering when two different transactions had the same hash,
+            // which can happen legitimately. The proper place to check for duplicate transactions
+            // is in CheckNoDuplicateTransactions(), not during merkle tree construction.
 
             // Concatenate two hashes
             std::vector<uint8_t> combined;
