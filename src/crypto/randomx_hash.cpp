@@ -94,18 +94,24 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
             throw std::runtime_error("Failed to allocate RandomX dataset");
         }
 
-        // BUG #18 FIX: Multi-threaded chunked dataset initialization
-        // Following XMRig/Monero pattern: divide dataset into chunks and init in parallel
-        // This prevents deadlock and speeds up initialization significantly
+        // BUG #51 FIX: Thread-safe multi-threaded dataset initialization
+        // Following XMRig PR #1146 and Monero patterns for proper synchronization
+        // Ensures dataset allocation is complete and visible before thread creation
+        std::atomic_thread_fence(std::memory_order_release);
+
+        // Get local copies of pointers for thread-safe capture
+        auto dataset_ptr = g_randomx_dataset;
+        auto cache_ptr = g_randomx_cache;
+
         unsigned long dataset_item_count = randomx_dataset_item_count();
-        // TEMPORARY FIX: Force single-threaded to avoid hang on multi-CPU systems
-        unsigned int num_threads = 1;
-        // unsigned int num_threads = std::thread::hardware_concurrency();
-        // if (num_threads == 0) num_threads = 2;  // Default to 2 if detection fails
+        unsigned int num_threads = std::thread::hardware_concurrency();
+        if (num_threads == 0) num_threads = 2;  // Default to 2 if detection fails
 
         std::cout << "  [FULL MODE] Initializing RandomX dataset with " << num_threads << " threads..." << std::endl;
 
         std::vector<std::thread> init_threads;
+        init_threads.reserve(num_threads);  // Pre-allocate to avoid reallocation during push
+
         unsigned long items_per_thread = dataset_item_count / num_threads;
         unsigned long items_remainder = dataset_item_count % num_threads;
 
@@ -120,8 +126,9 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
                 count += items_remainder;
             }
 
-            init_threads.emplace_back([=]() {
-                randomx_init_dataset(g_randomx_dataset, g_randomx_cache, start_item, count);
+            // Capture local pointer copies, not globals - prevents race condition
+            init_threads.emplace_back([dataset_ptr, cache_ptr, start_item, count]() {
+                randomx_init_dataset(dataset_ptr, cache_ptr, start_item, count);
             });
         }
 
@@ -129,6 +136,9 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
         for (auto& thread : init_threads) {
             thread.join();
         }
+
+        // Ensure all dataset writes are visible before creating VM
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         auto end_time = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
