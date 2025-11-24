@@ -9,6 +9,7 @@
 #include <node/mempool.h>
 #include <node/utxo_set.h>
 #include <consensus/tx_validation.h>
+#include <consensus/chain.h>  // BUG #50 FIX: For g_chainstate.GetHeight()
 #include <random>
 #include <cstring>
 #include <iostream>
@@ -824,7 +825,13 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
 // Create messages
 
 CNetMessage CNetMessageProcessor::CreateVersionMessage(const NetProtocol::CAddress& addr_recv, const NetProtocol::CAddress& addr_from) {
-    NetProtocol::CVersionMessage msg;
+    // BUG #50 FIX: Get actual blockchain height for VERSION message
+    // This allows remote peers to determine if they need to sync from us
+    extern CChainState g_chainstate;
+    int32_t blockchain_height = g_chainstate.GetHeight();
+
+    // Initialize message with actual blockchain height (Bitcoin Core pattern)
+    NetProtocol::CVersionMessage msg(blockchain_height);
 
     // Populate address fields (Bitcoin Core standard)
     msg.addr_recv = addr_recv;  // Peer's address (where we're sending to)

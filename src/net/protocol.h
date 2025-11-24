@@ -208,7 +208,9 @@ struct CVersionMessage {
     int32_t start_height;     // Last block height
     bool relay;              // Relay transactions
 
-    CVersionMessage();
+    // BUG #50 FIX: Accept blockchain height parameter (Bitcoin Core pattern)
+    // Defaults to 0 for backward compatibility, but should be set to actual height
+    explicit CVersionMessage(int32_t blockchain_height = 0);
     std::string ToString() const;
 };
 

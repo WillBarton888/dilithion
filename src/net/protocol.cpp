@@ -41,13 +41,15 @@ std::string CAddress::ToString() const {
                     ToStringIP().c_str(), port, services, time);
 }
 
-CVersionMessage::CVersionMessage()
+// BUG #50 FIX: Accept blockchain height parameter following Bitcoin Core pattern
+// This enables proper Initial Block Download (IBD) detection by remote peers
+CVersionMessage::CVersionMessage(int32_t blockchain_height)
     : version(PROTOCOL_VERSION),
       services(NODE_NETWORK),
       timestamp(std::time(nullptr)),
       nonce(0),
       user_agent("/Dilithion:0.1.0/"),
-      start_height(0),
+      start_height(blockchain_height),  // Use actual blockchain height, not hardcoded 0
       relay(true)
 {
 }
