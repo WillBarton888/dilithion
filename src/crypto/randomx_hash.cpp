@@ -98,8 +98,10 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
         // Following XMRig/Monero pattern: divide dataset into chunks and init in parallel
         // This prevents deadlock and speeds up initialization significantly
         unsigned long dataset_item_count = randomx_dataset_item_count();
-        unsigned int num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 2;  // Default to 2 if detection fails
+        // TEMPORARY FIX: Force single-threaded to avoid hang on multi-CPU systems
+        unsigned int num_threads = 1;
+        // unsigned int num_threads = std::thread::hardware_concurrency();
+        // if (num_threads == 0) num_threads = 2;  // Default to 2 if detection fails
 
         std::cout << "  [FULL MODE] Initializing RandomX dataset with " << num_threads << " threads..." << std::endl;
 
