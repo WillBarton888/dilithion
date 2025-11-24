@@ -335,6 +335,40 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch) {
     }
 }
 
+void CPeerManager::DecayMisbehaviorScores() {
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // BUG #49: Decay misbehavior scores over time
+    // Called every 30 seconds, decay by 0.5 points (1 point per minute)
+    for (auto& pair : peers) {
+        if (pair.second->misbehavior_score > 0) {
+            // Reduce by 0.5 points, but don't go below 0
+            pair.second->misbehavior_score = std::max(0, pair.second->misbehavior_score - 1);
+
+            // Log significant changes
+            if (pair.second->misbehavior_score % 10 == 0) {
+                std::cout << "[PeerManager] Peer " << pair.first
+                          << " misbehavior score decayed to " << pair.second->misbehavior_score << std::endl;
+            }
+        }
+    }
+
+    // Also clean up expired bans
+    std::vector<std::string> expired_bans;
+    int64_t now = GetTime();
+
+    for (const auto& ban_entry : banned_ips) {
+        if (ban_entry.second != 0 && now >= ban_entry.second) {
+            expired_bans.push_back(ban_entry.first);
+        }
+    }
+
+    for (const auto& ip : expired_bans) {
+        banned_ips.erase(ip);
+        std::cout << "[PeerManager] Ban expired for IP: " << ip << std::endl;
+    }
+}
+
 CPeerManager::Stats CPeerManager::GetStats() const {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 

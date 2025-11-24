@@ -2088,13 +2088,78 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  P2P receive thread stopping..." << std::endl;
         });
 
-        // Launch P2P maintenance thread (ping/pong keepalive)
+        // Launch P2P maintenance thread (ping/pong keepalive, reconnection, score decay)
+        // BUG #49 FIX: Add automatic peer reconnection and misbehavior score decay
         std::thread p2p_maint_thread([&connection_manager]() {
             std::cout << "  [OK] P2P maintenance thread started" << std::endl;
+
+            int cycles_without_peers = 0;
+            auto last_reconnect_attempt = std::chrono::steady_clock::now();
 
             while (g_node_state.running) {
                 // Send periodic pings, check timeouts
                 connection_manager.PeriodicMaintenance();
+
+                // BUG #49: Check if we need to reconnect to seed nodes
+                size_t peer_count = g_peer_manager ? g_peer_manager->GetConnectionCount() : 0;
+
+                if (peer_count == 0) {
+                    cycles_without_peers++;
+
+                    // Attempt reconnection every 60 seconds when isolated
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_reconnect_attempt);
+
+                    if (elapsed.count() >= 60) {
+                        std::cout << "[P2P-Maintenance] No peers connected - attempting to reconnect to seed nodes..." << std::endl;
+                        last_reconnect_attempt = now;
+
+                        // Get seed nodes from peer manager
+                        auto seed_nodes = g_peer_manager ? g_peer_manager->GetSeedNodes() : std::vector<NetProtocol::CAddress>();
+
+                        // Try to connect to each seed node
+                        int successful_connections = 0;
+                        for (const auto& seed_addr : seed_nodes) {
+                            std::string ip_str = seed_addr.ToStringIP();
+                            uint16_t port = seed_addr.port;
+
+                            std::cout << "[P2P-Maintenance] Attempting connection to seed " << ip_str << ":" << port << std::endl;
+
+                            int peer_id = connection_manager.ConnectToPeer(seed_addr);
+                            if (peer_id >= 0) {
+                                std::cout << "[P2P-Maintenance] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
+
+                                // Perform handshake
+                                if (connection_manager.PerformHandshake(peer_id)) {
+                                    std::cout << "[P2P-Maintenance] Handshake successful with peer " << peer_id << std::endl;
+                                    successful_connections++;
+                                } else {
+                                    std::cout << "[P2P-Maintenance] Handshake failed with peer " << peer_id << std::endl;
+                                }
+                            } else {
+                                std::cout << "[P2P-Maintenance] Failed to connect to seed " << ip_str << ":" << port << std::endl;
+                            }
+                        }
+
+                        if (successful_connections > 0) {
+                            std::cout << "[P2P-Maintenance] Reconnected to " << successful_connections << " seed node(s)" << std::endl;
+                            cycles_without_peers = 0;
+                        } else {
+                            std::cout << "[P2P-Maintenance] Could not reconnect to any seed nodes" << std::endl;
+                        }
+                    }
+                } else {
+                    if (cycles_without_peers > 0) {
+                        std::cout << "[P2P-Maintenance] Peer connectivity restored (" << peer_count << " peers)" << std::endl;
+                        cycles_without_peers = 0;
+                    }
+                }
+
+                // BUG #49: Decay misbehavior scores (reduce by 1 point per minute)
+                // This happens every 30 seconds, so decay by 0.5 points
+                if (g_peer_manager) {
+                    g_peer_manager->DecayMisbehaviorScores();
+                }
 
                 // Sleep for 30 seconds between maintenance cycles
                 std::this_thread::sleep_for(std::chrono::seconds(30));
@@ -2207,71 +2272,163 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // BLOCK DOWNLOAD COORDINATION (IBD)
             // ========================================
             // BUG #33 DEBUG: Add comprehensive logging to diagnose why blocks aren't downloading
+            // BUG #49 FIX: Add exponential backoff when no peers available for IBD
+            static int ibd_no_peer_cycles = 0;
+            static auto last_ibd_attempt = std::chrono::steady_clock::now();
+
             if (g_headers_manager && g_block_fetcher) {
                 int headerHeight = g_headers_manager->GetBestHeight();
                 int chainHeight = g_chainstate.GetHeight();
 
                 // If headers are ahead, we need to download blocks
                 if (headerHeight > chainHeight) {
-                    std::cout << "[IBD] Headers ahead of chain - downloading blocks (header="
-                              << headerHeight << " chain=" << chainHeight << ")" << std::endl;
+                    // Check if we should attempt IBD based on backoff
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_ibd_attempt);
 
-                    // Queue missing blocks for download (only queue next batch to avoid memory issues)
-                    int blocksToQueue = std::min(100, headerHeight - chainHeight);  // Queue max 100 at a time
-                    std::cout << "[IBD] Queueing " << blocksToQueue << " blocks for download..." << std::endl;
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
+                    int backoff_seconds = std::min(30, (1 << std::min(ibd_no_peer_cycles, 5)));
 
-                    for (int h = chainHeight + 1; h <= chainHeight + blocksToQueue; h++) {
-                        // Get header hash at this height
-                        std::vector<uint256> hashesAtHeight = g_headers_manager->GetHeadersAtHeight(h);
+                    if (elapsed.count() >= backoff_seconds) {
+                        // Check if we have any connected peers
+                        size_t peer_count = g_peer_manager ? g_peer_manager->GetConnectionCount() : 0;
 
-                        for (const uint256& hash : hashesAtHeight) {
-                            // Only queue if we don't already have the block
-                            if (!g_chainstate.HasBlockIndex(hash) &&
-                                !g_block_fetcher->IsQueued(hash) &&
-                                !g_block_fetcher->IsDownloading(hash)) {
-                                g_block_fetcher->QueueBlockForDownload(hash, h, false);
-                                std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16) << "... at height " << h << std::endl;
+                        if (peer_count == 0) {
+                            // No peers available
+                            if (ibd_no_peer_cycles == 0) {
+                                std::cout << "[IBD] No peers available for block download - entering backoff mode" << std::endl;
+                            }
+                            ibd_no_peer_cycles++;
+                            last_ibd_attempt = now;
+
+                            // Log periodically (every 10th cycle)
+                            if (ibd_no_peer_cycles % 10 == 0) {
+                                std::cout << "[IBD] Still waiting for peers (backoff: " << backoff_seconds
+                                          << "s, attempts: " << ibd_no_peer_cycles << ")" << std::endl;
+                            }
+                        } else {
+                            // We have peers, attempt IBD
+                            if (ibd_no_peer_cycles > 0) {
+                                std::cout << "[IBD] Peers available - resuming block download" << std::endl;
+                                ibd_no_peer_cycles = 0;  // Reset backoff
+                            }
+
+                            std::cout << "[IBD] Headers ahead of chain - downloading blocks (header="
+                                      << headerHeight << " chain=" << chainHeight << ")" << std::endl;
+
+                            // Queue missing blocks for download (only queue next batch to avoid memory issues)
+                            int blocksToQueue = std::min(100, headerHeight - chainHeight);  // Queue max 100 at a time
+                            std::cout << "[IBD] Queueing " << blocksToQueue << " blocks for download..." << std::endl;
+
+                            for (int h = chainHeight + 1; h <= chainHeight + blocksToQueue; h++) {
+                                // Get header hash at this height
+                                std::vector<uint256> hashesAtHeight = g_headers_manager->GetHeadersAtHeight(h);
+
+                                for (const uint256& hash : hashesAtHeight) {
+                                    // Only queue if we don't already have the block
+                                    if (!g_chainstate.HasBlockIndex(hash) &&
+                                        !g_block_fetcher->IsQueued(hash) &&
+                                        !g_block_fetcher->IsDownloading(hash)) {
+                                        g_block_fetcher->QueueBlockForDownload(hash, h, false);
+                                        std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16) << "... at height " << h << std::endl;
+                                    }
+                                }
+                            }
+
+                            // Get next blocks to fetch (respects 16 in-flight limit)
+                            auto blocksToFetch = g_block_fetcher->GetNextBlocksToFetch(16);
+
+                            if (blocksToFetch.empty() && g_block_fetcher->GetBlocksInFlight() == 0) {
+                                // Nothing to fetch and nothing in flight - might have no suitable peers
+                                ibd_no_peer_cycles++;
+                                last_ibd_attempt = now;
+                                std::cout << "[IBD] No blocks could be fetched (no suitable peers?)" << std::endl;
+                            } else {
+                                std::cout << "[IBD] Fetching " << blocksToFetch.size() << " blocks (max 16 in-flight)..." << std::endl;
+
+                                // For each block, select peer and send GETDATA
+                                int successful_requests = 0;
+                                for (const auto& [hash, height] : blocksToFetch) {
+                                    // Select best peer for download
+                                    NodeId peer = g_block_fetcher->SelectPeerForDownload(hash);
+                                    if (peer != -1) {
+                                        // Request block from fetcher (updates in-flight tracking)
+                                        if (g_block_fetcher->RequestBlock(peer, hash, height)) {
+                                            // Send GETDATA message
+                                            std::vector<NetProtocol::CInv> getdata;
+                                            getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, hash));
+
+                                            CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
+                                            connection_manager.SendMessage(peer, msg);
+                                            std::cout << "[IBD] Sent GETDATA for block " << hash.GetHex().substr(0, 16) << "... (height " << height << ") to peer " << peer << std::endl;
+                                            successful_requests++;
+                                        }
+                                    }
+                                }
+
+                                if (successful_requests == 0 && !blocksToFetch.empty()) {
+                                    // Had blocks to fetch but couldn't send any requests
+                                    ibd_no_peer_cycles++;
+                                    last_ibd_attempt = now;
+                                    std::cout << "[IBD] Could not send any block requests (no suitable peers)" << std::endl;
+                                }
+                            }
+
+                            // Check for timed-out block requests (60 second timeout)
+                            auto timedOut = g_block_fetcher->CheckTimeouts();
+                            if (!timedOut.empty()) {
+                                std::cout << "[BlockFetcher] " << timedOut.size() << " block(s) timed out, retrying..." << std::endl;
+                                g_block_fetcher->RetryTimedOutBlocks(timedOut);
                             }
                         }
-                    }
-
-                    // Get next blocks to fetch (respects 16 in-flight limit)
-                    auto blocksToFetch = g_block_fetcher->GetNextBlocksToFetch(16);
-                    std::cout << "[IBD] Fetching " << blocksToFetch.size() << " blocks (max 16 in-flight)..." << std::endl;
-
-                    // For each block, select peer and send GETDATA
-                    for (const auto& [hash, height] : blocksToFetch) {
-                        // Select best peer for download
-                        NodeId peer = g_block_fetcher->SelectPeerForDownload(hash);
-                        if (peer != -1) {
-                            // Request block from fetcher (updates in-flight tracking)
-                            if (g_block_fetcher->RequestBlock(peer, hash, height)) {
-                                // Send GETDATA message
-                                std::vector<NetProtocol::CInv> getdata;
-                                getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, hash));
-
-                                CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
-                                connection_manager.SendMessage(peer, msg);
-                                std::cout << "[IBD] Sent GETDATA for block " << hash.GetHex().substr(0, 16) << "... (height " << height << ") to peer " << peer << std::endl;
-                            }
-                        }
-                    }
-
-                    // Check for timed-out block requests (60 second timeout)
-                    auto timedOut = g_block_fetcher->CheckTimeouts();
-                    if (!timedOut.empty()) {
-                        std::cout << "[BlockFetcher] " << timedOut.size() << " block(s) timed out, retrying..." << std::endl;
-                        g_block_fetcher->RetryTimedOutBlocks(timedOut);
                     }
                 }
             }
 
             // Print mining stats every 10 seconds if mining
+            // BUG #49: Add isolation detection when mining
             static int counter = 0;
+            static int mining_without_peers_minutes = 0;
+            static auto last_isolation_check = std::chrono::steady_clock::now();
+
             if (config.start_mining && ++counter % 10 == 0) {
                 auto stats = miner.GetStats();
                 std::cout << "[Mining] Hash rate: " << miner.GetHashRate() << " H/s, "
                          << "Total hashes: " << stats.nHashesComputed << std::endl;
+
+                // BUG #49: Check if mining in isolation
+                if (miner.IsMining()) {
+                    size_t peer_count = g_peer_manager ? g_peer_manager->GetConnectionCount() : 0;
+
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::minutes>(now - last_isolation_check);
+
+                    if (elapsed.count() >= 1) {
+                        last_isolation_check = now;
+
+                        if (peer_count == 0) {
+                            mining_without_peers_minutes++;
+
+                            if (mining_without_peers_minutes == 1) {
+                                std::cout << "[Mining] WARNING: Mining with no connected peers" << std::endl;
+                            } else if (mining_without_peers_minutes == 5) {
+                                std::cout << "[Mining] WARNING: Mining in isolation for 5 minutes - possible chain fork" << std::endl;
+                            } else if (mining_without_peers_minutes == 10) {
+                                std::cout << "[Mining] ⚠️  CRITICAL: Mining in isolation for 10 minutes!" << std::endl;
+                                std::cout << "[Mining] ⚠️  You are likely creating a chain fork that will be rejected when reconnecting" << std::endl;
+                                std::cout << "[Mining] ⚠️  Consider stopping mining until peers are available" << std::endl;
+                            } else if (mining_without_peers_minutes % 10 == 0) {
+                                std::cout << "[Mining] ⚠️  Still mining in isolation (" << mining_without_peers_minutes
+                                          << " minutes) - chain fork highly likely!" << std::endl;
+                            }
+                        } else {
+                            if (mining_without_peers_minutes > 0) {
+                                std::cout << "[Mining] Peer connectivity restored - no longer mining in isolation" << std::endl;
+                                mining_without_peers_minutes = 0;
+                            }
+                        }
+                    }
+                }
             }
         }
 

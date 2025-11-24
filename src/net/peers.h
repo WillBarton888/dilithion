@@ -156,6 +156,7 @@ public:
 
     // DoS protection
     void Misbehaving(int peer_id, int howmuch);
+    void DecayMisbehaviorScores();  // BUG #49: Decay scores over time
 
     // Statistics
     struct Stats {
