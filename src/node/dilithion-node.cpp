@@ -536,7 +536,9 @@ int main(int argc, char* argv[]) {
         // FULL mode (>=3GB RAM): ~100 H/s with 2GB dataset, multi-threaded init (30-60s startup)
         // LIGHT mode (<3GB RAM): ~3-10 H/s, fast init (1-2s startup)
         // NYC (3.9GB) will use FULL mode for production mining hashrate
-        int light_mode = (total_ram_mb >= 3072) ? 0 : 1;  // 3GB threshold for FULL mode
+        // TEMPORARY: Force LIGHT mode to bypass multi-threaded init hang
+        int light_mode = 1;  // Force LIGHT mode for now
+        // int light_mode = (total_ram_mb >= 3072) ? 0 : 1;  // 3GB threshold for FULL mode
         std::cout << "  Detected RAM: " << total_ram_mb << " MB" << std::endl;
         std::cout << "  Selected mode: " << (light_mode ? "LIGHT" : "FULL") << " ("
                   << (light_mode ? "~3-10 H/s" : "~100 H/s") << ")" << std::endl;
