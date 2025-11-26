@@ -152,21 +152,20 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
     }
 #endif
 
-    // Use FULL mode if RAM >= 3GB, otherwise LIGHT mode
-    int light_mode = (total_ram_mb >= 3072) ? 0 : 1;
+    // BUG #55 FIX: Monero-style dual-mode mining
+    // - Validation mode (LIGHT) is already initialized by node startup
+    // - Mining can start immediately using LIGHT mode
+    // - Mining will automatically upgrade to FULL mode when ready
     std::cout << "[Mining] Detected RAM: " << total_ram_mb << " MB" << std::endl;
-    std::cout << "[Mining] Using RandomX " << (light_mode ? "LIGHT" : "FULL") << " mode" << std::endl;
-
-    // CRITICAL-5 FIX: Don't re-initialize RandomX if already done by async init
-    // The node's main function already called randomx_init_async(), so we just wait for it
-    if (!randomx_is_ready()) {
-        std::cout << "[Mining] Waiting for RandomX async initialization..." << std::endl;
-        randomx_wait_for_init();
-        std::cout << "[Mining] RandomX ready" << std::endl;
+    if (randomx_is_mining_mode_ready()) {
+        std::cout << "[Mining] Using RandomX FULL mode (~100 H/s)" << std::endl;
     } else {
-        std::cout << "[Mining] RandomX already initialized" << std::endl;
+        std::cout << "[Mining] Using RandomX LIGHT mode (~3-10 H/s)" << std::endl;
+        if (total_ram_mb >= 3072) {
+            std::cout << "[Mining] FULL mode initializing in background - will auto-upgrade" << std::endl;
+        }
     }
-    // Note: RAM mode detection above is for logging only; actual mode was set during async init
+    // Note: Mining proceeds immediately, no wait required
 
     // Store block template
     {

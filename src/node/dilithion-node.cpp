@@ -588,26 +588,36 @@ int main(int argc, char* argv[]) {
         }
 #endif
 
-        // BUG #18/#51 FIX: Multi-threaded RandomX dataset initialization enables FULL mode
-        // FULL mode (>=3GB RAM): ~100 H/s with 2GB dataset, multi-threaded init (30-60s startup)
-        // LIGHT mode (<3GB RAM): ~3-10 H/s, fast init (1-2s startup)
-        // NYC (3.9GB) will use FULL mode for production mining hashrate
-        // BUG #51 resolved thread-safety issues - FULL mode now works reliably
-        int light_mode = (total_ram_mb >= 3072) ? 0 : 1;  // 3GB threshold for FULL mode
+        // ========================================================================
+        // BUG #55 FIX: Monero-Style Dual-Mode RandomX Architecture
+        // ========================================================================
+        // Following Monero's proven pattern for instant node startup:
+        // - LIGHT mode (256MB): Used for ALL block validation - instant startup
+        // - FULL mode (2GB): Used ONLY for mining - async background init
+        //
+        // This allows nodes to:
+        // 1. Start validating blocks immediately (LIGHT mode)
+        // 2. Mining starts with LIGHT mode, upgrades to FULL when ready
+        // 3. No more 30-60s hang on high-RAM nodes like NYC (3.9GB)
+        // ========================================================================
         std::cout << "  Detected RAM: " << total_ram_mb << " MB" << std::endl;
-        std::cout << "  Selected mode: " << (light_mode ? "LIGHT" : "FULL") << " ("
-                  << (light_mode ? "~3-10 H/s" : "~100 H/s") << ")" << std::endl;
 
-        // BUG #14 FIX: Async RandomX initialization (Monero-style)
-        // This allows RPC server to start immediately while RandomX initializes in background
-        randomx_init_async(rx_key, strlen(rx_key), light_mode);
-        std::cout << "  [ASYNC] RandomX initialization started (continuing startup...)" << std::endl;
+        // Step 1: Always initialize LIGHT mode first for validation (fast, 1-2 seconds)
+        std::cout << "  Initializing validation mode (LIGHT)..." << std::endl;
+        randomx_init_validation_mode(rx_key, strlen(rx_key));
+        // Validation mode is now ready - node can verify blocks immediately
 
-        // Wait for RandomX to complete before loading genesis (genesis hash computation needs RandomX)
-        if (!randomx_is_ready()) {
-            std::cout << "  [WAIT] Waiting for RandomX initialization..." << std::endl;
-            randomx_wait_for_init();
+        // Step 2: If mining enabled AND RAM >= 3GB, start FULL mode in background
+        bool full_mode_available = (total_ram_mb >= 3072);
+        if (config.start_mining && full_mode_available) {
+            std::cout << "  Starting mining mode init (FULL) in background..." << std::endl;
+            randomx_init_mining_mode_async(rx_key, strlen(rx_key));
+            // Mining will start with LIGHT mode, auto-upgrade to FULL when ready
+        } else if (config.start_mining) {
+            std::cout << "  Mining mode: LIGHT only (RAM < 3GB)" << std::endl;
         }
+
+        // NO WAIT - node continues immediately, can validate blocks right away
 
         // Load and verify genesis block
 load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
@@ -2264,13 +2274,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             } else {
                 std::cout << "  [OK] Already synced with network" << std::endl;
 
-                // BUG #14 FIX: Wait for RandomX to complete initialization before mining
-                if (!randomx_is_ready()) {
-                    std::cout << "  [WAIT] RandomX still initializing, waiting..." << std::endl;
-                    randomx_wait_for_init();
-                    std::cout << "  [OK] RandomX ready for mining" << std::endl;
+                // BUG #55 FIX: Validation mode is already initialized (LIGHT mode)
+                // Mining can start immediately - will use LIGHT mode, upgrade to FULL when ready
+                if (randomx_is_mining_mode_ready()) {
+                    std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
                 } else {
-                    std::cout << "  [OK] RandomX already ready" << std::endl;
+                    std::cout << "  [OK] Mining will start with LIGHT mode (FULL mode initializing...)" << std::endl;
                 }
 
                 // Now safe to start mining (synced with network)
@@ -2345,11 +2354,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // IBD complete - start mining!
                     std::cout << "[IBD] Sync complete! Starting mining..." << std::endl;
 
-                    // Wait for RandomX if needed
-                    if (!randomx_is_ready()) {
-                        std::cout << "  [WAIT] RandomX still initializing, waiting..." << std::endl;
-                        randomx_wait_for_init();
-                        std::cout << "  [OK] RandomX ready for mining" << std::endl;
+                    // BUG #55 FIX: Validation mode already ready, mining can start immediately
+                    if (randomx_is_mining_mode_ready()) {
+                        std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
+                    } else {
+                        std::cout << "  [OK] Mining will start with LIGHT mode (FULL mode initializing...)" << std::endl;
                     }
 
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;

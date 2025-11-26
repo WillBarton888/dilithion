@@ -35,6 +35,39 @@ int randomx_is_ready();
 // Wait for RandomX initialization to complete
 void randomx_wait_for_init();
 
+// ============================================================================
+// BUG #55 FIX: Monero-Style Dual-Mode RandomX Architecture
+// ============================================================================
+// Following Monero's proven pattern:
+// - LIGHT mode (256MB): Used for ALL block validation (instant startup)
+// - FULL mode (2GB): Used ONLY for mining (async background init)
+// ============================================================================
+
+// Initialize LIGHT mode for block validation (fast, blocking, 1-2 seconds)
+// Call this first during node startup - enables immediate block validation
+void randomx_init_validation_mode(const void* key, size_t key_len);
+
+// Initialize FULL mode for mining (async, background, 30-60 seconds)
+// Call this after validation mode is ready, only if mining is enabled
+// Mining can proceed with LIGHT mode while FULL mode initializes
+void randomx_init_mining_mode_async(const void* key, size_t key_len);
+
+// Check if mining (FULL) mode is ready
+// Returns 1 if FULL mode is ready, 0 if still initializing or LIGHT mode only
+int randomx_is_mining_mode_ready();
+
+// Wait for mining mode to complete (blocking)
+void randomx_wait_for_mining_mode();
+
+// Hash for block validation (uses LIGHT mode, always available after init)
+// Use this for: verifying received blocks, checking PoW, IBD sync
+void randomx_hash_for_validation(const void* input, size_t input_len, void* output);
+
+// Hash for mining (uses FULL mode if ready, falls back to LIGHT mode)
+// Use this for: creating new blocks during mining
+// Returns 1 if FULL mode was used, 0 if LIGHT mode fallback
+int randomx_hash_for_mining(const void* input, size_t input_len, void* output);
+
 // BUG #28 FIX: Per-Thread RandomX VM API
 // Create VM for thread (call once per mining thread)
 // Returns: opaque VM pointer, or NULL on failure

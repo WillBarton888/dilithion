@@ -26,6 +26,30 @@ namespace {
     std::atomic<bool> g_randomx_initializing{false};
     std::thread g_randomx_init_thread;
     std::atomic<int> g_randomx_progress{0};  // 0-100%
+
+    // ========================================================================
+    // BUG #55 FIX: Monero-Style Dual-Mode RandomX Architecture
+    // ========================================================================
+    // Separate instances for validation (LIGHT) and mining (FULL)
+    // Following Monero's proven pattern for instant node startup
+    // ========================================================================
+
+    // Validation mode (LIGHT) - always available after init, instant startup
+    randomx_cache* g_validation_cache = nullptr;
+    randomx_vm* g_validation_vm = nullptr;
+    std::mutex g_validation_mutex;
+    std::atomic<bool> g_validation_ready{false};
+    std::vector<uint8_t> g_validation_key;
+
+    // Mining mode (FULL) - async background initialization
+    randomx_cache* g_mining_cache = nullptr;
+    randomx_dataset* g_mining_dataset = nullptr;
+    randomx_vm* g_mining_vm = nullptr;
+    std::mutex g_mining_mutex;
+    std::atomic<bool> g_mining_ready{false};
+    std::atomic<bool> g_mining_initializing{false};
+    std::thread g_mining_init_thread;
+    std::vector<uint8_t> g_mining_key;
 }
 
 extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int light_mode) {
@@ -193,6 +217,17 @@ void randomx_hash_fast(const void* input, size_t input_len, void* output) {
         throw std::invalid_argument("randomx_hash_fast: output buffer is NULL");
     }
 
+    // BUG #55 FIX: Prefer validation mode (dual-mode architecture)
+    // This ensures block validation works immediately after startup
+    if (g_validation_ready.load()) {
+        std::lock_guard<std::mutex> lock(g_validation_mutex);
+        if (g_validation_vm != nullptr) {
+            randomx_calculate_hash(g_validation_vm, input, input_len, output);
+            return;
+        }
+    }
+
+    // Fallback to legacy global VM (for backward compatibility)
     std::lock_guard<std::mutex> lock(g_randomx_mutex);
 
     if (g_randomx_vm == nullptr) {
@@ -281,41 +316,56 @@ extern "C" void randomx_wait_for_init() {
 // Each mining thread creates its own VM for true parallel mining
 
 extern "C" void* randomx_create_thread_vm() {
-    // Wait for initialization to complete (prevents race during startup)
-    while (!g_randomx_ready.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    // BUG #55 FIX: Monero-style dual-mode VM creation
+    // Try FULL mode first (mining), fall back to LIGHT mode (validation)
 
-    std::lock_guard<std::mutex> lock(g_randomx_mutex);
-
-    // Validate dataset/cache exists
-    if (!g_randomx_dataset && !g_randomx_cache) {
-        std::cerr << "[ERROR] RandomX not initialized before VM creation" << std::endl;
-        return nullptr;
-    }
-
-    // Create VM with appropriate flags
     randomx_flags flags = RANDOMX_FLAG_DEFAULT;
     randomx_vm* vm = nullptr;
 
-    if (g_is_light_mode) {
-        // LIGHT mode: VM uses cache (slower, less RAM)
-        vm = randomx_create_vm(flags, g_randomx_cache, nullptr);
-        if (!vm) {
-            std::cerr << "[ERROR] Failed to create thread VM (LIGHT mode)" << std::endl;
-            return nullptr;
-        }
-    } else {
-        // FULL mode: VM uses dataset (faster, shares 2GB dataset across all VMs)
-        flags = static_cast<randomx_flags>(flags | RANDOMX_FLAG_FULL_MEM);
-        vm = randomx_create_vm(flags, g_randomx_cache, g_randomx_dataset);
-        if (!vm) {
-            std::cerr << "[ERROR] Failed to create thread VM (FULL mode, OOM?)" << std::endl;
-            return nullptr;
+    // Option 1: Use mining mode (FULL) if ready
+    if (g_mining_ready.load()) {
+        std::lock_guard<std::mutex> lock(g_mining_mutex);
+        if (g_mining_dataset && g_mining_cache) {
+            flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
+            vm = randomx_create_vm(flags, g_mining_cache, g_mining_dataset);
+            if (vm) {
+                return static_cast<void*>(vm);
+            }
+            std::cerr << "[WARN] Failed to create thread VM (FULL mode), trying LIGHT mode" << std::endl;
         }
     }
 
-    return static_cast<void*>(vm);
+    // Option 2: Use validation mode (LIGHT) - always available after startup
+    if (g_validation_ready.load()) {
+        std::lock_guard<std::mutex> lock(g_validation_mutex);
+        if (g_validation_cache) {
+            flags = RANDOMX_FLAG_DEFAULT;
+            vm = randomx_create_vm(flags, g_validation_cache, nullptr);
+            if (vm) {
+                return static_cast<void*>(vm);
+            }
+            std::cerr << "[ERROR] Failed to create thread VM (LIGHT mode)" << std::endl;
+        }
+    }
+
+    // Option 3: Fallback to legacy global VM (for backward compatibility)
+    if (g_randomx_ready.load()) {
+        std::lock_guard<std::mutex> lock(g_randomx_mutex);
+        if (g_randomx_dataset || g_randomx_cache) {
+            if (g_is_light_mode) {
+                vm = randomx_create_vm(RANDOMX_FLAG_DEFAULT, g_randomx_cache, nullptr);
+            } else {
+                flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
+                vm = randomx_create_vm(flags, g_randomx_cache, g_randomx_dataset);
+            }
+            if (vm) {
+                return static_cast<void*>(vm);
+            }
+        }
+    }
+
+    std::cerr << "[ERROR] RandomX not initialized - cannot create thread VM" << std::endl;
+    return nullptr;
 }
 
 extern "C" void randomx_destroy_thread_vm(void* vm) {
@@ -342,4 +392,245 @@ extern "C" void randomx_hash_thread(void* vm, const void* input, size_t input_le
     // each thread hashes independently using its own VM
     randomx_vm* rx_vm = static_cast<randomx_vm*>(vm);
     randomx_calculate_hash(rx_vm, input, input_len, output);
+}
+
+// ============================================================================
+// BUG #55 FIX: Monero-Style Dual-Mode RandomX Implementation
+// ============================================================================
+// Following Monero's proven pattern:
+// - LIGHT mode (256MB): Used for ALL block validation (instant startup)
+// - FULL mode (2GB): Used ONLY for mining (async background init)
+// This allows nodes to start validating blocks immediately while mining
+// dataset initializes in the background.
+// ============================================================================
+
+extern "C" void randomx_init_validation_mode(const void* key, size_t key_len) {
+    std::lock_guard<std::mutex> lock(g_validation_mutex);
+
+    // Check if already initialized with same key
+    std::vector<uint8_t> new_key((const uint8_t*)key, (const uint8_t*)key + key_len);
+    if (g_validation_cache != nullptr && g_validation_key == new_key) {
+        std::cout << "  [VALIDATION] Already initialized with same key" << std::endl;
+        return;
+    }
+
+    std::cout << "  [VALIDATION] Initializing LIGHT mode for block validation..." << std::endl;
+    auto start_time = std::chrono::steady_clock::now();
+
+    // Cleanup existing resources
+    if (g_validation_vm != nullptr) {
+        randomx_destroy_vm(g_validation_vm);
+        g_validation_vm = nullptr;
+    }
+    if (g_validation_cache != nullptr) {
+        randomx_release_cache(g_validation_cache);
+        g_validation_cache = nullptr;
+    }
+
+    // Always use LIGHT mode for validation (RANDOMX_FLAG_DEFAULT only)
+    randomx_flags flags = RANDOMX_FLAG_DEFAULT;
+
+    // Allocate and initialize cache
+    g_validation_cache = randomx_alloc_cache(flags);
+    if (g_validation_cache == nullptr) {
+        throw std::runtime_error("Failed to allocate RandomX validation cache");
+    }
+    randomx_init_cache(g_validation_cache, key, key_len);
+
+    // Create VM with cache (LIGHT mode)
+    g_validation_vm = randomx_create_vm(flags, g_validation_cache, nullptr);
+    if (g_validation_vm == nullptr) {
+        randomx_release_cache(g_validation_cache);
+        g_validation_cache = nullptr;
+        throw std::runtime_error("Failed to create RandomX validation VM");
+    }
+
+    g_validation_key = new_key;
+    g_validation_ready = true;
+
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    std::cout << "  [OK] Validation mode ready (LIGHT, " << duration.count() << "ms)" << std::endl;
+}
+
+extern "C" void randomx_init_mining_mode_async(const void* key, size_t key_len) {
+    // Atomic compare-exchange to prevent race condition
+    bool expected = false;
+    if (!g_mining_initializing.compare_exchange_strong(expected, true)) {
+        std::cout << "  [MINING] Already initializing" << std::endl;
+        return;
+    }
+
+    // Check if already ready
+    if (g_mining_ready.load()) {
+        g_mining_initializing = false;
+        std::cout << "  [MINING] Already initialized" << std::endl;
+        return;
+    }
+
+    // Join any existing thread
+    if (g_mining_init_thread.joinable()) {
+        g_mining_init_thread.join();
+    }
+
+    // Copy key for thread safety
+    std::vector<uint8_t> key_copy((const uint8_t*)key, (const uint8_t*)key + key_len);
+
+    // Launch async initialization thread
+    g_mining_init_thread = std::thread([key_copy]() {
+        try {
+            std::cout << "  [MINING] Starting FULL mode initialization in background..." << std::endl;
+            auto start_time = std::chrono::steady_clock::now();
+
+            std::lock_guard<std::mutex> lock(g_mining_mutex);
+
+            // Cleanup existing resources
+            if (g_mining_vm != nullptr) {
+                randomx_destroy_vm(g_mining_vm);
+                g_mining_vm = nullptr;
+            }
+            if (g_mining_dataset != nullptr) {
+                randomx_release_dataset(g_mining_dataset);
+                g_mining_dataset = nullptr;
+            }
+            if (g_mining_cache != nullptr) {
+                randomx_release_cache(g_mining_cache);
+                g_mining_cache = nullptr;
+            }
+
+            // FULL mode flags
+            randomx_flags flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
+
+            // Allocate cache
+            g_mining_cache = randomx_alloc_cache(flags);
+            if (g_mining_cache == nullptr) {
+                throw std::runtime_error("Failed to allocate RandomX mining cache");
+            }
+            randomx_init_cache(g_mining_cache, key_copy.data(), key_copy.size());
+
+            // Allocate dataset (2GB)
+            g_mining_dataset = randomx_alloc_dataset(flags);
+            if (g_mining_dataset == nullptr) {
+                randomx_release_cache(g_mining_cache);
+                g_mining_cache = nullptr;
+                throw std::runtime_error("Failed to allocate RandomX mining dataset");
+            }
+
+            // Multi-threaded dataset initialization
+            std::atomic_thread_fence(std::memory_order_release);
+
+            auto dataset_ptr = g_mining_dataset;
+            auto cache_ptr = g_mining_cache;
+
+            unsigned long dataset_item_count = randomx_dataset_item_count();
+            unsigned int num_threads = std::thread::hardware_concurrency();
+            if (num_threads == 0) num_threads = 2;
+
+            std::cout << "  [MINING] Initializing dataset with " << num_threads << " threads..." << std::endl;
+
+            std::vector<std::thread> init_threads;
+            init_threads.reserve(num_threads);
+
+            unsigned long items_per_thread = dataset_item_count / num_threads;
+            unsigned long items_remainder = dataset_item_count % num_threads;
+
+            for (unsigned int t = 0; t < num_threads; t++) {
+                unsigned long start_item = t * items_per_thread;
+                unsigned long count = items_per_thread;
+                if (t == num_threads - 1) {
+                    count += items_remainder;
+                }
+
+                init_threads.emplace_back([dataset_ptr, cache_ptr, start_item, count]() {
+                    randomx_init_dataset(dataset_ptr, cache_ptr, start_item, count);
+                });
+            }
+
+            for (auto& thread : init_threads) {
+                thread.join();
+            }
+
+            std::atomic_thread_fence(std::memory_order_acquire);
+
+            // Create VM with dataset
+            g_mining_vm = randomx_create_vm(flags, g_mining_cache, g_mining_dataset);
+            if (g_mining_vm == nullptr) {
+                randomx_release_dataset(g_mining_dataset);
+                randomx_release_cache(g_mining_cache);
+                g_mining_dataset = nullptr;
+                g_mining_cache = nullptr;
+                throw std::runtime_error("Failed to create RandomX mining VM");
+            }
+
+            g_mining_key = key_copy;
+            g_mining_ready = true;
+
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
+            std::cout << "  [OK] Mining mode ready (FULL, " << duration.count() << "s)" << std::endl;
+
+        } catch (const std::exception& e) {
+            std::cerr << "  [ERROR] Mining mode init failed: " << e.what() << std::endl;
+            g_mining_ready = false;
+        }
+        g_mining_initializing = false;
+    });
+
+    std::cout << "  [MINING] Background initialization started (non-blocking)" << std::endl;
+}
+
+extern "C" int randomx_is_mining_mode_ready() {
+    return g_mining_ready.load() ? 1 : 0;
+}
+
+extern "C" void randomx_wait_for_mining_mode() {
+    if (g_mining_init_thread.joinable()) {
+        std::cout << "  [WAIT] Waiting for mining mode initialization..." << std::endl;
+        g_mining_init_thread.join();
+        std::cout << "  [WAIT] Mining mode initialization complete" << std::endl;
+    }
+}
+
+extern "C" void randomx_hash_for_validation(const void* input, size_t input_len, void* output) {
+    if (input == nullptr && input_len > 0) {
+        throw std::invalid_argument("randomx_hash_for_validation: input is NULL");
+    }
+    if (output == nullptr) {
+        throw std::invalid_argument("randomx_hash_for_validation: output is NULL");
+    }
+
+    std::lock_guard<std::mutex> lock(g_validation_mutex);
+
+    if (!g_validation_ready.load() || g_validation_vm == nullptr) {
+        throw std::runtime_error("Validation mode not initialized");
+    }
+
+    randomx_calculate_hash(g_validation_vm, input, input_len, output);
+}
+
+extern "C" int randomx_hash_for_mining(const void* input, size_t input_len, void* output) {
+    if (input == nullptr && input_len > 0) {
+        throw std::invalid_argument("randomx_hash_for_mining: input is NULL");
+    }
+    if (output == nullptr) {
+        throw std::invalid_argument("randomx_hash_for_mining: output is NULL");
+    }
+
+    // Try FULL mode first (faster)
+    if (g_mining_ready.load()) {
+        std::lock_guard<std::mutex> lock(g_mining_mutex);
+        if (g_mining_vm != nullptr) {
+            randomx_calculate_hash(g_mining_vm, input, input_len, output);
+            return 1;  // Used FULL mode
+        }
+    }
+
+    // Fallback to LIGHT mode (slower but always available)
+    std::lock_guard<std::mutex> lock(g_validation_mutex);
+    if (!g_validation_ready.load() || g_validation_vm == nullptr) {
+        throw std::runtime_error("Neither mining nor validation mode initialized");
+    }
+
+    randomx_calculate_hash(g_validation_vm, input, input_len, output);
+    return 0;  // Used LIGHT mode fallback
 }
