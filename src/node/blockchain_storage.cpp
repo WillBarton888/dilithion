@@ -133,9 +133,9 @@ bool CBlockchainDB::Open(const std::string& path, bool create_if_missing) {
     try {
         std::error_code ec;
         auto space = std::filesystem::space(validated_path, ec);
-        if (ec || space.available < (10ULL * 1024 * 1024 * 1024)) {  // 10 GB minimum
+        if (ec || space.available < (5ULL * 1024 * 1024 * 1024)) {  // 5 GB minimum (reduced from 10GB for testnet)
             std::cerr << "[ERROR] Insufficient disk space: "
-                      << (space.available / 1024 / 1024) << " MB available (need 10 GB)" << std::endl;
+                      << (space.available / 1024 / 1024) << " MB available (need 5 GB)" << std::endl;
             return false;
         }
         std::cout << "[DB-INFO] Available disk space: "
