@@ -2245,6 +2245,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "  [OK] RPC server listening on port " << config.rpcport << std::endl;
 
         // Start mining if requested
+        // BUG #54 FIX: Don't block here - let main loop run for block downloads
+        // Mining will start inside main loop after IBD completes
+        bool mining_deferred_for_ibd = false;  // Track if we're waiting for IBD
         if (config.start_mining) {
             g_node_state.mining_enabled = true;  // Track that mining was requested
             std::cout << std::endl;
@@ -2252,54 +2255,40 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // BUG #52 FIX: Check IBD before starting mining (Bitcoin pattern)
             // This prevents fresh nodes from mining on their own chain before syncing
+            // BUG #54 FIX: Don't BLOCK here - just defer mining and let main loop run
             if (IsInitialBlockDownload()) {
                 std::cout << "  [IBD] Node is syncing - mining will start after sync" << std::endl;
-                std::cout << "  [IBD] Waiting for blockchain to sync with network..." << std::endl;
-
-                // Wait for sync (check every second, show progress every 10s)
-                int wait_iterations = 0;
-                while (IsInitialBlockDownload() && g_node_state.running) {
-                    if (++wait_iterations % 10 == 0) {
-                        int height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
-                        int peerHeight = g_peer_manager ? g_peer_manager->GetBestPeerHeight() : 0;
-                        std::cout << "  [IBD] Progress: height=" << height
-                                  << " peers_best=" << peerHeight << std::endl;
-                    }
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                }
-
-                if (!g_node_state.running) {
-                    return 0;  // Shutdown requested during IBD wait
-                }
-                std::cout << "  [IBD] Sync complete!" << std::endl;
+                std::cout << "  [IBD] Main loop will handle block downloads, mining deferred..." << std::endl;
+                mining_deferred_for_ibd = true;
+                // DO NOT block here - main loop needs to run for block downloads!
             } else {
                 std::cout << "  [OK] Already synced with network" << std::endl;
+
+                // BUG #14 FIX: Wait for RandomX to complete initialization before mining
+                if (!randomx_is_ready()) {
+                    std::cout << "  [WAIT] RandomX still initializing, waiting..." << std::endl;
+                    randomx_wait_for_init();
+                    std::cout << "  [OK] RandomX ready for mining" << std::endl;
+                } else {
+                    std::cout << "  [OK] RandomX already ready" << std::endl;
+                }
+
+                // Now safe to start mining (synced with network)
+                unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+                std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
+
+                auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
+                if (!templateOpt) {
+                    std::cerr << "ERROR: Failed to build mining template" << std::endl;
+                    std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
+                    return 1;
+                }
+
+                miner.StartMining(*templateOpt);
+
+                std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
+                std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
             }
-
-            // BUG #14 FIX: Wait for RandomX to complete initialization before mining
-            if (!randomx_is_ready()) {
-                std::cout << "  [WAIT] RandomX still initializing, waiting..." << std::endl;
-                randomx_wait_for_init();
-                std::cout << "  [OK] RandomX ready for mining" << std::endl;
-            } else {
-                std::cout << "  [OK] RandomX already ready" << std::endl;
-            }
-
-            // Now safe to start mining (synced with network)
-            unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
-            std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
-
-            auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
-            if (!templateOpt) {
-                std::cerr << "ERROR: Failed to build mining template" << std::endl;
-                std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
-                return 1;
-            }
-
-            miner.StartMining(*templateOpt);
-
-            std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
-            std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
         }
 
         // Node is ready
@@ -2342,6 +2331,45 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 // Clear flag
                 g_node_state.new_block_found = false;
+            }
+
+            // ========================================
+            // BUG #54 FIX: Deferred mining startup after IBD
+            // ========================================
+            // If mining was deferred due to IBD, check if we can start now
+            if (mining_deferred_for_ibd && !miner.IsMining()) {
+                static int ibd_progress_counter = 0;
+                ibd_progress_counter++;
+
+                if (!IsInitialBlockDownload()) {
+                    // IBD complete - start mining!
+                    std::cout << "[IBD] Sync complete! Starting mining..." << std::endl;
+
+                    // Wait for RandomX if needed
+                    if (!randomx_is_ready()) {
+                        std::cout << "  [WAIT] RandomX still initializing, waiting..." << std::endl;
+                        randomx_wait_for_init();
+                        std::cout << "  [OK] RandomX ready for mining" << std::endl;
+                    }
+
+                    unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+                    std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
+
+                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
+                    if (templateOpt) {
+                        miner.StartMining(*templateOpt);
+                        std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
+                        mining_deferred_for_ibd = false;  // Clear flag
+                    } else {
+                        std::cerr << "[ERROR] Failed to build mining template!" << std::endl;
+                    }
+                } else if (ibd_progress_counter % 10 == 0) {
+                    // Show progress every 10 seconds
+                    int height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+                    int peerHeight = g_peer_manager ? g_peer_manager->GetBestPeerHeight() : 0;
+                    std::cout << "  [IBD] Progress: height=" << height
+                              << " peers_best=" << peerHeight << std::endl;
+                }
             }
 
             // Periodic tasks
