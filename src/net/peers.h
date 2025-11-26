@@ -168,6 +168,11 @@ public:
     };
     Stats GetStats() const;
 
+    // BUG #52: IBD detection support
+    // Returns the highest chain height reported by any connected peer
+    // Used to detect if we're behind the network and should delay mining
+    int GetBestPeerHeight() const;
+
     // Seed nodes
     void InitializeSeedNodes();
     std::vector<NetProtocol::CAddress> GetSeedNodes() const { return seed_nodes; }

@@ -151,15 +151,24 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 {
     uint256 hash = header.GetHash();
 
-    // Debug: Log the actual nBits value we received
-    std::cout << "[HeadersManager] ValidateHeader: hash=" << hash.GetHex().substr(0, 16)
-              << "... nBits=0x" << std::hex << header.nBits << std::dec << std::endl;
+    // BUG #53 DEBUG: Detailed header validation logging
+    std::cout << "[HeadersManager] ValidateHeader:" << std::endl;
+    std::cout << "  version=" << header.nVersion << std::endl;
+    std::cout << "  prevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "  merkleRoot=" << header.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "  nTime=" << header.nTime << std::endl;
+    std::cout << "  nBits=0x" << std::hex << header.nBits << std::dec << std::endl;
+    std::cout << "  nNonce=" << header.nNonce << std::endl;
+    std::cout << "  computed hash=" << hash.GetHex() << std::endl;
 
     // 1. Check Proof of Work
     if (!CheckProofOfWork(hash, header.nBits)) {
-        std::cerr << "[HeadersManager] Invalid PoW for header "
-                  << hash.GetHex().substr(0, 16) << "..."
-                  << " nBits=0x" << std::hex << header.nBits << std::dec << std::endl;
+        // Compute target for debug
+        uint256 target = CompactToBig(header.nBits);
+        std::cerr << "[HeadersManager] Invalid PoW for header " << std::endl;
+        std::cerr << "  hash=   " << hash.GetHex() << std::endl;
+        std::cerr << "  target= " << target.GetHex() << std::endl;
+        std::cerr << "  Hash must be < target to be valid" << std::endl;
         return false;
     }
 

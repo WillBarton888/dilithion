@@ -96,6 +96,62 @@ CHeadersManager* g_headers_manager = nullptr;
 COrphanManager* g_orphan_manager = nullptr;
 CBlockFetcher* g_block_fetcher = nullptr;
 
+/**
+ * BUG #52 FIX: Check if we're in Initial Block Download (IBD) mode
+ *
+ * This is a CHEAP O(1) check that prevents mining during initial sync.
+ * Following Bitcoin Core's pattern (src/validation.cpp IsInitialBlockDownload()).
+ *
+ * A node is in IBD if:
+ *   1. Only genesis block exists (no chain tip)
+ *   2. Chain tip is more than 24 hours old (stale)
+ *   3. Peers report significantly higher chain heights
+ *
+ * Mining is disabled during IBD to prevent fork creation with the network.
+ * This is critical for new nodes joining an existing network.
+ */
+bool IsInitialBlockDownload() {
+    const CBlockIndex* tip = g_chainstate.GetTip();
+    int ourHeight = tip ? tip->nHeight : 0;
+    int bestPeerHeight = g_peer_manager ? g_peer_manager->GetBestPeerHeight() : 0;
+
+    // Check 1: Are peers significantly ahead of us?
+    // This is the PRIMARY IBD check - prevents mining while syncing with network
+    if (bestPeerHeight > ourHeight + 6) {
+        return true;  // Peers have 6+ more blocks - we're behind, sync first
+    }
+
+    // Check 2: If we're at genesis (height 0) and peers are also at genesis,
+    // we're bootstrapping the network - allow mining
+    if (ourHeight == 0 && bestPeerHeight == 0) {
+        return false;  // Bootstrapping - all nodes at genesis, allow mining
+    }
+
+    // Check 3: If we're at genesis but can't determine peer height (no peers yet),
+    // wait a bit for connections before mining
+    if (ourHeight == 0 && !g_peer_manager) {
+        return true;  // No peer manager yet - wait
+    }
+
+    // Check 4: Is tip timestamp recent? (Bitcoin's secondary IBD criterion)
+    // This is O(1) - just compare timestamps, no full chain verification
+    if (tip) {
+        int64_t tipTime = tip->nTime;
+        int64_t now = GetTime();
+        const int64_t MAX_TIP_AGE = 24 * 60 * 60;  // 24 hours (same as Bitcoin)
+
+        if (now - tipTime > MAX_TIP_AGE) {
+            // Tip is stale - but only consider IBD if peers are ahead
+            if (bestPeerHeight > ourHeight) {
+                return true;  // Stale AND peers are ahead - sync first
+            }
+            // Stale but peers not ahead - could be network-wide stale, allow mining
+        }
+    }
+
+    return false;  // Synced - safe to mine
+}
+
 // Signal handler for graceful shutdown
 void SignalHandler(int signal) {
     std::cout << "\nReceived signal " << signal << ", shutting down gracefully..." << std::endl;
@@ -2192,7 +2248,33 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (config.start_mining) {
             g_node_state.mining_enabled = true;  // Track that mining was requested
             std::cout << std::endl;
-            std::cout << "Starting mining..." << std::endl;
+            std::cout << "Mining enabled - checking sync status..." << std::endl;
+
+            // BUG #52 FIX: Check IBD before starting mining (Bitcoin pattern)
+            // This prevents fresh nodes from mining on their own chain before syncing
+            if (IsInitialBlockDownload()) {
+                std::cout << "  [IBD] Node is syncing - mining will start after sync" << std::endl;
+                std::cout << "  [IBD] Waiting for blockchain to sync with network..." << std::endl;
+
+                // Wait for sync (check every second, show progress every 10s)
+                int wait_iterations = 0;
+                while (IsInitialBlockDownload() && g_node_state.running) {
+                    if (++wait_iterations % 10 == 0) {
+                        int height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+                        int peerHeight = g_peer_manager ? g_peer_manager->GetBestPeerHeight() : 0;
+                        std::cout << "  [IBD] Progress: height=" << height
+                                  << " peers_best=" << peerHeight << std::endl;
+                    }
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
+
+                if (!g_node_state.running) {
+                    return 0;  // Shutdown requested during IBD wait
+                }
+                std::cout << "  [IBD] Sync complete!" << std::endl;
+            } else {
+                std::cout << "  [OK] Already synced with network" << std::endl;
+            }
 
             // BUG #14 FIX: Wait for RandomX to complete initialization before mining
             if (!randomx_is_ready()) {
@@ -2203,8 +2285,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "  [OK] RandomX already ready" << std::endl;
             }
 
-            // Mining will start immediately - IBD block download happens continuously in main loop
-            // (Bug #32 fix ensures mining template updates when blocks arrive)
+            // Now safe to start mining (synced with network)
             unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
             std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 

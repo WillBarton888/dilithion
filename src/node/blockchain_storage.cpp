@@ -451,6 +451,11 @@ bool CBlockchainDB::WriteBlockIndex(const uint256& hash, const CBlockIndex& inde
     std::string hashPrevHex = index.header.hashPrevBlock.GetHex();
     data.append(hashPrevHex);
 
+    // BUG #53 FIX: Serialize merkle root (64 bytes hex string) - CRITICAL for header validation
+    // Without this, headers sent to peers have zero merkle root, causing "Invalid PoW" errors
+    std::string hashMerkleHex = index.header.hashMerkleRoot.GetHex();
+    data.append(hashMerkleHex);
+
     // Write data length
     uint32_t data_length = static_cast<uint32_t>(data.size());
     value.append(reinterpret_cast<const char*>(&data_length), sizeof(data_length));
@@ -598,7 +603,15 @@ bool CBlockchainDB::ReadBlockIndex(const uint256& hash, CBlockIndex& index) {
     index.header.nTime = index.nTime;
     index.header.nBits = index.nBits;
     index.header.nNonce = index.nNonce;
-    // hashMerkleRoot is not stored in the index, will be 0 (OK for header-only operations)
+
+    // BUG #53 FIX: Deserialize merkle root (64 bytes hex string)
+    // This is CRITICAL for correct header hash computation when sending headers to peers
+    if (data_offset + 64 <= data.size()) {
+        std::string hashMerkleHex = data.substr(data_offset, 64);
+        index.header.hashMerkleRoot.SetHex(hashMerkleHex);
+        data_offset += 64;
+    }
+    // Note: If merkle root not present (old format), it stays as zero - legacy compatibility
 
     return true;
 }

@@ -396,6 +396,20 @@ CPeerManager::Stats CPeerManager::GetStats() const {
     return stats;
 }
 
+int CPeerManager::GetBestPeerHeight() const {
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // BUG #52: Returns the highest chain height reported by any connected peer
+    // Used for IBD detection - if peers are significantly ahead, we're still syncing
+    int best = 0;
+    for (const auto& pair : peers) {
+        if (pair.second->IsHandshakeComplete() && pair.second->start_height > best) {
+            best = pair.second->start_height;
+        }
+    }
+    return best;
+}
+
 void CPeerManager::InitializeSeedNodes() {
     // Hardcoded seed nodes for Dilithion network
     // These are reliable nodes run by the community
