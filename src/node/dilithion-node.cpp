@@ -1579,8 +1579,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     hashStart.SetHex(Dilithion::g_chainParams->genesisHash);
                     found = true;
                 } else {
-                    std::cout << "[IBD] No common block found with peer " << peer_id << std::endl;
-                    return;
+                    // BUG #59 FIX: Fall back to genesis for divergent chains
+                    std::cout << "[IBD] No common block in locator - falling back to genesis" << std::endl;
+                    hashStart.SetHex(Dilithion::g_chainParams->genesisHash);
+                    found = true;
                 }
             }
 
