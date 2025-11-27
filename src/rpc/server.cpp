@@ -1185,25 +1185,11 @@ std::string CRPCServer::RPC_GetBalance(const std::string& params) {
     // Get available balance (excludes immature coinbase)
     CAmount balance = m_wallet->GetAvailableBalance(*m_utxo_set, currentHeight);
 
-    // Get all unspent outputs to calculate unconfirmed and immature
-    std::vector<CWalletTx> utxos = m_wallet->ListUnspentOutputs(*m_utxo_set, currentHeight);
+    // Get immature coinbase balance (not yet 100 confirmations)
+    CAmount immatureBalance = m_wallet->GetImmatureBalance(*m_utxo_set, currentHeight);
 
-    CAmount unconfirmedBalance = 0;  // For future: transactions with 0 confirmations
-    CAmount immatureBalance = 0;     // Coinbase outputs not yet mature
-
-    // Calculate immature balance from coinbase UTXOs
-    for (const auto& utxo : utxos) {
-        CUTXOEntry entry;
-        COutPoint outpoint(utxo.txid, utxo.vout);
-        if (m_utxo_set->GetUTXO(outpoint, entry)) {
-            if (entry.fCoinBase) {
-                unsigned int confirmations = currentHeight - entry.nHeight + 1;
-                if (confirmations < 100) {  // COINBASE_MATURITY
-                    immatureBalance += utxo.nValue;
-                }
-            }
-        }
-    }
+    // For future: transactions with 0 confirmations
+    CAmount unconfirmedBalance = 0;
 
     std::ostringstream oss;
     oss << "{";

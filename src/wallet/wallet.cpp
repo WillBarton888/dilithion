@@ -1539,24 +1539,35 @@ bool CWallet::Load(const std::string& filename) {
             usedIVs.insert(encKey.vchIV);
 
             // FIX-008 (CRYPT-007): Load MAC for authenticated encryption
-            // For legacy wallets (v2 without MAC), this field won't exist
+            // v3 format always writes macLen (even if 0), so don't seek back
+            // For legacy v1/v2 wallets without MAC, this field won't exist
             uint32_t macLen = 0;
-            std::streampos pos_before = file.tellg();
-            file.read(reinterpret_cast<char*>(&macLen), sizeof(macLen));
-            if (file.good() && macLen > 0 && macLen <= 64) {  // HMAC-SHA3-512 is 64 bytes
-                encKey.vchMAC.resize(macLen);
-                file.read(reinterpret_cast<char*>(encKey.vchMAC.data()), macLen);
-                if (!file.good()) {
-                    // Failed to read MAC - might be EOF, treat as legacy wallet
-                    file.clear();  // Clear error state
-                    file.seekg(pos_before);  // Restore position
-                    encKey.vchMAC.clear();
+            if (version >= 3) {
+                // v3: macLen is always present
+                file.read(reinterpret_cast<char*>(&macLen), sizeof(macLen));
+                if (!file.good()) return false;  // SEC-001: Check I/O error
+                if (macLen > 0 && macLen <= 64) {  // HMAC-SHA3-512 is 64 bytes
+                    encKey.vchMAC.resize(macLen);
+                    file.read(reinterpret_cast<char*>(encKey.vchMAC.data()), macLen);
+                    if (!file.good()) return false;  // SEC-001: Check I/O error
                 }
             } else {
-                // No MAC or invalid length - legacy wallet
-                file.clear();  // Clear error state if EOF
-                file.seekg(pos_before);  // Restore position
-                encKey.vchMAC.clear();
+                // Legacy v1/v2: try to read macLen, seek back if not present
+                std::streampos pos_before = file.tellg();
+                file.read(reinterpret_cast<char*>(&macLen), sizeof(macLen));
+                if (file.good() && macLen > 0 && macLen <= 64) {
+                    encKey.vchMAC.resize(macLen);
+                    file.read(reinterpret_cast<char*>(encKey.vchMAC.data()), macLen);
+                    if (!file.good()) {
+                        file.clear();
+                        file.seekg(pos_before);
+                        encKey.vchMAC.clear();
+                    }
+                } else {
+                    file.clear();
+                    file.seekg(pos_before);
+                    encKey.vchMAC.clear();
+                }
             }
 
             // Create address from public key
@@ -1694,10 +1705,12 @@ bool CWallet::Load(const std::string& filename) {
                    std::min(hmac_key.size(), temp_masterKey.vchSalt.size()));
         } else {
             // For unencrypted wallets, derive HMAC key from wallet content (deterministic)
-            // Use SHA3-256 of (first address + default address) as key
+            // FIX: Use first address from temp_mapKeys (sorted order) for consistency between Save and Load
+            // temp_vchAddresses is file order, but temp_mapKeys is sorted - use sorted order for determinism
             std::vector<uint8_t> key_material;
-            if (!temp_vchAddresses.empty()) {
-                std::vector<uint8_t> addr_data = temp_vchAddresses[0].GetData();
+            if (!temp_mapKeys.empty()) {
+                // Use first sorted address (deterministic across Save/Load)
+                std::vector<uint8_t> addr_data = temp_mapKeys.begin()->first.GetData();
                 key_material.insert(key_material.end(), addr_data.begin(), addr_data.end());
             }
             std::vector<uint8_t> default_data = temp_defaultAddress.GetData();
@@ -1714,6 +1727,7 @@ bool CWallet::Load(const std::string& filename) {
 
         // Constant-time comparison to prevent timing attacks (FIX-001)
         if (!RPCAuth::SecureCompare(stored_hmac.data(), computed_hmac.data(), WALLET_FILE_HMAC_SIZE)) {
+            std::cerr << "ERROR: HMAC verification failed - file integrity check failed" << std::endl;
             return false;  // HMAC verification failed - file has been tampered with!
         }
 
@@ -2089,10 +2103,12 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         memcpy(hmac_key.data(), masterKey.vchSalt.data(), std::min(hmac_key.size(), masterKey.vchSalt.size()));
     } else {
         // For unencrypted wallets, derive HMAC key from wallet content (deterministic)
-        // Use SHA3-256 of (first address + default address) as key
+        // FIX: Use first address from mapKeys (sorted order) for consistency between Save and Load
+        // vchAddresses is generation order, but mapKeys is sorted - use sorted order for determinism
         std::vector<uint8_t> key_material;
-        if (!vchAddresses.empty()) {
-            std::vector<uint8_t> addr_data = vchAddresses[0].GetData();
+        if (!mapKeys.empty()) {
+            // Use first sorted address (deterministic across Save/Load)
+            std::vector<uint8_t> addr_data = mapKeys.begin()->first.GetData();
             key_material.insert(key_material.end(), addr_data.begin(), addr_data.end());
         }
         std::vector<uint8_t> default_data = defaultAddress.GetData();
@@ -2727,6 +2743,44 @@ CAmount CWallet::GetAvailableBalance(CUTXOSet& utxo_set, unsigned int current_he
     }
 
     return balance;
+}
+
+CAmount CWallet::GetImmatureBalance(CUTXOSet& utxo_set, unsigned int current_height) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    CAmount immatureBalance = 0;
+
+    // Coinbase maturity requirement
+    const unsigned int COINBASE_MATURITY = 100;
+
+    for (const auto& pair : mapWalletTx) {
+        const CWalletTx& wtx = pair.second;
+
+        // Skip spent outputs
+        if (wtx.fSpent) {
+            continue;
+        }
+
+        // Verify UTXO still exists in global set
+        COutPoint outpoint(wtx.txid, wtx.vout);
+        CUTXOEntry entry;
+        if (!utxo_set.GetUTXO(outpoint, entry)) {
+            continue;  // UTXO was spent elsewhere
+        }
+
+        // Only count immature coinbase outputs
+        if (entry.fCoinBase) {
+            if (current_height < entry.nHeight + COINBASE_MATURITY) {
+                // Add to immature balance (with overflow protection)
+                if (immatureBalance > std::numeric_limits<CAmount>::max() - wtx.nValue) {
+                    continue;  // Overflow would occur
+                }
+                immatureBalance += wtx.nValue;
+            }
+        }
+    }
+
+    return immatureBalance;
 }
 
 std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned int current_height, unsigned int min_confirmations) const {

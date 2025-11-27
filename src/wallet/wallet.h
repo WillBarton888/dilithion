@@ -887,6 +887,18 @@ public:
     CAmount GetAvailableBalance(class CUTXOSet& utxo_set, unsigned int current_height) const;
 
     /**
+     * Get wallet's immature coinbase balance
+     *
+     * Calculates total balance from immature coinbase outputs (not yet 100 confirmations).
+     * Thread-safe.
+     *
+     * @param utxo_set UTXO set to query
+     * @param current_height Current blockchain height (for maturity checks)
+     * @return Total immature coinbase balance in ions
+     */
+    CAmount GetImmatureBalance(class CUTXOSet& utxo_set, unsigned int current_height) const;
+
+    /**
      * List all unspent transaction outputs for this wallet
      *
      * Returns only mature, spendable UTXOs (filters out immature coinbase).
