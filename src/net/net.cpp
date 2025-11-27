@@ -22,6 +22,9 @@
 #undef SendMessage
 #else
 #include <errno.h>
+#include <netdb.h>      // For gethostname, getaddrinfo
+#include <unistd.h>     // For gethostname
+#include <arpa/inet.h>  // For inet_ntop
 #endif
 
 // NET-003 FIX: Define consensus limits to prevent integer overflow in vector resize
@@ -1106,11 +1109,37 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
                                     addr.ip[14],
                                     addr.ip[15]);
 
-    // ANTI-SELF-CONNECTION FIX (Bug #20): Prevent nodes from connecting to themselves
+    // ANTI-SELF-CONNECTION FIX (Bug #20 + Bug #58): Prevent nodes from connecting to themselves
     // Skip localhost addresses
     if (ip_str == "127.0.0.1" || ip_str == "::1" || ip_str == "0.0.0.0") {
         std::cout << "[P2P] Skipping localhost address: " << ip_str << ":" << addr.port << std::endl;
         return -1;
+    }
+
+    // BUG #58 FIX: Check if target IP matches any of our local interface IPs
+    // This catches self-connection attempts BEFORE making the connection (more efficient)
+    char hostname[256];
+    if (gethostname(hostname, sizeof(hostname)) == 0) {
+        struct addrinfo hints, *result;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+
+        if (getaddrinfo(hostname, nullptr, &hints, &result) == 0) {
+            for (struct addrinfo* p = result; p != nullptr; p = p->ai_next) {
+                struct sockaddr_in* addr_in = (struct sockaddr_in*)p->ai_addr;
+                char local_ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &addr_in->sin_addr, local_ip, INET_ADDRSTRLEN);
+
+                if (ip_str == local_ip) {
+                    std::cout << "[P2P] Skipping self-connection to " << ip_str << ":" << addr.port
+                              << " (matches local interface " << local_ip << ")" << std::endl;
+                    freeaddrinfo(result);
+                    return -1;
+                }
+            }
+            freeaddrinfo(result);
+        }
     }
 
     // Check if we're already connected to this exact address (prevents duplicate connections)

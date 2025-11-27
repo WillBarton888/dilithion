@@ -64,6 +64,8 @@
     #include <windows.h>    // For GlobalMemoryStatusEx (Bug #23 fix)
 #else
     #include <arpa/inet.h>  // For inet_pton on Unix
+    #include <netdb.h>      // For gethostname, getaddrinfo
+    #include <unistd.h>     // For gethostname
 #endif
 
 // Windows API macro conflicts - undef after including headers
@@ -2019,6 +2021,56 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                         std::cout << "[HANDSHAKE-DIAG] Accepted routable inbound peer: " << peer_addr
                                   << " (0x" << std::hex << ipv4 << std::dec << ")" << std::endl;
+
+                        // BUG #58 FIX: Check for self-connection on ACCEPT side
+                        // When seed nodes try to connect to themselves via external IP,
+                        // the outbound check may happen AFTER accept() creates a peer entry.
+                        // We need to detect and reject self-connections on the inbound side too.
+                        //
+                        // Detection method: Get our own local addresses using gethostname + getaddrinfo
+                        // and check if the peer IP matches any of our local interface IPs.
+                        bool isSelfConnection = false;
+
+                        // Method 1: Check if peer IP matches any local interface IP
+                        // Get local hostname and resolve to IPs
+                        char hostname[256];
+                        if (gethostname(hostname, sizeof(hostname)) == 0) {
+                            struct addrinfo hints, *result;
+                            memset(&hints, 0, sizeof(hints));
+                            hints.ai_family = AF_INET;
+                            hints.ai_socktype = SOCK_STREAM;
+
+                            if (getaddrinfo(hostname, nullptr, &hints, &result) == 0) {
+                                for (struct addrinfo* p = result; p != nullptr; p = p->ai_next) {
+                                    struct sockaddr_in* addr_in = (struct sockaddr_in*)p->ai_addr;
+                                    char local_ip[INET_ADDRSTRLEN];
+                                    inet_ntop(AF_INET, &addr_in->sin_addr, local_ip, INET_ADDRSTRLEN);
+
+                                    if (peer_addr == local_ip) {
+                                        isSelfConnection = true;
+                                        std::cout << "[P2P] Detected INBOUND self-connection from " << peer_addr
+                                                  << " (matches local interface " << local_ip << ") - rejecting" << std::endl;
+                                        break;
+                                    }
+                                }
+                                freeaddrinfo(result);
+                            }
+                        }
+
+                        // Method 2: Also check if peer IP matches our socket's local address
+                        // (handles cases where hostname resolution doesn't work)
+                        if (!isSelfConnection) {
+                            std::string socket_local_ip = client->GetLocalAddress();
+                            if (!socket_local_ip.empty() && socket_local_ip == peer_addr) {
+                                isSelfConnection = true;
+                                std::cout << "[P2P] Detected INBOUND self-connection from " << peer_addr
+                                          << " (matches socket local IP) - rejecting" << std::endl;
+                            }
+                        }
+
+                        if (isSelfConnection) {
+                            continue; // Drop self-connection
+                        }
                     } else {
                         std::cout << "[P2P] ERROR: Failed to parse inbound peer IPv4: " << peer_addr
                                   << " (invalid format)" << std::endl;
