@@ -11,6 +11,10 @@
 #include <util/base58.h>
 #include <node/utxo_set.h>
 #include <node/mempool.h>
+#include <node/blockchain_storage.h>  // BUG #56 FIX: For CBlockchainDB (RescanFromHeight)
+#include <primitives/block.h>  // BUG #56 FIX: For CBlock (blockConnected/blockDisconnected)
+#include <primitives/transaction.h>  // BUG #56 FIX: For CTransaction deserialization
+#include <consensus/chain.h>  // BUG #56 FIX: For CChainState (RescanFromHeight)
 #include <consensus/tx_validation.h>
 #include <consensus/sighash.h>  // WALLET-015 FIX: SIGHASH types
 #include <core/chainparams.h>  // CHAIN-ID FIX: For replay protection
@@ -167,6 +171,7 @@ CWallet::CWallet()
       nUnlockFailedAttempts(0),  // WL-011: Initialize rate limiting
       nLastFailedUnlock(std::chrono::steady_clock::time_point::min()),
       m_autoSave(false),
+      m_bestBlockHeight(-1),  // BUG #56 FIX: Initialize to -1 (not synced)
       m_wal(nullptr),  // PERSIST-008 FIX: Initialize WAL
       fIsHDWallet(false),
       fHDMasterKeyEncrypted(false),
@@ -176,6 +181,7 @@ CWallet::CWallet()
       nHDInternalChainIndex(0)
 {
     vMasterKey.resize(WALLET_CRYPTO_KEY_SIZE);
+    // BUG #56 FIX: m_bestBlockHash is default-initialized to null hash
 }
 
 CWallet::~CWallet() {
@@ -477,6 +483,214 @@ size_t CWallet::CleanupStaleUTXOs(CUTXOSet& utxo_set) {
 }
 
 // ============================================================================
+// BUG #56 FIX: Chain Notifications Implementation (Bitcoin Core Pattern)
+// ============================================================================
+
+void CWallet::blockConnected(const CBlock& block, int height) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Process all transactions in the block
+    ProcessBlockTransactionsUnlocked(block, height, true /* connecting */);
+
+    // Update best block pointer and persist to disk
+    SetLastBlockProcessedUnlocked(block.GetHash(), height);
+
+    // Periodic persistence (Bitcoin Core: every 144 blocks = ~1 day)
+    // This ensures progress is saved even if no wallet transactions found
+    static const int WRITE_INTERVAL = 144;
+    if (height % WRITE_INTERVAL == 0 && m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+}
+
+void CWallet::blockDisconnected(const CBlock& block, int height) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Process transactions in REVERSE to undo the effects
+    ProcessBlockTransactionsUnlocked(block, height, false /* disconnecting */);
+
+    // Update best block pointer to previous block
+    // Note: We use hashPrevBlock from the disconnected block
+    SetLastBlockProcessedUnlocked(block.hashPrevBlock, height - 1);
+}
+
+void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, bool connecting) {
+    // Note: Caller must hold cs_wallet lock
+
+    // Build set of wallet pubkey hashes for fast lookup
+    std::set<std::vector<uint8_t>> walletPubKeyHashes;
+    for (const auto& addr : vchAddresses) {
+        std::vector<uint8_t> pkh = GetPubKeyHashFromAddress(addr);
+        if (!pkh.empty()) {
+            walletPubKeyHashes.insert(pkh);
+        }
+    }
+
+    if (walletPubKeyHashes.empty()) {
+        // No addresses in wallet, nothing to process
+        return;
+    }
+
+    // Parse transactions from block.vtx
+    // block.vtx contains multiple serialized transactions concatenated together
+    const uint8_t* ptr = block.vtx.data();
+    const uint8_t* end = block.vtx.data() + block.vtx.size();
+
+    while (ptr < end) {
+        // Deserialize one transaction
+        CTransaction tx;
+        size_t bytesConsumed = 0;
+        std::string deserializeError;
+
+        if (!tx.Deserialize(ptr, end - ptr, &deserializeError, &bytesConsumed)) {
+            // Failed to parse transaction - skip rest of this block
+            break;
+        }
+
+        // Move pointer forward
+        ptr += bytesConsumed;
+
+        if (connecting) {
+            // Block connected: add outputs, mark inputs spent
+
+            // Check outputs - add any that belong to wallet
+            for (uint32_t i = 0; i < tx.vout.size(); ++i) {
+                const CTxOut& out = tx.vout[i];
+                std::vector<uint8_t> scriptPKH = WalletCrypto::ExtractPubKeyHash(out.scriptPubKey);
+
+                if (!scriptPKH.empty() && walletPubKeyHashes.count(scriptPKH) > 0) {
+                    // This output belongs to our wallet
+                    // Find the corresponding address
+                    for (const auto& addr : vchAddresses) {
+                        std::vector<uint8_t> addrPKH = GetPubKeyHashFromAddress(addr);
+                        if (addrPKH == scriptPKH) {
+                            AddTxOutUnlocked(tx.GetHash(), i, out.nValue, addr, height);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Check inputs - mark any wallet UTXOs as spent
+            if (!tx.IsCoinBase()) {  // Coinbase has no real inputs
+                for (const auto& in : tx.vin) {
+                    COutPoint outpoint(in.prevout.hash, in.prevout.n);
+                    auto it = mapWalletTx.find(outpoint);
+                    if (it != mapWalletTx.end() && !it->second.fSpent) {
+                        it->second.fSpent = true;
+                    }
+                }
+            }
+        } else {
+            // Block disconnected: remove outputs, restore inputs
+
+            // Restore spent inputs (mark as unspent)
+            if (!tx.IsCoinBase()) {
+                for (const auto& in : tx.vin) {
+                    COutPoint outpoint(in.prevout.hash, in.prevout.n);
+                    auto it = mapWalletTx.find(outpoint);
+                    if (it != mapWalletTx.end() && it->second.fSpent) {
+                        // Only unspend if this was the transaction that spent it
+                        // Note: For full correctness we'd need to track which tx spent it
+                        // For now, we mark as unspent and let CleanupStaleUTXOs fix any issues
+                        it->second.fSpent = false;
+                    }
+                }
+            }
+
+            // Remove outputs that were added by this block
+            for (uint32_t i = 0; i < tx.vout.size(); ++i) {
+                COutPoint outpoint(tx.GetHash(), i);
+                auto it = mapWalletTx.find(outpoint);
+                if (it != mapWalletTx.end() && it->second.nHeight == static_cast<uint32_t>(height)) {
+                    // This output was added at this height, remove it
+                    mapWalletTx.erase(it);
+                }
+            }
+        }
+    }
+}
+
+void CWallet::SetLastBlockProcessedUnlocked(const uint256& hash, int height) {
+    // Note: Caller must hold cs_wallet lock
+
+    m_bestBlockHash = hash;
+    m_bestBlockHeight = height;
+
+    // Auto-save to persist the best block pointer
+    // This is critical for crash recovery - ensures we resume from correct block
+    if (m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+}
+
+uint256 CWallet::GetBestBlockHash() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return m_bestBlockHash;
+}
+
+int32_t CWallet::GetBestBlockHeight() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return m_bestBlockHeight;
+}
+
+bool CWallet::RescanFromHeight(CChainState& chainstate, CBlockchainDB& blockchain,
+                               int startHeight, int endHeight) {
+    std::cout << "[WALLET] Rescanning blocks " << startHeight << " to " << endHeight << "..." << std::endl;
+
+    int blocksProcessed = 0;
+    int txsFound = 0;
+
+    for (int height = startHeight; height <= endHeight; ++height) {
+        // Get block hashes at this height (typically just one on main chain)
+        std::vector<uint256> blockHashes = chainstate.GetBlocksAtHeight(height);
+        if (blockHashes.empty()) {
+            std::cerr << "[WALLET] Failed to get block hash at height " << height << std::endl;
+            return false;
+        }
+
+        // Use the first hash (main chain block)
+        uint256 blockHash = blockHashes[0];
+
+        // Load the block
+        CBlock block;
+        if (!blockchain.ReadBlock(blockHash, block)) {
+            std::cerr << "[WALLET] Failed to load block at height " << height << std::endl;
+            return false;
+        }
+
+        // Process the block (this acquires and releases cs_wallet)
+        {
+            std::lock_guard<std::mutex> lock(cs_wallet);
+
+            size_t txsBefore = mapWalletTx.size();
+            ProcessBlockTransactionsUnlocked(block, height, true);
+            size_t txsAfter = mapWalletTx.size();
+
+            if (txsAfter > txsBefore) {
+                txsFound += (txsAfter - txsBefore);
+            }
+
+            // Update best block pointer (persists to disk)
+            SetLastBlockProcessedUnlocked(blockHash, height);
+        }
+
+        blocksProcessed++;
+
+        // Progress report every 100 blocks
+        if (blocksProcessed % 100 == 0) {
+            std::cout << "[WALLET] Processed " << blocksProcessed << " blocks, "
+                      << txsFound << " wallet outputs found..." << std::endl;
+        }
+    }
+
+    std::cout << "[WALLET] Rescan complete: " << blocksProcessed << " blocks, "
+              << txsFound << " wallet outputs found" << std::endl;
+
+    return true;
+}
+
+// ============================================================================
 
 size_t CWallet::GetKeyPoolSize() const {
     std::lock_guard<std::mutex> lock(cs_wallet);
@@ -490,6 +704,11 @@ size_t CWallet::GetKeyPoolSize() const {
 
 bool CWallet::IsCrypted() const {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    return IsCryptedUnlocked();
+}
+
+// Private helper - assumes caller holds cs_wallet lock
+bool CWallet::IsCryptedUnlocked() const {
     // Wallet is encrypted if master key has been set up
     return masterKey.IsValid();
 }
@@ -1031,6 +1250,9 @@ bool CWallet::Load(const std::string& filename) {
     CAddress temp_defaultAddress;
     CMasterKey temp_masterKey;
     bool temp_fWalletUnlocked = true;
+    // BUG #56 FIX: Best block pointer temp variables
+    uint256 temp_bestBlockHash;
+    int32_t temp_bestBlockHeight = -1;
 
     // Read header
     char magic[8];
@@ -1425,6 +1647,23 @@ bool CWallet::Load(const std::string& filename) {
         temp_mapWalletTx[outpoint] = wtx;
     }
 
+    // BUG #56 FIX: Read best block pointer (Bitcoin Core pattern)
+    // Note: For backwards compatibility with older wallet files, we treat read failure
+    // as height -1 (triggers full rescan on startup)
+    if (file.good()) {
+        file.read(reinterpret_cast<char*>(temp_bestBlockHash.begin()), 32);
+        if (file.good()) {
+            file.read(reinterpret_cast<char*>(&temp_bestBlockHeight), sizeof(temp_bestBlockHeight));
+            // If read fails, we'll use defaults (height -1 = full rescan)
+            // This ensures backwards compatibility with pre-BUG#56 wallet files
+        }
+        // Note: It's OK if these reads fail for old wallet formats
+        // Clear the EOF/fail bits so subsequent good() checks work
+        if (file.eof()) {
+            file.clear();  // Clear EOF state for v1/v2 formats without best block
+        }
+    }
+
     // SEC-001 FIX: Only if ALL data loaded successfully, swap into wallet
     // This ensures atomic load - either everything loads or nothing changes
     if (!file.good()) {
@@ -1528,6 +1767,10 @@ bool CWallet::Load(const std::string& filename) {
     nHDInternalChainIndex = temp_nHDInternalChainIndex;
     mapAddressToPath = std::move(temp_mapAddressToPath);
     mapPathToAddress = std::move(temp_mapPathToAddress);
+
+    // BUG #56 FIX: Copy best block pointer
+    m_bestBlockHash = temp_bestBlockHash;
+    m_bestBlockHeight = temp_bestBlockHeight;
 
     m_walletFile = filename;  // Set wallet file path only on successful load
 
@@ -1796,6 +2039,13 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         file.write(reinterpret_cast<const char*>(&wtx.nHeight), sizeof(wtx.nHeight));
         if (!file.good()) return false;  // SEC-001: Check I/O error
     }
+
+    // BUG #56 FIX: Write best block pointer (Bitcoin Core pattern)
+    // This enables incremental rescanning on startup instead of full UTXO scan
+    file.write(reinterpret_cast<const char*>(m_bestBlockHash.begin()), 32);
+    if (!file.good()) return false;
+    file.write(reinterpret_cast<const char*>(&m_bestBlockHeight), sizeof(m_bestBlockHeight));
+    if (!file.good()) return false;
 
     // FIX-011 (PERSIST-001): Compute and write file integrity HMAC
     // HMAC covers all data from HMAC field onwards (includes salt and all wallet data)
@@ -2102,7 +2352,8 @@ bool CWallet::ValidateConsistency(std::string& error_out) const {
     // ========================================================================
     // When encrypted, verify key/address counts match
 
-    if (IsCrypted()) {
+    // BUG #56 FIX: Use IsCryptedUnlocked() to avoid deadlock (we already hold cs_wallet)
+    if (IsCryptedUnlocked()) {
         // Encrypted wallet should have no unencrypted keys
         if (!mapKeys.empty()) {
             error_out = "[KEY_COUNT] Encrypted wallet has " +

@@ -509,9 +509,18 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // Step 3: Mark block as connected
     pindex->nStatus |= CBlockIndex::BLOCK_VALID_CHAIN;
 
-    // Future enhancements:
-    // - Update wallet balances
-    // - Notify subscribers of new block
+    // BUG #56 FIX: Notify block connect callbacks (wallet update)
+    // NOTE: We don't hold cs_main during callbacks to prevent deadlock
+    // The wallet has its own lock (cs_wallet)
+    for (size_t i = 0; i < m_blockConnectCallbacks.size(); ++i) {
+        try {
+            m_blockConnectCallbacks[i](block, pindex->nHeight);
+        } catch (const std::exception& e) {
+            std::cerr << "[Chain] ERROR: Block connect callback " << i << " threw exception: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[Chain] ERROR: Block connect callback " << i << " threw unknown exception" << std::endl;
+        }
+    }
 
     return true;
 }
@@ -558,9 +567,18 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex) {
     // Step 5: Unmark block as on main chain
     pindex->nStatus &= ~CBlockIndex::BLOCK_VALID_CHAIN;
 
-    // Future enhancements:
-    // - Return transactions to mempool
-    // - Update wallet balances
+    // BUG #56 FIX: Notify block disconnect callbacks (wallet update)
+    // NOTE: We don't hold cs_main during callbacks to prevent deadlock
+    // The wallet has its own lock (cs_wallet)
+    for (size_t i = 0; i < m_blockDisconnectCallbacks.size(); ++i) {
+        try {
+            m_blockDisconnectCallbacks[i](block, pindex->nHeight);
+        } catch (const std::exception& e) {
+            std::cerr << "[Chain] ERROR: Block disconnect callback " << i << " threw exception: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[Chain] ERROR: Block disconnect callback " << i << " threw unknown exception" << std::endl;
+        }
+    }
 
     return true;
 }
@@ -630,4 +648,18 @@ void CChainState::NotifyTipUpdate(const CBlockIndex* pindex) {
             // Continue executing other callbacks even if one fails
         }
     }
+}
+
+// BUG #56 FIX: Block connect/disconnect callback registration
+
+void CChainState::RegisterBlockConnectCallback(BlockConnectCallback callback) {
+    std::lock_guard<std::mutex> lock(cs_main);
+    m_blockConnectCallbacks.push_back(callback);
+    std::cout << "[Chain] Registered block connect callback (total: " << m_blockConnectCallbacks.size() << ")" << std::endl;
+}
+
+void CChainState::RegisterBlockDisconnectCallback(BlockDisconnectCallback callback) {
+    std::lock_guard<std::mutex> lock(cs_main);
+    m_blockDisconnectCallbacks.push_back(callback);
+    std::cout << "[Chain] Registered block disconnect callback (total: " << m_blockDisconnectCallbacks.size() << ")" << std::endl;
 }

@@ -234,6 +234,16 @@ private:
     std::string m_walletFile;  // Current wallet file path
     bool m_autoSave;           // Auto-save after changes
 
+    // ============================================================================
+    // BUG #56 FIX: Best Block Tracking (Bitcoin Core Pattern - PR #30221)
+    // ============================================================================
+    // Tracks the last block the wallet was synced to, enabling:
+    // - Incremental rescans on startup (not full UTXO scan)
+    // - Proper crash recovery (resume from last persisted block)
+    // - Correct reorg handling (blockDisconnected updates this)
+    uint256 m_bestBlockHash;      // Hash of last block wallet was synced to
+    int32_t m_bestBlockHeight;    // Height of last block (-1 = not initialized)
+
     // PERSIST-008 FIX: Write-Ahead Log for atomic multi-step operations
     std::unique_ptr<CWalletWAL> m_wal;  // WAL instance (nullptr if not initialized)
 
@@ -273,6 +283,7 @@ private:
     std::vector<uint8_t> GetPublicKeyUnlocked() const;
     bool GetKeyUnlocked(const CAddress& address, CKey& keyOut) const;
     bool IsUnlockValid() const;  // VULN-002 FIX: Check if unlock hasn't expired
+    bool IsCryptedUnlocked() const;  // BUG #56 FIX: Check encryption without lock (avoids deadlock in ValidateConsistency)
     // FIX-006 (WALLET-002): Internal helper to add UTXO without acquiring lock (avoids deadlock in ScanUTXOs)
     bool AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValue,
                           const CAddress& address, uint32_t nHeight);
@@ -283,6 +294,31 @@ private:
     bool DecryptHDMasterKey(CHDExtendedKey& decrypted) const;
     bool EncryptMnemonic(const std::string& mnemonic);
     bool DecryptMnemonic(std::string& mnemonic) const;
+
+    // ============================================================================
+    // BUG #56 FIX: Block processing helpers (Bitcoin Core pattern)
+    // ============================================================================
+
+    /**
+     * Process all transactions in a block for wallet relevance
+     * Called by blockConnected/blockDisconnected
+     *
+     * @param block The block to process
+     * @param height Block height
+     * @param connecting True if block is being connected, false if disconnecting
+     * @note Assumes caller holds cs_wallet lock
+     */
+    void ProcessBlockTransactionsUnlocked(const class CBlock& block, int height, bool connecting);
+
+    /**
+     * Update best block pointer and persist to disk (Bitcoin Core: SetLastBlockProcessed)
+     * This is the atomic update that ensures crash recovery works correctly
+     *
+     * @param hash Block hash
+     * @param height Block height
+     * @note Assumes caller holds cs_wallet lock
+     */
+    void SetLastBlockProcessedUnlocked(const uint256& hash, int height);
 
 public:
     CWallet();
@@ -370,6 +406,68 @@ public:
      * Thread-safe: Acquires cs_wallet lock
      */
     size_t CleanupStaleUTXOs(class CUTXOSet& utxo_set);
+
+    // ============================================================================
+    // BUG #56 FIX: Chain Notifications (Bitcoin Core Pattern - PR #30221)
+    // ============================================================================
+    // These callbacks are invoked by CChainState when blocks are connected/disconnected
+    // Following Bitcoin Core's interfaces::Chain::Notifications pattern
+
+    /**
+     * Called when a new block is connected to the main chain
+     *
+     * Processes all transactions in the block:
+     * - Adds outputs belonging to wallet addresses
+     * - Marks wallet inputs as spent
+     * - Updates best block pointer (persists to disk)
+     *
+     * @param block The connected block
+     * @param height Block height
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    void blockConnected(const class CBlock& block, int height);
+
+    /**
+     * Called when a block is disconnected from the main chain (reorg)
+     *
+     * Reverses the effects of blockConnected:
+     * - Removes outputs added by this block
+     * - Marks wallet inputs as unspent
+     * - Updates best block pointer to previous block
+     *
+     * @param block The disconnected block
+     * @param height Block height being disconnected
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    void blockDisconnected(const class CBlock& block, int height);
+
+    /**
+     * Get the best block hash the wallet is synced to
+     * @return Block hash, or null hash if not initialized
+     */
+    uint256 GetBestBlockHash() const;
+
+    /**
+     * Get the best block height the wallet is synced to
+     * @return Block height, or -1 if not initialized
+     */
+    int32_t GetBestBlockHeight() const;
+
+    /**
+     * Rescan blocks in a height range for wallet transactions
+     *
+     * True incremental scanning: loads each block and processes transactions
+     * instead of scanning entire UTXO set. Updates best block after each block.
+     *
+     * @param chainstate Chain state for block index lookups
+     * @param blockchain Database to read block data from
+     * @param startHeight First block height to scan (inclusive)
+     * @param endHeight Last block height to scan (inclusive)
+     * @return true if rescan completed successfully
+     * Thread-safe: Acquires cs_wallet lock per block
+     */
+    bool RescanFromHeight(class CChainState& chainstate, class CBlockchainDB& blockchain,
+                          int startHeight, int endHeight);
 
     /**
      * Get number of keys in wallet

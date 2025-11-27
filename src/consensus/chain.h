@@ -47,6 +47,13 @@ private:
     using TipUpdateCallback = std::function<void(const CBlockIndex*)>;
     std::vector<TipUpdateCallback> m_tipCallbacks;
 
+    // BUG #56 FIX: Block connect/disconnect callbacks (Bitcoin Core pattern)
+    // Allows wallet to be notified when blocks are connected/disconnected
+    using BlockConnectCallback = std::function<void(const CBlock&, int height)>;
+    using BlockDisconnectCallback = std::function<void(const CBlock&, int height)>;
+    std::vector<BlockConnectCallback> m_blockConnectCallbacks;
+    std::vector<BlockDisconnectCallback> m_blockDisconnectCallbacks;
+
 public:
     CChainState();
     ~CChainState();
@@ -162,6 +169,22 @@ public:
      * @param callback Function to call with new tip index
      */
     void RegisterTipUpdateCallback(TipUpdateCallback callback);
+
+    /**
+     * BUG #56 FIX: Register callback for block connect events
+     * Called when a block is connected to the main chain
+     *
+     * @param callback Function to call with block data and height
+     */
+    void RegisterBlockConnectCallback(BlockConnectCallback callback);
+
+    /**
+     * BUG #56 FIX: Register callback for block disconnect events
+     * Called when a block is disconnected from the main chain (reorg)
+     *
+     * @param callback Function to call with block data and height
+     */
+    void RegisterBlockDisconnectCallback(BlockDisconnectCallback callback);
 
 private:
     /**

@@ -56,6 +56,7 @@
 #include <atomic>
 #include <optional>
 #include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
+#include <filesystem>  // BUG #56: For wallet file existence check
 
 #ifdef _WIN32
     #include <winsock2.h>   // For socket functions
@@ -1661,9 +1662,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "  [OK] Mining controller initialized (" << mining_threads << " threads)" << std::endl;
 
         // Phase 4: Initialize wallet (before mining callback setup)
+        // BUG #56 FIX: Full wallet persistence with Bitcoin Core pattern
         std::cout << "Initializing wallet..." << std::endl;
         CWallet wallet;
         g_node_state.wallet = &wallet;
+
+        // Build wallet file path
+        std::string wallet_path = config.datadir + "/wallet.dat";
+        std::cout << "  Wallet file: " << wallet_path << std::endl;
+
+        // Try to load existing wallet from disk
+        bool wallet_loaded = false;
+        if (std::filesystem::exists(wallet_path)) {
+            std::cout << "  Loading existing wallet..." << std::endl;
+            std::cout.flush();
+            if (wallet.Load(wallet_path)) {
+                wallet_loaded = true;
+                std::cout << "  [OK] Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
+                std::cout << "       Best block: height " << wallet.GetBestBlockHeight() << std::endl;
+                std::cout.flush();
+            } else {
+                std::cerr << "  WARNING: Failed to load wallet, creating new one" << std::endl;
+                std::cerr.flush();
+            }
+        } else {
+            std::cout << "  No existing wallet found, creating new one" << std::endl;
+        }
 
         // Generate initial key if wallet is empty
         if (wallet.GetAddresses().empty()) {
@@ -1671,8 +1695,73 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             wallet.GenerateNewKey();
             CAddress addr = wallet.GetNewAddress();
             std::cout << "  [OK] Initial address: " << addr.ToString() << std::endl;
+        }
+
+        // Enable auto-save (CRITICAL: must be done after Load or key generation)
+        wallet.SetWalletFile(wallet_path);
+        std::cout << "  [OK] Auto-save enabled" << std::endl;
+        std::cout.flush();
+
+        // BUG #56 FIX: Register wallet callbacks with chain state (Bitcoin Core pattern)
+        // Wallet will receive blockConnected/blockDisconnected notifications automatically
+        g_chainstate.RegisterBlockConnectCallback([&wallet](const CBlock& block, int height) {
+            wallet.blockConnected(block, height);
+        });
+        g_chainstate.RegisterBlockDisconnectCallback([&wallet](const CBlock& block, int height) {
+            wallet.blockDisconnected(block, height);
+        });
+        std::cout << "  [OK] Registered chain notification callbacks" << std::endl;
+        std::cout.flush();
+
+        // BUG #56 FIX: Incremental rescan based on best block pointer (Bitcoin Core pattern)
+        int32_t wallet_height = wallet.GetBestBlockHeight();
+        int chain_height = g_chainstate.GetHeight();
+        std::cout << "  Wallet best block: " << wallet_height << ", Chain height: " << chain_height << std::endl;
+        std::cout.flush();
+
+        if (wallet_height < 0 || wallet_height > chain_height) {
+            // Full rescan needed: new wallet OR wallet ahead of chain (possible reorg)
+            std::cout << "  Rescanning blockchain (full scan from genesis)..." << std::endl;
+            std::cout.flush();
+            if (wallet.RescanFromHeight(g_chainstate, blockchain, 0, chain_height)) {
+                int64_t balance = wallet.GetBalance();
+                double balanceInDIL = static_cast<double>(balance) / 100000000.0;
+                std::cout << "  [OK] Full scan complete, balance: " << std::fixed << std::setprecision(8)
+                          << balanceInDIL << " DIL" << std::endl;
+                std::cout.flush();
+            } else {
+                std::cerr << "  WARNING: Rescan failed" << std::endl;
+            }
+        } else if (wallet_height < chain_height) {
+            // Incremental rescan: scan only blocks since wallet's last sync
+            std::cout << "  Rescanning blocks " << (wallet_height + 1) << " to " << chain_height
+                      << " (incremental)..." << std::endl;
+            std::cout.flush();
+            if (wallet.RescanFromHeight(g_chainstate, blockchain, wallet_height + 1, chain_height)) {
+                int64_t balance = wallet.GetBalance();
+                double balanceInDIL = static_cast<double>(balance) / 100000000.0;
+                std::cout << "  [OK] Incremental scan complete, balance: " << std::fixed << std::setprecision(8)
+                          << balanceInDIL << " DIL" << std::endl;
+                std::cout.flush();
+            } else {
+                std::cerr << "  WARNING: Rescan failed" << std::endl;
+            }
         } else {
-            std::cout << "  [OK] Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
+            // wallet_height == chain_height: Already synced, no scan needed
+            int64_t balance = wallet.GetBalance();
+            double balanceInDIL = static_cast<double>(balance) / 100000000.0;
+            std::cout << "  [OK] Wallet already synced to chain tip, balance: " << std::fixed << std::setprecision(8)
+                      << balanceInDIL << " DIL" << std::endl;
+            std::cout.flush();
+        }
+
+        // Save wallet if newly created
+        if (!wallet_loaded) {
+            if (wallet.Save(wallet_path)) {
+                std::cout << "  [OK] New wallet saved" << std::endl;
+            } else {
+                std::cerr << "  WARNING: Failed to save new wallet" << std::endl;
+            }
         }
 
         // Set up block found callback to save mined blocks and credit wallet
