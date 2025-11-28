@@ -287,7 +287,9 @@ private:
         int nStalls;                                ///< Number of timeouts/stalls
         int nBlocksDownloaded;                      ///< Total blocks successfully downloaded
         bool preferred;                             ///< Marked as preferred peer (fast/reliable)
-        std::chrono::time_point<std::chrono::steady_clock> lastRequest;  ///< Last request time
+        std::chrono::time_point<std::chrono::steady_clock> lastRequest;     ///< Last request time
+        std::chrono::time_point<std::chrono::steady_clock> lastStallTime;   ///< BUG #61: When last stall occurred
+        std::chrono::time_point<std::chrono::steady_clock> lastSuccessTime; ///< BUG #61: When last success occurred
 
         PeerDownloadState()
             : nBlocksInFlight(0),
@@ -296,7 +298,10 @@ private:
               nBlocksDownloaded(0),
               preferred(false)
         {
-            lastRequest = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            lastRequest = now;
+            lastStallTime = now;     // BUG #61: Initialize (no stalls yet)
+            lastSuccessTime = now;   // BUG #61: Initialize
         }
     };
 
@@ -339,7 +344,8 @@ private:
     static constexpr auto BLOCK_DOWNLOAD_TIMEOUT = std::chrono::seconds(60);  ///< Timeout per block
     static constexpr auto STALE_TIP_TIMEOUT = std::chrono::minutes(5);        ///< Time before tip considered stale
     static constexpr int MAX_RETRIES = 3;                    ///< Max retry attempts per block
-    static constexpr int PEER_STALL_THRESHOLD = 5;           ///< Stalls before peer avoided
+    static constexpr int PEER_STALL_THRESHOLD = 10;          ///< BUG #61: Stalls before peer avoided (raised from 5)
+    static constexpr auto PEER_STALL_TIMEOUT = std::chrono::minutes(5);  ///< BUG #61: Forgive stalls after this time
 
     // Thread safety
     mutable std::mutex cs_fetcher;                           ///< Protects all data members

@@ -276,6 +276,7 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
     // 4. Preferred status
 
     NodeId bestPeer = -1;
+    NodeId fallbackPeer = -1;  // BUG #61: Track stalled peer as fallback
     int bestScore = -1;
 
     for (const auto& entry : mapPeerStates) {
@@ -288,9 +289,13 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
             continue;
         }
 
-        // Must be suitable (not stalled too often)
+        // Check if suitable (not stalled too often)
         bool suitable = IsPeerSuitable(peer);
         if (!suitable) {
+            // BUG #61: Track as fallback even if stalled
+            if (fallbackPeer == -1) {
+                fallbackPeer = peer;
+            }
             continue;
         }
 
@@ -322,6 +327,13 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
         }
     }
 
+    // BUG #61: Use fallback if no suitable peer found (prevents sync deadlock)
+    if (bestPeer == -1 && fallbackPeer != -1) {
+        std::cout << "[BlockFetcher] BUG #61: Using fallback peer " << fallbackPeer
+                  << " (all peers marked as stalled - giving another chance)" << std::endl;
+        return fallbackPeer;
+    }
+
     if (bestPeer != -1) {
         std::cout << "[BlockFetcher] Selected peer " << bestPeer
                   << " for download (score: " << bestScore << ")" << std::endl;
@@ -342,6 +354,15 @@ void CBlockFetcher::UpdatePeerStats(NodeId peer, bool success, std::chrono::mill
     PeerDownloadState& state = mapPeerStates[peer];
 
     if (success) {
+        // BUG #61 FIX: Reset stall count on successful block download (Bitcoin Core approach)
+        // This prevents permanent peer exclusion and allows recovery
+        if (state.nStalls > 0) {
+            std::cout << "[BlockFetcher] BUG #61: Resetting stall count for peer " << peer
+                      << " (was " << state.nStalls << ") after successful download" << std::endl;
+            state.nStalls = 0;
+        }
+        state.lastSuccessTime = std::chrono::steady_clock::now();
+
         // Update average response time (exponential moving average)
         if (responseTime.count() > 0) {
             // EMA: new_avg = alpha * new_value + (1 - alpha) * old_avg
@@ -579,11 +600,13 @@ void CBlockFetcher::MarkPeerStalled(NodeId peer)
 
     mapPeerStates[peer].nStalls++;
     mapPeerStates[peer].preferred = false;  // Remove preferred status
+    // BUG #61 FIX: Track when stall occurred for timeout calculation
+    mapPeerStates[peer].lastStallTime = std::chrono::steady_clock::now();
 
     std::cout << "[BlockFetcher] Peer " << peer << " stalled "
               << "(total stalls: " << mapPeerStates[peer].nStalls << ")" << std::endl;
 
-    // If peer stalls too much, it will be avoided by IsPeerSuitable
+    // If peer stalls too much, it will be avoided by IsPeerSuitable (but not permanently - BUG #61)
 }
 
 bool CBlockFetcher::IsPeerSuitable(NodeId peer) const
@@ -596,9 +619,20 @@ bool CBlockFetcher::IsPeerSuitable(NodeId peer) const
 
     const PeerDownloadState& state = it->second;
 
-    // Avoid peers that have stalled too many times
+    // BUG #61 FIX: Check if stall timeout has passed (Bitcoin Core-aligned)
+    // Never permanently exclude peers - allow retry after timeout
+    auto now = std::chrono::steady_clock::now();
+    auto stallAge = std::chrono::duration_cast<std::chrono::minutes>(
+        now - state.lastStallTime);
+
+    // Forgive stalls after PEER_STALL_TIMEOUT (5 minutes)
+    if (stallAge >= PEER_STALL_TIMEOUT) {
+        return true;  // Give peer another chance
+    }
+
+    // During timeout period, check threshold (raised to 10)
     if (state.nStalls >= PEER_STALL_THRESHOLD) {
-        return false;
+        return false;  // Temporarily unsuitable
     }
 
     return true;
