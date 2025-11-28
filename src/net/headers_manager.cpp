@@ -477,7 +477,7 @@ void CHeadersManager::OnPeerConnected(NodeId peer)
 {
     std::lock_guard<std::mutex> lock(cs_headers);
 
-    mapPeerStates[peer] = HeadersSyncState();
+    mapPeerStates[peer] = PeerSyncState();
 
     std::cout << "[HeadersManager] Peer " << peer << " connected" << std::endl;
 }
@@ -530,7 +530,7 @@ void CHeadersManager::UpdatePeerState(NodeId peer, const uint256& hash, int heig
 
     auto it = mapPeerStates.find(peer);
     if (it == mapPeerStates.end()) {
-        mapPeerStates[peer] = HeadersSyncState();
+        mapPeerStates[peer] = PeerSyncState();
         it = mapPeerStates.find(peer);
     }
 

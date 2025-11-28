@@ -5,8 +5,10 @@
 #define DILITHION_NET_HEADERS_MANAGER_H
 
 #include <primitives/block.h>
+#include <net/headerssync.h>
 #include <chrono>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <vector>
@@ -255,19 +257,24 @@ public:
 
 private:
     /**
-     * @struct HeadersSyncState
-     * @brief Tracks synchronization state for each peer
+     * @struct PeerSyncState
+     * @brief Tracks basic synchronization state for each peer
+     *
+     * Note: For DoS-protected header sync, see HeadersSyncState class.
      */
-    struct HeadersSyncState {
+    struct PeerSyncState {
         uint256 hashLastHeader;             ///< Last header received from this peer
         int nSyncHeight;                    ///< Height peer claims to have
         std::chrono::time_point<std::chrono::steady_clock> lastUpdate;  ///< Last time we heard from peer
         bool syncing;                       ///< Currently syncing from this peer
 
-        HeadersSyncState() : nSyncHeight(0), syncing(false) {
+        PeerSyncState() : nSyncHeight(0), syncing(false) {
             lastUpdate = std::chrono::steady_clock::now();
         }
     };
+
+    //! Per-peer DoS-protected header sync state (Bitcoin Core two-phase)
+    std::map<NodeId, std::unique_ptr<HeadersSyncState>> mapHeadersSyncStates;
 
     /**
      * @struct HeaderWithChainWork
@@ -306,7 +313,7 @@ private:
     uint256 nMinimumChainWork;              ///< Reject chains below this work threshold
 
     // Peer synchronization state
-    std::map<NodeId, HeadersSyncState> mapPeerStates;     ///< Peer -> Sync state
+    std::map<NodeId, PeerSyncState> mapPeerStates;        ///< Peer -> Basic sync state
     std::map<NodeId, int> mapPeerStartHeight;             ///< BUG #62: Peer -> Starting height from VERSION
 
     // Configuration
