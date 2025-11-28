@@ -132,17 +132,18 @@ bool IsInitialBlockDownload() {
         }
     }
 
-    // BUG #60 FIX (part 2): Wait for initial peer connection before allowing mining
-    // At startup, headers from disk might match chain tip (no IBD needed based on
-    // headers check above). But we haven't talked to peers yet to know if they have
-    // more blocks. Wait until at least one peer has connected and reported its height.
-    // This prevents mining before we can verify we're synced with the network.
-    if (bestPeerHeight == 0 && peerCount == 0) {
-        // No peers connected yet - wait for initial sync before mining
-        // Exception: if we're at genesis and this is likely a bootstrap scenario
-        if (ourHeight > 0) {
-            return true;  // Have blocks but no peer confirmation - wait for peers
-        }
+    // BUG #60 FIX (part 2): Wait for peer height info before allowing mining
+    // At startup, we haven't received any VERSION messages yet, so bestPeerHeight is 0.
+    // We MUST wait until at least one peer has reported their height via VERSION message.
+    // Otherwise, we might mine blocks while peers have a longer chain we don't know about.
+    //
+    // bestPeerHeight == 0 means NO peer has completed handshake yet.
+    // Once any peer completes handshake, they report their height (even if 0 for true bootstrap).
+    // We use peerCount > 0 AND bestPeerHeight == 0 to detect "connections initiated but
+    // no VERSION received" vs "no connections at all".
+    if (bestPeerHeight == 0 && peerCount > 0) {
+        // Connections exist but no VERSION received yet - wait for handshake
+        return true;  // In IBD - waiting for peer height information
     }
 
     // Check 1: Are peers significantly ahead of us?
@@ -151,17 +152,14 @@ bool IsInitialBlockDownload() {
         return true;  // Peers have 6+ more blocks - we're behind, sync first
     }
 
-    // Check 2: If we're at genesis (height 0) and peers are also at genesis,
-    // we're bootstrapping the network - allow mining
-    if (ourHeight == 0 && bestPeerHeight == 0) {
-        return false;  // Bootstrapping - all nodes at genesis, allow mining
+    // Check 2: If no peers at all and we're at genesis, allow bootstrap mining
+    // This is the TRUE bootstrap scenario - isolated node with no seed connections
+    if (ourHeight == 0 && peerCount == 0 && !g_peer_manager) {
+        return false;  // True bootstrap - allow mining
     }
 
-    // Check 3: If we're at genesis but can't determine peer height (no peers yet),
-    // wait a bit for connections before mining
-    if (ourHeight == 0 && !g_peer_manager) {
-        return true;  // No peer manager yet - wait
-    }
+    // Check 3: Peers connected and reported their height, and we're close to them
+    // This is the normal case after initial sync completes
 
     // Check 4: Is tip timestamp recent? (Bitcoin's secondary IBD criterion)
     // This is O(1) - just compare timestamps, no full chain verification
@@ -1413,7 +1411,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     g_node_state.new_block_found = true;
 
                     // BUG #32 FIX: Immediately update mining template when reorg occurs
-                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
+                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                         std::cout << "[Mining] Reorg detected - updating template immediately..." << std::endl;
                         auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
                         if (templateOpt) {
@@ -1435,7 +1433,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "[BUG32-DEBUG]   wallet = " << (g_node_state.wallet ? "valid" : "NULL") << std::endl;
                         std::cout << "[BUG32-DEBUG]   mining_enabled = " << (g_node_state.mining_enabled.load() ? "true" : "false") << std::endl;
 
-                        if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
+                        if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                             std::cout << "[Mining] IBD block became new tip - updating template immediately..." << std::endl;
                             auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
                             if (templateOpt) {
@@ -1929,7 +1927,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
 
                     // BUG #32 FIX: Immediately update mining template for locally mined blocks
-                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
+                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                         std::cout << "[Mining] Locally mined block became new tip - updating template immediately..." << std::endl;
                         auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
                         if (templateOpt) {
@@ -2497,7 +2495,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 // Build new template for next block (only if mining was requested)
-                if (g_node_state.mining_enabled.load()) {
+                if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                     auto templateOpt = BuildMiningTemplate(blockchain, wallet, false);
                     if (templateOpt) {
                         // Restart mining with new template
