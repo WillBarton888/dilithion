@@ -460,9 +460,9 @@ std::string CSocket::GetLastErrorString() const {
 #endif
 }
 
-// CNetAddr implementation
+// CResolvedAddr implementation
 
-std::string CNetAddr::ToString() const {
+std::string CResolvedAddr::ToString() const {
     if (!ip.empty()) {
         return ip + ":" + std::to_string(port);
     } else if (!hostname.empty()) {

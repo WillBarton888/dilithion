@@ -82,15 +82,19 @@ private:
 
 /**
  * Network address resolution helper
+ *
+ * Note: This is a simple DNS/address resolution struct.
+ * For Bitcoin Core-style network addresses (for AddrMan, P2P),
+ * use CNetAddr/CService from netaddress.h instead.
  */
-struct CNetAddr {
+struct CResolvedAddr {
     std::string hostname;
     std::string ip;
     uint16_t port;
     bool ipv6;
 
-    CNetAddr() : port(0), ipv6(false) {}
-    CNetAddr(const std::string& host, uint16_t p)
+    CResolvedAddr() : port(0), ipv6(false) {}
+    CResolvedAddr(const std::string& host, uint16_t p)
         : hostname(host), port(p), ipv6(false) {}
 
     std::string ToString() const;
