@@ -1,0 +1,701 @@
+// Copyright (c) 2016-2024 The Bitcoin Core developers
+// Copyright (c) 2025 The Dilithion Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#include <net/blockencodings.h>
+#include <crypto/sha3.h>
+#include <crypto/siphash.h>
+
+#include <algorithm>
+#include <cstring>
+#include <iostream>
+#include <random>
+
+// ============================================================================
+// Helper functions for transaction serialization
+// ============================================================================
+
+bool DeserializeTransactionsFromVtx(
+    const std::vector<uint8_t>& vtx,
+    std::vector<CTransaction>& transactions)
+{
+    transactions.clear();
+
+    if (vtx.empty()) {
+        return false;
+    }
+
+    const uint8_t* data = vtx.data();
+    size_t offset = 0;
+    size_t dataSize = vtx.size();
+
+    // Read transaction count (compact size encoding)
+    if (offset >= dataSize) {
+        return false;
+    }
+
+    uint64_t txCount = 0;
+    uint8_t firstByte = data[offset++];
+
+    if (firstByte < 253) {
+        txCount = firstByte;
+    } else if (firstByte == 253) {
+        if (offset + 2 > dataSize) {
+            return false;
+        }
+        txCount = data[offset] | (static_cast<uint64_t>(data[offset + 1]) << 8);
+        offset += 2;
+    } else if (firstByte == 254) {
+        if (offset + 4 > dataSize) {
+            return false;
+        }
+        txCount = data[offset] |
+                  (static_cast<uint64_t>(data[offset + 1]) << 8) |
+                  (static_cast<uint64_t>(data[offset + 2]) << 16) |
+                  (static_cast<uint64_t>(data[offset + 3]) << 24);
+        offset += 4;
+    } else {
+        if (offset + 8 > dataSize) {
+            return false;
+        }
+        txCount = data[offset] |
+                  (static_cast<uint64_t>(data[offset + 1]) << 8) |
+                  (static_cast<uint64_t>(data[offset + 2]) << 16) |
+                  (static_cast<uint64_t>(data[offset + 3]) << 24) |
+                  (static_cast<uint64_t>(data[offset + 4]) << 32) |
+                  (static_cast<uint64_t>(data[offset + 5]) << 40) |
+                  (static_cast<uint64_t>(data[offset + 6]) << 48) |
+                  (static_cast<uint64_t>(data[offset + 7]) << 56);
+        offset += 8;
+    }
+
+    // Sanity check
+    if (txCount > 100000) {
+        return false;
+    }
+
+    // Deserialize each transaction
+    transactions.reserve(txCount);
+    for (uint64_t i = 0; i < txCount; i++) {
+        CTransaction tx;
+        size_t bytesConsumed = 0;
+        std::string error;
+
+        if (!tx.Deserialize(data + offset, dataSize - offset, &error, &bytesConsumed)) {
+            std::cerr << "[CompactBlock] Failed to deserialize transaction " << i
+                      << ": " << error << std::endl;
+            return false;
+        }
+
+        transactions.push_back(std::move(tx));
+        offset += bytesConsumed;
+    }
+
+    return true;
+}
+
+void SerializeTransactionsToVtx(
+    const std::vector<std::shared_ptr<const CTransaction>>& transactions,
+    std::vector<uint8_t>& vtx)
+{
+    vtx.clear();
+
+    uint64_t txCount = transactions.size();
+
+    // Serialize transaction count (compact size encoding)
+    if (txCount < 253) {
+        vtx.push_back(static_cast<uint8_t>(txCount));
+    } else if (txCount <= 0xFFFF) {
+        vtx.push_back(253);
+        vtx.push_back(static_cast<uint8_t>(txCount));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 8));
+    } else if (txCount <= 0xFFFFFFFF) {
+        vtx.push_back(254);
+        vtx.push_back(static_cast<uint8_t>(txCount));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 8));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 16));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 24));
+    } else {
+        vtx.push_back(255);
+        vtx.push_back(static_cast<uint8_t>(txCount));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 8));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 16));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 24));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 32));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 40));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 48));
+        vtx.push_back(static_cast<uint8_t>(txCount >> 56));
+    }
+
+    // Serialize each transaction
+    for (const auto& tx : transactions) {
+        if (tx) {
+            std::vector<uint8_t> txData = tx->Serialize();
+            vtx.insert(vtx.end(), txData.begin(), txData.end());
+        }
+    }
+}
+
+uint256 BuildMerkleRootFromTxs(const std::vector<std::shared_ptr<const CTransaction>>& transactions)
+{
+    if (transactions.empty()) {
+        return uint256();
+    }
+
+    // Get transaction hashes
+    std::vector<uint256> merkleTree;
+    merkleTree.reserve(transactions.size() * 2);
+
+    for (const auto& tx : transactions) {
+        if (tx) {
+            merkleTree.push_back(tx->GetHash());
+        } else {
+            merkleTree.push_back(uint256());
+        }
+    }
+
+    // Build merkle tree iteratively
+    size_t levelOffset = 0;
+    for (size_t levelSize = transactions.size(); levelSize > 1; levelSize = (levelSize + 1) / 2) {
+        for (size_t i = 0; i < levelSize; i += 2) {
+            size_t i2 = std::min(i + 1, levelSize - 1);
+
+            // Concatenate two hashes
+            std::vector<uint8_t> combined;
+            combined.reserve(64);
+            combined.insert(combined.end(),
+                          merkleTree[levelOffset + i].begin(),
+                          merkleTree[levelOffset + i].end());
+            combined.insert(combined.end(),
+                          merkleTree[levelOffset + i2].begin(),
+                          merkleTree[levelOffset + i2].end());
+
+            // Hash the combination (SHA3-256)
+            uint256 hash;
+            SHA3_256(combined.data(), combined.size(), hash.data);
+            merkleTree.push_back(hash);
+        }
+        levelOffset += levelSize;
+    }
+
+    return merkleTree.empty() ? uint256() : merkleTree.back();
+}
+
+// ============================================================================
+// CBlockHeaderAndShortTxIDs
+// ============================================================================
+
+CBlockHeaderAndShortTxIDs::CBlockHeaderAndShortTxIDs(const CBlock& block, bool use_wtxid)
+    : shorttxidk0(0), shorttxidk1(0)
+{
+    // Copy header fields
+    header.nVersion = block.nVersion;
+    header.hashPrevBlock = block.hashPrevBlock;
+    header.hashMerkleRoot = block.hashMerkleRoot;
+    header.nTime = block.nTime;
+    header.nBits = block.nBits;
+    header.nNonce = block.nNonce;
+
+    // Generate random nonce for short ID calculation
+    std::random_device rd;
+    nonce = (static_cast<uint64_t>(rd()) << 32) | rd();
+
+    // Fill SipHash keys
+    FillShortTxIDSelector();
+
+    // Deserialize transactions from block.vtx
+    std::vector<CTransaction> transactions;
+    if (!DeserializeTransactionsFromVtx(block.vtx, transactions)) {
+        std::cerr << "[CompactBlock] Failed to deserialize transactions from block" << std::endl;
+        return;
+    }
+
+    if (transactions.empty()) {
+        return;
+    }
+
+    // Always prefill coinbase (index 0)
+    prefilledtxn.push_back(PrefilledTransaction(0, transactions[0]));
+
+    // Calculate short IDs for remaining transactions
+    for (size_t i = 1; i < transactions.size(); i++) {
+        uint256 txid = transactions[i].GetHash();
+        uint64_t shortid = GetShortID(txid);
+        shorttxids.push_back(shortid);
+    }
+
+    std::cout << "[CompactBlock] Created from block " << block.GetHash().GetHex().substr(0, 16)
+              << "... with " << transactions.size() << " txs"
+              << " (" << prefilledtxn.size() << " prefilled, "
+              << shorttxids.size() << " short IDs)" << std::endl;
+}
+
+void CBlockHeaderAndShortTxIDs::FillShortTxIDSelector() const
+{
+    // Derive SipHash keys from SHA3-256(header || nonce)
+    // Using first 16 bytes as two 64-bit keys
+
+    // Serialize header (80 bytes) + nonce (8 bytes)
+    uint8_t data[88];
+
+    // Header serialization
+    memcpy(data, &header.nVersion, 4);
+    memcpy(data + 4, header.hashPrevBlock.data, 32);
+    memcpy(data + 36, header.hashMerkleRoot.data, 32);
+    memcpy(data + 68, &header.nTime, 4);
+    memcpy(data + 72, &header.nBits, 4);
+    memcpy(data + 76, &header.nNonce, 4);
+    memcpy(data + 80, &nonce, 8);
+
+    // SHA3-256 hash
+    uint8_t hash[32];
+    SHA3_256(data, 88, hash);
+
+    // Extract two 64-bit keys (little-endian)
+    shorttxidk0 = 0;
+    shorttxidk1 = 0;
+    for (int i = 0; i < 8; i++) {
+        shorttxidk0 |= static_cast<uint64_t>(hash[i]) << (i * 8);
+        shorttxidk1 |= static_cast<uint64_t>(hash[i + 8]) << (i * 8);
+    }
+}
+
+uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const uint256& txid) const
+{
+    // Ensure keys are initialized
+    if (shorttxidk0 == 0 && shorttxidk1 == 0) {
+        FillShortTxIDSelector();
+    }
+
+    // SipHash-2-4 of txid with our keys
+    uint64_t hash = SipHashUint256(shorttxidk0, shorttxidk1, txid);
+
+    // Return lower 48 bits (6 bytes)
+    return hash & 0xffffffffffffULL;
+}
+
+bool CBlockHeaderAndShortTxIDs::IsValid() const
+{
+    // Check for reasonable sizes
+    if (shorttxids.size() > 100000) {
+        return false;  // Too many transactions
+    }
+
+    if (prefilledtxn.size() > shorttxids.size() + 1) {
+        return false;  // More prefilled than total
+    }
+
+    // Check prefilled indices are in range
+    for (const auto& prefilled : prefilledtxn) {
+        if (prefilled.index > shorttxids.size()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::vector<uint8_t> CBlockHeaderAndShortTxIDs::Serialize() const
+{
+    std::vector<uint8_t> result;
+
+    // Header (80 bytes)
+    result.reserve(88 + shorttxids.size() * 6 + prefilledtxn.size() * 200);
+
+    // Serialize header
+    const uint8_t* ptr = reinterpret_cast<const uint8_t*>(&header.nVersion);
+    result.insert(result.end(), ptr, ptr + 4);
+    result.insert(result.end(), header.hashPrevBlock.data, header.hashPrevBlock.data + 32);
+    result.insert(result.end(), header.hashMerkleRoot.data, header.hashMerkleRoot.data + 32);
+    ptr = reinterpret_cast<const uint8_t*>(&header.nTime);
+    result.insert(result.end(), ptr, ptr + 4);
+    ptr = reinterpret_cast<const uint8_t*>(&header.nBits);
+    result.insert(result.end(), ptr, ptr + 4);
+    ptr = reinterpret_cast<const uint8_t*>(&header.nNonce);
+    result.insert(result.end(), ptr, ptr + 4);
+
+    // Nonce (8 bytes)
+    ptr = reinterpret_cast<const uint8_t*>(&nonce);
+    result.insert(result.end(), ptr, ptr + 8);
+
+    // Short txids count (4 bytes)
+    uint32_t count = static_cast<uint32_t>(shorttxids.size());
+    ptr = reinterpret_cast<const uint8_t*>(&count);
+    result.insert(result.end(), ptr, ptr + 4);
+
+    // Short txids (6 bytes each)
+    for (const auto& shortid : shorttxids) {
+        for (int i = 0; i < 6; i++) {
+            result.push_back((shortid >> (i * 8)) & 0xFF);
+        }
+    }
+
+    // Prefilled count (2 bytes)
+    uint16_t prefilled_count = static_cast<uint16_t>(prefilledtxn.size());
+    ptr = reinterpret_cast<const uint8_t*>(&prefilled_count);
+    result.insert(result.end(), ptr, ptr + 2);
+
+    // Prefilled transactions (differential index encoding)
+    uint16_t last_index = 0;
+    for (const auto& prefilled : prefilledtxn) {
+        uint16_t diff = prefilled.index - last_index;
+        ptr = reinterpret_cast<const uint8_t*>(&diff);
+        result.insert(result.end(), ptr, ptr + 2);
+
+        std::vector<uint8_t> txData = prefilled.tx.Serialize();
+        result.insert(result.end(), txData.begin(), txData.end());
+
+        last_index = prefilled.index + 1;
+    }
+
+    return result;
+}
+
+bool CBlockHeaderAndShortTxIDs::Deserialize(const uint8_t* data, size_t len)
+{
+    if (len < 90) {  // Minimum: 80 (header) + 8 (nonce) + 4 (count) - 2 (prefilled count)
+        return false;
+    }
+
+    size_t offset = 0;
+
+    // Header
+    memcpy(&header.nVersion, data + offset, 4);
+    offset += 4;
+    memcpy(header.hashPrevBlock.data, data + offset, 32);
+    offset += 32;
+    memcpy(header.hashMerkleRoot.data, data + offset, 32);
+    offset += 32;
+    memcpy(&header.nTime, data + offset, 4);
+    offset += 4;
+    memcpy(&header.nBits, data + offset, 4);
+    offset += 4;
+    memcpy(&header.nNonce, data + offset, 4);
+    offset += 4;
+
+    // Nonce
+    memcpy(&nonce, data + offset, 8);
+    offset += 8;
+
+    // Fill SipHash keys
+    FillShortTxIDSelector();
+
+    // Short txids count
+    if (offset + 4 > len) return false;
+    uint32_t count = 0;
+    memcpy(&count, data + offset, 4);
+    offset += 4;
+
+    if (count > 100000) {
+        return false;
+    }
+
+    // Short txids
+    if (offset + count * 6 > len) return false;
+    shorttxids.resize(count);
+    for (size_t i = 0; i < count; i++) {
+        uint64_t shortid = 0;
+        for (int j = 0; j < 6; j++) {
+            shortid |= static_cast<uint64_t>(data[offset + j]) << (j * 8);
+        }
+        shorttxids[i] = shortid;
+        offset += 6;
+    }
+
+    // Prefilled count
+    if (offset + 2 > len) return false;
+    uint16_t prefilled_count = 0;
+    memcpy(&prefilled_count, data + offset, 2);
+    offset += 2;
+
+    // Prefilled transactions
+    prefilledtxn.resize(prefilled_count);
+    uint16_t last_index = 0;
+    for (size_t i = 0; i < prefilled_count; i++) {
+        if (offset + 2 > len) return false;
+
+        uint16_t diff = 0;
+        memcpy(&diff, data + offset, 2);
+        offset += 2;
+
+        prefilledtxn[i].index = last_index + diff;
+
+        size_t bytesConsumed = 0;
+        std::string error;
+        if (!prefilledtxn[i].tx.Deserialize(data + offset, len - offset, &error, &bytesConsumed)) {
+            return false;
+        }
+        offset += bytesConsumed;
+
+        last_index = prefilledtxn[i].index + 1;
+    }
+
+    return true;
+}
+
+// ============================================================================
+// PartiallyDownloadedBlock
+// ============================================================================
+
+ReadStatus PartiallyDownloadedBlock::InitData(
+    const CBlockHeaderAndShortTxIDs& cmpctblock,
+    const std::vector<CTransaction>& mempool_txs)
+{
+    if (!cmpctblock.IsValid()) {
+        return ReadStatus::INVALID;
+    }
+
+    header = cmpctblock.header;
+
+    // Total transaction count = prefilled + short IDs
+    size_t tx_count = cmpctblock.shorttxids.size() + cmpctblock.prefilledtxn.size();
+    txn_available.resize(tx_count);
+
+    // Place prefilled transactions
+    for (const auto& prefilled : cmpctblock.prefilledtxn) {
+        if (prefilled.index >= tx_count) {
+            return ReadStatus::INVALID;
+        }
+        txn_available[prefilled.index] = std::make_shared<CTransaction>(prefilled.tx);
+        prefilled_indices.insert(prefilled.index);
+    }
+
+    // Build short ID to index mapping for non-prefilled positions
+    size_t shortid_idx = 0;
+    for (size_t i = 0; i < tx_count; i++) {
+        if (prefilled_indices.find(i) == prefilled_indices.end()) {
+            if (shortid_idx >= cmpctblock.shorttxids.size()) {
+                return ReadStatus::INVALID;
+            }
+            uint64_t shortid = cmpctblock.shorttxids[shortid_idx];
+            shortid_to_index[shortid] = static_cast<uint16_t>(i);
+            shortid_idx++;
+        }
+    }
+
+    // Try to fill from mempool
+    for (const auto& tx : mempool_txs) {
+        uint256 txid = tx.GetHash();
+        uint64_t shortid = cmpctblock.GetShortID(txid);
+
+        auto it = shortid_to_index.find(shortid);
+        if (it != shortid_to_index.end() && !txn_available[it->second]) {
+            txn_available[it->second] = std::make_shared<CTransaction>(tx);
+        }
+    }
+
+    is_initialized = true;
+
+    std::cout << "[CompactBlock] InitData: " << tx_count << " total txs, "
+              << GetMissingTxCount() << " still missing" << std::endl;
+
+    if (GetMissingTxCount() > 0) {
+        return ReadStatus::EXTRA_TXN;
+    }
+
+    return ReadStatus::OK;
+}
+
+bool PartiallyDownloadedBlock::IsTxAvailable(size_t index) const
+{
+    if (index >= txn_available.size()) {
+        return false;
+    }
+    return txn_available[index] != nullptr;
+}
+
+size_t PartiallyDownloadedBlock::GetMissingTxCount() const
+{
+    size_t missing = 0;
+    for (const auto& tx : txn_available) {
+        if (!tx) {
+            missing++;
+        }
+    }
+    return missing;
+}
+
+std::vector<uint16_t> PartiallyDownloadedBlock::GetMissingTxIndices() const
+{
+    std::vector<uint16_t> missing;
+    for (size_t i = 0; i < txn_available.size(); i++) {
+        if (!txn_available[i]) {
+            missing.push_back(static_cast<uint16_t>(i));
+        }
+    }
+    return missing;
+}
+
+ReadStatus PartiallyDownloadedBlock::FillMissingTxs(const std::vector<CTransaction>& txn)
+{
+    auto missing = GetMissingTxIndices();
+
+    if (txn.size() != missing.size()) {
+        std::cerr << "[CompactBlock] Transaction count mismatch: got " << txn.size()
+                  << ", expected " << missing.size() << std::endl;
+        return ReadStatus::INVALID;
+    }
+
+    for (size_t i = 0; i < txn.size(); i++) {
+        txn_available[missing[i]] = std::make_shared<CTransaction>(txn[i]);
+    }
+
+    std::cout << "[CompactBlock] Filled " << txn.size() << " missing transactions" << std::endl;
+
+    return ReadStatus::OK;
+}
+
+bool PartiallyDownloadedBlock::GetBlock(CBlock& block) const
+{
+    if (!is_initialized) {
+        return false;
+    }
+
+    if (GetMissingTxCount() > 0) {
+        return false;
+    }
+
+    // Copy header
+    block.SetNull();
+    block.nVersion = header.nVersion;
+    block.hashPrevBlock = header.hashPrevBlock;
+    block.hashMerkleRoot = header.hashMerkleRoot;
+    block.nTime = header.nTime;
+    block.nBits = header.nBits;
+    block.nNonce = header.nNonce;
+
+    // Serialize transactions into block.vtx format
+    SerializeTransactionsToVtx(txn_available, block.vtx);
+
+    // Verify merkle root matches
+    uint256 computed_merkle = BuildMerkleRootFromTxs(txn_available);
+    if (computed_merkle != header.hashMerkleRoot) {
+        std::cerr << "[CompactBlock] Merkle root mismatch after reconstruction!" << std::endl;
+        std::cerr << "  Expected: " << header.hashMerkleRoot.GetHex() << std::endl;
+        std::cerr << "  Computed: " << computed_merkle.GetHex() << std::endl;
+        return false;
+    }
+
+    std::cout << "[CompactBlock] Successfully reconstructed block "
+              << block.GetHash().GetHex().substr(0, 16) << "..." << std::endl;
+
+    return true;
+}
+
+// ============================================================================
+// BlockTransactionsRequest
+// ============================================================================
+
+std::vector<uint8_t> BlockTransactionsRequest::Serialize() const
+{
+    std::vector<uint8_t> result;
+    result.reserve(32 + 2 + indexes.size() * 2);
+
+    // Block hash
+    result.insert(result.end(), blockhash.data, blockhash.data + 32);
+
+    // Index count
+    uint16_t count = static_cast<uint16_t>(indexes.size());
+    result.push_back(count & 0xFF);
+    result.push_back((count >> 8) & 0xFF);
+
+    // Differential encoding
+    uint16_t last_index = 0;
+    for (uint16_t idx : indexes) {
+        uint16_t diff = idx - last_index;
+        result.push_back(diff & 0xFF);
+        result.push_back((diff >> 8) & 0xFF);
+        last_index = idx + 1;
+    }
+
+    return result;
+}
+
+bool BlockTransactionsRequest::Deserialize(const uint8_t* data, size_t len)
+{
+    if (len < 34) {
+        return false;
+    }
+
+    size_t offset = 0;
+
+    // Block hash
+    memcpy(blockhash.data, data, 32);
+    offset += 32;
+
+    // Index count
+    uint16_t count = data[offset] | (static_cast<uint16_t>(data[offset + 1]) << 8);
+    offset += 2;
+
+    if (offset + count * 2 > len) {
+        return false;
+    }
+
+    // Differential decoding
+    indexes.resize(count);
+    uint16_t last_index = 0;
+    for (size_t i = 0; i < count; i++) {
+        uint16_t diff = data[offset] | (static_cast<uint16_t>(data[offset + 1]) << 8);
+        offset += 2;
+        indexes[i] = last_index + diff;
+        last_index = indexes[i] + 1;
+    }
+
+    return true;
+}
+
+// ============================================================================
+// BlockTransactions
+// ============================================================================
+
+std::vector<uint8_t> BlockTransactions::Serialize() const
+{
+    std::vector<uint8_t> result;
+
+    // Block hash
+    result.insert(result.end(), blockhash.data, blockhash.data + 32);
+
+    // Transaction count
+    uint16_t count = static_cast<uint16_t>(txn.size());
+    result.push_back(count & 0xFF);
+    result.push_back((count >> 8) & 0xFF);
+
+    // Transactions
+    for (const auto& tx : txn) {
+        std::vector<uint8_t> txData = tx.Serialize();
+        result.insert(result.end(), txData.begin(), txData.end());
+    }
+
+    return result;
+}
+
+bool BlockTransactions::Deserialize(const uint8_t* data, size_t len)
+{
+    if (len < 34) {
+        return false;
+    }
+
+    size_t offset = 0;
+
+    // Block hash
+    memcpy(blockhash.data, data, 32);
+    offset += 32;
+
+    // Transaction count
+    uint16_t count = data[offset] | (static_cast<uint16_t>(data[offset + 1]) << 8);
+    offset += 2;
+
+    // Transactions
+    txn.resize(count);
+    for (size_t i = 0; i < count; i++) {
+        size_t bytesConsumed = 0;
+        std::string error;
+        if (!txn[i].Deserialize(data + offset, len - offset, &error, &bytesConsumed)) {
+            return false;
+        }
+        offset += bytesConsumed;
+    }
+
+    return true;
+}
