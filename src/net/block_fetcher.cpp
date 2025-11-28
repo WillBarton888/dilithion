@@ -52,11 +52,9 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
         return false;
     }
 
-    // Check if peer is suitable
-    if (!IsPeerSuitable(peer)) {
-        std::cout << "[BlockFetcher] Peer " << peer << " not suitable (stalled too often)" << std::endl;
-        return false;
-    }
+    // BUG #61 FIX: Removed redundant IsPeerSuitable check
+    // SelectPeerForDownload already handles all peer selection logic including
+    // fallback peers, so RequestBlock should trust its decision
 
     // Check if already in-flight
     if (mapBlocksInFlight.count(hash) > 0) {
