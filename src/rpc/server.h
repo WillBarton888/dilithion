@@ -244,7 +244,7 @@ private:
 
     // Helper functions
     std::string FormatAmount(CAmount amount) const;
-    bool ValidateAddress(const std::string& addressStr, CAddress& addressOut) const;
+    bool ValidateAddress(const std::string& addressStr, CDilithiumAddress& addressOut) const;
     std::string EscapeJSON(const std::string& str) const;
 
 public:

@@ -9,6 +9,7 @@
 
 #include <wallet/wallet.h>
 #include <iostream>
+#include <fstream>
 #include <filesystem>
 
 // ANSI colors
@@ -22,7 +23,12 @@ int main() {
     std::cout << COLOR_BLUE << "   Wallet Persistence Tests            " << COLOR_RESET << std::endl;
     std::cout << COLOR_BLUE << "========================================" << COLOR_RESET << std::endl;
 
+    // Platform-specific temp path
+#ifdef _WIN32
+    const std::string testFile = "test_wallet_persist.dat";
+#else
     const std::string testFile = "/tmp/test_wallet.dat";
+#endif
 
     // Test 1: Save and load unencrypted wallet
     std::cout << COLOR_BLUE << "\n=== Test 1: Save/Load Unencrypted Wallet ===" << COLOR_RESET << std::endl;
@@ -79,6 +85,13 @@ int main() {
         // Generate key in encrypted wallet
         wallet1.GenerateNewKey();
         std::cout << COLOR_GREEN << "✓ Generated key in encrypted wallet" << COLOR_RESET << std::endl;
+
+        // Explicitly save encrypted wallet
+        if (!wallet1.Save()) {
+            std::cout << COLOR_RED << "✗ Failed to save encrypted wallet" << COLOR_RESET << std::endl;
+            return 1;
+        }
+        std::cout << COLOR_GREEN << "✓ Saved encrypted wallet" << COLOR_RESET << std::endl;
 
         // Load into new wallet
         CWallet wallet2;

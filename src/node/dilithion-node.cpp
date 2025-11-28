@@ -395,7 +395,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     block.nNonce = 0;
 
     // Get wallet address for coinbase reward
-    CAddress minerAddress = wallet.GetNewAddress();
+    CDilithiumAddress minerAddress = wallet.GetNewAddress();
     std::vector<uint8_t> minerPubKeyHash = wallet.GetPubKeyHash();
 
     // Calculate block subsidy using consensus parameters
@@ -1008,7 +1008,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "Initializing P2P components..." << std::endl;
 
         // Initialize peer manager as unique_ptr (global)
-        g_peer_manager = std::make_unique<CPeerManager>();
+        g_peer_manager = std::make_unique<CPeerManager>(config.datadir);
 
         // Initialize transaction relay manager (global)
         g_tx_relay_manager = new CTxRelayManager();
@@ -1760,7 +1760,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (wallet.GetAddresses().empty()) {
             std::cout << "  Generating initial address..." << std::endl;
             wallet.GenerateNewKey();
-            CAddress addr = wallet.GetNewAddress();
+            CDilithiumAddress addr = wallet.GetNewAddress();
             std::cout << "  [OK] Initial address: " << addr.ToString() << std::endl;
         }
 
@@ -1868,9 +1868,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Verify this coinbase belongs to our wallet
                 if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
                     // BUG #6 FIX: Use wallet's actual address instead of reconstructing from hash
-                    // The CAddress constructor expects a public key, not a hash, so we use GetNewAddress()
+                    // The CDilithiumAddress constructor expects a public key, not a hash, so we use GetNewAddress()
                     // which returns the correct address that matches the coinbase scriptPubKey
-                    CAddress our_address = wallet.GetNewAddress();
+                    CDilithiumAddress our_address = wallet.GetNewAddress();
 
                     // Get block height for UTXO tracking
                     uint32_t block_height = 0;

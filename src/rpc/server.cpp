@@ -1104,12 +1104,12 @@ std::string CRPCServer::FormatAmount(CAmount amount) const {
 /**
  * Validate and parse a Dilithion address string
  */
-bool CRPCServer::ValidateAddress(const std::string& addressStr, CAddress& addressOut) const {
+bool CRPCServer::ValidateAddress(const std::string& addressStr, CDilithiumAddress& addressOut) const {
     if (addressStr.empty()) {
         return false;
     }
 
-    CAddress addr;
+    CDilithiumAddress addr;
     if (!addr.SetString(addressStr)) {
         return false;
     }
@@ -1160,7 +1160,7 @@ std::string CRPCServer::RPC_GetNewAddress(const std::string& params) {
         throw std::runtime_error("Wallet not initialized");
     }
 
-    CAddress addr = m_wallet->GetNewAddress();
+    CDilithiumAddress addr = m_wallet->GetNewAddress();
     if (!addr.IsValid()) {
         throw std::runtime_error("Failed to get address");
     }
@@ -1327,7 +1327,7 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
     }
 
     // Validate address
-    CAddress recipient_address;
+    CDilithiumAddress recipient_address;
     if (!ValidateAddress(address_str, recipient_address)) {
         throw std::runtime_error("Invalid Dilithion address: " + address_str);
     }
@@ -2174,7 +2174,7 @@ std::string CRPCServer::RPC_CreateHDWallet(const std::string& params) {
     }
 
     // Get first address
-    CAddress firstAddress = m_wallet->GetNewHDAddress();
+    CDilithiumAddress firstAddress = m_wallet->GetNewHDAddress();
     if (!firstAddress.IsValid()) {
         throw std::runtime_error("Failed to derive first address");
     }
@@ -2234,7 +2234,7 @@ std::string CRPCServer::RPC_RestoreHDWallet(const std::string& params) {
     }
 
     // Get first address
-    CAddress firstAddress = m_wallet->GetNewHDAddress();
+    CDilithiumAddress firstAddress = m_wallet->GetNewHDAddress();
     if (!firstAddress.IsValid()) {
         throw std::runtime_error("Failed to derive first address");
     }
@@ -2313,14 +2313,14 @@ std::string CRPCServer::RPC_ListHDAddresses(const std::string& params) {
     }
 
     // Get all addresses
-    std::vector<CAddress> addresses = m_wallet->GetAddresses();
+    std::vector<CDilithiumAddress> addresses = m_wallet->GetAddresses();
 
     // Build JSON array of addresses with paths
     std::ostringstream oss;
     oss << "[";
 
     bool first = true;
-    for (const CAddress& addr : addresses) {
+    for (const CDilithiumAddress& addr : addresses) {
         // Get derivation path for this address
         CHDKeyPath path;
         if (!m_wallet->GetAddressPath(addr, path)) {
@@ -2396,7 +2396,7 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
     uint32_t nBits = GetNextWorkRequired(pindexPrev);
 
     // Get miner address from wallet
-    std::vector<CAddress> addresses = m_wallet->GetAddresses();
+    std::vector<CDilithiumAddress> addresses = m_wallet->GetAddresses();
     if (addresses.empty()) {
         throw std::runtime_error("No wallet address available for mining rewards");
     }
@@ -2811,7 +2811,7 @@ std::string CRPCServer::RPC_GenerateToAddress(const std::string& params) {
     }
 
     // Validate address
-    CAddress minerAddress;
+    CDilithiumAddress minerAddress;
     if (!ValidateAddress(address_str, minerAddress)) {
         throw std::runtime_error("Invalid address: " + address_str);
     }

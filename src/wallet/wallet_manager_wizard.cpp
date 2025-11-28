@@ -292,7 +292,7 @@ bool CWalletManager::RunFirstTimeSetupWizard() {
     std::cout << std::endl;
 
     // Display first address
-    CAddress first_address = m_wallet->GetNewHDAddress();
+    CDilithiumAddress first_address = m_wallet->GetNewHDAddress();
     std::cout << "Your first receive address:" << std::endl;
     std::cout << COLOR_GREEN << first_address.ToString() << COLOR_RESET << std::endl;
     std::cout << std::endl;

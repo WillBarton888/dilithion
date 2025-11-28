@@ -378,7 +378,7 @@ bool CWalletManager::InteractiveCreateHDWallet(std::string& mnemonic_out) {
     std::cout << std::endl;
 
     // Get first address
-    CAddress first_address = m_wallet->GetNewHDAddress();
+    CDilithiumAddress first_address = m_wallet->GetNewHDAddress();
     std::cout << "First address: " << COLOR_GREEN << first_address.ToString() << COLOR_RESET << std::endl;
     std::cout << std::endl;
 
@@ -587,7 +587,7 @@ bool CWalletManager::InteractiveRestoreHDWallet() {
     std::cout << std::endl;
 
     // Get first address
-    CAddress first_address = m_wallet->GetNewHDAddress();
+    CDilithiumAddress first_address = m_wallet->GetNewHDAddress();
     std::cout << "First address: " << COLOR_GREEN << first_address.ToString() << COLOR_RESET << std::endl;
     std::cout << std::endl;
 

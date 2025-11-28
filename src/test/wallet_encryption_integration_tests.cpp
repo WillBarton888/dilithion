@@ -106,7 +106,7 @@ bool Test_LockUnlock() {
     CWallet wallet;
     wallet.GenerateNewKey();
 
-    std::string passphrase = "SecurePass456!";
+    std::string passphrase = "SecurePass456!@@##";  // WL-009: min 16 chars
     wallet.EncryptWallet(passphrase);
 
     // Lock wallet
@@ -122,6 +122,10 @@ bool Test_LockUnlock() {
     TEST_ASSERT(!wallet.Unlock("WrongPassword"), "Unlock should fail with wrong passphrase");
     TEST_ASSERT(wallet.IsLocked(), "Wallet should remain locked");
     TEST_SUCCESS("Wrong passphrase rejected");
+
+    // WL-011: Wait for rate limiting to expire before correct attempt
+    TEST_INFO("Waiting 2 seconds for rate limit to expire (WL-011)...");
+    std::this_thread::sleep_for(std::chrono::seconds(2));
 
     // Unlock with correct passphrase
     TEST_ASSERT(wallet.Unlock(passphrase), "Unlock with correct passphrase");
@@ -173,6 +177,10 @@ bool Test_PassphraseChange() {
     TEST_ASSERT(wallet.IsLocked(), "Wallet should remain locked");
     TEST_SUCCESS("Old passphrase rejected after change");
 
+    // WL-011: Wait for rate limiting to expire before correct attempt
+    TEST_INFO("Waiting 2 seconds for rate limit to expire (WL-011)...");
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
     // New passphrase should work
     TEST_ASSERT(wallet.Unlock(newPass), "New passphrase should work");
     TEST_ASSERT(!wallet.IsLocked(), "Wallet should be unlocked");
@@ -199,7 +207,7 @@ bool Test_EncryptedKeyGeneration() {
 
     CWallet wallet;
 
-    std::string passphrase = "KeyGenPass789!";
+    std::string passphrase = "KeyGenPass789!@@##";  // WL-009: min 16 chars
 
     // Encrypt empty wallet
     wallet.EncryptWallet(passphrase);
@@ -259,7 +267,7 @@ bool Test_TimeoutLock() {
     CWallet wallet;
     wallet.GenerateNewKey();
 
-    std::string passphrase = "TimeoutPass123!";
+    std::string passphrase = "TimeoutPass123!@@#";  // WL-009: min 16 chars
     wallet.EncryptWallet(passphrase);
     wallet.Lock();
 
@@ -304,7 +312,7 @@ bool Test_KeyPersistence() {
 
     CWallet wallet;
 
-    std::string passphrase = "PersistPass123!";
+    std::string passphrase = "PersistPass123!@@#";  // WL-009: min 16 chars
 
     // Generate keys before encryption
     wallet.GenerateNewKey();
@@ -352,6 +360,10 @@ bool Test_KeyPersistence() {
     // Unlock with wrong passphrase (should fail)
     TEST_ASSERT(!wallet.Unlock("WrongPass"), "Wrong passphrase rejected");
 
+    // WL-011: Wait for rate limiting to expire before correct attempt
+    TEST_INFO("Waiting 2 seconds for rate limit to expire (WL-011)...");
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
     // Verify keys not accessible when locked
     CKey keyLocked;
     TEST_ASSERT(!wallet.GetKey(addr1, keyLocked), "Key not accessible when locked");
@@ -392,7 +404,7 @@ bool Test_EdgeCases() {
     // Test 2: Multiple unlock calls
     CWallet wallet;
     wallet.GenerateNewKey();
-    std::string pass = "MultiUnlock123!";
+    std::string pass = "MultiUnlock123!@@";  // WL-009: min 16 chars
     wallet.EncryptWallet(pass);
     wallet.Lock();
 

@@ -122,9 +122,9 @@ std::vector<uint8_t> HashPubKey(const std::vector<uint8_t>& pubkey) {
 
 } // namespace WalletCrypto
 
-// CAddress implementation
+// CDilithiumAddress implementation
 
-CAddress::CAddress(const std::vector<uint8_t>& pubkey) {
+CDilithiumAddress::CDilithiumAddress(const std::vector<uint8_t>& pubkey) {
     std::vector<uint8_t> hash = WalletCrypto::HashPubKey(pubkey);
 
     // Create address data: version byte (0x1E) + hash (20 bytes)
@@ -134,14 +134,14 @@ CAddress::CAddress(const std::vector<uint8_t>& pubkey) {
     // vchData is now 21 bytes (1 + 20)
 }
 
-std::string CAddress::ToString() const {
+std::string CDilithiumAddress::ToString() const {
     if (!IsValid()) {
         return "";
     }
     return ::EncodeBase58Check(vchData);
 }
 
-bool CAddress::SetString(const std::string& str) {
+bool CDilithiumAddress::SetString(const std::string& str) {
     if (!::DecodeBase58Check(str, vchData)) {
         vchData.clear();
         return false;
@@ -201,7 +201,7 @@ bool CWallet::GenerateNewKey() {
         return false;
     }
 
-    CAddress address(key.vchPubKey);
+    CDilithiumAddress address(key.vchPubKey);
 
     // If wallet is encrypted, encrypt the key (don't call IsCrypted() - we already have the mutex)
     if (masterKey.IsValid()) {
@@ -249,22 +249,22 @@ bool CWallet::GenerateNewKey() {
     return true;
 }
 
-CAddress CWallet::GetNewAddress() {
+CDilithiumAddress CWallet::GetNewAddress() {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     if (vchAddresses.empty()) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     return defaultAddress;
 }
 
-std::vector<CAddress> CWallet::GetAddresses() const {
+std::vector<CDilithiumAddress> CWallet::GetAddresses() const {
     std::lock_guard<std::mutex> lock(cs_wallet);
     return vchAddresses;
 }
 
-bool CWallet::HasKey(const CAddress& address) const {
+bool CWallet::HasKey(const CDilithiumAddress& address) const {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     // Check both encrypted and unencrypted key stores
@@ -276,13 +276,13 @@ bool CWallet::HasKey(const CAddress& address) const {
 }
 
 // Public GetKey - acquires lock
-bool CWallet::GetKey(const CAddress& address, CKey& keyOut) const {
+bool CWallet::GetKey(const CDilithiumAddress& address, CKey& keyOut) const {
     std::lock_guard<std::mutex> lock(cs_wallet);
     return GetKeyUnlocked(address, keyOut);
 }
 
 // Private GetKeyUnlocked - assumes caller holds lock
-bool CWallet::GetKeyUnlocked(const CAddress& address, CKey& keyOut) const {
+bool CWallet::GetKeyUnlocked(const CDilithiumAddress& address, CKey& keyOut) const {
     // First check unencrypted keys
     auto it = mapKeys.find(address);
     if (it != mapKeys.end()) {
@@ -339,7 +339,7 @@ bool CWallet::GetKeyUnlocked(const CAddress& address, CKey& keyOut) const {
     return true;
 }
 
-bool CWallet::SignHash(const CAddress& address, const uint256& hash,
+bool CWallet::SignHash(const CDilithiumAddress& address, const uint256& hash,
                        std::vector<uint8_t>& signature) {
     CKey key;
     if (!GetKey(address, key)) {
@@ -352,7 +352,7 @@ bool CWallet::SignHash(const CAddress& address, const uint256& hash,
 // FIX-006 (WALLET-002): Internal helper that assumes lock is already held
 // Used by ScanUTXOs to avoid deadlock
 bool CWallet::AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValue,
-                                const CAddress& address, uint32_t nHeight) {
+                                const CDilithiumAddress& address, uint32_t nHeight) {
     // REQUIRES: cs_wallet must be held by caller
 
     CWalletTx wtx;
@@ -371,7 +371,7 @@ bool CWallet::AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValu
 }
 
 bool CWallet::AddTxOut(const uint256& txid, uint32_t vout, int64_t nValue,
-                       const CAddress& address, uint32_t nHeight) {
+                       const CDilithiumAddress& address, uint32_t nHeight) {
     std::lock_guard<std::mutex> lock(cs_wallet);
     return AddTxOutUnlocked(txid, vout, nValue, address, nHeight);
 }
@@ -1041,7 +1041,7 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
 
     // Now encrypt all existing keys with the master key
     for (const auto& pair : mapKeys) {
-        const CAddress& address = pair.first;
+        const CDilithiumAddress& address = pair.first;
         const CKey& key = pair.second;
 
         CEncryptedKey encKey;
@@ -1242,12 +1242,12 @@ bool CWallet::Load(const std::string& filename) {
 
     // SEC-001 FIX: Load into temporary variables first (atomic load pattern)
     // Only clear existing wallet if load succeeds completely
-    std::map<CAddress, CKey> temp_mapKeys;
-    std::map<CAddress, CEncryptedKey> temp_mapCryptedKeys;
-    std::vector<CAddress> temp_vchAddresses;
+    std::map<CDilithiumAddress, CKey> temp_mapKeys;
+    std::map<CDilithiumAddress, CEncryptedKey> temp_mapCryptedKeys;
+    std::vector<CDilithiumAddress> temp_vchAddresses;
     // FIX-005 (WALLET-001): Changed to COutPoint key for v3 format
     std::map<COutPoint, CWalletTx> temp_mapWalletTx;
-    CAddress temp_defaultAddress;
+    CDilithiumAddress temp_defaultAddress;
     CMasterKey temp_masterKey;
     bool temp_fWalletUnlocked = true;
     // BUG #56 FIX: Best block pointer temp variables
@@ -1374,8 +1374,8 @@ bool CWallet::Load(const std::string& filename) {
     uint32_t temp_nHDAccountIndex = 0;
     uint32_t temp_nHDExternalChainIndex = 0;
     uint32_t temp_nHDInternalChainIndex = 0;
-    std::map<CAddress, CHDKeyPath> temp_mapAddressToPath;
-    std::map<CHDKeyPath, CAddress> temp_mapPathToAddress;
+    std::map<CDilithiumAddress, CHDKeyPath> temp_mapAddressToPath;
+    std::map<CHDKeyPath, CDilithiumAddress> temp_mapPathToAddress;
 
     if (is_hd_wallet) {
         temp_fIsHDWallet = true;
@@ -1476,7 +1476,7 @@ bool CWallet::Load(const std::string& filename) {
             if (!file.good()) return false;
 
             // Reconstruct address from raw data
-            CAddress address = CAddress::FromData(addrData);
+            CDilithiumAddress address = CDilithiumAddress::FromData(addrData);
 
             // Store path mappings
             temp_mapPathToAddress[path] = address;
@@ -1501,7 +1501,7 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(addrData.data()), 21);
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
-        CAddress addr;
+        CDilithiumAddress addr;
         if (!addr.SetString(::EncodeBase58Check(addrData))) {
             // Fallback: construct address directly from data
             // This is needed because SetString expects Base58-encoded string
@@ -1571,7 +1571,7 @@ bool CWallet::Load(const std::string& filename) {
             }
 
             // Create address from public key
-            CAddress keyAddr(encKey.vchPubKey);
+            CDilithiumAddress keyAddr(encKey.vchPubKey);
             temp_mapCryptedKeys[keyAddr] = encKey;
             temp_vchAddresses.push_back(keyAddr);
         } else {
@@ -1587,7 +1587,7 @@ bool CWallet::Load(const std::string& filename) {
             if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // Create address from public key
-            CAddress keyAddr(key.vchPubKey);
+            CDilithiumAddress keyAddr(key.vchPubKey);
             temp_mapKeys[keyAddr] = key;
             temp_vchAddresses.push_back(keyAddr);
         }
@@ -1940,7 +1940,7 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
 
         for (const auto& pair : mapPathToAddress) {
             const CHDKeyPath& path = pair.first;
-            const CAddress& address = pair.second;
+            const CDilithiumAddress& address = pair.second;
 
             // Write path indices count
             uint32_t numIndices = static_cast<uint32_t>(path.indices.size());
@@ -1967,7 +1967,7 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
         for (const auto& pair : mapCryptedKeys) {
-            const CAddress& addr = pair.first;
+            const CDilithiumAddress& addr = pair.first;
             const CEncryptedKey& encKey = pair.second;
 
             // Write address
@@ -2005,7 +2005,7 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
         for (const auto& pair : mapKeys) {
-            const CAddress& addr = pair.first;
+            const CDilithiumAddress& addr = pair.first;
             const CKey& key = pair.second;
 
             // Write address
@@ -2271,7 +2271,7 @@ void CWallet::Clear() {
     mapCryptedKeys.clear();
     vchAddresses.clear();
     mapWalletTx.clear();
-    defaultAddress = CAddress();
+    defaultAddress = CDilithiumAddress();
 
     // Clear encryption state
     fWalletUnlocked = false;
@@ -2321,9 +2321,9 @@ bool CWallet::ValidateConsistency(std::string& error_out) const {
 
     // Check unencrypted keys
     for (const auto& pair : mapKeys) {
-        const CAddress& address = pair.first;
+        const CDilithiumAddress& address = pair.first;
         const CKey& key = pair.second;
-        CAddress reconstructed(key.vchPubKey);
+        CDilithiumAddress reconstructed(key.vchPubKey);
         if (!(reconstructed == address)) {
             error_out = "[ADDRESS_RECONSTRUCTION] Mismatch for unencrypted key: expected " +
                        reconstructed.ToString() + ", got " + address.ToString();
@@ -2333,9 +2333,9 @@ bool CWallet::ValidateConsistency(std::string& error_out) const {
 
     // Check encrypted keys (public key is not encrypted, so we can reconstruct)
     for (const auto& pair : mapCryptedKeys) {
-        const CAddress& address = pair.first;
+        const CDilithiumAddress& address = pair.first;
         const CEncryptedKey& encKey = pair.second;
-        CAddress reconstructed(encKey.vchPubKey);
+        CDilithiumAddress reconstructed(encKey.vchPubKey);
         if (!(reconstructed == address)) {
             error_out = "[ADDRESS_RECONSTRUCTION] Mismatch for encrypted key: expected " +
                        reconstructed.ToString() + ", got " + address.ToString();
@@ -2350,7 +2350,7 @@ bool CWallet::ValidateConsistency(std::string& error_out) const {
     // (Check #3 is simpler than #2, so we do it before the complex HD check)
 
     // Optimization: Convert vchAddresses to set for O(log n) lookup
-    std::set<CAddress> address_set(vchAddresses.begin(), vchAddresses.end());
+    std::set<CDilithiumAddress> address_set(vchAddresses.begin(), vchAddresses.end());
 
     for (const auto& pair : mapWalletTx) {
         const COutPoint& outpoint = pair.first;
@@ -2438,7 +2438,7 @@ bool CWallet::ValidateConsistency(std::string& error_out) const {
     if (fIsHDWallet) {
         // Check Address→Path mapping completeness
         for (const auto& pair : mapAddressToPath) {
-            const CAddress& addr = pair.first;
+            const CDilithiumAddress& addr = pair.first;
             const CHDKeyPath& path = pair.second;
             auto it = mapPathToAddress.find(path);
             if (it == mapPathToAddress.end()) {
@@ -2456,7 +2456,7 @@ bool CWallet::ValidateConsistency(std::string& error_out) const {
         // Check Path→Address mapping completeness
         for (const auto& pair : mapPathToAddress) {
             const CHDKeyPath& path = pair.first;
-            const CAddress& addr = pair.second;
+            const CDilithiumAddress& addr = pair.second;
             auto it = mapAddressToPath.find(addr);
             if (it == mapAddressToPath.end()) {
                 error_out = "[HD_BIDIRECTIONAL] Path→Address exists for address " +
@@ -2584,8 +2584,8 @@ std::vector<uint8_t> ExtractPubKeyHash(const std::vector<uint8_t>& scriptPubKey)
 // Phase 5.2: UTXO Management & Transaction Creation Implementation
 // ============================================================================
 
-// Helper: Get public key hash (20 bytes) from CAddress
-std::vector<uint8_t> CWallet::GetPubKeyHashFromAddress(const CAddress& address) {
+// Helper: Get public key hash (20 bytes) from CDilithiumAddress
+std::vector<uint8_t> CWallet::GetPubKeyHashFromAddress(const CDilithiumAddress& address) {
     if (!address.IsValid()) {
         return std::vector<uint8_t>();
     }
@@ -2644,7 +2644,7 @@ bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
 
     // Step 1: Get all wallet addresses and their pubkey hashes
     // FIX-006: Access vchAddresses directly since we hold lock (avoid deadlock with GetAddresses())
-    const std::vector<CAddress>& addresses = vchAddresses;
+    const std::vector<CDilithiumAddress>& addresses = vchAddresses;
     if (addresses.empty()) {
         std::cout << "[Wallet] No addresses in wallet - nothing to scan" << std::endl;
         return true;
@@ -2926,7 +2926,7 @@ bool CWallet::SelectCoins(CAmount target_value,
     return false;
 }
 
-bool CWallet::CreateTransaction(const CAddress& recipient_address,
+bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
                                 CAmount amount,
                                 CAmount fee,
                                 CUTXOSet& utxo_set,
@@ -3043,7 +3043,7 @@ bool CWallet::CreateTransaction(const CAddress& recipient_address,
         // instead of reusing the default address. This prevents address reuse and improves privacy.
         // Impact: Prevents transaction graph analysis and wallet fingerprinting
         if (IsHDWallet()) {
-            CAddress change_address = GetChangeAddress();
+            CDilithiumAddress change_address = GetChangeAddress();
             if (!change_address.IsValid()) {
                 error = "Failed to generate HD change address (wallet may be locked)";
                 // WALLET-006 FIX: Unlock coins on failure
@@ -3443,11 +3443,11 @@ bool CWallet::RestoreHDWallet(const std::string& mnemonic, const std::string& pa
     return true;
 }
 
-CAddress CWallet::GetNewHDAddress() {
+CDilithiumAddress CWallet::GetNewHDAddress() {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     if (!fIsHDWallet) {
-        return CAddress();  // Empty address
+        return CDilithiumAddress();  // Empty address
     }
 
     // RPC-003 FIX: Enforce wallet lock check with explicit error logging
@@ -3458,14 +3458,14 @@ CAddress CWallet::GetNewHDAddress() {
     if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
         std::cerr << "[ERROR] Cannot generate new address: wallet is locked. "
                   << "Please unlock wallet first." << std::endl;
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Derive next address on external chain (receive)
     CHDKeyPath path = CHDKeyPath::ReceiveAddress(nHDAccountIndex, nHDExternalChainIndex);
 
     if (!DeriveAndCacheHDAddress(path)) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Increment external chain index
@@ -3482,14 +3482,14 @@ CAddress CWallet::GetNewHDAddress() {
         return it->second;
     }
 
-    return CAddress();
+    return CDilithiumAddress();
 }
 
-CAddress CWallet::GetChangeAddress() {
+CDilithiumAddress CWallet::GetChangeAddress() {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     if (!fIsHDWallet) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // RPC-003 FIX: Enforce wallet lock check with explicit error logging
@@ -3497,14 +3497,14 @@ CAddress CWallet::GetChangeAddress() {
     if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
         std::cerr << "[ERROR] Cannot generate change address: wallet is locked. "
                   << "Please unlock wallet first." << std::endl;
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Derive next address on internal chain (change)
     CHDKeyPath path = CHDKeyPath::ChangeAddress(nHDAccountIndex, nHDInternalChainIndex);
 
     if (!DeriveAndCacheHDAddress(path)) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Increment internal chain index
@@ -3521,25 +3521,25 @@ CAddress CWallet::GetChangeAddress() {
         return it->second;
     }
 
-    return CAddress();
+    return CDilithiumAddress();
 }
 
-CAddress CWallet::DeriveAddress(const std::string& path_str) {
+CDilithiumAddress CWallet::DeriveAddress(const std::string& path_str) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     if (!fIsHDWallet) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Check if wallet is locked and encrypted
     if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Parse path
     CHDKeyPath path;
     if (!path.Parse(path_str) || !path.IsValid()) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Check if already cached
@@ -3550,7 +3550,7 @@ CAddress CWallet::DeriveAddress(const std::string& path_str) {
 
     // Derive and cache new address
     if (!DeriveAndCacheHDAddress(path)) {
-        return CAddress();
+        return CDilithiumAddress();
     }
 
     // Auto-save if enabled
@@ -3564,7 +3564,7 @@ CAddress CWallet::DeriveAddress(const std::string& path_str) {
         return it->second;
     }
 
-    return CAddress();
+    return CDilithiumAddress();
 }
 
 bool CWallet::ExportMnemonic(std::string& mnemonic_out) const {
@@ -3598,7 +3598,7 @@ bool CWallet::GetHDWalletInfo(uint32_t& account, uint32_t& external_index,
     return true;
 }
 
-bool CWallet::GetAddressPath(const CAddress& address, CHDKeyPath& path_out) const {
+bool CWallet::GetAddressPath(const CDilithiumAddress& address, CHDKeyPath& path_out) const {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     if (!fIsHDWallet) {
@@ -3732,7 +3732,7 @@ bool CWallet::DeriveAndCacheHDAddress(const CHDKeyPath& path) {
     }
 
     // Create address from public key
-    CAddress address(std::vector<uint8_t>(pk, pk + DILITHIUM_PUBLICKEY_SIZE));
+    CDilithiumAddress address(std::vector<uint8_t>(pk, pk + DILITHIUM_PUBLICKEY_SIZE));
 
     // Create CKey structure
     CKey key;
