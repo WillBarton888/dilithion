@@ -2688,6 +2688,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << "[IBD] Sent GETDATA for block " << hash.GetHex().substr(0, 16) << "... (height " << height << ") to peer " << peer << std::endl;
                                             successful_requests++;
                                         }
+                                    } else {
+                                        // BUG #63 FIX: Re-queue block if no peer available
+                                        // Without this, blocks are LOST - removed from queue but never added to in-flight
+                                        g_block_fetcher->QueueBlockForDownload(hash, height, true);  // High priority for retry
                                     }
                                 }
 
