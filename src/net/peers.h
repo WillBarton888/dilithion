@@ -5,6 +5,8 @@
 #define DILITHION_NET_PEERS_H
 
 #include <net/protocol.h>
+#include <net/addrman.h>  // Bitcoin Core-style address manager
+#include <net/banman.h>   // Bitcoin Core-style ban manager with persistence
 #include <util/time.h>
 #include <string>
 #include <vector>
@@ -84,10 +86,9 @@ private:
     mutable std::recursive_mutex cs_peers;
     std::map<int, std::shared_ptr<CPeer>> peers;
 
-    // NET-005 FIX: Track ban expiry times instead of just banned status
-    // Maps IP address -> ban expiry timestamp (0 = permanent ban)
-    // This allows proper LRU eviction when limit is reached
-    std::map<std::string, int64_t> banned_ips;
+    // Bitcoin Core-style ban manager with banlist.dat persistence
+    // Replaces simple banned_ips map with structured ban entries
+    CBanManager banman;
 
     int next_peer_id;
 
@@ -97,37 +98,27 @@ private:
     // Hardcoded seed nodes
     std::vector<NetProtocol::CAddress> seed_nodes;
 
-    // Peer address database (NW-003)
-    struct CAddrInfo {
-        NetProtocol::CAddress addr;
-        int64_t nTime;          // Last seen time
-        int64_t nLastTry;       // Last connection attempt time
-        int64_t nLastSuccess;   // Last successful connection time
-        int nAttempts;          // Total connection attempts
-        int nSuccesses;         // Successful connections
-        bool fInTried;          // In "tried" table (vs "new" table)
-
-        CAddrInfo() : nTime(0), nLastTry(0), nLastSuccess(0),
-                      nAttempts(0), nSuccesses(0), fInTried(false) {}
-    };
-
-    std::map<std::string, CAddrInfo> addr_map;  // IP:port -> address info
-    mutable std::mutex cs_addrs;
+    // Bitcoin Core-style address manager (replaces simple addr_map)
+    // Provides eclipse attack protection via two-table bucket system
+    CAddrMan addrman;
+    std::string data_dir;  // Path to data directory for peers.dat
 
     // Connection limits
     static const int MAX_OUTBOUND_CONNECTIONS = 8;
     static const int MAX_INBOUND_CONNECTIONS = 117;
     static const int MAX_TOTAL_CONNECTIONS = 125;
 
-    // NET-005 FIX: Ban list limit to prevent unbounded memory growth
-    static const size_t MAX_BANNED_IPS = 10000;
-
 public:
     // DoS protection thresholds (public so CPeer can access)
     static const int BAN_THRESHOLD = 100;
     static const int64_t DEFAULT_BAN_TIME = 24 * 60 * 60;  // 24 hours
 
-    CPeerManager();
+    // Constructor takes data directory for peers.dat persistence
+    explicit CPeerManager(const std::string& datadir = "");
+
+    // Persistence (peers.dat)
+    bool SavePeers();   // Save address database to peers.dat
+    bool LoadPeers();   // Load address database from peers.dat
 
     // Peer management
     std::shared_ptr<CPeer> AddPeer(const NetProtocol::CAddress& addr);
@@ -154,9 +145,12 @@ public:
     bool IsBanned(const std::string& ip) const;
     void ClearBans();
 
-    // DoS protection
-    void Misbehaving(int peer_id, int howmuch);
+    // DoS protection with structured misbehavior tracking
+    void Misbehaving(int peer_id, int howmuch, MisbehaviorType type = MisbehaviorType::NONE);
     void DecayMisbehaviorScores();  // BUG #49: Decay scores over time
+
+    // Access to ban manager for advanced operations
+    CBanManager& GetBanManager() { return banman; }
 
     // Statistics
     struct Stats {

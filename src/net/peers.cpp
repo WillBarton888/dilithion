@@ -36,20 +36,60 @@ std::string CPeer::ToString() const {
 
 // CPeerManager implementation
 
-CPeerManager::CPeerManager() : next_peer_id(1) {
+CPeerManager::CPeerManager(const std::string& datadir)
+    : banman(datadir), next_peer_id(1), data_dir(datadir) {
     InitializeSeedNodes();
+
+    // Load persisted peer addresses from peers.dat
+    if (!data_dir.empty()) {
+        LoadPeers();
+    }
+}
+
+bool CPeerManager::SavePeers() {
+    if (data_dir.empty()) {
+        return false;
+    }
+
+    std::string path = data_dir + "/peers.dat";
+    bool result = addrman.SaveToFile(path);
+
+    if (result) {
+        std::cout << "[PeerManager] Saved " << addrman.Size() << " peer addresses to " << path << std::endl;
+    } else {
+        std::cerr << "[PeerManager] ERROR: Failed to save peers to " << path << std::endl;
+    }
+
+    return result;
+}
+
+bool CPeerManager::LoadPeers() {
+    if (data_dir.empty()) {
+        return false;
+    }
+
+    std::string path = data_dir + "/peers.dat";
+    bool result = addrman.LoadFromFile(path);
+
+    if (result) {
+        std::cout << "[PeerManager] Loaded " << addrman.Size() << " peer addresses from " << path << std::endl;
+    } else {
+        std::cerr << "[PeerManager] WARNING: Could not load peers from " << path << " (starting fresh)" << std::endl;
+    }
+
+    return result;
 }
 
 std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // NET-005 FIX: Check if IP is banned (uses updated IsBanned with expiry check)
+    // Check if IP is banned using CBanManager
     std::string ip = addr.ToStringIP();
     std::cout << "[HANDSHAKE-DIAG] AddPeer called for " << addr.ToString()
               << " (IP: " << ip << ", current peers: " << peers.size() << "/" << MAX_TOTAL_CONNECTIONS << ")"
               << std::endl;
 
-    if (IsBanned(ip)) {
+    if (banman.IsBanned(ip)) {
         std::cout << "[HANDSHAKE-DIAG] REJECT: IP " << ip << " is banned" << std::endl;
         return nullptr;
     }
@@ -154,51 +194,37 @@ std::vector<NetProtocol::CAddress> CPeerManager::GetPeerAddresses(int max_count)
 }
 
 void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
-    std::lock_guard<std::mutex> lock(cs_addrs);
-
     // Skip localhost and invalid addresses
     std::string ip = addr.ToStringIP();
     if (ip == "127.0.0.1" || ip == "::1" || ip.empty()) {
         return;
     }
 
-    // Create unique key: IP:port
-    std::string key = addr.ToString();
+    // Convert NetProtocol::CAddress to CService for CAddrMan
+    // Create CNetAddr from IP bytes
+    CNetAddr netaddr;
 
-    // Check if address already exists
-    auto it = addr_map.find(key);
-    if (it != addr_map.end()) {
-        // Update timestamp
-        it->second.nTime = GetTime();
-        return;
+    // Check if IPv4-mapped address (::ffff:x.x.x.x)
+    // IPv4-mapped prefix: 00 00 00 00 00 00 00 00 00 00 FF FF
+    static const uint8_t ipv4_mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+    bool is_ipv4 = (memcmp(addr.ip, ipv4_mapped_prefix, 12) == 0);
+
+    if (is_ipv4) {
+        // IPv4 address - extract from last 4 bytes
+        uint32_t ipv4 = ((uint32_t)addr.ip[12] << 24) |
+                        ((uint32_t)addr.ip[13] << 16) |
+                        ((uint32_t)addr.ip[14] << 8) |
+                        (uint32_t)addr.ip[15];
+        netaddr.SetIPv4(ipv4);
+    } else {
+        // IPv6 address - pass raw bytes directly
+        netaddr.SetIPv6(addr.ip);
     }
 
-    // NET-013 FIX: Limit address database size to prevent unbounded growth
-    const size_t MAX_ADDR_COUNT = 10000;
+    CService service(netaddr, addr.port);
 
-    // If at capacity, evict oldest unused address
-    if (addr_map.size() >= MAX_ADDR_COUNT) {
-        // Find oldest address that hasn't been successfully connected
-        auto oldest = addr_map.begin();
-        for (auto iter = addr_map.begin(); iter != addr_map.end(); ++iter) {
-            if (iter->second.nSuccesses == 0 && iter->second.nTime < oldest->second.nTime) {
-                oldest = iter;
-            }
-        }
-        addr_map.erase(oldest);
-    }
-
-    // Add new address
-    CAddrInfo info;
-    info.addr = addr;
-    info.nTime = GetTime();
-    info.nLastTry = 0;
-    info.nLastSuccess = 0;
-    info.nAttempts = 0;
-    info.nSuccesses = 0;
-    info.fInTried = false;
-
-    addr_map[key] = info;
+    // Add to AddrMan - bucket system handles deduplication and limits
+    addrman.Add(service, CNetAddr());  // No source address for now
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
@@ -253,37 +279,21 @@ void CPeerManager::BanPeer(int peer_id, int64_t ban_time_seconds) {
         int64_t ban_until = GetTime() + ban_time_seconds;
         it->second->Ban(ban_until);
 
-        // Add IP to banned list with expiry time
+        // Add IP to banned list using CBanManager
         std::string ip = it->second->addr.ToStringIP();
-        BanIP(ip, ban_time_seconds);  // Use BanIP to enforce limits
+        banman.Ban(ip, ban_time_seconds, BanReason::NodeMisbehaving,
+                   MisbehaviorType::NONE, it->second->misbehavior_score);
     }
 }
 
 void CPeerManager::BanIP(const std::string& ip, int64_t ban_time_seconds) {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // NET-005 FIX: Enforce maximum banned IPs limit with LRU eviction
-    if (banned_ips.size() >= MAX_BANNED_IPS) {
-        // Find the ban that expires soonest (LRU based on expiry time)
-        auto oldest = banned_ips.begin();
-        for (auto it = banned_ips.begin(); it != banned_ips.end(); ++it) {
-            // Prefer removing entries that expire sooner
-            // If permanent ban (0), keep it unless all are permanent
-            if (it->second > 0 && (oldest->second == 0 || it->second < oldest->second)) {
-                oldest = it;
-            }
-        }
-
-        std::cout << "[PeerManager] WARNING: Banned IPs at capacity (" << banned_ips.size()
-                  << "), removing ban for " << oldest->first << std::endl;
-        banned_ips.erase(oldest);
-    }
-
-    // Add ban with expiry timestamp
-    int64_t ban_until = GetTime() + ban_time_seconds;
-    banned_ips[ip] = ban_until;
+    // Use CBanManager (handles LRU eviction internally)
+    banman.Ban(ip, ban_time_seconds, BanReason::ManuallyBanned);
 
     // Disconnect all peers from this IP
+    int64_t ban_until = GetTime() + ban_time_seconds;
     for (auto& pair : peers) {
         if (pair.second->addr.ToStringIP() == ip) {
             pair.second->Ban(ban_until);
@@ -292,46 +302,33 @@ void CPeerManager::BanIP(const std::string& ip, int64_t ban_time_seconds) {
 }
 
 void CPeerManager::UnbanIP(const std::string& ip) {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
-    banned_ips.erase(ip);
+    banman.Unban(ip);
 }
 
 bool CPeerManager::IsBanned(const std::string& ip) const {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
-
-    // NET-005 FIX: Check if IP is banned and ban hasn't expired
-    auto it = banned_ips.find(ip);
-    if (it == banned_ips.end()) {
-        return false;  // Not banned
-    }
-
-    // Check if ban has expired
-    int64_t ban_until = it->second;
-    if (ban_until == 0) {
-        return true;  // Permanent ban
-    }
-
-    if (GetTime() >= ban_until) {
-        // Ban expired - remove it (const_cast needed for cleanup in const method)
-        // Better: have separate cleanup thread, but this works for now
-        return false;  // Expired ban = not banned
-    }
-
-    return true;  // Still banned
+    return banman.IsBanned(ip);
 }
 
 void CPeerManager::ClearBans() {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
-    banned_ips.clear();
+    banman.ClearBanned();
 }
 
-void CPeerManager::Misbehaving(int peer_id, int howmuch) {
+void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
     auto peer = GetPeer(peer_id);
     if (!peer) return;
 
-    if (peer->Misbehaving(howmuch)) {
+    // Use default score from MisbehaviorType if howmuch is 0
+    int score = howmuch > 0 ? howmuch : GetMisbehaviorScore(type);
+
+    if (peer->Misbehaving(score)) {
         // Ban peer if threshold exceeded
-        BanPeer(peer_id, DEFAULT_BAN_TIME);
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        int64_t ban_until = GetTime() + DEFAULT_BAN_TIME;
+        peer->Ban(ban_until);
+
+        std::string ip = peer->addr.ToStringIP();
+        banman.Ban(ip, DEFAULT_BAN_TIME, BanReason::NodeMisbehaving,
+                   type, peer->misbehavior_score);
     }
 }
 
@@ -353,20 +350,8 @@ void CPeerManager::DecayMisbehaviorScores() {
         }
     }
 
-    // Also clean up expired bans
-    std::vector<std::string> expired_bans;
-    int64_t now = GetTime();
-
-    for (const auto& ban_entry : banned_ips) {
-        if (ban_entry.second != 0 && now >= ban_entry.second) {
-            expired_bans.push_back(ban_entry.first);
-        }
-    }
-
-    for (const auto& ip : expired_bans) {
-        banned_ips.erase(ip);
-        std::cout << "[PeerManager] Ban expired for IP: " << ip << std::endl;
-    }
+    // Clean up expired bans using CBanManager
+    banman.SweepExpiredBans();
 }
 
 CPeerManager::Stats CPeerManager::GetStats() const {
@@ -391,7 +376,7 @@ CPeerManager::Stats CPeerManager::GetStats() const {
     }
     stats.outbound_connections = std::min(outbound, (size_t)MAX_OUTBOUND_CONNECTIONS);
     stats.inbound_connections = stats.connected_peers - stats.outbound_connections;
-    stats.banned_ips = banned_ips.size();
+    stats.banned_ips = banman.GetBannedCount();
 
     return stats;
 }
@@ -472,90 +457,90 @@ void CPeerManager::InitializeSeedNodes() {
     // Users can also manually configure peers using --addnode command line parameter.
 }
 
-// Address database management (NW-003)
+// Address database management (NW-003 - now uses Bitcoin Core CAddrMan)
 
 void CPeerManager::MarkAddressGood(const NetProtocol::CAddress& addr) {
-    std::lock_guard<std::mutex> lock(cs_addrs);
+    // Convert NetProtocol::CAddress to CService
+    CNetAddr netaddr;
 
-    std::string key = addr.ToString();
-    auto it = addr_map.find(key);
-    if (it == addr_map.end()) {
-        // Address not in database yet, add it
-        AddPeerAddress(addr);
-        it = addr_map.find(key);
-        if (it == addr_map.end()) return;
+    // Check if IPv4-mapped address (::ffff:x.x.x.x)
+    static const uint8_t ipv4_mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+    bool is_ipv4 = (memcmp(addr.ip, ipv4_mapped_prefix, 12) == 0);
+
+    if (is_ipv4) {
+        uint32_t ipv4 = ((uint32_t)addr.ip[12] << 24) |
+                        ((uint32_t)addr.ip[13] << 16) |
+                        ((uint32_t)addr.ip[14] << 8) |
+                        (uint32_t)addr.ip[15];
+        netaddr.SetIPv4(ipv4);
+    } else {
+        netaddr.SetIPv6(addr.ip);
     }
 
-    // Update success metrics
-    it->second.nLastSuccess = GetTime();
-    it->second.nSuccesses++;
-    it->second.fInTried = true;  // Move to "tried" table
+    CService service(netaddr, addr.port);
+
+    // Mark as good in AddrMan (moves to tried table)
+    addrman.Good(service);
 }
 
 void CPeerManager::MarkAddressTried(const NetProtocol::CAddress& addr) {
-    std::lock_guard<std::mutex> lock(cs_addrs);
+    // Convert NetProtocol::CAddress to CService
+    CNetAddr netaddr;
 
-    std::string key = addr.ToString();
-    auto it = addr_map.find(key);
-    if (it == addr_map.end()) {
-        return;  // Address not in database
+    // Check if IPv4-mapped address (::ffff:x.x.x.x)
+    static const uint8_t ipv4_mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+    bool is_ipv4 = (memcmp(addr.ip, ipv4_mapped_prefix, 12) == 0);
+
+    if (is_ipv4) {
+        uint32_t ipv4 = ((uint32_t)addr.ip[12] << 24) |
+                        ((uint32_t)addr.ip[13] << 16) |
+                        ((uint32_t)addr.ip[14] << 8) |
+                        (uint32_t)addr.ip[15];
+        netaddr.SetIPv4(ipv4);
+    } else {
+        netaddr.SetIPv6(addr.ip);
     }
 
-    // Update attempt metrics
-    it->second.nLastTry = GetTime();
-    it->second.nAttempts++;
+    CService service(netaddr, addr.port);
+
+    // Mark connection attempt in AddrMan (true = count as failure if it fails)
+    addrman.Attempt(service, true);
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int count) {
-    std::lock_guard<std::mutex> lock(cs_addrs);
-
     std::vector<NetProtocol::CAddress> result;
 
-    if (addr_map.empty()) {
-        return result;
-    }
+    // Use AddrMan's deterministic selection algorithm
+    // This provides eclipse attack protection via the bucket system
+    for (int i = 0; i < count; i++) {
+        // Select returns pair<CAddress, int64_t> where int64_t is last try time
+        auto [selected_addr, last_try] = addrman.Select();
 
-    // Selection strategy:
-    // 1. Prefer addresses we've never tried (nAttempts == 0)
-    // 2. Then prefer addresses with successful connections (fInTried && nSuccesses > 0)
-    // 3. Then try older addresses (larger time since last attempt)
+        // Check if valid address was returned
+        if (!selected_addr.IsValid()) {
+            break;  // No more addresses available
+        }
 
-    std::vector<std::pair<std::string, CAddrInfo*>> candidates;
-    candidates.reserve(addr_map.size());
+        // Convert CAddress (which inherits from CService/CNetAddr) back to NetProtocol::CAddress
+        NetProtocol::CAddress addr;
+        addr.services = NetProtocol::NODE_NETWORK;
+        addr.port = selected_addr.GetPort();
+        addr.time = GetTime();
 
-    for (auto& pair : addr_map) {
-        candidates.push_back({pair.first, &pair.second});
-    }
+        // CService inherits from CNetAddr, so we can access CNetAddr methods directly
+        if (selected_addr.IsIPv4()) {
+            addr.SetIPv4(selected_addr.GetIPv4());
+        } else {
+            // Copy raw bytes from CNetAddr
+            memcpy(addr.ip, selected_addr.GetAddrBytes(), 16);
+        }
 
-    // Sort by priority:
-    // Priority 1: Never tried (nAttempts == 0)
-    // Priority 2: Tried and succeeded (fInTried && nSuccesses > 0)
-    // Priority 3: Everything else, sorted by last attempt time (oldest first)
-    std::sort(candidates.begin(), candidates.end(),
-              [](const auto& a, const auto& b) {
-                  // Never tried addresses come first
-                  if (a.second->nAttempts == 0 && b.second->nAttempts > 0) return true;
-                  if (a.second->nAttempts > 0 && b.second->nAttempts == 0) return false;
-
-                  // Among tried addresses, prioritize successful ones
-                  if (a.second->fInTried && a.second->nSuccesses > 0 &&
-                      (!b.second->fInTried || b.second->nSuccesses == 0)) return true;
-                  if (b.second->fInTried && b.second->nSuccesses > 0 &&
-                      (!a.second->fInTried || a.second->nSuccesses == 0)) return false;
-
-                  // Otherwise sort by last attempt time (oldest first)
-                  return a.second->nLastTry < b.second->nLastTry;
-              });
-
-    // Select up to 'count' addresses
-    for (size_t i = 0; i < candidates.size() && result.size() < (size_t)count; i++) {
-        result.push_back(candidates[i].second->addr);
+        result.push_back(addr);
     }
 
     return result;
 }
 
 size_t CPeerManager::GetAddressCount() const {
-    std::lock_guard<std::mutex> lock(cs_addrs);
-    return addr_map.size();
+    return addrman.Size();
 }
