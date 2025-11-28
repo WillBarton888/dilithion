@@ -143,7 +143,11 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/async_broadcaster.cpp \
                src/net/headers_manager.cpp \
                src/net/orphan_manager.cpp \
-              src/net/block_fetcher.cpp
+               src/net/block_fetcher.cpp \
+               src/net/netaddress.cpp \
+               src/net/addrman.cpp \
+               src/net/banman.cpp \
+               src/net/headerssync.cpp
 
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \
@@ -304,6 +308,22 @@ wallet_encryption_integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/wallet_encr
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 wallet_persistence_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/wallet_persistence_tests.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+test_iv_reuse_detection: $(CORE_OBJECTS) $(OBJ_DIR)/test/test_iv_reuse_detection.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+test_authenticated_encryption: $(CORE_OBJECTS) $(OBJ_DIR)/test/test_authenticated_encryption.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+test_secure_allocator: $(CORE_OBJECTS) $(OBJ_DIR)/test/test_secure_allocator.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+hd_wallet_standalone_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/hd_wallet_standalone_tests.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
