@@ -147,6 +147,153 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
     return true;
 }
 
+// ============================================================================
+// DoS-Protected Header Sync (Bitcoin Core two-phase)
+// ============================================================================
+
+bool CHeadersManager::ProcessHeadersWithDoSProtection(NodeId peer, const std::vector<CBlockHeader>& headers)
+{
+    // Check if peer has active HeadersSyncState
+    auto it = mapHeadersSyncStates.find(peer);
+    if (it == mapHeadersSyncStates.end()) {
+        std::cerr << "[HeadersManager] No HeadersSyncState for peer " << peer
+                  << ", falling back to direct processing" << std::endl;
+        return ProcessHeaders(peer, headers);
+    }
+
+    HeadersSyncState* sync_state = it->second.get();
+    if (!sync_state || sync_state->GetState() == HeadersSyncState::State::FINAL) {
+        std::cerr << "[HeadersManager] HeadersSyncState finalized for peer " << peer
+                  << ", falling back to direct processing" << std::endl;
+        mapHeadersSyncStates.erase(peer);
+        return ProcessHeaders(peer, headers);
+    }
+
+    std::cout << "[HeadersManager] Processing " << headers.size()
+              << " headers from peer " << peer << " with DoS protection"
+              << " (phase: " << static_cast<int>(sync_state->GetState()) << ")" << std::endl;
+
+    // Process through HeadersSyncState
+    auto result = sync_state->ProcessNextHeaders(headers, true);
+
+    if (!result.success) {
+        std::cerr << "[HeadersManager] HeadersSyncState rejected headers from peer " << peer << std::endl;
+        mapHeadersSyncStates.erase(peer);
+        return false;
+    }
+
+    // If we got validated headers back, store them
+    if (!result.pow_validated_headers.empty()) {
+        std::cout << "[HeadersManager] HeadersSyncState returned " << result.pow_validated_headers.size()
+                  << " validated headers for storage" << std::endl;
+
+        // Store validated headers using existing logic (but without re-validation)
+        std::lock_guard<std::mutex> lock(cs_headers);
+        for (const auto& header : result.pow_validated_headers) {
+            uint256 hash = header.GetHash();
+
+            // Skip if already stored
+            if (mapHeaders.find(hash) != mapHeaders.end()) {
+                continue;
+            }
+
+            // Find parent
+            auto parentIt = mapHeaders.find(header.hashPrevBlock);
+            const HeaderWithChainWork* pprev = nullptr;
+            int height = 1;
+
+            if (parentIt != mapHeaders.end()) {
+                pprev = &parentIt->second;
+                height = pprev->height + 1;
+            }
+
+            // Calculate chain work and store
+            uint256 chainWork = CalculateChainWork(header, pprev);
+            HeaderWithChainWork headerData(header, height);
+            headerData.chainWork = chainWork;
+
+            mapHeaders[hash] = headerData;
+            AddToHeightIndex(hash, height);
+            UpdateChainTips(hash);
+            UpdateBestHeader(hash);
+        }
+
+        std::cout << "[HeadersManager] Stored " << result.pow_validated_headers.size()
+                  << " headers. Best height: " << nBestHeight << std::endl;
+    }
+
+    // Check if sync is complete
+    if (sync_state->GetState() == HeadersSyncState::State::FINAL) {
+        std::cout << "[HeadersManager] DoS-protected sync complete for peer " << peer << std::endl;
+        mapHeadersSyncStates.erase(peer);
+    }
+
+    return true;
+}
+
+bool CHeadersManager::ShouldUseDoSProtection(NodeId peer) const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    // Check if peer already has active HeadersSyncState
+    if (mapHeadersSyncStates.find(peer) != mapHeadersSyncStates.end()) {
+        return true;
+    }
+
+    // Check if we're in IBD (peer claims significantly more headers than we have)
+    auto heightIt = mapPeerStartHeight.find(peer);
+    if (heightIt != mapPeerStartHeight.end()) {
+        int peerHeight = heightIt->second;
+        // If peer is 2000+ blocks ahead, use DoS protection
+        if (peerHeight > nBestHeight + 2000) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool CHeadersManager::InitializeDoSProtectedSync(NodeId peer, const uint256& minimum_work)
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    // Don't reinitialize if already exists
+    if (mapHeadersSyncStates.find(peer) != mapHeadersSyncStates.end()) {
+        std::cout << "[HeadersManager] HeadersSyncState already exists for peer " << peer << std::endl;
+        return true;
+    }
+
+    // Create HeadersSyncState parameters
+    HeadersSyncParams params;
+    // Use defaults from HeadersSyncParams
+
+    // Get chain start (our current best header or genesis)
+    uint256 chainStartHash = hashBestHeader;
+    int64_t chainStartHeight = nBestHeight;
+
+    if (chainStartHash.IsNull()) {
+        // Start from genesis
+        chainStartHash = Genesis::GetGenesisHash();
+        chainStartHeight = 0;
+    }
+
+    // Create the state
+    auto state = std::make_unique<HeadersSyncState>(
+        peer,
+        params,
+        chainStartHash,
+        chainStartHeight,
+        minimum_work
+    );
+
+    mapHeadersSyncStates[peer] = std::move(state);
+
+    std::cout << "[HeadersManager] Initialized DoS-protected sync for peer " << peer
+              << " (start height: " << chainStartHeight << ")" << std::endl;
+
+    return true;
+}
+
 bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev)
 {
     uint256 hash = header.GetHash();
@@ -488,6 +635,7 @@ void CHeadersManager::OnPeerDisconnected(NodeId peer)
 
     mapPeerStates.erase(peer);
     mapPeerStartHeight.erase(peer);  // BUG #62: Clean up peer height tracking
+    mapHeadersSyncStates.erase(peer);  // Clean up DoS protection state
 
     std::cout << "[HeadersManager] Peer " << peer << " disconnected" << std::endl;
 }

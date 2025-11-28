@@ -69,6 +69,43 @@ public:
     bool ProcessHeaders(NodeId peer, const std::vector<CBlockHeader>& headers);
 
     /**
+     * @brief Process headers with two-phase DoS protection (Bitcoin Core style)
+     *
+     * Uses HeadersSyncState for memory-safe IBD. Headers go through:
+     * Phase 1 (PRESYNC): Build commitments, track chain work
+     * Phase 2 (REDOWNLOAD): Verify headers match commitments
+     *
+     * @param peer Peer ID that sent the headers
+     * @param headers Vector of headers to process
+     * @return true if headers processed successfully
+     */
+    bool ProcessHeadersWithDoSProtection(NodeId peer, const std::vector<CBlockHeader>& headers);
+
+    /**
+     * @brief Check if peer should use DoS-protected header sync
+     *
+     * Returns true if:
+     * - Peer has an active HeadersSyncState, OR
+     * - We're in IBD and peer claims significantly more headers
+     *
+     * @param peer Peer ID to check
+     * @return true if DoS protection should be used
+     */
+    bool ShouldUseDoSProtection(NodeId peer) const;
+
+    /**
+     * @brief Initialize DoS-protected sync for a peer
+     *
+     * Creates HeadersSyncState for the peer. Call this when starting
+     * IBD from a new peer.
+     *
+     * @param peer Peer ID
+     * @param minimum_work Minimum chain work to require
+     * @return true if state created successfully
+     */
+    bool InitializeDoSProtectedSync(NodeId peer, const uint256& minimum_work);
+
+    /**
      * @brief Validate a single header against its parent
      *
      * @param header Header to validate
