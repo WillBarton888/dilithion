@@ -1149,7 +1149,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register version handler to automatically respond with verack
         message_processor.SetVersionHandler([&connection_manager](int peer_id, const NetProtocol::CVersionMessage& msg) {
-            std::cout << "[P2P] Handshake with peer " << peer_id << " (" << msg.user_agent << ")" << std::endl;
+            std::cout << "[P2P] Handshake with peer " << peer_id << " (" << msg.user_agent << ")"
+                      << " start_height=" << msg.start_height << std::endl;
+
+            // BUG #62 FIX: Store peer's starting height for later header sync decision
+            if (g_headers_manager) {
+                g_headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
+            }
 
             // Send verack in response
             connection_manager.SendVerackMessage(peer_id);
@@ -1170,25 +1176,36 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 return;
             }
 
-            std::cout << "[P2P] Triggering IBD for peer " << peer_id << std::endl;
+            // BUG #62 FIX: Compare our height with peer's announced height
+            int ourHeight = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+            int peerHeight = g_headers_manager->GetPeerStartHeight(peer_id);
 
-            // Trigger IBD - request headers from this peer to sync blockchain
-            uint256 ourBestBlock;
-            if (g_chainstate.GetTip()) {
-                ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
+            std::cout << "[P2P] Our height: " << ourHeight << ", Peer height: " << peerHeight << std::endl;
+
+            // Request headers if peer is ahead OR if we're at genesis
+            // This is the key fix: only request headers from peers with more blocks
+            if (peerHeight > ourHeight || ourHeight == 0) {
+                std::cout << "[P2P] Peer " << peer_id << " is ahead or we are at genesis, requesting headers" << std::endl;
+
+                // Trigger IBD - request headers from this peer to sync blockchain
+                uint256 ourBestBlock;
+                if (g_chainstate.GetTip()) {
+                    ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
+                } else {
+                    ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
+                }
+
+                try {
+                    g_headers_manager->RequestHeaders(peer_id, ourBestBlock);
+                    std::cout << "[P2P] Headers request sent" << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "[P2P] EXCEPTION in RequestHeaders: " << e.what() << std::endl;
+                } catch (...) {
+                    std::cerr << "[P2P] UNKNOWN EXCEPTION in RequestHeaders" << std::endl;
+                }
             } else {
-                ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
-            }
-
-            std::cout << "[P2P] Requesting headers from peer " << peer_id << std::endl;
-
-            try {
-                g_headers_manager->RequestHeaders(peer_id, ourBestBlock);
-                std::cout << "[P2P] Headers request sent" << std::endl;
-            } catch (const std::exception& e) {
-                std::cerr << "[P2P] EXCEPTION in RequestHeaders: " << e.what() << std::endl;
-            } catch (...) {
-                std::cerr << "[P2P] UNKNOWN EXCEPTION in RequestHeaders" << std::endl;
+                std::cout << "[P2P] We are ahead of peer " << peer_id << " (" << ourHeight
+                          << " vs " << peerHeight << "), not requesting headers" << std::endl;
             }
         });
 
@@ -1207,6 +1224,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         message_processor.SetInvHandler([&blockchain, &connection_manager, &message_processor](
             int peer_id, const std::vector<NetProtocol::CInv>& inv_items) {
 
+            bool hasUnknownBlocks = false;
             std::vector<NetProtocol::CInv> getdata;
 
             for (const auto& item : inv_items) {
@@ -1215,12 +1233,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (!blockchain.BlockExists(item.hash)) {
                         std::cout << "[P2P] Peer " << peer_id << " announced new block: "
                                   << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
+                        hasUnknownBlocks = true;
                         getdata.push_back(item);
                     }
                 }
             }
 
-            // Request blocks we don't have
+            // BUG #62 FIX: Request headers when peer announces unknown blocks
+            // This ensures we get the FULL chain (all intermediate blocks), not just
+            // the announced block which may fail validation if we're missing its parent.
+            // Rate limited via ShouldFetchHeaders() - max once per 30 seconds per peer.
+            if (hasUnknownBlocks && g_headers_manager) {
+                if (g_headers_manager->ShouldFetchHeaders(peer_id)) {
+                    uint256 ourBestBlock;
+                    if (g_chainstate.GetTip()) {
+                        ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
+                    } else {
+                        ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
+                    }
+
+                    std::cout << "[P2P] Unknown blocks announced by peer " << peer_id
+                              << ", requesting headers for full chain" << std::endl;
+                    g_headers_manager->RequestHeaders(peer_id, ourBestBlock);
+                }
+            }
+
+            // Also request the specific blocks (may succeed if we have their parents)
             if (!getdata.empty()) {
                 std::cout << "[P2P] Requesting " << getdata.size() << " block(s) from peer " << peer_id << std::endl;
                 CNetMessage msg = message_processor.CreateGetDataMessage(getdata);

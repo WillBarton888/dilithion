@@ -487,8 +487,23 @@ void CHeadersManager::OnPeerDisconnected(NodeId peer)
     std::lock_guard<std::mutex> lock(cs_headers);
 
     mapPeerStates.erase(peer);
+    mapPeerStartHeight.erase(peer);  // BUG #62: Clean up peer height tracking
 
     std::cout << "[HeadersManager] Peer " << peer << " disconnected" << std::endl;
+}
+
+void CHeadersManager::SetPeerStartHeight(NodeId peer, int height)
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    mapPeerStartHeight[peer] = height;
+    std::cout << "[HeadersManager] Peer " << peer << " start height: " << height << std::endl;
+}
+
+int CHeadersManager::GetPeerStartHeight(NodeId peer) const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    auto it = mapPeerStartHeight.find(peer);
+    return (it != mapPeerStartHeight.end()) ? it->second : 0;
 }
 
 bool CHeadersManager::ShouldFetchHeaders(NodeId peer) const

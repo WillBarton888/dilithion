@@ -211,6 +211,25 @@ public:
      */
     void UpdatePeerState(NodeId peer, const uint256& hash, int height);
 
+    /**
+     * @brief Store peer's starting height from VERSION message (BUG #62)
+     *
+     * Called when receiving VERSION message to track peer's announced chain height.
+     * Used to determine if we should request headers from this peer.
+     *
+     * @param peer Peer ID
+     * @param height Peer's announced chain height from VERSION message
+     */
+    void SetPeerStartHeight(NodeId peer, int height);
+
+    /**
+     * @brief Get peer's starting height from VERSION message (BUG #62)
+     *
+     * @param peer Peer ID
+     * @return Peer's announced starting height, or 0 if not known
+     */
+    int GetPeerStartHeight(NodeId peer) const;
+
     // Diagnostic/monitoring
 
     /**
@@ -288,6 +307,7 @@ private:
 
     // Peer synchronization state
     std::map<NodeId, HeadersSyncState> mapPeerStates;     ///< Peer -> Sync state
+    std::map<NodeId, int> mapPeerStartHeight;             ///< BUG #62: Peer -> Starting height from VERSION
 
     // Configuration
     static constexpr size_t MAX_HEADERS_BUFFER = 2000;     ///< Max headers per message (Bitcoin Core std)
