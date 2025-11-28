@@ -124,7 +124,7 @@ const CAddrInfo* CAddrMan::Find(const CService& addr) const {
     return &it2->second;
 }
 
-int CAddrMan::Create(const CAddress& addr, const CNetAddr& source, int* pnId) {
+int CAddrMan::Create(const CNetworkAddr& addr, const CNetAddr& source, int* pnId) {
     int nId = nIdCount++;
     mapInfo[nId] = CAddrInfo(addr, source);
     mapAddr[addr] = nId;
@@ -304,7 +304,7 @@ int CAddrMan::GetBucketPosition(const CNetAddr& addr, bool fNew, int nBucket) co
     return static_cast<int>(hash64 % ADDRMAN_BUCKET_SIZE);
 }
 
-bool CAddrMan::Add(const CAddress& addr, const CNetAddr& source, int64_t nTimePenalty) {
+bool CAddrMan::Add(const CNetworkAddr& addr, const CNetAddr& source, int64_t nTimePenalty) {
     std::lock_guard<std::mutex> lock(cs);
 
     // Validate address
@@ -373,9 +373,9 @@ bool CAddrMan::Add(const CAddress& addr, const CNetAddr& source, int64_t nTimePe
     }
 }
 
-int CAddrMan::Add(const std::vector<CAddress>& vAddr, const CNetAddr& source, int64_t nTimePenalty) {
+int CAddrMan::Add(const std::vector<CNetworkAddr>& vAddr, const CNetAddr& source, int64_t nTimePenalty) {
     int nAdd = 0;
-    for (const CAddress& addr : vAddr) {
+    for (const CNetworkAddr& addr : vAddr) {
         if (Add(addr, source, nTimePenalty)) {
             nAdd++;
         }
@@ -430,11 +430,11 @@ void CAddrMan::Attempt(const CService& addr, bool fCountFailure, int64_t nTime) 
     }
 }
 
-std::pair<CAddress, int64_t> CAddrMan::Select(bool newOnly) const {
+std::pair<CNetworkAddr, int64_t> CAddrMan::Select(bool newOnly) const {
     std::lock_guard<std::mutex> lock(cs);
 
     if (vRandom.empty()) {
-        return std::make_pair(CAddress(), 0);
+        return std::make_pair(CNetworkAddr(), 0);
     }
 
     // 50% chance of tried vs new (unless newOnly)
@@ -491,13 +491,13 @@ std::pair<CAddress, int64_t> CAddrMan::Select(bool newOnly) const {
     }
 
     // Should never reach here
-    return std::make_pair(CAddress(), 0);
+    return std::make_pair(CNetworkAddr(), 0);
 }
 
-std::vector<CAddress> CAddrMan::GetAddr(size_t maxAddresses, size_t maxPct) const {
+std::vector<CNetworkAddr> CAddrMan::GetAddr(size_t maxAddresses, size_t maxPct) const {
     std::lock_guard<std::mutex> lock(cs);
 
-    std::vector<CAddress> vAddr;
+    std::vector<CNetworkAddr> vAddr;
 
     size_t nNodes = vRandom.size();
     if (nNodes == 0) return vAddr;

@@ -39,17 +39,18 @@
 class CAddrMan;
 
 /**
- * @struct CAddress
+ * @struct CNetworkAddr
  * @brief Extended network address with metadata
  *
  * Extends CService with timestamp and service flags for P2P communication.
+ * Named CNetworkAddr to avoid collision with wallet's CAddress.
  */
-struct CAddress : public CService {
+struct CNetworkAddr : public CService {
     uint64_t nServices;      ///< Service flags (NODE_NETWORK, etc.)
     int64_t nTime;           ///< Last seen timestamp (seconds since epoch)
 
-    CAddress() : CService(), nServices(0), nTime(0) {}
-    CAddress(const CService& service, uint64_t services = 0, int64_t time = 0)
+    CNetworkAddr() : CService(), nServices(0), nTime(0) {}
+    CNetworkAddr(const CService& service, uint64_t services = 0, int64_t time = 0)
         : CService(service), nServices(services), nTime(time) {}
 
     // Serialization
@@ -95,7 +96,7 @@ struct CAddress : public CService {
  * - Success/failure history
  * - Random position for bucket assignment
  */
-class CAddrInfo : public CAddress {
+class CAddrInfo : public CNetworkAddr {
 public:
     //! Where knowledge about this address first came from
     CNetAddr source;
@@ -122,7 +123,7 @@ public:
     int64_t nLastCountAttempt;
 
     CAddrInfo()
-        : CAddress(),
+        : CNetworkAddr(),
           nLastSuccess(0),
           nAttempts(0),
           nRefCount(0),
@@ -131,8 +132,8 @@ public:
           nLastTry(0),
           nLastCountAttempt(0) {}
 
-    CAddrInfo(const CAddress& addr, const CNetAddr& src)
-        : CAddress(addr),
+    CAddrInfo(const CNetworkAddr& addr, const CNetAddr& src)
+        : CNetworkAddr(addr),
           source(src),
           nLastSuccess(0),
           nAttempts(0),
@@ -165,7 +166,7 @@ public:
     // Serialization
     template<typename Stream>
     void Serialize(Stream& s) const {
-        CAddress::Serialize(s);
+        CNetworkAddr::Serialize(s);
         source.Serialize(s);
 
         s.write(reinterpret_cast<const char*>(&nLastSuccess), 8);
@@ -174,7 +175,7 @@ public:
 
     template<typename Stream>
     void Unserialize(Stream& s) {
-        CAddress::Unserialize(s);
+        CNetworkAddr::Unserialize(s);
         source.Unserialize(s);
 
         s.read(reinterpret_cast<char*>(&nLastSuccess), 8);
@@ -232,12 +233,12 @@ public:
      * @param nTimePenalty Penalty to subtract from timestamp (default 0)
      * @return Number of addresses actually added
      */
-    int Add(const std::vector<CAddress>& vAddr, const CNetAddr& source, int64_t nTimePenalty = 0);
+    int Add(const std::vector<CNetworkAddr>& vAddr, const CNetAddr& source, int64_t nTimePenalty = 0);
 
     /**
      * @brief Add a single address
      */
-    bool Add(const CAddress& addr, const CNetAddr& source, int64_t nTimePenalty = 0);
+    bool Add(const CNetworkAddr& addr, const CNetAddr& source, int64_t nTimePenalty = 0);
 
     /**
      * @brief Mark an address as successfully connected
@@ -268,7 +269,7 @@ public:
      * @param newOnly If true, only select from new table
      * @return Selected address, or empty if none available
      */
-    std::pair<CAddress, int64_t> Select(bool newOnly = false) const;
+    std::pair<CNetworkAddr, int64_t> Select(bool newOnly = false) const;
 
     /**
      * @brief Get addresses for sharing with peers (ADDR message)
@@ -277,7 +278,7 @@ public:
      * @param maxPct Maximum percentage of addresses (0-100)
      * @return Vector of addresses
      */
-    std::vector<CAddress> GetAddr(size_t maxAddresses, size_t maxPct) const;
+    std::vector<CNetworkAddr> GetAddr(size_t maxAddresses, size_t maxPct) const;
 
     /**
      * @brief Get total number of addresses
@@ -423,7 +424,7 @@ private:
      * @brief Create a new entry
      * @return ID of new entry, or -1 on failure
      */
-    int Create(const CAddress& addr, const CNetAddr& source, int* pnId = nullptr);
+    int Create(const CNetworkAddr& addr, const CNetAddr& source, int* pnId = nullptr);
 
     /**
      * @brief Swap two entries in random vector
