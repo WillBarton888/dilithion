@@ -100,26 +100,53 @@ COrphanManager* g_orphan_manager = nullptr;
 CBlockFetcher* g_block_fetcher = nullptr;
 
 /**
- * BUG #52 FIX: Check if we're in Initial Block Download (IBD) mode
+ * BUG #52 & #60 FIX: Check if we're in Initial Block Download (IBD) mode
  *
  * This is a CHEAP O(1) check that prevents mining during initial sync.
  * Following Bitcoin Core's pattern (src/validation.cpp IsInitialBlockDownload()).
  *
  * A node is in IBD if:
- *   1. Only genesis block exists (no chain tip)
- *   2. Chain tip is more than 24 hours old (stale)
- *   3. Peers report significantly higher chain heights
+ *   1. Headers are ahead of chain tip (BUG #60 - most reliable indicator)
+ *   2. Peers report significantly higher chain heights (6+ blocks)
+ *   3. Only genesis block exists (no chain tip)
+ *   4. Chain tip is more than 24 hours old (stale)
  *
  * Mining is disabled during IBD to prevent fork creation with the network.
  * This is critical for new nodes joining an existing network.
+ * BUG #60: Mining during block download creates divergent chains that can't sync.
  */
 bool IsInitialBlockDownload() {
     const CBlockIndex* tip = g_chainstate.GetTip();
     int ourHeight = tip ? tip->nHeight : 0;
     int bestPeerHeight = g_peer_manager ? g_peer_manager->GetBestPeerHeight() : 0;
+    size_t peerCount = g_peer_manager ? g_peer_manager->GetConnectionCount() : 0;
+
+    // BUG #60 FIX: Check if headers are ahead of chain tip
+    // This is the MOST RELIABLE IBD indicator - if we have headers for blocks we
+    // don't have yet, we're actively downloading blocks and MUST NOT mine.
+    // Mining during block download creates divergent chains that can't sync.
+    if (g_headers_manager) {
+        int headerHeight = g_headers_manager->GetBestHeight();
+        if (headerHeight > ourHeight) {
+            return true;  // Headers ahead = actively downloading = IBD mode
+        }
+    }
+
+    // BUG #60 FIX (part 2): Wait for initial peer connection before allowing mining
+    // At startup, headers from disk might match chain tip (no IBD needed based on
+    // headers check above). But we haven't talked to peers yet to know if they have
+    // more blocks. Wait until at least one peer has connected and reported its height.
+    // This prevents mining before we can verify we're synced with the network.
+    if (bestPeerHeight == 0 && peerCount == 0) {
+        // No peers connected yet - wait for initial sync before mining
+        // Exception: if we're at genesis and this is likely a bootstrap scenario
+        if (ourHeight > 0) {
+            return true;  // Have blocks but no peer confirmation - wait for peers
+        }
+    }
 
     // Check 1: Are peers significantly ahead of us?
-    // This is the PRIMARY IBD check - prevents mining while syncing with network
+    // This is a secondary IBD check - prevents mining while syncing with network
     if (bestPeerHeight > ourHeight + 6) {
         return true;  // Peers have 6+ more blocks - we're behind, sync first
     }
