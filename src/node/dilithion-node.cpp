@@ -1688,40 +1688,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             std::cout << "[IBD] Received " << headers.size() << " header(s) from peer " << peer_id << std::endl;
 
-            // [CONVERGENCE-DIAG] Log HEADERS message
-            std::cout << "[CONVERGENCE-DIAG] HEADERS message received from peer " << peer_id
-                      << " (" << headers.size() << " headers)" << std::endl;
-
             // Pass headers to headers manager for validation and storage
             if (g_headers_manager->ProcessHeaders(peer_id, headers)) {
-                // Headers were valid and processed successfully
                 int bestHeight = g_headers_manager->GetBestHeight();
-                uint256 bestHash = g_headers_manager->GetBestHeaderHash();
+                std::cout << "[IBD] Headers processed. Best height: " << bestHeight << std::endl;
 
-                std::cout << "[IBD] Headers processed successfully" << std::endl;
-                std::cout << "[IBD] Best header height: " << bestHeight << std::endl;
-                std::cout << "[IBD] Best header hash: " << bestHash.GetHex().substr(0, 16) << "..." << std::endl;
-
-                // Bug #34 fix: Queue received blocks for download
-                // After headers are validated, tell BlockFetcher to download the actual blocks
+                // Queue blocks for download from this peer
                 if (g_block_fetcher) {
-                    // Calculate starting height for this batch of headers
-                    // If we received N headers and best height is now H, first header is at H-N+1
                     int startHeight = bestHeight - static_cast<int>(headers.size()) + 1;
-
                     for (size_t i = 0; i < headers.size(); i++) {
                         uint256 hash = headers[i].GetHash();
                         int height = startHeight + static_cast<int>(i);
-
-                        // BUG #64: Pass peer_id as announcing_peer for preferred download
                         g_block_fetcher->QueueBlockForDownload(hash, height, peer_id);
-                        std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16)
-                                  << "... (height " << height << ") for download from peer " << peer_id << std::endl;
                     }
+                    std::cout << "[IBD] Queued " << headers.size() << " blocks for download" << std::endl;
                 }
             } else {
-                std::cerr << "[IBD] ERROR: Failed to process headers from peer " << peer_id << std::endl;
-                std::cerr << "  Headers may be invalid or disconnected from our chain" << std::endl;
+                // BUG #67: Even if ProcessHeaders failed, headers may have been partially processed
+                // The main loop will detect header height changes and handle block downloads
+                std::cerr << "[IBD] Headers processing incomplete (orphan or invalid header encountered)" << std::endl;
             }
         });
 
@@ -2633,14 +2618,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // ========================================
             // BLOCK DOWNLOAD COORDINATION (IBD)
             // ========================================
-            // BUG #33 DEBUG: Add comprehensive logging to diagnose why blocks aren't downloading
-            // BUG #49 FIX: Add exponential backoff when no peers available for IBD
+            // BUG #49 FIX: Exponential backoff when no peers available
+            // BUG #67 FIX: Reset backoff when header height increases (new chain discovered)
             static int ibd_no_peer_cycles = 0;
             static auto last_ibd_attempt = std::chrono::steady_clock::now();
+            static int last_header_height = 0;
 
             if (g_headers_manager && g_block_fetcher) {
                 int headerHeight = g_headers_manager->GetBestHeight();
                 int chainHeight = g_chainstate.GetHeight();
+
+                // BUG #67 FIX: Reset backoff when new headers arrive that extend beyond our chain
+                if (headerHeight > last_header_height) {
+                    ibd_no_peer_cycles = 0;
+                    last_ibd_attempt = std::chrono::steady_clock::time_point();
+                }
+                last_header_height = headerHeight;
 
                 // If headers are ahead, we need to download blocks
                 if (headerHeight > chainHeight) {
