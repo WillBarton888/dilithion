@@ -1393,8 +1393,31 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
         received = it->second->Recv(temp_buf, sizeof(temp_buf));
     }
 
-    if (received <= 0) {
-        return;  // No data or error - normal for non-blocking sockets
+    // BUG #66 FIX: Properly handle recv() return values
+    // recv() == 0: Connection closed gracefully (EOF) - MUST disconnect
+    // recv() < 0 && EAGAIN/EWOULDBLOCK: No data available (normal for non-blocking)
+    // recv() < 0 && other error: Socket error - should disconnect
+    if (received == 0) {
+        // Connection closed gracefully by remote peer
+        DisconnectPeer(peer_id, "connection closed by peer");
+        return;
+    }
+
+    if (received < 0) {
+        // Check if it's just "no data available" (normal for non-blocking)
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err == WSAEWOULDBLOCK) {
+            return;  // No data available, normal for non-blocking
+        }
+#else
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return;  // No data available, normal for non-blocking
+        }
+#endif
+        // Real socket error - disconnect
+        DisconnectPeer(peer_id, "socket receive error");
+        return;
     }
 
     // Step 2: Append received data to peer's receive buffer
