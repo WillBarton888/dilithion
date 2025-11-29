@@ -85,9 +85,22 @@ public:
      *
      * @param hash Block hash to download
      * @param height Block height (for priority ordering)
+     * @param announcing_peer Peer that announced this block (preferred for download)
      * @param highPriority If true, download immediately
      */
-    void QueueBlockForDownload(const uint256& hash, int height, bool highPriority = false);
+    void QueueBlockForDownload(const uint256& hash, int height,
+                               NodeId announcing_peer = -1,
+                               bool highPriority = false);
+
+    /**
+     * @brief Get the preferred peer for downloading a block
+     *
+     * Returns the peer that announced this block, if tracked.
+     *
+     * @param hash Block hash
+     * @return Peer ID that announced this block, or -1 if not tracked
+     */
+    NodeId GetPreferredPeer(const uint256& hash) const;
 
     /**
      * @brief Request a block from a specific peer
@@ -156,11 +169,13 @@ public:
      * - Average response time (faster peers preferred)
      * - Stall count (avoid unreliable peers)
      * - Preferred peer status
+     * - BUG #64: Announcing peer preference
      *
      * @param hash Block hash to download (unused currently, for future peer filtering)
+     * @param preferred_peer BUG #64: Peer that announced this block (has priority)
      * @return Peer ID, or -1 if no suitable peer available
      */
-    NodeId SelectPeerForDownload(const uint256& hash);
+    NodeId SelectPeerForDownload(const uint256& hash, NodeId preferred_peer = -1);
 
     /**
      * @brief Update peer statistics after download attempt
@@ -312,10 +327,11 @@ private:
     struct BlockDownloadRequest {
         uint256 hash;
         int nHeight;
+        NodeId announcing_peer;  // BUG #64: Track which peer announced this block
         bool highPriority;
 
-        BlockDownloadRequest(const uint256& h, int height, bool priority = false)
-            : hash(h), nHeight(height), highPriority(priority) {}
+        BlockDownloadRequest(const uint256& h, int height, NodeId peer = -1, bool priority = false)
+            : hash(h), nHeight(height), announcing_peer(peer), highPriority(priority) {}
 
         // Priority queue ordering: high priority first, then by height (ascending)
         bool operator<(const BlockDownloadRequest& other) const {
@@ -330,6 +346,7 @@ private:
     std::map<NodeId, std::set<uint256>> mapPeerBlocks;       ///< Peer -> Blocks in-flight
     std::priority_queue<BlockDownloadRequest> queueBlocksToFetch;  ///< Priority queue of blocks to download
     std::set<uint256> setQueuedHashes;                       ///< Fast lookup for queued blocks
+    std::map<uint256, NodeId> mapPreferredPeers;             ///< BUG #64: Block -> Announcing peer
 
     // Peer tracking
     std::map<NodeId, PeerDownloadState> mapPeerStates;       ///< Peer -> Download state

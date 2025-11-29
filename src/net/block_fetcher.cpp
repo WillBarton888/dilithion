@@ -20,7 +20,8 @@ CBlockFetcher::CBlockFetcher()
     lastBlockReceived = std::chrono::steady_clock::now();
 }
 
-void CBlockFetcher::QueueBlockForDownload(const uint256& hash, int height, bool highPriority)
+void CBlockFetcher::QueueBlockForDownload(const uint256& hash, int height,
+                                          NodeId announcing_peer, bool highPriority)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
@@ -34,12 +35,29 @@ void CBlockFetcher::QueueBlockForDownload(const uint256& hash, int height, bool 
     }
 
     // Add to priority queue
-    queueBlocksToFetch.push(BlockDownloadRequest(hash, height, highPriority));
+    queueBlocksToFetch.push(BlockDownloadRequest(hash, height, announcing_peer, highPriority));
     setQueuedHashes.insert(hash);
+
+    // BUG #64: Track which peer announced this block for preferred download
+    if (announcing_peer != -1) {
+        mapPreferredPeers[hash] = announcing_peer;
+    }
 
     std::cout << "[BlockFetcher] Queued block for download: height=" << height
               << " hash=" << hash.GetHex().substr(0, 16) << "..."
+              << (announcing_peer != -1 ? " from peer " + std::to_string(announcing_peer) : "")
               << (highPriority ? " [HIGH PRIORITY]" : "") << std::endl;
+}
+
+NodeId CBlockFetcher::GetPreferredPeer(const uint256& hash) const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    auto it = mapPreferredPeers.find(hash);
+    if (it != mapPreferredPeers.end()) {
+        return it->second;
+    }
+    return -1;
 }
 
 bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
@@ -130,6 +148,9 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // Update global statistics
     nBlocksReceivedTotal++;
     lastBlockReceived = timeReceived;
+
+    // BUG #64: Clean up preferred peer tracking
+    mapPreferredPeers.erase(hash);
 
     std::cout << "[BlockFetcher] Block received from peer " << peer
               << " (response time: " << responseTime.count() << "ms)"
@@ -263,9 +284,22 @@ void CBlockFetcher::RetryTimedOutBlocks(const std::vector<uint256>& timedOutHash
     }
 }
 
-NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash)
+NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferred_peer)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // BUG #64: First try the preferred peer (the one that announced the block)
+    if (preferred_peer != -1) {
+        auto it = mapPeerStates.find(preferred_peer);
+        if (it != mapPeerStates.end()) {
+            int availableSlots = GetAvailableSlotsForPeer(preferred_peer);
+            if (availableSlots > 0 && IsPeerSuitable(preferred_peer)) {
+                std::cout << "[BlockFetcher] BUG #64: Using preferred peer " << preferred_peer
+                          << " that announced this block" << std::endl;
+                return preferred_peer;
+            }
+        }
+    }
 
     // Find best peer based on:
     // 1. Has available capacity
@@ -429,6 +463,9 @@ void CBlockFetcher::RemoveFromQueue(const uint256& hash)
     // Remove from queued set
     setQueuedHashes.erase(hash);
 
+    // BUG #64: Clean up preferred peer tracking
+    mapPreferredPeers.erase(hash);
+
     // Note: We can't efficiently remove from priority_queue without rebuilding it
     // The item will be skipped when popped in GetNextBlocksToFetch
     // This is acceptable performance-wise as the queue is typically small
@@ -560,6 +597,7 @@ void CBlockFetcher::Clear()
         queueBlocksToFetch.pop();
     }
     setQueuedHashes.clear();
+    mapPreferredPeers.clear();  // BUG #64: Clear preferred peers
 
     mapPeerStates.clear();
     nBlocksReceivedTotal = 0;

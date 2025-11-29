@@ -358,10 +358,17 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     uint256 hashBestBlock;
     uint32_t nHeight = 0;
 
+    // BUG #65 FIX: Add logging to diagnose template build failures
+    std::cout << "[Mining] Building template - reading best block from DB..." << std::endl;
+
     if (!blockchain.ReadBestBlock(hashBestBlock)) {
-        std::cerr << "[ERROR] Cannot read best block from blockchain" << std::endl;
+        std::cerr << "[Mining] ERROR: Cannot read best block from blockchain database" << std::endl;
         return std::nullopt;
     }
+
+    // BUG #65: Always log the best block hash for debugging
+    std::cout << "[Mining] Building template on best block: "
+              << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
 
     if (verbose) {
         std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
@@ -1706,9 +1713,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         uint256 hash = headers[i].GetHash();
                         int height = startHeight + static_cast<int>(i);
 
-                        g_block_fetcher->QueueBlockForDownload(hash, height);
+                        // BUG #64: Pass peer_id as announcing_peer for preferred download
+                        g_block_fetcher->QueueBlockForDownload(hash, height, peer_id);
                         std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16)
-                                  << "... (height " << height << ") for download" << std::endl;
+                                  << "... (height " << height << ") for download from peer " << peer_id << std::endl;
                     }
                 }
             } else {
@@ -1965,12 +1973,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
 
                     // BUG #32 FIX: Immediately update mining template for locally mined blocks
-                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
+                    // BUG #65 FIX: Skip IBD check for locally mined blocks - we KNOW we're at chain tip
+                    // because we just mined this block ourselves. The IBD check fails when peers
+                    // are connected but haven't completed handshake (version=0), which incorrectly
+                    // prevents mining from resuming after finding a block.
+                    bool immediate_update_succeeded = false;
+                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
                         std::cout << "[Mining] Locally mined block became new tip - updating template immediately..." << std::endl;
                         auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
                         if (templateOpt) {
                             g_node_state.miner->UpdateTemplate(*templateOpt);
                             std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
+                            immediate_update_succeeded = true;
+                        } else {
+                            std::cerr << "[Mining] ERROR: Immediate template build failed" << std::endl;
                         }
                     }
 
@@ -2001,8 +2017,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "[P2P] WARNING: No connected peers to broadcast block" << std::endl;
                     }
 
-                    // Signal main loop to update mining template for next block
-                    g_node_state.new_block_found = true;
+                    // BUG #65 FIX: Only signal main loop if immediate update failed
+                    // If immediate update succeeded, mining is already continuing - don't let
+                    // main loop stop it (which it would do if IBD check fails there)
+                    if (!immediate_update_succeeded) {
+                        g_node_state.new_block_found = true;
+                    }
                 } else {
                     std::cout << "[Blockchain] WARNING: Mined block is valid but not on best chain" << std::endl;
                     std::cout << "  This should not happen during solo mining" << std::endl;
@@ -2534,13 +2554,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 // Build new template for next block (only if mining was requested)
                 if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
-                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, false);
+                    // BUG #65 FIX: Retry template build up to 3 times with delays
+                    // This handles the race condition where database write hasn't fully synced
+                    std::optional<CBlockTemplate> templateOpt;
+                    constexpr int MAX_TEMPLATE_RETRIES = 3;
+
+                    for (int attempt = 1; attempt <= MAX_TEMPLATE_RETRIES; attempt++) {
+                        templateOpt = BuildMiningTemplate(blockchain, wallet, false);
+                        if (templateOpt) {
+                            break;  // Success!
+                        }
+                        std::cerr << "[Mining] Template build failed (attempt " << attempt << "/" << MAX_TEMPLATE_RETRIES << ")" << std::endl;
+                        if (attempt < MAX_TEMPLATE_RETRIES) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                        }
+                    }
+
                     if (templateOpt) {
                         // Restart mining with new template
                         miner.StartMining(*templateOpt);
                         std::cout << "[Mining] Resumed mining on block height " << templateOpt->nHeight << std::endl;
                     } else {
-                        std::cerr << "[ERROR] Failed to build new mining template!" << std::endl;
+                        std::cerr << "[ERROR] Failed to build mining template after " << MAX_TEMPLATE_RETRIES << " attempts!" << std::endl;
+                        // BUG #65: Keep mining_enabled true so we can retry on next iteration
+                        // The next main loop iteration will try again
                     }
                 }
 
@@ -2674,8 +2711,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 // For each block, select peer and send GETDATA
                                 int successful_requests = 0;
                                 for (const auto& [hash, height] : blocksToFetch) {
-                                    // Select best peer for download
-                                    NodeId peer = g_block_fetcher->SelectPeerForDownload(hash);
+                                    // BUG #64: Get preferred peer (the one that announced this block)
+                                    NodeId preferred = g_block_fetcher->GetPreferredPeer(hash);
+                                    // Select best peer for download, preferring announcing peer
+                                    NodeId peer = g_block_fetcher->SelectPeerForDownload(hash, preferred);
                                     if (peer != -1) {
                                         // Request block from fetcher (updates in-flight tracking)
                                         if (g_block_fetcher->RequestBlock(peer, hash, height)) {
@@ -2691,7 +2730,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     } else {
                                         // BUG #63 FIX: Re-queue block if no peer available
                                         // Without this, blocks are LOST - removed from queue but never added to in-flight
-                                        g_block_fetcher->QueueBlockForDownload(hash, height, true);  // High priority for retry
+                                        // BUG #64: Use -1 for announcing_peer since we lost track, true for high priority
+                                        g_block_fetcher->QueueBlockForDownload(hash, height, -1, true);
                                     }
                                 }
 
