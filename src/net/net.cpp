@@ -10,6 +10,7 @@
 #include <node/utxo_set.h>
 #include <consensus/tx_validation.h>
 #include <consensus/chain.h>  // BUG #50 FIX: For g_chainstate.GetHeight()
+#include <net/block_fetcher.h>  // BUG #68 FIX: For BlockFetcher peer disconnect notification
 #include <random>
 #include <cstring>
 #include <iostream>
@@ -57,6 +58,9 @@ unsigned int g_chain_height = 0;
 // Global pointers for P2P networking (NW-005)
 CConnectionManager* g_connection_manager = nullptr;
 CNetMessageProcessor* g_message_processor = nullptr;
+
+// BUG #68 FIX: External reference to block fetcher for peer disconnect notification
+extern CBlockFetcher* g_block_fetcher;
 
 std::string CNetworkStats::ToString() const {
     return strprintf("CNetworkStats(peers=%d/%d, handshake=%d, "
@@ -1272,6 +1276,13 @@ void CConnectionManager::DisconnectPeer(int peer_id, const std::string& reason) 
             it->second.reset();  // Explicitly close socket
             peer_sockets.erase(it);
         }
+    }
+
+    // BUG #68 FIX: Notify BlockFetcher of peer disconnect
+    // This ensures in-flight block requests are re-queued to other peers
+    // and the disconnected peer is removed from BlockFetcher's internal state
+    if (g_block_fetcher) {
+        g_block_fetcher->OnPeerDisconnected(peer_id);
     }
 
     // Remove peer from peer manager
