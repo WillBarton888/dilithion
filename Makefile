@@ -129,7 +129,8 @@ CORE_SOURCES_UTIL := src/core/chainparams.cpp \
 CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/sha3.cpp \
                   src/crypto/hmac_sha3.cpp \
-                  src/crypto/pbkdf2_sha3.cpp
+                  src/crypto/pbkdf2_sha3.cpp \
+                  src/crypto/siphash.cpp
 
 MINER_SOURCES := src/miner/controller.cpp
 
@@ -144,10 +145,12 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/headers_manager.cpp \
                src/net/orphan_manager.cpp \
                src/net/block_fetcher.cpp \
+               src/net/node_state.cpp \
                src/net/netaddress.cpp \
                src/net/addrman.cpp \
                src/net/banman.cpp \
-               src/net/headerssync.cpp
+               src/net/headerssync.cpp \
+               src/net/blockencodings.cpp
 
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \

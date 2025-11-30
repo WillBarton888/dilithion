@@ -167,6 +167,10 @@ public:
     // Used to detect if we're behind the network and should delay mining
     int GetBestPeerHeight() const;
 
+    // BUG #69: Check if any peer has completed VERSION handshake
+    // Used to distinguish "waiting for handshakes" from "all peers at height 0"
+    bool HasCompletedHandshakes() const;
+
     // Seed nodes
     void InitializeSeedNodes();
     std::vector<NetProtocol::CAddress> GetSeedNodes() const { return seed_nodes; }

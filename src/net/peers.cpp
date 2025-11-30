@@ -395,6 +395,24 @@ int CPeerManager::GetBestPeerHeight() const {
     return best;
 }
 
+bool CPeerManager::HasCompletedHandshakes() const {
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // BUG #69 FIX: Check if ANY peer has completed VERSION/VERACK handshake
+    // This distinguishes between:
+    // 1. "Connections initiated but no VERSION received yet" (return false)
+    // 2. "Peers have completed handshake but are at height 0" (return true)
+    //
+    // Used by IsInitialBlockDownload() to avoid incorrectly staying in IBD mode
+    // when all connected peers legitimately have height 0 (bootstrap scenario).
+    for (const auto& pair : peers) {
+        if (pair.second->IsHandshakeComplete()) {
+            return true;  // At least one peer completed handshake
+        }
+    }
+    return false;  // No handshakes completed yet
+}
+
 void CPeerManager::InitializeSeedNodes() {
     // Hardcoded seed nodes for Dilithion network
     // These are reliable nodes run by the community

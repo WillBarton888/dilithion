@@ -100,31 +100,55 @@ COrphanManager* g_orphan_manager = nullptr;
 CBlockFetcher* g_block_fetcher = nullptr;
 
 /**
- * BUG #52 & #60 FIX: Check if we're in Initial Block Download (IBD) mode
+ * BUG #69 FIX: Bitcoin Core-style Initial Block Download detection
  *
- * This is a CHEAP O(1) check that prevents mining during initial sync.
- * Following Bitcoin Core's pattern (src/validation.cpp IsInitialBlockDownload()).
+ * Replaces custom peer-height-based detection with Bitcoin Core's proven approach:
+ * 1. LATCH MECHANISM - Once IBD=false, it stays false permanently (like Bitcoin Core)
+ * 2. TIP TIMESTAMP - Primary criterion: tip < 24 hours old = exit IBD
+ * 3. HEADERS AHEAD - Secondary: if headers ahead of tip, still downloading
  *
- * A node is in IBD if:
- *   1. Headers are ahead of chain tip (BUG #60 - most reliable indicator)
- *   2. Peers report significantly higher chain heights (6+ blocks)
- *   3. Only genesis block exists (no chain tip)
- *   4. Chain tip is more than 24 hours old (stale)
+ * This fixes BUG #69 where IsInitialBlockDownload() couldn't distinguish between:
+ * - "Waiting for peer handshakes to complete" (version=0)
+ * - "Peers have completed handshake but are at height 0" (true bootstrap)
  *
- * Mining is disabled during IBD to prevent fork creation with the network.
- * This is critical for new nodes joining an existing network.
- * BUG #60: Mining during block download creates divergent chains that can't sync.
+ * The old condition `bestPeerHeight == 0 && peerCount > 0` incorrectly returned
+ * IBD=true when all peers were legitimately at height 0.
+ *
+ * Bitcoin Core reference: src/validation.cpp IsInitialBlockDownload()
  */
 bool IsInitialBlockDownload() {
-    const CBlockIndex* tip = g_chainstate.GetTip();
-    int ourHeight = tip ? tip->nHeight : 0;
-    int bestPeerHeight = g_peer_manager ? g_peer_manager->GetBestPeerHeight() : 0;
-    size_t peerCount = g_peer_manager ? g_peer_manager->GetConnectionCount() : 0;
+    // LATCH MECHANISM: Once we exit IBD, we never re-enter
+    // This prevents mining from being disabled by transient network conditions
+    // (e.g., a peer reconnecting, a temporary network split)
+    static std::atomic<bool> s_initial_download_complete{false};
+    if (s_initial_download_complete.load(std::memory_order_relaxed)) {
+        return false;  // Already exited IBD - stay out forever
+    }
 
-    // BUG #60 FIX: Check if headers are ahead of chain tip
-    // This is the MOST RELIABLE IBD indicator - if we have headers for blocks we
-    // don't have yet, we're actively downloading blocks and MUST NOT mine.
-    // Mining during block download creates divergent chains that can't sync.
+    const CBlockIndex* tip = g_chainstate.GetTip();
+
+    // No tip = no chain = definitely IBD
+    if (!tip) {
+        return true;
+    }
+
+    int ourHeight = tip->nHeight;
+
+    // PRIMARY CRITERION: Is tip timestamp recent?
+    // If our chain tip is less than 24 hours old, we're caught up with the network.
+    // This is the most reliable indicator - doesn't depend on peer state at all.
+    int64_t tipTime = tip->nTime;
+    int64_t now = GetTime();
+    const int64_t MAX_TIP_AGE = 24 * 60 * 60;  // 24 hours (same as Bitcoin Core)
+
+    if (now - tipTime < MAX_TIP_AGE) {
+        // Tip is recent - exit IBD permanently
+        s_initial_download_complete.store(true, std::memory_order_relaxed);
+        return false;
+    }
+
+    // SECONDARY CRITERION: Check if headers are ahead of chain tip
+    // If we have headers for blocks we don't have yet, we're actively downloading
     if (g_headers_manager) {
         int headerHeight = g_headers_manager->GetBestHeight();
         if (headerHeight > ourHeight) {
@@ -132,52 +156,32 @@ bool IsInitialBlockDownload() {
         }
     }
 
-    // BUG #60 FIX (part 2): Wait for peer height info before allowing mining
-    // At startup, we haven't received any VERSION messages yet, so bestPeerHeight is 0.
-    // We MUST wait until at least one peer has reported their height via VERSION message.
-    // Otherwise, we might mine blocks while peers have a longer chain we don't know about.
-    //
-    // bestPeerHeight == 0 means NO peer has completed handshake yet.
-    // Once any peer completes handshake, they report their height (even if 0 for true bootstrap).
-    // We use peerCount > 0 AND bestPeerHeight == 0 to detect "connections initiated but
-    // no VERSION received" vs "no connections at all".
-    if (bestPeerHeight == 0 && peerCount > 0) {
-        // Connections exist but no VERSION received yet - wait for handshake
-        return true;  // In IBD - waiting for peer height information
-    }
+    // TERTIARY CRITERION: Check peer heights (but only if peers have completed handshake)
+    // Use the new HasCompletedHandshakes() to distinguish "waiting" from "at height 0"
+    if (g_peer_manager) {
+        int bestPeerHeight = g_peer_manager->GetBestPeerHeight();
+        size_t peerCount = g_peer_manager->GetConnectionCount();
 
-    // Check 1: Are peers significantly ahead of us?
-    // This is a secondary IBD check - prevents mining while syncing with network
-    if (bestPeerHeight > ourHeight + 6) {
-        return true;  // Peers have 6+ more blocks - we're behind, sync first
-    }
+        // If we have peers that are ahead of us, stay in IBD
+        if (bestPeerHeight > ourHeight + 6) {
+            return true;  // Peers have 6+ more blocks - we're behind
+        }
 
-    // Check 2: If no peers at all and we're at genesis, allow bootstrap mining
-    // This is the TRUE bootstrap scenario - isolated node with no seed connections
-    if (ourHeight == 0 && peerCount == 0 && !g_peer_manager) {
-        return false;  // True bootstrap - allow mining
-    }
-
-    // Check 3: Peers connected and reported their height, and we're close to them
-    // This is the normal case after initial sync completes
-
-    // Check 4: Is tip timestamp recent? (Bitcoin's secondary IBD criterion)
-    // This is O(1) - just compare timestamps, no full chain verification
-    if (tip) {
-        int64_t tipTime = tip->nTime;
-        int64_t now = GetTime();
-        const int64_t MAX_TIP_AGE = 24 * 60 * 60;  // 24 hours (same as Bitcoin)
-
-        if (now - tipTime > MAX_TIP_AGE) {
-            // Tip is stale - but only consider IBD if peers are ahead
-            if (bestPeerHeight > ourHeight) {
-                return true;  // Stale AND peers are ahead - sync first
-            }
-            // Stale but peers not ahead - could be network-wide stale, allow mining
+        // BUG #69 FIX: Only wait for handshakes if peers haven't completed any yet
+        // If HasCompletedHandshakes() returns true, peers ARE at height 0 legitimately
+        if (peerCount > 0 && bestPeerHeight == 0 && !g_peer_manager->HasCompletedHandshakes()) {
+            // Connections exist but NO peer has completed handshake - wait
+            return true;
         }
     }
 
-    return false;  // Synced - safe to mine
+    // If we get here:
+    // - Tip exists but is stale (> 24 hours old)
+    // - No headers ahead (not actively downloading)
+    // - Either no peers, or peers completed handshake and are at similar height
+    // This is likely a bootstrap scenario or stale network - allow mining
+    s_initial_download_complete.store(true, std::memory_order_relaxed);
+    return false;
 }
 
 // Signal handler for graceful shutdown
