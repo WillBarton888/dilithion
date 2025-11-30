@@ -44,6 +44,33 @@ CBlockIndex::CBlockIndex(const CBlockHeader& block) {
     nVersion = block.nVersion;
 }
 
+// BUG #70 FIX: Explicit copy constructor to ensure ALL fields are copied
+// including header.hashMerkleRoot which was being lost during database loading
+CBlockIndex::CBlockIndex(const CBlockIndex& other) {
+    // Copy the FULL header including merkle root
+    header = other.header;
+
+    // Copy pointers (will be re-linked during chain loading)
+    pprev = other.pprev;
+    pnext = other.pnext;
+    pskip = other.pskip;
+
+    // Copy all integer fields
+    nHeight = other.nHeight;
+    nFile = other.nFile;
+    nDataPos = other.nDataPos;
+    nUndoPos = other.nUndoPos;
+    nChainWork = other.nChainWork;
+    nTx = other.nTx;
+    nStatus = other.nStatus;
+    nSequenceId = other.nSequenceId;
+    nTime = other.nTime;
+    nBits = other.nBits;
+    nNonce = other.nNonce;
+    nVersion = other.nVersion;
+    phashBlock = other.phashBlock;
+}
+
 uint256 CBlockIndex::GetBlockHash() const {
     if (phashBlock.IsNull()) {
         phashBlock = header.GetHash();

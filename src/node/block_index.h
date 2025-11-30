@@ -31,6 +31,13 @@ public:
 
     CBlockIndex();
     explicit CBlockIndex(const CBlockHeader& block);
+
+    /**
+     * BUG #70 FIX: Explicit copy constructor to ensure header.hashMerkleRoot is copied
+     * The implicit copy constructor should work, but we add explicit for safety and clarity
+     */
+    CBlockIndex(const CBlockIndex& other);
+
     uint256 GetBlockHash() const;
     bool IsValid() const;
     bool HaveData() const;
