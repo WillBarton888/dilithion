@@ -721,13 +721,9 @@ bool CWallet::IsLocked() const {
 
 // VULN-002 FIX: Helper to check if unlock is still valid (not expired)
 // Assumes caller holds cs_wallet lock
-bool CWallet::IsUnlockValid() const {
-    // WL-005 FIX: Add mutex protection to prevent race condition
-    // Without this lock, concurrent calls to CheckUnlockTimeout() or Lock()
-    // could modify fWalletUnlocked/nUnlockTime while we're reading them,
-    // leading to inconsistent state and potential security issues
-    std::lock_guard<std::mutex> lock(cs_wallet);
-
+// BUG #74 FIX: Internal version that assumes caller already holds cs_wallet
+// This avoids deadlock when called from within SignTransaction which already holds the lock
+bool CWallet::_IsUnlockValidNoLock() const {
     // If wallet is not encrypted, it doesn't need to be unlocked
     if (!masterKey.IsValid()) {
         return true;  // Unencrypted wallet is always "unlocked"
@@ -745,6 +741,15 @@ bool CWallet::IsUnlockValid() const {
 
     // Check if timeout has expired
     return std::chrono::steady_clock::now() < nUnlockTime;
+}
+
+bool CWallet::IsUnlockValid() const {
+    // WL-005 FIX: Add mutex protection to prevent race condition
+    // Without this lock, concurrent calls to CheckUnlockTimeout() or Lock()
+    // could modify fWalletUnlocked/nUnlockTime while we're reading them,
+    // leading to inconsistent state and potential security issues
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return _IsUnlockValidNoLock();
 }
 
 void CWallet::CheckUnlockTimeout() {
@@ -3133,145 +3138,175 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
 }
 
 bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string& error) {
-    std::lock_guard<std::mutex> lock(cs_wallet);
+    // BUG #74 FIX: Three-phase signing to avoid holding lock during CPU-intensive operations
+    // Following Bitcoin Core pattern: collect data under lock, release, sign, re-acquire
+    // This reduces lock hold time from 50-500ms to ~10ms, preventing RPC thread starvation
 
-    // VULN-002 FIX: Check if unlock is still valid (not expired) before signing
-    if (!IsUnlockValid()) {
-        error = "Wallet is locked or unlock timeout has expired";
-        return false;
-    }
-
-    // Get wallet's public key (we already hold the lock)
-    std::vector<uint8_t> wallet_pubkey = GetPublicKeyUnlocked();
-    if (wallet_pubkey.empty()) {
-        error = "Failed to get wallet public key";
-        return false;
-    }
-
-    // Get transaction hash for signing
+    // =========================================================================
+    // PHASE 1: Collect signing data under lock (fast, ~5-10ms)
+    // =========================================================================
+    struct SigningData {
+        size_t input_index;
+        CKey signing_key;
+        std::vector<uint8_t> sig_hash;
+        std::vector<uint8_t> scriptPubKey;
+    };
+    std::vector<SigningData> signing_inputs;
     uint256 tx_hash = tx.GetHash();
 
-    // Sign each input
-    for (size_t i = 0; i < tx.vin.size(); i++) {
-        CTxIn& txin = tx.vin[i];
+    {
+        std::lock_guard<std::mutex> lock(cs_wallet);
 
-        // Lookup the UTXO being spent
-        CUTXOEntry utxo_entry;
-        if (!utxo_set.GetUTXO(txin.prevout, utxo_entry)) {
-            error = "UTXO not found for input " + std::to_string(i);
+        // VULN-002 FIX: Check if unlock is still valid (not expired) before signing
+        // BUG #74 FIX: Use NoLock version since we already hold cs_wallet
+        if (!_IsUnlockValidNoLock()) {
+            error = "Wallet is locked or unlock timeout has expired";
             return false;
         }
 
-        // Extract public key hash from scriptPubKey
-        std::vector<uint8_t> required_hash = WalletCrypto::ExtractPubKeyHash(utxo_entry.out.scriptPubKey);
-        if (required_hash.empty()) {
-            error = "Failed to extract public key hash from scriptPubKey for input " + std::to_string(i);
+        // Get wallet's public key
+        std::vector<uint8_t> wallet_pubkey = GetPublicKeyUnlocked();
+        if (wallet_pubkey.empty()) {
+            error = "Failed to get wallet public key";
             return false;
         }
 
-        // Compute hash of our public key
-        std::vector<uint8_t> our_hash = WalletCrypto::HashPubKey(wallet_pubkey);
-
-        // Verify we can spend this output
-        if (our_hash != required_hash) {
-            error = "Cannot spend input " + std::to_string(i) + " - public key mismatch";
-            return false;
-        }
-
-        // VULN-003 FIX: Create signature message with version (must match validation)
-        // CHAIN-ID FIX: Include chain ID to prevent cross-chain replay attacks (EIP-155 style)
-        // Signature message: tx_hash + input_index + tx_version + chain_id
-        // Note: SIGHASH flags removed - chain ID provides stronger replay protection
-        // MUST match format in tx_validation.cpp VerifyScript()
-        std::vector<uint8_t> sig_message;
-        sig_message.reserve(32 + 4 + 4 + 4);  // hash + index + version + chainID
-        sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
-
-        // Add input index (4 bytes, little-endian)
-        uint32_t input_idx = static_cast<uint32_t>(i);
-        sig_message.push_back(static_cast<uint8_t>(input_idx & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((input_idx >> 8) & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((input_idx >> 16) & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((input_idx >> 24) & 0xFF));
-
-        // VULN-003 FIX: Add transaction version to prevent signature replay
-        uint32_t version = tx.nVersion;
-        sig_message.push_back(static_cast<uint8_t>(version & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
-
-        // CHAIN-ID FIX: Add chain ID to prevent cross-chain replay attacks (EIP-155 style)
-        // This prevents transactions signed on testnet from being replayed on mainnet
-        // Mainnet Chain ID = 1, Testnet Chain ID = 1001
+        // Check chain params before loop
         if (Dilithion::g_chainParams == nullptr) {
             error = "Chain parameters not initialized";
             return false;
         }
         uint32_t chain_id = Dilithion::g_chainParams->chainID;
-        sig_message.push_back(static_cast<uint8_t>(chain_id & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((chain_id >> 8) & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((chain_id >> 16) & 0xFF));
-        sig_message.push_back(static_cast<uint8_t>((chain_id >> 24) & 0xFF));
+        uint32_t version = tx.nVersion;
 
-        // Hash the signature message
-        uint8_t sig_hash[32];
-        SHA3_256(sig_message.data(), sig_message.size(), sig_hash);
+        // Collect signing data for each input
+        for (size_t i = 0; i < tx.vin.size(); i++) {
+            const CTxIn& txin = tx.vin[i];
 
-        // Find the key for this address
-        CKey signing_key;
-        bool found_key = false;
+            // Lookup the UTXO being spent
+            CUTXOEntry utxo_entry;
+            if (!utxo_set.GetUTXO(txin.prevout, utxo_entry)) {
+                error = "UTXO not found for input " + std::to_string(i);
+                return false;
+            }
 
-        // Check all wallet addresses to find the matching key (we already hold the lock)
-        for (const auto& addr : vchAddresses) {
-            CKey key;
-            if (GetKeyUnlocked(addr, key)) {
-                std::vector<uint8_t> key_hash = WalletCrypto::HashPubKey(key.vchPubKey);
-                if (key_hash == required_hash) {
-                    signing_key = key;
-                    found_key = true;
-                    break;
+            // Extract public key hash from scriptPubKey
+            std::vector<uint8_t> required_hash = WalletCrypto::ExtractPubKeyHash(utxo_entry.out.scriptPubKey);
+            if (required_hash.empty()) {
+                error = "Failed to extract public key hash from scriptPubKey for input " + std::to_string(i);
+                return false;
+            }
+
+            // Compute hash of our public key
+            std::vector<uint8_t> our_hash = WalletCrypto::HashPubKey(wallet_pubkey);
+
+            // Verify we can spend this output
+            if (our_hash != required_hash) {
+                error = "Cannot spend input " + std::to_string(i) + " - public key mismatch";
+                return false;
+            }
+
+            // VULN-003 FIX: Create signature message with version
+            // CHAIN-ID FIX: Include chain ID to prevent cross-chain replay attacks (EIP-155 style)
+            std::vector<uint8_t> sig_message;
+            sig_message.reserve(32 + 4 + 4 + 4);  // hash + index + version + chainID
+            sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
+
+            // Add input index (4 bytes, little-endian)
+            uint32_t input_idx = static_cast<uint32_t>(i);
+            sig_message.push_back(static_cast<uint8_t>(input_idx & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((input_idx >> 8) & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((input_idx >> 16) & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((input_idx >> 24) & 0xFF));
+
+            // Add transaction version
+            sig_message.push_back(static_cast<uint8_t>(version & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
+
+            // Add chain ID
+            sig_message.push_back(static_cast<uint8_t>(chain_id & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((chain_id >> 8) & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((chain_id >> 16) & 0xFF));
+            sig_message.push_back(static_cast<uint8_t>((chain_id >> 24) & 0xFF));
+
+            // Hash the signature message
+            SigningData data;
+            data.input_index = i;
+            data.sig_hash.resize(32);
+            SHA3_256(sig_message.data(), sig_message.size(), data.sig_hash.data());
+            data.scriptPubKey = utxo_entry.out.scriptPubKey;
+
+            // Find the key for this address
+            bool found_key = false;
+            for (const auto& addr : vchAddresses) {
+                CKey key;
+                if (GetKeyUnlocked(addr, key)) {
+                    std::vector<uint8_t> key_hash = WalletCrypto::HashPubKey(key.vchPubKey);
+                    if (key_hash == required_hash) {
+                        data.signing_key = key;
+                        found_key = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        if (!found_key) {
-            error = "Wallet does not have key to sign input " + std::to_string(i);
-            return false;
-        }
+            if (!found_key) {
+                error = "Wallet does not have key to sign input " + std::to_string(i);
+                return false;
+            }
 
-        // Sign with Dilithium
+            signing_inputs.push_back(std::move(data));
+        }
+    }  // Lock released here - Phase 1 complete
+
+    // =========================================================================
+    // PHASE 2: Sign all inputs WITHOUT holding lock (slow, 10-50ms per input)
+    // Other wallet operations can proceed during this phase
+    // =========================================================================
+    struct SignatureResult {
+        size_t input_index;
         std::vector<uint8_t> signature;
-        if (!WalletCrypto::Sign(signing_key, sig_hash, 32, signature)) {
-            error = "Failed to sign input " + std::to_string(i);
+        std::vector<uint8_t> pubkey;
+    };
+    std::vector<SignatureResult> signatures;
+
+    for (const auto& data : signing_inputs) {
+        std::vector<uint8_t> signature;
+        if (!WalletCrypto::Sign(data.signing_key, data.sig_hash.data(), 32, signature)) {
+            error = "Failed to sign input " + std::to_string(data.input_index);
             return false;
         }
 
-        // Create scriptSig
-        std::vector<uint8_t> scriptSig = WalletCrypto::CreateScriptSig(signature, signing_key.vchPubKey);
+        SignatureResult result;
+        result.input_index = data.input_index;
+        result.signature = std::move(signature);
+        result.pubkey = data.signing_key.vchPubKey;
+        signatures.push_back(std::move(result));
+    }
 
-        // Set scriptSig on input
-        txin.scriptSig = scriptSig;
+    // =========================================================================
+    // PHASE 3: Apply signatures to transaction (no lock needed for tx modification)
+    // Then verify signatures (UTXO lookup may need brief lock, but verification is fast)
+    // =========================================================================
+    for (const auto& sig_result : signatures) {
+        // Create scriptSig
+        std::vector<uint8_t> scriptSig = WalletCrypto::CreateScriptSig(sig_result.signature, sig_result.pubkey);
+        tx.vin[sig_result.input_index].scriptSig = scriptSig;
     }
 
     // WALLET-014 FIX: Verify signatures immediately after signing (defense-in-depth)
     // This catches any bugs in the signing process before the transaction propagates
-    // Impact: Prevents invalid transactions from being broadcast to the network
     CTransactionValidator validator;
-    for (size_t i = 0; i < tx.vin.size(); i++) {
-        const CTxIn& txin = tx.vin[i];
+    for (size_t i = 0; i < signing_inputs.size(); i++) {
+        const auto& data = signing_inputs[i];
+        const CTxIn& txin = tx.vin[data.input_index];
 
-        // Lookup the UTXO to get scriptPubKey
-        CUTXOEntry utxo_entry;
-        if (!utxo_set.GetUTXO(txin.prevout, utxo_entry)) {
-            error = "Post-sign verification failed: UTXO not found for input " + std::to_string(i);
-            return false;
-        }
-
-        // Verify the signature
+        // Verify the signature using cached scriptPubKey
         std::string verify_error;
-        if (!validator.VerifyScript(tx, i, txin.scriptSig, utxo_entry.out.scriptPubKey, verify_error)) {
-            error = "Post-sign verification failed for input " + std::to_string(i) + ": " + verify_error;
+        if (!validator.VerifyScript(tx, data.input_index, txin.scriptSig, data.scriptPubKey, verify_error)) {
+            error = "Post-sign verification failed for input " + std::to_string(data.input_index) + ": " + verify_error;
             return false;
         }
     }

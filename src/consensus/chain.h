@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <functional>
+#include <atomic>
 
 // Forward declarations
 class CBlockchainDB;
@@ -41,6 +42,12 @@ private:
     // CRITICAL-1 FIX: Mutex for thread-safe access to chain state
     // Protects mapBlockIndex, pindexTip, and all chain operations
     mutable std::mutex cs_main;
+
+    // BUG #74 FIX: Atomic cached height for lock-free reads
+    // GetHeight() is called frequently by RPC and wallet operations
+    // Using cs_main for height reads causes contention with block processing
+    // This atomic is updated atomically whenever pindexTip changes
+    std::atomic<int> m_cachedHeight{-1};
 
     // Bug #40 fix: Callback mechanism for tip updates
     // Allows HeadersManager and other components to be notified when chain tip changes

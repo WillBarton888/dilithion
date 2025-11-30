@@ -283,7 +283,8 @@ private:
     std::vector<uint8_t> GetPubKeyHashUnlocked() const;
     std::vector<uint8_t> GetPublicKeyUnlocked() const;
     bool GetKeyUnlocked(const CDilithiumAddress& address, CKey& keyOut) const;
-    bool IsUnlockValid() const;  // VULN-002 FIX: Check if unlock hasn't expired
+    bool IsUnlockValid() const;  // VULN-002 FIX: Check if unlock hasn't expired (acquires cs_wallet)
+    bool _IsUnlockValidNoLock() const;  // BUG #74 FIX: Same as above but assumes caller holds cs_wallet
     bool IsCryptedUnlocked() const;  // BUG #56 FIX: Check encryption without lock (avoids deadlock in ValidateConsistency)
     // FIX-006 (WALLET-002): Internal helper to add UTXO without acquiring lock (avoids deadlock in ScanUTXOs)
     bool AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValue,

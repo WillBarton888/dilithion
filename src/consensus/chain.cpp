@@ -23,6 +23,8 @@ void CChainState::Cleanup() {
     // No need for manual delete - RAII handles cleanup
     mapBlockIndex.clear();
     pindexTip = nullptr;
+    // BUG #74 FIX: Reset atomic cached height
+    m_cachedHeight.store(-1, std::memory_order_release);
 }
 
 bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex> pindex) {
@@ -119,6 +121,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         }
 
         pindexTip = pindexNew;
+        // BUG #74 FIX: Update atomic cached height
+        m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
 
         // Persist to database
         if (pdb != nullptr) {
@@ -146,6 +150,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         }
 
         pindexTip = pindexNew;
+        // BUG #74 FIX: Update atomic cached height
+        m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
 
         // Persist to database
         if (pdb != nullptr) {
@@ -466,6 +472,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
     // Update tip
     pindexTip = pindexNew;
+    // BUG #74 FIX: Update atomic cached height
+    m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
 
     // Persist to database
     if (pdb != nullptr) {
@@ -608,11 +616,15 @@ CBlockIndex* CChainState::GetTip() const {
 void CChainState::SetTip(CBlockIndex* pindex) {
     std::lock_guard<std::mutex> lock(cs_main);
     pindexTip = pindex;
+    // BUG #74 FIX: Update atomic cached height for lock-free reads
+    m_cachedHeight.store(pindex ? pindex->nHeight : -1, std::memory_order_release);
 }
 
 int CChainState::GetHeight() const {
-    std::lock_guard<std::mutex> lock(cs_main);
-    return pindexTip ? pindexTip->nHeight : -1;
+    // BUG #74 FIX: Lock-free read of cached height
+    // This prevents RPC calls from blocking on cs_main during block processing
+    // The atomic is updated atomically whenever pindexTip changes
+    return m_cachedHeight.load(std::memory_order_acquire);
 }
 
 uint256 CChainState::GetChainWork() const {
