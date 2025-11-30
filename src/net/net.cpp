@@ -11,6 +11,7 @@
 #include <consensus/tx_validation.h>
 #include <consensus/chain.h>  // BUG #50 FIX: For g_chainstate.GetHeight()
 #include <net/block_fetcher.h>  // BUG #68 FIX: For BlockFetcher peer disconnect notification
+#include <net/node_state.h>     // BUG #69: Bitcoin Core-style per-peer state management
 #include <random>
 #include <cstring>
 #include <iostream>
@@ -256,6 +257,17 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
         g_network_stats.handshake_complete++;
 
         std::cout << "[HANDSHAKE-DIAG] ✅ HANDSHAKE COMPLETE with peer " << peer_id << std::endl;
+
+        // BUG #69: Create per-peer CNodeState for block download tracking
+        // This enables Bitcoin Core-style bidirectional block tracking
+        CNodeState* state = CNodeStateManager::Get().CreateState(peer_id);
+        if (state) {
+            state->fHandshakeComplete = true;
+            state->nStartingHeight = peer->start_height;
+            // Note: CPeer doesn't track outbound vs inbound yet - default to preferred
+            // TODO: Add fOutbound tracking to CPeer for proper Bitcoin Core-style preference
+            state->fPreferredDownload = true;
+        }
 
         // Trigger VERACK handler (for IBD initialization)
         if (on_verack) {
@@ -1284,6 +1296,10 @@ void CConnectionManager::DisconnectPeer(int peer_id, const std::string& reason) 
     if (g_block_fetcher) {
         g_block_fetcher->OnPeerDisconnected(peer_id);
     }
+
+    // BUG #69: Remove CNodeState for this peer
+    // This cleans up in-flight block tracking and prevents stale state
+    CNodeStateManager::Get().RemoveState(peer_id);
 
     // Remove peer from peer manager
     peer_manager.RemovePeer(peer_id);

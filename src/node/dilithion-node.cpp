@@ -32,6 +32,7 @@
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
+#include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer state and stalling detection
 #include <api/http_server.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
@@ -2745,6 +2746,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             if (!timedOut.empty()) {
                                 std::cout << "[BlockFetcher] " << timedOut.size() << " block(s) timed out, retrying..." << std::endl;
                                 g_block_fetcher->RetryTimedOutBlocks(timedOut);
+                            }
+
+                            // BUG #69: Check for stalling peers with adaptive timeouts
+                            // CNodeStateManager uses per-peer adaptive timeouts (2-64 seconds)
+                            // and disconnects peers that stall too many times
+                            auto stallingPeers = CNodeStateManager::Get().CheckForStallingPeers();
+                            for (NodeId stalling_peer : stallingPeers) {
+                                std::cout << "[NodeState] Disconnecting stalling peer " << stalling_peer << std::endl;
+                                connection_manager.DisconnectPeer(stalling_peer, "stalling block download");
                             }
                         }
                     }

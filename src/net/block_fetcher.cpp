@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <net/block_fetcher.h>
+#include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer block tracking
 #include <iostream>
 #include <algorithm>
 #include <sstream>
@@ -86,6 +87,10 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     // Track peer's blocks
     mapPeerBlocks[peer].insert(hash);
 
+    // BUG #69: Also track in CNodeStateManager for bidirectional tracking
+    // This provides single source of truth for in-flight blocks across the codebase
+    CNodeStateManager::Get().MarkBlockAsInFlight(peer, hash, nullptr);
+
     // Update peer state
     if (mapPeerStates.count(peer) == 0) {
         mapPeerStates[peer] = PeerDownloadState();
@@ -151,6 +156,9 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 
     // BUG #64: Clean up preferred peer tracking
     mapPreferredPeers.erase(hash);
+
+    // BUG #69: Also mark received in CNodeStateManager
+    CNodeStateManager::Get().MarkBlockAsReceived(hash);
 
     std::cout << "[BlockFetcher] Block received from peer " << peer
               << " (response time: " << responseTime.count() << "ms)"
