@@ -1,8 +1,7 @@
 // Copyright (c) 2025 The Dilithion Core developers
 // Distributed under the MIT software license
 
-#define BOOST_TEST_MODULE rpc_hd_wallet_tests
-#include <boost/test/included/unit_test.hpp>
+#include <boost/test/unit_test.hpp>
 
 #include <rpc/server.h>
 #include <wallet/wallet.h>
@@ -124,7 +123,7 @@ BOOST_AUTO_TEST_CASE(rpc_restore_hd_wallet_test) {
     BOOST_REQUIRE(wallet1->GenerateHDWallet(original_mnemonic));
 
     // Get first address from original wallet
-    CAddress original_addr = wallet1->GetNewHDAddress();
+    CDilithiumAddress original_addr = wallet1->GetNewHDAddress();
     BOOST_REQUIRE(original_addr.IsValid());
 
     // Create new wallet and restore from mnemonic
@@ -132,7 +131,7 @@ BOOST_AUTO_TEST_CASE(rpc_restore_hd_wallet_test) {
     BOOST_REQUIRE(wallet2->InitializeHDWallet(original_mnemonic));
 
     // Get first address from restored wallet
-    CAddress restored_addr = wallet2->GetNewHDAddress();
+    CDilithiumAddress restored_addr = wallet2->GetNewHDAddress();
     BOOST_REQUIRE(restored_addr.IsValid());
 
     // Addresses should match (deterministic)
@@ -148,20 +147,20 @@ BOOST_AUTO_TEST_CASE(rpc_restore_hd_wallet_with_passphrase_test) {
     std::string mnemonic;
     BOOST_REQUIRE(wallet1->GenerateHDWallet(mnemonic, passphrase));
 
-    CAddress addr1 = wallet1->GetNewHDAddress();
+    CDilithiumAddress addr1 = wallet1->GetNewHDAddress();
 
     // Restore with correct passphrase
     std::unique_ptr<CWallet> wallet2 = std::make_unique<CWallet>();
     BOOST_REQUIRE(wallet2->InitializeHDWallet(mnemonic, passphrase));
 
-    CAddress addr2 = wallet2->GetNewHDAddress();
+    CDilithiumAddress addr2 = wallet2->GetNewHDAddress();
     BOOST_CHECK_EQUAL(addr1.ToString(), addr2.ToString());
 
     // Restore with wrong passphrase produces different addresses
     std::unique_ptr<CWallet> wallet3 = std::make_unique<CWallet>();
     BOOST_REQUIRE(wallet3->InitializeHDWallet(mnemonic, "wrong_passphrase"));
 
-    CAddress addr3 = wallet3->GetNewHDAddress();
+    CDilithiumAddress addr3 = wallet3->GetNewHDAddress();
     BOOST_CHECK(addr1.ToString() != addr3.ToString());
 }
 
@@ -228,16 +227,16 @@ BOOST_AUTO_TEST_CASE(rpc_list_hd_addresses_test) {
     BOOST_REQUIRE(wallet->GenerateHDWallet(mnemonic));
 
     // Generate several addresses
-    CAddress addr1 = wallet->GetNewHDAddress();
-    CAddress addr2 = wallet->GetNewHDAddress();
-    CAddress addr3 = wallet->GetChangeAddress();
+    CDilithiumAddress addr1 = wallet->GetNewHDAddress();
+    CDilithiumAddress addr2 = wallet->GetNewHDAddress();
+    CDilithiumAddress addr3 = wallet->GetChangeAddress();
 
     // Get all addresses
-    std::vector<CAddress> addresses = wallet->GetAddresses();
+    std::vector<CDilithiumAddress> addresses = wallet->GetAddresses();
     BOOST_CHECK_EQUAL(addresses.size(), 4); // Initial + 2 receive + 1 change
 
     // Verify paths
-    for (const CAddress& addr : addresses) {
+    for (const CDilithiumAddress& addr : addresses) {
         CHDKeyPath path;
         BOOST_REQUIRE(wallet->GetAddressPath(addr, path));
         BOOST_CHECK(path.IsValid());
@@ -296,8 +295,8 @@ BOOST_AUTO_TEST_CASE(rpc_hd_wallet_deterministic_test) {
 
     // Generate addresses and verify they match
     for (int i = 0; i < 10; i++) {
-        CAddress addr1 = wallet1->GetNewHDAddress();
-        CAddress addr2 = wallet2->GetNewHDAddress();
+        CDilithiumAddress addr1 = wallet1->GetNewHDAddress();
+        CDilithiumAddress addr2 = wallet2->GetNewHDAddress();
 
         BOOST_REQUIRE(addr1.IsValid());
         BOOST_REQUIRE(addr2.IsValid());
@@ -305,8 +304,8 @@ BOOST_AUTO_TEST_CASE(rpc_hd_wallet_deterministic_test) {
     }
 
     // Change addresses should also match
-    CAddress change1 = wallet1->GetChangeAddress();
-    CAddress change2 = wallet2->GetChangeAddress();
+    CDilithiumAddress change1 = wallet1->GetChangeAddress();
+    CDilithiumAddress change2 = wallet2->GetChangeAddress();
     BOOST_CHECK_EQUAL(change1.ToString(), change2.ToString());
 }
 
@@ -355,9 +354,9 @@ BOOST_AUTO_TEST_CASE(rpc_hd_wallet_path_validation_test) {
     BOOST_REQUIRE(wallet->GenerateHDWallet(mnemonic));
 
     // Generate addresses
-    CAddress receive1 = wallet->GetNewHDAddress();
-    CAddress receive2 = wallet->GetNewHDAddress();
-    CAddress change1 = wallet->GetChangeAddress();
+    CDilithiumAddress receive1 = wallet->GetNewHDAddress();
+    CDilithiumAddress receive2 = wallet->GetNewHDAddress();
+    CDilithiumAddress change1 = wallet->GetChangeAddress();
 
     // Verify paths
     CHDKeyPath path;
@@ -385,8 +384,8 @@ BOOST_AUTO_TEST_CASE(rpc_multiple_hd_wallets_test) {
     BOOST_CHECK(mnemonic1 != mnemonic2);
 
     // Generated addresses should be different
-    CAddress addr1 = wallet1->GetNewHDAddress();
-    CAddress addr2 = wallet2->GetNewHDAddress();
+    CDilithiumAddress addr1 = wallet1->GetNewHDAddress();
+    CDilithiumAddress addr2 = wallet2->GetNewHDAddress();
 
     BOOST_CHECK(addr1.ToString() != addr2.ToString());
 }
@@ -409,7 +408,7 @@ BOOST_AUTO_TEST_CASE(rpc_list_addresses_empty_hd_wallet_test) {
     BOOST_REQUIRE(wallet->GenerateHDWallet(mnemonic));
 
     // Should have one initial address
-    std::vector<CAddress> addresses = wallet->GetAddresses();
+    std::vector<CDilithiumAddress> addresses = wallet->GetAddresses();
     BOOST_CHECK_EQUAL(addresses.size(), 1);
 }
 
@@ -422,7 +421,7 @@ BOOST_AUTO_TEST_CASE(rpc_hd_wallet_large_index_test) {
 
     // Generate many addresses
     for (int i = 0; i < 50; i++) {
-        CAddress addr = wallet->GetNewHDAddress();
+        CDilithiumAddress addr = wallet->GetNewHDAddress();
         BOOST_REQUIRE(addr.IsValid());
     }
 
@@ -439,9 +438,9 @@ BOOST_AUTO_TEST_CASE(rpc_concurrent_address_generation_test) {
     BOOST_REQUIRE(wallet->GenerateHDWallet(mnemonic));
 
     // Generate addresses (wallet has mutex protection)
-    std::vector<CAddress> addresses;
+    std::vector<CDilithiumAddress> addresses;
     for (int i = 0; i < 20; i++) {
-        CAddress addr = wallet->GetNewHDAddress();
+        CDilithiumAddress addr = wallet->GetNewHDAddress();
         BOOST_REQUIRE(addr.IsValid());
         addresses.push_back(addr);
     }
