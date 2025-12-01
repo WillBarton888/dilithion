@@ -405,15 +405,15 @@ BOOST_AUTO_TEST_CASE(encrypted_hd_wallet_wrong_passphrase_test) {
     std::string mnemonic;
     BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
 
-    std::string passphrase = "CorrectPassword!";
+    std::string passphrase = "CorrectPassword1!";
     BOOST_REQUIRE(wallet.EncryptWallet(passphrase));
 
     // Lock wallet
     wallet.Lock();
     BOOST_CHECK(wallet.IsLocked());
 
-    // Try wrong passphrase (must be 16+ chars to test actual wrong password, not length validation)
-    BOOST_CHECK(!wallet.Unlock("WrongPassword!###"));
+    // Try wrong passphrase (must be 16+ chars with digit+special to test actual wrong password)
+    BOOST_CHECK(!wallet.Unlock("WrongPassword123!"));
     BOOST_CHECK(wallet.IsLocked());
 
     // Try correct passphrase
