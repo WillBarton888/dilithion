@@ -10,14 +10,10 @@
  */
 
 #include <consensus/chain.h>
-#include <net/block_fetcher.h>
 #include <atomic>
 
 // Global chain state
 CChainState g_chainstate;
-
-// Global IBD managers (BUG #77 FIX: Moved here from dilithion-node.cpp for test linkage)
-CBlockFetcher* g_block_fetcher = nullptr;
 
 // Global node state for RPC and signal handling
 struct NodeState {

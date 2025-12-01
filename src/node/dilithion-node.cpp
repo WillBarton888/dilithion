@@ -98,7 +98,7 @@ CAsyncBroadcaster* g_async_broadcaster = nullptr;
 // Global IBD manager pointers (Bug #12 - Phase 4.1)
 CHeadersManager* g_headers_manager = nullptr;
 COrphanManager* g_orphan_manager = nullptr;
-extern CBlockFetcher* g_block_fetcher;  // Defined in globals.cpp
+CBlockFetcher* g_block_fetcher = nullptr;
 
 /**
  * BUG #69 FIX: Bitcoin Core-style Initial Block Download detection
