@@ -188,8 +188,8 @@ BOOST_AUTO_TEST_SUITE_END()
 BOOST_AUTO_TEST_SUITE(mnemonic_validation_tests)
 
 BOOST_AUTO_TEST_CASE(validate_known_good_mnemonic) {
-    // Known valid 12-word mnemonic
-    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    // Known valid 12-word mnemonic (Dilithion uses SHA3-256 for checksums, so "absorb" not "about")
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb";
     BOOST_CHECK(CMnemonic::Validate(mnemonic));
 }
 
@@ -213,10 +213,10 @@ BOOST_AUTO_TEST_CASE(reject_bad_checksum) {
 }
 
 BOOST_AUTO_TEST_CASE(case_insensitive_validation) {
-    // Mixed case should work
-    std::string mnemonic_lower = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-    std::string mnemonic_upper = "ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABOUT";
-    std::string mnemonic_mixed = "Abandon Abandon abandon ABANDON abandon Abandon abandon abandon ABANDON abandon abandon about";
+    // Mixed case should work (Dilithion SHA3-256 checksum: "absorb" not "about")
+    std::string mnemonic_lower = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb";
+    std::string mnemonic_upper = "ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABSORB";
+    std::string mnemonic_mixed = "Abandon Abandon abandon ABANDON abandon Abandon abandon abandon ABANDON abandon abandon absorb";
 
     BOOST_CHECK(CMnemonic::Validate(mnemonic_lower));
     BOOST_CHECK(CMnemonic::Validate(mnemonic_upper));
@@ -295,7 +295,8 @@ BOOST_AUTO_TEST_SUITE_END()
 BOOST_AUTO_TEST_SUITE(seed_derivation_tests)
 
 BOOST_AUTO_TEST_CASE(derive_seed_without_passphrase) {
-    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    // Dilithion SHA3-256 checksum: "absorb" not "about"
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb";
     uint8_t seed[64];
 
     BOOST_REQUIRE(CMnemonic::ToSeed(mnemonic, "", seed));
@@ -312,7 +313,8 @@ BOOST_AUTO_TEST_CASE(derive_seed_without_passphrase) {
 }
 
 BOOST_AUTO_TEST_CASE(derive_seed_with_passphrase) {
-    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    // Dilithion SHA3-256 checksum: "absorb" not "about"
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb";
     uint8_t seed_no_pass[64];
     uint8_t seed_with_pass[64];
 
@@ -324,7 +326,8 @@ BOOST_AUTO_TEST_CASE(derive_seed_with_passphrase) {
 }
 
 BOOST_AUTO_TEST_CASE(seed_derivation_is_deterministic) {
-    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    // Dilithion SHA3-256 checksum: "absorb" not "about"
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb";
     uint8_t seed1[64];
     uint8_t seed2[64];
 
@@ -443,17 +446,18 @@ BOOST_AUTO_TEST_CASE(empty_mnemonic) {
 }
 
 BOOST_AUTO_TEST_CASE(whitespace_handling) {
-    // Multiple spaces between words
-    std::string mnemonic_multi_space = "abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  about";
+    // Multiple spaces between words (Dilithion SHA3-256 checksum: "absorb")
+    std::string mnemonic_multi_space = "abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  absorb";
     BOOST_CHECK(CMnemonic::Validate(mnemonic_multi_space));
 
     // Leading/trailing spaces
-    std::string mnemonic_spaces = "  abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about  ";
+    std::string mnemonic_spaces = "  abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb  ";
     BOOST_CHECK(CMnemonic::Validate(mnemonic_spaces));
 }
 
 BOOST_AUTO_TEST_CASE(unicode_passphrase) {
-    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    // Dilithion SHA3-256 checksum: "absorb" not "about"
+    std::string mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb";
     uint8_t seed_ascii[64];
     uint8_t seed_unicode[64];
 

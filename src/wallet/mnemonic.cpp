@@ -86,15 +86,19 @@ int CMnemonic::FindWordIndex(const std::string& word) {
     // word, reducing 256-bit entropy to ~55 bits (practical brute force).
     //
     // This implementation:
-    // - Always performs exactly 11 iterations (log2(2048) = 11)
+    // - Always performs exactly 12 comparisons (11 iterations + 1 final check)
     // - Uses conditional move to avoid early exit
     // - Leaks no information about word position through timing
+    //
+    // BUG FIX: 11 iterations can miss the last element (index 2047) because
+    // when left=2046, right=2047, mid = 2046 + (2047-2046)/2 = 2046.
+    // We need a 12th comparison to check the remaining element.
 
     int result = -1;  // Will be set if word found
     int left = 0;
     int right = WORDLIST_SIZE - 1;
 
-    // Always do 11 iterations for 2048-word list (constant time)
+    // 11 iterations for 2048-word list
     for (int iter = 0; iter < 11; iter++) {
         int mid = left + (right - left) / 2;
 
@@ -112,6 +116,14 @@ int CMnemonic::FindWordIndex(const std::string& word) {
         // Update search bounds (always executed, no branching)
         left = (cmp > 0) ? (mid + 1) : left;
         right = (cmp < 0) ? (mid - 1) : right;
+    }
+
+    // 12th comparison: check the remaining element when range narrows to single item
+    // This is needed because mid = left + (right-left)/2 rounds down,
+    // potentially missing the last element (e.g., "zoo" at index 2047)
+    if (result == -1 && left <= right && left < (int)WORDLIST_SIZE) {
+        int cmp = word.compare(BIP39_WORDLIST_ENGLISH[left]);
+        result = (cmp == 0) ? left : result;
     }
 
     return result;

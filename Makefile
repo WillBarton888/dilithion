@@ -57,15 +57,15 @@ ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Windows)
     # Windows requires ws2_32 for sockets and bcrypt for secure RNG
     LIBS += -lws2_32 -lbcrypt
-    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include
+    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
     # MinGW/MSYS2 on Windows - use system OpenSSL 3.x from /mingw64
     LIBS += -lws2_32 -lbcrypt
-    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include
+    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
     # MSYS on Windows - use system OpenSSL 3.x from /mingw64
     LIBS += -lws2_32 -lbcrypt
-    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include
+    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
 endif
 
 # Fix for Windows: Use system default temp directories
@@ -362,7 +362,7 @@ validate_crypto: validate_crypto.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/cryp
 # Boost Unit Test Binaries
 # ============================================================================
 
-test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(DILITHIUM_OBJECTS)
+test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/wallet/wal.o $(OBJ_DIR)/wallet/wal_recovery.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/node/blockchain_storage.o $(OBJ_DIR)/rpc/server.o $(OBJ_DIR)/rpc/auth.o $(OBJ_DIR)/rpc/ratelimiter.o $(OBJ_DIR)/rpc/permissions.o $(OBJ_DIR)/miner/controller.o $(OBJ_DIR)/net/net.o $(OBJ_DIR)/net/peers.o $(OBJ_DIR)/net/tx_relay.o $(OBJ_DIR)/net/socket.o $(OBJ_DIR)/net/protocol.o $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/net/block_fetcher.o $(OBJ_DIR)/net/netaddress.o $(OBJ_DIR)/net/node_state.o $(OBJ_DIR)/net/addrman.o $(OBJ_DIR)/net/banman.o $(OBJ_DIR)/net/dns.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully (header-only)$(COLOR_RESET)"
