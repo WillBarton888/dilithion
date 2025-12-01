@@ -1091,6 +1091,17 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
     fWalletUnlocked = true;
     nUnlockTime = std::chrono::steady_clock::time_point::max();
 
+    // BUG #82 FIX: Encrypt HD master key if this is an HD wallet
+    // Without this, fHDMasterKeyEncrypted stays false and lock checks don't work
+    if (fIsHDWallet) {
+        if (!EncryptHDMasterKey()) {
+            std::cerr << "[Wallet] Failed to encrypt HD master key" << std::endl;
+            memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+            memory_cleanse(derivedKey.data(), derivedKey.size());
+            return false;
+        }
+    }
+
     // Wipe sensitive data
     memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
     memory_cleanse(derivedKey.data(), derivedKey.size());
