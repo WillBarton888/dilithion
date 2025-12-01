@@ -1091,17 +1091,6 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
     fWalletUnlocked = true;
     nUnlockTime = std::chrono::steady_clock::time_point::max();
 
-    // BUG #82 FIX: Encrypt HD master key if this is an HD wallet
-    // Without this, fHDMasterKeyEncrypted stays false and lock checks don't work
-    if (fIsHDWallet) {
-        if (!EncryptHDMasterKey()) {
-            std::cerr << "[Wallet] Failed to encrypt HD master key" << std::endl;
-            memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
-            memory_cleanse(derivedKey.data(), derivedKey.size());
-            return false;
-        }
-    }
-
     // Wipe sensitive data
     memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
     memory_cleanse(derivedKey.data(), derivedKey.size());
@@ -3503,7 +3492,7 @@ CDilithiumAddress CWallet::GetNewHDAddress() {
     // - Attacker can enumerate future addresses without passphrase
     // - Breaks expectation that locked wallet doesn't expose sensitive operations
     // Impact: Prevents address enumeration attacks, protects user privacy
-    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+    if (IsCrypted() && !fWalletUnlocked) {
         std::cerr << "[ERROR] Cannot generate new address: wallet is locked. "
                   << "Please unlock wallet first." << std::endl;
         return CDilithiumAddress();
@@ -3542,7 +3531,7 @@ CDilithiumAddress CWallet::GetChangeAddress() {
 
     // RPC-003 FIX: Enforce wallet lock check with explicit error logging
     // Same security issue as GetNewHDAddress() - prevents change address enumeration
-    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+    if (IsCrypted() && !fWalletUnlocked) {
         std::cerr << "[ERROR] Cannot generate change address: wallet is locked. "
                   << "Please unlock wallet first." << std::endl;
         return CDilithiumAddress();
@@ -3580,7 +3569,7 @@ CDilithiumAddress CWallet::DeriveAddress(const std::string& path_str) {
     }
 
     // Check if wallet is locked and encrypted
-    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+    if (IsCrypted() && !fWalletUnlocked) {
         return CDilithiumAddress();
     }
 
@@ -3670,7 +3659,7 @@ size_t CWallet::ScanHDChains(CUTXOSet& utxo_set) {
     }
 
     // Check if wallet is locked
-    if (fHDMasterKeyEncrypted && !fWalletUnlocked) {
+    if (IsCrypted() && !fWalletUnlocked) {
         return 0;
     }
 
