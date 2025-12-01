@@ -258,17 +258,13 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
 
         std::cout << "[HANDSHAKE-DIAG] ✅ HANDSHAKE COMPLETE with peer " << peer_id << std::endl;
 
-        // BUG #85 FIX: Temporarily disabled BUG #69 CNodeState creation to isolate crash
-        // The CNodeState integration was causing crashes - needs investigation
-        // TODO: Re-enable once root cause is fixed
-        /*
+        // BUG #69: Create per-peer CNodeState for block download tracking
         CNodeState* state = CNodeStateManager::Get().CreateState(peer_id);
         if (state) {
             state->fHandshakeComplete = true;
             state->nStartingHeight = peer->start_height;
             state->fPreferredDownload = true;
         }
-        */
 
         // Trigger VERACK handler (for IBD initialization)
         if (on_verack) {
