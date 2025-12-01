@@ -284,7 +284,8 @@ BOOST_AUTO_TEST_CASE(rpc_restore_invalid_mnemonic_test) {
 
 // Test 12: HD Wallet Deterministic Address Generation
 BOOST_AUTO_TEST_CASE(rpc_hd_wallet_deterministic_test) {
-    std::string test_mnemonic = "legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title";
+    // Use known-valid 12-word mnemonic with SHA3-256 checksum
+    std::string test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon absorb";
 
     // Create two wallets from same mnemonic
     std::unique_ptr<CWallet> wallet1 = std::make_unique<CWallet>();

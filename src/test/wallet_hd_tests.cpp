@@ -324,8 +324,8 @@ BOOST_AUTO_TEST_CASE(encrypt_hd_wallet_test) {
     CDilithiumAddress addr_before = wallet.GetNewHDAddress();
     BOOST_CHECK(addr_before.IsValid());
 
-    // Encrypt wallet
-    std::string passphrase = "TestPassphrase123!";
+    // Encrypt wallet - avoid common password substrings
+    std::string passphrase = "MyUniqueKey472!##";
     BOOST_REQUIRE(wallet.EncryptWallet(passphrase));
 
     // Verify wallet is encrypted
