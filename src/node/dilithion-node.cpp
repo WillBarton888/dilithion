@@ -1862,11 +1862,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "======================================" << std::endl;
             std::cout << std::endl;
 
-            // Credit coinbase transaction to wallet using globally stored coinbase
+            // BUG #84 FIX: Extract coinbase from actual block, not global
+            // Race condition: g_currentCoinbase might be overwritten by template updates
+            // before the block is found, causing hash mismatch between wallet and UTXO set
             CTransactionRef coinbase;
             {
-                std::lock_guard<std::mutex> lock(g_coinbaseMutex);
-                coinbase = g_currentCoinbase;
+                CBlockValidator validator;
+                std::vector<CTransactionRef> transactions;
+                std::string error;
+                if (validator.DeserializeBlockTransactions(block, transactions, error) && !transactions.empty()) {
+                    coinbase = transactions[0];  // Coinbase is always first transaction
+                } else {
+                    std::cerr << "[Wallet] ERROR: Failed to deserialize coinbase from block: " << error << std::endl;
+                }
             }
 
             if (coinbase && !coinbase->vout.empty()) {
