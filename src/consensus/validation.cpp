@@ -316,6 +316,14 @@ bool CBlockValidator::VerifyMerkleRoot(
 ) const {
     uint256 calculatedRoot = BuildMerkleRoot(transactions);
 
+    // BUG #71 DEBUG: Log merkle root comparison
+    std::cout << "[DEBUG] VerifyMerkleRoot: txCount=" << transactions.size() << std::endl;
+    std::cout << "[DEBUG] VerifyMerkleRoot: blockMerkleRoot=" << block.hashMerkleRoot.GetHex() << std::endl;
+    std::cout << "[DEBUG] VerifyMerkleRoot: calculatedRoot=" << calculatedRoot.GetHex() << std::endl;
+    if (!transactions.empty()) {
+        std::cout << "[DEBUG] VerifyMerkleRoot: tx[0] hash=" << transactions[0]->GetHash().GetHex() << std::endl;
+    }
+
     if (!(calculatedRoot == block.hashMerkleRoot)) {
         error = "Merkle root mismatch";
         return false;

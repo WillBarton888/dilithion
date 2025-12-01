@@ -74,8 +74,8 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
         g_randomx_cache = nullptr;
     }
 
-    // BUG #13 FIX: Force deterministic RandomX flags for consensus
-    // CRITICAL: All nodes must use identical flags to produce identical hashes
+    // BUG #73 FIX: Use optimal RandomX flags for full performance
+    // CORRECTION: RandomX is deterministic - flags only affect speed, not hash output
     //
     // Root Cause: randomx_get_flags() returns CPU-specific optimizations (SSSE3, AVX2, etc.)
     // which can cause different hash outputs on different hardware, breaking consensus.
@@ -85,12 +85,12 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
     //
     // Note: LIGHT vs FULL mode only affects memory usage and speed, NOT hash output.
     // However, to maximize compatibility, we enforce RANDOMX_FLAG_DEFAULT for both modes.
-    randomx_flags flags = RANDOMX_FLAG_DEFAULT;
+    randomx_flags flags = randomx_get_flags();
 
     if (!light_mode) {
         // Full mode: Add FULL_MEM flag for 2GB dataset (faster hashing)
         // Still using DEFAULT as base to avoid hardware-specific variations
-        flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
+        flags = randomx_get_flags() | RANDOMX_FLAG_FULL_MEM;
     }
 
     // Allocate and initialize cache (required for both modes)
@@ -319,14 +319,14 @@ extern "C" void* randomx_create_thread_vm() {
     // BUG #55 FIX: Monero-style dual-mode VM creation
     // Try FULL mode first (mining), fall back to LIGHT mode (validation)
 
-    randomx_flags flags = RANDOMX_FLAG_DEFAULT;
+    randomx_flags flags = randomx_get_flags();
     randomx_vm* vm = nullptr;
 
     // Option 1: Use mining mode (FULL) if ready
     if (g_mining_ready.load()) {
         std::lock_guard<std::mutex> lock(g_mining_mutex);
         if (g_mining_dataset && g_mining_cache) {
-            flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
+            flags = randomx_get_flags() | RANDOMX_FLAG_FULL_MEM;
             vm = randomx_create_vm(flags, g_mining_cache, g_mining_dataset);
             if (vm) {
                 return static_cast<void*>(vm);
@@ -355,7 +355,7 @@ extern "C" void* randomx_create_thread_vm() {
             if (g_is_light_mode) {
                 vm = randomx_create_vm(RANDOMX_FLAG_DEFAULT, g_randomx_cache, nullptr);
             } else {
-                flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
+                flags = randomx_get_flags() | RANDOMX_FLAG_FULL_MEM;
                 vm = randomx_create_vm(flags, g_randomx_cache, g_randomx_dataset);
             }
             if (vm) {
@@ -428,7 +428,7 @@ extern "C" void randomx_init_validation_mode(const void* key, size_t key_len) {
     }
 
     // Always use LIGHT mode for validation (RANDOMX_FLAG_DEFAULT only)
-    randomx_flags flags = RANDOMX_FLAG_DEFAULT;
+    randomx_flags flags = randomx_get_flags();
 
     // Allocate and initialize cache
     g_validation_cache = randomx_alloc_cache(flags);
@@ -499,7 +499,7 @@ extern "C" void randomx_init_mining_mode_async(const void* key, size_t key_len) 
             }
 
             // FULL mode flags
-            randomx_flags flags = static_cast<randomx_flags>(RANDOMX_FLAG_DEFAULT | RANDOMX_FLAG_FULL_MEM);
+            randomx_flags flags = randomx_get_flags() | RANDOMX_FLAG_FULL_MEM;
 
             // Allocate cache
             g_mining_cache = randomx_alloc_cache(flags);

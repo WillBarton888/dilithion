@@ -252,71 +252,16 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
         error = "scriptPubKey too large (DoS protection)";
         return false;
     }
-    // Only accept standard sizes: 25 (legacy) or 37 (SHA3-256)
-    if (scriptPubKey.size() != 25 && scriptPubKey.size() != 37) {
-        error = "scriptPubKey has non-standard size (must be 25 or 37 bytes)";
+    // Only accept 25-byte P2PKH
+    if (scriptPubKey.size() != 25) {
+        error = "scriptPubKey must be 25 bytes (P2PKH)";
         return false;
     }
 
-    bool isStandardP2PKH = false;
-    bool isLegacyP2PKH = false;
-
-    // SCRIPT-011 FIX: Explicit opcode validation for standard P2PKH
-    // Check for SHA3-256 based P2PKH (37 bytes)
-    if (scriptPubKey.size() == 37) {
-        // Validate each opcode explicitly with detailed checks
-        if (scriptPubKey[0] != 0x76) {  // OP_DUP
-            error = "scriptPubKey byte 0 must be OP_DUP (0x76)";
-            return false;
-        }
-        if (scriptPubKey[1] != 0xa9) {  // OP_HASH160
-            error = "scriptPubKey byte 1 must be OP_HASH160 (0xa9)";
-            return false;
-        }
-        if (scriptPubKey[2] != 0x20) {  // Push 32 bytes
-            error = "scriptPubKey byte 2 must be push-32 opcode (0x20)";
-            return false;
-        }
-        if (scriptPubKey[35] != 0x88) {  // OP_EQUALVERIFY
-            error = "scriptPubKey byte 35 must be OP_EQUALVERIFY (0x88)";
-            return false;
-        }
-        if (scriptPubKey[36] != 0xac) {  // OP_CHECKSIG
-            error = "scriptPubKey byte 36 must be OP_CHECKSIG (0xac)";
-            return false;
-        }
-        isStandardP2PKH = true;
-    }
-
-    // SCRIPT-011 FIX: Explicit opcode validation for legacy P2PKH
-    // Check for legacy 20-byte hash P2PKH (25 bytes)
-    if (scriptPubKey.size() == 25) {
-        // Validate each opcode explicitly with detailed checks
-        if (scriptPubKey[0] != 0x76) {  // OP_DUP
-            error = "scriptPubKey byte 0 must be OP_DUP (0x76)";
-            return false;
-        }
-        if (scriptPubKey[1] != 0xa9) {  // OP_HASH160
-            error = "scriptPubKey byte 1 must be OP_HASH160 (0xa9)";
-            return false;
-        }
-        if (scriptPubKey[2] != 0x14) {  // Push 20 bytes
-            error = "scriptPubKey byte 2 must be push-20 opcode (0x14)";
-            return false;
-        }
-        if (scriptPubKey[23] != 0x88) {  // OP_EQUALVERIFY
-            error = "scriptPubKey byte 23 must be OP_EQUALVERIFY (0x88)";
-            return false;
-        }
-        if (scriptPubKey[24] != 0xac) {  // OP_CHECKSIG
-            error = "scriptPubKey byte 24 must be OP_CHECKSIG (0xac)";
-            return false;
-        }
-        isLegacyP2PKH = true;
-    }
-
-    if (!isStandardP2PKH && !isLegacyP2PKH) {
-        error = "scriptPubKey is not valid P2PKH format (opcode validation failed)";
+    // Validate P2PKH: OP_DUP OP_HASH160 <20> <hash20> OP_EQUALVERIFY OP_CHECKSIG
+    if (scriptPubKey[0] != 0x76 || scriptPubKey[1] != 0xa9 || scriptPubKey[2] != 0x14 ||
+        scriptPubKey[23] != 0x88 || scriptPubKey[24] != 0xac) {
+        error = "Invalid P2PKH script format";
         return false;
     }
 
@@ -460,41 +405,19 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
         return false;
     }
 
-    // Hash the public key with SHA3-256
+    // BUG #75 FIX: Hash the public key with DOUBLE SHA3-256 (matches wallet HashPubKey)
+    // The wallet uses: SHA3_256(SHA3_256(pubkey))[0:20]
+    // This must match for signature verification to succeed
+    uint8_t hash1[32];
+    SHA3_256(pubkey.data(), pubkey.size(), hash1);
     uint8_t computed_hash[32];
-    SHA3_256(pubkey.data(), pubkey.size(), computed_hash);
+    SHA3_256(hash1, 32, computed_hash);
 
-    // Extract expected hash from scriptPubKey
-    const uint8_t* expected_hash;
-    size_t hash_size;
+    // Extract expected 20-byte hash from scriptPubKey (starts at byte 3)
+    const uint8_t* expected_hash = scriptPubKey.data() + 3;
 
-    // SCRIPT-003 FIX: Validate scriptPubKey pointer and size before pointer arithmetic
-    if (scriptPubKey.data() == nullptr) {
-        error = "Internal error: scriptPubKey data pointer is null";
-        return false;
-    }
-
-    if (isStandardP2PKH) {
-        // SHA3-256 (32 bytes) starts at byte 3
-        if (scriptPubKey.size() < 3 + 32) {
-            error = "scriptPubKey too short for standard P2PKH hash";
-            return false;
-        }
-        expected_hash = scriptPubKey.data() + 3;
-        hash_size = 32;
-    } else {
-        // Legacy RIPEMD160 (20 bytes) starts at byte 3
-        if (scriptPubKey.size() < 3 + 20) {
-            error = "scriptPubKey too short for legacy P2PKH hash";
-            return false;
-        }
-        expected_hash = scriptPubKey.data() + 3;
-        hash_size = 20;
-        // Only compare first 20 bytes of computed hash for legacy
-    }
-
-    // Compare hashes (both pointers now validated)
-    if (memcmp(computed_hash, expected_hash, hash_size) != 0) {
+    // Compare first 20 bytes of computed hash
+    if (memcmp(computed_hash, expected_hash, 20) != 0) {
         error = "Public key hash does not match scriptPubKey";
         return false;
     }

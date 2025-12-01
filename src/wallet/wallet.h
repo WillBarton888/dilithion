@@ -1065,7 +1065,7 @@ public:
      * Default transaction fee (0.00185000 DLT = 185000 ions)
      * Updated for P2PKH script format (larger than simplified script)
      */
-    static const CAmount DEFAULT_TRANSACTION_FEE = 185000;
+    static const CAmount DEFAULT_TRANSACTION_FEE = 700000;
 
     /**
      * Get this wallet's public key hash (for receiving payments)

@@ -98,7 +98,7 @@ CAsyncBroadcaster* g_async_broadcaster = nullptr;
 // Global IBD manager pointers (Bug #12 - Phase 4.1)
 CHeadersManager* g_headers_manager = nullptr;
 COrphanManager* g_orphan_manager = nullptr;
-CBlockFetcher* g_block_fetcher = nullptr;
+extern CBlockFetcher* g_block_fetcher;  // Defined in globals.cpp
 
 /**
  * BUG #69 FIX: Bitcoin Core-style Initial Block Download detection
@@ -455,10 +455,13 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     block.vtx.push_back(1);  // Transaction count = 1 (only coinbase)
     block.vtx.insert(block.vtx.end(), coinbaseData.begin(), coinbaseData.end());
 
-    // Calculate merkle root (SHA3-256 hash of serialized coinbase)
+    // BUG #71 FIX: Calculate merkle root from transaction hash, NOT from raw vtx
+    // The merkle root for a single transaction IS the transaction hash
+    // The bug was hashing block.vtx (which includes count prefix) instead of the tx alone
     uint8_t merkleHash[32];
     extern void SHA3_256(const uint8_t* data, size_t len, uint8_t hash[32]);
-    SHA3_256(block.vtx.data(), block.vtx.size(), merkleHash);
+    // Hash the transaction data ONLY (coinbaseData), not the vtx with count prefix
+    SHA3_256(coinbaseData.data(), coinbaseData.size(), merkleHash);
     memcpy(block.hashMerkleRoot.data, merkleHash, 32);
 
     // Calculate target from nBits (compact format)
@@ -1592,9 +1595,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     // Activate in chain
                                     bool reorg = false;
                                     if (g_chainstate.ActivateBestChain(pOrphanIndexRaw, orphanBlock, reorg)) {
-                                        // Save to database
+                                        // Save block to database
                                         if (!blockchain.WriteBlock(orphanBlockHash, orphanBlock)) {
                                             std::cerr << "[Orphan] ERROR: Failed to save orphan block to database" << std::endl;
+                                        }
+                                        // BUG #70 FIX: Save block INDEX to database (was missing!)
+                                        // Without this, merkle root is lost on restart because only
+                                        // the block is persisted, not the index with header fields
+                                        if (!blockchain.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw)) {
+                                            std::cerr << "[Orphan] ERROR: Failed to save orphan block index to database" << std::endl;
                                         }
 
                                         // Queue this block's orphan children for processing
@@ -1669,6 +1678,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 pindex = pindex->pnext;  // Start from next block (may be NULL if at tip)
 
                 while (pindex && headers.size() < 2000) {
+                    // BUG #70 DEBUG: Log merkle root of each header being sent
+                    std::cerr << "[BUG70-DEBUG] Sending header height=" << pindex->nHeight
+                              << " merkle=" << pindex->header.hashMerkleRoot.GetHex().substr(0,16)
+                              << "..." << std::endl;
                     headers.push_back(pindex->header);
                     pindex = pindex->pnext;
 
@@ -2490,12 +2503,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             } else {
                 std::cout << "  [OK] Already synced with network" << std::endl;
 
-                // BUG #55 FIX: Validation mode is already initialized (LIGHT mode)
-                // Mining can start immediately - will use LIGHT mode, upgrade to FULL when ready
-                if (randomx_is_mining_mode_ready()) {
-                    std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
+                // BUG #72 FIX: Wait for FULL mode before starting mining threads
+                // Following XMRig's proven pattern: "dataset ready" before thread creation
+                // Mining threads created in LIGHT mode get LIGHT VMs and never upgrade
+                if (!randomx_is_mining_mode_ready()) {
+                    std::cout << "  [WAIT] Waiting for RandomX FULL mode..." << std::endl;
+                    auto wait_start = std::chrono::steady_clock::now();
+                    while (!randomx_is_mining_mode_ready() && g_node_state.running) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        auto elapsed = std::chrono::steady_clock::now() - wait_start;
+                        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > 120) {
+                            std::cerr << "  [WARN] FULL mode init timeout, starting with LIGHT mode" << std::endl;
+                            break;
+                        }
+                    }
+                    auto wait_time = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now() - wait_start).count();
+                    std::cout << "  [OK] Mining mode ready (FULL, " << wait_time << "s)" << std::endl;
                 } else {
-                    std::cout << "  [OK] Mining will start with LIGHT mode (FULL mode initializing...)" << std::endl;
+                    std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
                 }
 
                 // Now safe to start mining (synced with network)
@@ -2587,11 +2613,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // IBD complete - start mining!
                     std::cout << "[IBD] Sync complete! Starting mining..." << std::endl;
 
-                    // BUG #55 FIX: Validation mode already ready, mining can start immediately
-                    if (randomx_is_mining_mode_ready()) {
-                        std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
+                    // BUG #72 FIX: Wait for FULL mode before starting mining threads
+                    // Following XMRig's proven pattern: "dataset ready" before thread creation
+                    if (!randomx_is_mining_mode_ready()) {
+                        std::cout << "  [WAIT] Waiting for RandomX FULL mode..." << std::endl;
+                        auto wait_start = std::chrono::steady_clock::now();
+                        while (!randomx_is_mining_mode_ready() && g_node_state.running) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                            auto elapsed = std::chrono::steady_clock::now() - wait_start;
+                            if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > 120) {
+                                std::cerr << "  [WARN] FULL mode init timeout, starting with LIGHT mode" << std::endl;
+                                break;
+                            }
+                        }
+                        auto wait_time = std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::steady_clock::now() - wait_start).count();
+                        std::cout << "  [OK] Mining mode ready (FULL, " << wait_time << "s)" << std::endl;
                     } else {
-                        std::cout << "  [OK] Mining will start with LIGHT mode (FULL mode initializing...)" << std::endl;
+                        std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
                     }
 
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;

@@ -554,7 +554,18 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
     // Coinbase output: pay to miner address
     CTxOut coinbaseOut;
     coinbaseOut.nValue = nCoinbaseValue;
-    coinbaseOut.scriptPubKey = minerAddress;
+
+    // Create proper 25-byte P2PKH scriptPubKey
+    // minerAddress format: version_byte (1) + pubkey_hash (20) = 21 bytes
+    // P2PKH format: OP_DUP OP_HASH160 <20> <hash> OP_EQUALVERIFY OP_CHECKSIG = 25 bytes
+    std::vector<uint8_t> script;
+    script.push_back(0x76);  // OP_DUP
+    script.push_back(0xa9);  // OP_HASH160
+    script.push_back(0x14);  // Push 20 bytes
+    script.insert(script.end(), minerAddress.begin() + 1, minerAddress.begin() + 21);
+    script.push_back(0x88);  // OP_EQUALVERIFY
+    script.push_back(0xac);  // OP_CHECKSIG
+    coinbaseOut.scriptPubKey = script;
 
     coinbase.vout.push_back(coinbaseOut);
 
@@ -806,6 +817,12 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
 
     // Step 4: Calculate merkle root
     uint256 hashMerkleRoot = BuildMerkleRoot(allTxs);
+
+    // BUG #71 DEBUG: Log miner's merkle root computation
+    std::cout << "[DEBUG] CreateBlockTemplate: merkleRoot=" << hashMerkleRoot.GetHex() << std::endl;
+    if (!allTxs.empty()) {
+        std::cout << "[DEBUG] CreateBlockTemplate: tx[0] hash=" << allTxs[0]->GetHash().GetHex() << std::endl;
+    }
 
     // Step 5: Serialize all transactions into block.vtx
     // For now, CBlock.vtx is std::vector<uint8_t> representing raw transaction data
