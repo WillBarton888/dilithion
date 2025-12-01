@@ -1181,8 +1181,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "[P2P] Handshake complete with peer " << peer_id << std::endl;
 
             // BUG #36 FIX: Register peer with BlockFetcher so it can download blocks
-            if (g_block_fetcher) {
-                g_block_fetcher->OnPeerConnected(peer_id);
+            std::cout << "[BUG85-DEBUG] About to call OnPeerConnected, g_block_fetcher="
+                      << (g_block_fetcher ? "valid" : "null") << std::endl;
+            try {
+                if (g_block_fetcher) {
+                    std::cout << "[BUG85-DEBUG] Calling OnPeerConnected..." << std::endl;
+                    g_block_fetcher->OnPeerConnected(peer_id);
+                    std::cout << "[BUG85-DEBUG] OnPeerConnected returned" << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[BUG85-DEBUG] EXCEPTION in OnPeerConnected: " << e.what() << std::endl;
             }
 
             // Debug: Check if g_headers_manager is initialized

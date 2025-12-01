@@ -260,18 +260,31 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
 
         // BUG #69: Create per-peer CNodeState for block download tracking
         // This enables Bitcoin Core-style bidirectional block tracking
-        CNodeState* state = CNodeStateManager::Get().CreateState(peer_id);
-        if (state) {
-            state->fHandshakeComplete = true;
-            state->nStartingHeight = peer->start_height;
-            // Note: CPeer doesn't track outbound vs inbound yet - default to preferred
-            // TODO: Add fOutbound tracking to CPeer for proper Bitcoin Core-style preference
-            state->fPreferredDownload = true;
+        std::cout << "[BUG85-DEBUG] About to create CNodeState..." << std::endl;
+        try {
+            CNodeState* state = CNodeStateManager::Get().CreateState(peer_id);
+            std::cout << "[BUG85-DEBUG] CNodeState created: " << (state ? "success" : "null") << std::endl;
+            if (state) {
+                state->fHandshakeComplete = true;
+                state->nStartingHeight = peer->start_height;
+                // Note: CPeer doesn't track outbound vs inbound yet - default to preferred
+                // TODO: Add fOutbound tracking to CPeer for proper Bitcoin Core-style preference
+                state->fPreferredDownload = true;
+            }
+            std::cout << "[BUG85-DEBUG] CNodeState initialized" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[BUG85-DEBUG] EXCEPTION in CNodeState creation: " << e.what() << std::endl;
         }
 
         // Trigger VERACK handler (for IBD initialization)
+        std::cout << "[BUG85-DEBUG] About to call on_verack handler..." << std::endl;
         if (on_verack) {
-            on_verack(peer_id);
+            try {
+                on_verack(peer_id);
+                std::cout << "[BUG85-DEBUG] on_verack handler returned" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "[BUG85-DEBUG] EXCEPTION in on_verack: " << e.what() << std::endl;
+            }
         }
     } else {
         std::cout << "[HANDSHAKE-DIAG] WARNING: Received VERACK from peer " << peer_id
