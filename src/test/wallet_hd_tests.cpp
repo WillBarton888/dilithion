@@ -7,6 +7,8 @@
 #include <wallet/hd_derivation.h>
 #include <cstring>
 #include <fstream>
+#include <thread>
+#include <chrono>
 
 BOOST_AUTO_TEST_SUITE(wallet_hd_tests)
 
@@ -330,6 +332,10 @@ BOOST_AUTO_TEST_CASE(encrypt_hd_wallet_test) {
 
     // Verify wallet is encrypted
     BOOST_CHECK(wallet.IsCrypted());
+
+    // Lock wallet to test locked behavior
+    // (wallet stays unlocked for 60 seconds after encryption for user convenience)
+    wallet.Lock();
     BOOST_CHECK(wallet.IsLocked());
 
     // Cannot generate addresses while locked
@@ -415,6 +421,9 @@ BOOST_AUTO_TEST_CASE(encrypted_hd_wallet_wrong_passphrase_test) {
     // Try wrong passphrase (must be 16+ chars with digit+special to test actual wrong password)
     BOOST_CHECK(!wallet.Unlock("NotThisString99!#"));
     BOOST_CHECK(wallet.IsLocked());
+
+    // Wait 1.1 seconds to bypass rate limiting (exponential backoff after failed attempt)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 
     // Try correct passphrase
     BOOST_REQUIRE(wallet.Unlock(passphrase));
