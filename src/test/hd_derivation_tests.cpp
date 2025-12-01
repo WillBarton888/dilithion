@@ -139,11 +139,13 @@ BOOST_AUTO_TEST_CASE(reject_invalid_paths) {
     // Wrong prefix
     BOOST_CHECK(!path.Parse("n/44'/573'/0'/0'/0'"));
 
-    // Too few levels
-    BOOST_CHECK(!path.Parse("m/44'/573'/0'"));
+    // Too few levels (parses OK syntactically, fails validation)
+    BOOST_CHECK(path.Parse("m/44'/573'/0'"));
+    BOOST_CHECK(!path.IsValid());
 
-    // Too many levels
-    BOOST_CHECK(!path.Parse("m/44'/573'/0'/0'/0'/0'"));
+    // Too many levels (parses OK syntactically, fails validation)
+    BOOST_CHECK(path.Parse("m/44'/573'/0'/0'/0'/0'"));
+    BOOST_CHECK(!path.IsValid());
 
     // Wrong purpose
     BOOST_CHECK(path.Parse("m/49'/573'/0'/0'/0'"));
@@ -403,7 +405,7 @@ BOOST_AUTO_TEST_CASE(generate_dilithium_keypair) {
 
     // Generate Dilithium keypair
     uint8_t pk[1952];  // Dilithium3 public key size
-    uint8_t sk[4000];  // Dilithium3 secret key size
+    uint8_t sk[4032];  // Dilithium3 secret key size (NOT 4000!)
     BOOST_REQUIRE(GenerateDilithiumKey(derived, pk, sk));
 
     // Keys should be non-zero
@@ -411,7 +413,7 @@ BOOST_AUTO_TEST_CASE(generate_dilithium_keypair) {
     for (int i = 0; i < 1952; i++) {
         if (pk[i] != 0) pk_nonzero = true;
     }
-    for (int i = 0; i < 4000; i++) {
+    for (int i = 0; i < 4032; i++) {
         if (sk[i] != 0) sk_nonzero = true;
     }
     BOOST_CHECK(pk_nonzero);
@@ -428,8 +430,8 @@ BOOST_AUTO_TEST_CASE(keypair_generation_deterministic) {
     BOOST_REQUIRE(DerivePath(master, "m/44'/573'/0'/0'/0'", derived));
 
     // Generate twice
-    uint8_t pk1[1952], sk1[4000];
-    uint8_t pk2[1952], sk2[4000];
+    uint8_t pk1[1952], sk1[4032];
+    uint8_t pk2[1952], sk2[4032];
     BOOST_REQUIRE(GenerateDilithiumKey(derived, pk1, sk1));
     BOOST_REQUIRE(GenerateDilithiumKey(derived, pk2, sk2));
 
@@ -448,8 +450,8 @@ BOOST_AUTO_TEST_CASE(different_paths_different_keypairs) {
     BOOST_REQUIRE(DerivePath(master, "m/44'/573'/0'/0'/0'", key1));
     BOOST_REQUIRE(DerivePath(master, "m/44'/573'/0'/0'/1'", key2));
 
-    uint8_t pk1[1952], sk1[4000];
-    uint8_t pk2[1952], sk2[4000];
+    uint8_t pk1[1952], sk1[4032];
+    uint8_t pk2[1952], sk2[4032];
     BOOST_REQUIRE(GenerateDilithiumKey(key1, pk1, sk1));
     BOOST_REQUIRE(GenerateDilithiumKey(key2, pk2, sk2));
 
@@ -531,7 +533,7 @@ BOOST_AUTO_TEST_CASE(full_hd_wallet_flow) {
     BOOST_REQUIRE(DerivePath(master, "m/44'/573'/0'/0'/0'", receive_key));
 
     // 5. Generate Dilithium keypair
-    uint8_t pk[1952], sk[4000];
+    uint8_t pk[1952], sk[4032];
     BOOST_REQUIRE(GenerateDilithiumKey(receive_key, pk, sk));
 
     // 6. Derive first change address
@@ -539,15 +541,15 @@ BOOST_AUTO_TEST_CASE(full_hd_wallet_flow) {
     BOOST_REQUIRE(DerivePath(master, "m/44'/573'/0'/1'/0'", change_key));
 
     // 7. Generate change keypair
-    uint8_t change_pk[1952], change_sk[4000];
+    uint8_t change_pk[1952], change_sk[4032];
     BOOST_REQUIRE(GenerateDilithiumKey(change_key, change_pk, change_sk));
 
     // Receive and change keys should be different
     BOOST_CHECK(std::memcmp(pk, change_pk, 1952) != 0);
 
     // Cleanup
-    std::memset(sk, 0, 4000);
-    std::memset(change_sk, 0, 4000);
+    std::memset(sk, 0, 4032);
+    std::memset(change_sk, 0, 4032);
     master.Wipe();
 }
 
@@ -566,7 +568,7 @@ BOOST_AUTO_TEST_CASE(wallet_recovery) {
     CHDExtendedKey key1;
     BOOST_REQUIRE(DerivePath(master1, "m/44'/573'/0'/0'/0'", key1));
 
-    uint8_t pk1[1952], sk1[4000];
+    uint8_t pk1[1952], sk1[4032];
     BOOST_REQUIRE(GenerateDilithiumKey(key1, pk1, sk1));
 
     // "Recover" wallet from same mnemonic
@@ -579,7 +581,7 @@ BOOST_AUTO_TEST_CASE(wallet_recovery) {
     CHDExtendedKey key2;
     BOOST_REQUIRE(DerivePath(master2, "m/44'/573'/0'/0'/0'", key2));
 
-    uint8_t pk2[1952], sk2[4000];
+    uint8_t pk2[1952], sk2[4032];
     BOOST_REQUIRE(GenerateDilithiumKey(key2, pk2, sk2));
 
     // Should produce identical keys
@@ -587,8 +589,8 @@ BOOST_AUTO_TEST_CASE(wallet_recovery) {
     BOOST_CHECK(std::memcmp(sk1, sk2, 4000) == 0);
 
     // Cleanup
-    std::memset(sk1, 0, 4000);
-    std::memset(sk2, 0, 4000);
+    std::memset(sk1, 0, 4032);
+    std::memset(sk2, 0, 4032);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
