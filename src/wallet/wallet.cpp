@@ -2400,36 +2400,38 @@ bool CWallet::ValidateConsistency(std::string& error_out) const {
     if (fIsHDWallet) {
         // External chain: Check indices [0, nHDExternalChainIndex)
         for (uint32_t i = 0; i < nHDExternalChainIndex; i++) {
-            // Construct expected path: m/44'/573'/account'/0/i
+            // Construct expected path: m/44'/573'/account'/0'/i'
+            // NOTE: Dilithion uses hardened derivation at ALL levels for security
             CHDKeyPath expected;
             expected.indices.push_back(44 | 0x80000000);  // BIP44 purpose (hardened)
             expected.indices.push_back(573 | 0x80000000); // Dilithion coin type (hardened)
             expected.indices.push_back(nHDAccountIndex | 0x80000000); // Account (hardened)
-            expected.indices.push_back(0);  // External chain (not hardened)
-            expected.indices.push_back(i);  // Address index (not hardened)
+            expected.indices.push_back(0 | 0x80000000);   // External chain (hardened for Dilithium security)
+            expected.indices.push_back(i | 0x80000000);   // Address index (hardened for Dilithium security)
 
             if (mapPathToAddress.find(expected) == mapPathToAddress.end()) {
                 error_out = "[HD_PATH_GAPS] Missing external chain address at index " +
                            std::to_string(i) + " (path: m/44'/573'/" +
-                           std::to_string(nHDAccountIndex) + "'/0/" + std::to_string(i) + ")";
+                           std::to_string(nHDAccountIndex) + "'/0'/" + std::to_string(i) + "')";
                 return false;
             }
         }
 
         // Internal chain: Check indices [0, nHDInternalChainIndex)
         for (uint32_t i = 0; i < nHDInternalChainIndex; i++) {
-            // Construct expected path: m/44'/573'/account'/1/i
+            // Construct expected path: m/44'/573'/account'/1'/i'
+            // NOTE: Dilithion uses hardened derivation at ALL levels for security
             CHDKeyPath expected;
             expected.indices.push_back(44 | 0x80000000);  // BIP44 purpose (hardened)
             expected.indices.push_back(573 | 0x80000000); // Dilithion coin type (hardened)
             expected.indices.push_back(nHDAccountIndex | 0x80000000); // Account (hardened)
-            expected.indices.push_back(1);  // Internal chain (change addresses, not hardened)
-            expected.indices.push_back(i);  // Address index (not hardened)
+            expected.indices.push_back(1 | 0x80000000);   // Internal chain (hardened for Dilithium security)
+            expected.indices.push_back(i | 0x80000000);   // Address index (hardened for Dilithium security)
 
             if (mapPathToAddress.find(expected) == mapPathToAddress.end()) {
                 error_out = "[HD_PATH_GAPS] Missing internal chain address at index " +
                            std::to_string(i) + " (path: m/44'/573'/" +
-                           std::to_string(nHDAccountIndex) + "'/1/" + std::to_string(i) + ")";
+                           std::to_string(nHDAccountIndex) + "'/1'/" + std::to_string(i) + "')";
                 return false;
             }
         }
