@@ -484,8 +484,9 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
     //
     // ========================================================================
 
-    // Get transaction hash
-    uint256 tx_hash = tx.GetHash();
+    // BUG #86 FIX: Use GetSigningHash() which excludes scriptSig
+    // This ensures verification uses the same hash that was used during signing
+    uint256 tx_hash = tx.GetSigningHash();
 
     // SCRIPT-007 FIX: Transaction hash validation
     // uint256 is guaranteed to be 32 bytes by its class definition (uint8_t data[32])

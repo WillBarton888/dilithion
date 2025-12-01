@@ -180,11 +180,36 @@ public:
     void MarkAddressTried(const NetProtocol::CAddress& addr); // Mark connection attempt
     std::vector<NetProtocol::CAddress> SelectAddressesToConnect(int count);  // Select addresses for outbound connections
     size_t GetAddressCount() const;  // Total addresses in database
+
+    // Peer eviction (Bitcoin Core-style)
+    /**
+     * @brief Evict peers when connection limit is reached
+     *
+     * Bitcoin Core-style eviction logic:
+     * - Prefer to keep outbound connections
+     * - Evict peers with lowest network group diversity
+     * - Evict peers with highest misbehavior scores
+     * - Evict peers with oldest last block time
+     *
+     * @return true if a peer was evicted
+     */
+    bool EvictPeersIfNeeded();
+
+    /**
+     * @brief Periodic maintenance
+     *
+     * Should be called periodically from main loop:
+     * - Decay misbehavior scores
+     * - Evict peers if needed
+     * - Save peers to disk
+     */
+    void PeriodicMaintenance();
 };
 
 /**
- * Global peer manager instance
+ * Global peer manager instance (raw pointer for backward compatibility)
+ * Note: Ownership is now managed by g_node_context.peer_manager
  */
-extern std::unique_ptr<CPeerManager> g_peer_manager;
+extern CPeerManager* g_peer_manager;
 
 #endif // DILITHION_NET_PEERS_H

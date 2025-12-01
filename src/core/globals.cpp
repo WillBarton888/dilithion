@@ -7,15 +7,20 @@
  * This file contains global state variables that are shared across the application.
  * Extracted from dilithion-node.cpp to allow utilities (genesis_gen, check-wallet-balance)
  * to link without requiring the full node implementation.
+ *
+ * Phase 1.2: Migrated to NodeContext pattern (Bitcoin Core style)
+ * Old g_* globals are now accessed via g_node_context for better initialization control.
  */
 
 #include <consensus/chain.h>
+#include <core/node_context.h>
 #include <atomic>
 
-// Global chain state
+// Global chain state (kept separate for utilities that don't need full NodeContext)
 CChainState g_chainstate;
 
-// Global node state for RPC and signal handling
+// Legacy NodeState struct (kept for backward compatibility during migration)
+// TODO: Remove after full migration to NodeContext
 struct NodeState {
     std::atomic<bool> running{false};
     std::atomic<bool> new_block_found{false};

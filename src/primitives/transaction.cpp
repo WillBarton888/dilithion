@@ -96,12 +96,63 @@ uint256 CTransaction::GetHash() const {
     if (!hash_valid) {
         // Serialize transaction
         std::vector<uint8_t> data = Serialize();
-        
+
         // Hash with SHA3-256 (quantum-resistant)
         SHA3_256(data.data(), data.size(), hash_cached.data);
         hash_valid = true;
     }
     return hash_cached;
+}
+
+uint256 CTransaction::GetSigningHash() const {
+    // BUG #86 FIX: Serialize transaction WITHOUT scriptSig for signature verification
+    // This ensures signing and verification use the same hash, regardless of scriptSig content.
+    // Similar to Bitcoin's SIGHASH_ALL but simplified for Dilithion's single signature scheme.
+
+    std::vector<uint8_t> data;
+    data.reserve(256);  // Reasonable initial size
+
+    // Serialize version (4 bytes, little-endian)
+    SerializeUint32(data, static_cast<uint32_t>(nVersion));
+
+    // Serialize number of inputs
+    SerializeCompactSize(data, vin.size());
+
+    // Serialize each input WITHOUT scriptSig
+    for (const CTxIn& txin : vin) {
+        // Serialize prevout hash (32 bytes)
+        data.insert(data.end(), txin.prevout.hash.begin(), txin.prevout.hash.end());
+
+        // Serialize prevout index (4 bytes, little-endian)
+        SerializeUint32(data, txin.prevout.n);
+
+        // BUG #86 FIX: Use empty scriptSig (just zero length)
+        SerializeCompactSize(data, 0);  // Empty scriptSig
+
+        // Serialize sequence (4 bytes, little-endian)
+        SerializeUint32(data, txin.nSequence);
+    }
+
+    // Serialize number of outputs
+    SerializeCompactSize(data, vout.size());
+
+    // Serialize each output
+    for (const CTxOut& txout : vout) {
+        // Serialize value (8 bytes, little-endian)
+        SerializeUint64(data, txout.nValue);
+
+        // Serialize scriptPubKey length and data
+        SerializeCompactSize(data, txout.scriptPubKey.size());
+        data.insert(data.end(), txout.scriptPubKey.begin(), txout.scriptPubKey.end());
+    }
+
+    // Serialize locktime (4 bytes, little-endian)
+    SerializeUint32(data, nLockTime);
+
+    // Hash with SHA3-256
+    uint256 result;
+    SHA3_256(data.data(), data.size(), result.data);
+    return result;
 }
 
 size_t CTransaction::GetSerializedSize() const {

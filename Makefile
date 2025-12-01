@@ -124,7 +124,8 @@ CONSENSUS_SOURCES := src/consensus/fees.cpp \
                      src/consensus/validation.cpp
 
 CORE_SOURCES_UTIL := src/core/chainparams.cpp \
-                     src/core/globals.cpp
+                     src/core/globals.cpp \
+                     src/core/node_context.cpp
 
 CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/sha3.cpp \
@@ -150,13 +151,15 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/addrman.cpp \
                src/net/banman.cpp \
                src/net/headerssync.cpp \
-               src/net/blockencodings.cpp
+               src/net/blockencodings.cpp \
+               src/net/feeler.cpp
 
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \
                 src/node/mempool.cpp \
                 src/node/genesis.cpp \
-                src/node/utxo_set.cpp
+                src/node/utxo_set.cpp \
+                src/node/ibd_coordinator.cpp
 
 PRIMITIVES_SOURCES := src/primitives/block.cpp \
                       src/primitives/transaction.cpp
@@ -181,7 +184,9 @@ WALLET_SOURCES := src/wallet/wallet.cpp \
 
 UTIL_SOURCES := src/util/strencodings.cpp \
                 src/util/base58.cpp \
-                src/util/system.cpp
+                src/util/system.cpp \
+                src/util/assert.cpp \
+                src/util/logging.cpp
 
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \
@@ -232,6 +237,9 @@ BOOST_UTIL_TEST_SOURCE := src/test/util_tests.cpp
 BOOST_MNEMONIC_TEST_SOURCE := src/test/mnemonic_tests.cpp
 BOOST_HD_DERIVATION_TEST_SOURCE := src/test/hd_derivation_tests.cpp
 BOOST_WALLET_HD_TEST_SOURCE := src/test/wallet_hd_tests.cpp
+BOOST_IBD_COORDINATOR_TEST_SOURCE := src/test/ibd_coordinator_tests.cpp
+BOOST_MISBEHAVIOR_SCORING_TEST_SOURCE := src/test/misbehavior_scoring_tests.cpp
+BOOST_IBD_FUNCTIONAL_TEST_SOURCE := src/test/ibd_functional_tests.cpp
 
 # ============================================================================
 # Targets
@@ -362,7 +370,7 @@ validate_crypto: validate_crypto.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/cryp
 # Boost Unit Test Binaries
 # ============================================================================
 
-test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/wallet/wal.o $(OBJ_DIR)/wallet/wal_recovery.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/node/blockchain_storage.o $(OBJ_DIR)/rpc/server.o $(OBJ_DIR)/rpc/auth.o $(OBJ_DIR)/rpc/ratelimiter.o $(OBJ_DIR)/rpc/permissions.o $(OBJ_DIR)/miner/controller.o $(OBJ_DIR)/net/net.o $(OBJ_DIR)/net/peers.o $(OBJ_DIR)/net/tx_relay.o $(OBJ_DIR)/net/socket.o $(OBJ_DIR)/net/protocol.o $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/net/block_fetcher.o $(OBJ_DIR)/net/netaddress.o $(OBJ_DIR)/net/node_state.o $(OBJ_DIR)/net/addrman.o $(OBJ_DIR)/net/banman.o $(OBJ_DIR)/net/dns.o $(DILITHIUM_OBJECTS)
+test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/test/ibd_coordinator_tests.o $(OBJ_DIR)/test/misbehavior_scoring_tests.o $(OBJ_DIR)/test/ibd_functional_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/wallet/wal.o $(OBJ_DIR)/wallet/wal_recovery.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/node/blockchain_storage.o $(OBJ_DIR)/node/ibd_coordinator.o $(OBJ_DIR)/rpc/server.o $(OBJ_DIR)/rpc/auth.o $(OBJ_DIR)/rpc/ratelimiter.o $(OBJ_DIR)/rpc/permissions.o $(OBJ_DIR)/miner/controller.o $(OBJ_DIR)/net/net.o $(OBJ_DIR)/net/peers.o $(OBJ_DIR)/net/tx_relay.o $(OBJ_DIR)/net/socket.o $(OBJ_DIR)/net/protocol.o $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/net/block_fetcher.o $(OBJ_DIR)/net/netaddress.o $(OBJ_DIR)/net/node_state.o $(OBJ_DIR)/net/addrman.o $(OBJ_DIR)/net/banman.o $(OBJ_DIR)/net/dns.o $(OBJ_DIR)/net/headers_manager.o $(OBJ_DIR)/net/orphan_manager.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully (header-only)$(COLOR_RESET)"

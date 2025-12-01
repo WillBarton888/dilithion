@@ -2,9 +2,14 @@
 // Distributed under the MIT software license
 
 #include <net/net.h>
+#include <consensus/params.h>
 #include <net/tx_relay.h>
+#include <net/banman.h>  // For MisbehaviorType
+#include <net/features.h>  // Feature flags system
+#include <core/node_context.h>  // Phase 1.2: NodeContext for global state
 #include <util/strencodings.h>
 #include <util/time.h>
+#include <util/logging.h>  // Bitcoin Core-style logging
 #include <core/chainparams.h>
 #include <node/mempool.h>
 #include <node/utxo_set.h>
@@ -60,7 +65,8 @@ unsigned int g_chain_height = 0;
 CConnectionManager* g_connection_manager = nullptr;
 CNetMessageProcessor* g_message_processor = nullptr;
 
-// BUG #68 FIX: External reference to block fetcher for peer disconnect notification
+// Phase 1.2: Block fetcher now accessed via NodeContext
+// Legacy extern kept for backward compatibility during migration
 extern CBlockFetcher* g_block_fetcher;
 
 std::string CNetworkStats::ToString() const {
@@ -203,9 +209,31 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             return false;
         }
 
+        // Protocol version negotiation (Bitcoin Core pattern)
+        // Reject peers with incompatible protocol versions
+        if (msg.version < NetProtocol::MIN_PEER_PROTO_VERSION) {
+            LogPrintf(NET, WARN, "Peer %d has incompatible protocol version %d (minimum: %d)",
+                      peer_id, msg.version, NetProtocol::MIN_PEER_PROTO_VERSION);
+            std::cout << "[P2P] ERROR: Peer " << peer_id << " has incompatible protocol version "
+                      << msg.version << " (minimum: " << NetProtocol::MIN_PEER_PROTO_VERSION << ")" << std::endl;
+            // Use proper misbehavior type for protocol version violation
+            peer_manager.Misbehaving(peer_id, 50, MisbehaviorType::INVALID_PROTOCOL_VERSION);
+            return false;
+        }
+
+        // Feature flags validation (Bitcoin Core pattern)
+        // Ensure peer supports basic network functionality
+        if ((msg.services & NetProtocol::NODE_NETWORK) == 0) {
+            LogPrintf(NET, WARN, "Peer %d does not support NODE_NETWORK service flag", peer_id);
+            std::cout << "[P2P] WARNING: Peer " << peer_id << " does not support NODE_NETWORK" << std::endl;
+            // Don't reject, but log for monitoring
+        }
+
         // Update peer info
         auto peer = peer_manager.GetPeer(peer_id);
         if (peer) {
+            LogPrintf(NET, INFO, "Received VERSION from peer %d (version=%d, agent=%s, height=%d, services=0x%016llx)",
+                      peer_id, msg.version, msg.user_agent.c_str(), msg.start_height, msg.services);
             std::cout << "[HANDSHAKE-DIAG] Received VERSION from peer " << peer_id
                       << " (agent: " << msg.user_agent << ", height: " << msg.start_height
                       << ", old_state: " << peer->state << ")" << std::endl;
@@ -355,7 +383,10 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
         }
 
         uint64_t count = stream.ReadCompactSize();
-        if (count > NetProtocol::MAX_INV_SIZE) {
+        if (count > Consensus::MAX_INV_SIZE) {
+            std::cout << "[P2P] ERROR: ADDR message too large from peer " << peer_id
+                      << " (count=" << count << ")" << std::endl;
+            peer_manager.Misbehaving(peer_id, 20);
             return false;
         }
 
@@ -422,7 +453,7 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
         }
 
         uint64_t count = stream.ReadCompactSize();
-        if (count > NetProtocol::MAX_INV_SIZE) {
+        if (count > Consensus::MAX_INV_SIZE) {
             std::cout << "[P2P] ERROR: INV message too large from peer " << peer_id
                       << " (count=" << count << ")" << std::endl;
             // NET-011 FIX: Penalize peer for sending oversized message
@@ -696,7 +727,13 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
             if (!g_tx_validator->CheckTransaction(tx, *g_utxo_set, g_chain_height, fee, error)) {
                 std::cout << "[P2P] Invalid transaction " << txid.GetHex().substr(0, 16)
                           << "... from peer " << peer_id << ": " << error << std::endl;
-                // Could penalize peer here
+                // DoS hardening: Penalize peer for sending invalid transactions
+                // Distinguish between different failure types for appropriate penalties
+                bool is_severe = (error.find("double-spend") != std::string::npos ||
+                                  error.find("invalid signature") != std::string::npos ||
+                                  error.find("malformed") != std::string::npos);
+                int penalty = is_severe ? 50 : 10;  // Severe violations get higher penalty
+                peer_manager.Misbehaving(peer_id, penalty);
                 return false;
             }
 
@@ -788,8 +825,8 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
         // Read header count
         uint64_t header_count = stream.ReadCompactSize();
 
-        // Validate count (Bitcoin Core max is 2000)
-        if (header_count > NetProtocol::MAX_HEADERS_SIZE) {
+        // Validate count (Bitcoin Core max is 2000, wired via Consensus::MAX_HEADERS_RESULTS)
+        if (header_count > Consensus::MAX_HEADERS_RESULTS) {
             std::cout << "[P2P] ERROR: HEADERS count too large: " << header_count << std::endl;
             peer_manager.Misbehaving(peer_id, 20);
             return false;
@@ -853,6 +890,9 @@ CNetMessage CNetMessageProcessor::CreateVersionMessage(const NetProtocol::CAddre
     // Populate address fields (Bitcoin Core standard)
     msg.addr_recv = addr_recv;  // Peer's address (where we're sending to)
     msg.addr_from = addr_from;  // Our address (what we believe our external IP to be)
+
+    // Advertise our service flags (Bitcoin Core pattern)
+    msg.services = NetFeatures::GetOurServices();
 
     // Generate random nonce to prevent self-connections (Bitcoin Core standard)
     // Use time + random for uniqueness
@@ -1291,8 +1331,10 @@ void CConnectionManager::DisconnectPeer(int peer_id, const std::string& reason) 
     // BUG #68 FIX: Notify BlockFetcher of peer disconnect
     // This ensures in-flight block requests are re-queued to other peers
     // and the disconnected peer is removed from BlockFetcher's internal state
-    if (g_block_fetcher) {
-        g_block_fetcher->OnPeerDisconnected(peer_id);
+    // Phase 1.2: Use NodeContext for block fetcher
+    extern NodeContext g_node_context;
+    if (g_node_context.block_fetcher) {
+        g_node_context.block_fetcher->OnPeerDisconnected(peer_id);
     }
 
     // BUG #69: Remove CNodeState for this peer
@@ -1522,16 +1564,22 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
             message.payload.assign(buffer_copy.begin() + 24,
                                   buffer_copy.begin() + 24 + message.header.payload_size);
 
-            // Verify checksum
+            // Verify checksum (Bitcoin Core pattern - critical for message integrity)
             uint32_t calculated_checksum = CDataStream::CalculateChecksum(message.payload);
             if (calculated_checksum != message.header.checksum) {
+                LogPrintf(NET, ERROR, "Checksum mismatch from peer %d (got 0x%08x, expected 0x%08x)",
+                          peer_id, message.header.checksum, calculated_checksum);
                 std::cout << "[P2P] ERROR: Checksum mismatch from peer " << peer_id
                           << " (got 0x" << std::hex << message.header.checksum
                           << ", expected 0x" << calculated_checksum << std::dec << ")" << std::endl;
 
                 // Clear buffer and disconnect on checksum failure
+                // Checksum mismatch indicates data corruption or tampering
                 std::lock_guard<std::mutex> lock(cs_recv_buffers);
                 peer_recv_buffers[peer_id].clear();
+                
+                // Penalize peer for checksum failure (could be attack or corruption)
+                peer_manager.Misbehaving(peer_id, 50, MisbehaviorType::INVALID_CHECKSUM);
                 DisconnectPeer(peer_id, "checksum mismatch");
                 return;
             }
@@ -1646,14 +1694,16 @@ void CConnectionManager::Cleanup() {
  */
 void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
     // Check if networking infrastructure is initialized
-    if (!g_peer_manager || !g_connection_manager || !g_message_processor || !g_tx_relay_manager) {
+    // Phase 1.2: Use NodeContext for peer manager
+    extern NodeContext g_node_context;
+    if (!g_node_context.peer_manager || !g_node_context.connection_manager || !g_node_context.message_processor || !g_tx_relay_manager) {
         std::cout << "[TX-RELAY] Cannot announce transaction " << txid.GetHex().substr(0, 16)
                   << "... (networking not initialized)" << std::endl;
         return;
     }
 
     // Get list of connected peers
-    std::vector<std::shared_ptr<CPeer>> peers = g_peer_manager->GetConnectedPeers();
+    std::vector<std::shared_ptr<CPeer>> peers = g_node_context.peer_manager->GetConnectedPeers();
 
     if (peers.empty()) {
         std::cout << "[TX-RELAY] No connected peers to announce transaction "
@@ -1691,11 +1741,12 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
         std::vector<NetProtocol::CInv> inv_vec;
         inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, txid));
 
-        CNetMessage inv_message = g_message_processor->CreateInvMessage(inv_vec);
+        extern NodeContext g_node_context;
+        CNetMessage inv_message = g_node_context.message_processor->CreateInvMessage(inv_vec);
 
         // Send INV message to peer
         // Only mark as announced if send succeeds (audit recommendation)
-        if (g_connection_manager->SendMessage(peer->id, inv_message)) {
+        if (g_node_context.connection_manager->SendMessage(peer->id, inv_message)) {
             // Mark as announced to prevent duplicates
             g_tx_relay_manager->MarkAnnounced(peer->id, txid);
             announced_count++;

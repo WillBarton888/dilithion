@@ -140,6 +140,12 @@ public:
     /** Compute the hash of this transaction. */
     uint256 GetHash() const;
 
+    /** Compute the signing hash of this transaction (excludes scriptSig for signature verification).
+     *  This is used in both signing and verification to ensure consistent hash computation.
+     *  Similar to Bitcoin's SIGHASH_ALL but simplified for Dilithion's single signature scheme.
+     */
+    uint256 GetSigningHash() const;
+
     /** Get the serialized size of this transaction. */
     size_t GetSerializedSize() const;
 

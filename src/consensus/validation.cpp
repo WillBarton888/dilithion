@@ -6,6 +6,7 @@
 #include <consensus/pow.h>
 #include <crypto/sha3.h>
 #include <amount.h>
+#include <util/assert.h>
 #include <set>
 #include <algorithm>
 #include <iostream>
@@ -438,6 +439,8 @@ bool CBlockValidator::CheckBlock(
         error = "First transaction is not coinbase";
         return false;
     }
+    // Consensus invariant: First transaction must always be coinbase
+    ConsensusInvariant(transactions[0]->IsCoinBase());
 
     // Only first transaction can be coinbase
     for (size_t i = 1; i < transactions.size(); i++) {

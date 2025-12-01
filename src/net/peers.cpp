@@ -4,11 +4,12 @@
 #include <net/peers.h>
 #include <net/dns.h>
 #include <util/strencodings.h>
+#include <util/logging.h>
 #include <algorithm>
 #include <iostream>
 
-// Global peer manager instance
-std::unique_ptr<CPeerManager> g_peer_manager = nullptr;
+// Global peer manager instance (raw pointer - ownership in g_node_context)
+CPeerManager* g_peer_manager = nullptr;
 
 // CPeer implementation
 
@@ -561,4 +562,78 @@ std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int co
 
 size_t CPeerManager::GetAddressCount() const {
     return addrman.Size();
+}
+
+bool CPeerManager::EvictPeersIfNeeded() {
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // Only evict if we're at or over the limit
+    if (peers.size() < MAX_TOTAL_CONNECTIONS) {
+        return false;  // No eviction needed
+    }
+
+    // Find candidate peers to evict
+    // Priority: Keep outbound connections (we initiated), evict inbound with highest misbehavior
+    std::vector<std::pair<int, int>> eviction_candidates;  // (peer_id, score)
+
+    int64_t now = GetTime();
+    for (const auto& [peer_id, peer] : peers) {
+        // Only consider connected peers for eviction
+        if (!peer->IsConnected()) {
+            continue;
+        }
+
+        // Calculate eviction score (higher = more likely to evict)
+        int score = peer->misbehavior_score;
+        
+        // Prefer to evict peers with no recent activity (no messages in last 5 minutes)
+        if (peer->last_recv > 0 && (now - peer->last_recv) > 5 * 60) {
+            score += 50;  // Inactive peer
+        } else if (peer->last_recv == 0) {
+            score += 100;  // Never received anything
+        }
+
+        // Prefer to evict peers that haven't completed handshake
+        if (!peer->IsHandshakeComplete()) {
+            score += 200;  // Incomplete handshake
+        }
+
+        eviction_candidates.push_back({peer_id, score});
+    }
+
+    if (eviction_candidates.empty()) {
+        return false;  // No candidates to evict
+    }
+
+    // Sort by score (highest first = most likely to evict)
+    std::sort(eviction_candidates.begin(), eviction_candidates.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    // Evict the worst peer
+    int peer_to_evict = eviction_candidates[0].first;
+    auto peer = GetPeer(peer_to_evict);
+    if (peer) {
+        LogPrintf(NET, INFO, "Evicting peer %d (score: %d, addr: %s)",
+                  peer_to_evict, eviction_candidates[0].second, peer->addr.ToString().c_str());
+        RemovePeer(peer_to_evict);
+        return true;
+    }
+
+    return false;
+}
+
+void CPeerManager::PeriodicMaintenance() {
+    // Decay misbehavior scores
+    DecayMisbehaviorScores();
+
+    // Evict peers if needed
+    EvictPeersIfNeeded();
+
+    // Save peers periodically (every 15 minutes)
+    static int64_t last_save_time = 0;
+    int64_t now = GetTime();
+    if (now - last_save_time > 15 * 60) {
+        SavePeers();
+        last_save_time = now;
+    }
 }

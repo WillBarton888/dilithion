@@ -3154,7 +3154,9 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
         std::vector<uint8_t> scriptPubKey;
     };
     std::vector<SigningData> signing_inputs;
-    uint256 tx_hash = tx.GetHash();
+    // BUG #86 FIX: Use GetSigningHash() which excludes scriptSig
+    // This ensures the hash is the same during signing (empty scriptSig) and verification (filled scriptSig)
+    uint256 tx_hash = tx.GetSigningHash();
 
     {
         std::lock_guard<std::mutex> lock(cs_wallet);

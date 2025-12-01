@@ -5,6 +5,7 @@
 #include <consensus/pow.h>
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
+#include <util/assert.h>
 #include <iostream>
 #include <algorithm>
 
@@ -36,11 +37,26 @@ bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex
         return false;
     }
 
+    // Invariant: Hash must match block index hash
+    Invariant(pindex->GetBlockHash() == hash);
+
     // Check if already exists
     if (mapBlockIndex.count(hash) > 0) {
         std::cerr << "[Chain] Warning: Block index " << hash.GetHex().substr(0, 16)
                   << " already exists in map" << std::endl;
         return false;
+    }
+
+    // Consensus invariant: If block has parent, parent must exist in map
+    if (pindex->pprev != nullptr) {
+        uint256 parentHash = pindex->pprev->GetBlockHash();
+        ConsensusInvariant(mapBlockIndex.count(parentHash) > 0);
+        
+        // Consensus invariant: Height must be parent height + 1
+        ConsensusInvariant(pindex->nHeight == pindex->pprev->nHeight + 1);
+    } else {
+        // Genesis block must be at height 0
+        ConsensusInvariant(pindex->nHeight == 0);
     }
 
     // Transfer ownership to map using move semantics
@@ -615,9 +631,24 @@ CBlockIndex* CChainState::GetTip() const {
 
 void CChainState::SetTip(CBlockIndex* pindex) {
     std::lock_guard<std::mutex> lock(cs_main);
+    
+    // Consensus invariant: If tip is set, it must exist in mapBlockIndex
+    if (pindex != nullptr) {
+        uint256 tipHash = pindex->GetBlockHash();
+        ConsensusInvariant(mapBlockIndex.count(tipHash) > 0);
+        
+        // Consensus invariant: Tip height must be >= 0
+        ConsensusInvariant(pindex->nHeight >= 0);
+    }
+    
     pindexTip = pindex;
     // BUG #74 FIX: Update atomic cached height for lock-free reads
     m_cachedHeight.store(pindex ? pindex->nHeight : -1, std::memory_order_release);
+    
+    // Invariant: Cached height must match tip height
+    if (pindex != nullptr) {
+        Invariant(m_cachedHeight.load(std::memory_order_acquire) == pindex->nHeight);
+    }
 }
 
 int CChainState::GetHeight() const {
