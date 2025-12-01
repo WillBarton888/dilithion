@@ -2381,20 +2381,50 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
 
         // Launch P2P message receive thread
+        // BUG #85 FIX: Add exception handling to prevent std::terminate
         std::thread p2p_recv_thread([&connection_manager]() {
             std::cout << "  [OK] P2P receive thread started" << std::endl;
 
             while (g_node_state.running) {
-                // Get all connected peers
-                auto peers = g_peer_manager->GetConnectedPeers();
+                try {
+                    // Get all connected peers
+                    auto peers = g_peer_manager->GetConnectedPeers();
 
-                // Try to receive messages from each peer
-                for (const auto& peer : peers) {
-                    connection_manager.ReceiveMessages(peer->id);
+                    // Try to receive messages from each peer
+                    for (const auto& peer : peers) {
+                        try {
+                            connection_manager.ReceiveMessages(peer->id);
+                        } catch (const std::system_error& e) {
+                            // BUG #85: Log and continue instead of crashing
+                            std::cerr << "[P2P-Recv] System error processing peer " << peer->id
+                                      << ": " << e.what() << " (code: " << e.code() << ")" << std::endl;
+                            // Disconnect this peer but don't crash
+                            try {
+                                connection_manager.DisconnectPeer(peer->id, "system_error during receive");
+                            } catch (...) {}
+                        } catch (const std::exception& e) {
+                            std::cerr << "[P2P-Recv] Exception processing peer " << peer->id
+                                      << ": " << e.what() << std::endl;
+                            try {
+                                connection_manager.DisconnectPeer(peer->id, "exception during receive");
+                            } catch (...) {}
+                        }
+                    }
+
+                    // Sleep briefly to avoid busy-wait
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                } catch (const std::system_error& e) {
+                    std::cerr << "[P2P-Recv] CRITICAL system error in recv loop: " << e.what()
+                              << " (code: " << e.code() << ")" << std::endl;
+                    // Brief pause before retrying
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                } catch (const std::exception& e) {
+                    std::cerr << "[P2P-Recv] CRITICAL exception in recv loop: " << e.what() << std::endl;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                } catch (...) {
+                    std::cerr << "[P2P-Recv] CRITICAL unknown exception in recv loop" << std::endl;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 }
-
-                // Sleep briefly to avoid busy-wait
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
 
             std::cout << "  P2P receive thread stopping..." << std::endl;
@@ -2402,6 +2432,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Launch P2P maintenance thread (ping/pong keepalive, reconnection, score decay)
         // BUG #49 FIX: Add automatic peer reconnection and misbehavior score decay
+        // BUG #85 FIX: Add exception handling to prevent std::terminate
         std::thread p2p_maint_thread([&connection_manager]() {
             std::cout << "  [OK] P2P maintenance thread started" << std::endl;
 
@@ -2409,72 +2440,88 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             auto last_reconnect_attempt = std::chrono::steady_clock::now();
 
             while (g_node_state.running) {
-                // Send periodic pings, check timeouts
-                connection_manager.PeriodicMaintenance();
+                try {
+                    // Send periodic pings, check timeouts
+                    connection_manager.PeriodicMaintenance();
 
-                // BUG #49: Check if we need to reconnect to seed nodes
-                size_t peer_count = g_peer_manager ? g_peer_manager->GetConnectionCount() : 0;
+                    // BUG #49: Check if we need to reconnect to seed nodes
+                    size_t peer_count = g_peer_manager ? g_peer_manager->GetConnectionCount() : 0;
 
-                if (peer_count == 0) {
-                    cycles_without_peers++;
+                    if (peer_count == 0) {
+                        cycles_without_peers++;
 
-                    // Attempt reconnection every 60 seconds when isolated
-                    auto now = std::chrono::steady_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_reconnect_attempt);
+                        // Attempt reconnection every 60 seconds when isolated
+                        auto now = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_reconnect_attempt);
 
-                    if (elapsed.count() >= 60) {
-                        std::cout << "[P2P-Maintenance] No peers connected - attempting to reconnect to seed nodes..." << std::endl;
-                        last_reconnect_attempt = now;
+                        if (elapsed.count() >= 60) {
+                            std::cout << "[P2P-Maintenance] No peers connected - attempting to reconnect to seed nodes..." << std::endl;
+                            last_reconnect_attempt = now;
 
-                        // Get seed nodes from peer manager
-                        auto seed_nodes = g_peer_manager ? g_peer_manager->GetSeedNodes() : std::vector<NetProtocol::CAddress>();
+                            // Get seed nodes from peer manager
+                            auto seed_nodes = g_peer_manager ? g_peer_manager->GetSeedNodes() : std::vector<NetProtocol::CAddress>();
 
-                        // Try to connect to each seed node
-                        int successful_connections = 0;
-                        for (const auto& seed_addr : seed_nodes) {
-                            std::string ip_str = seed_addr.ToStringIP();
-                            uint16_t port = seed_addr.port;
+                            // Try to connect to each seed node
+                            int successful_connections = 0;
+                            for (const auto& seed_addr : seed_nodes) {
+                                try {
+                                    std::string ip_str = seed_addr.ToStringIP();
+                                    uint16_t port = seed_addr.port;
 
-                            std::cout << "[P2P-Maintenance] Attempting connection to seed " << ip_str << ":" << port << std::endl;
+                                    std::cout << "[P2P-Maintenance] Attempting connection to seed " << ip_str << ":" << port << std::endl;
 
-                            int peer_id = connection_manager.ConnectToPeer(seed_addr);
-                            if (peer_id >= 0) {
-                                std::cout << "[P2P-Maintenance] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
+                                    int peer_id = connection_manager.ConnectToPeer(seed_addr);
+                                    if (peer_id >= 0) {
+                                        std::cout << "[P2P-Maintenance] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
 
-                                // Perform handshake
-                                if (connection_manager.PerformHandshake(peer_id)) {
-                                    std::cout << "[P2P-Maintenance] Handshake successful with peer " << peer_id << std::endl;
-                                    successful_connections++;
-                                } else {
-                                    std::cout << "[P2P-Maintenance] Handshake failed with peer " << peer_id << std::endl;
+                                        // Perform handshake
+                                        if (connection_manager.PerformHandshake(peer_id)) {
+                                            std::cout << "[P2P-Maintenance] Handshake successful with peer " << peer_id << std::endl;
+                                            successful_connections++;
+                                        } else {
+                                            std::cout << "[P2P-Maintenance] Handshake failed with peer " << peer_id << std::endl;
+                                        }
+                                    } else {
+                                        std::cout << "[P2P-Maintenance] Failed to connect to seed " << ip_str << ":" << port << std::endl;
+                                    }
+                                } catch (const std::exception& e) {
+                                    std::cerr << "[P2P-Maintenance] Exception connecting to seed: " << e.what() << std::endl;
                                 }
+                            }
+
+                            if (successful_connections > 0) {
+                                std::cout << "[P2P-Maintenance] Reconnected to " << successful_connections << " seed node(s)" << std::endl;
+                                cycles_without_peers = 0;
                             } else {
-                                std::cout << "[P2P-Maintenance] Failed to connect to seed " << ip_str << ":" << port << std::endl;
+                                std::cout << "[P2P-Maintenance] Could not reconnect to any seed nodes" << std::endl;
                             }
                         }
-
-                        if (successful_connections > 0) {
-                            std::cout << "[P2P-Maintenance] Reconnected to " << successful_connections << " seed node(s)" << std::endl;
+                    } else {
+                        if (cycles_without_peers > 0) {
+                            std::cout << "[P2P-Maintenance] Peer connectivity restored (" << peer_count << " peers)" << std::endl;
                             cycles_without_peers = 0;
-                        } else {
-                            std::cout << "[P2P-Maintenance] Could not reconnect to any seed nodes" << std::endl;
                         }
                     }
-                } else {
-                    if (cycles_without_peers > 0) {
-                        std::cout << "[P2P-Maintenance] Peer connectivity restored (" << peer_count << " peers)" << std::endl;
-                        cycles_without_peers = 0;
+
+                    // BUG #49: Decay misbehavior scores (reduce by 1 point per minute)
+                    // This happens every 30 seconds, so decay by 0.5 points
+                    if (g_peer_manager) {
+                        g_peer_manager->DecayMisbehaviorScores();
                     }
-                }
 
-                // BUG #49: Decay misbehavior scores (reduce by 1 point per minute)
-                // This happens every 30 seconds, so decay by 0.5 points
-                if (g_peer_manager) {
-                    g_peer_manager->DecayMisbehaviorScores();
+                    // Sleep for 30 seconds between maintenance cycles
+                    std::this_thread::sleep_for(std::chrono::seconds(30));
+                } catch (const std::system_error& e) {
+                    std::cerr << "[P2P-Maint] System error in maintenance loop: " << e.what()
+                              << " (code: " << e.code() << ")" << std::endl;
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                } catch (const std::exception& e) {
+                    std::cerr << "[P2P-Maint] Exception in maintenance loop: " << e.what() << std::endl;
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                } catch (...) {
+                    std::cerr << "[P2P-Maint] Unknown exception in maintenance loop" << std::endl;
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
                 }
-
-                // Sleep for 30 seconds between maintenance cycles
-                std::this_thread::sleep_for(std::chrono::seconds(30));
             }
 
             std::cout << "  P2P maintenance thread stopping..." << std::endl;

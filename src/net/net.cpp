@@ -258,13 +258,14 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
 
         std::cout << "[HANDSHAKE-DIAG] ✅ HANDSHAKE COMPLETE with peer " << peer_id << std::endl;
 
-        // BUG #69: Create per-peer CNodeState for block download tracking
-        CNodeState* state = CNodeStateManager::Get().CreateState(peer_id);
-        if (state) {
-            state->fHandshakeComplete = true;
-            state->nStartingHeight = peer->start_height;
-            state->fPreferredDownload = true;
-        }
+        // BUG #85 FIX: Use atomic method that follows Bitcoin Core's pattern
+        // All state modifications happen while holding the lock, preventing
+        // race conditions where RemoveState() could invalidate our pointer
+        CNodeStateManager::Get().CreateStateWithHandshake(
+            peer_id,
+            peer->start_height,
+            true  // fPreferredDownload
+        );
 
         // Trigger VERACK handler (for IBD initialization)
         if (on_verack) {

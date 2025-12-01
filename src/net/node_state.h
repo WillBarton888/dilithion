@@ -146,6 +146,11 @@ public:
     //! Create state for a new peer (call on handshake complete)
     CNodeState* CreateState(NodeId nodeid);
 
+    //! BUG #85 FIX: Atomically create state AND set handshake complete fields
+    //! This prevents race conditions where state is modified after lock is released
+    //! Returns true if state was created and initialized, false if already exists
+    bool CreateStateWithHandshake(NodeId nodeid, int nStartingHeight, bool fPreferredDownload);
+
     //! Get existing state for a peer (returns nullptr if not found)
     CNodeState* GetState(NodeId nodeid);
 

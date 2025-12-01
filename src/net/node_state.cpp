@@ -30,6 +30,38 @@ CNodeState* CNodeStateManager::CreateState(NodeId nodeid) {
     return &result.first->second;
 }
 
+bool CNodeStateManager::CreateStateWithHandshake(NodeId nodeid, int nStartingHeight, bool fPreferredDownload) {
+    std::lock_guard<std::mutex> lock(cs_nodestate);
+
+    // BUG #85 FIX: This is the Bitcoin Core pattern - all state modifications
+    // happen atomically while holding the lock. The caller never gets a pointer
+    // that could become dangling due to concurrent RemoveState() calls.
+
+    // Remove any existing state for this peer (shouldn't happen, but be safe)
+    auto it = mapNodeState.find(nodeid);
+    if (it != mapNodeState.end()) {
+        // Clean up in-flight blocks for old state
+        for (const auto& block : it->second.vBlocksInFlight) {
+            mapBlocksInFlight.erase(block.hash);
+        }
+        mapNodeState.erase(it);
+    }
+
+    // Create new state AND initialize handshake fields atomically
+    auto result = mapNodeState.emplace(nodeid, CNodeState(nodeid));
+    CNodeState& state = result.first->second;
+
+    // Set handshake complete fields while still holding lock
+    state.fHandshakeComplete = true;
+    state.nStartingHeight = nStartingHeight;
+    state.fPreferredDownload = fPreferredDownload;
+
+    std::cout << "[NodeState] Created state for peer " << nodeid
+              << " (height=" << nStartingHeight << ", preferred=" << fPreferredDownload << ")" << std::endl;
+
+    return true;
+}
+
 CNodeState* CNodeStateManager::GetState(NodeId nodeid) {
     std::lock_guard<std::mutex> lock(cs_nodestate);
 
