@@ -3463,10 +3463,6 @@ std::string CRPCServer::RPC_GenerateToAddress(const std::string& params) {
     throw std::runtime_error("generatetoaddress not fully implemented - requires mining infrastructure");
 }
 
-uint16_t CRPCServer::GetPort() const {
-    return m_port;
-}
-
 void CRPCServer::InitializeLogging(const std::string& log_file,
                                     const std::string& audit_file,
                                     CRPCLogger::LogLevel level) {
