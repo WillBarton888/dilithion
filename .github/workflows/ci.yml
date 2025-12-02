@@ -618,7 +618,15 @@ jobs:
           --form platform=linux64 \
           -o /tmp/cov-analysis.tar.gz
         tar -xzf /tmp/cov-analysis.tar.gz -C /tmp
-        echo "COVERITY_PATH=/tmp/cov-analysis-linux64/bin" >> $GITHUB_ENV
+        # Find the actual extracted directory (name includes version)
+        COV_DIR=$(find /tmp -maxdepth 1 -type d -name 'cov-analysis-linux64*' | head -1)
+        if [ -z "$COV_DIR" ]; then
+          echo "❌ Failed to find Coverity directory"
+          ls -la /tmp/
+          exit 1
+        fi
+        echo "Found Coverity at: $COV_DIR"
+        echo "COVERITY_PATH=$COV_DIR/bin" >> $GITHUB_ENV
 
     - name: Build RandomX
       run: |
