@@ -13,8 +13,8 @@
  * complex setup and the internal handlers are private.
  */
 
-#define BOOST_TEST_MODULE Misbehavior Scoring Tests
-#include <boost/test/included/unit_test.hpp>
+// Part of main Boost test suite (no BOOST_TEST_MODULE here)
+#include <boost/test/unit_test.hpp>
 
 #include <net/peers.h>
 #include <net/protocol.h>

@@ -14,8 +14,8 @@
  * rather than mocks, since the classes don't use virtual methods.
  */
 
-#define BOOST_TEST_MODULE IBD Coordinator Tests
-#include <boost/test/included/unit_test.hpp>
+// Part of main Boost test suite (no BOOST_TEST_MODULE here)
+#include <boost/test/unit_test.hpp>
 
 #include <node/ibd_coordinator.h>
 #include <core/node_context.h>
