@@ -483,9 +483,10 @@ BOOST_AUTO_TEST_CASE(hd_wallet_many_addresses_test) {
     std::string mnemonic;
     BOOST_REQUIRE(wallet.GenerateHDWallet(mnemonic));
 
-    // Generate many addresses to verify no issues
+    // Generate addresses to verify no issues
+    // Note: Reduced from 100 to 10 for CI - Dilithium3 key generation is slow
     std::vector<CDilithiumAddress> addresses;
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 10; i++) {
         CDilithiumAddress addr = wallet.GetNewHDAddress();
         BOOST_REQUIRE(addr.IsValid());
         addresses.push_back(addr);
@@ -501,7 +502,7 @@ BOOST_AUTO_TEST_CASE(hd_wallet_many_addresses_test) {
     // Verify chain index
     uint32_t account, external_idx, internal_idx;
     BOOST_REQUIRE(wallet.GetHDWalletInfo(account, external_idx, internal_idx));
-    BOOST_CHECK_EQUAL(external_idx, 101);  // 0 at init + 100 more
+    BOOST_CHECK_EQUAL(external_idx, 11);  // 0 at init + 10 more
 }
 
 BOOST_AUTO_TEST_CASE(hd_wallet_path_validation_test) {

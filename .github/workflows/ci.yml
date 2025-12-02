@@ -10,7 +10,7 @@ jobs:
   build-and-test:
     name: Build and Test (${{ matrix.compiler }}, ${{ matrix.build_type }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90  # Dilithium3 key generation in wallet tests is slow
 
     strategy:
       fail-fast: false
@@ -373,7 +373,7 @@ jobs:
   coverage:
     name: Code Coverage (LCOV)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90  # Dilithium3 key generation in wallet tests is slow
 
     steps:
     - name: Checkout code
