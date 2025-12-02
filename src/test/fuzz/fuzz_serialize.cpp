@@ -27,7 +27,7 @@
 #include <cstring>
 #include <stdexcept>
 
-FUZZ_TARGET(serialize_basic)
+FUZZ_TARGET(serialize)
 {
     FuzzedDataProvider fuzzed_data(data, size);
 
@@ -36,39 +36,88 @@ FUZZ_TARGET(serialize_basic)
     }
 
     try {
-        CDataStream stream;
+        // Decide which test to run based on fuzz data
+        uint8_t test_type = fuzzed_data.ConsumeIntegralInRange<uint8_t>(0, 3);
 
-        // Test writing various types
-        uint8_t u8 = fuzzed_data.ConsumeUint8();
-        uint16_t u16 = fuzzed_data.ConsumeUint16();
-        uint32_t u32 = fuzzed_data.ConsumeUint32();
-        uint64_t u64 = fuzzed_data.ConsumeUint64();
+        switch (test_type) {
+        case 0: {
+            // Test basic integer serialization
+            CDataStream stream;
 
-        // Write data to stream
-        // Write using CDataStream API
-        stream.write(&u8, sizeof(u8));
-        stream.write(&u16, sizeof(u16));
-        stream.write(&u32, sizeof(u32));
-        stream.write(&u64, sizeof(u64));
+            uint8_t u8 = fuzzed_data.ConsumeUint8();
+            uint16_t u16 = fuzzed_data.ConsumeUint16();
+            uint32_t u32 = fuzzed_data.ConsumeUint32();
+            uint64_t u64 = fuzzed_data.ConsumeUint64();
 
-        // Test reading back (CDataStream reads from current position)
-        // Reset read position
-        stream.seek(0);
-        
-        uint8_t read_u8;
-        uint16_t read_u16;
-        uint32_t read_u32;
-        uint64_t read_u64;
+            // Write data to stream (cast to uint8_t*)
+            stream.write(reinterpret_cast<const uint8_t*>(&u8), sizeof(u8));
+            stream.write(reinterpret_cast<const uint8_t*>(&u16), sizeof(u16));
+            stream.write(reinterpret_cast<const uint8_t*>(&u32), sizeof(u32));
+            stream.write(reinterpret_cast<const uint8_t*>(&u64), sizeof(u64));
 
-        if (stream.remaining() >= sizeof(u8) + sizeof(u16) + sizeof(u32) + sizeof(u64)) {
-            stream.read(&read_u8, sizeof(read_u8));
-            stream.read(&read_u16, sizeof(read_u16));
-            stream.read(&read_u32, sizeof(read_u32));
-            stream.read(&read_u64, sizeof(read_u64));
+            // Read back
+            stream.seek(0);
+
+            uint8_t read_u8;
+            uint16_t read_u16;
+            uint32_t read_u32;
+            uint64_t read_u64;
+
+            if (stream.remaining() >= sizeof(u8) + sizeof(u16) + sizeof(u32) + sizeof(u64)) {
+                stream.read(reinterpret_cast<uint8_t*>(&read_u8), sizeof(read_u8));
+                stream.read(reinterpret_cast<uint8_t*>(&read_u16), sizeof(read_u16));
+                stream.read(reinterpret_cast<uint8_t*>(&read_u32), sizeof(read_u32));
+                stream.read(reinterpret_cast<uint8_t*>(&read_u64), sizeof(read_u64));
+            }
+            break;
         }
+        case 1: {
+            // Test string serialization
+            CDataStream stream;
 
-        // Verify (should match if no corruption)
-        // Note: We don't assert here - just ensure no crash
+            std::string test_string = fuzzed_data.ConsumeRandomLengthString(1000);
+            stream.write(reinterpret_cast<const uint8_t*>(test_string.data()), test_string.size());
+
+            stream.seek(0);
+            if (stream.remaining() >= test_string.size()) {
+                std::vector<uint8_t> buffer = stream.read(test_string.size());
+            }
+            break;
+        }
+        case 2: {
+            // Test CompactSize serialization
+            CDataStream stream;
+
+            uint64_t value = fuzzed_data.ConsumeUint64();
+            stream.WriteCompactSize(value);
+
+            stream.seek(0);
+            uint64_t read_value = stream.ReadCompactSize();
+            (void)read_value;
+            break;
+        }
+        case 3: {
+            // Test vector serialization
+            CDataStream stream;
+
+            size_t vec_size = fuzzed_data.ConsumeIntegralInRange<size_t>(0, std::min(size, size_t(10000)));
+            std::vector<uint8_t> test_vec = fuzzed_data.ConsumeBytes(vec_size);
+
+            stream.WriteCompactSize(vec_size);
+
+            if (!test_vec.empty()) {
+                stream.write(test_vec.data(), test_vec.size());
+            }
+
+            stream.seek(0);
+            uint64_t read_size = stream.ReadCompactSize();
+
+            if (read_size > 0 && read_size < 100000 && stream.remaining() >= read_size) {
+                std::vector<uint8_t> read_vec = stream.read(read_size);
+            }
+            break;
+        }
+        }
 
     } catch (const std::exception& e) {
         // Expected for malformed input
@@ -78,104 +127,3 @@ FUZZ_TARGET(serialize_basic)
         return;
     }
 }
-
-FUZZ_TARGET(serialize_string)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    if (size < 1) {
-        return;
-    }
-
-    try {
-        CDataStream stream;
-
-        // Write string
-        std::string test_string = fuzzed_data.ConsumeRandomLengthString(1000);
-        stream.write(reinterpret_cast<const uint8_t*>(test_string.data()), test_string.size());
-
-        // Read back
-        stream.seek(0);
-        if (stream.remaining() >= test_string.size()) {
-            std::vector<uint8_t> buffer = stream.read(test_string.size());
-        }
-
-        // Verify no crash
-
-    } catch (const std::exception& e) {
-        return;
-    } catch (...) {
-        return;
-    }
-}
-
-FUZZ_TARGET(serialize_compactsize)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    if (size < 1) {
-        return;
-    }
-
-    try {
-        CDataStream stream;
-
-        // Write CompactSize
-        uint64_t value = fuzzed_data.ConsumeUint64();
-        
-        // Write as CompactSize using CDataStream API
-        stream.WriteCompactSize(value);
-
-        // Read back CompactSize
-        stream.seek(0);
-        uint64_t read_value = stream.ReadCompactSize();
-
-        // Verify no crash
-
-    } catch (const std::exception& e) {
-        return;
-    } catch (...) {
-        return;
-    }
-}
-
-FUZZ_TARGET(serialize_vector)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    if (size < 10) {
-        return;
-    }
-
-    try {
-        CDataStream stream;
-
-        // Write vector of bytes
-        size_t vec_size = fuzzed_data.ConsumeIntegralInRange<size_t>(0, std::min(size, size_t(10000)));
-        std::vector<uint8_t> test_vec = fuzzed_data.ConsumeBytes(vec_size);
-
-        // Write size as CompactSize
-        stream.WriteCompactSize(vec_size);
-
-        // Write vector data
-        if (!test_vec.empty()) {
-            stream.write(test_vec.data(), test_vec.size());
-        }
-
-        // Read back
-        stream.seek(0);
-        uint64_t read_size = stream.ReadCompactSize();
-        
-        if (read_size > 0 && read_size < 100000 && stream.remaining() >= read_size) {
-            std::vector<uint8_t> read_vec = stream.read(read_size);
-        }
-
-        // Verify no crash
-
-    } catch (const std::exception& e) {
-        return;
-    } catch (...) {
-        return;
-    }
-}
-
