@@ -831,10 +831,10 @@ fuzz_subsidy: $(FUZZ_SUBSIDY_OBJ) $(DILITHIUM_OBJECTS)
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-# fuzz_merkle: SHA3 + consensus/validation for CBlockValidator::BuildMerkleRoot
-fuzz_merkle: $(FUZZ_MERKLE_OBJ) $(FUZZ_COMMON_OBJECTS) $(OBJ_DIR)/consensus/validation.o $(DILITHIUM_OBJECTS)
+# fuzz_merkle: Full consensus + UTXO for CBlockValidator::BuildMerkleRoot
+fuzz_merkle: $(FUZZ_MERKLE_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (7 targets)"
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lrandomx -lpthread
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_tx_validation: Full consensus + UTXO dependencies
