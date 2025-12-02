@@ -10,6 +10,7 @@ jobs:
   build-and-test:
     name: Build and Test (${{ matrix.compiler }}, ${{ matrix.build_type }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     strategy:
       fail-fast: false
@@ -98,6 +99,7 @@ jobs:
   sanitizer-asan:
     name: AddressSanitizer (Memory Safety)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -169,6 +171,7 @@ jobs:
   sanitizer-ubsan:
     name: UndefinedBehaviorSanitizer
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -240,6 +243,7 @@ jobs:
   sanitizer-tsan:
     name: ThreadSanitizer (Data Races)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -311,6 +315,7 @@ jobs:
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
     - name: Checkout code
@@ -342,6 +347,7 @@ jobs:
   spell-check:
     name: Spell Check (codespell)
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
 
     steps:
     - name: Checkout code
@@ -367,6 +373,7 @@ jobs:
   coverage:
     name: Code Coverage (LCOV)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -487,6 +494,7 @@ jobs:
   functional-tests:
     name: Functional Tests (Python)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
     - name: Checkout code
@@ -553,6 +561,7 @@ jobs:
   fuzz-build:
     name: Fuzz Testing Build (libFuzzer)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
     - name: Checkout code
@@ -605,6 +614,7 @@ jobs:
   security-checks:
     name: Security Checks
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
     - name: Checkout code
@@ -642,6 +652,7 @@ jobs:
   documentation:
     name: Documentation Check
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
 
     steps:
     - name: Checkout code
@@ -665,10 +676,11 @@ jobs:
   coverity-scan:
     name: Coverity Static Analysis
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     # Only run on main branch and if COVERITY_TOKEN is set
     # Note: Set COVERITY_TOKEN and COVERITY_EMAIL secrets in GitHub repository settings
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
