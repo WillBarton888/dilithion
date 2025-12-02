@@ -225,8 +225,8 @@ bool CRPCServer::Start() {
     addr.sin_port = htons(m_port);
 
     if (bind(m_serverSocket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        ErrorMessage error = CErrorFormatter::NetworkError("bind RPC server", 
-            "Failed to bind to port " + std::to_string(port));
+        ErrorMessage error = CErrorFormatter::NetworkError("bind RPC server",
+            "Failed to bind to port " + std::to_string(m_port));
         error.recovery_steps = {
             "Check if port is already in use",
             "Verify you have permission to bind to this port",

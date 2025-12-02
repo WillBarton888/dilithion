@@ -11,6 +11,7 @@
 #include <rpc/permissions.h>
 
 #include <string>
+#include <sstream>
 #include <map>
 #include <functional>
 #include <memory>

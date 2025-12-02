@@ -168,7 +168,7 @@ int64_t CConfigParser::GetInt64(const std::string& key, int64_t default_value) c
     try {
         return std::stoll(value);
     } catch (const std::exception& e) {
-        LogPrintf(ALL, WARNING, "Config: Invalid integer value for %s: %s (using default: %lld)", 
+        LogPrintf(ALL, WARN, "Config: Invalid integer value for %s: %s (using default: %lld)",
                   key.c_str(), value.c_str(), default_value);
         return default_value;
     }
@@ -193,7 +193,7 @@ bool CConfigParser::GetBool(const std::string& key, bool default_value) const {
         return false;
     }
 
-    LogPrintf(ALL, WARNING, "Config: Invalid boolean value for %s: %s (using default: %s)", 
+    LogPrintf(ALL, WARN, "Config: Invalid boolean value for %s: %s (using default: %s)",
               key.c_str(), value.c_str(), default_value ? "true" : "false");
     return default_value;
 }
