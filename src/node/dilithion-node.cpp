@@ -2808,7 +2808,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Phase 4: Initialize RPC server
-        std::cout << "Initializing RPC server..." << std::endl;
+        std::cout << "[4/6] Initializing RPC server..." << std::flush;
         CRPCServer rpc_server(config.rpcport);
         g_node_state.rpc_server = &rpc_server;
 
@@ -2819,6 +2819,45 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterChainState(&g_chainstate);
         rpc_server.RegisterMempool(&mempool);
         rpc_server.RegisterUTXOSet(&utxo_set);
+
+        // Phase 1: Initialize authentication and permissions
+        std::string rpcuser = config_parser.GetString("rpcuser", "");
+        std::string rpcpassword = config_parser.GetString("rpcpassword", "");
+        std::string rpc_permissions_file = config.datadir + "/rpc_permissions.json";
+        
+        if (!rpcuser.empty() && !rpcpassword.empty()) {
+            // Initialize permissions system
+            if (!rpc_server.InitializePermissions(rpc_permissions_file, rpcuser, rpcpassword)) {
+                std::cerr << "WARNING: Failed to initialize RPC permissions, continuing without authentication" << std::endl;
+            } else {
+                std::cout << "  [AUTH] RPC authentication enabled" << std::endl;
+            }
+        } else {
+            std::cout << "  [INFO] RPC authentication disabled (no rpcuser/rpcpassword in config)" << std::endl;
+        }
+
+        // Phase 1: Initialize request logging
+        std::string rpc_log_file = config.datadir + "/rpc.log";
+        std::string rpc_audit_file = config.datadir + "/rpc_audit.log";
+        rpc_server.InitializeLogging(rpc_log_file, rpc_audit_file, CRPCLogger::LogLevel::INFO);
+
+        // Phase 3: Initialize SSL/TLS if configured
+        std::string rpc_cert_file = config_parser.GetString("rpcsslcertificatechainfile", "");
+        std::string rpc_key_file = config_parser.GetString("rpcsslprivatekeyfile", "");
+        if (!rpc_cert_file.empty() && !rpc_key_file.empty()) {
+            std::string rpc_ca_file = config_parser.GetString("rpcsslcapath", "");
+            if (!rpc_server.InitializeSSL(rpc_cert_file, rpc_key_file, rpc_ca_file)) {
+                std::cerr << "WARNING: Failed to initialize SSL/TLS, continuing without encryption" << std::endl;
+            }
+        }
+
+        // Phase 4: Initialize WebSocket server if configured
+        int64_t ws_port = config_parser.GetInt64("rpcwebsocketport", 0);
+        if (ws_port > 0 && ws_port <= 65535) {
+            if (!rpc_server.InitializeWebSocket(static_cast<uint16_t>(ws_port))) {
+                std::cerr << "WARNING: Failed to initialize WebSocket server, continuing without WebSocket" << std::endl;
+            }
+        }
 
         if (!rpc_server.Start()) {
             std::cerr << "Failed to start RPC server on port " << config.rpcport << std::endl;

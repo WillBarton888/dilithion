@@ -9,6 +9,9 @@
 #include <net/net.h>
 #include <rpc/ratelimiter.h>
 #include <rpc/permissions.h>
+#include <rpc/logger.h>
+#include <rpc/ssl_wrapper.h>
+#include <rpc/websocket.h>
 
 #include <string>
 #include <sstream>
@@ -17,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 #include <atomic>
 #include <queue>
 #include <condition_variable>
@@ -140,6 +144,18 @@ private:
     // FIX-014: Role-based access control (RBAC)
     std::unique_ptr<CRPCPermissions> m_permissions;
 
+    // Phase 1: Request logging and auditing
+    std::unique_ptr<CRPCLogger> m_logger;
+
+    // Phase 3: SSL/TLS support
+    std::unique_ptr<CSSLWrapper> m_ssl_wrapper;
+    bool m_ssl_enabled;
+    std::map<int, SSL*> m_ssl_connections;  // Map socket to SSL connection
+    std::mutex m_ssl_mutex;  // Protects SSL connections map
+
+    // Phase 4: WebSocket server
+    std::unique_ptr<class CWebSocketServer> m_websocket_server;
+
     // Server socket
     int m_serverSocket;
 
@@ -193,11 +209,29 @@ private:
      * Execute RPC method
      */
     RPCResponse ExecuteRPC(const RPCRequest& request);
+    
+    /**
+     * Phase 2: Execute batch RPC requests
+     * @param requests Vector of RPCRequest objects
+     * @param clientIP Client IP address (for logging)
+     * @param username Username (for logging)
+     * @return Vector of RPCResponse objects
+     */
+    std::vector<RPCResponse> ExecuteBatchRPC(const std::vector<RPCRequest>& requests,
+                                            const std::string& clientIP,
+                                            const std::string& username);
 
     /**
      * Convert RPCResponse to JSON string
      */
     std::string SerializeResponse(const RPCResponse& response);
+    
+    /**
+     * Phase 2: Serialize batch RPC responses to JSON array string
+     * @param responses Vector of RPCResponse objects
+     * @return JSON array string
+     */
+    std::string SerializeBatchResponse(const std::vector<RPCResponse>& responses);
 
     // RPC method handlers
 
@@ -365,6 +399,44 @@ public:
      * Get server port
      */
     uint16_t GetPort() const { return m_port; }
+
+    /**
+     * Phase 1: Initialize logging
+     * @param log_file Path to request log file (empty = disabled)
+     * @param audit_file Path to audit log file (empty = disabled)
+     * @param level Minimum log level
+     */
+    void InitializeLogging(const std::string& log_file = "",
+                          const std::string& audit_file = "",
+                          CRPCLogger::LogLevel level = CRPCLogger::LogLevel::INFO);
+
+    /**
+     * Phase 3: Initialize SSL/TLS support
+     * @param cert_file Path to certificate file (PEM format)
+     * @param key_file Path to private key file (PEM format)
+     * @param ca_file Optional path to CA certificate file
+     * @return true if initialization successful, false on error
+     */
+    bool InitializeSSL(const std::string& cert_file,
+                      const std::string& key_file,
+                      const std::string& ca_file = "");
+
+    /**
+     * Phase 3: Check if SSL is enabled
+     */
+    bool IsSSLEnabled() const { return m_ssl_enabled; }
+
+    /**
+     * Phase 4: Get WebSocket server instance
+     */
+    class CWebSocketServer* GetWebSocketServer() const { return m_websocket_server.get(); }
+    
+    /**
+     * Phase 4: Initialize WebSocket server
+     * @param port WebSocket server port (0 = disabled)
+     * @return true if initialized successfully
+     */
+    bool InitializeWebSocket(uint16_t port = 0);
 };
 
 #endif // DILITHION_RPC_SERVER_H
