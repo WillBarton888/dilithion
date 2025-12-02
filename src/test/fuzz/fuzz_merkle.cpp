@@ -117,7 +117,7 @@ FUZZ_TARGET(merkle_calculate)
         }
 
         // Call PRODUCTION BuildMerkleRoot (tests CVE-2012-2459 fix!)
-        Consensus::BlockValidator validator;
+        CBlockValidator validator;
         uint256 merkle_root1 = validator.BuildMerkleRoot(transactions);
 
         // Calculate again (should be deterministic)
