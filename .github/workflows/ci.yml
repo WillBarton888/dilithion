@@ -584,7 +584,7 @@ jobs:
         fi
         curl -sSL https://scan.coverity.com/download/linux64 \
           --form token="$COVERITY_TOKEN" \
-          --form project=dilithion \
+          --form project="WillBarton888/dilithion" \
           --form platform=linux64 \
           -o /tmp/cov-analysis.tar.gz
         tar -xzf /tmp/cov-analysis.tar.gz -C /tmp
@@ -625,6 +625,6 @@ jobs:
              --form file=@cov-int.tar.gz \
              --form version="$(git rev-parse --short HEAD)" \
              --form description="Automated Coverity scan" \
-             https://scan.coverity.com/builds?project=dilithion
+             https://scan.coverity.com/builds?project=WillBarton888%2Fdilithion
         echo "✅ Coverity scan submitted"
 # Trigger CI
