@@ -81,19 +81,20 @@ void CBandwidthThrottle::Reset() {
 
 bool CPerPeerThrottle::CanTransfer(int peer_id, size_t bytes, bool is_send) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+
     if (is_send) {
         auto it = m_send_throttles.find(peer_id);
         if (it == m_send_throttles.end()) {
-            // Create throttle for new peer
-            m_send_throttles.emplace(peer_id, CBandwidthThrottle(DEFAULT_PEER_BANDWIDTH));
+            // Create throttle for new peer using try_emplace (constructs in-place)
+            // Note: emplace doesn't work here because CBandwidthThrottle has a mutex
+            m_send_throttles.try_emplace(peer_id, DEFAULT_PEER_BANDWIDTH);
             return true;  // Allow first transfer
         }
         return it->second.CanSend(bytes);
     } else {
         auto it = m_recv_throttles.find(peer_id);
         if (it == m_recv_throttles.end()) {
-            m_recv_throttles.emplace(peer_id, CBandwidthThrottle(DEFAULT_PEER_BANDWIDTH));
+            m_recv_throttles.try_emplace(peer_id, DEFAULT_PEER_BANDWIDTH);
             return true;
         }
         return it->second.CanSend(bytes);
