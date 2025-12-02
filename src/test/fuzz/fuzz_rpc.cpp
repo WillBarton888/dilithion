@@ -33,7 +33,7 @@ bool ParseRPCRequest(const uint8_t* data, size_t size, std::string& method, std:
 
     // Simple JSON-like parsing (not full JSON parser, just for fuzzing)
     std::string input(reinterpret_cast<const char*>(data), size);
-    
+
     // Look for "method" field
     size_t method_pos = input.find("\"method\"");
     if (method_pos == std::string::npos) {
@@ -74,62 +74,7 @@ bool ParseRPCRequest(const uint8_t* data, size_t size, std::string& method, std:
     return !method.empty();
 }
 
-FUZZ_TARGET(rpc_parse_request)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    if (size < 10) {
-        return;
-    }
-
-    try {
-        std::string method;
-        std::string params;
-
-        // Parse RPC request
-        bool parsed = ParseRPCRequest(data, size, method, params);
-
-        // Verify no crash (parsing may fail, that's OK)
-
-    } catch (const std::exception& e) {
-        // Expected for malformed JSON
-        return;
-    } catch (...) {
-        return;
-    }
-}
-
-FUZZ_TARGET(rpc_method_names)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    if (size < 1) {
-        return;
-    }
-
-    try {
-        // Test various method name formats
-        std::string method = fuzzed_data.ConsumeRandomLengthString(100);
-
-        // Validate method name (should not crash on any input)
-        bool is_valid = !method.empty() && method.length() < 1000;
-
-        // Check for common RPC methods
-        if (method == "getnewaddress" || method == "getbalance" || 
-            method == "getmininginfo" || method == "help") {
-            // Valid method
-        }
-
-        // Verify no crash
-
-    } catch (const std::exception& e) {
-        return;
-    } catch (...) {
-        return;
-    }
-}
-
-FUZZ_TARGET(rpc_json_parsing)
+FUZZ_TARGET(rpc)
 {
     FuzzedDataProvider fuzzed_data(data, size);
 
@@ -138,21 +83,46 @@ FUZZ_TARGET(rpc_json_parsing)
     }
 
     try {
-        // Create JSON-like string from fuzz data
-        std::string json_input = fuzzed_data.ConsumeRemainingAsString();
+        // Decide which test to run based on fuzz data
+        uint8_t test_type = fuzzed_data.ConsumeIntegralInRange<uint8_t>(0, 2);
 
-        // Try to parse as JSON-RPC request
-        std::string method;
-        std::string params;
-        ParseRPCRequest(reinterpret_cast<const uint8_t*>(json_input.data()), 
-                       json_input.size(), method, params);
+        switch (test_type) {
+        case 0: {
+            // Test RPC request parsing
+            std::string method;
+            std::string params;
+            bool parsed = ParseRPCRequest(data, size, method, params);
+            (void)parsed;
+            break;
+        }
+        case 1: {
+            // Test method name validation
+            std::string method = fuzzed_data.ConsumeRandomLengthString(100);
+            bool is_valid = !method.empty() && method.length() < 1000;
 
-        // Verify no crash
+            // Check for common RPC methods
+            if (method == "getnewaddress" || method == "getbalance" ||
+                method == "getmininginfo" || method == "help") {
+                // Valid method
+            }
+            (void)is_valid;
+            break;
+        }
+        case 2: {
+            // Test JSON parsing
+            std::string json_input = fuzzed_data.ConsumeRemainingAsString();
+            std::string method;
+            std::string params;
+            ParseRPCRequest(reinterpret_cast<const uint8_t*>(json_input.data()),
+                           json_input.size(), method, params);
+            break;
+        }
+        }
 
     } catch (const std::exception& e) {
+        // Expected for malformed JSON
         return;
     } catch (...) {
         return;
     }
 }
-

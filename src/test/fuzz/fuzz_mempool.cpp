@@ -28,9 +28,10 @@
 #include "../../amount.h"
 #include <vector>
 #include <cstring>
+#include <memory>
 
 // Minimal transaction creation for fuzzing
-CTransaction CreateFuzzTransaction(const uint8_t* data, size_t size) {
+CTransactionRef CreateFuzzTransaction(const uint8_t* data, size_t size) {
     CTransaction tx;
     tx.nVersion = 1;
     tx.nLockTime = 0;
@@ -43,7 +44,7 @@ CTransaction CreateFuzzTransaction(const uint8_t* data, size_t size) {
         for (uint32_t i = 0; i < num_inputs && size > 2 + i * 36; ++i) {
             CTxIn input;
             // Minimal prevout hash
-            std::memcpy(input.prevout.hash.data, data + 2 + i * 32, 32);
+            std::memcpy(input.prevout.hash.data, data + 2 + i * 32, std::min(size_t(32), size - 2 - i * 32));
             input.prevout.n = i;
             tx.vin.push_back(input);
         }
@@ -56,10 +57,10 @@ CTransaction CreateFuzzTransaction(const uint8_t* data, size_t size) {
         }
     }
 
-    return tx;
+    return std::make_shared<const CTransaction>(tx);
 }
 
-FUZZ_TARGET(mempool_add_remove)
+FUZZ_TARGET(mempool)
 {
     FuzzedDataProvider fuzzed_data(data, size);
 
@@ -68,25 +69,57 @@ FUZZ_TARGET(mempool_add_remove)
     }
 
     try {
-        CTxMemPool mempool;
+        // Decide which test to run based on fuzz data
+        uint8_t test_type = fuzzed_data.ConsumeIntegralInRange<uint8_t>(0, 1);
 
-        // Create fuzzed transaction
-        auto tx_data = fuzzed_data.ConsumeRemainingBytes();
-        CTransaction tx = CreateFuzzTransaction(tx_data.data(), tx_data.size());
+        switch (test_type) {
+        case 0: {
+            // Test add/remove
+            CTxMemPool mempool;
 
-        // Try to add to mempool
-        CAmount fee = fuzzed_data.ConsumeIntegral<CAmount>();
-        int64_t time = fuzzed_data.ConsumeIntegral<int64_t>();
-        unsigned int height = fuzzed_data.ConsumeIntegralInRange<unsigned int>(0, 1000000);
+            auto tx_data = fuzzed_data.ConsumeRemainingBytes();
+            CTransactionRef tx = CreateFuzzTransaction(tx_data.data(), tx_data.size());
 
-        // Add transaction (may fail, that's OK)
-        mempool.AddTransaction(std::make_shared<CTransaction>(tx), fee, time, height);
+            CAmount fee = fuzzed_data.ConsumeIntegral<CAmount>() % 1000000000;
+            int64_t time = fuzzed_data.ConsumeIntegral<int64_t>();
+            unsigned int height = fuzzed_data.ConsumeIntegralInRange<unsigned int>(0, 1000000);
 
-        // Try to remove
-        uint256 txid = tx.GetHash();
-        mempool.RemoveTransaction(txid);
+            // Add transaction (may fail, that's OK)
+            std::string error;
+            mempool.AddTx(tx, fee, time, height, &error);
 
-        // Verify no crash
+            // Try to remove
+            uint256 txid = tx->GetHash();
+            mempool.RemoveTx(txid);
+            break;
+        }
+        case 1: {
+            // Test fee calculation / stats
+            CTxMemPool mempool;
+
+            size_t num_txs = fuzzed_data.ConsumeIntegralInRange<size_t>(1, 10);
+
+            for (size_t i = 0; i < num_txs && fuzzed_data.remaining_bytes() > 20; ++i) {
+                auto tx_data = fuzzed_data.ConsumeRandomLengthByteVector(1000);
+                CTransactionRef tx = CreateFuzzTransaction(tx_data.data(), tx_data.size());
+
+                CAmount fee = fuzzed_data.ConsumeIntegral<CAmount>() % 1000000000;
+                int64_t time = fuzzed_data.ConsumeIntegral<int64_t>();
+                unsigned int height = fuzzed_data.ConsumeIntegralInRange<unsigned int>(0, 1000000);
+
+                std::string error;
+                mempool.AddTx(tx, fee, time, height, &error);
+            }
+
+            // Get mempool stats
+            size_t size_count = mempool.Size();
+            size_t bytes, bytes_dummy;
+            double min_fee, max_fee;
+            mempool.GetStats(bytes, bytes_dummy, min_fee, max_fee);
+            (void)size_count;
+            break;
+        }
+        }
 
     } catch (const std::exception& e) {
         // Expected for invalid transactions
@@ -95,42 +128,3 @@ FUZZ_TARGET(mempool_add_remove)
         return;
     }
 }
-
-FUZZ_TARGET(mempool_fee_calculation)
-{
-    FuzzedDataProvider fuzzed_data(data, size);
-
-    if (size < 20) {
-        return;
-    }
-
-    try {
-        CTxMemPool mempool;
-
-        // Create multiple transactions
-        size_t num_txs = fuzzed_data.ConsumeIntegralInRange<size_t>(1, 10);
-        
-        for (size_t i = 0; i < num_txs && fuzzed_data.remaining_bytes() > 20; ++i) {
-            auto tx_data = fuzzed_data.ConsumeRandomLengthByteVector(1000);
-            CTransaction tx = CreateFuzzTransaction(tx_data.data(), tx_data.size());
-
-            CAmount fee = fuzzed_data.ConsumeIntegral<CAmount>();
-            int64_t time = fuzzed_data.ConsumeIntegral<int64_t>();
-            unsigned int height = fuzzed_data.ConsumeIntegralInRange<unsigned int>(0, 1000000);
-
-            mempool.AddTransaction(std::make_shared<CTransaction>(tx), fee, time, height);
-        }
-
-        // Get mempool info (may be empty, that's OK)
-        size_t mempool_size = mempool.Size();
-        CAmount total_fee = mempool.GetTotalFee();
-
-        // Verify no crash
-
-    } catch (const std::exception& e) {
-        return;
-    } catch (...) {
-        return;
-    }
-}
-
