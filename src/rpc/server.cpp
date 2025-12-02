@@ -12,8 +12,12 @@
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
 #include <util/strencodings.h>
+#include <util/error_format.h>  // UX: Better error messages
 #include <amount.h>
 #include <net/peers.h>  // For CPeerManager and g_peer_manager
+#include <core/node_context.h>  // For g_node_context and connection_manager
+#include <net/net.h>  // For CConnectionManager
+#include <net/protocol.h>  // For NetProtocol::CAddress
 
 #include <sstream>
 #include <cstring>
@@ -38,6 +42,7 @@ extern NodeState g_node_state;
 
 #ifdef _WIN32
     #include <winsock2.h>
+    #include <ws2tcpip.h>  // For inet_pton
     #pragma comment(lib, "ws2_32.lib")
     typedef int socklen_t;
 #else
@@ -220,6 +225,14 @@ bool CRPCServer::Start() {
     addr.sin_port = htons(m_port);
 
     if (bind(m_serverSocket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        ErrorMessage error = CErrorFormatter::NetworkError("bind RPC server", 
+            "Failed to bind to port " + std::to_string(port));
+        error.recovery_steps = {
+            "Check if port is already in use",
+            "Verify you have permission to bind to this port",
+            "Try a different port with --rpcport"
+        };
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
         closesocket(m_serverSocket);
         m_serverSocket = INVALID_SOCKET;
         return false;
@@ -231,6 +244,9 @@ bool CRPCServer::Start() {
 
     // Listen
     if (listen(m_serverSocket, 10) == SOCKET_ERROR) {
+        ErrorMessage error = CErrorFormatter::NetworkError("listen RPC server", 
+            "Failed to listen on socket");
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
         closesocket(m_serverSocket);
         m_serverSocket = INVALID_SOCKET;
         return false;
@@ -324,7 +340,9 @@ bool CRPCServer::InitializePermissions(const std::string& configPath,
 }
 
 void CRPCServer::ServerThread() {
-    while (m_running) {
+    // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
+    try {
+        while (m_running) {
         // Accept client connection
         struct sockaddr_in clientAddr;
         socklen_t clientLen = sizeof(clientAddr);
@@ -347,12 +365,27 @@ void CRPCServer::ServerThread() {
         }
         // Notify one worker thread that work is available
         m_queueCV.notify_one();
+        }
+    } catch (const std::exception& e) {
+        // Phase 1.1: Prevent silent thread crashes
+        ErrorMessage error = CErrorFormatter::NetworkError("RPC server thread", e.what());
+        error.severity = ErrorSeverity::CRITICAL;
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+    } catch (...) {
+        ErrorMessage error(ErrorSeverity::CRITICAL, "RPC Server Error", 
+                          "RPC server thread crashed with unknown exception");
+        error.recovery_steps.push_back("Check system logs");
+        error.recovery_steps.push_back("Restart the node");
+        error.recovery_steps.push_back("Report this issue");
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
     }
 }
 
 // RPC-002: Worker Thread Implementation
 void CRPCServer::WorkerThread() {
-    while (m_running) {
+    // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
+    try {
+        while (m_running) {
         int clientSocket = INVALID_SOCKET;
 
         // Wait for work or shutdown
@@ -381,14 +414,26 @@ void CRPCServer::WorkerThread() {
             HandleClient(clientSocket);
             closesocket(clientSocket);
         }
+        }
+    } catch (const std::exception& e) {
+        // Phase 1.1: Prevent silent thread crashes
+        ErrorMessage error = CErrorFormatter::NetworkError("RPC worker thread", e.what());
+        error.severity = ErrorSeverity::ERROR;
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+    } catch (...) {
+        ErrorMessage error(ErrorSeverity::ERROR, "RPC Worker Error", 
+                          "RPC worker thread crashed with unknown exception");
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
     }
 }
 
 void CRPCServer::CleanupThread() {
-    // Rate limiter maintenance: clean up old records every 5 minutes
-    const std::chrono::minutes CLEANUP_INTERVAL(5);
+    // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
+    try {
+        // Rate limiter maintenance: clean up old records every 5 minutes
+        const std::chrono::minutes CLEANUP_INTERVAL(5);
 
-    while (m_running) {
+        while (m_running) {
         // Sleep for 5 minutes, but wake up every second to check m_running
         for (int i = 0; i < 300 && m_running; i++) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -400,6 +445,14 @@ void CRPCServer::CleanupThread() {
 
         // Clean up old rate limiter records
         m_rateLimiter.CleanupOldRecords();
+        }
+    } catch (const std::exception& e) {
+        // Phase 1.1: Prevent silent thread crashes
+        ErrorMessage error = CErrorFormatter::NetworkError("RPC cleanup thread", e.what());
+        error.severity = ErrorSeverity::WARNING;
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+    } catch (...) {
+        std::cerr << "[RPC-Cleanup] FATAL: CleanupThread unknown exception" << std::endl;
     }
 }
 
@@ -638,12 +691,24 @@ void CRPCServer::HandleClient(int clientSocket) {
         rpcReq = ParseRPCRequest(jsonrpc);
     } catch (const std::exception& e) {
         // RPC-002 FIX: Proper error handling for parsing failures
-        RPCResponse rpcResp = RPCResponse::Error(-32700, std::string("Parse error: ") + e.what(), "");
+        // UX: Enhanced error response
+        std::vector<std::string> recovery = {
+            "Check JSON syntax",
+            "Verify Content-Type is application/json",
+            "Ensure request follows JSON-RPC 2.0 format"
+        };
+        RPCResponse rpcResp = RPCResponse::ErrorStructured(-32700, 
+            std::string("Parse error: ") + e.what(), "", "RPC-PARSE-ERROR", recovery);
         std::string response = BuildHTTPResponse(SerializeResponse(rpcResp));
         send(clientSocket, response.c_str(), response.size(), 0);
         return;
     } catch (...) {
-        RPCResponse rpcResp = RPCResponse::Error(-32700, "Parse error", "");
+        std::vector<std::string> recovery = {
+            "Check JSON syntax",
+            "Verify request format"
+        };
+        RPCResponse rpcResp = RPCResponse::ErrorStructured(-32700, "Parse error", "", 
+            "RPC-PARSE-ERROR", recovery);
         std::string response = BuildHTTPResponse(SerializeResponse(rpcResp));
         send(clientSocket, response.c_str(), response.size(), 0);
         return;
@@ -660,11 +725,19 @@ void CRPCServer::HandleClient(int clientSocket) {
                                "Connection: close\r\n"
                                "\r\n";
 
-        RPCResponse rpcResp = RPCResponse::Error(
+        // UX: Enhanced error response with recovery guidance
+        std::vector<std::string> recovery = {
+            "Wait 60 seconds before retrying",
+            "Reduce request frequency",
+            "Consider batching multiple operations"
+        };
+        RPCResponse rpcResp = RPCResponse::ErrorStructured(
             -32000,  // Server error code
             std::string("Rate limit exceeded for method '") + rpcReq.method +
                 "'. Please slow down your requests.",
-            rpcReq.id
+            rpcReq.id,
+            "RPC-RATE-LIMIT",
+            recovery
         );
 
         response += SerializeResponse(rpcResp);
@@ -685,14 +758,18 @@ void CRPCServer::HandleClient(int clientSocket) {
                                "Connection: close\r\n"
                                "\r\n";
 
-        RPCResponse rpcResp = RPCResponse::Error(
+        // UX: Enhanced error response with permission guidance
+        std::vector<std::string> recovery = {
+            "Contact administrator to grant required permissions",
+            "Verify you are using the correct user account",
+            "Check role-based access control configuration"
+        };
+        RPCResponse rpcResp = RPCResponse::ErrorStructured(
             -32000,  // Server error code
-            std::string("Insufficient permissions for method '") + rpcReq.method +
-                "'. Required: " +
-                std::to_string(m_permissions->GetMethodPermissions(rpcReq.method)) +
-                ", User has: " + std::to_string(userPermissions) +
-                " (role: " + CRPCPermissions::GetRoleName(userPermissions) + ")",
-            rpcReq.id
+            std::string("Insufficient permissions for method '") + rpcReq.method + "'",
+            rpcReq.id,
+            "RPC-PERMISSION-DENIED",
+            recovery
         );
 
         response += SerializeResponse(rpcResp);
@@ -1047,7 +1124,15 @@ RPCResponse CRPCServer::ExecuteRPC(const RPCRequest& request) {
     // Find handler
     auto it = m_handlers.find(request.method);
     if (it == m_handlers.end()) {
-        return RPCResponse::Error(-32601, "Method not found", request.id);
+        // UX: Enhanced error for method not found
+        std::vector<std::string> recovery = {
+            "Check method name spelling",
+            "Verify method is available in this version",
+            "Use 'help' method to list available methods"
+        };
+        return RPCResponse::ErrorStructured(-32601, 
+            "Method not found: " + request.method, request.id,
+            "RPC-METHOD-NOT-FOUND", recovery);
     }
 
     // Execute handler
@@ -2795,9 +2880,83 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
         }
     }
 
-    // TODO: Integrate with network manager when available
-    // For now, just return success
-    return "null";
+    // Validate command
+    if (command != "add" && command != "remove" && command != "onetry") {
+        throw std::runtime_error("Invalid command. Must be 'add', 'remove', or 'onetry'");
+    }
+
+    // Parse IP:port from node_str
+    std::string ip_str;
+    uint16_t port = 18444;  // Default testnet port
+
+    size_t port_sep = node_str.rfind(':');
+    if (port_sep != std::string::npos) {
+        ip_str = node_str.substr(0, port_sep);
+        try {
+            port = static_cast<uint16_t>(std::stoi(node_str.substr(port_sep + 1)));
+        } catch (...) {
+            throw std::runtime_error("Invalid port number in node address");
+        }
+    } else {
+        ip_str = node_str;
+    }
+
+    // Check if connection_manager is available
+    if (!g_node_context.connection_manager) {
+        throw std::runtime_error("Connection manager not initialized");
+    }
+
+    if (command == "remove") {
+        // Find and disconnect peer by IP
+        if (!g_peer_manager) {
+            throw std::runtime_error("Peer manager not initialized");
+        }
+
+        // Find peer by IP address
+        auto peers = g_peer_manager->GetAllPeers();
+        bool found = false;
+        for (const auto& peer : peers) {
+            // Compare IP address
+            std::string peer_ip = peer->addr.ToStringIP();
+            if (peer_ip == ip_str) {
+                g_node_context.connection_manager->DisconnectPeer(peer->id, "addnode remove");
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            throw std::runtime_error("Node not found: " + node_str);
+        }
+
+        return "null";  // Success (null in JSON-RPC means success with no return value)
+    }
+
+    // For "add" and "onetry" - connect to the peer
+    // Parse IP address using inet_pton
+    struct in_addr ipv4_addr;
+    if (inet_pton(AF_INET, ip_str.c_str(), &ipv4_addr) != 1) {
+        throw std::runtime_error("Invalid IPv4 address: " + ip_str);
+    }
+
+    // Create CAddress
+    NetProtocol::CAddress addr;
+    uint32_t ipv4 = ntohl(ipv4_addr.s_addr);
+    addr.SetIPv4(ipv4);
+    addr.port = port;
+    addr.services = NetProtocol::NODE_NETWORK;
+    addr.time = static_cast<uint32_t>(time(nullptr));
+
+    // Connect to peer
+    int peer_id = g_node_context.connection_manager->ConnectToPeer(addr);
+
+    if (peer_id < 0) {
+        throw std::runtime_error("Failed to connect to node: " + node_str);
+    }
+
+    std::cout << "[RPC] addnode: Connected to " << node_str << " (peer_id=" << peer_id << ")" << std::endl;
+
+    return "null";  // Success
 }
 
 // ============================================================================

@@ -5,17 +5,30 @@
 #define DILITHION_NODE_IBD_COORDINATOR_H
 
 #include <chrono>
+#include <string>
 
+// Forward declarations
 class CChainState;
-class CHeadersManager;
-class CBlockFetcher;
-class CPeerManager;
-class CConnectionManager;
-class CNetMessageProcessor;
+class NodeContext;
+
+/**
+ * @brief IBD State Machine
+ *
+ * Phase 5.1: State machine for tracking IBD phases
+ */
+enum class IBDState {
+    IDLE,              // No IBD needed (chain is synced)
+    WAITING_FOR_PEERS, // Waiting for peers to connect
+    HEADERS_SYNC,      // Syncing headers from peers
+    BLOCKS_DOWNLOAD,   // Downloading blocks
+    COMPLETE           // IBD complete
+};
 
 /**
  * @brief Encapsulates the Initial Block Download coordination logic.
  *
+ * Phase 5.1: Encapsulates IBD logic from main loop
+ * 
  * Dilithion originally embedded all block download orchestration inside
  * the main node loop.  This class collects the state (backoff counters,
  * header deltas) and exposes a single Tick() entry point, mirroring the
@@ -23,17 +36,19 @@ class CNetMessageProcessor;
  */
 class CIbdCoordinator {
 public:
-    CIbdCoordinator(CChainState& chainstate,
-                    CHeadersManager& headers_manager,
-                    CBlockFetcher& block_fetcher,
-                    CPeerManager& peer_manager,
-                    CConnectionManager& connection_manager,
-                    CNetMessageProcessor& message_processor);
+    /**
+     * @brief Constructor using NodeContext (Phase 5.1)
+     * 
+     * Uses NodeContext to access all required components, following
+     * the pattern established in Phase 1.2.
+     */
+    CIbdCoordinator(CChainState& chainstate, NodeContext& node_context);
 
     /**
      * @brief Executes one maintenance pass of block download coordination.
      *
      * Call this from the main event loop once per second.  It handles:
+     *  - State machine transitions
      *  - Exponential backoff when no peers are available.
      *  - Queueing headers-ahead blocks for download.
      *  - Dispatching GETDATA requests up to the in-flight limit.
@@ -41,7 +56,25 @@ public:
      */
     void Tick();
 
+    /**
+     * @brief Get current IBD state
+     */
+    IBDState GetState() const { return m_state; }
+
+    /**
+     * @brief Get human-readable state name
+     */
+    std::string GetStateName() const;
+
+    /**
+     * @brief Check if IBD is active (not IDLE or COMPLETE)
+     */
+    bool IsActive() const {
+        return m_state != IBDState::IDLE && m_state != IBDState::COMPLETE;
+    }
+
 private:
+    void UpdateState();
     void ResetBackoffOnNewHeaders(int header_height);
     bool ShouldAttemptDownload() const;
     void HandleNoPeers(std::chrono::steady_clock::time_point now);
@@ -51,12 +84,12 @@ private:
     void RetryTimeoutsAndStalls();
 
     CChainState& m_chainstate;
-    CHeadersManager& m_headers_manager;
-    CBlockFetcher& m_block_fetcher;
-    CPeerManager& m_peer_manager;
-    CConnectionManager& m_connection_manager;
-    CNetMessageProcessor& m_message_processor;
+    NodeContext& m_node_context;
 
+    // State machine
+    IBDState m_state{IBDState::IDLE};
+
+    // Backoff state
     int m_last_header_height{0};
     int m_ibd_no_peer_cycles{0};
     std::chrono::steady_clock::time_point m_last_ibd_attempt;

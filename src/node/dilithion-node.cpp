@@ -45,6 +45,11 @@
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
+#include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
+#include <util/config.h>  // Phase 10: Configuration system
+#include <util/config_validator.h>  // UX: Configuration validation
+#include <util/error_format.h>  // User experience: Better error messages
+#include <util/bench.h>  // Performance: Benchmarking
 
 #include <iostream>
 #include <fstream>
@@ -96,6 +101,7 @@ extern NodeState g_node_state;
 
 // Phase 1.2: NodeContext for centralized global state management (Bitcoin Core pattern)
 #include <core/node_context.h>
+#include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 extern NodeContext g_node_context;
 
 // Global async broadcaster pointer (initialized in main)
@@ -199,9 +205,10 @@ void SignalHandler(int signal) {
     std::cout << "\nReceived signal " << signal << ", shutting down gracefully..." << std::endl;
     g_node_state.running = false;
 
-    if (g_node_state.rpc_server) {
-        g_node_state.rpc_server->Stop();
-    }
+        if (g_node_state.rpc_server) {
+            g_node_state.rpc_server->Stop();
+            std::cout << " ✓" << std::endl;
+        }
     if (g_node_state.miner) {
         g_node_state.miner->StopMining();
     }
@@ -223,6 +230,8 @@ struct NodeConfig {
     int mining_threads = 0;         // 0 = auto-detect
     std::vector<std::string> connect_nodes;  // --connect nodes (exclusive)
     std::vector<std::string> add_nodes;      // --addnode nodes (additional)
+    bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
+    bool rescan = false;            // Phase 4.2: Rescan wallet transactions
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -239,8 +248,10 @@ struct NodeConfig {
                 try {
                     int port = std::stoi(arg.substr(10));
                     if (port < Consensus::MIN_PORT || port > Consensus::MAX_PORT) {
-                        std::cerr << "Error: Invalid RPC port (must be " << Consensus::MIN_PORT
-                                  << "-" << Consensus::MAX_PORT << "): " << arg << std::endl;
+                        ErrorMessage error = CErrorFormatter::ConfigError("rpcport", 
+                            "Port must be between " + std::to_string(Consensus::MIN_PORT) + 
+                            " and " + std::to_string(Consensus::MAX_PORT));
+                        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
                         return false;
                     }
                     rpcport = static_cast<uint16_t>(port);
@@ -304,6 +315,14 @@ struct NodeConfig {
                     }
                 }
             }
+            else if (arg == "--reindex" || arg == "-reindex") {
+                // Phase 4.2: Rebuild block index from blocks on disk
+                reindex = true;
+            }
+            else if (arg == "--rescan" || arg == "-rescan") {
+                // Phase 4.2: Rescan wallet transactions
+                rescan = true;
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -337,6 +356,11 @@ struct NodeConfig {
         std::cout << "  --mine                Start mining automatically" << std::endl;
         std::cout << "  --threads=<n|auto>    Mining threads (number or 'auto' to detect)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
+        std::cout << std::endl;
+        std::cout << "Configuration:" << std::endl;
+        std::cout << "  Configuration file: dilithion.conf (in data directory)" << std::endl;
+        std::cout << "  Environment variables: DILITHION_* (e.g., DILITHION_RPCPORT=8332)" << std::endl;
+        std::cout << "  Priority: Command-line > Environment > Config file > Default" << std::endl;
         std::cout << std::endl;
         std::cout << "Network Defaults:" << std::endl;
         std::cout << "  Mainnet:  datadir=.dilithion         port=8444  rpcport=8332" << std::endl;
@@ -527,6 +551,125 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Phase 10: Load configuration from dilithion.conf
+    // Determine initial data directory based on command-line testnet flag
+    // (Config file may override testnet, but we need initial location to load config)
+    std::string initial_datadir = config.datadir;
+    if (initial_datadir.empty()) {
+        initial_datadir = GetDefaultDataDir(config.testnet);
+    }
+    
+    // Load config file from initial datadir
+    std::string config_file = GetConfigFilePath(initial_datadir);
+    CConfigParser config_parser;
+    if (!config_parser.LoadConfigFile(config_file)) {
+        std::cerr << "ERROR: Failed to load configuration file: " << config_file << std::endl;
+        return 1;
+    }
+    
+    // Apply config file and environment variable settings (only if not set via command-line)
+    // Priority: Command-line > Environment > Config file > Default
+    
+    // Testnet (only if not set via command-line)
+    // Note: This may change the datadir location, but we've already loaded config from initial location
+    if (!config.testnet) {
+        config.testnet = config_parser.GetBool("testnet", false);
+    }
+    
+    // Data directory (only if not set via command-line)
+    // If testnet changed, update datadir accordingly
+    if (config.datadir.empty()) {
+        std::string conf_datadir = config_parser.GetString("datadir", "");
+        if (!conf_datadir.empty()) {
+            config.datadir = conf_datadir;
+        } else {
+            // Use default based on current testnet setting
+            config.datadir = GetDefaultDataDir(config.testnet);
+        }
+    }
+    
+    // RPC port (only if not set via command-line)
+    if (config.rpcport == 0) {
+        int64_t conf_rpcport = config_parser.GetInt64("rpcport", 0);
+        if (conf_rpcport > 0 && conf_rpcport <= 65535) {
+            config.rpcport = static_cast<uint16_t>(conf_rpcport);
+        }
+    }
+    
+    // P2P port (only if not set via command-line)
+    if (config.p2pport == 0) {
+        int64_t conf_p2pport = config_parser.GetInt64("port", 0);
+        if (conf_p2pport > 0 && conf_p2pport <= 65535) {
+            config.p2pport = static_cast<uint16_t>(conf_p2pport);
+        }
+    }
+    
+    // Mining (only if not set via command-line)
+    if (!config.start_mining) {
+        config.start_mining = config_parser.GetBool("mine", false);
+    }
+    
+    // Mining threads (only if not set via command-line)
+    if (config.mining_threads == 0) {
+        std::string conf_threads = config_parser.GetString("threads", "");
+        if (!conf_threads.empty()) {
+            if (conf_threads == "auto" || conf_threads == "AUTO") {
+                config.mining_threads = 0;  // Auto-detect
+            } else {
+                int64_t threads = config_parser.GetInt64("threads", 0);
+                if (threads > 0 && threads <= 256) {
+                    config.mining_threads = static_cast<int>(threads);
+                }
+            }
+        }
+    }
+    
+    // Add nodes from config file (append to command-line nodes)
+    std::vector<std::string> conf_addnodes = config_parser.GetList("addnode");
+    for (const auto& node : conf_addnodes) {
+        if (std::find(config.add_nodes.begin(), config.add_nodes.end(), node) == config.add_nodes.end()) {
+            config.add_nodes.push_back(node);
+        }
+    }
+    
+    // Connect nodes from config file (append to command-line nodes)
+    std::vector<std::string> conf_connect = config_parser.GetList("connect");
+    for (const auto& node : conf_connect) {
+        if (std::find(config.connect_nodes.begin(), config.connect_nodes.end(), node) == config.connect_nodes.end()) {
+            config.connect_nodes.push_back(node);
+        }
+    }
+    
+    // Reindex (only if not set via command-line)
+    if (!config.reindex) {
+        config.reindex = config_parser.GetBool("reindex", false);
+    }
+    
+    // Rescan (only if not set via command-line)
+    if (!config.rescan) {
+        config.rescan = config_parser.GetBool("rescan", false);
+    }
+    
+    if (config_parser.IsLoaded()) {
+        LogPrintf(ALL, INFO, "Configuration loaded from: %s", config_file.c_str());
+    }
+    
+    // UX: Validate configuration values
+    std::vector<ConfigValidationResult> validation_results = CConfigValidator::ValidateAll(config_parser);
+    bool has_errors = false;
+    for (const auto& result : validation_results) {
+        if (!result.valid) {
+            has_errors = true;
+            ErrorMessage error = CErrorFormatter::ConfigError(result.field_name, result.error_message);
+            error.recovery_steps = result.suggestions;
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+        }
+    }
+    if (has_errors) {
+        std::cerr << std::endl << "Please fix configuration errors and restart the node." << std::endl;
+        return 1;
+    }
+
     std::cout << "======================================" << std::endl;
     std::cout << "Dilithion Node v1.0.16" << std::endl;
     std::cout << "Post-Quantum Cryptocurrency" << std::endl;
@@ -542,7 +685,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Network: MAINNET" << std::endl;
     }
 
-    // Set default datadir, ports from chain params if not specified
+    // Phase 10: Set default datadir, ports from chain params if not specified
+    // (Config file values already applied above, now apply chain params as final fallback)
     if (config.datadir.empty()) {
         config.datadir = Dilithion::g_chainParams->dataDir;
     }
@@ -594,8 +738,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Initializing blockchain storage..." << std::endl;
         CBlockchainDB blockchain;
         if (!blockchain.Open(config.datadir + "/blocks")) {
-            LogPrintf(ALL, ERROR, "Failed to open blockchain database");
-            std::cerr << "Failed to open blockchain database" << std::endl;
+            ErrorMessage error = CErrorFormatter::DatabaseError("open blockchain database", config.datadir + "/blocks");
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+            LogPrintf(ALL, ERROR, "%s", CErrorFormatter::FormatForLog(error).c_str());
             return 1;
         }
         LogPrintf(ALL, INFO, "Blockchain database opened successfully");
@@ -609,7 +754,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Initializing UTXO set..." << std::endl;
         CUTXOSet utxo_set;
         if (!utxo_set.Open(config.datadir + "/chainstate")) {
-            std::cerr << "Failed to open UTXO database" << std::endl;
+            ErrorMessage error = CErrorFormatter::DatabaseError("open UTXO database", config.datadir + "/chainstate");
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+            LogPrintf(ALL, ERROR, "%s", CErrorFormatter::FormatForLog(error).c_str());
             return 1;
         }
         std::cout << "  [OK] UTXO set opened" << std::endl;
@@ -685,12 +832,21 @@ int main(int argc, char* argv[]) {
 
         // Load and verify genesis block
 load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
-        std::cout << "Loading genesis block..." << std::endl;
+        std::cout << "[1/6] Loading genesis block..." << std::flush;
         CBlock genesis = Genesis::CreateGenesisBlock();
 
         if (!Genesis::IsGenesisBlock(genesis)) {
-            std::cerr << "ERROR: Genesis block verification failed!" << std::endl;
-            std::cerr << "This indicates a critical configuration problem." << std::endl;
+            ErrorMessage error = CErrorFormatter::ValidationError("genesis block", 
+                "Genesis block verification failed. This indicates a critical configuration problem.");
+            error.severity = ErrorSeverity::CRITICAL;
+            error.recovery_steps = {
+                "Verify you are using the correct network (mainnet/testnet)",
+                "Check that blockchain data directory is correct",
+                "Try deleting blockchain data and re-syncing",
+                "Report this issue if it persists"
+            };
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+            LogPrintf(ALL, ERROR, "%s", CErrorFormatter::FormatForLog(error).c_str());
             delete Dilithion::g_chainParams;
             return 1;
         }
@@ -698,6 +854,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "  Network: " << Dilithion::g_chainParams->GetNetworkName() << std::endl;
         std::cout << "  Genesis hash: " << genesis.GetHash().GetHex() << std::endl;
         std::cout << "  Genesis time: " << genesis.nTime << std::endl;
+        std::cout << " ✓" << std::endl;
         std::cout << "  [OK] Genesis block verified" << std::endl;
 
         // Initialize blockchain with genesis block if needed
@@ -707,7 +864,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // Save genesis block
             if (!blockchain.WriteBlock(genesisHash, genesis)) {
-                std::cerr << "ERROR: Failed to write genesis block to database!" << std::endl;
+                ErrorMessage error = CErrorFormatter::DatabaseError("write genesis block", 
+                    "Failed to write genesis block to database");
+                error.severity = ErrorSeverity::CRITICAL;
+                std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+                LogPrintf(ALL, ERROR, "%s", CErrorFormatter::FormatForLog(error).c_str());
                 delete Dilithion::g_chainParams;
                 return 1;
             }
@@ -764,8 +925,40 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         } else {
             std::cout << "  [OK] Genesis block already in database" << std::endl;
 
+            // Phase 4.2: Handle -reindex flag
+            if (config.reindex) {
+                LogPrintf(ALL, INFO, "Rebuilding block index from blocks on disk (--reindex)");
+                std::cout << "\n==========================================================" << std::endl;
+                std::cout << "REINDEX: Rebuilding block index from blocks on disk..." << std::endl;
+                std::cout << "==========================================================" << std::endl;
+                
+                // Clear existing block index (but keep blocks)
+                // We'll rebuild the index by reading all blocks
+                std::cout << "  Clearing existing block index..." << std::endl;
+                
+                // Get all block hashes
+                std::vector<uint256> all_blocks;
+                if (!blockchain.GetAllBlockHashes(all_blocks)) {
+                    std::cerr << "ERROR: Failed to enumerate blocks for reindex" << std::endl;
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
+                
+                std::cout << "  Found " << all_blocks.size() << " blocks to reindex" << std::endl;
+                
+                // Rebuild index
+                if (!blockchain.RebuildBlockIndex()) {
+                    std::cerr << "ERROR: Failed to rebuild block index" << std::endl;
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
+                
+                std::cout << "  [OK] Block index rebuilt successfully" << std::endl;
+                std::cout << "==========================================================" << std::endl;
+            }
+
             // Load existing chain state from database
-            std::cout << "Loading chain state from database..." << std::endl;
+            std::cout << "[2/6] Loading chain state from database..." << std::flush;
 
             // Load genesis block index first
             CBlockIndex genesisIndexFromDB;
@@ -774,6 +967,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 auto pgenesisIndex = std::make_unique<CBlockIndex>(genesisIndexFromDB);
                 pgenesisIndex->pprev = nullptr;
                 g_chainstate.AddBlockIndex(genesisHash, std::move(pgenesisIndex));
+                std::cout << " ✓" << std::endl;
                 std::cout << "  Loaded genesis block index (height 0)" << std::endl;
             } else {
                 std::cerr << "ERROR: Cannot load genesis block index from database!" << std::endl;
@@ -806,6 +1000,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     return 1;
                 }
                 g_chainstate.SetTip(pgenesisIndexPtr);
+                std::cout << " ✓" << std::endl;
                 std::cout << "  [OK] Loaded chain state: 1 block (height 0)" << std::endl;
             } else if (!(hashBestBlock.IsNull())) {
                 std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
@@ -1807,10 +2002,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Try to load existing wallet from disk
         bool wallet_loaded = false;
         if (std::filesystem::exists(wallet_path)) {
-            std::cout << "  Loading existing wallet..." << std::endl;
+            std::cout << "[3/6] Loading wallet..." << std::flush;
             std::cout.flush();
             if (wallet.Load(wallet_path)) {
                 wallet_loaded = true;
+                std::cout << " ✓" << std::endl;
                 std::cout << "  [OK] Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
                 std::cout << "       Best block: height " << wallet.GetBestBlockHeight() << std::endl;
                 std::cout.flush();
@@ -2104,7 +2300,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Phase 2.5: Start P2P networking server
-        std::cout << "Starting P2P networking server..." << std::endl;
+        std::cout << "[4/6] Starting P2P networking server..." << std::flush;
 
         // Set running flag before starting threads
         g_node_state.running = true;
@@ -2130,6 +2326,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return 1;
         }
 
+        std::cout << " ✓" << std::endl;
         std::cout << "  [OK] P2P server listening on port " << config.p2pport << std::endl;
 
         // Set socket to non-blocking for graceful shutdown
@@ -2138,9 +2335,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Launch P2P accept thread
         std::thread p2p_thread([&p2p_socket, &connection_manager]() {
-            std::cout << "  [OK] P2P accept thread started" << std::endl;
+            // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
+            try {
+                std::cout << "  [OK] P2P accept thread started" << std::endl;
 
-            while (g_node_state.running) {
+                while (g_node_state.running) {
                 // Accept new connection (non-blocking)
                 auto client = p2p_socket.Accept();
 
@@ -2249,7 +2448,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             }
 
-            std::cout << "  P2P accept thread stopping..." << std::endl;
+                std::cout << "  P2P accept thread stopping..." << std::endl;
+            } catch (const std::exception& e) {
+                // Phase 1.1: Prevent silent thread crashes
+                LogPrintf(NET, ERROR, "P2P accept thread exception: %s", e.what());
+                std::cerr << "[P2P-Accept] FATAL: Thread exception: " << e.what() << std::endl;
+            } catch (...) {
+                LogPrintf(NET, ERROR, "P2P accept thread unknown exception");
+                std::cerr << "[P2P-Accept] FATAL: Unknown thread exception" << std::endl;
+            }
         });
 
         // Helper function to parse IPv4 address string to uint32_t
@@ -2430,9 +2637,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Launch P2P message receive thread
         // BUG #85 FIX: Add exception handling to prevent std::terminate
         std::thread p2p_recv_thread([&connection_manager]() {
-            std::cout << "  [OK] P2P receive thread started" << std::endl;
+            // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
+            try {
+                std::cout << "  [OK] P2P receive thread started" << std::endl;
 
-            while (g_node_state.running) {
+                while (g_node_state.running) {
                 try {
                     // Get all connected peers
                     auto peers = g_node_context.peer_manager->GetConnectedPeers();
@@ -2474,20 +2683,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             }
 
-            std::cout << "  P2P receive thread stopping..." << std::endl;
+                std::cout << "  P2P receive thread stopping..." << std::endl;
+            } catch (const std::exception& e) {
+                // Phase 1.1: Prevent silent thread crashes (outer catch for unexpected exceptions)
+                LogPrintf(NET, ERROR, "P2P receive thread exception: %s", e.what());
+                std::cerr << "[P2P-Recv] FATAL: Thread exception: " << e.what() << std::endl;
+            } catch (...) {
+                LogPrintf(NET, ERROR, "P2P receive thread unknown exception");
+                std::cerr << "[P2P-Recv] FATAL: Unknown thread exception" << std::endl;
+            }
         });
 
         // Launch P2P maintenance thread (ping/pong keepalive, reconnection, score decay)
         // BUG #49 FIX: Add automatic peer reconnection and misbehavior score decay
         // BUG #85 FIX: Add exception handling to prevent std::terminate
         std::thread p2p_maint_thread([&connection_manager, &feeler_manager]() {
-            std::cout << "  [OK] P2P maintenance thread started" << std::endl;
+            // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
+            try {
+                std::cout << "  [OK] P2P maintenance thread started" << std::endl;
 
-            int cycles_without_peers = 0;
-            auto last_reconnect_attempt = std::chrono::steady_clock::now();
+                int cycles_without_peers = 0;
+                auto last_reconnect_attempt = std::chrono::steady_clock::now();
 
-            while (g_node_state.running) {
-                try {
+                while (g_node_state.running) {
+                    try {
                     // Send periodic pings, check timeouts
                     connection_manager.PeriodicMaintenance();
 
@@ -2575,9 +2794,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "[P2P-Maint] Unknown exception in maintenance loop" << std::endl;
                     std::this_thread::sleep_for(std::chrono::seconds(5));
                 }
-            }
+                }
 
-            std::cout << "  P2P maintenance thread stopping..." << std::endl;
+                std::cout << "  P2P maintenance thread stopping..." << std::endl;
+            } catch (const std::exception& e) {
+                // Phase 1.1: Prevent silent thread crashes
+                LogPrintf(NET, ERROR, "P2P maintenance thread exception: %s", e.what());
+                std::cerr << "[P2P-Maintenance] FATAL: Thread exception: " << e.what() << std::endl;
+            } catch (...) {
+                LogPrintf(NET, ERROR, "P2P maintenance thread unknown exception");
+                std::cerr << "[P2P-Maintenance] FATAL: Unknown thread exception" << std::endl;
+            }
         });
 
         // Phase 4: Initialize RPC server
@@ -2671,6 +2898,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "Press Ctrl+C to stop" << std::endl;
         std::cout << std::endl;
 
+        // Phase 5.1: Initialize IBD Coordinator (must be after all components are ready)
+        CIbdCoordinator ibd_coordinator(g_chainstate, g_node_context);
+        LogPrintf(IBD, INFO, "IBD Coordinator initialized");
+
         // Main loop
         while (g_node_state.running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -2727,7 +2958,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 if (!IsInitialBlockDownload()) {
                     // IBD complete - start mining!
-                    std::cout << "[IBD] Sync complete! Starting mining..." << std::endl;
+                    std::cout << "[5/6] IBD sync complete!" << std::endl;
+                    std::cout << "[6/6] Starting mining..." << std::flush;
 
                     // BUG #72 FIX: Wait for FULL mode before starting mining threads
                     // Following XMRig's proven pattern: "dataset ready" before thread creation
@@ -2778,143 +3010,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // ========================================
             // BLOCK DOWNLOAD COORDINATION (IBD)
             // ========================================
-            // BUG #49 FIX: Exponential backoff when no peers available
-            // BUG #67 FIX: Reset backoff when header height increases (new chain discovered)
-            static int ibd_no_peer_cycles = 0;
-            static auto last_ibd_attempt = std::chrono::steady_clock::now();
-            static int last_header_height = 0;
-
-            if (g_node_context.headers_manager && g_node_context.block_fetcher) {
-                int headerHeight = g_node_context.headers_manager->GetBestHeight();
-                int chainHeight = g_chainstate.GetHeight();
-
-                // BUG #67 FIX: Reset backoff when new headers arrive that extend beyond our chain
-                if (headerHeight > last_header_height) {
-                    ibd_no_peer_cycles = 0;
-                    last_ibd_attempt = std::chrono::steady_clock::time_point();
-                }
-                last_header_height = headerHeight;
-
-                // If headers are ahead, we need to download blocks
-                if (headerHeight > chainHeight) {
-                    // Check if we should attempt IBD based on backoff
-                    auto now = std::chrono::steady_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_ibd_attempt);
-
-                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
-                    int backoff_seconds = std::min(30, (1 << std::min(ibd_no_peer_cycles, 5)));
-
-                    if (elapsed.count() >= backoff_seconds) {
-                        // Check if we have any connected peers
-                        size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
-
-                        if (peer_count == 0) {
-                            // No peers available
-                            if (ibd_no_peer_cycles == 0) {
-                                std::cout << "[IBD] No peers available for block download - entering backoff mode" << std::endl;
-                            }
-                            ibd_no_peer_cycles++;
-                            last_ibd_attempt = now;
-
-                            // Log periodically (every 10th cycle)
-                            if (ibd_no_peer_cycles % 10 == 0) {
-                                std::cout << "[IBD] Still waiting for peers (backoff: " << backoff_seconds
-                                          << "s, attempts: " << ibd_no_peer_cycles << ")" << std::endl;
-                            }
-                        } else {
-                            // We have peers, attempt IBD
-                            if (ibd_no_peer_cycles > 0) {
-                                std::cout << "[IBD] Peers available - resuming block download" << std::endl;
-                                ibd_no_peer_cycles = 0;  // Reset backoff
-                            }
-
-                            std::cout << "[IBD] Headers ahead of chain - downloading blocks (header="
-                                      << headerHeight << " chain=" << chainHeight << ")" << std::endl;
-
-                            // Queue missing blocks for download (only queue next batch to avoid memory issues)
-                            int blocksToQueue = std::min(100, headerHeight - chainHeight);  // Queue max 100 at a time
-                            std::cout << "[IBD] Queueing " << blocksToQueue << " blocks for download..." << std::endl;
-
-                            for (int h = chainHeight + 1; h <= chainHeight + blocksToQueue; h++) {
-                                // Get header hash at this height
-                                std::vector<uint256> hashesAtHeight = g_node_context.headers_manager->GetHeadersAtHeight(h);
-
-                                for (const uint256& hash : hashesAtHeight) {
-                                    // Only queue if we don't already have the block
-                                    if (!g_chainstate.HasBlockIndex(hash) &&
-                                        !g_node_context.block_fetcher->IsQueued(hash) &&
-                                        !g_node_context.block_fetcher->IsDownloading(hash)) {
-                                        g_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
-                                        std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16) << "... at height " << h << std::endl;
-                                    }
-                                }
-                            }
-
-                            // Get next blocks to fetch (respects 16 in-flight limit)
-                            auto blocksToFetch = g_node_context.block_fetcher->GetNextBlocksToFetch(16);
-
-                            if (blocksToFetch.empty() && g_node_context.block_fetcher->GetBlocksInFlight() == 0) {
-                                // Nothing to fetch and nothing in flight - might have no suitable peers
-                                ibd_no_peer_cycles++;
-                                last_ibd_attempt = now;
-                                std::cout << "[IBD] No blocks could be fetched (no suitable peers?)" << std::endl;
-                            } else {
-                                std::cout << "[IBD] Fetching " << blocksToFetch.size() << " blocks (max 16 in-flight)..." << std::endl;
-
-                                // For each block, select peer and send GETDATA
-                                int successful_requests = 0;
-                                for (const auto& [hash, height] : blocksToFetch) {
-                                    // BUG #64: Get preferred peer (the one that announced this block)
-                                    NodeId preferred = g_node_context.block_fetcher->GetPreferredPeer(hash);
-                                    // Select best peer for download, preferring announcing peer
-                                    NodeId peer = g_node_context.block_fetcher->SelectPeerForDownload(hash, preferred);
-                                    if (peer != -1) {
-                                        // Request block from fetcher (updates in-flight tracking)
-                                        if (g_node_context.block_fetcher->RequestBlock(peer, hash, height)) {
-                                            // Send GETDATA message
-                                            std::vector<NetProtocol::CInv> getdata;
-                                            getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, hash));
-
-                                            CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
-                                            connection_manager.SendMessage(peer, msg);
-                                            std::cout << "[IBD] Sent GETDATA for block " << hash.GetHex().substr(0, 16) << "... (height " << height << ") to peer " << peer << std::endl;
-                                            successful_requests++;
-                                        }
-                                    } else {
-                                        // BUG #63 FIX: Re-queue block if no peer available
-                                        // Without this, blocks are LOST - removed from queue but never added to in-flight
-                                        // BUG #64: Use -1 for announcing_peer since we lost track, true for high priority
-                                        g_node_context.block_fetcher->QueueBlockForDownload(hash, height, -1, true);
-                                    }
-                                }
-
-                                if (successful_requests == 0 && !blocksToFetch.empty()) {
-                                    // Had blocks to fetch but couldn't send any requests
-                                    ibd_no_peer_cycles++;
-                                    last_ibd_attempt = now;
-                                    std::cout << "[IBD] Could not send any block requests (no suitable peers)" << std::endl;
-                                }
-                            }
-
-                            // Check for timed-out block requests (60 second timeout)
-                            auto timedOut = g_node_context.block_fetcher->CheckTimeouts();
-                            if (!timedOut.empty()) {
-                                std::cout << "[BlockFetcher] " << timedOut.size() << " block(s) timed out, retrying..." << std::endl;
-                                g_node_context.block_fetcher->RetryTimedOutBlocks(timedOut);
-                            }
-
-                            // BUG #69: Check for stalling peers with adaptive timeouts
-                            // CNodeStateManager uses per-peer adaptive timeouts (2-64 seconds)
-                            // and disconnects peers that stall too many times
-                            auto stallingPeers = CNodeStateManager::Get().CheckForStallingPeers();
-                            for (NodeId stalling_peer : stallingPeers) {
-                                std::cout << "[NodeState] Disconnecting stalling peer " << stalling_peer << std::endl;
-                                connection_manager.DisconnectPeer(stalling_peer, "stalling block download");
-                            }
-                        }
-                    }
-                }
-            }
+            // Phase 5.1: Use IBD Coordinator instead of inline logic
+            // This encapsulates all IBD logic (backoff, queueing, fetching, retries)
+            ibd_coordinator.Tick();
 
             // Print mining stats every 10 seconds if mining
             // BUG #49: Add isolation detection when mining
@@ -2965,19 +3063,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Shutdown
         std::cout << std::endl;
-        std::cout << "Shutting down..." << std::endl;
+        std::cout << "[Shutdown] Initiating graceful shutdown..." << std::endl;
 
         if (miner.IsMining()) {
-            std::cout << "  Stopping mining..." << std::endl;
+            std::cout << "[Shutdown] Stopping mining..." << std::flush;
             miner.StopMining();
+            std::cout << " ✓" << std::endl;
         }
 
-        std::cout << "  Stopping P2P server..." << std::endl;
+        std::cout << "[Shutdown] Stopping P2P server..." << std::flush;
         connection_manager.Cleanup();  // Close all peer sockets
         p2p_socket.Close();
         
         // Phase 1.2: Shutdown NodeContext (Bitcoin Core pattern)
-        std::cout << "  Shutting down NodeContext..." << std::endl;
+        std::cout << "[Shutdown] NodeContext shutdown complete" << std::endl;
         g_node_context.Shutdown();
         if (p2p_thread.joinable()) {
             p2p_thread.join();
@@ -3000,7 +3099,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Clear peer manager pointer (ownership in g_node_context)
         g_peer_manager = nullptr;
 
-        std::cout << "  Stopping RPC server..." << std::endl;
+        std::cout << "[Shutdown] Stopping RPC server..." << std::flush;
         rpc_server.Stop();
 
         std::cout << "  Closing UTXO database..." << std::endl;
@@ -3020,7 +3119,39 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "Dilithion node stopped cleanly" << std::endl;
 
     } catch (const std::exception& e) {
-        std::cerr << "Fatal error: " << e.what() << std::endl;
+        // Phase 2.2: Enhanced crash diagnostics
+        LogPrintf(ALL, ERROR, "===========================================================");
+        LogPrintf(ALL, ERROR, "FATAL ERROR: Unhandled exception in main()");
+        LogPrintf(ALL, ERROR, "Exception type: std::exception");
+        LogPrintf(ALL, ERROR, "Exception message: %s", e.what());
+        
+        // Log stack trace in debug builds
+        #ifdef DEBUG
+        try {
+            std::string stackTrace = GetStackTrace(1);  // Skip this frame
+            LogPrintf(ALL, ERROR, "Stack trace:");
+            LogPrintf(ALL, ERROR, "%s", stackTrace.c_str());
+        } catch (...) {
+            LogPrintf(ALL, ERROR, "Failed to capture stack trace");
+        }
+        #endif
+        
+        LogPrintf(ALL, ERROR, "===========================================================");
+        
+        // Also print to stderr for immediate visibility
+        std::cerr << "\n===========================================================" << std::endl;
+        std::cerr << "FATAL ERROR: Unhandled exception in main()" << std::endl;
+        std::cerr << "Exception type: std::exception" << std::endl;
+        std::cerr << "Exception message: " << e.what() << std::endl;
+        #ifdef DEBUG
+        try {
+            std::string stackTrace = GetStackTrace(1);
+            std::cerr << "\nStack trace:\n" << stackTrace << std::endl;
+        } catch (...) {
+            std::cerr << "Failed to capture stack trace" << std::endl;
+        }
+        #endif
+        std::cerr << "===========================================================" << std::endl;
 
         // Cleanup on error
         if (g_tx_relay_manager) {
@@ -3030,6 +3161,54 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 1.2: All cleanup handled by NodeContext.Shutdown()
         // No manual cleanup needed
 
+        if (Dilithion::g_chainParams) {
+            delete Dilithion::g_chainParams;
+            Dilithion::g_chainParams = nullptr;
+        }
+
+        // Shutdown logging system
+        CLogger::GetInstance().Shutdown();
+
+        return 1;
+    } catch (...) {
+        // Phase 2.2: Catch all other exceptions (non-std::exception)
+        LogPrintf(ALL, ERROR, "===========================================================");
+        LogPrintf(ALL, ERROR, "FATAL ERROR: Unknown exception in main()");
+        LogPrintf(ALL, ERROR, "Exception type: unknown (not std::exception)");
+        
+        // Log stack trace in debug builds
+        #ifdef DEBUG
+        try {
+            std::string stackTrace = GetStackTrace(1);  // Skip this frame
+            LogPrintf(ALL, ERROR, "Stack trace:");
+            LogPrintf(ALL, ERROR, "%s", stackTrace.c_str());
+        } catch (...) {
+            LogPrintf(ALL, ERROR, "Failed to capture stack trace");
+        }
+        #endif
+        
+        LogPrintf(ALL, ERROR, "===========================================================");
+        
+        // Also print to stderr for immediate visibility
+        std::cerr << "\n===========================================================" << std::endl;
+        std::cerr << "FATAL ERROR: Unknown exception in main()" << std::endl;
+        std::cerr << "Exception type: unknown (not std::exception)" << std::endl;
+        #ifdef DEBUG
+        try {
+            std::string stackTrace = GetStackTrace(1);
+            std::cerr << "\nStack trace:\n" << stackTrace << std::endl;
+        } catch (...) {
+            std::cerr << "Failed to capture stack trace" << std::endl;
+        }
+        #endif
+        std::cerr << "===========================================================" << std::endl;
+
+        // Cleanup on error
+        if (g_tx_relay_manager) {
+            delete g_tx_relay_manager;
+            g_tx_relay_manager = nullptr;
+        }
+        // Phase 1.2: All cleanup handled by NodeContext.Shutdown()
         if (Dilithion::g_chainParams) {
             delete Dilithion::g_chainParams;
             Dilithion::g_chainParams = nullptr;

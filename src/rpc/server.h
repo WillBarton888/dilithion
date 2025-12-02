@@ -57,6 +57,31 @@ struct RPCResponse {
         resp.id = id;
         return resp;
     }
+    
+    // UX: Enhanced error response with structured information
+    static RPCResponse ErrorStructured(int code, const std::string& message, 
+                                       const std::string& id,
+                                       const std::string& error_code = "",
+                                       const std::vector<std::string>& recovery_steps = {}) {
+        RPCResponse resp;
+        std::ostringstream oss;
+        oss << "{\"code\":" << code << ",\"message\":\"" << message << "\"";
+        if (!error_code.empty()) {
+            oss << ",\"error_code\":\"" << error_code << "\"";
+        }
+        if (!recovery_steps.empty()) {
+            oss << ",\"recovery_steps\":[";
+            for (size_t i = 0; i < recovery_steps.size(); ++i) {
+                if (i > 0) oss << ",";
+                oss << "\"" << recovery_steps[i] << "\"";
+            }
+            oss << "]";
+        }
+        oss << "}";
+        resp.error = oss.str();
+        resp.id = id;
+        return resp;
+    }
 };
 
 /**

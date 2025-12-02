@@ -8,6 +8,7 @@
 #include <net/serialize.h>
 #include <net/peers.h>
 #include <net/socket.h>
+#include <net/bandwidth_throttle.h>  // Network: Bandwidth throttling
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <string>
@@ -160,6 +161,10 @@ private:
     // Non-blocking sockets can return partial data, we must accumulate it
     std::map<int, std::vector<uint8_t>> peer_recv_buffers;
     mutable std::mutex cs_recv_buffers;
+    
+    // Network: Connection quality tracking and partition detection
+    CConnectionQualityTracker connection_quality;
+    CPartitionDetector partition_detector;
 
     // Ping tracking
     struct PingInfo {

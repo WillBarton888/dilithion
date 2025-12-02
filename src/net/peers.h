@@ -7,6 +7,8 @@
 #include <net/protocol.h>
 #include <net/addrman.h>  // Bitcoin Core-style address manager
 #include <net/banman.h>   // Bitcoin Core-style ban manager with persistence
+#include <net/peer_discovery.h>  // Network: Enhanced peer discovery
+#include <net/connection_quality.h>  // Network: Connection quality metrics
 #include <util/time.h>
 #include <string>
 #include <vector>
@@ -102,6 +104,12 @@ private:
     // Provides eclipse attack protection via two-table bucket system
     CAddrMan addrman;
     std::string data_dir;  // Path to data directory for peers.dat
+    
+    // Network: Enhanced peer discovery
+    std::unique_ptr<CPeerDiscovery> peer_discovery;
+    
+    // Network: Connection quality tracking
+    CConnectionQualityTracker connection_quality;
 
     // Connection limits
     static const int MAX_OUTBOUND_CONNECTIONS = 8;

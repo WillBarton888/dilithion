@@ -2,6 +2,9 @@
 // Distributed under the MIT software license
 
 #include <net/net.h>
+#include <util/error_format.h>  // UX: Better error messages
+#include <net/connection_quality.h>  // Network: Connection quality metrics
+#include <net/partition_detector.h>  // Network: Partition detection
 #include <consensus/params.h>
 #include <net/tx_relay.h>
 #include <net/banman.h>  // For MisbehaviorType
@@ -130,6 +133,9 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
     auto it = size_limits.find(command);
     if (it != size_limits.end()) {
         if (payload_size < it->second.min_size || payload_size > it->second.max_size) {
+            ErrorMessage error = CErrorFormatter::NetworkError("process message", 
+                "Invalid payload size for '" + std::string(command) + "'");
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
             std::cout << "[P2P] ERROR: Invalid payload size for '" << command
                       << "' from peer " << peer_id << " (got " << payload_size
                       << " bytes, expected " << it->second.min_size << "-" << it->second.max_size << ")"
@@ -203,6 +209,10 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         // NET-001 FIX: Explicit user agent length validation (defense-in-depth)
         // Note: NET-002 already limits ReadString() to 256 bytes, but we validate explicitly
         if (msg.user_agent.length() > 256) {
+            ErrorMessage error = CErrorFormatter::NetworkError("process version message", 
+                "User agent too long from peer");
+            error.severity = ErrorSeverity::WARNING;
+            LogPrintf(ALL, WARNING, "%s", CErrorFormatter::FormatForLog(error).c_str());
             std::cout << "[P2P] ERROR: User agent too long from peer " << peer_id
                       << " (" << msg.user_agent.length() << " bytes, max 256)" << std::endl;
             peer_manager.Misbehaving(peer_id, 20);
@@ -214,6 +224,10 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         if (msg.version < NetProtocol::MIN_PEER_PROTO_VERSION) {
             LogPrintf(NET, WARN, "Peer %d has incompatible protocol version %d (minimum: %d)",
                       peer_id, msg.version, NetProtocol::MIN_PEER_PROTO_VERSION);
+            ErrorMessage error = CErrorFormatter::NetworkError("process version message", 
+                "Peer has incompatible protocol version");
+            error.severity = ErrorSeverity::WARNING;
+            LogPrintf(ALL, WARNING, "%s", CErrorFormatter::FormatForLog(error).c_str());
             std::cout << "[P2P] ERROR: Peer " << peer_id << " has incompatible protocol version "
                       << msg.version << " (minimum: " << NetProtocol::MIN_PEER_PROTO_VERSION << ")" << std::endl;
             // Use proper misbehavior type for protocol version violation
@@ -1151,6 +1165,8 @@ CConnectionManager::CConnectionManager(CPeerManager& peer_mgr,
 }
 
 int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
+    // Network: Record connection attempt
+    partition_detector.RecordConnection();
     // Check if we can accept more connections
     if (!peer_manager.CanAcceptConnection()) {
         return -1;
@@ -1210,6 +1226,8 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
 
     // Connect to peer
     if (!socket->Connect(ip_str, addr.port)) {
+        // Network: Record connection failure for partition detection
+        partition_detector.RecordConnectionFailure();
         return -1;
     }
 
@@ -1428,6 +1446,9 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
                 std::cout << "[P2P] ERROR: Send failed to peer " << peer_id
                           << " (sent " << sent << " of " << data.size() << " bytes, error: " << error_str << ")" << std::endl;
             }
+            // Network: Record send error
+            connection_quality.RecordError(peer_id);
+            partition_detector.RecordConnectionFailure();
             return false;
         }
 
@@ -1438,6 +1459,13 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
             peer->last_send = GetTime();
         }
     }
+
+    // Network: Track connection quality metrics
+    connection_quality.RecordBytesSent(peer_id, data.size());
+    connection_quality.RecordMessageSent(peer_id);
+    
+    // Network: Record successful message exchange for partition detection
+    partition_detector.RecordMessageExchange();
 
     return true;
 }
@@ -1466,6 +1494,9 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
     // recv() < 0 && other error: Socket error - should disconnect
     if (received == 0) {
         // Connection closed gracefully by remote peer
+        // Network: Record connection failure
+        connection_quality.RecordError(peer_id);
+        partition_detector.RecordConnectionFailure();
         DisconnectPeer(peer_id, "connection closed by peer");
         return;
     }
@@ -1483,6 +1514,9 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
         }
 #endif
         // Real socket error - disconnect
+        // Network: Record connection failure
+        connection_quality.RecordError(peer_id);
+        partition_detector.RecordConnectionFailure();
         DisconnectPeer(peer_id, "socket receive error");
         return;
     }
@@ -1599,7 +1633,20 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
         }
 
         // Process message
-        message_processor.ProcessMessage(peer_id, message);
+        bool success = message_processor.ProcessMessage(peer_id, message);
+        
+        // Network: Track connection quality and partition detection
+        if (success) {
+            // Successful message processing
+            connection_quality.RecordMessageReceived(peer_id);
+            partition_detector.RecordMessageExchange();
+        } else {
+            // Failed message processing
+            connection_quality.RecordError(peer_id);
+        }
+        
+        // Track bytes received
+        connection_quality.RecordBytesReceived(peer_id, total_size);
 
         // Loop to process next message if available
     }

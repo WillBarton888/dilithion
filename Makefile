@@ -14,8 +14,13 @@ CXX := g++
 # Use ?= to allow environment variables (e.g., --coverage) to completely override defaults
 # If not set by environment, use optimized defaults
 # Note: -pipe avoids temp file issues on Windows
-CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2 -pipe
-CFLAGS ?= -O2
+# Phase 9.2: Build hardening flags for security
+# -fstack-protector-strong: Stack canaries (prevents stack buffer overflow exploits)
+# -D_FORTIFY_SOURCE=2: Runtime buffer overflow checks (requires -O2 or higher)
+# -Wformat -Wformat-security: Format string vulnerability warnings
+# -fPIC: Position-independent code (for shared libraries)
+CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2 -pipe -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security
+CFLAGS ?= -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security
 
 # Include paths (base)
 INCLUDES := -I src \
@@ -46,6 +51,7 @@ LDFLAGS += -L $(RANDOMX_BUILD_DIR) \
            -L .
 
 # FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
+# Phase 2.2: Add dbghelp for Windows stack traces
 LIBS := -lrandomx -lleveldb -lpthread -lssl -lcrypto
 
 # Platform-specific configuration
@@ -55,16 +61,16 @@ ifeq ($(UNAME_S),Darwin)
     INCLUDES += -I$(HOMEBREW_PREFIX)/opt/leveldb/include
     LDFLAGS += -L$(HOMEBREW_PREFIX)/opt/leveldb/lib
 else ifeq ($(UNAME_S),Windows)
-    # Windows requires ws2_32 for sockets and bcrypt for secure RNG
-    LIBS += -lws2_32 -lbcrypt
+    # Windows requires ws2_32 for sockets, bcrypt for secure RNG, and dbghelp for stack traces
+    LIBS += -lws2_32 -lbcrypt -ldbghelp
     INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
     # MinGW/MSYS2 on Windows - use system OpenSSL 3.x from /mingw64
-    LIBS += -lws2_32 -lbcrypt
+    LIBS += -lws2_32 -lbcrypt -ldbghelp
     INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
     # MSYS on Windows - use system OpenSSL 3.x from /mingw64
-    LIBS += -lws2_32 -lbcrypt
+    LIBS += -lws2_32 -lbcrypt -ldbghelp
     INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
 endif
 
@@ -127,6 +133,9 @@ CORE_SOURCES_UTIL := src/core/chainparams.cpp \
                      src/core/globals.cpp \
                      src/core/node_context.cpp
 
+# Phase 4.2: Database hardening
+DB_SOURCES := src/db/db_errors.cpp
+
 CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/sha3.cpp \
                   src/crypto/hmac_sha3.cpp \
@@ -138,6 +147,7 @@ MINER_SOURCES := src/miner/controller.cpp
 NET_SOURCES := src/net/protocol.cpp \
                src/net/serialize.cpp \
                src/net/net.cpp \
+               src/net/peer_discovery.cpp \
                src/net/peers.cpp \
                src/net/socket.cpp \
                src/net/dns.cpp \
@@ -152,7 +162,10 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/banman.cpp \
                src/net/headerssync.cpp \
                src/net/blockencodings.cpp \
-               src/net/feeler.cpp
+               src/net/feeler.cpp \
+               src/net/bandwidth_throttle.cpp \
+               src/net/connection_quality.cpp \
+               src/net/partition_detector.cpp
 
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \
@@ -183,14 +196,20 @@ WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/wal_recovery.cpp
 
 UTIL_SOURCES := src/util/strencodings.cpp \
+                src/util/stacktrace.cpp \
                 src/util/base58.cpp \
                 src/util/system.cpp \
                 src/util/assert.cpp \
-                src/util/logging.cpp
+                src/util/logging.cpp \
+                src/util/config.cpp \
+                src/util/config_validator.cpp \
+                src/util/error_format.cpp \
+                src/util/bench.cpp
 
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(CORE_SOURCES_UTIL) \
+                $(DB_SOURCES) \
                 $(CRYPTO_SOURCES) \
                 $(MINER_SOURCES) \
                 $(NET_SOURCES) \
@@ -240,6 +259,8 @@ BOOST_WALLET_HD_TEST_SOURCE := src/test/wallet_hd_tests.cpp
 BOOST_IBD_COORDINATOR_TEST_SOURCE := src/test/ibd_coordinator_tests.cpp
 BOOST_MISBEHAVIOR_SCORING_TEST_SOURCE := src/test/misbehavior_scoring_tests.cpp
 BOOST_IBD_FUNCTIONAL_TEST_SOURCE := src/test/ibd_functional_tests.cpp
+# Phase 9.3: Crypto property tests
+BOOST_CRYPTO_PROPERTY_TEST_SOURCE := src/test/crypto_property_tests.cpp
 
 # ============================================================================
 # Targets
@@ -370,7 +391,10 @@ validate_crypto: validate_crypto.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/cryp
 # Boost Unit Test Binaries
 # ============================================================================
 
-test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/test/ibd_coordinator_tests.o $(OBJ_DIR)/test/misbehavior_scoring_tests.o $(OBJ_DIR)/test/ibd_functional_tests.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/wallet/wal.o $(OBJ_DIR)/wallet/wal_recovery.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/node/blockchain_storage.o $(OBJ_DIR)/node/ibd_coordinator.o $(OBJ_DIR)/rpc/server.o $(OBJ_DIR)/rpc/auth.o $(OBJ_DIR)/rpc/ratelimiter.o $(OBJ_DIR)/rpc/permissions.o $(OBJ_DIR)/miner/controller.o $(OBJ_DIR)/net/net.o $(OBJ_DIR)/net/peers.o $(OBJ_DIR)/net/tx_relay.o $(OBJ_DIR)/net/socket.o $(OBJ_DIR)/net/protocol.o $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/net/block_fetcher.o $(OBJ_DIR)/net/netaddress.o $(OBJ_DIR)/net/node_state.o $(OBJ_DIR)/net/addrman.o $(OBJ_DIR)/net/banman.o $(OBJ_DIR)/net/dns.o $(OBJ_DIR)/net/headers_manager.o $(OBJ_DIR)/net/orphan_manager.o $(DILITHIUM_OBJECTS)
+# Phase 9.3: Crypto property tests object
+CRYPTO_PROPERTY_OBJECTS := $(OBJ_DIR)/test/crypto_property_tests.o
+
+test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/test/ibd_coordinator_tests.o $(OBJ_DIR)/test/misbehavior_scoring_tests.o $(OBJ_DIR)/test/ibd_functional_tests.o $(CRYPTO_PROPERTY_OBJECTS) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/wallet/wal.o $(OBJ_DIR)/wallet/wal_recovery.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/node/blockchain_storage.o $(OBJ_DIR)/node/ibd_coordinator.o $(OBJ_DIR)/rpc/server.o $(OBJ_DIR)/rpc/auth.o $(OBJ_DIR)/rpc/ratelimiter.o $(OBJ_DIR)/rpc/permissions.o $(OBJ_DIR)/miner/controller.o $(OBJ_DIR)/net/net.o $(OBJ_DIR)/net/peers.o $(OBJ_DIR)/net/tx_relay.o $(OBJ_DIR)/net/socket.o $(OBJ_DIR)/net/protocol.o $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/net/block_fetcher.o $(OBJ_DIR)/net/netaddress.o $(OBJ_DIR)/net/node_state.o $(OBJ_DIR)/net/addrman.o $(OBJ_DIR)/net/banman.o $(OBJ_DIR)/net/dns.o $(OBJ_DIR)/net/headers_manager.o $(OBJ_DIR)/net/orphan_manager.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully (header-only)$(COLOR_RESET)"
@@ -672,6 +696,10 @@ FUZZ_NETWORK_CHECKSUM_SOURCE := src/test/fuzz/fuzz_network_checksum.cpp
 FUZZ_NETWORK_COMMAND_SOURCE := src/test/fuzz/fuzz_network_command.cpp
 FUZZ_SIGNATURE_SOURCE := src/test/fuzz/fuzz_signature.cpp
 FUZZ_BASE58_SOURCE := src/test/fuzz/fuzz_base58.cpp
+# Phase 9.1: Additional fuzz targets
+FUZZ_SERIALIZE_SOURCE := src/test/fuzz/fuzz_serialize.cpp
+FUZZ_MEMPOOL_SOURCE := src/test/fuzz/fuzz_mempool.cpp
+FUZZ_RPC_SOURCE := src/test/fuzz/fuzz_rpc.cpp
 
 # Fuzzer object files (compiled WITH sanitizers) - harness code only
 FUZZ_SHA3_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_sha3.o
@@ -695,6 +723,10 @@ FUZZ_NETWORK_CHECKSUM_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_network_checksum.o
 FUZZ_NETWORK_COMMAND_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_network_command.o
 FUZZ_SIGNATURE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_signature.o
 FUZZ_BASE58_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_base58.o
+# Phase 9.1: Additional fuzzer objects
+FUZZ_SERIALIZE_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_serialize.o
+FUZZ_MEMPOOL_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_mempool.o
+FUZZ_RPC_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_rpc.o
 
 # Common fuzzer dependencies (compiled WITHOUT sanitizers) - linked library code
 FUZZ_COMMON_OBJECTS := $(OBJ_DIR)/crypto/sha3.o \
@@ -732,10 +764,15 @@ FUZZ_NETWORK_CHECKSUM := fuzz_network_checksum
 FUZZ_NETWORK_COMMAND := fuzz_network_command
 FUZZ_SIGNATURE := fuzz_signature
 FUZZ_BASE58 := fuzz_base58
+# Phase 9.1: Additional fuzzer binaries
+FUZZ_SERIALIZE := fuzz_serialize
+FUZZ_MEMPOOL := fuzz_mempool
+FUZZ_RPC := fuzz_rpc
 
 # Build all fuzz tests (requires Clang with libFuzzer)
-fuzz: fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo fuzz_address_encode fuzz_address_validate fuzz_address_bech32 fuzz_address_type fuzz_network_create fuzz_network_checksum fuzz_network_command fuzz_signature fuzz_base58
-	@echo "$(COLOR_GREEN)✓ All fuzz tests built successfully (20 harnesses, 70+ targets)$(COLOR_RESET)"
+# Phase 9.1: Expanded to 23 harnesses with additional coverage
+fuzz: fuzz_sha3 fuzz_transaction fuzz_block fuzz_compactsize fuzz_network_message fuzz_address fuzz_difficulty fuzz_subsidy fuzz_merkle fuzz_tx_validation fuzz_utxo fuzz_address_encode fuzz_address_validate fuzz_address_bech32 fuzz_address_type fuzz_network_create fuzz_network_checksum fuzz_network_command fuzz_signature fuzz_base58 fuzz_serialize fuzz_mempool fuzz_rpc
+	@echo "$(COLOR_GREEN)✓ All fuzz tests built successfully (23 harnesses, 80+ targets)$(COLOR_RESET)"
 	@echo "  Run individual: ./fuzz_sha3, ./fuzz_transaction, ./fuzz_block, etc."
 	@echo "  With corpus: ./fuzz_transaction fuzz_corpus/transaction/"
 	@echo "  Time limit: ./fuzz_block -max_total_time=60"
@@ -868,11 +905,37 @@ fuzz_base58: $(FUZZ_BASE58_OBJ) $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/crypto/sha3.
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
+# Phase 9.1: Additional fuzz targets
+# fuzz_serialize: Serialization/deserialization
+fuzz_serialize: $(FUZZ_SERIALIZE_OBJ) $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/crypto/sha3.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_mempool: Mempool operations
+fuzz_mempool: $(FUZZ_MEMPOOL_OBJ) $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/core/chainparams.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
+# fuzz_rpc: RPC parsing and validation
+fuzz_rpc: $(FUZZ_RPC_OBJ) $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
+	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
+
 # Run fuzz tests (short run for CI)
+# Phase 9.1: Updated to include new fuzz targets
 run_fuzz: fuzz
 	@echo "$(COLOR_YELLOW)Running fuzz tests (60 second each)...$(COLOR_RESET)"
 	@echo "$(COLOR_BLUE)Fuzzing SHA-3...$(COLOR_RESET)"
 	@timeout 60 ./$(FUZZ_SHA3) || true
+	@echo "$(COLOR_BLUE)Fuzzing Serialization...$(COLOR_RESET)"
+	@timeout 60 ./$(FUZZ_SERIALIZE) || true
+	@echo "$(COLOR_BLUE)Fuzzing Mempool...$(COLOR_RESET)"
+	@timeout 60 ./$(FUZZ_MEMPOOL) || true
+	@echo "$(COLOR_BLUE)Fuzzing RPC...$(COLOR_RESET)"
+	@timeout 60 ./$(FUZZ_RPC) || true
 	@echo "$(COLOR_GREEN)✓ Fuzz testing complete$(COLOR_RESET)"
 
 # ============================================================================

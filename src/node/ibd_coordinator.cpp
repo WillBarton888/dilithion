@@ -8,32 +8,39 @@
 #include <vector>
 
 #include <consensus/chain.h>
+#include <core/node_context.h>
 #include <net/block_fetcher.h>
 #include <net/headers_manager.h>
 #include <net/net.h>  // CConnectionManager, CNetMessageProcessor
 #include <net/node_state.h>
 #include <net/peers.h>
 #include <net/protocol.h>
+#include <util/logging.h>
+#include <util/bench.h>  // Performance: Benchmarking
 
-CIbdCoordinator::CIbdCoordinator(CChainState& chainstate,
-                                 CHeadersManager& headers_manager,
-                                 CBlockFetcher& block_fetcher,
-                                 CPeerManager& peer_manager,
-                                 CConnectionManager& connection_manager,
-                                 CNetMessageProcessor& message_processor)
+CIbdCoordinator::CIbdCoordinator(CChainState& chainstate, NodeContext& node_context)
     : m_chainstate(chainstate),
-      m_headers_manager(headers_manager),
-      m_block_fetcher(block_fetcher),
-      m_peer_manager(peer_manager),
-      m_connection_manager(connection_manager),
-      m_message_processor(message_processor),
+      m_node_context(node_context),
       m_last_ibd_attempt(std::chrono::steady_clock::time_point()) {}
 
 void CIbdCoordinator::Tick() {
-    int header_height = m_headers_manager.GetBestHeight();
+    // Phase 5.1: Update state machine
+    UpdateState();
+
+    // Check if IBD components are available
+    if (!m_node_context.headers_manager || !m_node_context.block_fetcher) {
+        return;
+    }
+
+    int header_height = m_node_context.headers_manager->GetBestHeight();
     int chain_height = m_chainstate.GetHeight();
 
+    // If headers are not ahead, we're synced (IDLE or COMPLETE)
     if (header_height <= chain_height) {
+        if (m_state != IBDState::IDLE && m_state != IBDState::COMPLETE) {
+            m_state = IBDState::COMPLETE;
+            LogPrintIBD(INFO, "IBD complete: chain synced (height=%d)", chain_height);
+        }
         return;
     }
 
@@ -44,18 +51,57 @@ void CIbdCoordinator::Tick() {
         return;
     }
 
-    size_t peer_count = m_peer_manager.GetConnectionCount();
+    size_t peer_count = m_node_context.peer_manager ? m_node_context.peer_manager->GetConnectionCount() : 0;
     if (peer_count == 0) {
         HandleNoPeers(now);
         return;
     }
 
     if (m_ibd_no_peer_cycles > 0) {
-        std::cout << "[IBD] Peers available - resuming block download" << std::endl;
+        LogPrintIBD(INFO, "Peers available - resuming block download");
         m_ibd_no_peer_cycles = 0;
     }
 
+    BENCHMARK_START("ibd_tick");
     DownloadBlocks(header_height, chain_height, now);
+    BENCHMARK_END("ibd_tick");
+}
+
+void CIbdCoordinator::UpdateState() {
+    if (!m_node_context.headers_manager) {
+        m_state = IBDState::IDLE;
+        return;
+    }
+
+    int header_height = m_node_context.headers_manager->GetBestHeight();
+    int chain_height = m_chainstate.GetHeight();
+    size_t peer_count = m_node_context.peer_manager ? m_node_context.peer_manager->GetConnectionCount() : 0;
+
+    // Determine state based on current conditions
+    if (header_height <= chain_height) {
+        if (m_state != IBDState::IDLE && m_state != IBDState::COMPLETE) {
+            m_state = IBDState::COMPLETE;
+        }
+    } else if (peer_count == 0) {
+        m_state = IBDState::WAITING_FOR_PEERS;
+    } else if (header_height > chain_height + 10) {
+        // If headers are significantly ahead, we're in headers sync phase
+        // (though headers sync happens in headers_manager, not here)
+        m_state = IBDState::BLOCKS_DOWNLOAD;
+    } else {
+        m_state = IBDState::BLOCKS_DOWNLOAD;
+    }
+}
+
+std::string CIbdCoordinator::GetStateName() const {
+    switch (m_state) {
+        case IBDState::IDLE: return "IDLE";
+        case IBDState::WAITING_FOR_PEERS: return "WAITING_FOR_PEERS";
+        case IBDState::HEADERS_SYNC: return "HEADERS_SYNC";
+        case IBDState::BLOCKS_DOWNLOAD: return "BLOCKS_DOWNLOAD";
+        case IBDState::COMPLETE: return "COMPLETE";
+        default: return "UNKNOWN";
+    }
 }
 
 void CIbdCoordinator::ResetBackoffOnNewHeaders(int header_height) {
@@ -75,59 +121,70 @@ bool CIbdCoordinator::ShouldAttemptDownload() const {
 
 void CIbdCoordinator::HandleNoPeers(std::chrono::steady_clock::time_point now) {
     if (m_ibd_no_peer_cycles == 0) {
-        std::cout << "[IBD] No peers available for block download - entering backoff mode" << std::endl;
+        LogPrintIBD(WARN, "No peers available for block download - entering backoff mode");
     }
     m_ibd_no_peer_cycles++;
     m_last_ibd_attempt = now;
 
     if (m_ibd_no_peer_cycles % 10 == 0) {
         int backoff_seconds = std::min(30, (1 << std::min(m_ibd_no_peer_cycles, 5)));
-        std::cout << "[IBD] Still waiting for peers (backoff: " << backoff_seconds
-                  << "s, attempts: " << m_ibd_no_peer_cycles << ")" << std::endl;
+        LogPrintIBD(INFO, "Still waiting for peers (backoff: %ds, attempts: %d)", backoff_seconds, m_ibd_no_peer_cycles);
     }
 }
 
 void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                                      std::chrono::steady_clock::time_point now) {
+    BENCHMARK_START("ibd_download_blocks");
     m_last_ibd_attempt = now;
 
-    std::cout << "[IBD] Headers ahead of chain - downloading blocks (header="
-              << header_height << " chain=" << chain_height << ")" << std::endl;
+    LogPrintIBD(INFO, "Headers ahead of chain - downloading blocks (header=%d chain=%d)", header_height, chain_height);
 
     int blocks_to_queue = std::min(100, header_height - chain_height);
-    std::cout << "[IBD] Queueing " << blocks_to_queue << " blocks for download..." << std::endl;
+    LogPrintIBD(INFO, "Queueing %d blocks for download...", blocks_to_queue);
 
+    BENCHMARK_START("ibd_queue_blocks");
     QueueMissingBlocks(chain_height, blocks_to_queue);
+    BENCHMARK_END("ibd_queue_blocks");
 
+    BENCHMARK_START("ibd_fetch_blocks");
     bool any_requested = FetchBlocks();
+    BENCHMARK_END("ibd_fetch_blocks");
     if (!any_requested) {
         m_ibd_no_peer_cycles++;
-        std::cout << "[IBD] Could not send any block requests (no suitable peers)" << std::endl;
+        LogPrintIBD(WARN, "Could not send any block requests (no suitable peers)");
     }
 
     RetryTimeoutsAndStalls();
+    BENCHMARK_END("ibd_download_blocks");
 }
 
 void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) {
+    if (!m_node_context.headers_manager || !m_node_context.block_fetcher) {
+        return;
+    }
+
     for (int h = chain_height + 1; h <= chain_height + blocks_to_queue; h++) {
-        std::vector<uint256> hashes_at_height = m_headers_manager.GetHeadersAtHeight(h);
+        std::vector<uint256> hashes_at_height = m_node_context.headers_manager->GetHeadersAtHeight(h);
         for (const uint256& hash : hashes_at_height) {
             if (!m_chainstate.HasBlockIndex(hash) &&
-                !m_block_fetcher.IsQueued(hash) &&
-                !m_block_fetcher.IsDownloading(hash)) {
-                m_block_fetcher.QueueBlockForDownload(hash, h, false);
-                std::cout << "[IBD] Queued block " << hash.GetHex().substr(0, 16)
-                          << "... at height " << h << std::endl;
+                !m_node_context.block_fetcher->IsQueued(hash) &&
+                !m_node_context.block_fetcher->IsDownloading(hash)) {
+                m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
+                LogPrintIBD(DEBUG, "Queued block %s... at height %d", hash.GetHex().substr(0, 16).c_str(), h);
             }
         }
     }
 }
 
 bool CIbdCoordinator::FetchBlocks() {
-    auto blocks_to_fetch = m_block_fetcher.GetNextBlocksToFetch(16);
-    if (blocks_to_fetch.empty() && m_block_fetcher.GetBlocksInFlight() == 0) {
+    if (!m_node_context.block_fetcher || !m_node_context.message_processor || !m_node_context.connection_manager) {
+        return false;
+    }
+
+    auto blocks_to_fetch = m_node_context.block_fetcher->GetNextBlocksToFetch(16);
+    if (blocks_to_fetch.empty() && m_node_context.block_fetcher->GetBlocksInFlight() == 0) {
         m_ibd_no_peer_cycles++;
-        std::cout << "[IBD] No blocks could be fetched (no suitable peers?)" << std::endl;
+        LogPrintIBD(WARN, "No blocks could be fetched (no suitable peers?)");
         return false;
     }
 
@@ -135,23 +192,23 @@ bool CIbdCoordinator::FetchBlocks() {
         return true;  // Work in flight already, nothing new to request.
     }
 
-    std::cout << "[IBD] Fetching " << blocks_to_fetch.size()
-              << " blocks (max 16 in-flight)..." << std::endl;
+    LogPrintIBD(INFO, "Fetching %zu blocks (max 16 in-flight)...", blocks_to_fetch.size());
 
     int successful_requests = 0;
     for (const auto& [hash, height] : blocks_to_fetch) {
-        NodeId preferred = m_block_fetcher.GetPreferredPeer(hash);
-        NodeId peer = m_block_fetcher.SelectPeerForDownload(hash, preferred);
-        if (peer != -1 && m_block_fetcher.RequestBlock(peer, hash, height)) {
+        NodeId preferred = m_node_context.block_fetcher->GetPreferredPeer(hash);
+        NodeId peer = m_node_context.block_fetcher->SelectPeerForDownload(hash, preferred);
+        if (peer != -1 && m_node_context.block_fetcher->RequestBlock(peer, hash, height)) {
             std::vector<NetProtocol::CInv> getdata;
             getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-            CNetMessage msg = m_message_processor.CreateGetDataMessage(getdata);
-            m_connection_manager.SendMessage(peer, msg);
-            std::cout << "[IBD] Sent GETDATA for block " << hash.GetHex().substr(0, 16)
-                      << "... (height " << height << ") to peer " << peer << std::endl;
+            CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+            m_node_context.connection_manager->SendMessage(peer, msg);
+            LogPrintIBD(DEBUG, "Sent GETDATA for block %s... (height %d) to peer %d", 
+                       hash.GetHex().substr(0, 16).c_str(), height, peer);
             successful_requests++;
         } else {
-            m_block_fetcher.QueueBlockForDownload(hash, height, -1, true);
+            // BUG #63 FIX: Re-queue block if no peer available
+            m_node_context.block_fetcher->QueueBlockForDownload(hash, height, -1, true);
         }
     }
 
@@ -159,17 +216,20 @@ bool CIbdCoordinator::FetchBlocks() {
 }
 
 void CIbdCoordinator::RetryTimeoutsAndStalls() {
-    auto timed_out = m_block_fetcher.CheckTimeouts();
+    if (!m_node_context.block_fetcher || !m_node_context.connection_manager) {
+        return;
+    }
+
+    auto timed_out = m_node_context.block_fetcher->CheckTimeouts();
     if (!timed_out.empty()) {
-        std::cout << "[BlockFetcher] " << timed_out.size()
-                  << " block(s) timed out, retrying..." << std::endl;
-        m_block_fetcher.RetryTimedOutBlocks(timed_out);
+        LogPrintIBD(WARN, "%zu block(s) timed out, retrying...", timed_out.size());
+        m_node_context.block_fetcher->RetryTimedOutBlocks(timed_out);
     }
 
     auto stalling_peers = CNodeStateManager::Get().CheckForStallingPeers();
     for (NodeId peer : stalling_peers) {
-        std::cout << "[NodeState] Disconnecting stalling peer " << peer << std::endl;
-        m_connection_manager.DisconnectPeer(peer, "stalling block download");
+        LogPrintIBD(WARN, "Disconnecting stalling peer %d", peer);
+        m_node_context.connection_manager->DisconnectPeer(peer, "stalling block download");
     }
 }
 

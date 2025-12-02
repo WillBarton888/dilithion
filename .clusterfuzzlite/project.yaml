@@ -1,0 +1,33 @@
+# Phase 9.1: OSS-Fuzz integration configuration
+# This file configures ClusterFuzzLite for continuous fuzzing
+
+language: cpp
+sanitizers:
+  - address
+  - undefined
+  - memory
+
+fuzzing_engines:
+  - libfuzzer
+
+# Fuzz targets to build and run
+targets:
+  - name: fuzz_sha3
+    path: src/test/fuzz/fuzz_sha3.cpp
+  - name: fuzz_transaction
+    path: src/test/fuzz/fuzz_transaction.cpp
+  - name: fuzz_block
+    path: src/test/fuzz/fuzz_block.cpp
+  - name: fuzz_serialize
+    path: src/test/fuzz/fuzz_serialize.cpp
+  - name: fuzz_mempool
+    path: src/test/fuzz/fuzz_mempool.cpp
+  - name: fuzz_rpc
+    path: src/test/fuzz/fuzz_rpc.cpp
+  - name: fuzz_p2p_validation
+    path: src/test/fuzz/fuzz_p2p_validation.cpp
+
+# Build configuration
+build_integration: external
+main_repo: https://github.com/dilithion/dilithion
+

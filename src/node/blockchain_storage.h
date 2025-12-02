@@ -45,6 +45,38 @@ public:
 
     // DB-010 FIX: Disk space checking
     bool CheckDiskSpace(uint64_t min_bytes = 1ULL * 1024 * 1024 * 1024) const;
+
+    // Phase 4.2: Fsync verification
+    /**
+     * Verify that a write operation was successfully persisted to disk
+     * 
+     * This performs a read-back verification to ensure data was actually
+     * written to disk, not just buffered in memory.
+     * 
+     * @param key Key that was written
+     * @param expected_value Expected value that should be on disk
+     * @return true if verification succeeds, false otherwise
+     */
+    bool VerifyWrite(const std::string& key, const std::string& expected_value) const;
+
+    // Phase 4.2: Reindex support
+    /**
+     * Rebuild block index from blocks on disk
+     * 
+     * This scans all blocks in the database and rebuilds the block index.
+     * Used by -reindex flag to recover from corruption.
+     * 
+     * @return true on success, false on failure
+     */
+    bool RebuildBlockIndex();
+    
+    /**
+     * Get all block hashes in the database
+     * 
+     * @param block_hashes Output vector to store block hashes
+     * @return true on success, false on failure
+     */
+    bool GetAllBlockHashes(std::vector<uint256>& block_hashes) const;
 };
 
 #endif

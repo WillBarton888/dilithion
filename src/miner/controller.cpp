@@ -10,6 +10,8 @@
 #include <node/mempool.h>
 #include <node/utxo_set.h>
 #include <util/time.h>
+#include <util/bench.h>  // Performance: Benchmarking
+#include <util/error_format.h>  // UX: Better error messages
 #include <amount.h>
 
 #include <iostream>
@@ -365,7 +367,9 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         try {
             // BUG #28 FIX: Use thread-local VM (no mutex, fully parallel)
             // This eliminates the global mutex bottleneck that was serializing all threads
+            BENCHMARK_START("mining_hash");
             randomx_hash_thread(vm.get(), header, 80, hashBuffer);
+            (void)BENCHMARK_END("mining_hash");
 
             // Convert to uint256
             uint256 hash;
@@ -414,11 +418,16 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         } catch (const std::exception& e) {
             // CRITICAL-4 FIX: Log RandomX exceptions instead of silently continuing
             // This helps identify VM corruption or initialization failures
-            std::cerr << "[Mining] Thread " << threadId << " RandomX error: " << e.what() << std::endl;
+            ErrorMessage error = CErrorFormatter::ValidationError("RandomX hash computation", 
+                "Thread " + std::to_string(threadId) + ": " + e.what());
+            error.severity = ErrorSeverity::WARNING;
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
             // Continue mining - may be transient error
         } catch (...) {
             // CRITICAL-4 FIX: Log unknown exceptions
-            std::cerr << "[Mining] Thread " << threadId << " unknown RandomX error" << std::endl;
+            ErrorMessage error(ErrorSeverity::WARNING, "Mining Error", 
+                "Thread " + std::to_string(threadId) + ": unknown RandomX error");
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
             // Continue mining
         }
 
@@ -436,13 +445,21 @@ void CMiningController::MiningWorker(uint32_t threadId) {
     } catch (const std::exception& e) {
         // MINE-011 FIX: Caught exception in mining worker thread
         // Log error and terminate gracefully
-        // In production, would log to file: std::cerr << "Mining worker " << threadId << " error: " << e.what()
-        // For now, just return to allow thread to terminate cleanly
+        ErrorMessage error = CErrorFormatter::ValidationError("Mining worker thread", 
+            "Thread " + std::to_string(threadId) + ": " + e.what());
+        error.severity = ErrorSeverity::ERROR;
+        error.recovery_steps.push_back("Check system resources (CPU, memory)");
+        error.recovery_steps.push_back("Restart mining if problem persists");
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
         return;
     } catch (...) {
         // MINE-011 FIX: Caught unknown exception in mining worker thread
         // Unknown exception type - terminate gracefully
-        // In production, would log: std::cerr << "Mining worker " << threadId << " unknown exception"
+        ErrorMessage error(ErrorSeverity::ERROR, "Mining Worker Error", 
+            "Thread " + std::to_string(threadId) + ": unknown exception");
+        error.recovery_steps.push_back("Check system resources");
+        error.recovery_steps.push_back("Restart mining");
+        std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
         return;
     }
 }
@@ -766,18 +783,23 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     const std::vector<uint8_t>& minerAddress,
     std::string& error
 ) {
+    BENCHMARK_START("mining_create_template");
+    
     // Validate inputs
     if (minerAddress.empty()) {
         error = "Invalid miner address (empty)";
+        (void)BENCHMARK_END("mining_create_template");
         return std::nullopt;
     }
 
     if (hashPrevBlock.IsNull() && nHeight != 0) {
         error = "Invalid previous block hash for non-genesis block";
+        (void)BENCHMARK_END("mining_create_template");
         return std::nullopt;
     }
 
     // Step 1: Select transactions from mempool
+    BENCHMARK_START("mining_select_txs");
     uint64_t totalFees = 0;
     std::vector<CTransactionRef> selectedTxs = SelectTransactionsForBlock(
         mempool,
@@ -786,16 +808,21 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
         1000000,  // 1 MB max block size
         totalFees
     );
+    (void)BENCHMARK_END("mining_select_txs");
 
     // Step 2: Create coinbase transaction
     // MINE-001 FIX: Catch overflow exceptions from coinbase creation
+    BENCHMARK_START("mining_create_coinbase");
     CTransactionRef coinbaseTx;
     try {
         coinbaseTx = CreateCoinbaseTransaction(nHeight, totalFees, minerAddress);
     } catch (const std::runtime_error& e) {
         error = std::string("Coinbase creation failed: ") + e.what();
+        (void)BENCHMARK_END("mining_create_coinbase");
+        (void)BENCHMARK_END("mining_create_template");
         return std::nullopt;
     }
+    (void)BENCHMARK_END("mining_create_coinbase");
 
     // Step 3: Build complete transaction list (coinbase first)
     std::vector<CTransactionRef> allTxs;
@@ -816,7 +843,9 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     }
 
     // Step 4: Calculate merkle root
+    BENCHMARK_START("mining_merkle_root");
     uint256 hashMerkleRoot = BuildMerkleRoot(allTxs);
+    (void)BENCHMARK_END("mining_merkle_root");
 
     // BUG #71 DEBUG: Log miner's merkle root computation
     std::cout << "[DEBUG] CreateBlockTemplate: merkleRoot=" << hashMerkleRoot.GetHex() << std::endl;
@@ -952,5 +981,6 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     // Step 8: Create and return block template
     CBlockTemplate blockTemplate(block, hashTarget, nHeight);
 
+    (void)BENCHMARK_END("mining_create_template");
     return blockTemplate;
 }

@@ -33,8 +33,28 @@
 /**
  * Assert that a mutex is held by the current thread
  * Used to verify thread safety assumptions
+ * 
+ * Phase 1.1: Note: For std::mutex/std::recursive_mutex, we can't directly check ownership.
+ * This macro is a placeholder that compiles but doesn't verify at runtime.
+ * For proper verification, use std::unique_lock or implement thread-local tracking.
+ * 
+ * For lock_guard, this will always pass (lock_guard doesn't expose ownership).
+ * For unique_lock, this checks if the lock is held.
  */
-#define AssertLockHeld(cs) Assert((cs).owns_lock() || (cs).try_lock())
+#ifdef NDEBUG
+#define AssertLockHeld(cs) ((void)0)
+#else
+// Try to lock - if it succeeds, the lock wasn't held (assertion fails)
+// If it fails (lock already held), the assertion passes
+// Note: This only works for non-recursive mutexes
+#define AssertLockHeld(cs) \
+    do { \
+        if ((cs).try_lock()) { \
+            (cs).unlock(); \
+            AssertionFailure("AssertLockHeld: Mutex not held", __FILE__, __LINE__, __func__); \
+        } \
+    } while (0)
+#endif
 
 /**
  * Assert that a mutex is NOT held by the current thread

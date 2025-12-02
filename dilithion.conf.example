@@ -1,0 +1,97 @@
+# Dilithion Configuration File
+# Phase 10: Configuration System
+#
+# This file contains configuration options for dilithion-node.
+# Command-line arguments override settings in this file.
+# Environment variables (DILITHION_*) override both.
+#
+# Lines starting with # or ; are comments and are ignored.
+# Empty lines are ignored.
+#
+# Format: key=value
+# No spaces around the = sign.
+
+# ============================================================================
+# Network Configuration
+# ============================================================================
+
+# Use testnet (true/false)
+# Default: false (mainnet)
+testnet=false
+
+# Data directory (where blockchain, wallet, etc. are stored)
+# Default: ~/.dilithion (mainnet) or ~/.dilithion-testnet (testnet)
+# datadir=/path/to/data
+
+# ============================================================================
+# P2P Network
+# ============================================================================
+
+# P2P network port
+# Default: 8444 (mainnet) or 18444 (testnet)
+# port=8444
+
+# Connect to specific nodes (exclusive, disables DNS seeds)
+# Can be specified multiple times
+# connect=192.168.1.100:8444
+# connect=10.0.0.50:8444
+
+# Add nodes to connect to (additional, doesn't disable DNS seeds)
+# Can be specified multiple times
+# addnode=134.122.4.164:18444
+# addnode=example.com:8444
+
+# ============================================================================
+# RPC Server
+# ============================================================================
+
+# RPC server port
+# Default: 8332 (mainnet) or 18332 (testnet)
+# rpcport=8332
+
+# ============================================================================
+# Mining
+# ============================================================================
+
+# Start mining automatically (true/false)
+# Default: false
+# mine=true
+
+# Number of mining threads (or "auto" for auto-detection)
+# Default: auto
+# threads=4
+# threads=auto
+
+# ============================================================================
+# Advanced Options
+# ============================================================================
+
+# Rebuild block index from blocks on disk (true/false)
+# Use this if the block index is corrupted
+# Default: false
+# reindex=false
+
+# Rescan wallet transactions (true/false)
+# Use this to rebuild wallet transaction history
+# Default: false
+# rescan=false
+
+# ============================================================================
+# Examples
+# ============================================================================
+
+# Example 1: Testnet with mining
+# testnet=true
+# mine=true
+# threads=auto
+# addnode=134.122.4.164:18444
+
+# Example 2: Mainnet with custom ports
+# testnet=false
+# port=8444
+# rpcport=8332
+
+# Example 3: Connect to specific nodes only
+# connect=192.168.1.100:8444
+# connect=192.168.1.101:8444
+

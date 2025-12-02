@@ -45,6 +45,11 @@ CPeerManager::CPeerManager(const std::string& datadir)
     if (!data_dir.empty()) {
         LoadPeers();
     }
+    
+    // Network: Initialize enhanced peer discovery
+    peer_discovery = std::make_unique<CPeerDiscovery>(*this, addrman);
+    
+    // Network: Connection quality tracker is initialized automatically (default constructor)
 }
 
 bool CPeerManager::SavePeers() {
