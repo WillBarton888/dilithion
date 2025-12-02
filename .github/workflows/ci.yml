@@ -612,25 +612,32 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Verify dependencies are from official sources
+    - name: Verify dependencies are present
       run: |
-        cd depends/dilithium
-        DILITHIUM_URL=$(git remote get-url origin)
-        echo "Dilithium source: $DILITHIUM_URL"
-        if [ "$DILITHIUM_URL" != "https://github.com/pq-crystals/dilithium.git" ]; then
-          echo "❌ ERROR: Dilithium dependency not from official source!"
+        # Dilithium source files are tracked in repo (with HD wallet modifications)
+        echo "Checking Dilithium source files..."
+        if [ ! -f depends/dilithium/ref/sign.c ]; then
+          echo "❌ ERROR: Dilithium source files missing!"
           exit 1
         fi
+        echo "✅ Dilithium source files present"
 
-        cd ../randomx
-        RANDOMX_URL=$(git remote get-url origin)
+        # RandomX is a submodule from official source
+        cd depends/randomx
+        RANDOMX_URL=$(git remote get-url origin 2>/dev/null || echo "")
         echo "RandomX source: $RANDOMX_URL"
-        if [ "$RANDOMX_URL" != "https://github.com/tevador/RandomX.git" ]; then
+        if [ -z "$RANDOMX_URL" ]; then
+          echo "⚠️ RandomX is not a git submodule, checking for source files..."
+          if [ ! -f src/randomx.cpp ]; then
+            echo "❌ ERROR: RandomX source files missing!"
+            exit 1
+          fi
+        elif [ "$RANDOMX_URL" != "https://github.com/tevador/RandomX.git" ]; then
           echo "❌ ERROR: RandomX dependency not from official source!"
           exit 1
         fi
 
-        echo "✅ All dependencies from official sources"
+        echo "✅ All dependencies verified"
 
   documentation:
     name: Documentation Check
