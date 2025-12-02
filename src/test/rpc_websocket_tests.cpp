@@ -1,7 +1,7 @@
 // Copyright (c) 2025 The Dilithion Core developers
 // Distributed under the MIT software license
 
-#define BOOST_TEST_MODULE RPC WebSocket Tests
+// Part of main Boost test suite (no BOOST_TEST_MODULE here - defined in test_dilithion.cpp)
 #include <boost/test/unit_test.hpp>
 
 #include <rpc/websocket.h>
