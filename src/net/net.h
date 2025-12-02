@@ -9,6 +9,7 @@
 #include <net/peers.h>
 #include <net/socket.h>
 #include <net/bandwidth_throttle.h>  // Network: Bandwidth throttling
+#include <net/partition_detector.h>  // Network: Partition detection
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <string>
