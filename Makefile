@@ -181,7 +181,9 @@ RPC_SOURCES := src/rpc/server.cpp \
                src/rpc/auth.cpp \
                src/rpc/ratelimiter.cpp \
                src/rpc/permissions.cpp \
-               src/rpc/logger.cpp
+               src/rpc/logger.cpp \
+               src/rpc/ssl_wrapper.cpp \
+               src/rpc/websocket.cpp
 
 API_SOURCES := src/api/http_server.cpp
 
@@ -235,6 +237,8 @@ WALLET_TEST_SOURCE := src/test/wallet_tests.cpp
 RPC_TEST_SOURCE := src/test/rpc_tests.cpp
 RPC_AUTH_TEST_SOURCE := src/test/rpc_auth_tests.cpp
 RPC_HD_WALLET_TEST_SOURCE := src/test/rpc_hd_wallet_tests.cpp
+RPC_SSL_TEST_SOURCE := src/test/rpc_ssl_tests.cpp
+RPC_WEBSOCKET_TEST_SOURCE := src/test/rpc_websocket_tests.cpp
 TIMESTAMP_TEST_SOURCE := src/test/timestamp_tests.cpp
 CRYPTER_TEST_SOURCE := src/test/crypter_tests.cpp
 WALLET_ENCRYPTION_INTEGRATION_TEST_SOURCE := src/test/wallet_encryption_integration_tests.cpp
@@ -262,6 +266,9 @@ BOOST_MISBEHAVIOR_SCORING_TEST_SOURCE := src/test/misbehavior_scoring_tests.cpp
 BOOST_IBD_FUNCTIONAL_TEST_SOURCE := src/test/ibd_functional_tests.cpp
 # Phase 9.3: Crypto property tests
 BOOST_CRYPTO_PROPERTY_TEST_SOURCE := src/test/crypto_property_tests.cpp
+# Phase 3 & 4: RPC SSL and WebSocket tests
+BOOST_RPC_SSL_TEST_SOURCE := src/test/rpc_ssl_tests.cpp
+BOOST_RPC_WEBSOCKET_TEST_SOURCE := src/test/rpc_websocket_tests.cpp
 
 # ============================================================================
 # Targets
@@ -394,8 +401,11 @@ validate_crypto: validate_crypto.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/cryp
 
 # Phase 9.3: Crypto property tests object
 CRYPTO_PROPERTY_OBJECTS := $(OBJ_DIR)/test/crypto_property_tests.o
+# Phase 3 & 4: RPC SSL and WebSocket test objects
+RPC_SSL_TEST_OBJECTS := $(OBJ_DIR)/test/rpc_ssl_tests.o
+RPC_WEBSOCKET_TEST_OBJECTS := $(OBJ_DIR)/test/rpc_websocket_tests.o
 
-test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/test/ibd_coordinator_tests.o $(OBJ_DIR)/test/misbehavior_scoring_tests.o $(OBJ_DIR)/test/ibd_functional_tests.o $(CRYPTO_PROPERTY_OBJECTS) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/wallet/wal.o $(OBJ_DIR)/wallet/wal_recovery.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/util/error_format.o $(OBJ_DIR)/util/logging.o $(OBJ_DIR)/util/assert.o $(OBJ_DIR)/db/db_errors.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/core/node_context.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/node/blockchain_storage.o $(OBJ_DIR)/node/ibd_coordinator.o $(OBJ_DIR)/node/genesis.o $(OBJ_DIR)/rpc/server.o $(OBJ_DIR)/rpc/auth.o $(OBJ_DIR)/rpc/ratelimiter.o $(OBJ_DIR)/rpc/permissions.o $(OBJ_DIR)/miner/controller.o $(OBJ_DIR)/net/net.o $(OBJ_DIR)/net/peers.o $(OBJ_DIR)/net/tx_relay.o $(OBJ_DIR)/net/socket.o $(OBJ_DIR)/net/protocol.o $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/net/block_fetcher.o $(OBJ_DIR)/net/netaddress.o $(OBJ_DIR)/net/node_state.o $(OBJ_DIR)/net/addrman.o $(OBJ_DIR)/net/banman.o $(OBJ_DIR)/net/dns.o $(OBJ_DIR)/net/headers_manager.o $(OBJ_DIR)/net/orphan_manager.o $(OBJ_DIR)/net/partition_detector.o $(OBJ_DIR)/net/connection_quality.o $(OBJ_DIR)/net/peer_discovery.o $(OBJ_DIR)/net/headerssync.o $(DILITHIUM_OBJECTS)
+test_dilithion: $(OBJ_DIR)/test/test_dilithion.o $(OBJ_DIR)/test/crypto_tests.o $(OBJ_DIR)/test/hmac_sha3_tests.o $(OBJ_DIR)/test/pbkdf2_tests.o $(OBJ_DIR)/test/transaction_tests.o $(OBJ_DIR)/test/block_tests.o $(OBJ_DIR)/test/util_tests.o $(OBJ_DIR)/test/mnemonic_tests.o $(OBJ_DIR)/test/hd_derivation_tests.o $(OBJ_DIR)/test/wallet_hd_tests.o $(OBJ_DIR)/test/rpc_hd_wallet_tests.o $(RPC_SSL_TEST_OBJECTS) $(RPC_WEBSOCKET_TEST_OBJECTS) $(OBJ_DIR)/test/difficulty_tests.o $(OBJ_DIR)/test/validation_integration_tests.o $(OBJ_DIR)/test/consensus_validation_tests.o $(OBJ_DIR)/test/utxo_tests.o $(OBJ_DIR)/test/tx_validation_tests.o $(OBJ_DIR)/test/ibd_coordinator_tests.o $(OBJ_DIR)/test/misbehavior_scoring_tests.o $(OBJ_DIR)/test/ibd_functional_tests.o $(CRYPTO_PROPERTY_OBJECTS) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/crypto/pbkdf2_sha3.o $(OBJ_DIR)/wallet/mnemonic.o $(OBJ_DIR)/wallet/hd_derivation.o $(OBJ_DIR)/wallet/wallet.o $(OBJ_DIR)/wallet/crypter.o $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/wallet/wal.o $(OBJ_DIR)/wallet/wal_recovery.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/util/error_format.o $(OBJ_DIR)/util/logging.o $(OBJ_DIR)/util/assert.o $(OBJ_DIR)/db/db_errors.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/core/node_context.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/node/utxo_set.o $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/node/blockchain_storage.o $(OBJ_DIR)/node/ibd_coordinator.o $(OBJ_DIR)/node/genesis.o $(OBJ_DIR)/rpc/server.o $(OBJ_DIR)/rpc/auth.o $(OBJ_DIR)/rpc/ratelimiter.o $(OBJ_DIR)/rpc/permissions.o $(OBJ_DIR)/miner/controller.o $(OBJ_DIR)/net/net.o $(OBJ_DIR)/net/peers.o $(OBJ_DIR)/net/tx_relay.o $(OBJ_DIR)/net/socket.o $(OBJ_DIR)/net/protocol.o $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/net/block_fetcher.o $(OBJ_DIR)/net/netaddress.o $(OBJ_DIR)/net/node_state.o $(OBJ_DIR)/net/addrman.o $(OBJ_DIR)/net/banman.o $(OBJ_DIR)/net/dns.o $(OBJ_DIR)/net/headers_manager.o $(OBJ_DIR)/net/orphan_manager.o $(OBJ_DIR)/net/partition_detector.o $(OBJ_DIR)/net/connection_quality.o $(OBJ_DIR)/net/peer_discovery.o $(OBJ_DIR)/net/headerssync.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully (header-only)$(COLOR_RESET)"
