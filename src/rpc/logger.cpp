@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <ctime>
+#include <iostream>
 
 CRPCLogger::CRPCLogger(const std::string& log_file,
                        const std::string& audit_file,
@@ -66,10 +67,18 @@ std::string CRPCLogger::HashParams(const std::string& params) const {
     if (params.empty()) {
         return "";
     }
-    
-    // Hash params for privacy (SHA-3-256, first 16 chars)
-    uint256 hash = SHA3_256(reinterpret_cast<const uint8_t*>(params.data()), params.size());
-    return hash.GetHex().substr(0, 16);
+
+    // Hash params for privacy (SHA-3-256, first 16 chars hex)
+    uint8_t hash[32];
+    SHA3_256(reinterpret_cast<const uint8_t*>(params.data()), params.size(), hash);
+
+    // Convert first 8 bytes to hex string
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (int i = 0; i < 8; ++i) {
+        oss << std::setw(2) << static_cast<int>(hash[i]);
+    }
+    return oss.str();
 }
 
 std::string CRPCLogger::FormatLogEntry(const RequestLog& log) const {

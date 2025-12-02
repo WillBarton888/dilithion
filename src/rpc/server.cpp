@@ -930,9 +930,15 @@ void CRPCServer::HandleClient(int clientSocket) {
                 log.username = username;
                 log.method = batch_requests[i].method;
                 if (!batch_requests[i].params.empty()) {
-                    uint256 hash = SHA3_256(reinterpret_cast<const uint8_t*>(batch_requests[i].params.data()),
-                                           batch_requests[i].params.size());
-                    log.params_hash = hash.GetHex().substr(0, 16);
+                    uint8_t hash_bytes[32];
+                    SHA3_256(reinterpret_cast<const uint8_t*>(batch_requests[i].params.data()),
+                             batch_requests[i].params.size(), hash_bytes);
+                    std::ostringstream oss;
+                    oss << std::hex << std::setfill('0');
+                    for (int j = 0; j < 8; ++j) {
+                        oss << std::setw(2) << static_cast<int>(hash_bytes[j]);
+                    }
+                    log.params_hash = oss.str();
                 } else {
                     log.params_hash = "";
                 }
@@ -1083,8 +1089,14 @@ void CRPCServer::HandleClient(int clientSocket) {
         log.method = rpcReq.method;
         // Hash params for privacy (SHA-3-256, first 16 chars)
         if (!rpcReq.params.empty()) {
-            uint256 hash = SHA3_256(reinterpret_cast<const uint8_t*>(rpcReq.params.data()), rpcReq.params.size());
-            log.params_hash = hash.GetHex().substr(0, 16);
+            uint8_t hash_bytes[32];
+            SHA3_256(reinterpret_cast<const uint8_t*>(rpcReq.params.data()), rpcReq.params.size(), hash_bytes);
+            std::ostringstream oss;
+            oss << std::hex << std::setfill('0');
+            for (int j = 0; j < 8; ++j) {
+                oss << std::setw(2) << static_cast<int>(hash_bytes[j]);
+            }
+            log.params_hash = oss.str();
         } else {
             log.params_hash = "";
         }

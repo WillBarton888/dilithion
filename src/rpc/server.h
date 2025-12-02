@@ -206,6 +206,11 @@ private:
     RPCRequest ParseRPCRequest(const std::string& json);
 
     /**
+     * Phase 2: Parse batch JSON-RPC request
+     */
+    std::vector<RPCRequest> ParseBatchRPCRequest(const std::string& json);
+
+    /**
      * Execute RPC method
      */
     RPCResponse ExecuteRPC(const RPCRequest& request);

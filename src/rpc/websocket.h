@@ -11,8 +11,9 @@
 #include <mutex>
 #include <vector>
 
-// Forward declaration
-struct SSL;
+// Forward declarations for OpenSSL types (same pattern as ssl_wrapper.h)
+struct ssl_st;
+typedef struct ssl_st SSL;
 
 /**
  * Phase 4: WebSocket Server for Real-Time Updates
