@@ -57,8 +57,14 @@ jobs:
 
     - name: Build Dilithium library
       run: |
+        # Clone dilithium if Makefile doesn't exist
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          echo "Cloning dilithium from pq-crystals..."
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true  # Ignore if clean fails
         make -j$(nproc)
 
     - name: Build Dilithion Node
@@ -118,8 +124,12 @@ jobs:
 
     - name: Build Dilithium library
       run: |
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true
         CFLAGS="-fsanitize=address -fno-omit-frame-pointer -O2 -DDILITHIUM_MODE=3" make -j$(nproc)
 
     - name: Build with ASan
@@ -174,8 +184,12 @@ jobs:
 
     - name: Build Dilithium library
       run: |
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true
         CFLAGS="-fsanitize=undefined -fno-omit-frame-pointer -O2 -DDILITHIUM_MODE=3" make -j$(nproc)
 
     - name: Build with UBSan
@@ -230,8 +244,12 @@ jobs:
 
     - name: Build Dilithium library
       run: |
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true
         CFLAGS="-fsanitize=thread -fno-omit-frame-pointer -O2 -DDILITHIUM_MODE=3" make -j$(nproc)
 
     - name: Build with TSan
@@ -334,8 +352,12 @@ jobs:
 
     - name: Build Dilithium library
       run: |
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true
         CFLAGS="--coverage -O0 -g -DDILITHIUM_MODE=3" make -j$(nproc)
 
     - name: Build with coverage
@@ -440,8 +462,12 @@ jobs:
         cd ../../..
 
         # Build Dilithium library
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true
         CFLAGS="-O2 -DDILITHIUM_MODE=3" make -j$(nproc)
         cd ../../..
 
@@ -479,8 +505,12 @@ jobs:
 
     - name: Build Dilithium library for fuzzing
       run: |
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true
         CC=clang CFLAGS="-O1 -g -DDILITHIUM_MODE=3" make -j$(nproc)
 
     - name: Build fuzz harnesses
@@ -600,8 +630,14 @@ jobs:
 
     - name: Build Dilithium library
       run: |
+        # Clone dilithium if Makefile doesn't exist
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          echo "Cloning dilithium from pq-crystals..."
+          rm -rf depends/dilithium
+          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+        fi
         cd depends/dilithium/ref
-        make clean
+        make clean || true  # Ignore if clean fails
         make -j$(nproc)
 
     - name: Build with Coverity
