@@ -627,3 +627,4 @@ jobs:
              --form description="Automated Coverity scan" \
              https://scan.coverity.com/builds?project=dilithion
         echo "✅ Coverity scan submitted"
+# Trigger CI
