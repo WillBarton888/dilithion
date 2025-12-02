@@ -16,6 +16,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 /**
  * Connection quality metrics for a peer
