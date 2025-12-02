@@ -106,10 +106,10 @@ bool CPeerDiscovery::DetectNetworkPartition() const {
 
 size_t CPeerDiscovery::DiscoverFromAddrMan(size_t max_peers) {
     size_t discovered = 0;
-    
+
     // Get good addresses from addrman
     std::vector<CNetworkAddr> addrs = m_addrman.GetAddr(max_peers, 23);  // 23% max
-    
+
     for (const auto& addr : addrs) {
         if (discovered >= max_peers) {
             break;
@@ -117,7 +117,8 @@ size_t CPeerDiscovery::DiscoverFromAddrMan(size_t max_peers) {
 
         // Try to connect (this would need CPeerManager::ConnectToPeer)
         // For now, just mark as attempted
-        m_addrman.Attempt(addr);
+        // CNetworkAddr extends CService, so we can pass it directly
+        m_addrman.Attempt(static_cast<const CService&>(addr), false);
         discovered++;
     }
 
@@ -133,12 +134,11 @@ size_t CPeerDiscovery::DiscoverFromDNSSeeds(size_t max_peers) {
 
 size_t CPeerDiscovery::DiscoverFromSeedNodes(size_t max_peers) {
     size_t discovered = 0;
-    
-    // Get seed nodes from peer manager
-    // This would need CPeerManager::GetSeedNodes()
-    // For now, use hardcoded seeds
-    std::vector<NetProtocol::CAddress> seeds = {
-        NetProtocol::CAddress("134.122.4.164", 18444)  // Testnet seed
+
+    // Testnet seed nodes - use CService directly
+    // Format: CService::FromIPv4(ipv4_addr, port)
+    std::vector<CService> seeds = {
+        CService::FromIPv4(0x8606227A, 18444)  // 134.122.4.164:18444 (NYC)
     };
 
     for (const auto& seed : seeds) {
@@ -146,13 +146,15 @@ size_t CPeerDiscovery::DiscoverFromSeedNodes(size_t max_peers) {
             break;
         }
 
-        // Convert NetProtocol::CAddress to CNetworkAddr for addrman
-        CService service(seed.ToStringIP(), seed.GetPort());
-        CNetworkAddr addr(service, NetProtocol::NODE_NETWORK, GetTime());
-        CNetAddr source;  // Empty source
-        m_addrman.Add(CAddrInfo(addr, source));
-        m_addrman.Good(addr);  // Mark as good
-        discovered++;
+        // Create CNetworkAddr from CService
+        CNetworkAddr addr(seed, NetProtocol::NODE_NETWORK, GetTime());
+        CNetAddr source;  // Empty source (self-discovered)
+
+        // Add to address manager
+        if (m_addrman.Add(addr, source)) {
+            m_addrman.Good(seed);  // Mark as good since it's a seed
+            discovered++;
+        }
     }
 
     return discovered;

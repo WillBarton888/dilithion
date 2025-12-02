@@ -212,7 +212,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             ErrorMessage error = CErrorFormatter::NetworkError("process version message", 
                 "User agent too long from peer");
             error.severity = ErrorSeverity::WARNING;
-            LogPrintf(ALL, WARNING, "%s", CErrorFormatter::FormatForLog(error).c_str());
+            LogPrintf(ALL, WARN, "%s", CErrorFormatter::FormatForLog(error).c_str());
             std::cout << "[P2P] ERROR: User agent too long from peer " << peer_id
                       << " (" << msg.user_agent.length() << " bytes, max 256)" << std::endl;
             peer_manager.Misbehaving(peer_id, 20);
@@ -227,7 +227,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             ErrorMessage error = CErrorFormatter::NetworkError("process version message", 
                 "Peer has incompatible protocol version");
             error.severity = ErrorSeverity::WARNING;
-            LogPrintf(ALL, WARNING, "%s", CErrorFormatter::FormatForLog(error).c_str());
+            LogPrintf(ALL, WARN, "%s", CErrorFormatter::FormatForLog(error).c_str());
             std::cout << "[P2P] ERROR: Peer " << peer_id << " has incompatible protocol version "
                       << msg.version << " (minimum: " << NetProtocol::MIN_PEER_PROTO_VERSION << ")" << std::endl;
             // Use proper misbehavior type for protocol version violation
