@@ -11,6 +11,7 @@
 #ifndef DILITHION_UTIL_BENCH_H
 #define DILITHION_UTIL_BENCH_H
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <map>
