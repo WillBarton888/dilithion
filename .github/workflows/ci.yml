@@ -57,14 +57,25 @@ jobs:
 
     - name: Build Dilithium library
       run: |
-        # Clone dilithium if Makefile doesn't exist
+        # Check if dilithium source files exist (they're tracked in repo with HD wallet modifications)
+        if [ ! -f depends/dilithium/ref/sign.c ]; then
+          echo "ERROR: Dilithium source files missing. They should be tracked in the repo."
+          exit 1
+        fi
+        # Create Makefile if it doesn't exist (gitignored but needed for build)
         if [ ! -f depends/dilithium/ref/Makefile ]; then
-          echo "Cloning dilithium from pq-crystals..."
-          rm -rf depends/dilithium
-          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+          echo "Creating Dilithium Makefile..."
+          echo 'CC ?= /usr/bin/cc' > depends/dilithium/ref/Makefile
+          echo 'CFLAGS += -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wredundant-decls -Wshadow -Wvla -Wpointer-arith -O3 -fomit-frame-pointer' >> depends/dilithium/ref/Makefile
+          echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> depends/dilithium/ref/Makefile
+          echo '.PHONY: all clean' >> depends/dilithium/ref/Makefile
+          echo 'all:' >> depends/dilithium/ref/Makefile
+          printf '\t$$(CC) $$(CFLAGS) -DDILITHIUM_MODE=3 -c $$(SOURCES)\n' >> depends/dilithium/ref/Makefile
+          echo 'clean:' >> depends/dilithium/ref/Makefile
+          printf '\trm -f *.o\n' >> depends/dilithium/ref/Makefile
         fi
         cd depends/dilithium/ref
-        make clean || true  # Ignore if clean fails
+        make clean || true
         make -j$(nproc)
 
     - name: Build Dilithion Node
@@ -638,14 +649,25 @@ jobs:
 
     - name: Build Dilithium library
       run: |
-        # Clone dilithium if Makefile doesn't exist
+        # Check if dilithium source files exist (they're tracked in repo with HD wallet modifications)
+        if [ ! -f depends/dilithium/ref/sign.c ]; then
+          echo "ERROR: Dilithium source files missing. They should be tracked in the repo."
+          exit 1
+        fi
+        # Create Makefile if it doesn't exist (gitignored but needed for build)
         if [ ! -f depends/dilithium/ref/Makefile ]; then
-          echo "Cloning dilithium from pq-crystals..."
-          rm -rf depends/dilithium
-          git clone --depth 1 https://github.com/pq-crystals/dilithium.git depends/dilithium
+          echo "Creating Dilithium Makefile..."
+          echo 'CC ?= /usr/bin/cc' > depends/dilithium/ref/Makefile
+          echo 'CFLAGS += -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wredundant-decls -Wshadow -Wvla -Wpointer-arith -O3 -fomit-frame-pointer' >> depends/dilithium/ref/Makefile
+          echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> depends/dilithium/ref/Makefile
+          echo '.PHONY: all clean' >> depends/dilithium/ref/Makefile
+          echo 'all:' >> depends/dilithium/ref/Makefile
+          printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> depends/dilithium/ref/Makefile
+          echo 'clean:' >> depends/dilithium/ref/Makefile
+          printf '\trm -f *.o\n' >> depends/dilithium/ref/Makefile
         fi
         cd depends/dilithium/ref
-        make clean || true  # Ignore if clean fails
+        make clean || true
         make -j$(nproc)
 
     - name: Build with Coverity
