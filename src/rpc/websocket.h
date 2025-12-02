@@ -10,6 +10,8 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#include <atomic>
+#include <thread>
 
 // Forward declarations for OpenSSL types (same pattern as ssl_wrapper.h)
 struct ssl_st;
@@ -138,7 +140,7 @@ private:
     
     // Connections
     std::map<int, std::unique_ptr<WebSocketConnection>> m_connections;
-    std::mutex m_connections_mutex;
+    mutable std::mutex m_connections_mutex;
     int m_next_connection_id;
     
     // Message callback

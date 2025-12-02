@@ -85,9 +85,9 @@ void CSSLWrapper::SetSSLOptions() {
         return;
     }
     
-    // Enable secure renegotiation
-    #if OPENSSL_VERSION_NUMBER >= 0x10001000L
-        SSL_CTX_set_options(m_ctx, SSL_OP_SECURE_RENEGOTIATION);
+    // Disable renegotiation for security (SSL_OP_NO_RENEGOTIATION available in OpenSSL 1.1.0h+)
+    #ifdef SSL_OP_NO_RENEGOTIATION
+        SSL_CTX_set_options(m_ctx, SSL_OP_NO_RENEGOTIATION);
     #endif
     
     // Prefer server cipher order
