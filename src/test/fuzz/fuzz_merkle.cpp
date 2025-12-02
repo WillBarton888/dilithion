@@ -90,7 +90,7 @@ FUZZ_TARGET(merkle_calculate)
         size_t num_txs = fuzzed_data.ConsumeIntegralInRange<size_t>(0, 100);
 
         // Create fuzzed transactions (calls PRODUCTION code now!)
-        std::vector<CTransaction> transactions;
+        std::vector<CTransactionRef> transactions;
 
         for (size_t i = 0; i < num_txs && fuzzed_data.remaining_bytes() > 32; ++i) {
             CTransaction tx;
@@ -113,7 +113,7 @@ FUZZ_TARGET(merkle_calculate)
                 tx.vout.push_back(CTxOut(amount, scriptPubKey));
             }
 
-            transactions.push_back(tx);
+            transactions.push_back(std::make_shared<const CTransaction>(tx));
         }
 
         // Call PRODUCTION BuildMerkleRoot (tests CVE-2012-2459 fix!)
@@ -132,7 +132,7 @@ FUZZ_TARGET(merkle_calculate)
         // Also test old implementation for comparison
         std::vector<uint256> tx_hashes;
         for (const auto& tx : transactions) {
-            tx_hashes.push_back(tx.GetHash());
+            tx_hashes.push_back(tx->GetHash());
         }
         uint256 old_root = ComputeMerkleRoot(tx_hashes);
 
