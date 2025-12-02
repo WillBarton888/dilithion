@@ -734,7 +734,8 @@ FUZZ_COMMON_OBJECTS := $(OBJ_DIR)/crypto/sha3.o \
                        $(OBJ_DIR)/primitives/transaction.o \
                        $(OBJ_DIR)/primitives/block.o \
                        $(OBJ_DIR)/core/chainparams.o \
-                       $(OBJ_DIR)/crypto/randomx_hash.o
+                       $(OBJ_DIR)/crypto/randomx_hash.o \
+                       $(OBJ_DIR)/util/system.o
 
 FUZZ_CONSENSUS_OBJECTS := $(OBJ_DIR)/consensus/pow.o \
                           $(OBJ_DIR)/consensus/fees.o \
