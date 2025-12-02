@@ -70,7 +70,7 @@ jobs:
           echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> depends/dilithium/ref/Makefile
           echo '.PHONY: all clean' >> depends/dilithium/ref/Makefile
           echo 'all:' >> depends/dilithium/ref/Makefile
-          printf '\t$$(CC) $$(CFLAGS) -DDILITHIUM_MODE=3 -c $$(SOURCES)\n' >> depends/dilithium/ref/Makefile
+          printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> depends/dilithium/ref/Makefile
           echo 'clean:' >> depends/dilithium/ref/Makefile
           printf '\trm -f *.o\n' >> depends/dilithium/ref/Makefile
         fi
