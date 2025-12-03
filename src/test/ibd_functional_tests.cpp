@@ -47,7 +47,7 @@ BOOST_AUTO_TEST_CASE(test_ibd_coordinator_integration) {
 
     // Verify initial state
     BOOST_CHECK_EQUAL(chainstate.GetHeight(), -1);  // No blocks yet
-    BOOST_CHECK_EQUAL(node_context.headers_manager->GetBestHeight(), 0);  // No headers yet
+    BOOST_CHECK_EQUAL(node_context.headers_manager->GetBestHeight(), -1);  // No headers yet (-1 = uninitialized)
     BOOST_CHECK_EQUAL(node_context.block_fetcher->GetBlocksInFlight(), 0);  // No blocks in flight
     BOOST_CHECK_EQUAL(node_context.peer_manager->GetConnectionCount(), 0);  // No peers
 
@@ -105,8 +105,8 @@ BOOST_AUTO_TEST_CASE(test_headers_manager_basic) {
     // Test basic headers manager functionality
     CHeadersManager manager;
 
-    // Initially no headers
-    BOOST_CHECK_EQUAL(manager.GetBestHeight(), 0);
+    // Initially no headers (-1 = uninitialized, 0 would mean genesis processed)
+    BOOST_CHECK_EQUAL(manager.GetBestHeight(), -1);
 
     // Create a test header
     CBlockHeader header;
@@ -121,7 +121,7 @@ BOOST_AUTO_TEST_CASE(test_headers_manager_basic) {
 
     // Note: Full processing requires proper parent linkage
     // This test verifies the manager can be instantiated and queried
-    BOOST_CHECK_EQUAL(manager.GetBestHeight(), 0);  // Still 0 until properly processed
+    BOOST_CHECK_EQUAL(manager.GetBestHeight(), -1);  // Still -1 until headers properly processed
 }
 
 BOOST_AUTO_TEST_CASE(test_peer_manager_misbehavior) {
