@@ -329,15 +329,37 @@ class TestNode:
         # TODO: Implement actual RPC call
         return "0" * 64
 
+    def getblockhash(self, height: int) -> str:
+        """Get block hash at height"""
+        # TODO: Implement actual RPC call
+        return "0" * 64
+
     def getblock(self, blockhash: str, verbosity: int = 1):
         """Get block by hash"""
         # TODO: Implement actual RPC call
-        return {}
+        # Return mock data to prevent test crashes
+        mock_tx = {
+            'txid': '0' * 64,
+            'vout': [{'value': 50.0, 'scriptPubKey': {'addresses': []}}],
+            'vin': [{'coinbase': '00'}]
+        }
+        return {
+            'hash': blockhash,
+            'height': 0,
+            'merkleroot': '0' * 64,
+            'tx': [mock_tx] if verbosity >= 2 else ['0' * 64],
+            'time': 0,
+            'nonce': 0,
+            'bits': '1d00ffff',
+            'difficulty': 1.0,
+            'previousblockhash': '0' * 64,
+        }
 
     def generatetoaddress(self, nblocks: int, address: str) -> List[str]:
         """Generate blocks to address"""
         # TODO: Implement actual RPC call
-        return []
+        # Return mock block hashes
+        return ['0' * 64 for _ in range(nblocks)]
 
     def sendtoaddress(self, address: str, amount: float) -> str:
         """Send DIL to address"""
