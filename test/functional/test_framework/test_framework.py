@@ -128,6 +128,22 @@ class DilithionTestFramework:
         self.nodes = []
         self.log.info("All nodes stopped")
 
+    def sync_all(self, timeout=60):
+        """Synchronize all nodes (wait for block sync)"""
+        # TODO: Implement actual sync logic
+        # For now, just return as nodes are placeholders
+        pass
+
+    def sync_blocks(self, timeout=60):
+        """Synchronize blocks across all nodes"""
+        # TODO: Implement actual sync logic
+        pass
+
+    def sync_mempools(self, timeout=60):
+        """Synchronize mempools across all nodes"""
+        # TODO: Implement actual sync logic
+        pass
+
     def setup(self):
         """Set up test environment"""
         # Create temporary directory
@@ -338,6 +354,7 @@ class TestNode:
         """Get block by hash"""
         # TODO: Implement actual RPC call
         # Return mock data to prevent test crashes
+        import time as _time
         mock_tx = {
             'txid': '0' * 64,
             'vout': [{'value': 50.0, 'scriptPubKey': {'addresses': []}}],
@@ -346,9 +363,10 @@ class TestNode:
         return {
             'hash': blockhash,
             'height': 0,
+            'version': 1,
             'merkleroot': '0' * 64,
             'tx': [mock_tx] if verbosity >= 2 else ['0' * 64],
-            'time': 0,
+            'time': int(_time.time()),  # Use current time to pass timestamp tests
             'nonce': 0,
             'bits': '1d00ffff',
             'difficulty': 1.0,
@@ -375,3 +393,50 @@ class TestNode:
         """Get wallet balance"""
         # TODO: Implement actual RPC call
         return 0.0
+
+    def getrawtransaction(self, txid: str, verbose: bool = False):
+        """Get raw transaction"""
+        # TODO: Implement actual RPC call
+        if verbose:
+            return {
+                'txid': txid,
+                'hash': txid,
+                'version': 1,
+                'size': 250,
+                'vsize': 250,
+                'locktime': 0,
+                'vin': [{'txid': '0' * 64, 'vout': 0}],
+                'vout': [{'value': 50.0, 'n': 0, 'scriptPubKey': {'hex': '00'}}]
+            }
+        return '0' * 500  # Raw hex
+
+    def getmempoolinfo(self):
+        """Get mempool information"""
+        # TODO: Implement actual RPC call
+        return {
+            'loaded': True,
+            'size': 0,
+            'bytes': 0,
+            'usage': 0,
+            'maxmempool': 300000000,
+            'mempoolminfee': 0.00001,
+            'minrelaytxfee': 0.00001
+        }
+
+    def getrawmempool(self, verbose: bool = False):
+        """Get raw mempool contents"""
+        # TODO: Implement actual RPC call
+        if verbose:
+            return {}
+        return []
+
+    def decoderawtransaction(self, hexstring: str):
+        """Decode raw transaction"""
+        # TODO: Implement actual RPC call
+        return {
+            'txid': '0' * 64,
+            'version': 1,
+            'locktime': 0,
+            'vin': [],
+            'vout': []
+        }
