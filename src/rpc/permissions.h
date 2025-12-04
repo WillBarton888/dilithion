@@ -341,6 +341,17 @@ private:
      */
     bool ParseJSONConfig(const std::string& json);
 
+    /**
+     * CID 1675190 FIX: Internal unlocked version of GetMethodPermissions
+     *
+     * Called by CheckMethodPermission variants to avoid double lock.
+     * Caller MUST hold m_mutex before calling this function.
+     *
+     * @param method RPC method name
+     * @return required permission bitmask (0 if method unknown/public)
+     */
+    uint32_t GetMethodPermissionsUnlocked(const std::string& method) const;
+
 public:
     /**
      * Constructor

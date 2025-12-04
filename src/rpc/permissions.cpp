@@ -366,8 +366,9 @@ bool CRPCPermissions::CheckMethodPermission(const std::string& username,
 
 bool CRPCPermissions::CheckMethodPermission(uint32_t userPermissions,
                                            const std::string& method) const {
-    // Get required permissions for method
-    uint32_t required = GetMethodPermissions(method);
+    // CID 1675190 FIX: Use unlocked version since m_methodPermissions is read-only after init
+    // This avoids double lock when called from CheckMethodPermission(username, method)
+    uint32_t required = GetMethodPermissionsUnlocked(method);
 
     // If method not found (required = 0), allow (public method like "help")
     if (required == 0) {
@@ -380,16 +381,21 @@ bool CRPCPermissions::CheckMethodPermission(uint32_t userPermissions,
     return (userPermissions & required) == required;
 }
 
-uint32_t CRPCPermissions::GetMethodPermissions(const std::string& method) const {
-    // Read-only after initialization, but lock for safety
-    std::lock_guard<std::mutex> lock(m_mutex);
-
+// CID 1675190 FIX: Internal unlocked version - safe because m_methodPermissions
+// is only written in constructor and read-only afterwards
+uint32_t CRPCPermissions::GetMethodPermissionsUnlocked(const std::string& method) const {
     auto it = m_methodPermissions.find(method);
     if (it == m_methodPermissions.end()) {
         return 0;  // Unknown method, no permission required (public)
     }
 
     return it->second;
+}
+
+uint32_t CRPCPermissions::GetMethodPermissions(const std::string& method) const {
+    // Public API acquires lock for thread safety
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return GetMethodPermissionsUnlocked(method);
 }
 
 // ============================================================================
