@@ -20,7 +20,7 @@
 enum class ErrorSeverity {
     INFO,      // Informational message
     WARNING,   // Warning - operation may have issues
-    ERROR,     // Error - operation failed but recoverable
+    ERR,       // Error - operation failed but recoverable (renamed from ERROR to avoid Windows macro conflict)
     CRITICAL   // Critical - operation failed, may require intervention
 };
 

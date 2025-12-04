@@ -98,12 +98,13 @@ public:
 
     /**
      * Send message to WebSocket client
+     * Note: Named SendToClient instead of SendMessage to avoid Windows API macro conflict
      * @param connection_id Connection ID
      * @param message Message to send
      * @param is_text true for text message, false for binary
      * @return true if sent successfully, false on error
      */
-    bool SendMessage(int connection_id, const std::string& message, bool is_text = true);
+    bool SendToClient(int connection_id, const std::string& message, bool is_text = true);
 
     /**
      * Broadcast message to all connected clients

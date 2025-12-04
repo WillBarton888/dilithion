@@ -15,6 +15,7 @@
 #include <map>
 #include <vector>
 #include <optional>
+#include <cstdint>
 
 /**
  * Configuration file parser

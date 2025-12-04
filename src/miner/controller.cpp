@@ -447,7 +447,7 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         // Log error and terminate gracefully
         ErrorMessage error = CErrorFormatter::ValidationError("Mining worker thread", 
             "Thread " + std::to_string(threadId) + ": " + e.what());
-        error.severity = ErrorSeverity::ERROR;
+        error.severity = ErrorSeverity::ERR;
         error.recovery_steps.push_back("Check system resources (CPU, memory)");
         error.recovery_steps.push_back("Restart mining if problem persists");
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
@@ -455,7 +455,7 @@ void CMiningController::MiningWorker(uint32_t threadId) {
     } catch (...) {
         // MINE-011 FIX: Caught unknown exception in mining worker thread
         // Unknown exception type - terminate gracefully
-        ErrorMessage error(ErrorSeverity::ERROR, "Mining Worker Error", 
+        ErrorMessage error(ErrorSeverity::ERR, "Mining Worker Error", 
             "Thread " + std::to_string(threadId) + ": unknown exception");
         error.recovery_steps.push_back("Check system resources");
         error.recovery_steps.push_back("Restart mining");

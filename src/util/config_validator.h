@@ -13,6 +13,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 #include <util/error_format.h>
 
 /**

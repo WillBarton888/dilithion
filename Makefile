@@ -46,8 +46,8 @@ endif
 
 LDFLAGS += -L $(RANDOMX_BUILD_DIR) \
            -L depends/dilithium/ref \
-           -L C:/ProgramData/mingw64/mingw64/opt/lib \
            -L /mingw64/lib \
+           -L C:/msys64/mingw64/lib \
            -L .
 
 # FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
@@ -63,15 +63,17 @@ ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Windows)
     # Windows requires ws2_32 for sockets, bcrypt for secure RNG, and dbghelp for stack traces
     LIBS += -lws2_32 -lbcrypt -ldbghelp
-    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
+    # Use MSYS2 MinGW64 includes - do NOT use MinGW-Builds paths (C:/ProgramData/mingw64)
+    # as they lack C11 support (quick_exit, timespec_get)
+    INCLUDES += -I depends/leveldb/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
     # MinGW/MSYS2 on Windows - use system OpenSSL 3.x from /mingw64
     LIBS += -lws2_32 -lbcrypt -ldbghelp
-    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
+    INCLUDES += -I depends/leveldb/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
     # MSYS on Windows - use system OpenSSL 3.x from /mingw64
     LIBS += -lws2_32 -lbcrypt -ldbghelp
-    INCLUDES += -I depends/leveldb/include -I C:/ProgramData/mingw64/mingw64/opt/include -I /mingw64/include -I C:/msys64/mingw64/include
+    INCLUDES += -I depends/leveldb/include -I /mingw64/include -I C:/msys64/mingw64/include
 endif
 
 # Fix for Windows: Use system default temp directories

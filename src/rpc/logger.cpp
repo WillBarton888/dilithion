@@ -124,7 +124,7 @@ void CRPCLogger::LogRequest(const RequestLog& log) {
     }
     
     // Check log level
-    LogLevel required_level = log.success ? LogLevel::INFO : LogLevel::ERROR;
+    LogLevel required_level = log.success ? LogLevel::INFO : LogLevel::ERR;
     if (required_level < m_log_level) {
         return;
     }

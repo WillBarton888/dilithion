@@ -30,7 +30,7 @@ public:
         DEBUG,    // All requests (verbose)
         INFO,     // Normal operations
         WARN,     // Warnings (rate limits, etc.)
-        ERROR,    // Errors only
+        ERR,      // Errors only (renamed from ERROR to avoid Windows macro conflict)
         AUDIT     // Security events only
     };
 

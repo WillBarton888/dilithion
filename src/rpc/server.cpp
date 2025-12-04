@@ -456,10 +456,10 @@ void CRPCServer::WorkerThread() {
     } catch (const std::exception& e) {
         // Phase 1.1: Prevent silent thread crashes
         ErrorMessage error = CErrorFormatter::NetworkError("RPC worker thread", e.what());
-        error.severity = ErrorSeverity::ERROR;
+        error.severity = ErrorSeverity::ERR;
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
     } catch (...) {
-        ErrorMessage error(ErrorSeverity::ERROR, "RPC Worker Error", 
+        ErrorMessage error(ErrorSeverity::ERR, "RPC Worker Error",
                           "RPC worker thread crashed with unknown exception");
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
     }
@@ -3518,12 +3518,12 @@ bool CRPCServer::InitializeWebSocket(uint16_t port) {
             
             // Send response back via WebSocket
             std::string response_json = SerializeResponse(rpcResp);
-            m_websocket_server->SendMessage(connection_id, response_json, true);
+            m_websocket_server->SendToClient(connection_id, response_json, true);
         } catch (const std::exception& e) {
             // Send error response
             RPCResponse errorResp = RPCResponse::Error(-32700, e.what(), "");
             std::string error_json = SerializeResponse(errorResp);
-            m_websocket_server->SendMessage(connection_id, error_json, true);
+            m_websocket_server->SendToClient(connection_id, error_json, true);
         }
     });
     

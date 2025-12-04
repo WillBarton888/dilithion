@@ -16,9 +16,9 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <intrin.h>  // For _byteswap_uint64
-    #define INVALID_SOCKET -1
-    #define SOCKET_ERROR -1
-    #define closesocket close
+    // Windows already has closesocket - no need to redefine
+    // Undef Windows API macros that conflict with our code
+    #undef SendMessage
 #else
     #include <sys/socket.h>
     #include <netinet/in.h>
@@ -425,7 +425,7 @@ int CWebSocketServer::SocketWrite(WebSocketConnection& connection, const void* b
     }
 }
 
-bool CWebSocketServer::SendMessage(int connection_id, const std::string& message, bool is_text) {
+bool CWebSocketServer::SendToClient(int connection_id, const std::string& message, bool is_text) {
     std::lock_guard<std::mutex> lock(m_connections_mutex);
     auto it = m_connections.find(connection_id);
     if (it == m_connections.end()) {

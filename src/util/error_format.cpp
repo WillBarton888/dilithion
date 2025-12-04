@@ -24,7 +24,7 @@ std::string CErrorFormatter::FormatForUser(const ErrorMessage& error) {
             color = "\033[0;33m";  // Yellow
             symbol = "⚠";
             break;
-        case ErrorSeverity::ERROR:
+        case ErrorSeverity::ERR:
             color = "\033[0;31m";  // Red
             symbol = "✗";
             break;
@@ -63,7 +63,7 @@ std::string CErrorFormatter::FormatForLog(const ErrorMessage& error) {
     switch (error.severity) {
         case ErrorSeverity::INFO: severity_str = "INFO"; break;
         case ErrorSeverity::WARNING: severity_str = "WARNING"; break;
-        case ErrorSeverity::ERROR: severity_str = "ERROR"; break;
+        case ErrorSeverity::ERR: severity_str = "ERROR"; break;
         case ErrorSeverity::CRITICAL: severity_str = "CRITICAL"; break;
     }
 
@@ -81,7 +81,7 @@ std::string CErrorFormatter::FormatForLog(const ErrorMessage& error) {
 }
 
 ErrorMessage CErrorFormatter::DatabaseError(const std::string& operation, const std::string& details) {
-    ErrorMessage error(ErrorSeverity::ERROR, 
+    ErrorMessage error(ErrorSeverity::ERR, 
                       "Database Operation Failed",
                       "Failed to " + operation + ": " + details);
     error.cause = "Database I/O error or corruption";
@@ -111,7 +111,7 @@ ErrorMessage CErrorFormatter::NetworkError(const std::string& operation, const s
 }
 
 ErrorMessage CErrorFormatter::ConfigError(const std::string& option, const std::string& details) {
-    ErrorMessage error(ErrorSeverity::ERROR,
+    ErrorMessage error(ErrorSeverity::ERR,
                       "Configuration Error",
                       "Invalid configuration for '" + option + "': " + details);
     error.cause = "Invalid or malformed configuration value";
@@ -126,7 +126,7 @@ ErrorMessage CErrorFormatter::ConfigError(const std::string& option, const std::
 }
 
 ErrorMessage CErrorFormatter::ValidationError(const std::string& object, const std::string& details) {
-    ErrorMessage error(ErrorSeverity::ERROR,
+    ErrorMessage error(ErrorSeverity::ERR,
                       "Validation Failed",
                       "Failed to validate " + object + ": " + details);
     error.cause = "Invalid data format or corrupted data";
