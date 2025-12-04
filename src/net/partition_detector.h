@@ -70,7 +70,10 @@ public:
 
 private:
     mutable std::mutex m_mutex;
-    
+
+    // CID 1675218 FIX: Internal unlocked version - caller MUST hold m_mutex
+    bool IsPartitionedUnlocked() const;
+
     uint64_t m_total_connections;
     uint64_t m_failed_connections;
     uint64_t m_successful_messages;

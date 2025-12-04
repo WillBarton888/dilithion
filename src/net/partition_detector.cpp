@@ -40,24 +40,28 @@ void CPartitionDetector::RecordMessageExchange() {
     m_is_partitioned = false;
 }
 
-bool CPartitionDetector::IsPartitioned() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    
+// CID 1675218 FIX: Internal unlocked version - caller MUST hold m_mutex
+bool CPartitionDetector::IsPartitionedUnlocked() const {
     // Check consecutive failures
     if (m_consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
         return true;
     }
-    
+
     // Check if we haven't received messages in a while
     auto now = std::chrono::steady_clock::now();
     auto time_since_last = std::chrono::duration_cast<std::chrono::minutes>(
         now - m_last_successful_message).count();
-    
+
     if (time_since_last >= PARTITION_TIMEOUT.count() && m_total_connections > 0) {
         return true;
     }
-    
+
     return m_is_partitioned;
+}
+
+bool CPartitionDetector::IsPartitioned() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return IsPartitionedUnlocked();
 }
 
 double CPartitionDetector::GetPartitionSeverity() const {
@@ -101,7 +105,8 @@ CPartitionDetector::Stats CPartitionDetector::GetStats() const {
     stats.failed_connections = m_failed_connections;
     stats.successful_messages = m_successful_messages;
     stats.consecutive_failures = m_consecutive_failures;
-    stats.is_partitioned = IsPartitioned();
+    // CID 1675218 FIX: Use unlocked version since we already hold m_mutex
+    stats.is_partitioned = IsPartitionedUnlocked();
     return stats;
 }
 
