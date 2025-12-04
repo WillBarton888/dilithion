@@ -732,8 +732,14 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, SignalHandler);
     std::signal(SIGTERM, SignalHandler);
 
+    // BUG #88: Windows startup crash diagnostics
+    std::cerr << "[DEBUG] Entering main initialization try block" << std::endl;
+    std::cerr.flush();
+    
     try {
         // Phase 1: Initialize blockchain storage and mempool
+        std::cerr << "[DEBUG] Phase 1: Initializing blockchain storage..." << std::endl;
+        std::cerr.flush();
         LogPrintf(ALL, INFO, "Initializing blockchain storage...");
         std::cout << "Initializing blockchain storage..." << std::endl;
         CBlockchainDB blockchain;
@@ -2332,13 +2338,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Phase 2.5: Start P2P networking server
+        std::cerr << "[DEBUG] Phase 2.5: Starting P2P networking server..." << std::endl;
+        std::cerr.flush();
         std::cout << "[4/6] Starting P2P networking server..." << std::flush;
 
         // Set running flag before starting threads
         g_node_state.running = true;
+        std::cerr << "[DEBUG] g_node_state.running set to true" << std::endl;
+        std::cerr.flush();
 
         // Initialize socket layer (required for Windows)
+        std::cerr << "[DEBUG] Initializing Winsock (Windows socket layer)..." << std::endl;
+        std::cerr.flush();
         CSocketInit socket_init;
+        std::cerr << "[DEBUG] Winsock initialized successfully" << std::endl;
+        std::cerr.flush();
 
         // Create P2P listening socket
         CSocket p2p_socket;
@@ -2365,11 +2379,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         p2p_socket.SetNonBlocking(true);
         p2p_socket.SetReuseAddr(true);
 
-        // Launch P2P accept thread
-        std::thread p2p_thread([&p2p_socket, &connection_manager]() {
-            // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
-            try {
-                std::cout << "  [OK] P2P accept thread started" << std::endl;
+        // BUG #88: Windows startup crash fix - wrap thread creation in try/catch
+        std::cerr << "[DEBUG] Creating P2P accept thread..." << std::endl;
+        std::cerr.flush();
+        std::thread p2p_thread;
+        try {
+            p2p_thread = std::thread([&p2p_socket, &connection_manager]() {
+                // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
+                try {
+                    std::cerr << "[DEBUG] P2P accept thread entry point reached" << std::endl;
+                    std::cerr.flush();
+                    std::cout << "  [OK] P2P accept thread started" << std::endl;
 
                 while (g_node_state.running) {
                 // Accept new connection (non-blocking)
@@ -2489,7 +2509,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 LogPrintf(NET, ERROR, "P2P accept thread unknown exception");
                 std::cerr << "[P2P-Accept] FATAL: Unknown thread exception" << std::endl;
             }
-        });
+            });
+            std::cerr << "[DEBUG] P2P accept thread created successfully" << std::endl;
+            std::cerr.flush();
+        } catch (const std::exception& e) {
+            std::cerr << "[DEBUG] FATAL: Failed to create P2P accept thread: " << e.what() << std::endl;
+            std::cerr.flush();
+            g_node_state.running = false;
+            throw;  // Re-throw to be caught by outer try/catch
+        } catch (...) {
+            std::cerr << "[DEBUG] FATAL: Failed to create P2P accept thread (unknown exception)" << std::endl;
+            std::cerr.flush();
+            g_node_state.running = false;
+            throw;
+        }
 
         // Helper function to parse IPv4 address string to uint32_t
         auto parseIPv4 = [](const std::string& ip) -> uint32_t {
@@ -2668,7 +2701,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Launch P2P message receive thread
         // BUG #85 FIX: Add exception handling to prevent std::terminate
-        std::thread p2p_recv_thread([&connection_manager]() {
+        // BUG #88: Windows startup crash fix - wrap thread creation in try/catch
+        std::cerr << "[DEBUG] Creating P2P receive thread..." << std::endl;
+        std::cerr.flush();
+        std::thread p2p_recv_thread;
+        try {
+            p2p_recv_thread = std::thread([&connection_manager]() {
             // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
             try {
                 std::cout << "  [OK] P2P receive thread started" << std::endl;
@@ -2724,12 +2762,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 LogPrintf(NET, ERROR, "P2P receive thread unknown exception");
                 std::cerr << "[P2P-Recv] FATAL: Unknown thread exception" << std::endl;
             }
-        });
+            });
+            std::cerr << "[DEBUG] P2P receive thread created successfully" << std::endl;
+            std::cerr.flush();
+        } catch (const std::exception& e) {
+            std::cerr << "[DEBUG] FATAL: Failed to create P2P receive thread: " << e.what() << std::endl;
+            std::cerr.flush();
+            g_node_state.running = false;
+            throw;
+        } catch (...) {
+            std::cerr << "[DEBUG] FATAL: Failed to create P2P receive thread (unknown exception)" << std::endl;
+            std::cerr.flush();
+            g_node_state.running = false;
+            throw;
+        }
 
         // Launch P2P maintenance thread (ping/pong keepalive, reconnection, score decay)
         // BUG #49 FIX: Add automatic peer reconnection and misbehavior score decay
         // BUG #85 FIX: Add exception handling to prevent std::terminate
-        std::thread p2p_maint_thread([&connection_manager, &feeler_manager]() {
+        // BUG #88: Windows startup crash fix - wrap thread creation in try/catch
+        std::cerr << "[DEBUG] Creating P2P maintenance thread..." << std::endl;
+        std::cerr.flush();
+        std::thread p2p_maint_thread;
+        try {
+            p2p_maint_thread = std::thread([&connection_manager, &feeler_manager]() {
             // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
             try {
                 std::cout << "  [OK] P2P maintenance thread started" << std::endl;
@@ -2837,9 +2893,28 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 LogPrintf(NET, ERROR, "P2P maintenance thread unknown exception");
                 std::cerr << "[P2P-Maintenance] FATAL: Unknown thread exception" << std::endl;
             }
-        });
+            });
+            std::cerr << "[DEBUG] P2P maintenance thread created successfully" << std::endl;
+            std::cerr.flush();
+        } catch (const std::exception& e) {
+            std::cerr << "[DEBUG] FATAL: Failed to create P2P maintenance thread: " << e.what() << std::endl;
+            std::cerr.flush();
+            g_node_state.running = false;
+            throw;
+        } catch (...) {
+            std::cerr << "[DEBUG] FATAL: Failed to create P2P maintenance thread (unknown exception)" << std::endl;
+            std::cerr.flush();
+            g_node_state.running = false;
+            throw;
+        }
+
+        // BUG #88: All P2P threads created successfully
+        std::cerr << "[DEBUG] All P2P threads created successfully - proceeding to RPC initialization" << std::endl;
+        std::cerr.flush();
 
         // Phase 4: Initialize RPC server
+        std::cerr << "[DEBUG] Phase 4: Initializing RPC server..." << std::endl;
+        std::cerr.flush();
         std::cout << "[4/6] Initializing RPC server..." << std::flush;
         CRPCServer rpc_server(config.rpcport);
         g_node_state.rpc_server = &rpc_server;
