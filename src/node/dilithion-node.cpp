@@ -1589,21 +1589,41 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Check if we already have this block in database
-            if (blockchain.BlockExists(blockHash)) {
-                std::cout << "[P2P] Block already in database, skipping" << std::endl;
+            bool blockInDb = blockchain.BlockExists(blockHash);
+            if (blockInDb) {
                 // BUG #86 FIX: Mark block as received even when skipping
                 if (g_node_context.block_fetcher) {
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                 }
-                return;
+
+                // BUG #88 FIX: If block is in DB but NOT in chainstate, try to connect it
+                // This can happen when:
+                // 1. Block was received as orphan, saved to DB, but never connected
+                // 2. Node restarted and orphan pool was lost
+                // 3. Orphan's parent has now arrived
+                if (!g_chainstate.HasBlockIndex(blockHash)) {
+                    CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+                    if (pParent != nullptr) {
+                        std::cout << "[BUG88-FIX] Block in DB but not chainstate, parent now available - connecting" << std::endl;
+                        // Don't return - fall through to create block index and connect
+                    } else {
+                        std::cout << "[P2P] Block in DB but parent still missing, skipping" << std::endl;
+                        return;
+                    }
+                } else {
+                    std::cout << "[P2P] Block already in chainstate, skipping" << std::endl;
+                    return;
+                }
             }
 
-            // Save block to database first
-            if (!blockchain.WriteBlock(blockHash, block)) {
+            // Save block to database first (skip if already there from BUG #88 path)
+            if (!blockInDb && !blockchain.WriteBlock(blockHash, block)) {
                 std::cerr << "[P2P] ERROR: Failed to save block from peer " << peer_id << std::endl;
                 return;
             }
-            std::cout << "[P2P] Block saved to database" << std::endl;
+            if (!blockInDb) {
+                std::cout << "[P2P] Block saved to database" << std::endl;
+            }
 
             // Create block index with proper chain linkage
             // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
