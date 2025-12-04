@@ -1540,12 +1540,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Look up block in database
                     CBlock block;
                     if (blockchain.ReadBlock(item.hash, block)) {
-                        std::cout << "[P2P] Serving block " << item.hash.GetHex().substr(0, 16)
-                                  << "... to peer " << peer_id << std::endl;
-
                         // Send block to requesting peer
                         CNetMessage blockMsg = message_processor.CreateBlockMessage(block);
-                        connection_manager.SendMessage(peer_id, blockMsg);
+                        auto serialized = blockMsg.Serialize();
+                        std::cout << "[BLOCK-SERVE] Sending block " << item.hash.GetHex().substr(0, 16)
+                                  << "... to peer " << peer_id
+                                  << " (vtx=" << block.vtx.size() << " bytes, msg=" << serialized.size() << " bytes)" << std::endl;
+                        bool sent = connection_manager.SendMessage(peer_id, blockMsg);
+                        std::cout << "[BLOCK-SERVE] SendMessage " << (sent ? "SUCCEEDED" : "FAILED")
+                                  << " for block to peer " << peer_id << std::endl;
                     } else {
                         std::cout << "[P2P] Peer " << peer_id << " requested unknown block: "
                                   << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
