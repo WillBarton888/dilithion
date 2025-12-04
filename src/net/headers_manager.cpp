@@ -801,7 +801,8 @@ bool CHeadersManager::CheckProofOfWork(const uint256& hash, uint32_t nBits) cons
 bool CHeadersManager::CheckTimestamp(const CBlockHeader& header, const HeaderWithChainWork* pprev) const
 {
     // 1. Check not too far in future (2 hours)
-    uint32_t now = static_cast<uint32_t>(std::time(nullptr));
+    // CID 1675246 FIX: Safe 64-to-32 bit time conversion (valid until 2106)
+    uint32_t now = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);
     if (header.nTime > now + MAX_HEADERS_AGE_SECONDS) {
         std::cerr << "[HeadersManager] Timestamp too far in future: "
                   << header.nTime << " vs now " << now << std::endl;
