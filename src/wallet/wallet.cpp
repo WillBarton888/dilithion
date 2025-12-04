@@ -3682,11 +3682,22 @@ size_t CWallet::ScanHDChains(CUTXOSet& utxo_set) {
             break;
         }
 
-        // Check if this address has any UTXOs
+        // CID 1675306 FIX: Actually check if address has UTXOs instead of constant false
+        // Get pubkey hash from this address
+        std::vector<uint8_t> addrPKH = GetPubKeyHashFromAddress(it->second);
         bool has_utxos = false;
-        // Note: Actual UTXO checking would require iterating utxo_set
-        // For now, placeholder logic
-        // has_utxos = utxo_set.HasAddressOutputs(it->second);
+
+        if (!addrPKH.empty()) {
+            // Iterate through UTXO set to find matches
+            utxo_set.ForEach([&](const COutPoint& /*outpoint*/, const CUTXOEntry& entry) {
+                std::vector<uint8_t> scriptPKH = WalletCrypto::ExtractPubKeyHash(entry.out.scriptPubKey);
+                if (scriptPKH == addrPKH) {
+                    has_utxos = true;
+                    return false;  // Stop iteration, found a match
+                }
+                return true;  // Continue iteration
+            });
+        }
 
         if (has_utxos) {
             found_count++;
@@ -3710,8 +3721,20 @@ size_t CWallet::ScanHDChains(CUTXOSet& utxo_set) {
             break;
         }
 
+        // CID 1675306 FIX: Actually check if address has UTXOs
+        std::vector<uint8_t> addrPKH = GetPubKeyHashFromAddress(it->second);
         bool has_utxos = false;
-        // has_utxos = utxo_set.HasAddressOutputs(it->second);
+
+        if (!addrPKH.empty()) {
+            utxo_set.ForEach([&](const COutPoint& /*outpoint*/, const CUTXOEntry& entry) {
+                std::vector<uint8_t> scriptPKH = WalletCrypto::ExtractPubKeyHash(entry.out.scriptPubKey);
+                if (scriptPKH == addrPKH) {
+                    has_utxos = true;
+                    return false;
+                }
+                return true;
+            });
+        }
 
         if (has_utxos) {
             found_count++;
