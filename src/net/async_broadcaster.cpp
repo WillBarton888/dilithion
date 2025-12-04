@@ -36,9 +36,12 @@ bool CAsyncBroadcaster::Start() {
 
     m_running.store(true);
 
-    // Initialize statistics window
-    m_stats_window_start = GetTimeMillis();
-    m_stats_window_sent = 0;
+    // CID 1675305 FIX: Acquire lock before modifying shared statistics data
+    {
+        std::lock_guard<std::mutex> lock(m_stats_mutex);
+        m_stats_window_start = GetTimeMillis();
+        m_stats_window_sent = 0;
+    }
 
     // Launch worker thread
     try {
