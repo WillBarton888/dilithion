@@ -621,19 +621,21 @@ void CRPCServer::HandleClient(int clientSocket) {
         totalRead += bytesRead;
 
         // Check if we have complete HTTP request (headers end with \r\n\r\n)
-        if (buffer.size() >= 4) {
-            // CID 1675184 FIX: Cast bytesRead to size_t to prevent signed/unsigned overflow
+        // CID 1675184 FIX: Pre-compute all bounds to prevent any overflow in loop
+        const size_t bufSize = buffer.size();
+        if (bufSize >= 4) {
             size_t bytesReadSize = static_cast<size_t>(bytesRead);  // Safe: bytesRead > 0 verified above
-            size_t searchStart = (buffer.size() > bytesReadSize + 3) ? buffer.size() - bytesReadSize - 3 : 0;
-            // CID 1675184 FIX: Use i + 3 < size to prevent overflow
-            for (size_t i = searchStart; i + 3 < buffer.size(); i++) {
+            size_t searchStart = (bufSize > bytesReadSize + 3) ? bufSize - bytesReadSize - 3 : 0;
+            // Pre-compute max index where [i+3] is valid - bufSize >= 4 guaranteed above
+            const size_t maxIdx = bufSize - 4;
+            for (size_t i = searchStart; i <= maxIdx; i++) {
                 if (buffer[i] == '\r' && buffer[i+1] == '\n' &&
                     buffer[i+2] == '\r' && buffer[i+3] == '\n') {
                     requestComplete = true;
                     break;
                 }
-                // Also check for \n\n (less common but valid)
-                if (i + 1 < buffer.size() && buffer[i] == '\n' && buffer[i+1] == '\n') {
+                // Also check for \n\n (less common but valid) - [i+1] valid since i <= bufSize-4
+                if (buffer[i] == '\n' && buffer[i+1] == '\n') {
                     requestComplete = true;
                     break;
                 }
