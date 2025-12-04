@@ -360,6 +360,16 @@ class Decimal:
     def __repr__(self):
         return f"Decimal('{self.value:.8f}')"
 
+    def __format__(self, format_spec):
+        """Support format specifiers like {x:,} for thousand separators"""
+        if format_spec == '' or format_spec == '.8f':
+            return f"{self.value:.8f}"
+        elif ',' in format_spec:
+            # Handle thousand separator format
+            return format(int(self.value), format_spec)
+        else:
+            return format(self.value, format_spec)
+
     def __float__(self):
         return self.value
 
