@@ -103,6 +103,10 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
     }
 
     std::string command = message.header.GetCommand();
+
+    // BUG #87 DEBUG: Log ALL incoming commands
+    std::cout << "[P2P-DEBUG] ProcessMessage: peer=" << peer_id
+              << " cmd='" << command << "' payload=" << message.header.payload_size << " bytes" << std::endl;
     uint32_t payload_size = message.header.payload_size;
 
     // NET-003 FIX: Validate payload size before deserialization
