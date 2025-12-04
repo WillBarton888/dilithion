@@ -622,16 +622,18 @@ void CRPCServer::HandleClient(int clientSocket) {
 
         // Check if we have complete HTTP request (headers end with \r\n\r\n)
         if (buffer.size() >= 4) {
-            // Look for end of headers in last chunk + overlap
-            size_t searchStart = (buffer.size() > bytesRead + 3) ? buffer.size() - bytesRead - 3 : 0;
-            for (size_t i = searchStart; i < buffer.size() - 3; i++) {
+            // CID 1675184 FIX: Cast bytesRead to size_t to prevent signed/unsigned overflow
+            size_t bytesReadSize = static_cast<size_t>(bytesRead);  // Safe: bytesRead > 0 verified above
+            size_t searchStart = (buffer.size() > bytesReadSize + 3) ? buffer.size() - bytesReadSize - 3 : 0;
+            // CID 1675184 FIX: Use i + 3 < size to prevent overflow
+            for (size_t i = searchStart; i + 3 < buffer.size(); i++) {
                 if (buffer[i] == '\r' && buffer[i+1] == '\n' &&
                     buffer[i+2] == '\r' && buffer[i+3] == '\n') {
                     requestComplete = true;
                     break;
                 }
                 // Also check for \n\n (less common but valid)
-                if (i < buffer.size() - 1 && buffer[i] == '\n' && buffer[i+1] == '\n') {
+                if (i + 1 < buffer.size() && buffer[i] == '\n' && buffer[i+1] == '\n') {
                     requestComplete = true;
                     break;
                 }
