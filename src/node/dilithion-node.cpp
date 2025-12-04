@@ -1577,12 +1577,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Check if we already have this block in memory
             if (g_chainstate.HasBlockIndex(blockHash)) {
                 std::cout << "[P2P] Block already in chain state, skipping" << std::endl;
+                // BUG #86 FIX: Mark block as received even when skipping
+                // Otherwise it stays "in-flight" forever, causing timeout/retry loops
+                if (g_node_context.block_fetcher) {
+                    g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                }
                 return;
             }
 
             // Check if we already have this block in database
             if (blockchain.BlockExists(blockHash)) {
                 std::cout << "[P2P] Block already in database, skipping" << std::endl;
+                // BUG #86 FIX: Mark block as received even when skipping
+                if (g_node_context.block_fetcher) {
+                    g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                }
                 return;
             }
 
