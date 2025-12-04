@@ -3494,7 +3494,8 @@ CDilithiumAddress CWallet::GetNewHDAddress() {
     // - Attacker can enumerate future addresses without passphrase
     // - Breaks expectation that locked wallet doesn't expose sensitive operations
     // Impact: Prevents address enumeration attacks, protects user privacy
-    if (IsCrypted() && !fWalletUnlocked) {
+    // CID 1675174 FIX: Use IsCryptedUnlocked() since we already hold cs_wallet
+    if (IsCryptedUnlocked() && !fWalletUnlocked) {
         std::cerr << "[ERROR] Cannot generate new address: wallet is locked. "
                   << "Please unlock wallet first." << std::endl;
         return CDilithiumAddress();
@@ -3533,7 +3534,8 @@ CDilithiumAddress CWallet::GetChangeAddress() {
 
     // RPC-003 FIX: Enforce wallet lock check with explicit error logging
     // Same security issue as GetNewHDAddress() - prevents change address enumeration
-    if (IsCrypted() && !fWalletUnlocked) {
+    // CID 1675174 FIX: Use IsCryptedUnlocked() since we already hold cs_wallet
+    if (IsCryptedUnlocked() && !fWalletUnlocked) {
         std::cerr << "[ERROR] Cannot generate change address: wallet is locked. "
                   << "Please unlock wallet first." << std::endl;
         return CDilithiumAddress();
@@ -3571,7 +3573,8 @@ CDilithiumAddress CWallet::DeriveAddress(const std::string& path_str) {
     }
 
     // Check if wallet is locked and encrypted
-    if (IsCrypted() && !fWalletUnlocked) {
+    // CID 1675174 FIX: Use IsCryptedUnlocked() since we already hold cs_wallet
+    if (IsCryptedUnlocked() && !fWalletUnlocked) {
         return CDilithiumAddress();
     }
 
@@ -3661,7 +3664,8 @@ size_t CWallet::ScanHDChains(CUTXOSet& utxo_set) {
     }
 
     // Check if wallet is locked
-    if (IsCrypted() && !fWalletUnlocked) {
+    // CID 1675174 FIX: Use IsCryptedUnlocked() since we already hold cs_wallet
+    if (IsCryptedUnlocked() && !fWalletUnlocked) {
         return 0;
     }
 
