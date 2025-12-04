@@ -30,6 +30,9 @@ static const size_t DEFAULT_MAX_MEMPOOL_SIZE = 300 * 1024 * 1024;
 // - No memory leaks on exception
 // - Maintains consistency invariants
 //
+// CID 1675265 FIX: This guard class accesses thread-shared mempool fields.
+// INVARIANT: Caller MUST hold CTxMemPool::cs lock when using this guard.
+// The guard does not acquire the lock itself - it relies on the caller.
 class MempoolInsertionGuard {
 private:
     CTxMemPool& mempool;
@@ -46,7 +49,9 @@ public:
     MempoolInsertionGuard(CTxMemPool& mp, const uint256& id)
         : mempool(mp), txid(id), map_inserted(false), set_inserted(false),
           size_added(0), count_incremented(false), descendants_updated(false),
-          committed(false) {}
+          committed(false) {
+        // CID 1675265: Caller MUST hold CTxMemPool::cs lock when using this guard
+    }
 
     ~MempoolInsertionGuard() {
         if (!committed) {
@@ -271,7 +276,8 @@ bool CTxMemPool::EvictTransactions(size_t bytes_needed, std::string* error) {
     // Evict selected transactions
     // Note: RemoveTx() is exception-safe (no partial eviction on failure)
     for (const auto& txid : to_evict) {
-        if (RemoveTx(txid)) {
+        // CID 1675290 FIX: Use unlocked version - caller (AddTx) already holds cs lock
+        if (RemoveTxUnlocked(txid)) {
             // MEMPOOL-018 FIX: Track successful eviction
             metric_evictions.fetch_add(1, std::memory_order_relaxed);
         }
@@ -328,9 +334,9 @@ void CTxMemPool::CleanupExpiredTransactions() {
     }
 
     // Remove expired transactions
-    // Note: RemoveTx() is thread-safe and handles descendant tracking
+    // CID 1675260 FIX: Use unlocked version - we already hold cs lock above
     for (const auto& txid : to_remove) {
-        if (RemoveTx(txid)) {
+        if (RemoveTxUnlocked(txid)) {
             // MEMPOOL-018 FIX: Track successful expiration
             metric_expirations.fetch_add(1, std::memory_order_relaxed);
         }
@@ -359,8 +365,9 @@ void CTxMemPool::ExpirationThreadFunc() {
     }
 }
 
-bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error) {
-    std::lock_guard<std::mutex> lock(cs);
+// CID 1675250 FIX: Internal unlocked version - caller MUST hold cs lock
+bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error) {
+    // NOTE: This function assumes caller holds cs lock - no lock acquisition here
     if (!tx) { if (error) *error = "Null tx"; return false; }
 
     // MEMPOOL-005 FIX: Reject coinbase transactions (consensus violation)
@@ -517,10 +524,15 @@ bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, uns
     } catch (...) {
         // Unknown exception - guard destructor will rollback all changes
         // MEMPOOL-018 FIX: Track failed addition
-        metric_add_failures.fetch_add(1, std::memory_order_relaxed);
-        if (error) *error = "Failed to add transaction to mempool: unknown exception";
+        metric_add_failures.fetch_add(1, std::memory_order_relaxed);    if (error) *error = "Failed to add transaction to mempool: unknown exception";
         return false;
     }
+}
+
+// Public wrapper that acquires lock
+bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error) {
+    std::lock_guard<std::mutex> lock(cs);
+    return AddTxUnlocked(tx, fee, time, height, error);
 }
 
 // ============================================================================
@@ -668,8 +680,9 @@ bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmou
     // All BIP-125 rules passed - perform atomic replacement
 
     // Step 1: Remove all conflicting transactions
+    // CID 1675250 FIX: Use unlocked version - we already hold cs lock
     for (const auto& conflict_txid : conflicts) {
-        if (!RemoveTx(conflict_txid)) {
+        if (!RemoveTxUnlocked(conflict_txid)) {
             // This should not happen since we verified existence above
             if (error) *error = "Failed to remove conflicting transaction";
             return false;
@@ -677,8 +690,8 @@ bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmou
     }
 
     // Step 2: Add replacement transaction
-    // Use existing AddTx() which has exception safety and all validations
-    if (!AddTx(replacement_tx, replacement_fee, time, height, error)) {
+    // CID 1675250 FIX: Use unlocked version - we already hold cs lock
+    if (!AddTxUnlocked(replacement_tx, replacement_fee, time, height, error)) {
         // Rollback: Re-add conflicting transactions
         // Note: This is best-effort rollback. In production, would use transaction log.
         // MEMPOOL-018 FIX: Track failed RBF replacement
@@ -695,8 +708,9 @@ bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmou
     return true;
 }
 
-bool CTxMemPool::RemoveTx(const uint256& txid) {
-    std::lock_guard<std::mutex> lock(cs);
+// CID 1675260/1675290/1675250 FIX: Internal unlocked version - caller MUST hold cs lock
+bool CTxMemPool::RemoveTxUnlocked(const uint256& txid) {
+    // NOTE: This function assumes caller holds cs lock - no lock acquisition here
     auto it = mapTx.find(txid);
     if (it == mapTx.end()) return false;
 
@@ -730,10 +744,15 @@ bool CTxMemPool::RemoveTx(const uint256& txid) {
 
     mapTx.erase(it);
 
-    // MEMPOOL-018 FIX: Track successful removal
-    metric_removes.fetch_add(1, std::memory_order_relaxed);
+    // MEMPOOL-018 FIX: Track successful removal    metric_removes.fetch_add(1, std::memory_order_relaxed);
 
     return true;
+}
+
+// Public wrapper that acquires lock
+bool CTxMemPool::RemoveTx(const uint256& txid) {
+    std::lock_guard<std::mutex> lock(cs);
+    return RemoveTxUnlocked(txid);
 }
 
 bool CTxMemPool::Exists(const uint256& txid) const {

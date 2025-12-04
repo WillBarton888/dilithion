@@ -106,6 +106,11 @@ private:
     void ExpirationThreadFunc();
     void CleanupExpiredTransactions();
 
+    // CID 1675260/1675290/1675250 FIX: Internal unlocked versions to prevent deadlock
+    // These MUST only be called while holding cs lock
+    bool RemoveTxUnlocked(const uint256& txid);
+    bool AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error);
+
 public:
     CTxMemPool();
     ~CTxMemPool();  // MEMPOOL-007 FIX: Destructor to stop expiration thread
