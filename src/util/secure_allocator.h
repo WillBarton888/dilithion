@@ -184,6 +184,12 @@ public:
             throw std::bad_alloc();
         }
 
+        // CID 1675311 FIX: Initialize memory before locking
+        // This ensures the memory is in a known state and satisfies static analyzers
+        // that flag uninitialized memory being passed to system calls (mlock/VirtualLock).
+        // The actual data will overwrite this, so the overhead is minimal.
+        std::memset(ptr, 0, bytes);
+
         // Lock memory (best-effort, don't throw on failure)
         // Locking may fail due to:
         // - Insufficient privileges (CAP_IPC_LOCK on Linux, SeLockMemoryPrivilege on Windows)
