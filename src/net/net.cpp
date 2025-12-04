@@ -535,6 +535,8 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
 
 bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& stream) {
     try {
+        // BUG #87 DEBUG: Log GETDATA processing
+        std::cout << "[P2P] Processing GETDATA from peer " << peer_id << std::endl;
         // Read number of inv items
         uint64_t count = stream.ReadCompactSize();
 
@@ -590,6 +592,7 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         }
 
         // Call handler to serve requested data
+        std::cout << "[P2P] Invoking GETDATA handler for " << getdata.size() << " items from peer " << peer_id << std::endl;
         on_getdata(peer_id, getdata);
         return true;
 
