@@ -47,7 +47,9 @@ public:
     bool SetSendTimeout(int timeout_ms);
 
     // Status
-    bool IsValid() const { return sock_fd >= 0; }
+    // BUG #90 FIX: sock_fd >= 0 is ALWAYS true on Windows (unsigned type)
+    // Must compare against INVALID_SOCKET_FD instead
+    bool IsValid() const { return sock_fd != INVALID_SOCKET_FD; }
     bool IsConnected() const { return connected; }
     std::string GetPeerAddress() const;
     uint16_t GetPeerPort() const;
