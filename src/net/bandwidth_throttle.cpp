@@ -16,11 +16,12 @@ CBandwidthThrottle::CBandwidthThrottle(uint64_t max_bytes_per_second)
 }
 
 bool CBandwidthThrottle::CanSend(size_t bytes) {
+    // CID 1675183 FIX: Acquire lock before reading shared data to prevent race condition
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (m_max_bytes_per_second == 0) {
         return true;  // Unlimited
     }
-    
-    std::lock_guard<std::mutex> lock(m_mutex);
     
     // Refill tokens based on elapsed time
     auto now = std::chrono::steady_clock::now();
@@ -37,11 +38,12 @@ bool CBandwidthThrottle::CanSend(size_t bytes) {
 }
 
 void CBandwidthThrottle::RecordSent(size_t bytes) {
+    // CID 1675183 FIX: Acquire lock before reading shared data to prevent race condition
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (m_max_bytes_per_second == 0) {
         return;  // Unlimited
     }
-    
-    std::lock_guard<std::mutex> lock(m_mutex);
     
     // Refill tokens
     auto now = std::chrono::steady_clock::now();
