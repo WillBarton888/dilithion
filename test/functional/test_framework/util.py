@@ -348,6 +348,12 @@ class Decimal:
             return Decimal(self.value / other.value)
         return Decimal(self.value / float(other))
 
+    def __abs__(self):
+        return Decimal(abs(self.value))
+
+    def __neg__(self):
+        return Decimal(-self.value)
+
     def __str__(self):
         return f"{self.value:.8f}"
 

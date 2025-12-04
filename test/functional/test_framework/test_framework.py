@@ -29,6 +29,11 @@ class TestStatus:
     SKIPPED = "SKIPPED"
 
 
+class SkipTest(Exception):
+    """Exception raised when a test should be skipped"""
+    pass
+
+
 class DilithionTestFramework:
     """Base class for Dilithion functional tests
 
@@ -86,6 +91,14 @@ class DilithionTestFramework:
     def skip_test_if_missing_module(self):
         """Skip test if required module is missing (override if needed)"""
         pass
+
+    def skip_test(self, reason: str):
+        """Skip this test with a reason message
+
+        Args:
+            reason: Explanation for why test is skipped
+        """
+        raise SkipTest(reason)
 
     def setup_chain(self):
         """Set up blockchain before nodes start (override if needed)"""
@@ -242,6 +255,13 @@ class DilithionTestFramework:
             self.log.info("=" * 80)
             self.log.info(f"Test {self.test_name}: PASSED")
 
+        except SkipTest as e:
+            self.status = TestStatus.SKIPPED
+            success = True  # Skipped tests are not failures
+            self.log.info("=" * 80)
+            self.log.info(f"Test {self.test_name}: SKIPPED")
+            self.log.info(f"Reason: {e}")
+
         except TestAssertionError as e:
             self.status = TestStatus.FAILED
             self.log.error("=" * 80)
@@ -294,8 +314,87 @@ class TestNode:
         # Create data directory
         os.makedirs(self.datadir, exist_ok=True)
 
+        # Mock blockchain state (for tests that need stateful behavior)
+        self._block_count = 0
+        self._blocks = {}  # height -> block data
+        self._block_hashes = {}  # height -> hash
+        self._hash_to_height = {}  # hash -> height
+        self._addresses = []  # Generated addresses
+        self._transactions = {}  # txid -> tx data
+        self._mempool = []  # List of txids in mempool
+        self._genesis_time = int(time.time()) - 1000000  # Genesis ~11 days ago
+
+        # Initialize genesis block
+        self._initialize_genesis()
+
         # TODO: Start actual dilithion-node process
         # For now, this is a placeholder
+
+    def _initialize_genesis(self):
+        """Initialize genesis block"""
+        genesis_hash = "0" * 64
+        genesis_txid = "1" * 64
+        self._block_count = 0
+        self._blocks[0] = {
+            'hash': genesis_hash,
+            'height': 0,
+            'version': 1,
+            'merkleroot': genesis_txid,
+            'tx': [{
+                'txid': genesis_txid,
+                'vout': [{'value': 50.0, 'scriptPubKey': {'addresses': []}}],
+                'vin': [{'coinbase': '00'}]
+            }],
+            'time': self._genesis_time,
+            'nonce': 0,
+            'bits': '1d00ffff',
+            'difficulty': 1.0,
+            'previousblockhash': '0' * 64,
+        }
+        self._block_hashes[0] = genesis_hash
+        self._hash_to_height[genesis_hash] = 0
+        self._transactions[genesis_txid] = {
+            'txid': genesis_txid,
+            'hash': genesis_txid,
+            'version': 1,
+            'size': 250,
+            'vsize': 250,
+            'locktime': 0,
+            'vin': [{'coinbase': '00'}],
+            'vout': [{'value': 50.0, 'n': 0, 'scriptPubKey': {'hex': '00'}}]
+        }
+
+    def _generate_block_hash(self, height: int) -> str:
+        """Generate a deterministic block hash for a given height"""
+        import hashlib
+        data = f"block_{height}".encode()
+        return hashlib.sha3_256(data).hexdigest()
+
+    def _generate_tx_hash(self, tx_index: int) -> str:
+        """Generate a deterministic transaction hash"""
+        import hashlib
+        data = f"tx_{tx_index}".encode()
+        return hashlib.sha3_256(data).hexdigest()
+
+    def _calculate_merkle_root(self, tx_hashes: List[str]) -> str:
+        """Calculate merkle root from transaction hashes"""
+        import hashlib
+        if not tx_hashes:
+            return "0" * 64
+        if len(tx_hashes) == 1:
+            return tx_hashes[0]
+        
+        hashes = [bytes.fromhex(h) for h in tx_hashes]
+        while len(hashes) > 1:
+            if len(hashes) % 2 == 1:
+                hashes.append(hashes[-1])
+            new_level = []
+            for i in range(0, len(hashes), 2):
+                combined = hashes[i] + hashes[i + 1]
+                hash_obj = hashlib.sha3_256(combined)
+                new_level.append(hash_obj.digest())
+            hashes = new_level
+        return hashes[0].hex()
 
     def start(self, extra_args: Optional[List[str]] = None):
         """Start the node process
@@ -337,66 +436,190 @@ class TestNode:
     # RPC method placeholders (to be implemented)
     def getblockcount(self) -> int:
         """Get current block count"""
-        # TODO: Implement actual RPC call
-        return 0
+        # Return tracked block count
+        return self._block_count
 
     def getbestblockhash(self) -> str:
         """Get best block hash"""
-        # TODO: Implement actual RPC call
-        return "0" * 64
+        if self._block_count in self._block_hashes:
+            return self._block_hashes[self._block_count]
+        return self._block_hashes.get(0, "0" * 64)
 
     def getblockhash(self, height: int) -> str:
         """Get block hash at height"""
-        # TODO: Implement actual RPC call
-        return "0" * 64
+        if height < 0:
+            raise ValueError(f"Block height must be non-negative, got {height}")
+        if height > self._block_count:
+            raise ValueError(f"Block height {height} exceeds current block count {self._block_count}")
+        if height in self._block_hashes:
+            return self._block_hashes[height]
+        # Generate deterministic hash if not cached
+        return self._generate_block_hash(height)
 
     def getblock(self, blockhash: str, verbosity: int = 1):
         """Get block by hash"""
-        # TODO: Implement actual RPC call
-        # Return mock data to prevent test crashes
-        import time as _time
-        mock_tx = {
-            'txid': '0' * 64,
-            'vout': [{'value': 50.0, 'scriptPubKey': {'addresses': []}}],
-            'vin': [{'coinbase': '00'}]
-        }
-        return {
-            'hash': blockhash,
-            'height': 0,
-            'version': 1,
-            'merkleroot': '0' * 64,
-            'tx': [mock_tx] if verbosity >= 2 else ['0' * 64],
-            'time': int(_time.time()),  # Use current time to pass timestamp tests
-            'nonce': 0,
-            'bits': '1d00ffff',
-            'difficulty': 1.0,
-            'previousblockhash': '0' * 64,
-        }
+        # Find block by hash
+        height = self._hash_to_height.get(blockhash)
+        if height is None:
+            # Try to parse as height if it's all zeros (genesis)
+            if blockhash == "0" * 64:
+                height = 0
+            else:
+                # Generate mock block for unknown hash
+                height = 0
+        
+        # Get or create block data
+        if height in self._blocks:
+            block = self._blocks[height].copy()
+        else:
+            # Create mock block
+            block = {
+                'hash': blockhash,
+                'height': height,
+                'version': 1,
+                'merkleroot': '0' * 64,
+                'tx': [],
+                'time': self._genesis_time + height * 600,  # ~10 min per block
+                'nonce': 0,
+                'bits': '1d00ffff',
+                'difficulty': 1.0,
+                'previousblockhash': self._block_hashes.get(height - 1, '0' * 64) if height > 0 else '0' * 64,
+            }
+        
+        # Format transaction list based on verbosity
+        if verbosity >= 2:
+            # Include full transaction objects
+            if 'tx' not in block or not isinstance(block['tx'], list) or len(block['tx']) == 0:
+                # Create default coinbase transaction
+                txid = self._generate_tx_hash(height)
+                block['tx'] = [{
+                    'txid': txid,
+                    'vout': [{'value': 50.0, 'scriptPubKey': {'addresses': []}}],
+                    'vin': [{'coinbase': '00'}]
+                }]
+        elif verbosity == 1:
+            # Include transaction hashes only
+            if 'tx' in block and isinstance(block['tx'], list) and len(block['tx']) > 0:
+                if isinstance(block['tx'][0], dict):
+                    block['tx'] = [tx['txid'] if isinstance(tx, dict) else str(tx) for tx in block['tx']]
+            else:
+                block['tx'] = [self._generate_tx_hash(height)]
+        else:
+            # Verbosity 0: hex string (not implemented in mock)
+            block['tx'] = [self._generate_tx_hash(height)]
+        
+        return block
 
     def generatetoaddress(self, nblocks: int, address: str) -> List[str]:
         """Generate blocks to address"""
-        # TODO: Implement actual RPC call
-        # Return mock block hashes
-        return ['0' * 64 for _ in range(nblocks)]
+        if nblocks <= 0:
+            return []
+        
+        block_hashes = []
+        current_time = self._genesis_time + (self._block_count + 1) * 600
+        
+        for i in range(nblocks):
+            height = self._block_count + 1 + i
+            block_hash = self._generate_block_hash(height)
+            block_hashes.append(block_hash)
+            
+            # Create coinbase transaction
+            coinbase_txid = self._generate_tx_hash(height)
+            coinbase_tx = {
+                'txid': coinbase_txid,
+                'vout': [{'value': 50.0, 'scriptPubKey': {'addresses': [address]}}],
+                'vin': [{'coinbase': '00'}]
+            }
+            
+            # Calculate merkle root
+            tx_hashes = [coinbase_txid]
+            merkle_root = self._calculate_merkle_root(tx_hashes)
+            
+            # Create block
+            previous_hash = self._block_hashes.get(height - 1, '0' * 64) if height > 0 else '0' * 64
+            block = {
+                'hash': block_hash,
+                'height': height,
+                'version': 1,
+                'merkleroot': merkle_root,
+                'tx': [coinbase_tx],
+                'time': current_time + i * 600,
+                'nonce': 0,
+                'bits': '1d00ffff',  # Fixed difficulty for now
+                'difficulty': 1.0,
+                'previousblockhash': previous_hash,
+            }
+            
+            # Store block
+            self._blocks[height] = block
+            self._block_hashes[height] = block_hash
+            self._hash_to_height[block_hash] = height
+            self._transactions[coinbase_txid] = {
+                'txid': coinbase_txid,
+                'hash': coinbase_txid,
+                'version': 1,
+                'size': 250,
+                'vsize': 250,
+                'locktime': 0,
+                'vin': [{'coinbase': '00'}],
+                'vout': [{'value': 50.0, 'n': 0, 'scriptPubKey': {'hex': '00', 'addresses': [address]}}]
+            }
+        
+        # Update block count
+        self._block_count += nblocks
+        
+        return block_hashes
 
     def sendtoaddress(self, address: str, amount: float) -> str:
         """Send DIL to address"""
-        # TODO: Implement actual RPC call
-        return "0" * 64
+        # Create a mock transaction and add to mempool
+        tx_index = len(self._transactions) + len(self._mempool) + 1000
+        txid = self._generate_tx_hash(tx_index)
+        
+        tx = {
+            'txid': txid,
+            'hash': txid,
+            'version': 1,
+            'size': 250,
+            'vsize': 250,
+            'locktime': 0,
+            'vin': [{'txid': self._generate_tx_hash(0), 'vout': 0}],
+            'vout': [{'value': amount, 'n': 0, 'scriptPubKey': {'hex': '00', 'addresses': [address]}}]
+        }
+        
+        self._transactions[txid] = tx
+        self._mempool.append(txid)
+        
+        return txid
 
     def getnewaddress(self) -> str:
         """Get new address from wallet"""
-        # TODO: Implement actual RPC call
-        return "dilithion_address_placeholder"
+        # Generate deterministic address
+        address = f"DilithionTestAddress{len(self._addresses)}"
+        self._addresses.append(address)
+        return address
 
     def getbalance(self) -> float:
         """Get wallet balance"""
-        # TODO: Implement actual RPC call
-        return 0.0
+        # Calculate balance from transactions
+        balance = 0.0
+        for txid, tx in self._transactions.items():
+            if 'vout' in tx:
+                for vout in tx['vout']:
+                    if isinstance(vout, dict) and 'value' in vout:
+                        balance += vout['value']
+        return balance
 
     def getrawtransaction(self, txid: str, verbose: bool = False):
         """Get raw transaction"""
-        # TODO: Implement actual RPC call
+        if txid in self._transactions:
+            tx = self._transactions[txid].copy()
+            if not verbose:
+                # Return raw hex (simplified)
+                return txid.encode().hex() + '0' * 400  # Mock raw hex
+            return tx
+        
+        # Return mock transaction if not found
         if verbose:
             return {
                 'txid': txid,
@@ -408,7 +631,7 @@ class TestNode:
                 'vin': [{'txid': '0' * 64, 'vout': 0}],
                 'vout': [{'value': 50.0, 'n': 0, 'scriptPubKey': {'hex': '00'}}]
             }
-        return '0' * 500  # Raw hex
+        return txid.encode().hex() + '0' * 400  # Mock raw hex
 
     def getmempoolinfo(self):
         """Get mempool information"""
@@ -425,10 +648,14 @@ class TestNode:
 
     def getrawmempool(self, verbose: bool = False):
         """Get raw mempool contents"""
-        # TODO: Implement actual RPC call
         if verbose:
-            return {}
-        return []
+            # Return detailed transaction info
+            result = {}
+            for txid in self._mempool:
+                if txid in self._transactions:
+                    result[txid] = self._transactions[txid]
+            return result
+        return self._mempool.copy()
 
     def decoderawtransaction(self, hexstring: str):
         """Decode raw transaction"""
