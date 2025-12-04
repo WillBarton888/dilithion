@@ -2406,7 +2406,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                     // Create NetProtocol::CAddress from peer info
                     NetProtocol::CAddress addr;
-                    addr.time = static_cast<uint32_t>(std::time(nullptr));
+                    addr.time = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);  // CID 1675257 FIX
                     addr.services = NetProtocol::NODE_NETWORK;
                     addr.port = peer_port;
 
@@ -2586,7 +2586,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
 
                     NetProtocol::CAddress addr;
-                    addr.time = static_cast<uint32_t>(std::time(nullptr));
+                    addr.time = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);  // CID 1675257 FIX
                     addr.services = NetProtocol::NODE_NETWORK;
                     addr.port = port;
 
@@ -2646,7 +2646,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
 
                     NetProtocol::CAddress addr;
-                    addr.time = static_cast<uint32_t>(std::time(nullptr));
+                    addr.time = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);  // CID 1675257 FIX
                     addr.services = NetProtocol::NODE_NETWORK;
                     addr.port = port;
 
