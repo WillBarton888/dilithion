@@ -212,7 +212,7 @@ bool CRPCServer::Start() {
 
     // Set socket options
     int opt = 1;
-    setsockopt(m_serverSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+    (void)setsockopt(m_serverSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
 
     // RPC-001 FIX: Bind to localhost only for security
     // SECURITY: RPC server binds to 127.0.0.1 (localhost) only by default
@@ -509,14 +509,14 @@ void CRPCServer::HandleClient(int clientSocket) {
     // Reduced from 30s to 10s (sufficient for RPC, prevents connection exhaustion)
     #ifdef _WIN32
     DWORD timeout = 10000;  // 10 seconds in milliseconds
-    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-    setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
     #else
     struct timeval timeout;
     timeout.tv_sec = 10;  // 10 seconds (down from 30)
     timeout.tv_usec = 0;
-    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-    setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
     #endif
 
     // Get client IP for rate limiting
@@ -542,7 +542,7 @@ void CRPCServer::HandleClient(int clientSocket) {
     
     // Phase 3: Helper lambda for sending response and cleaning up
     auto send_response_and_cleanup = [this, &ssl, clientSocket, &socket_write](const std::string& response) {
-        socket_write(clientSocket, response.c_str(), response.size());
+        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
         if (ssl && m_ssl_wrapper) {
             m_ssl_wrapper->SSLShutdown(ssl);
             m_ssl_wrapper->SSLFree(ssl);
@@ -557,7 +557,7 @@ void CRPCServer::HandleClient(int clientSocket) {
         std::string response = BuildHTTPResponse(
             "{\"error\":\"Too many failed authentication attempts. Try again later.\"}"
         );
-        socket_write(clientSocket, response.c_str(), response.size());
+        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
         
         // Phase 3: Clean up SSL connection
         if (ssl && m_ssl_wrapper) {
@@ -575,7 +575,7 @@ void CRPCServer::HandleClient(int clientSocket) {
         std::string response = BuildHTTPResponse(
             "{\"error\":\"Rate limit exceeded. Please slow down your requests.\"}"
         );
-        socket_write(clientSocket, response.c_str(), response.size());
+        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
         
         // Phase 3: Clean up SSL connection
         if (ssl && m_ssl_wrapper) {
@@ -649,7 +649,7 @@ void CRPCServer::HandleClient(int clientSocket) {
                                "Connection: close\r\n"
                                "\r\n"
                                "{\"error\":\"Request too large (max 1MB)\",\"code\":-32700}";
-        socket_write(clientSocket, response.c_str(), response.size());
+        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
         
         // Phase 3: Clean up SSL connection
         if (ssl && m_ssl_wrapper) {
