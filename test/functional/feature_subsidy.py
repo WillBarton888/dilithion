@@ -174,12 +174,13 @@ class SubsidyHalvingTest(DilithionTestFramework):
         total_supply = self.calculate_total_supply()
         self.log.info(f"  Total supply after all halvings: {total_supply} DIL")
 
-        # Should be very close to 21 million (within satoshi precision)
+        # Should be very close to 21 million
+        # Note: Due to integer division in halving, actual total is ~20,999,999.9769
         expected_supply = Decimal("21000000")
         difference = abs(total_supply - expected_supply)
 
-        # Allow small difference due to integer division
-        assert_equal(difference < Decimal("0.01"), True,
+        # Allow difference up to 0.1 DIL (actual mathematical total is ~20,999,999.9769)
+        assert_equal(difference < Decimal("0.1"), True,
                      f"Total supply should be ~21M DIL (actual: {total_supply})")
 
         self.log.info(f"✓ Total supply: {total_supply} DIL (target: {expected_supply} DIL)")
