@@ -1743,17 +1743,24 @@ bool CWallet::Load(const std::string& filename) {
     // This detects corruption/tampering beyond just HMAC failures
     // Create temporary wallet to test consistency before modifying this wallet
     CWallet temp_wallet_for_validation;
-    temp_wallet_for_validation.mapKeys = temp_mapKeys;
-    temp_wallet_for_validation.mapCryptedKeys = temp_mapCryptedKeys;
-    temp_wallet_for_validation.vchAddresses = temp_vchAddresses;
-    temp_wallet_for_validation.mapWalletTx = temp_mapWalletTx;
-    temp_wallet_for_validation.fIsHDWallet = temp_fIsHDWallet;
-    temp_wallet_for_validation.mapAddressToPath = temp_mapAddressToPath;
-    temp_wallet_for_validation.mapPathToAddress = temp_mapPathToAddress;
-    temp_wallet_for_validation.nHDExternalChainIndex = temp_nHDExternalChainIndex;
-    temp_wallet_for_validation.nHDInternalChainIndex = temp_nHDInternalChainIndex;
-    temp_wallet_for_validation.nHDAccountIndex = temp_nHDAccountIndex;
-    temp_wallet_for_validation.masterKey = temp_masterKey;
+
+    // CID 1675316 FIX: Acquire temp wallet's lock before writing its members
+    // This prevents Coverity from flagging a data race, even though
+    // temp_wallet_for_validation is a local object not shared with other threads
+    {
+        std::lock_guard<std::mutex> temp_lock(temp_wallet_for_validation.cs_wallet);
+        temp_wallet_for_validation.mapKeys = temp_mapKeys;
+        temp_wallet_for_validation.mapCryptedKeys = temp_mapCryptedKeys;
+        temp_wallet_for_validation.vchAddresses = temp_vchAddresses;
+        temp_wallet_for_validation.mapWalletTx = temp_mapWalletTx;
+        temp_wallet_for_validation.fIsHDWallet = temp_fIsHDWallet;
+        temp_wallet_for_validation.mapAddressToPath = temp_mapAddressToPath;
+        temp_wallet_for_validation.mapPathToAddress = temp_mapPathToAddress;
+        temp_wallet_for_validation.nHDExternalChainIndex = temp_nHDExternalChainIndex;
+        temp_wallet_for_validation.nHDInternalChainIndex = temp_nHDInternalChainIndex;
+        temp_wallet_for_validation.nHDAccountIndex = temp_nHDAccountIndex;
+        temp_wallet_for_validation.masterKey = temp_masterKey;
+    }
 
     std::string consistency_error;
     if (!temp_wallet_for_validation.ValidateConsistency(consistency_error)) {
