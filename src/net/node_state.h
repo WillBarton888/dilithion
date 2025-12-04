@@ -107,12 +107,14 @@ struct CNodeState {
     //! Stalling statistics
     int nStallingCount = 0;
 
-    //! Adaptive timeout: starts at 2 seconds, grows up to 64 seconds
+    //! Adaptive timeout: starts at 10 seconds, grows up to 320 seconds
     //! after repeated stalls from this peer
+    //! BUG #89 FIX: Increased base from 2s to 10s - 2s was too aggressive
+    //! for cross-datacenter transfers with RandomX PoW verification overhead
     std::chrono::seconds GetBlockTimeout() const {
-        // Base timeout: 2 seconds
-        // Double for each stall, max 64 seconds
-        int timeout_seconds = 2 << std::min(nStallingCount, 5);
+        // Base timeout: 10 seconds (was 2s - too aggressive)
+        // Double for each stall, max 320 seconds
+        int timeout_seconds = 10 << std::min(nStallingCount, 5);
         return std::chrono::seconds(timeout_seconds);
     }
 
