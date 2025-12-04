@@ -3391,7 +3391,8 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
     addr.SetIPv4(ipv4);
     addr.port = port;
     addr.services = NetProtocol::NODE_NETWORK;
-    addr.time = static_cast<uint32_t>(time(nullptr));
+    // CID 1675249 FIX: Safe 64-to-32 bit time conversion (valid until 2106)
+    addr.time = static_cast<uint32_t>(time(nullptr) & 0xFFFFFFFF);
 
     // Connect to peer
     int peer_id = g_node_context.connection_manager->ConnectToPeer(addr);
