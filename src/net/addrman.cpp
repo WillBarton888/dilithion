@@ -539,6 +539,11 @@ size_t CAddrMan::Size() const {
 
 void CAddrMan::Clear() {
     std::lock_guard<std::mutex> lock(cs);
+    ClearLocked();
+}
+
+void CAddrMan::ClearLocked() {
+    // Note: Caller must hold cs lock
 
     mapInfo.clear();
     mapAddr.clear();

@@ -414,6 +414,12 @@ private:
     // Internal methods
 
     /**
+     * @brief Clear all addresses (assumes lock is already held)
+     * Used internally by Clear() and Unserialize()
+     */
+    void ClearLocked();
+
+    /**
      * @brief Find an address in the map
      * @return Pointer to CAddrInfo or nullptr
      */
@@ -527,7 +533,8 @@ template<typename Stream>
 void CAddrMan::Unserialize(Stream& s) {
     std::lock_guard<std::mutex> lock(cs);
 
-    Clear();
+    // Use ClearLocked() since we already hold the lock
+    ClearLocked();
 
     // Format version
     uint8_t version;
