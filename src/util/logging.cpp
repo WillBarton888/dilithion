@@ -63,6 +63,12 @@ std::string CLoggingConfig::GetLogFile() const {
     return m_logFile;
 }
 
+// CID 1675300 FIX: Acquire lock before reading m_logFile to prevent data race
+bool CLoggingConfig::IsFileLoggingEnabled() const {
+    std::lock_guard<std::mutex> lock(m_configMutex);
+    return !m_logFile.empty();
+}
+
 void CLoggingConfig::SetConsoleLogging(bool enable) {
     m_consoleLogging.store(enable);
 }

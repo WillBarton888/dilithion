@@ -69,7 +69,7 @@ public:
     // File logging
     void SetLogFile(const std::string& path);
     std::string GetLogFile() const;
-    bool IsFileLoggingEnabled() const { return !m_logFile.empty(); }
+    bool IsFileLoggingEnabled() const;  // CID 1675300 FIX: Moved to .cpp for thread safety
 
     // Console logging
     void SetConsoleLogging(bool enable);
