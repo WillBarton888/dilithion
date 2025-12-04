@@ -202,7 +202,8 @@ bool CIbdCoordinator::FetchBlocks() {
             std::vector<NetProtocol::CInv> getdata;
             getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-            m_node_context.connection_manager->SendMessage(peer, msg);
+            bool sent = m_node_context.connection_manager->SendMessage(peer, msg);
+            std::cout << "[IBD-DEBUG] GETDATA " << (sent ? "SENT" : "FAILED") << " to peer " << peer << " for " << hash.GetHex().substr(0, 16) << "..." << std::endl;
             LogPrintIBD(DEBUG, "Sent GETDATA for block %s... (height %d) to peer %d", 
                        hash.GetHex().substr(0, 16).c_str(), height, peer);
             successful_requests++;
