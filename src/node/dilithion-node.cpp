@@ -435,7 +435,10 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     CBlock block;
     block.nVersion = 1;
     block.hashPrevBlock = hashBestBlock;
-    block.nTime = static_cast<uint32_t>(std::time(nullptr));
+    // CID 1675302 FIX: Use safe 64-to-32 bit time conversion
+    // Block timestamps are uint32_t per blockchain protocol (valid until year 2106)
+    time_t currentTime = std::time(nullptr);
+    block.nTime = static_cast<uint32_t>(currentTime & 0xFFFFFFFF);
     block.nBits = GetNextWorkRequired(pindexPrev);
     block.nNonce = 0;
 
