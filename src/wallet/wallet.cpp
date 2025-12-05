@@ -1612,7 +1612,8 @@ bool CWallet::Load(const std::string& filename) {
             // Create address from public key
             CDilithiumAddress keyAddr(encKey.vchPubKey);
             temp_mapCryptedKeys[keyAddr] = encKey;
-            temp_vchAddresses.push_back(keyAddr);
+            // CID 1675XXX FIX: Use std::move after last use as map key
+            temp_vchAddresses.push_back(std::move(keyAddr));
         } else {
             // Read unencrypted key
             CKey key;
@@ -1628,7 +1629,8 @@ bool CWallet::Load(const std::string& filename) {
             // Create address from public key
             CDilithiumAddress keyAddr(key.vchPubKey);
             temp_mapKeys[keyAddr] = key;
-            temp_vchAddresses.push_back(keyAddr);
+            // CID 1675XXX FIX: Use std::move after last use as map key
+            temp_vchAddresses.push_back(std::move(keyAddr));
         }
     }
 

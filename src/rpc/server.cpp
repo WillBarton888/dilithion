@@ -1588,7 +1588,8 @@ std::vector<RPCResponse> CRPCServer::ExecuteBatchRPC(const std::vector<RPCReques
             RPCResponse error_resp = RPCResponse::ErrorStructured(-32600,
                 "Invalid Request", request.id, "RPC-INVALID-REQUEST",
                 {"Check JSON-RPC 2.0 format", "Verify request is a valid object"});
-            responses.push_back(error_resp);
+            // CID 1675XXX FIX: Use std::move to avoid unnecessary copy
+            responses.push_back(std::move(error_resp));
             continue;
         }
 
@@ -1600,7 +1601,8 @@ std::vector<RPCResponse> CRPCServer::ExecuteBatchRPC(const std::vector<RPCReques
         
         // Execute request
         RPCResponse resp = ExecuteRPC(request);
-        responses.push_back(resp);
+        // CID 1675XXX FIX: Use std::move to avoid unnecessary copy
+        responses.push_back(std::move(resp));
     }
 
     return responses;
