@@ -146,7 +146,8 @@ HeadersSyncState::ProcessingResult HeadersSyncState::ProcessNextHeaders(
         }
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 std::vector<uint256> HeadersSyncState::NextHeadersRequestLocator() const {
@@ -166,7 +167,8 @@ std::vector<uint256> HeadersSyncState::NextHeadersRequestLocator() const {
         locator.push_back(m_chain_start_hash);
     }
 
-    return locator;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(locator);
 }
 
 uint32_t HeadersSyncState::GetPresyncTime() const {

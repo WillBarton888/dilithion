@@ -272,7 +272,8 @@ std::string Base64Encode(const uint8_t* data, size_t dataLen) {
         result.push_back(i + 2 < dataLen ? BASE64_CHARS[triple & 0x3F] : '=');
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 bool Base64Decode(const std::string& encoded, std::vector<uint8_t>& decoded) {

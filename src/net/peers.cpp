@@ -137,7 +137,8 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetAllPeers() {
     for (const auto& pair : peers) {
         result.push_back(pair.second);
     }
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
@@ -148,7 +149,8 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
             result.push_back(pair.second);
         }
     }
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 bool CPeerManager::CanAcceptConnection() const {
@@ -196,7 +198,8 @@ std::vector<NetProtocol::CAddress> CPeerManager::GetPeerAddresses(int max_count)
         }
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
@@ -562,7 +565,8 @@ std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int co
         result.push_back(addr);
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 size_t CPeerManager::GetAddressCount() const {

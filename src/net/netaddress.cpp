@@ -240,7 +240,8 @@ std::vector<uint8_t> CNetAddr::GetGroup() const {
         }
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 std::string CNetAddr::ToString() const {

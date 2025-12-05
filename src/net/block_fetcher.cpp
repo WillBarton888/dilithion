@@ -212,7 +212,8 @@ std::vector<std::pair<uint256, int>> CBlockFetcher::GetNextBlocksToFetch(int max
                   << "(queue size: " << queueBlocksToFetch.size() << ")" << std::endl;
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 std::vector<uint256> CBlockFetcher::CheckTimeouts()
@@ -461,7 +462,8 @@ std::vector<uint256> CBlockFetcher::GetQueuedBlocks() const
         result.push_back(hash);
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 void CBlockFetcher::RemoveFromQueue(const uint256& hash)

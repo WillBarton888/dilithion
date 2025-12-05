@@ -613,7 +613,8 @@ std::vector<uint256> CHeadersManager::GetHeadersAtHeight(int height) const
         result.insert(result.end(), it->second.begin(), it->second.end());
     }
 
-    return result;
+    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
+    return std::move(result);
 }
 
 // ============================================================================
