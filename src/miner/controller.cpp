@@ -302,23 +302,30 @@ void CMiningController::MiningWorker(uint32_t threadId) {
             std::lock_guard<std::mutex> lock(m_templateMutex);
             if (!m_pTemplate) {
                 templateValid = false;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                continue;
-            }
+                // CID 1675230 FIX: Release lock before sleeping to prevent blocking other threads
+                // The lock is automatically released when the lock_guard goes out of scope
+            } else {
+                // Check if template changed by comparing header fields
+                if (!templateValid ||
+                    !(m_pTemplate->block.hashPrevBlock == currentBlock.hashPrevBlock) ||
+                    !(m_pTemplate->block.hashMerkleRoot == currentBlock.hashMerkleRoot) ||
+                    m_pTemplate->block.nTime != currentBlock.nTime ||
+                    m_pTemplate->block.nBits != currentBlock.nBits) {
 
-            // Check if template changed by comparing header fields
-            if (!templateValid ||
-                !(m_pTemplate->block.hashPrevBlock == currentBlock.hashPrevBlock) ||
-                !(m_pTemplate->block.hashMerkleRoot == currentBlock.hashMerkleRoot) ||
-                m_pTemplate->block.nTime != currentBlock.nTime ||
-                m_pTemplate->block.nBits != currentBlock.nBits) {
-
-                // Template changed - copy it once
-                currentBlock = m_pTemplate->block;
-                currentHashTarget = m_pTemplate->hashTarget;
-                templateValid = true;
-                needNewTemplate = true;
+                    // Template changed - copy it once
+                    currentBlock = m_pTemplate->block;
+                    currentHashTarget = m_pTemplate->hashTarget;
+                    templateValid = true;
+                    needNewTemplate = true;
+                }
             }
+        }
+        
+        // CID 1675230 FIX: Sleep outside the lock to prevent blocking other threads
+        // If template is not available, sleep briefly and retry
+        if (!templateValid) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
         }
 
         // BUG #24 + #26 + #27 FIX: Only re-serialize header when template changes
@@ -566,7 +573,9 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
                                  coinbaseMsg.begin(), coinbaseMsg.end());
 
     coinbaseIn.nSequence = CTxIn::SEQUENCE_FINAL;
-    coinbase.vin.push_back(coinbaseIn);
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // coinbaseIn is a local variable that's no longer used after push_back
+    coinbase.vin.push_back(std::move(coinbaseIn));
 
     // Coinbase output: pay to miner address
     CTxOut coinbaseOut;
@@ -584,7 +593,9 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
     script.push_back(0xac);  // OP_CHECKSIG
     coinbaseOut.scriptPubKey = script;
 
-    coinbase.vout.push_back(coinbaseOut);
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // coinbaseOut is a local variable that's no longer used after push_back
+    coinbase.vout.push_back(std::move(coinbaseOut));
 
     return MakeTransactionRef(coinbase);
 }
@@ -771,7 +782,9 @@ std::vector<CTransactionRef> CMiningController::SelectTransactionsForBlock(
         }
     }
 
-    return selectedTxs;
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // selectedTxs is a local variable that's no longer used after return
+    return std::move(selectedTxs);
 }
 
 std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
@@ -889,7 +902,9 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
             }
             std::cout << std::endl;
         }
-        blockTxData.insert(blockTxData.end(), txData.begin(), txData.end());
+        // CID 1675171 FIX: Use move iterators to avoid unnecessary copy
+        // txData is a local variable that's no longer used after insert
+        blockTxData.insert(blockTxData.end(), std::make_move_iterator(txData.begin()), std::make_move_iterator(txData.end()));
     }
 
     std::cout << "[DEBUG] CreateBlockTemplate: blockTxData.size() after serialization = " << blockTxData.size() << " bytes" << std::endl;
@@ -954,7 +969,9 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
 
     block.nBits = nBits;
     block.nNonce = 0;  // Miner will increment this
-    block.vtx = blockTxData;
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // blockTxData is no longer used after this assignment, so we can move it
+    block.vtx = std::move(blockTxData);
 
     // Step 7: Calculate target from nBits
     uint256 hashTarget = CompactToBig(nBits);
@@ -982,5 +999,7 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     CBlockTemplate blockTemplate(block, hashTarget, nHeight);
 
     (void)BENCHMARK_END("mining_create_template");
-    return blockTemplate;
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // blockTemplate is a local variable that's no longer used after return
+    return std::move(blockTemplate);
 }

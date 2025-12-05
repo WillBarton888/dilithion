@@ -1906,7 +1906,12 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     if (!file.good()) return false;
 
     // FIX-011: Remember position for HMAC (will write real HMAC later)
+    // CID 1675266 FIX: Check return value of tellp to ensure position is valid
+    // tellp returns -1 on error
     std::streampos hmac_pos = file.tellp();
+    if (hmac_pos == std::streampos(-1)) {
+        return false;  // Failed to get file position
+    }
 
     // Write placeholder HMAC (zeros for now, will compute and write later)
     std::vector<uint8_t> placeholder_hmac(WALLET_FILE_HMAC_SIZE, 0);
@@ -1919,7 +1924,12 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         return false;
     }
     // FIX-011: Remember position before writing salt (HMAC covers [Salt][Data...])
+    // CID 1675266 FIX: Check return value of tellp to ensure position is valid
+    // tellp returns -1 on error
     std::streampos data_start_pos = file.tellp();
+    if (data_start_pos == std::streampos(-1)) {
+        return false;  // Failed to get file position
+    }
     file.write(reinterpret_cast<const char*>(hmac_salt.data()), WALLET_FILE_SALT_SIZE);
     if (!file.good()) return false;
 
@@ -2122,7 +2132,13 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
 
     // FIX-011 (PERSIST-001): Compute and write file integrity HMAC
     // HMAC covers all data from HMAC field onwards (includes salt and all wallet data)
+    // CID 1675266 FIX: Check return value of tellp to ensure position is valid
+    // tellp returns -1 on error
     std::streampos end_pos = file.tellp();
+    if (end_pos == std::streampos(-1)) {
+        std::remove(tempFile.c_str());
+        return false;  // Failed to get file position
+    }
 
     // FIX-004 (PERSIST-002): Flush data before reopening for read
     file.flush();
@@ -2136,6 +2152,8 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     }
 
     // Seek to start of HMAC-protected data
+    // CID 1675266 FIX: Check return value of seekg to ensure seek succeeded
+    // seekg can fail if position is invalid or stream is in bad state
     read_file.seekg(data_start_pos);
     if (!read_file.good()) {
         read_file.close();
@@ -2146,8 +2164,10 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     // Read all data from salt position to end
     size_t data_size = static_cast<size_t>(end_pos - data_start_pos);
     std::vector<uint8_t> file_data(data_size);
+    // CID 1675266 FIX: Check return value of read to ensure expected bytes were read
+    // read() returns stream reference, but we must check gcount() to verify bytes read
     read_file.read(reinterpret_cast<char*>(file_data.data()), data_size);
-    if (!read_file.good()) {
+    if (!read_file.good() || static_cast<size_t>(read_file.gcount()) != data_size) {
         read_file.close();
         std::remove(tempFile.c_str());
         return false;
@@ -2190,7 +2210,14 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     }
 
     // Write the computed HMAC
+    // CID 1675266 FIX: Check return value of seekp to ensure seek succeeded
+    // seekp can fail if position is invalid or stream is in bad state
     update_file.seekp(hmac_pos);
+    if (!update_file.good()) {
+        update_file.close();
+        std::remove(tempFile.c_str());
+        return false;
+    }
     update_file.write(reinterpret_cast<const char*>(computed_hmac.data()), WALLET_FILE_HMAC_SIZE);
     if (!update_file.good()) {
         update_file.close();

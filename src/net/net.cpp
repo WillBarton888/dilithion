@@ -1444,7 +1444,9 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
     // Serialize complete message (header + payload)
     std::vector<uint8_t> data = message.Serialize();
 
-    // Get socket and send (hold lock during send to prevent socket deletion)
+    // CID 1675314 FIX: Get socket pointer while holding lock, then release lock before blocking operations
+    // This prevents holding the lock during sleep, which blocks other threads from accessing sockets
+    CSocket* socket_ptr = nullptr;
     {
         std::lock_guard<std::mutex> lock(cs_sockets);
         auto it = peer_sockets.find(peer_id);
@@ -1452,62 +1454,81 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
             std::cout << "[P2P] ERROR: No valid socket for peer " << peer_id << std::endl;
             return false;
         }
+        // Get raw pointer to socket - we'll use it outside the lock
+        // Note: Socket may be deleted by another thread, but we check validity before each use
+        socket_ptr = it->second.get();
+    }
 
-        // BUG #91 FIX: Use loop to handle partial sends on non-blocking sockets
-        // Large messages (like 145KB of headers) may not send in one call
-        // when the socket buffer is full. We must wait and retry.
-        const uint8_t* ptr = data.data();
-        size_t remaining = data.size();
-        int total_sent = 0;
-        int max_retries = 100;  // 100 retries * 100ms = 10 seconds max
-        int retry_count = 0;
+    // BUG #91 FIX: Use loop to handle partial sends on non-blocking sockets
+    // Large messages (like 145KB of headers) may not send in one call
+    // when the socket buffer is full. We must wait and retry.
+    const uint8_t* ptr = data.data();
+    size_t remaining = data.size();
+    int total_sent = 0;
+    int max_retries = 100;  // 100 retries * 100ms = 10 seconds max
+    int retry_count = 0;
 
-        while (remaining > 0 && retry_count < max_retries) {
-            int sent = it->second->Send(ptr, remaining);
-
-            if (sent > 0) {
-                ptr += sent;
-                remaining -= sent;
-                total_sent += sent;
-                retry_count = 0;  // Reset retry count on successful send
-                continue;
+    while (remaining > 0 && retry_count < max_retries) {
+        // CID 1675314 FIX: Re-check socket validity before each send attempt
+        // Socket may have been deleted by another thread, so we verify it still exists
+        {
+            std::lock_guard<std::mutex> lock(cs_sockets);
+            auto it = peer_sockets.find(peer_id);
+            if (it == peer_sockets.end() || !it->second || it->second.get() != socket_ptr || !it->second->IsValid()) {
+                std::cout << "[P2P] ERROR: Socket for peer " << peer_id << " was deleted during send" << std::endl;
+                return false;
             }
+            // Update socket_ptr in case it changed (shouldn't happen, but be safe)
+            socket_ptr = it->second.get();
+        }
 
-            // sent <= 0: Check for would-block (need to wait) vs real error
-            int error_code = it->second->GetLastError();
-            bool would_block = false;
+        // Send data (lock is released, so we can block here)
+        int sent = socket_ptr->Send(ptr, remaining);
+
+        if (sent > 0) {
+            ptr += sent;
+            remaining -= sent;
+            total_sent += sent;
+            retry_count = 0;  // Reset retry count on successful send
+            continue;
+        }
+
+        // sent <= 0: Check for would-block (need to wait) vs real error
+        int error_code = socket_ptr->GetLastError();
+        bool would_block = false;
 #ifdef _WIN32
-            would_block = (error_code == WSAEWOULDBLOCK);
+        would_block = (error_code == WSAEWOULDBLOCK);
 #else
-            would_block = (error_code == EAGAIN || error_code == EWOULDBLOCK);
+        would_block = (error_code == EAGAIN || error_code == EWOULDBLOCK);
 #endif
 
-            if (would_block) {
-                // Socket buffer full, wait for it to drain
-                retry_count++;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                continue;
-            }
-
-            // Real error - log and fail
-            std::string error_str = it->second->GetLastErrorString();
-            std::cout << "[P2P] ERROR: Send failed to peer " << peer_id
-                      << " (sent " << total_sent << " of " << data.size()
-                      << " bytes, error: " << error_str << ")" << std::endl;
-            connection_quality.RecordError(peer_id);
-            partition_detector.RecordConnectionFailure();
-            return false;
+        if (would_block) {
+            // CID 1675314 FIX: Sleep outside the lock to prevent blocking other threads
+            // Socket buffer full, wait for it to drain
+            retry_count++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
         }
 
-        if (remaining > 0) {
-            // Timed out after max retries
-            std::cout << "[P2P] WARNING: Send timeout to peer " << peer_id
-                      << " (sent " << total_sent << " of " << data.size()
-                      << " bytes after " << retry_count << " retries)" << std::endl;
-            connection_quality.RecordError(peer_id);
-            partition_detector.RecordConnectionFailure();
-            return false;
-        }
+        // Real error - log and fail
+        std::string error_str = socket_ptr->GetLastErrorString();
+        std::cout << "[P2P] ERROR: Send failed to peer " << peer_id
+                  << " (sent " << total_sent << " of " << data.size()
+                  << " bytes, error: " << error_str << ")" << std::endl;
+        connection_quality.RecordError(peer_id);
+        partition_detector.RecordConnectionFailure();
+        return false;
+    }
+
+    if (remaining > 0) {
+        // Timed out after max retries
+        std::cout << "[P2P] WARNING: Send timeout to peer " << peer_id
+                  << " (sent " << total_sent << " of " << data.size()
+                  << " bytes after " << retry_count << " retries)" << std::endl;
+        connection_quality.RecordError(peer_id);
+        partition_detector.RecordConnectionFailure();
+        return false;
+    }
 
         // NET-005 FIX: Update peer last_send time INSIDE mutex to prevent race
         // Previously this was done after releasing lock, creating TOCTOU vulnerability

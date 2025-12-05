@@ -8,6 +8,9 @@
 #include <iomanip>
 #include <cstring>
 #include <algorithm>
+#ifndef _WIN32
+#include <errno.h>
+#endif
 
 // OpenSSL for SHA-1 (required for WebSocket accept key)
 #include <openssl/sha.h>
@@ -78,7 +81,20 @@ bool CWebSocketServer::Start() {
 
     // Set socket options
     int opt = 1;
-    setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+    // CID 1675303 FIX: Check return value of setsockopt to ensure socket option is set
+    // setsockopt returns 0 on success, SOCKET_ERROR (-1) on error
+#ifdef _WIN32
+    if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)) == SOCKET_ERROR) {
+        int error = WSAGetLastError();
+        std::cerr << "[WebSocket] Warning: Failed to set SO_REUSEADDR (error: " << error << ")" << std::endl;
+        // Continue anyway - SO_REUSEADDR failure is non-fatal, but may cause issues on restart
+    }
+#else
+    if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        std::cerr << "[WebSocket] Warning: Failed to set SO_REUSEADDR (" << strerror(errno) << ")" << std::endl;
+        // Continue anyway - SO_REUSEADDR failure is non-fatal, but may cause issues on restart
+    }
+#endif
 
     // Bind to localhost
     struct sockaddr_in addr;

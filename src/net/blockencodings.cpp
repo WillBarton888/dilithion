@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
 #include <iostream>
 #include <random>
 
@@ -132,7 +133,9 @@ void SerializeTransactionsToVtx(
     for (const auto& tx : transactions) {
         if (tx) {
             std::vector<uint8_t> txData = tx->Serialize();
-            vtx.insert(vtx.end(), txData.begin(), txData.end());
+            // CID 1675171 FIX: Use move iterators to avoid unnecessary copy
+            // txData is a local variable that's no longer used after insert
+            vtx.insert(vtx.end(), std::make_move_iterator(txData.begin()), std::make_move_iterator(txData.end()));
         }
     }
 }
@@ -344,12 +347,16 @@ std::vector<uint8_t> CBlockHeaderAndShortTxIDs::Serialize() const
         result.insert(result.end(), ptr, ptr + 2);
 
         std::vector<uint8_t> txData = prefilled.tx.Serialize();
-        result.insert(result.end(), txData.begin(), txData.end());
+        // CID 1675171 FIX: Use move iterators to avoid unnecessary copy
+        // txData is a local variable that's no longer used after insert
+        result.insert(result.end(), std::make_move_iterator(txData.begin()), std::make_move_iterator(txData.end()));
 
         last_index = prefilled.index + 1;
     }
 
-    return result;
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // result is a local variable that's no longer used after return
+    return std::move(result);
 }
 
 bool CBlockHeaderAndShortTxIDs::Deserialize(const uint8_t* data, size_t len)
@@ -609,7 +616,9 @@ std::vector<uint8_t> BlockTransactionsRequest::Serialize() const
         last_index = idx + 1;
     }
 
-    return result;
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // result is a local variable that's no longer used after return
+    return std::move(result);
 }
 
 bool BlockTransactionsRequest::Deserialize(const uint8_t* data, size_t len)
@@ -628,7 +637,23 @@ bool BlockTransactionsRequest::Deserialize(const uint8_t* data, size_t len)
     uint16_t count = data[offset] | (static_cast<uint16_t>(data[offset + 1]) << 8);
     offset += 2;
 
-    if (offset + count * 2 > len) {
+    // CID 1675261 FIX: Validate untrusted allocation size to prevent DoS attacks
+    // An attacker could send a malicious message with a very large count value,
+    // causing excessive memory allocation. Limit to a reasonable maximum.
+    // A block typically has at most a few thousand transactions, and we're only requesting
+    // missing ones, so 10000 is a safe upper bound (well below uint16_t max of 65535).
+    const uint16_t MAX_INDEX_COUNT = 10000;
+    if (count > MAX_INDEX_COUNT) {
+        return false;  // Reject maliciously large count values
+    }
+
+    // CID 1675261 FIX: Check for integer overflow in calculation before using count
+    // Check that count * 2 doesn't overflow size_t, and that offset + count * 2 doesn't overflow
+    if (count > SIZE_MAX / 2 || offset > SIZE_MAX - static_cast<size_t>(count) * 2) {
+        return false;  // Integer overflow would occur
+    }
+
+    if (offset + static_cast<size_t>(count) * 2 > len) {
         return false;
     }
 
@@ -664,10 +689,14 @@ std::vector<uint8_t> BlockTransactions::Serialize() const
     // Transactions
     for (const auto& tx : txn) {
         std::vector<uint8_t> txData = tx.Serialize();
-        result.insert(result.end(), txData.begin(), txData.end());
+        // CID 1675171 FIX: Use move iterators to avoid unnecessary copy
+        // txData is a local variable that's no longer used after insert
+        result.insert(result.end(), std::make_move_iterator(txData.begin()), std::make_move_iterator(txData.end()));
     }
 
-    return result;
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // result is a local variable that's no longer used after return
+    return std::move(result);
 }
 
 bool BlockTransactions::Deserialize(const uint8_t* data, size_t len)
@@ -685,6 +714,23 @@ bool BlockTransactions::Deserialize(const uint8_t* data, size_t len)
     // Transaction count
     uint16_t count = data[offset] | (static_cast<uint16_t>(data[offset + 1]) << 8);
     offset += 2;
+
+    // CID 1675268 FIX: Validate untrusted allocation size to prevent DoS attacks
+    // An attacker could send a malicious message with a very large count value,
+    // causing excessive memory allocation. Limit to a reasonable maximum.
+    // A block typically has at most a few thousand transactions. Since count is uint16_t,
+    // the maximum value is 65535, but we limit to 10000 as a reasonable upper bound
+    // to prevent DoS attacks while still allowing legitimate large blocks.
+    const uint16_t MAX_TX_COUNT = 10000;
+    if (count > MAX_TX_COUNT) {
+        return false;  // Reject maliciously large count values
+    }
+
+    // CID 1675268 FIX: Check for integer overflow in calculation before using count
+    // Although count is uint16_t (max 65535), we still check for safety and consistency
+    if (count > SIZE_MAX / 2) {
+        return false;  // Integer overflow would occur (defensive check)
+    }
 
     // Transactions
     txn.resize(count);

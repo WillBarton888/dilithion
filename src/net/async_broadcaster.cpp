@@ -304,11 +304,15 @@ bool CAsyncBroadcaster::ShouldRetry(const BroadcastTask& task) const {
 
 // Calculate retry delay with exponential backoff
 int64_t CAsyncBroadcaster::GetRetryDelay(int retry_count) const {
-    int base_delay = m_retry_delay_ms.load();
+    // CID 1675228 FIX: Cast to int64_t before arithmetic to prevent integer overflow
+    // The expression (1 << retry_count) is evaluated as int, which can overflow if retry_count is large.
+    // Casting to int64_t before shifting ensures the operation happens in a wider type.
+    int64_t base_delay = static_cast<int64_t>(m_retry_delay_ms.load());
 
     // Exponential backoff: delay * (2 ^ retry_count)
     // Example with 1000ms base: 1s, 2s, 4s, 8s, 16s...
-    int64_t delay = base_delay * (1 << retry_count);
+    // Cast 1 to int64_t before shifting to prevent overflow in narrow int type
+    int64_t delay = base_delay * (static_cast<int64_t>(1) << retry_count);
 
     // Cap at 60 seconds
     const int64_t MAX_DELAY = 60000;

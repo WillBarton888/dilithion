@@ -182,41 +182,87 @@ void CRPCLogger::RotateLogs(size_t max_size) {
     
     // Check log file size
     if (!m_log_file.empty() && m_log_stream && m_log_stream->is_open()) {
+        // CID 1675254 FIX: Check return value of seekp and tellp to ensure file operations succeed
+        // seekp can fail if stream is in bad state, tellp returns -1 on error
         m_log_stream->seekp(0, std::ios::end);
-        size_t size = m_log_stream->tellp();
-        
-        if (size > max_size) {
-            // Close and rotate
-            m_log_stream->close();
-            m_log_stream.reset();
-            
-            // Rename old log
-            std::string old_log = m_log_file + ".old";
-            std::remove(old_log.c_str());  // Remove old backup
-            std::rename(m_log_file.c_str(), old_log.c_str());
-            
-            // Open new log
-            m_log_stream = std::make_unique<std::ofstream>(m_log_file, std::ios::app);
+        if (m_log_stream->good()) {
+            std::streampos pos = m_log_stream->tellp();
+            if (pos != std::streampos(-1)) {
+                size_t size = static_cast<size_t>(pos);
+                
+                if (size > max_size) {
+                    // Close and rotate
+                    m_log_stream->close();
+                    m_log_stream.reset();
+                    
+                    // Rename old log
+                    std::string old_log = m_log_file + ".old";
+                    // CID 1675231 FIX: Check return value of std::remove to ensure old backup is removed
+                    // std::remove returns 0 on success, non-zero on error
+                    // If file doesn't exist, that's okay (first rotation)
+                    (void)std::remove(old_log.c_str());  // Best-effort remove old backup
+                    
+                    // CID 1675231 FIX: Check return value of std::rename to ensure rotation succeeds
+                    // std::rename returns 0 on success, non-zero on error
+                    if (std::rename(m_log_file.c_str(), old_log.c_str()) != 0) {
+                        // Rotation failed - log warning but continue (new log will still be opened)
+                        std::cerr << "[RPCLogger] Warning: Failed to rotate log file " << m_log_file
+                                  << " to " << old_log << std::endl;
+                    }
+                    
+                    // Open new log
+                    m_log_stream = std::make_unique<std::ofstream>(m_log_file, std::ios::app);
+                }
+            } else {
+                // tellp failed - skip rotation for this file
+                std::cerr << "[RPCLogger] Warning: Failed to get log file size (tellp error)" << std::endl;
+            }
+        } else {
+            // seekp failed - skip rotation for this file
+            std::cerr << "[RPCLogger] Warning: Failed to seek to end of log file" << std::endl;
         }
     }
     
     // Check audit file size
     if (!m_audit_file.empty() && m_audit_stream && m_audit_stream->is_open()) {
+        // CID 1675254 FIX: Check return value of seekp and tellp to ensure file operations succeed
+        // seekp can fail if stream is in bad state, tellp returns -1 on error
         m_audit_stream->seekp(0, std::ios::end);
-        size_t size = m_audit_stream->tellp();
-        
-        if (size > max_size) {
-            // Close and rotate
-            m_audit_stream->close();
-            m_audit_stream.reset();
-            
-            // Rename old audit log
-            std::string old_audit = m_audit_file + ".old";
-            std::remove(old_audit.c_str());  // Remove old backup
-            std::rename(m_audit_file.c_str(), old_audit.c_str());
-            
-            // Open new audit log
-            m_audit_stream = std::make_unique<std::ofstream>(m_audit_file, std::ios::app);
+        if (m_audit_stream->good()) {
+            std::streampos pos = m_audit_stream->tellp();
+            if (pos != std::streampos(-1)) {
+                size_t size = static_cast<size_t>(pos);
+                
+                if (size > max_size) {
+                    // Close and rotate
+                    m_audit_stream->close();
+                    m_audit_stream.reset();
+                    
+                    // Rename old audit log
+                    std::string old_audit = m_audit_file + ".old";
+                    // CID 1675231 FIX: Check return value of std::remove to ensure old backup is removed
+                    // std::remove returns 0 on success, non-zero on error
+                    // If file doesn't exist, that's okay (first rotation)
+                    (void)std::remove(old_audit.c_str());  // Best-effort remove old backup
+                    
+                    // CID 1675231 FIX: Check return value of std::rename to ensure rotation succeeds
+                    // std::rename returns 0 on success, non-zero on error
+                    if (std::rename(m_audit_file.c_str(), old_audit.c_str()) != 0) {
+                        // Rotation failed - log warning but continue (new audit log will still be opened)
+                        std::cerr << "[RPCLogger] Warning: Failed to rotate audit file " << m_audit_file
+                                  << " to " << old_audit << std::endl;
+                    }
+                    
+                    // Open new audit log
+                    m_audit_stream = std::make_unique<std::ofstream>(m_audit_file, std::ios::app);
+                }
+            } else {
+                // tellp failed - skip rotation for this file
+                std::cerr << "[RPCLogger] Warning: Failed to get audit file size (tellp error)" << std::endl;
+            }
+        } else {
+            // seekp failed - skip rotation for this file
+            std::cerr << "[RPCLogger] Warning: Failed to seek to end of audit file" << std::endl;
         }
     }
 }

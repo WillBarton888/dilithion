@@ -187,7 +187,9 @@ std::vector<uint8_t> WALEntry::Serialize() const {
     uint32_t calculated_crc = calculate_crc32(buffer.data(), buffer.size());
     write_uint32_le(buffer, calculated_crc);
 
-    return buffer;
+    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+    // buffer is a local variable that's no longer used after return
+    return std::move(buffer);
 }
 
 bool WALEntry::Deserialize(const std::vector<uint8_t>& bytes) {
@@ -466,6 +468,32 @@ bool CWalletWAL::ReadEntries(std::vector<WALEntry>& entries_out) const {
     wal_stream.read(reinterpret_cast<char*>(&entry_count), 4);
     entry_count = read_uint32_le(reinterpret_cast<const uint8_t*>(&entry_count));
 
+    // CID 1675263 FIX: Validate untrusted loop bound to prevent DoS attacks
+    // An attacker could craft a malicious WAL file with a very large entry_count,
+    // causing the loop to iterate excessively and consume resources.
+    // A WAL file typically has a small number of entries (dozens to hundreds),
+    // so 10000 is a safe upper bound to prevent DoS while allowing legitimate use.
+    const uint32_t MAX_WAL_ENTRIES = 10000;
+    if (entry_count > MAX_WAL_ENTRIES) {
+        std::cerr << "[WAL ERROR] Entry count too large: " << entry_count 
+                  << " (max: " << MAX_WAL_ENTRIES << ")" << std::endl;
+        wal_stream.close();
+        return false;
+    }
+
+    // CID 1675263 FIX: Validate that entry_count is reasonable given file size
+    // Each entry has a minimum size, so we can estimate if entry_count is plausible
+    // Minimum entry size: type(1) + op_id_len(2) + step_name_len(2) + data_len(4) + timestamp(8) + crc32(4) = 21 bytes
+    // Plus variable-length fields, but at minimum ~21 bytes per entry
+    const size_t MIN_ENTRY_SIZE = 21;
+    size_t remaining_bytes = static_cast<size_t>(file_size) - 16; // Subtract header size
+    if (entry_count > 0 && remaining_bytes < static_cast<size_t>(entry_count) * MIN_ENTRY_SIZE) {
+        std::cerr << "[WAL ERROR] Entry count inconsistent with file size: " << entry_count 
+                  << " entries but only " << remaining_bytes << " bytes available" << std::endl;
+        wal_stream.close();
+        return false;
+    }
+
     std::cout << "[WAL] Reading WAL file: " << entry_count << " entries" << std::endl;
 
     // Read entries
@@ -484,10 +512,12 @@ bool CWalletWAL::ReadEntries(std::vector<WALEntry>& entries_out) const {
             return false;
         }
 
-        entries_out.push_back(entry);
-
-        // Calculate actual entry size and seek to next entry
+        // Calculate actual entry size before moving entry
         size_t entry_size = entry.Serialize().size();
+        
+        // CID 1675171 FIX: Use std::move to avoid unnecessary copy
+        // entry is a local variable that's no longer used after push_back
+        entries_out.push_back(std::move(entry));
         wal_stream.seekg(16 + entry_size * (i + 1));
     }
 

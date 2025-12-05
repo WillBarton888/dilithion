@@ -5,6 +5,9 @@
 #include <iostream>
 #include <cstring>
 #include <sstream>
+#ifndef _WIN32
+#include <errno.h>
+#endif
 
 // Cross-platform socket headers
 #ifdef _WIN32
@@ -291,7 +294,32 @@ void CHttpServer::SendResponse(SOCKET client_socket,
 
     // Send response
     std::string response_str = response.str();
-    send(client_socket, response_str.c_str(), response_str.length(), 0);
+    // CID 1675271 FIX: Check return value of send to ensure data was sent successfully
+    // send() returns number of bytes sent on success, or SOCKET_ERROR (-1) on error
+    // On Windows, SOCKET_ERROR is -1. On Unix, -1 indicates error and errno is set.
+    size_t response_len = response_str.length();
+#ifdef _WIN32
+    int bytes_sent = send(client_socket, response_str.c_str(), static_cast<int>(response_len), 0);
+    if (bytes_sent == SOCKET_ERROR) {
+        // Failed to send response - log error but continue (connection may be closed)
+        int error = WSAGetLastError();
+        std::cerr << "[HttpServer] Warning: Failed to send HTTP response (error: " << error << ")" << std::endl;
+    } else if (static_cast<size_t>(bytes_sent) != response_len) {
+        // Partial send - log warning (connection may be closing)
+        std::cerr << "[HttpServer] Warning: Partial HTTP response sent (" << bytes_sent 
+                  << " of " << response_len << " bytes)" << std::endl;
+    }
+#else
+    ssize_t bytes_sent = send(client_socket, response_str.c_str(), response_len, MSG_NOSIGNAL);
+    if (bytes_sent < 0) {
+        // Failed to send response - log error but continue (connection may be closed)
+        std::cerr << "[HttpServer] Warning: Failed to send HTTP response (" << strerror(errno) << ")" << std::endl;
+    } else if (static_cast<size_t>(bytes_sent) != response_len) {
+        // Partial send - log warning (connection may be closing)
+        std::cerr << "[HttpServer] Warning: Partial HTTP response sent (" << bytes_sent 
+                  << " of " << response_len << " bytes)" << std::endl;
+    }
+#endif
 }
 
 // Send 404 Not Found

@@ -111,15 +111,23 @@ bool CBlockValidator::DeserializeBlockTransactions(
             error = "Incomplete transaction count (253)";
             return false;
         }
-        txCount = data[offset] | (data[offset + 1] << 8);
+        // CID 1675211 FIX: Cast to uint64_t before shifting to prevent sign extension
+        // When shifting uint8_t values, they are promoted to int (signed), which can cause
+        // sign extension if the high bit is set. Casting to uint64_t ensures unsigned behavior.
+        txCount = static_cast<uint64_t>(data[offset]) | (static_cast<uint64_t>(data[offset + 1]) << 8);
         offset += 2;
     } else if (firstByte == 254) {
         if (offset + 4 > dataSize) {
             error = "Incomplete transaction count (254)";
             return false;
         }
-        txCount = data[offset] | (data[offset + 1] << 8) |
-                 (data[offset + 2] << 16) | (data[offset + 3] << 24);
+        // CID 1675211 FIX: Cast to uint64_t before shifting to prevent sign extension
+        // When shifting uint8_t values, they are promoted to int (signed), which can cause
+        // sign extension if the high bit is set. Casting to uint64_t ensures unsigned behavior.
+        txCount = static_cast<uint64_t>(data[offset]) |
+                 (static_cast<uint64_t>(data[offset + 1]) << 8) |
+                 (static_cast<uint64_t>(data[offset + 2]) << 16) |
+                 (static_cast<uint64_t>(data[offset + 3]) << 24);
         offset += 4;
     } else {
         error = "Unsupported transaction count encoding (255)";
