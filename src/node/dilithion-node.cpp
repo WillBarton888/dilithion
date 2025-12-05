@@ -2192,43 +2192,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             }
 
-            if (coinbase && !coinbase->vout.empty()) {
-                const CTxOut& coinbaseOut = coinbase->vout[0];
-
-                // Extract public key hash from scriptPubKey to verify it's ours
-                std::vector<uint8_t> pubkey_hash = WalletCrypto::ExtractPubKeyHash(coinbaseOut.scriptPubKey);
-                std::vector<uint8_t> our_hash = wallet.GetPubKeyHash();
-
-                // Verify this coinbase belongs to our wallet
-                if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
-                    // BUG #6 FIX: Use wallet's actual address instead of reconstructing from hash
-                    // The CDilithiumAddress constructor expects a public key, not a hash, so we use GetNewAddress()
-                    // which returns the correct address that matches the coinbase scriptPubKey
-                    CDilithiumAddress our_address = wallet.GetNewAddress();
-
-                    // Get block height for UTXO tracking
-                    uint32_t block_height = 0;
-                    CBlockIndex tempIndex;
-                    if (blockchain.ReadBlockIndex(block.hashPrevBlock, tempIndex)) {
-                        block_height = tempIndex.nHeight + 1;
-                    }
-
-                    // Add coinbase UTXO to wallet
-                    wallet.AddTxOut(coinbase->GetHash(), 0, coinbaseOut.nValue, our_address, block_height);
-
-                    // Display credited amount
-                    double amountDIL = static_cast<double>(coinbaseOut.nValue) / 100000000.0;
-                    std::cout << "[Wallet] Coinbase credited: " << std::fixed << std::setprecision(8)
-                              << amountDIL << " DIL" << std::endl;
-                }
-            }
-
-            // Display updated wallet balance
-            int64_t balance = wallet.GetBalance();
-            double balanceInDIL = static_cast<double>(balance) / 100000000.0;
-            std::cout << "[Wallet] Total Balance: " << std::fixed << std::setprecision(8)
-                      << balanceInDIL << " DIL (" << balance << " ions)" << std::endl;
-            std::cout << std::endl;
+            // BUG #95 FIX: Wallet crediting moved to AFTER chain tip decision below
+            // Only credit when block actually becomes chain tip, not for orphaned/stale blocks
 
             // Save block to blockchain database
             if (!blockchain.WriteBlock(blockHash, block)) {
@@ -2297,6 +2262,28 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     g_node_state.new_block_found = true;
                 } else if (g_chainstate.GetTip() == pblockIndexPtr) {
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
+
+                    // BUG #95 FIX: Only credit wallet when block actually becomes chain tip
+                    // This prevents crediting for orphaned/stale blocks on competing chains
+                    if (coinbase && !coinbase->vout.empty()) {
+                        const CTxOut& coinbaseOut = coinbase->vout[0];
+                        std::vector<uint8_t> pubkey_hash = WalletCrypto::ExtractPubKeyHash(coinbaseOut.scriptPubKey);
+                        std::vector<uint8_t> our_hash = wallet.GetPubKeyHash();
+
+                        if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
+                            CDilithiumAddress our_address = wallet.GetNewAddress();
+                            wallet.AddTxOut(coinbase->GetHash(), 0, coinbaseOut.nValue, our_address, pblockIndexPtr->nHeight);
+
+                            double amountDIL = static_cast<double>(coinbaseOut.nValue) / 100000000.0;
+                            std::cout << "[Wallet] Coinbase credited: " << std::fixed << std::setprecision(8)
+                                      << amountDIL << " DIL" << std::endl;
+
+                            int64_t balance = wallet.GetBalance();
+                            double balanceInDIL = static_cast<double>(balance) / 100000000.0;
+                            std::cout << "[Wallet] Total Balance: " << std::fixed << std::setprecision(8)
+                                      << balanceInDIL << " DIL (" << balance << " ions)" << std::endl;
+                        }
+                    }
 
                     // BUG #32 FIX: Immediately update mining template for locally mined blocks
                     // BUG #65 FIX: Skip IBD check for locally mined blocks - we KNOW we're at chain tip
