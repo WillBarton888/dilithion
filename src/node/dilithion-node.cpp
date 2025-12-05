@@ -2696,8 +2696,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         }
 
-        // Automatically connect to hardcoded seed nodes (unless --connect or --addnode specified)
-        if (config.connect_nodes.empty() && config.add_nodes.empty()) {
+        // Automatically connect to hardcoded seed nodes (unless --connect specified)
+        // BUG FIX: --connect is exclusive, --addnode is additive with seed nodes
+        if (config.connect_nodes.empty()) {
             std::cout << "Connecting to seed nodes..." << std::endl;
             auto seeds = g_node_context.peer_manager->GetSeedNodes();
 
