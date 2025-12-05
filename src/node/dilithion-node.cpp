@@ -149,21 +149,14 @@ bool IsInitialBlockDownload() {
 
     int ourHeight = tip->nHeight;
 
-    // PRIMARY CRITERION: Is tip timestamp recent?
-    // If our chain tip is less than 24 hours old, we're caught up with the network.
-    // This is the most reliable indicator - doesn't depend on peer state at all.
-    int64_t tipTime = tip->nTime;
-    int64_t now = GetTime();
-    const int64_t MAX_TIP_AGE = 24 * 60 * 60;  // 24 hours (same as Bitcoin Core)
+    // BUG #94 FIX: Check headers and peers BEFORE tip time!
+    // The tip time check can exit IBD permanently (via the latch), so we MUST verify
+    // we're actually synced before allowing that. During IBD, each newly downloaded
+    // block has a recent timestamp (because blocks are actively being mined on the
+    // network), which would cause premature IBD exit if checked first.
 
-    if (now - tipTime < MAX_TIP_AGE) {
-        // Tip is recent - exit IBD permanently
-        s_initial_download_complete.store(true, std::memory_order_relaxed);
-        return false;
-    }
-
-    // SECONDARY CRITERION: Check if headers are ahead of chain tip
-    // If we have headers for blocks we don't have yet, we're actively downloading
+    // PRIMARY CRITERION: Check if headers are ahead of chain tip
+    // This check MUST come first to prevent premature IBD exit during sync
     if (g_node_context.headers_manager) {
         int headerHeight = g_node_context.headers_manager->GetBestHeight();
         if (headerHeight > ourHeight) {
@@ -171,7 +164,7 @@ bool IsInitialBlockDownload() {
         }
     }
 
-    // TERTIARY CRITERION: Check peer heights (but only if peers have completed handshake)
+    // SECONDARY CRITERION: Check peer heights (but only if peers have completed handshake)
     // Use the new HasCompletedHandshakes() to distinguish "waiting" from "at height 0"
     if (g_node_context.peer_manager) {
         int bestPeerHeight = g_node_context.peer_manager->GetBestPeerHeight();
@@ -188,6 +181,19 @@ bool IsInitialBlockDownload() {
             // Connections exist but NO peer has completed handshake - wait
             return true;
         }
+    }
+
+    // TERTIARY CRITERION: Is tip timestamp recent?
+    // Only check this AFTER verifying we're not actively syncing (headers/peers checks).
+    // If our chain tip is less than 24 hours old AND we passed the checks above, we're caught up.
+    int64_t tipTime = tip->nTime;
+    int64_t now = GetTime();
+    const int64_t MAX_TIP_AGE = 24 * 60 * 60;  // 24 hours (same as Bitcoin Core)
+
+    if (now - tipTime < MAX_TIP_AGE) {
+        // Tip is recent AND we're synced - exit IBD permanently
+        s_initial_download_complete.store(true, std::memory_order_relaxed);
+        return false;
     }
 
     // If we get here:
