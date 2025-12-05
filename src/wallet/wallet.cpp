@@ -1814,8 +1814,12 @@ bool CWallet::Load(const std::string& filename) {
         mapCryptedKeys = std::move(temp_mapCryptedKeys);
         vchAddresses = std::move(temp_vchAddresses);
         mapWalletTx = std::move(temp_mapWalletTx);
-        defaultAddress = temp_defaultAddress;
-        masterKey = temp_masterKey;
+        // CID 1675177 FIX: Use std::move to avoid unnecessary copy
+        // temp_defaultAddress is a local variable that's no longer used after assignment
+        defaultAddress = std::move(temp_defaultAddress);
+        // CID 1675177 FIX: Use std::move to avoid unnecessary copy
+        // temp_masterKey is a local variable that's no longer used after assignment
+        masterKey = std::move(temp_masterKey);
         fWalletUnlocked = temp_fWalletUnlocked;
 
         // HD wallet data
@@ -1824,7 +1828,9 @@ bool CWallet::Load(const std::string& filename) {
         vchEncryptedMnemonic = std::move(temp_vchEncryptedMnemonic);
         // FIX-009: Use assign() for SecureAllocator vectors
         vchMnemonicIV.assign(temp_vchMnemonicIV.begin(), temp_vchMnemonicIV.end());
-        hdMasterKey = temp_hdMasterKey;
+        // CID 1675177 FIX: Use std::move to avoid unnecessary copy
+        // temp_hdMasterKey is a local variable that's no longer used after assignment
+        hdMasterKey = std::move(temp_hdMasterKey);
         fHDMasterKeyEncrypted = temp_fHDMasterKeyEncrypted;
         // FIX-009: Use assign() for SecureAllocator vectors
         vchHDMasterKeyIV.assign(temp_vchHDMasterKeyIV.begin(), temp_vchHDMasterKeyIV.end());
@@ -3117,7 +3123,9 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
     for (const CWalletTx& wtx : selected_coins) {
         COutPoint outpoint(wtx.txid, wtx.vout);
         CTxIn txin(outpoint);
-        tx.vin.push_back(txin);
+        // CID 1675180 FIX: Use std::move to avoid unnecessary copy
+        // txin is a local variable that's no longer used after push_back
+        tx.vin.push_back(std::move(txin));
     }
 
     // Create output for recipient
@@ -3132,8 +3140,10 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
     }
 
     std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(recipient_hash);
-    CTxOut txout_recipient(amount, scriptPubKey);
-    tx.vout.push_back(txout_recipient);
+    // CID 1675180 FIX: Move scriptPubKey into constructor to avoid unnecessary copy
+    CTxOut txout_recipient(amount, std::move(scriptPubKey));
+    // CID 1675180 FIX: Move txout_recipient into push_back to avoid unnecessary copy
+    tx.vout.push_back(std::move(txout_recipient));
 
     // Create change output if needed
     CAmount change = total_selected - total_needed;
@@ -3176,8 +3186,10 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
         }
 
         std::vector<uint8_t> change_scriptPubKey = WalletCrypto::CreateScriptPubKey(change_hash);
-        CTxOut txout_change(change, change_scriptPubKey);
-        tx.vout.push_back(txout_change);
+        // CID 1675180 FIX: Move change_scriptPubKey into constructor to avoid unnecessary copy
+        CTxOut txout_change(change, std::move(change_scriptPubKey));
+        // CID 1675180 FIX: Move txout_change into push_back to avoid unnecessary copy
+        tx.vout.push_back(std::move(txout_change));
     }
     // else: change < DUST_THRESHOLD - add to miner fee (implicit, not creating output)
 
