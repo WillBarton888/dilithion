@@ -1530,12 +1530,10 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
         return false;
     }
 
-        // NET-005 FIX: Update peer last_send time INSIDE mutex to prevent race
-        // Previously this was done after releasing lock, creating TOCTOU vulnerability
-        auto peer = peer_manager.GetPeer(peer_id);
-        if (peer) {
-            peer->last_send = GetTime();
-        }
+    // NET-005 FIX: Update peer last_send time to track activity
+    auto peer = peer_manager.GetPeer(peer_id);
+    if (peer) {
+        peer->last_send = GetTime();
     }
 
     // Network: Track connection quality metrics
