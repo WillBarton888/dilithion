@@ -55,6 +55,7 @@
 #include <fstream>
 #include <iomanip>
 #include <string>
+#include <sstream>  // For mnemonic display parsing
 #include <memory>
 #include <csignal>
 #include <cstring>
@@ -2078,12 +2079,71 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  No existing wallet found, creating new one" << std::endl;
         }
 
-        // Generate initial key if wallet is empty
+        // Generate HD wallet if wallet is empty (new wallet creation)
         if (wallet.GetAddresses().empty()) {
-            std::cout << "  Generating initial address..." << std::endl;
-            wallet.GenerateNewKey();
-            CDilithiumAddress addr = wallet.GetNewAddress();
-            std::cout << "  [OK] Initial address: " << addr.ToString() << std::endl;
+            std::cout << "  Generating HD wallet with 24-word recovery phrase..." << std::endl;
+            std::string mnemonic;
+            if (wallet.GenerateHDWallet(mnemonic, "")) {
+                // Display mnemonic prominently - this is CRITICAL for user to backup
+                std::cout << std::endl;
+                std::cout << "\033[31m\033[1m" << "╔══════════════════════════════════════════════════════════════════════════════╗" << "\033[0m" << std::endl;
+                std::cout << "\033[31m\033[1m" << "║              IMPORTANT: YOUR 24-WORD RECOVERY PHRASE                        ║" << "\033[0m" << std::endl;
+                std::cout << "\033[31m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
+                std::cout << "\033[31m\033[1m" << "║  Write these words on paper and store in a safe place.                      ║" << "\033[0m" << std::endl;
+                std::cout << "\033[31m\033[1m" << "║  This is the ONLY way to recover your wallet if you lose access.            ║" << "\033[0m" << std::endl;
+                std::cout << "\033[31m\033[1m" << "║  NEVER share this phrase with anyone or store it digitally.                 ║" << "\033[0m" << std::endl;
+                std::cout << "\033[31m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
+
+                // Parse and display words in a formatted grid (6 words per line)
+                std::istringstream iss(mnemonic);
+                std::vector<std::string> words;
+                std::string word;
+                while (iss >> word) {
+                    words.push_back(word);
+                }
+
+                for (size_t i = 0; i < words.size(); i += 6) {
+                    std::cout << "\033[33m\033[1m" << "║  ";
+                    for (size_t j = i; j < std::min(i + 6, words.size()); ++j) {
+                        // Format: "NN.word      " (right-pad word to 10 chars)
+                        std::ostringstream entry;
+                        entry << (j + 1) << "." << std::setw(10) << std::left << words[j];
+                        std::cout << std::setw(13) << std::left << entry.str();
+                    }
+                    // Pad remaining space to fill the row
+                    size_t printed = std::min(size_t(6), words.size() - i);
+                    for (size_t k = printed; k < 6; ++k) {
+                        std::cout << "             ";  // 13 chars padding per missing word
+                    }
+                    std::cout << "║\033[0m" << std::endl;
+                }
+
+                std::cout << "\033[31m\033[1m" << "╚══════════════════════════════════════════════════════════════════════════════╝" << "\033[0m" << std::endl;
+                std::cout << std::endl;
+                std::cout << "\033[32m" << "  [OK] HD Wallet created successfully!" << "\033[0m" << std::endl;
+                std::cout << std::endl;
+
+                // Generate and display first receiving address prominently
+                CDilithiumAddress addr = wallet.GetNewHDAddress();
+                std::string addrStr = addr.ToString();
+
+                std::cout << "\033[36m\033[1m" << "╔══════════════════════════════════════════════════════════════════════════════╗" << "\033[0m" << std::endl;
+                std::cout << "\033[36m\033[1m" << "║              YOUR PUBLIC RECEIVING ADDRESS (Copy & Share)                   ║" << "\033[0m" << std::endl;
+                std::cout << "\033[36m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
+                std::cout << "\033[36m\033[1m" << "║                                                                              ║" << "\033[0m" << std::endl;
+                std::cout << "\033[33m\033[1m" << "║  " << addrStr << std::string(76 - addrStr.length(), ' ') << "║" << "\033[0m" << std::endl;
+                std::cout << "\033[36m\033[1m" << "║                                                                              ║" << "\033[0m" << std::endl;
+                std::cout << "\033[36m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
+                std::cout << "\033[36m\033[1m" << "║  Share this address to receive DIL. Safe to share publicly.                 ║" << "\033[0m" << std::endl;
+                std::cout << "\033[36m\033[1m" << "╚══════════════════════════════════════════════════════════════════════════════╝" << "\033[0m" << std::endl;
+                std::cout << std::endl;
+            } else {
+                // Fallback to legacy key generation if HD fails
+                std::cerr << "  WARNING: HD wallet generation failed, using legacy key" << std::endl;
+                wallet.GenerateNewKey();
+                CDilithiumAddress addr = wallet.GetNewAddress();
+                std::cout << "  [OK] Initial address (legacy): " << addr.ToString() << std::endl;
+            }
         }
 
         // Enable auto-save (CRITICAL: must be done after Load or key generation)
@@ -2113,10 +2173,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  Rescanning blockchain (full scan from genesis)..." << std::endl;
             std::cout.flush();
             if (wallet.RescanFromHeight(g_chainstate, blockchain, 0, chain_height)) {
-                int64_t balance = wallet.GetBalance();
-                double balanceInDIL = static_cast<double>(balance) / 100000000.0;
-                std::cout << "  [OK] Full scan complete, balance: " << std::fixed << std::setprecision(8)
-                          << balanceInDIL << " DIL" << std::endl;
+                unsigned int height = static_cast<unsigned int>(chain_height);
+                int64_t total = wallet.GetBalance();
+                int64_t immature = wallet.GetImmatureBalance(utxo_set, height);
+                int64_t mature = total - immature;
+                std::cout << "  [OK] Full scan complete" << std::endl;
+                std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
+                          << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
+                std::cout << "       Immature (coinbase): " << std::fixed << std::setprecision(8)
+                          << (static_cast<double>(immature) / 100000000.0) << " DIL" << std::endl;
+                std::cout << "       Total: " << std::fixed << std::setprecision(8)
+                          << (static_cast<double>(total) / 100000000.0) << " DIL" << std::endl;
                 std::cout.flush();
             } else {
                 std::cerr << "  WARNING: Rescan failed" << std::endl;
@@ -2127,20 +2194,34 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                       << " (incremental)..." << std::endl;
             std::cout.flush();
             if (wallet.RescanFromHeight(g_chainstate, blockchain, wallet_height + 1, chain_height)) {
-                int64_t balance = wallet.GetBalance();
-                double balanceInDIL = static_cast<double>(balance) / 100000000.0;
-                std::cout << "  [OK] Incremental scan complete, balance: " << std::fixed << std::setprecision(8)
-                          << balanceInDIL << " DIL" << std::endl;
+                unsigned int height = static_cast<unsigned int>(chain_height);
+                int64_t total = wallet.GetBalance();
+                int64_t immature = wallet.GetImmatureBalance(utxo_set, height);
+                int64_t mature = total - immature;
+                std::cout << "  [OK] Incremental scan complete" << std::endl;
+                std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
+                          << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
+                std::cout << "       Immature (coinbase): " << std::fixed << std::setprecision(8)
+                          << (static_cast<double>(immature) / 100000000.0) << " DIL" << std::endl;
+                std::cout << "       Total: " << std::fixed << std::setprecision(8)
+                          << (static_cast<double>(total) / 100000000.0) << " DIL" << std::endl;
                 std::cout.flush();
             } else {
                 std::cerr << "  WARNING: Rescan failed" << std::endl;
             }
         } else {
             // wallet_height == chain_height: Already synced, no scan needed
-            int64_t balance = wallet.GetBalance();
-            double balanceInDIL = static_cast<double>(balance) / 100000000.0;
-            std::cout << "  [OK] Wallet already synced to chain tip, balance: " << std::fixed << std::setprecision(8)
-                      << balanceInDIL << " DIL" << std::endl;
+            unsigned int height = static_cast<unsigned int>(chain_height);
+            int64_t total = wallet.GetBalance();
+            int64_t immature = wallet.GetImmatureBalance(utxo_set, height);
+            int64_t mature = total - immature;
+            std::cout << "  [OK] Wallet already synced to chain tip" << std::endl;
+            std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
+                      << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
+            std::cout << "       Immature (coinbase): " << std::fixed << std::setprecision(8)
+                      << (static_cast<double>(immature) / 100000000.0) << " DIL" << std::endl;
+            std::cout << "       Total: " << std::fixed << std::setprecision(8)
+                      << (static_cast<double>(total) / 100000000.0) << " DIL" << std::endl;
             std::cout.flush();
         }
 
@@ -2154,7 +2235,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
 
         // Set up block found callback to save mined blocks and credit wallet
-        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &message_processor, &wallet](const CBlock& block) {
+        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &message_processor, &wallet, &utxo_set](const CBlock& block) {
             // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
             if (!g_node_state.running) {
                 // Shutting down - discard this block to prevent race condition
@@ -2276,12 +2357,29 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                             double amountDIL = static_cast<double>(coinbaseOut.nValue) / 100000000.0;
                             std::cout << "[Wallet] Coinbase credited: " << std::fixed << std::setprecision(8)
-                                      << amountDIL << " DIL" << std::endl;
+                                      << amountDIL << " DIL (immature for 100 blocks)" << std::endl;
 
-                            int64_t balance = wallet.GetBalance();
-                            double balanceInDIL = static_cast<double>(balance) / 100000000.0;
-                            std::cout << "[Wallet] Total Balance: " << std::fixed << std::setprecision(8)
-                                      << balanceInDIL << " DIL (" << balance << " ions)" << std::endl;
+                            // Get current height for maturity calculation
+                            unsigned int current_height = static_cast<unsigned int>(g_chainstate.GetHeight());
+
+                            // Total balance (all unspent including immature)
+                            int64_t total_balance = wallet.GetBalance();
+                            double totalDIL = static_cast<double>(total_balance) / 100000000.0;
+
+                            // Immature balance (coinbase not yet mature)
+                            int64_t immature_balance = wallet.GetImmatureBalance(utxo_set, current_height);
+                            double immatureDIL = static_cast<double>(immature_balance) / 100000000.0;
+
+                            // Mature balance (spendable)
+                            int64_t mature_balance = total_balance - immature_balance;
+                            double matureDIL = static_cast<double>(mature_balance) / 100000000.0;
+
+                            std::cout << "[Wallet] Balance: " << std::fixed << std::setprecision(8)
+                                      << matureDIL << " DIL (mature/spendable)" << std::endl;
+                            std::cout << "[Wallet]          " << std::fixed << std::setprecision(8)
+                                      << immatureDIL << " DIL (immature coinbase)" << std::endl;
+                            std::cout << "[Wallet]          " << std::fixed << std::setprecision(8)
+                                      << totalDIL << " DIL (total)" << std::endl;
                         }
                     }
 
