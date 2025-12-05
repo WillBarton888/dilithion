@@ -1,0 +1,141 @@
+name: Build Linux Release
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          libleveldb-dev \
+          libssl-dev
+
+    - name: Build RandomX
+      run: |
+        cd depends/randomx
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(nproc)
+        ls -lh librandomx.a
+
+    - name: Build Dilithium library
+      run: |
+        if [ ! -f depends/dilithium/ref/sign.c ]; then
+          echo "ERROR: Dilithium source files missing."
+          exit 1
+        fi
+        if [ ! -f depends/dilithium/ref/Makefile ]; then
+          echo "Creating Dilithium Makefile..."
+          echo 'CC ?= /usr/bin/cc' > depends/dilithium/ref/Makefile
+          echo 'CFLAGS += -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wredundant-decls -Wshadow -Wvla -Wpointer-arith -O3 -fomit-frame-pointer' >> depends/dilithium/ref/Makefile
+          echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> depends/dilithium/ref/Makefile
+          echo '.PHONY: all clean' >> depends/dilithium/ref/Makefile
+          echo 'all:' >> depends/dilithium/ref/Makefile
+          printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> depends/dilithium/ref/Makefile
+          echo 'clean:' >> depends/dilithium/ref/Makefile
+          printf '\trm -f *.o\n' >> depends/dilithium/ref/Makefile
+        fi
+        cd depends/dilithium/ref
+        make clean || true
+        make -j$(nproc)
+
+    - name: Build Dilithion
+      run: |
+        make clean
+        make -j$(nproc)
+        ls -lh dilithion-node
+
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+        else
+          VERSION="dev"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+
+    - name: Create release package
+      env:
+        VERSION: ${{ steps.get_version.outputs.version }}
+      run: |
+        RELEASE_DIR="releases/dilithion-testnet-${VERSION}-linux-x64"
+        mkdir -p "$RELEASE_DIR"
+
+        # Copy binary
+        cp dilithion-node "$RELEASE_DIR/"
+        chmod +x "$RELEASE_DIR/dilithion-node"
+
+        # Create README
+        cat > "$RELEASE_DIR/README.txt" << 'EOF'
+Dilithion Testnet - Linux x64
+==============================
+
+Quick Start:
+1. Extract all files to a folder
+2. Run: ./dilithion-node --testnet
+3. Wait for sync (usually 5-10 minutes)
+4. Mining starts automatically once synced
+
+Mining Options:
+  --mining-threads=N     Use N CPU threads (default: auto-detect)
+  --mining-address=ADDR  Send rewards to specific address
+
+Network Ports:
+  P2P:  18444 (testnet)
+  RPC:  18332 (testnet)
+
+RPC Access (default credentials):
+  Username: dilithion
+  Password: dilithion123
+
+Seed Nodes (auto-connected):
+  NYC:       134.122.4.164:18444
+  London:    209.97.177.197:18444
+  Singapore: 188.166.255.63:18444
+
+Support: https://github.com/WillBarton888/dilithion/issues
+EOF
+
+        # Create tarball
+        cd releases
+        tar -czvf "dilithion-testnet-${VERSION}-linux-x64.tar.gz" "dilithion-testnet-${VERSION}-linux-x64"
+
+        # Generate checksum
+        sha256sum "dilithion-testnet-${VERSION}-linux-x64.tar.gz" > "dilithion-testnet-${VERSION}-linux-x64.tar.gz.sha256"
+
+        echo "Created release package:"
+        ls -lh "dilithion-testnet-${VERSION}-linux-x64.tar.gz"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dilithion-testnet-${{ steps.get_version.outputs.version }}-linux-x64
+        path: releases/dilithion-testnet-${{ steps.get_version.outputs.version }}-linux-x64.tar.gz
+
+    - name: Upload to release (if tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          releases/dilithion-testnet-${{ steps.get_version.outputs.version }}-linux-x64.tar.gz
+          releases/dilithion-testnet-${{ steps.get_version.outputs.version }}-linux-x64.tar.gz.sha256
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
