@@ -12,7 +12,10 @@
 #include <algorithm>
 
 #ifdef _WIN32
-#include <windows.h>
+#include <windows.h>  // CID 1675220: For GetLastError and ERROR_FILE_NOT_FOUND
+#else
+#include <errno.h>  // CID 1675220: For errno and ENOENT
+#include <cstring>  // CID 1675220: For strerror
 #endif
 
 // CLoggingConfig implementation
@@ -209,19 +212,46 @@ void CLogger::RotateLogIfNeeded() {
         std::string newFile = logPath + "." + std::to_string(i + 1);
         
         // Rename old file
+        // CID 1675220 FIX: Check return value of rename/MoveFileA to ensure rotation succeeds
+        // If file doesn't exist, that's okay (not all rotated files may exist yet)
         #ifdef _WIN32
-            MoveFileA(oldFile.c_str(), newFile.c_str());
+            if (!MoveFileA(oldFile.c_str(), newFile.c_str())) {
+                DWORD error = GetLastError();
+                // ERROR_FILE_NOT_FOUND is expected if rotated file doesn't exist yet
+                if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                    // Actual error - log warning but continue rotation
+                    std::cerr << "[Logger] Warning: Failed to rotate log file " << oldFile
+                              << " to " << newFile << " (error: " << error << ")" << std::endl;
+                }
+            }
         #else
-            rename(oldFile.c_str(), newFile.c_str());
+            if (rename(oldFile.c_str(), newFile.c_str()) != 0) {
+                // ENOENT is expected if rotated file doesn't exist yet
+                if (errno != ENOENT) {
+                    // Actual error - log warning but continue rotation
+                    std::cerr << "[Logger] Warning: Failed to rotate log file " << oldFile
+                              << " to " << newFile << " (" << strerror(errno) << ")" << std::endl;
+                }
+            }
         #endif
     }
 
     // Move current log to .1
     std::string rotatedFile = logPath + ".1";
+    // CID 1675220 FIX: Check return value of rename/MoveFileA to ensure rotation succeeds
     #ifdef _WIN32
-        MoveFileA(logPath.c_str(), rotatedFile.c_str());
+        if (!MoveFileA(logPath.c_str(), rotatedFile.c_str())) {
+            DWORD error = GetLastError();
+            // Log error but continue - new log file will still be opened
+            std::cerr << "[Logger] Warning: Failed to rotate current log file to " << rotatedFile
+                      << " (error: " << error << ")" << std::endl;
+        }
     #else
-        rename(logPath.c_str(), rotatedFile.c_str());
+        if (rename(logPath.c_str(), rotatedFile.c_str()) != 0) {
+            // Log error but continue - new log file will still be opened
+            std::cerr << "[Logger] Warning: Failed to rotate current log file to " << rotatedFile
+                      << " (" << strerror(errno) << ")" << std::endl;
+        }
     #endif
 
     // Open new log file

@@ -14,9 +14,12 @@
 
 #ifdef _WIN32
     #include <direct.h>
+    #include <windows.h>  // CID 1675185: For GetLastError and ERROR_ALREADY_EXISTS
     #define mkdir(path, mode) _mkdir(path)
 #else
     #include <unistd.h>
+    #include <errno.h>  // CID 1675185: For errno and EEXIST
+    #include <cstring>  // CID 1675185: For strerror
 #endif
 
 // ANSI color codes for terminal output
@@ -65,7 +68,25 @@ void CWalletManager::EnableAutoBackup(const std::string& backup_dir, int interva
     m_auto_backup_enabled = true;
 
     // Create backup directory if it doesn't exist
-    mkdir(backup_dir.c_str(), 0700);
+    // CID 1675185 FIX: Check return value of mkdir to ensure directory is created
+    // mkdir returns 0 on success, -1 on error
+    // EEXIST (directory already exists) is not an error
+#ifdef _WIN32
+    if (_mkdir(backup_dir.c_str()) != 0) {
+        DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS) {
+            PrintError("Failed to create backup directory: " + backup_dir);
+            std::cerr << "  Error code: " << error << std::endl;
+        }
+    }
+#else
+    if (mkdir(backup_dir.c_str(), 0700) != 0) {
+        if (errno != EEXIST) {
+            PrintError("Failed to create backup directory: " + backup_dir);
+            std::cerr << "  Error: " << strerror(errno) << std::endl;
+        }
+    }
+#endif
 
     PrintSuccess("Auto-backup enabled");
     std::cout << "  Backup directory: " << backup_dir << std::endl;

@@ -22,6 +22,7 @@
 
 // Forward declarations for PERSIST-008 FIX (WAL)
 class CWalletWAL;
+class CWalletRecovery;  // CID 1675307 FIX: Forward declaration for friend class
 
 // Dilithium3 parameters (balanced security/performance)
 static const size_t DILITHIUM_PUBLICKEY_SIZE = 1952;
@@ -195,6 +196,9 @@ struct CWalletTx {
  *   int64_t balance = wallet.GetBalance();
  */
 class CWallet {
+    // CID 1675307 FIX: Friend declaration to allow recovery functions to use unlocked methods
+    friend class CWalletRecovery;
+
 private:
     // Key storage
     std::map<CDilithiumAddress, CKey> mapKeys;              // Unencrypted keys (when wallet not encrypted)
@@ -321,6 +325,34 @@ private:
      * @note Assumes caller holds cs_wallet lock
      */
     void SetLastBlockProcessedUnlocked(const uint256& hash, int height);
+
+    /**
+     * WALLET-008 FIX: Clean up stale UTXOs (unlocked version)
+     * Internal helper that assumes caller already holds cs_wallet lock
+     * 
+     * @param utxo_set Current UTXO set from blockchain
+     * @return Number of stale UTXOs removed
+     * @note Caller must hold cs_wallet lock
+     */
+    size_t CleanupStaleUTXOsUnlocked(class CUTXOSet& utxo_set);
+
+    /**
+     * PERSIST-008 FIX: Check for incomplete WAL operations and recover (unlocked version)
+     * Internal helper that assumes caller already holds cs_wallet lock
+     * 
+     * @return true if recovery successful or no recovery needed, false on error
+     * @note Caller must hold cs_wallet lock
+     */
+    bool RecoverFromWALUnlocked();
+
+    /**
+     * Lock wallet (unlocked version)
+     * Internal helper that assumes caller already holds cs_wallet lock
+     * 
+     * @return true if successful
+     * @note Caller must hold cs_wallet lock
+     */
+    bool LockUnlocked();
 
 public:
     CWallet();
@@ -738,8 +770,9 @@ public:
 
     /**
      * Check if this is an HD wallet
+     * CID 1675320 FIX: Thread-safe accessor - acquires lock before reading member variable
      */
-    bool IsHDWallet() const { return fIsHDWallet; }
+    bool IsHDWallet() const;
 
     /**
      * Check if wallet is empty (has no keys/addresses)

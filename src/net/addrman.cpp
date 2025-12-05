@@ -11,6 +11,9 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#ifdef _WIN32
+#include <windows.h>  // CID 1675210: For GetLastError and ERROR_FILE_NOT_FOUND
+#endif
 
 //-----------------------------------------------------------------------------
 // CAddrInfo implementation
@@ -490,7 +493,11 @@ std::pair<CNetworkAddr, int64_t> CAddrMan::Select(bool newOnly) const {
         }
     }
 
-    // Should never reach here
+    // CID 1675299 FIX: This code is structurally unreachable because both if/else branches
+    // contain while(true) loops that always return. However, we keep an assertion here
+    // as a safety check in case of a logic error that would cause infinite loops.
+    // If we somehow reach here, it indicates a serious bug in the selection logic.
+    assert(false && "CAddrMan::Select: Unreachable code reached - selection logic error");
     return std::make_pair(CNetworkAddr(), 0);
 }
 
@@ -691,18 +698,33 @@ bool CAddrMan::SaveToFile(const std::string& path) const {
 
         // Rename temp file to final path (atomic)
         // On Windows, need to remove existing file first
+        // CID 1675210 FIX: Check return value of std::remove to ensure old file is removed
+        // std::remove returns 0 on success, non-zero on error
+        // On Windows, we need to remove the old file before rename (rename doesn't replace existing files)
+        // If file doesn't exist, remove will fail but that's okay - we just want to ensure it's gone
 #ifdef _WIN32
-        std::remove(path.c_str());
+        if (std::remove(path.c_str()) != 0) {
+            // File might not exist (first save) - that's okay, but check for actual errors
+            DWORD error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                // Actual error (not just "file doesn't exist") - log warning but continue
+                // This is non-fatal - rename might still work if file doesn't exist
+                std::cerr << "[AddrMan] Warning: Failed to remove old peers file: " << path
+                          << " (error: " << error << ")" << std::endl;
+            }
+        }
 #endif
         if (std::rename(temp_path.c_str(), path.c_str()) != 0) {
-            std::remove(temp_path.c_str());
+            // CID 1675210 FIX: Best-effort cleanup - remove temp file (errors are non-critical here)
+            (void)std::remove(temp_path.c_str());
             return false;
         }
 
         return true;
 
     } catch (...) {
-        std::remove(temp_path.c_str());
+        // CID 1675210 FIX: Best-effort cleanup - remove temp file (errors are non-critical here)
+        (void)std::remove(temp_path.c_str());
         return false;
     }
 }

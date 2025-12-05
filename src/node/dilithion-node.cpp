@@ -506,7 +506,12 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     if (verbose) {
         std::cout << "  Block height: " << nHeight << std::endl;
         std::cout << "  Previous block: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "  Difficulty (nBits): 0x" << std::hex << block.nBits << std::dec << std::endl;
+        // CID 1675194/1675256 FIX: Save and restore ostream format state
+        // This prevents format state leakage to subsequent output operations
+        std::ios_base::fmtflags oldFlags = std::cout.flags();
+        std::cout << "  Difficulty (nBits): 0x" << std::hex << block.nBits;
+        std::cout.flags(oldFlags);  // Restore original format flags
+        std::cout << std::endl;
         std::cout << "  Target: " << hashTarget.GetHex().substr(0, 16) << "..." << std::endl;
         std::cout << "  Coinbase: " << coinbaseMsg << std::endl;
         std::cout << "  Merkle root: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
@@ -732,8 +737,16 @@ int main(int argc, char* argv[]) {
     std::cout << std::endl;
 
     // Setup signal handlers
-    std::signal(SIGINT, SignalHandler);
-    std::signal(SIGTERM, SignalHandler);
+    // CID 1675274 FIX: Check return value of std::signal to ensure handlers are installed
+    // std::signal returns the previous handler or SIG_ERR on error
+    if (std::signal(SIGINT, SignalHandler) == SIG_ERR) {
+        std::cerr << "WARNING: Failed to install SIGINT handler" << std::endl;
+        LogPrintf(ALL, WARNING, "Failed to install SIGINT handler");
+    }
+    if (std::signal(SIGTERM, SignalHandler) == SIG_ERR) {
+        std::cerr << "WARNING: Failed to install SIGTERM handler" << std::endl;
+        LogPrintf(ALL, WARNING, "Failed to install SIGTERM handler");
+    }
 
     // BUG #88: Windows startup crash diagnostics
     std::cerr << "[DEBUG] Entering main initialization try block" << std::endl;
@@ -2150,7 +2163,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "Block hash: " << blockHash.GetHex() << std::endl;
             std::cout << "Block time: " << block.nTime << std::endl;
             std::cout << "Nonce: " << block.nNonce << std::endl;
-            std::cout << "Difficulty: 0x" << std::hex << block.nBits << std::dec << std::endl;
+            // CID 1675194 FIX: Save and restore ostream format state to prevent affecting subsequent output
+            std::ios_base::fmtflags oldFlags = std::cout.flags();
+            std::cout << "Difficulty: 0x" << std::hex << block.nBits;
+            std::cout.flags(oldFlags);  // Restore original format flags
+            std::cout << std::endl;
             std::cout << "======================================" << std::endl;
             std::cout << std::endl;
 
@@ -2424,8 +2441,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             continue; // Drop non-routable addresses (Bitcoin Core behavior)
                         }
 
+                        // CID 1675194 FIX: Save and restore ostream format state
+                        std::ios_base::fmtflags oldFlags = std::cout.flags();
                         std::cout << "[HANDSHAKE-DIAG] Accepted routable inbound peer: " << peer_addr
-                                  << " (0x" << std::hex << ipv4 << std::dec << ")" << std::endl;
+                                  << " (0x" << std::hex << ipv4;
+                        std::cout.flags(oldFlags);  // Restore original format flags
+                        std::cout << ")" << std::endl;
 
                         // BUG #58 FIX: Check for self-connection on ACCEPT side
                         // When seed nodes try to connect to themselves via external IP,

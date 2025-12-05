@@ -99,14 +99,20 @@ void CPartitionDetector::Reset() {
 }
 
 CPartitionDetector::Stats CPartitionDetector::GetStats() const {
+    // CID 1675218 FIX: Lock mutex to protect member variable access
     std::lock_guard<std::mutex> lock(m_mutex);
+    
     Stats stats;
     stats.total_connections = m_total_connections;
     stats.failed_connections = m_failed_connections;
     stats.successful_messages = m_successful_messages;
     stats.consecutive_failures = m_consecutive_failures;
+    
     // CID 1675218 FIX: Use unlocked version since we already hold m_mutex
+    // IsPartitionedUnlocked() does NOT lock - it's designed to be called while holding the lock
+    // This prevents double-lock deadlock that would occur if we called IsPartitioned() here
     stats.is_partitioned = IsPartitionedUnlocked();
+    
     return stats;
 }
 

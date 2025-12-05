@@ -265,12 +265,26 @@ bool CBanManager::SaveBanList() {
         file.close();
 
         // Atomic rename (remove old file first on Windows)
+        // CID 1675200 FIX: Check return value of std::remove to ensure old file is removed
+        // std::remove returns 0 on success, non-zero on error
+        // On Windows, we need to remove the old file before rename (rename doesn't replace existing files)
+        // If file doesn't exist, remove will fail but that's okay - we just want to ensure it's gone
 #ifdef _WIN32
-        std::remove(m_ban_file_path.c_str());
+        if (std::remove(m_ban_file_path.c_str()) != 0) {
+            // File might not exist (first save) - that's okay, but check for actual errors
+            DWORD error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                // Actual error (not just "file doesn't exist") - log warning but continue
+                // This is non-fatal - rename might still work
+                std::cerr << "[BanManager] Warning: Failed to remove old ban file: " << m_ban_file_path
+                          << " (error: " << error << ")" << std::endl;
+            }
+        }
 #endif
         if (std::rename(temp_path.c_str(), m_ban_file_path.c_str()) != 0) {
             std::cerr << "[BanManager] Failed to rename " << temp_path << " to " << m_ban_file_path << std::endl;
-            std::remove(temp_path.c_str());
+            // CID 1675200 FIX: Best-effort cleanup - remove temp file (errors are non-critical here)
+            (void)std::remove(temp_path.c_str());
             return false;
         }
 

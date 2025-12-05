@@ -429,8 +429,20 @@ std::vector<CWalletTx> CWallet::GetUnspentTxOuts() const {
 // WALLET-008 FIX: Stale UTXO Cleanup
 // ============================================================================
 
+// CID 1675287 FIX: Public method acquires lock and calls unlocked version
+// WARNING: Do NOT call this method from contexts that already hold cs_wallet lock
+// (e.g., blockConnected/blockDisconnected). Use CleanupStaleUTXOsUnlocked() instead.
+// This method unconditionally acquires cs_wallet, which would cause deadlock if
+// called from a context that already holds the lock.
 size_t CWallet::CleanupStaleUTXOs(CUTXOSet& utxo_set) {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    return CleanupStaleUTXOsUnlocked(utxo_set);
+}
+
+// CID 1675287 FIX: Unlocked version - assumes caller already holds cs_wallet lock
+// This allows safe calling from blockConnected/blockDisconnected which already hold the lock
+size_t CWallet::CleanupStaleUTXOsUnlocked(CUTXOSet& utxo_set) {
+    // Note: Caller must hold cs_wallet lock
 
     size_t removed_count = 0;
     std::vector<COutPoint> to_mark_spent;
@@ -474,8 +486,9 @@ size_t CWallet::CleanupStaleUTXOs(CUTXOSet& utxo_set) {
         std::cout << "[WALLET] Cleaned up " << removed_count << " stale UTXO(s)" << std::endl;
 
         // Mark wallet as needing save
+        // CID 1675287 FIX: Use SaveUnlocked since we already hold cs_wallet
         if (m_autoSave && !m_walletFile.empty()) {
-            Save(m_walletFile);
+            SaveUnlocked(m_walletFile);
         }
     }
 
@@ -698,6 +711,12 @@ size_t CWallet::GetKeyPoolSize() const {
     return mapKeys.size() + mapCryptedKeys.size();
 }
 
+// CID 1675320 FIX: Thread-safe accessor - acquires lock before reading fIsHDWallet
+bool CWallet::IsHDWallet() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return fIsHDWallet;
+}
+
 // ============================================================================
 // Wallet Encryption Implementation
 // ============================================================================
@@ -838,8 +857,17 @@ size_t CWallet::GetIVCount() const {
     return usedIVs.size();
 }
 
+// CID 1675307 FIX: Public method acquires lock and calls unlocked version
+// This prevents double-lock deadlock if called from context that already holds cs_wallet
 bool CWallet::Lock() {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    return LockUnlocked();
+}
+
+// CID 1675307 FIX: Unlocked version - assumes caller already holds cs_wallet lock
+// This allows safe calling from recovery functions which already hold the lock
+bool CWallet::LockUnlocked() {
+    // Note: Caller must hold cs_wallet lock
 
     if (!masterKey.IsValid()) {
         return false;  // Can't lock unencrypted wallet
@@ -1237,6 +1265,8 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
 // Persistence
 // ============================================================================
 
+// CID 1675316/1675317/1675318/1675319/1675321 FIX: This entire function is protected by cs_wallet lock
+// All member variable reads and writes throughout this function are thread-safe
 bool CWallet::Load(const std::string& filename) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
@@ -1336,6 +1366,7 @@ bool CWallet::Load(const std::string& filename) {
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
         // FIX-010: Register master key IV to prevent reuse
+        // CID 1675317 FIX: Access to usedIVs is protected by lock acquired at line 1260
         usedIVs.insert(temp_masterKey.vchIV);
 
         file.read(reinterpret_cast<char*>(&temp_masterKey.nDerivationMethod), sizeof(temp_masterKey.nDerivationMethod));
@@ -1406,6 +1437,7 @@ bool CWallet::Load(const std::string& filename) {
             if (!file.good()) return false;
 
             // FIX-010: Register mnemonic IV to prevent reuse
+            // CID 1675317 FIX: Access to usedIVs is protected by lock acquired at line 1260
             usedIVs.insert(temp_vchMnemonicIV);
         }
 
@@ -1433,6 +1465,7 @@ bool CWallet::Load(const std::string& filename) {
             if (!file.good()) return false;
 
             // FIX-010: Register HD master key IV to prevent reuse
+            // CID 1675317 FIX: Access to usedIVs is protected by lock acquired at line 1260
             usedIVs.insert(temp_vchHDMasterKeyIV);
         }
 
@@ -1541,6 +1574,7 @@ bool CWallet::Load(const std::string& filename) {
             if (!file.good()) return false;  // SEC-001: Check I/O error
 
             // FIX-010: Register encrypted key IV to prevent reuse
+            // CID 1675317 FIX: Access to usedIVs is protected by lock acquired at line 1260
             usedIVs.insert(encKey.vchIV);
 
             // FIX-008 (CRYPT-007): Load MAC for authenticated encryption
@@ -1771,34 +1805,42 @@ bool CWallet::Load(const std::string& filename) {
     }
 
     // All data loaded successfully - now atomically replace wallet contents
-    mapKeys = std::move(temp_mapKeys);
-    mapCryptedKeys = std::move(temp_mapCryptedKeys);
-    vchAddresses = std::move(temp_vchAddresses);
-    mapWalletTx = std::move(temp_mapWalletTx);
-    defaultAddress = temp_defaultAddress;
-    masterKey = temp_masterKey;
-    fWalletUnlocked = temp_fWalletUnlocked;
+    // CID 1675316 FIX: All member variable writes below are protected by lock acquired at line 1260
+    // The lock_guard ensures thread-safe access throughout this function
+    {
+        // Explicit scope to document that lock is held for all assignments
+        // (lock was acquired at function start: std::lock_guard<std::mutex> lock(cs_wallet);)
+        mapKeys = std::move(temp_mapKeys);
+        mapCryptedKeys = std::move(temp_mapCryptedKeys);
+        vchAddresses = std::move(temp_vchAddresses);
+        mapWalletTx = std::move(temp_mapWalletTx);
+        defaultAddress = temp_defaultAddress;
+        masterKey = temp_masterKey;
+        fWalletUnlocked = temp_fWalletUnlocked;
 
-    // HD wallet data
-    fIsHDWallet = temp_fIsHDWallet;
-    vchEncryptedMnemonic = std::move(temp_vchEncryptedMnemonic);
-    // FIX-009: Use assign() for SecureAllocator vectors
-    vchMnemonicIV.assign(temp_vchMnemonicIV.begin(), temp_vchMnemonicIV.end());
-    hdMasterKey = temp_hdMasterKey;
-    fHDMasterKeyEncrypted = temp_fHDMasterKeyEncrypted;
-    // FIX-009: Use assign() for SecureAllocator vectors
-    vchHDMasterKeyIV.assign(temp_vchHDMasterKeyIV.begin(), temp_vchHDMasterKeyIV.end());
-    nHDAccountIndex = temp_nHDAccountIndex;
-    nHDExternalChainIndex = temp_nHDExternalChainIndex;
-    nHDInternalChainIndex = temp_nHDInternalChainIndex;
-    mapAddressToPath = std::move(temp_mapAddressToPath);
-    mapPathToAddress = std::move(temp_mapPathToAddress);
+        // HD wallet data
+        // CID 1675319 FIX: All HD wallet member variable writes below are protected by lock acquired at line 1260
+        fIsHDWallet = temp_fIsHDWallet;
+        vchEncryptedMnemonic = std::move(temp_vchEncryptedMnemonic);
+        // FIX-009: Use assign() for SecureAllocator vectors
+        vchMnemonicIV.assign(temp_vchMnemonicIV.begin(), temp_vchMnemonicIV.end());
+        hdMasterKey = temp_hdMasterKey;
+        fHDMasterKeyEncrypted = temp_fHDMasterKeyEncrypted;
+        // FIX-009: Use assign() for SecureAllocator vectors
+        vchHDMasterKeyIV.assign(temp_vchHDMasterKeyIV.begin(), temp_vchHDMasterKeyIV.end());
+        nHDAccountIndex = temp_nHDAccountIndex;
+        nHDExternalChainIndex = temp_nHDExternalChainIndex;
+        nHDInternalChainIndex = temp_nHDInternalChainIndex;
+        mapAddressToPath = std::move(temp_mapAddressToPath);
+        mapPathToAddress = std::move(temp_mapPathToAddress);
 
-    // BUG #56 FIX: Copy best block pointer
-    m_bestBlockHash = temp_bestBlockHash;
-    m_bestBlockHeight = temp_bestBlockHeight;
+        // BUG #56 FIX: Copy best block pointer
+        // CID 1675318 FIX: All member variable writes below are protected by lock acquired at line 1260
+        m_bestBlockHash = temp_bestBlockHash;
+        m_bestBlockHeight = temp_bestBlockHeight;
 
-    m_walletFile = filename;  // Set wallet file path only on successful load
+        m_walletFile = filename;  // Set wallet file path only on successful load
+    }
 
     return true;
 }
@@ -1833,8 +1875,13 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     #ifndef _WIN32
         umask(old_umask);  // Restore original umask
         // Double-check permissions were applied correctly
+        // CID 1675198 FIX: Check return value of chmod to ensure permissions are set
+        // chmod returns 0 on success, -1 on error
         if (file.is_open()) {
-            chmod(tempFile.c_str(), S_IRUSR | S_IWUSR);  // 0600: owner read/write only
+            if (chmod(tempFile.c_str(), S_IRUSR | S_IWUSR) != 0) {
+                // Failed to set permissions - log warning but continue (non-fatal)
+                std::cerr << "WARNING: Failed to set secure permissions on wallet file: " << tempFile << std::endl;
+            }
         }
     #endif
 
@@ -2159,10 +2206,15 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     // This prevents data loss if power failure occurs between close() and rename()
     #ifndef _WIN32
         // Linux/Unix: fsync() ensures data written to physical disk
+        // CID 1675198 FIX: Check return value of fsync to ensure data is synced
+        // fsync returns 0 on success, -1 on error
         int fd = open(tempFile.c_str(), O_RDONLY);
         if (fd >= 0) {
-            fsync(fd);  // Sync file data and metadata to disk
-            close(fd);
+            if (fsync(fd) != 0) {
+                // Failed to sync - log warning but continue (non-fatal, but data may not be on disk)
+                std::cerr << "WARNING: Failed to sync wallet file to disk: " << tempFile << std::endl;
+            }
+            close(fd);  // Best-effort close (errors are usually non-critical)
         }
 
         // Also sync parent directory to persist rename operation metadata
@@ -2172,8 +2224,11 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
             if (parent_dir.empty()) parent_dir = ".";
             int dirfd = open(parent_dir.c_str(), O_RDONLY);
             if (dirfd >= 0) {
-                fsync(dirfd);
-                close(dirfd);
+                if (fsync(dirfd) != 0) {
+                    // Failed to sync directory - log warning but continue (non-fatal)
+                    std::cerr << "WARNING: Failed to sync wallet directory to disk: " << parent_dir << std::endl;
+                }
+                close(dirfd);  // Best-effort close (errors are usually non-critical)
             }
         }
     #endif
@@ -2232,8 +2287,20 @@ bool CWallet::InitializeWAL(const std::string& wallet_path) {
     return true;
 }
 
+// CID 1675307 FIX: Public method acquires lock and calls unlocked version
+// WARNING: Do NOT call this method from contexts that already hold cs_wallet lock.
+// Use RecoverFromWALUnlocked() instead if you already hold the lock.
+// This method unconditionally acquires cs_wallet, which would cause deadlock if
+// called from a context that already holds the lock.
 bool CWallet::RecoverFromWAL() {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    return RecoverFromWALUnlocked();
+}
+
+// CID 1675307 FIX: Unlocked version - assumes caller already holds cs_wallet lock
+// This allows safe calling from contexts that already hold the lock
+bool CWallet::RecoverFromWALUnlocked() {
+    // Note: Caller must hold cs_wallet lock
 
     // Check if WAL is initialized
     if (!m_wal) {
@@ -2263,7 +2330,8 @@ bool CWallet::RecoverFromWAL() {
             return false;
         }
 
-        // Execute recovery
+        // Execute recovery (passes this wallet which already holds cs_wallet)
+        // CID 1675307 FIX: Recovery functions will use unlocked wallet methods
         if (!CWalletRecovery::ExecuteRecovery(this, *m_wal, plan)) {
             std::cerr << "[WALLET RECOVERY ERROR] Failed to recover operation " << op_id << std::endl;
             return false;

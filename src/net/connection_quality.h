@@ -106,6 +106,16 @@ private:
     
     static constexpr uint32_t MAX_CONSECUTIVE_FAILURES = 10;
     static constexpr double MIN_QUALITY_SCORE = 0.1;  // Disconnect if score < 0.1
+    
+    /**
+     * CID 1675310 FIX: Get quality score (unlocked version)
+     * Internal helper that assumes caller already holds m_mutex
+     * 
+     * @param peer_id Peer ID to check
+     * @return Quality score (0.0 to 1.0)
+     * @note Caller must hold m_mutex lock
+     */
+    double GetQualityScoreUnlocked(int peer_id) const;
 };
 
 #endif // DILITHION_NET_CONNECTION_QUALITY_H

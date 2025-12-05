@@ -218,8 +218,15 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
               << " (height " << pindexFork->nHeight << ")" << std::endl;
 
     // VULN-008 FIX: Protect against excessively deep reorganizations
-    static const int MAX_REORG_DEPTH = 100;  // Similar to Bitcoin's practical limit
-    int reorg_depth = pindexTip->nHeight - pindexFork->nHeight;
+    // CID 1675248 FIX: Use int64_t to prevent overflow when computing reorg depth
+    // and add validation to ensure reorg_depth is non-negative
+    static const int64_t MAX_REORG_DEPTH = 100;  // Similar to Bitcoin's practical limit
+    int64_t reorg_depth = static_cast<int64_t>(pindexTip->nHeight) - static_cast<int64_t>(pindexFork->nHeight);
+    if (reorg_depth < 0) {
+        std::cerr << "[Chain] ERROR: Invalid reorg depth (negative): " << reorg_depth << std::endl;
+        std::cerr << "  Tip height: " << pindexTip->nHeight << ", Fork height: " << pindexFork->nHeight << std::endl;
+        return false;
+    }
     if (reorg_depth > MAX_REORG_DEPTH) {
         std::cerr << "[Chain] ERROR: Reorganization too deep: " << reorg_depth << " blocks" << std::endl;
         std::cerr << "  Maximum allowed: " << MAX_REORG_DEPTH << " blocks" << std::endl;

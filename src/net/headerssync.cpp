@@ -386,8 +386,11 @@ uint256 HeadersSyncState::GetBlockWork(uint32_t nBits) const {
     if (work_byte_pos < 0) work_byte_pos = 0;
     if (work_byte_pos > 31) work_byte_pos = 31;
 
-    uint64_t work_mantissa = (mantissa > 0) ?
-        (0xFFFFFFFFFFFFFFFFULL / mantissa) : 0xFFFFFFFFFFFFFFFFULL;
+    // CID 1675253/1675270 FIX: Calculate reciprocal of mantissa scaled to 64 bits
+    // Note: mantissa > 0 is guaranteed here because we check mantissa == 0 and return early at line 377
+    // The ternary operator's else branch was dead code, so we simplified to just the division
+    // This eliminates the logical contradiction where mantissa > 0 was always true at this point
+    uint64_t work_mantissa = 0xFFFFFFFFFFFFFFFFULL / mantissa;
 
     for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
         proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;

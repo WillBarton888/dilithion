@@ -59,8 +59,18 @@ ConnectionQuality CConnectionQualityTracker::GetQuality(int peer_id) const {
     return it->second;
 }
 
+// CID 1675310 FIX: Public method acquires lock and calls unlocked version
+// This prevents double-lock deadlock if called from context that already holds m_mutex
 double CConnectionQualityTracker::GetQualityScore(int peer_id) const {
     std::lock_guard<std::mutex> lock(m_mutex);
+    return GetQualityScoreUnlocked(peer_id);
+}
+
+// CID 1675310 FIX: Unlocked version - assumes caller already holds m_mutex lock
+// This allows safe calling from ShouldDisconnect which already holds the lock
+double CConnectionQualityTracker::GetQualityScoreUnlocked(int peer_id) const {
+    // Note: Caller must hold m_mutex lock
+    
     auto it = m_qualities.find(peer_id);
     if (it == m_qualities.end()) {
         return 0.0;
@@ -114,6 +124,10 @@ std::vector<int> CConnectionQualityTracker::GetTrackedPeers() const {
     return peers;
 }
 
+// CID 1675310 FIX: Public method acquires lock and uses unlocked helper
+// WARNING: Do NOT call this method from contexts that already hold m_mutex lock.
+// This method unconditionally acquires m_mutex, which would cause deadlock if
+// called from a context that already holds the lock.
 bool CConnectionQualityTracker::ShouldDisconnect(int peer_id) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_qualities.find(peer_id);
@@ -128,8 +142,9 @@ bool CConnectionQualityTracker::ShouldDisconnect(int peer_id) const {
         return true;
     }
     
+    // CID 1675310 FIX: Use GetQualityScoreUnlocked since we already hold m_mutex
     // Disconnect if quality score is too low
-    double score = GetQualityScore(peer_id);
+    double score = GetQualityScoreUnlocked(peer_id);
     if (score < MIN_QUALITY_SCORE) {
         return true;
     }

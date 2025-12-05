@@ -152,8 +152,10 @@ uint256 CBlockIndex::GetBlockProof() const {
     if (work_byte_pos < 0) work_byte_pos = 0;
     if (work_byte_pos > 31) work_byte_pos = 31;
 
-    // Calculate reciprocal of mantissa scaled to 64 bits
-    uint64_t work_mantissa = (mantissa > 0) ? (0xFFFFFFFFFFFFFFFFULL / mantissa) : 0xFFFFFFFFFFFFFFFFULL;
+    // CID 1675209 FIX: Calculate reciprocal of mantissa scaled to 64 bits
+    // Note: mantissa > 0 is guaranteed here because we check mantissa == 0 and return early at line 131
+    // The ternary operator's else branch is dead code, so we simplify to just the division
+    uint64_t work_mantissa = 0xFFFFFFFFFFFFFFFFULL / mantissa;
 
     // Store the work value at the appropriate byte position
     // This creates a properly scaled work value

@@ -37,8 +37,14 @@ std::string CAddress::ToStringIP() const {
 }
 
 std::string CAddress::ToString() const {
-    return strprintf("%s:%d (services=%016x, time=%u)",
-                    ToStringIP().c_str(), port, services, time);
+    // CID 1675229 FIX: Use std::ostringstream to completely eliminate printf format specifiers
+    // This ensures type safety: port (uint16_t), services (uint64_t), time (uint32_t)
+    std::ostringstream oss;
+    oss << ToStringIP() << ":" << static_cast<unsigned int>(port)
+        << " (services=0x" << std::hex << std::setfill('0') << std::setw(16) 
+        << static_cast<unsigned long long>(services) << std::dec
+        << ", time=" << static_cast<unsigned int>(time) << ")";
+    return oss.str();
 }
 
 // BUG #50 FIX: Accept blockchain height parameter following Bitcoin Core pattern
@@ -55,10 +61,18 @@ CVersionMessage::CVersionMessage(int32_t blockchain_height)
 }
 
 std::string CVersionMessage::ToString() const {
-    return strprintf("CVersionMessage(version=%d, services=%016x, timestamp=%ld, "
-                    "user_agent=%s, start_height=%d, relay=%s)",
-                    version, services, timestamp,
-                    user_agent.c_str(), start_height, relay ? "true" : "false");
+    // CID 1675294 FIX: Use std::ostringstream to completely eliminate printf format specifiers
+    // This ensures type safety: version (int32_t), services (uint64_t), timestamp (int64_t),
+    // start_height (int32_t), relay (bool)
+    std::ostringstream oss;
+    oss << "CVersionMessage(version=" << static_cast<int>(version)
+        << ", services=0x" << std::hex << std::setfill('0') << std::setw(16)
+        << static_cast<unsigned long long>(services) << std::dec
+        << ", timestamp=" << static_cast<long long>(timestamp)
+        << ", user_agent=" << user_agent
+        << ", start_height=" << static_cast<int>(start_height)
+        << ", relay=" << (relay ? "true" : "false") << ")";
+    return oss.str();
 }
 
 } // namespace NetProtocol

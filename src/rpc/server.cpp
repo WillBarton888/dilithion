@@ -25,9 +25,13 @@
 
 #include <sstream>
 #include <cstring>
+#include <cctype>  // CID 1675176: For std::isxdigit
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#ifndef _WIN32
+#include <errno.h>  // CID 1675178: For errno and strerror
+#endif
 #include <chrono>
 #include <thread>  // BUG #76 FIX: For std::this_thread::sleep_for
 #include <crypto/randomx_hash.h>  // BUG #76 FIX: For randomx_is_mining_mode_ready()
@@ -507,16 +511,26 @@ void CRPCServer::HandleClient(int clientSocket) {
 
     // RPC-017 FIX: Reduce socket timeouts to prevent slowloris attacks
     // Reduced from 30s to 10s (sufficient for RPC, prevents connection exhaustion)
+    // CID 1675178 FIX: Check return value of setsockopt to ensure timeout is set
+    // setsockopt returns 0 on success, -1 on error
     #ifdef _WIN32
     DWORD timeout = 10000;  // 10 seconds in milliseconds
-    (void)setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-    (void)setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+    if (setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
+        LogPrintf(RPC, WARNING, "Failed to set SO_RCVTIMEO on client socket");
+    }
+    if (setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
+        LogPrintf(RPC, WARNING, "Failed to set SO_SNDTIMEO on client socket");
+    }
     #else
     struct timeval timeout;
     timeout.tv_sec = 10;  // 10 seconds (down from 30)
     timeout.tv_usec = 0;
-    (void)setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-    (void)setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+    if (setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
+        LogPrintf(RPC, WARNING, "Failed to set SO_RCVTIMEO on client socket: %s", strerror(errno));
+    }
+    if (setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
+        LogPrintf(RPC, WARNING, "Failed to set SO_SNDTIMEO on client socket: %s", strerror(errno));
+    }
     #endif
 
     // Get client IP for rate limiting
@@ -622,10 +636,29 @@ void CRPCServer::HandleClient(int clientSocket) {
 
         // Check if we have complete HTTP request (headers end with \r\n\r\n)
         // CID 1675184 FIX: Pre-compute all bounds to prevent any overflow in loop
+        // Validate bytesRead before casting to prevent integer overflow
         const size_t bufSize = buffer.size();
-        if (bufSize >= 4) {
-            size_t bytesReadSize = static_cast<size_t>(bytesRead);  // Safe: bytesRead > 0 verified above
-            size_t searchStart = (bufSize > bytesReadSize + 3) ? bufSize - bytesReadSize - 3 : 0;
+        if (bufSize >= 4 && bytesRead > 0) {
+            // CID 1675184 FIX: Check for overflow before casting and arithmetic
+            // bytesRead is int, so check it's positive and within reasonable bounds
+            if (bytesRead > static_cast<int>(SIZE_MAX)) {
+                std::cerr << "[RPC] ERROR: bytesRead exceeds SIZE_MAX, possible integer overflow" << std::endl;
+                return;
+            }
+            size_t bytesReadSize = static_cast<size_t>(bytesRead);
+            
+            // CID 1675184 FIX: Check for overflow in bytesReadSize + 3 before subtraction
+            // This prevents overflowed constant from being used in arithmetic
+            size_t searchStart = 0;
+            if (bytesReadSize <= SIZE_MAX - 3) {
+                // Safe to compute: bufSize > bytesReadSize + 3 check prevents underflow
+                size_t sum = bytesReadSize + 3;
+                if (bufSize > sum) {
+                    searchStart = bufSize - sum;
+                }
+            }
+            // If overflow would occur, searchStart remains 0 (search from beginning)
+            
             // Pre-compute max index where [i+3] is valid - bufSize >= 4 guaranteed above
             const size_t maxIdx = bufSize - 4;
             for (size_t i = searchStart; i <= maxIdx; i++) {
@@ -2433,7 +2466,22 @@ std::string CRPCServer::RPC_GetTxOut(const std::string& params) {
 
     std::string txid_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
     uint256 txid;
-    txid.SetHex(txid_str);
+    // CID 1675176 FIX: Validate hex string before calling SetHex to prevent exceptions
+    // SetHex can throw std::invalid_argument or std::out_of_range on invalid hex input
+    if (txid_str.length() != 64) {
+        throw std::runtime_error("Invalid txid: must be 64 hex characters");
+    }
+    // Validate all characters are valid hex digits
+    for (char c : txid_str) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) {
+            throw std::runtime_error("Invalid txid: contains non-hexadecimal characters");
+        }
+    }
+    try {
+        txid.SetHex(txid_str);
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Invalid txid format: " + std::string(e.what()));
+    }
 
     // Parse n
     size_t n_pos = params.find("\"n\"", quote2);

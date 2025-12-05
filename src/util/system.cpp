@@ -99,35 +99,75 @@ std::string GetDataDir(bool testnet) {
 }
 
 bool EnsureDataDirExists(const std::string& path) {
-    // Check if directory already exists
-    struct stat info;
-    if (stat(path.c_str(), &info) == 0) {
-        if (info.st_mode & S_IFDIR) {
-            return true;  // Directory exists
-        } else {
-            std::cerr << "ERROR: " << path << " exists but is not a directory" << std::endl;
+    // CID 1675201 FIX: Prevent TOCTOU (Time-Of-Check Time-Of-Use) race condition
+    // Instead of checking then creating, we attempt to create atomically and verify
+    // This prevents an attacker from replacing the directory with a symlink between check and use
+    
+    // Attempt to create directory atomically (mkdir fails if directory already exists)
+#ifdef _WIN32
+    int mkdir_result = mkdir(path.c_str(), 0);
+    bool created = (mkdir_result == 0);
+    
+    if (mkdir_result != 0) {
+        // Directory might already exist, or creation failed
+        DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS) {
+            std::cerr << "ERROR: Failed to create directory: " << path << " (error: " << error << ")" << std::endl;
             return false;
         }
+        // ERROR_ALREADY_EXISTS means directory exists - verify it's actually a directory
     }
+#else
+    int mkdir_result = mkdir(path.c_str(), 0700);
+    bool created = (mkdir_result == 0);
+    
+    if (mkdir_result != 0) {
+        // Directory might already exist, or creation failed
+        if (errno != EEXIST) {
+            std::cerr << "ERROR: Failed to create directory: " << path << " (" << strerror(errno) << ")" << std::endl;
+            return false;
+        }
+        // EEXIST means directory exists - verify it's actually a directory (not symlink/file)
+    }
+#endif
 
-    // Create directory with secure permissions (0700 on Unix)
+    // CID 1675201 FIX: Verify directory attributes AFTER creation/check to prevent TOCTOU
+    // Use lstat on Unix to detect symlinks (doesn't follow symlinks), stat on Windows
+    struct stat info;
 #ifdef _WIN32
-    if (mkdir(path.c_str(), 0) != 0) {
-        std::cerr << "ERROR: Failed to create directory: " << path << std::endl;
+    if (stat(path.c_str(), &info) != 0) {
+        std::cerr << "ERROR: Cannot access directory: " << path << std::endl;
         return false;
     }
-
-    // Set restrictive permissions on Windows (deny access to other users)
-    // This is a simplified approach - production code should use proper Windows ACLs
-
+    
+    // On Windows, verify it's actually a directory (not a file)
+    if (!(info.st_mode & S_IFDIR)) {
+        std::cerr << "ERROR: " << path << " exists but is not a directory" << std::endl;
+        return false;
+    }
 #else
-    if (mkdir(path.c_str(), 0700) != 0) {
-        std::cerr << "ERROR: Failed to create directory: " << path << std::endl;
+    // Use lstat to detect symlinks (doesn't follow symlinks)
+    if (lstat(path.c_str(), &info) != 0) {
+        std::cerr << "ERROR: Cannot access directory: " << path << std::endl;
+        return false;
+    }
+    
+    // CID 1675201 FIX: Reject symlinks for security (prevent symlink attacks)
+    if (S_ISLNK(info.st_mode)) {
+        std::cerr << "ERROR: " << path << " is a symlink - not allowed for security reasons" << std::endl;
+        return false;
+    }
+    
+    // Verify it's actually a directory (not a file)
+    if (!S_ISDIR(info.st_mode)) {
+        std::cerr << "ERROR: " << path << " exists but is not a directory" << std::endl;
         return false;
     }
 #endif
 
-    std::cout << "Created data directory: " << path << std::endl;
+    if (created) {
+        std::cout << "Created data directory: " << path << std::endl;
+    }
     return true;
 }
 

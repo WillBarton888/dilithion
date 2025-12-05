@@ -352,8 +352,9 @@ bool CWalletRecovery::CompleteInitialization(CWallet* wallet,
 
     std::cout << "[WAL RECOVERY] Completing wallet initialization..." << std::endl;
 
+    // CID 1675307 FIX: Use SaveUnlocked since RecoverFromWALUnlocked already holds cs_wallet
     // Save wallet
-    if (!wallet->Save(wallet_path)) {
+    if (!wallet->SaveUnlocked(wallet_path)) {
         std::cerr << "[WAL RECOVERY ERROR] Failed to save wallet" << std::endl;
         return false;
     }
@@ -373,8 +374,9 @@ bool CWalletRecovery::RollbackEncryption(CWallet* wallet,
     std::cout << "[WAL RECOVERY] Rolling back wallet encryption..." << std::endl;
     std::cout << "[WAL RECOVERY] WARNING: This will revert wallet to unencrypted state" << std::endl;
 
+    // CID 1675307 FIX: Use LockUnlocked since RecoverFromWALUnlocked already holds cs_wallet
     // Clear encryption state
-    wallet->Lock(); // Lock wallet first
+    wallet->LockUnlocked(); // Lock wallet first
 
     // Note: In full implementation, would properly revert encryption
     // For now, just write ROLLBACK
@@ -423,8 +425,9 @@ bool CWalletRecovery::CompleteHDCreation(CWallet* wallet,
 
     std::cout << "[WAL RECOVERY] Completing HD wallet creation..." << std::endl;
 
+    // CID 1675307 FIX: Use SaveUnlocked since RecoverFromWALUnlocked already holds cs_wallet
     // Save wallet with HD state
-    if (!wallet->Save(wallet_path)) {
+    if (!wallet->SaveUnlocked(wallet_path)) {
         std::cerr << "[WAL RECOVERY ERROR] Failed to save wallet" << std::endl;
         return false;
     }
@@ -460,8 +463,9 @@ bool CWalletRecovery::CompleteRestore(CWallet* wallet,
 
     std::cout << "[WAL RECOVERY] Completing HD wallet restore..." << std::endl;
 
+    // CID 1675307 FIX: Use SaveUnlocked since RecoverFromWALUnlocked already holds cs_wallet
     // Save wallet with restored HD state
-    if (!wallet->Save(wallet_path)) {
+    if (!wallet->SaveUnlocked(wallet_path)) {
         std::cerr << "[WAL RECOVERY ERROR] Failed to save wallet" << std::endl;
         return false;
     }
