@@ -847,12 +847,11 @@ int main(int argc, char* argv[]) {
         randomx_init_validation_mode(rx_key, strlen(rx_key));
         // Validation mode is now ready - node can verify blocks immediately
 
-        // Step 2: If mining enabled AND RAM >= 3GB, start FULL mode in background
+        // Step 2: Check if FULL mode will be available (RAM >= 3GB)
+        // NOTE: Actual mining init is deferred until AFTER sync completes (BUG #97 fix)
         bool full_mode_available = (total_ram_mb >= 3072);
         if (config.start_mining && full_mode_available) {
-            std::cout << "  Starting mining mode init (FULL) in background..." << std::endl;
-            randomx_init_mining_mode_async(rx_key, strlen(rx_key));
-            // Mining will start with LIGHT mode, auto-upgrade to FULL when ready
+            std::cout << "  Mining mode: FULL (will initialize after sync)" << std::endl;
         } else if (config.start_mining) {
             std::cout << "  Mining mode: LIGHT only (RAM < 3GB)" << std::endl;
         }
@@ -2085,14 +2084,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::string mnemonic;
             if (wallet.GenerateHDWallet(mnemonic, "")) {
                 // Display mnemonic prominently - this is CRITICAL for user to backup
+                // BUG #97 FIX: Use ASCII box characters for Windows compatibility
                 std::cout << std::endl;
-                std::cout << "\033[31m\033[1m" << "╔══════════════════════════════════════════════════════════════════════════════╗" << "\033[0m" << std::endl;
-                std::cout << "\033[31m\033[1m" << "║              IMPORTANT: YOUR 24-WORD RECOVERY PHRASE                        ║" << "\033[0m" << std::endl;
-                std::cout << "\033[31m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
-                std::cout << "\033[31m\033[1m" << "║  Write these words on paper and store in a safe place.                      ║" << "\033[0m" << std::endl;
-                std::cout << "\033[31m\033[1m" << "║  This is the ONLY way to recover your wallet if you lose access.            ║" << "\033[0m" << std::endl;
-                std::cout << "\033[31m\033[1m" << "║  NEVER share this phrase with anyone or store it digitally.                 ║" << "\033[0m" << std::endl;
-                std::cout << "\033[31m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
+                std::cout << "|              IMPORTANT: YOUR 24-WORD RECOVERY PHRASE                        |" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
+                std::cout << "|  Write these words on paper and store in a safe place.                      |" << std::endl;
+                std::cout << "|  This is the ONLY way to recover your wallet if you lose access.            |" << std::endl;
+                std::cout << "|  NEVER share this phrase with anyone or store it digitally.                 |" << std::endl;
+                std::cout << "+------------------------------------------------------------------------------+" << std::endl;
 
                 // Parse and display words in a formatted grid (6 words per line)
                 std::istringstream iss(mnemonic);
@@ -2103,7 +2103,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 for (size_t i = 0; i < words.size(); i += 6) {
-                    std::cout << "\033[33m\033[1m" << "║  ";
+                    std::cout << "|  ";
                     for (size_t j = i; j < std::min(i + 6, words.size()); ++j) {
                         // Format: "NN.word      " (right-pad word to 10 chars)
                         std::ostringstream entry;
@@ -2115,48 +2115,48 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     for (size_t k = printed; k < 6; ++k) {
                         std::cout << "             ";  // 13 chars padding per missing word
                     }
-                    std::cout << "║\033[0m" << std::endl;
+                    std::cout << "|" << std::endl;
                 }
 
-                std::cout << "\033[31m\033[1m" << "╚══════════════════════════════════════════════════════════════════════════════╝" << "\033[0m" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
                 std::cout << std::endl;
-                std::cout << "\033[32m" << "  [OK] HD Wallet created successfully!" << "\033[0m" << std::endl;
+                std::cout << "  [OK] HD Wallet created successfully!" << std::endl;
                 std::cout << std::endl;
 
                 // Generate and display first receiving address prominently
                 CDilithiumAddress addr = wallet.GetNewHDAddress();
                 std::string addrStr = addr.ToString();
 
-                std::cout << "\033[36m\033[1m" << "╔══════════════════════════════════════════════════════════════════════════════╗" << "\033[0m" << std::endl;
-                std::cout << "\033[36m\033[1m" << "║              YOUR PUBLIC RECEIVING ADDRESS (Copy & Share)                   ║" << "\033[0m" << std::endl;
-                std::cout << "\033[36m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
-                std::cout << "\033[36m\033[1m" << "║                                                                              ║" << "\033[0m" << std::endl;
-                std::cout << "\033[33m\033[1m" << "║  " << addrStr << std::string(76 - addrStr.length(), ' ') << "║" << "\033[0m" << std::endl;
-                std::cout << "\033[36m\033[1m" << "║                                                                              ║" << "\033[0m" << std::endl;
-                std::cout << "\033[36m\033[1m" << "╠══════════════════════════════════════════════════════════════════════════════╣" << "\033[0m" << std::endl;
-                std::cout << "\033[36m\033[1m" << "║  Share this address to receive DIL. Safe to share publicly.                 ║" << "\033[0m" << std::endl;
-                std::cout << "\033[36m\033[1m" << "╚══════════════════════════════════════════════════════════════════════════════╝" << "\033[0m" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
+                std::cout << "|              YOUR PUBLIC RECEIVING ADDRESS (Copy & Share)                   |" << std::endl;
+                std::cout << "+------------------------------------------------------------------------------+" << std::endl;
+                std::cout << "|                                                                              |" << std::endl;
+                std::cout << "|  " << addrStr << std::string(76 - addrStr.length(), ' ') << "|" << std::endl;
+                std::cout << "|                                                                              |" << std::endl;
+                std::cout << "+------------------------------------------------------------------------------+" << std::endl;
+                std::cout << "|  Share this address to receive DIL. Safe to share publicly.                 |" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
                 std::cout << std::endl;
 
                 // CRITICAL: Pause to let user write down recovery phrase
-                std::cout << "[33m[1m" << "╔══════════════════════════════════════════════════════════════════════════════╗" << "[0m" << std::endl;
-                std::cout << "[33m[1m" << "║  IMPORTANT: Have you written down your 24-word recovery phrase?             ║" << "[0m" << std::endl;
-                std::cout << "[33m[1m" << "║                                                                              ║" << "[0m" << std::endl;
-                std::cout << "[33m[1m" << "║  This is your ONLY backup. If you lose it, your funds are GONE FOREVER.     ║" << "[0m" << std::endl;
-                std::cout << "[33m[1m" << "║  Store it safely on PAPER - never digitally!                                ║" << "[0m" << std::endl;
-                std::cout << "[33m[1m" << "╚══════════════════════════════════════════════════════════════════════════════╝" << "[0m" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
+                std::cout << "|  IMPORTANT: Have you written down your 24-word recovery phrase?             |" << std::endl;
+                std::cout << "|                                                                              |" << std::endl;
+                std::cout << "|  This is your ONLY backup. If you lose it, your funds are GONE FOREVER.     |" << std::endl;
+                std::cout << "|  Store it safely on PAPER - never digitally!                                |" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
                 std::cout << std::endl;
 
                 // Require explicit Y confirmation to ensure user has read and saved the phrase
                 std::string confirm;
                 while (true) {
-                    std::cout << "[32m[1m" << "  >>> Type 'Y' to confirm you have saved your recovery phrase: " << "[0m";
+                    std::cout << "  >>> Type 'Y' to confirm you have saved your recovery phrase: ";
                     std::cout.flush();
                     std::getline(std::cin, confirm);
                     if (confirm == "Y" || confirm == "y" || confirm == "yes" || confirm == "YES") {
                         break;
                     }
-                    std::cout << "[31m" << "  Please type 'Y' to confirm. Your recovery phrase is critical!" << "[0m" << std::endl;
+                    std::cout << "  Please type 'Y' to confirm. Your recovery phrase is critical!" << std::endl;
                 }
                 std::cout << std::endl;
                 std::cout << "  [OK] Continuing with node startup..." << std::endl;
@@ -3245,12 +3245,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (!IsInitialBlockDownload()) {
                     // IBD complete - start mining!
                     std::cout << "[5/6] IBD sync complete!" << std::endl;
-                    std::cout << "[6/6] Starting mining..." << std::flush;
+                    std::cout << "[6/6] Starting mining..." << std::endl;
 
-                    // BUG #72 FIX: Wait for FULL mode before starting mining threads
-                    // Following XMRig's proven pattern: "dataset ready" before thread creation
+                    // BUG #97 FIX: Initialize mining mode AFTER sync completes (not during startup)
+                    // This prevents "[MINING] Initializing dataset..." messages during wallet setup
                     if (!randomx_is_mining_mode_ready()) {
-                        std::cout << "  [WAIT] Waiting for RandomX FULL mode..." << std::endl;
+                        std::cout << "  Initializing RandomX mining mode (FULL)..." << std::endl;
+                        randomx_init_mining_mode_async(rx_key, strlen(rx_key));
+                        std::cout << "  [WAIT] Waiting for dataset initialization..." << std::endl;
                         auto wait_start = std::chrono::steady_clock::now();
                         while (!randomx_is_mining_mode_ready() && g_node_state.running) {
                             std::this_thread::sleep_for(std::chrono::milliseconds(100));
