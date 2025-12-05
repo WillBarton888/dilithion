@@ -2137,6 +2137,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "\033[36m\033[1m" << "║  Share this address to receive DIL. Safe to share publicly.                 ║" << "\033[0m" << std::endl;
                 std::cout << "\033[36m\033[1m" << "╚══════════════════════════════════════════════════════════════════════════════╝" << "\033[0m" << std::endl;
                 std::cout << std::endl;
+
+                // CRITICAL: Pause to let user write down recovery phrase
+                std::cout << "[33m[1m" << "╔══════════════════════════════════════════════════════════════════════════════╗" << "[0m" << std::endl;
+                std::cout << "[33m[1m" << "║  IMPORTANT: Have you written down your 24-word recovery phrase?             ║" << "[0m" << std::endl;
+                std::cout << "[33m[1m" << "║                                                                              ║" << "[0m" << std::endl;
+                std::cout << "[33m[1m" << "║  This is your ONLY backup. If you lose it, your funds are GONE FOREVER.     ║" << "[0m" << std::endl;
+                std::cout << "[33m[1m" << "║  Store it safely on PAPER - never digitally!                                ║" << "[0m" << std::endl;
+                std::cout << "[33m[1m" << "╚══════════════════════════════════════════════════════════════════════════════╝" << "[0m" << std::endl;
+                std::cout << std::endl;
+
+                // Require explicit Y confirmation to ensure user has read and saved the phrase
+                std::string confirm;
+                while (true) {
+                    std::cout << "[32m[1m" << "  >>> Type 'Y' to confirm you have saved your recovery phrase: " << "[0m";
+                    std::cout.flush();
+                    std::getline(std::cin, confirm);
+                    if (confirm == "Y" || confirm == "y" || confirm == "yes" || confirm == "YES") {
+                        break;
+                    }
+                    std::cout << "[31m" << "  Please type 'Y' to confirm. Your recovery phrase is critical!" << "[0m" << std::endl;
+                }
+                std::cout << std::endl;
+                std::cout << "  [OK] Continuing with node startup..." << std::endl;
+                std::cout << std::endl;
             } else {
                 // Fallback to legacy key generation if HD fails
                 std::cerr << "  WARNING: HD wallet generation failed, using legacy key" << std::endl;
