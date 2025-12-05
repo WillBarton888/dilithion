@@ -335,7 +335,7 @@ struct NodeConfig {
     }
 
     void PrintUsage(const char* program) {
-        std::cout << "Dilithion Node v1.0.16 - Post-Quantum Cryptocurrency" << std::endl;
+        std::cout << "Dilithion Node v1.1.1 - Post-Quantum Cryptocurrency" << std::endl;
         std::cout << std::endl;
         std::cout << "Usage: " << program << " [options]" << std::endl;
         std::cout << std::endl;
@@ -679,7 +679,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "======================================" << std::endl;
-    std::cout << "Dilithion Node v1.0.16" << std::endl;
+    std::cout << "Dilithion Node v1.1.1" << std::endl;
     std::cout << "Post-Quantum Cryptocurrency" << std::endl;
     std::cout << "======================================" << std::endl;
     std::cout << std::endl;
@@ -709,7 +709,7 @@ int main(int argc, char* argv[]) {
     if (!CLogger::GetInstance().Initialize(config.datadir)) {
         std::cerr << "Warning: Failed to initialize logging system" << std::endl;
     }
-    LogPrintf(ALL, INFO, "Dilithion Node v1.0.16 starting");
+    LogPrintf(ALL, INFO, "Dilithion Node v1.1.1 starting");
     LogPrintf(ALL, INFO, "Data directory: %s", config.datadir.c_str());
     LogPrintf(ALL, INFO, "P2P port: %d", config.p2pport);
     LogPrintf(ALL, INFO, "RPC port: %d", config.rpcport);
