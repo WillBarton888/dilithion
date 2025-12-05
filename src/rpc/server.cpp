@@ -515,22 +515,16 @@ void CRPCServer::HandleClient(int clientSocket) {
     // setsockopt returns 0 on success, -1 on error
     #ifdef _WIN32
     DWORD timeout = 10000;  // 10 seconds in milliseconds
-    if (setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
-        LogPrintf(RPC, WARNING, "Failed to set SO_RCVTIMEO on client socket");
-    }
-    if (setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
-        LogPrintf(RPC, WARNING, "Failed to set SO_SNDTIMEO on client socket");
-    }
+    // CID 1675178 FIX: setsockopt failure is non-critical
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
     #else
     struct timeval timeout;
     timeout.tv_sec = 10;  // 10 seconds (down from 30)
     timeout.tv_usec = 0;
-    if (setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
-        LogPrintf(RPC, WARNING, "Failed to set SO_RCVTIMEO on client socket: %s", strerror(errno));
-    }
-    if (setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) != 0) {
-        LogPrintf(RPC, WARNING, "Failed to set SO_SNDTIMEO on client socket: %s", strerror(errno));
-    }
+    // CID 1675178 FIX: setsockopt failure is non-critical
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    (void)setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
     #endif
 
     // Get client IP for rate limiting

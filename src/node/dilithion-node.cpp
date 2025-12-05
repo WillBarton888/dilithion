@@ -741,11 +741,11 @@ int main(int argc, char* argv[]) {
     // std::signal returns the previous handler or SIG_ERR on error
     if (std::signal(SIGINT, SignalHandler) == SIG_ERR) {
         std::cerr << "WARNING: Failed to install SIGINT handler" << std::endl;
-        LogPrintf(ALL, WARNING, "Failed to install SIGINT handler");
+        LogPrintf(ALL, WARN, "Failed to install SIGINT handler");
     }
     if (std::signal(SIGTERM, SignalHandler) == SIG_ERR) {
         std::cerr << "WARNING: Failed to install SIGTERM handler" << std::endl;
-        LogPrintf(ALL, WARNING, "Failed to install SIGTERM handler");
+        LogPrintf(ALL, WARN, "Failed to install SIGTERM handler");
     }
 
     // BUG #88: Windows startup crash diagnostics

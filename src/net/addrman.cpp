@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <algorithm>
 #ifdef _WIN32

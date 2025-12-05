@@ -343,7 +343,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
             // ROLLBACK: Reconnect all blocks we already disconnected
             std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " blocks..." << std::endl;
-            for (int j = disconnectedCount - 1; j >= 0; --j) {
+            for (int j = static_cast<int>(disconnectedCount) - 1; j >= 0; --j) {
                 CBlockIndex* pindexReconnect = disconnectBlocks[j];
                 CBlock reconnectBlock;
 
@@ -408,7 +408,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
             // ROLLBACK: Disconnect what we connected, reconnect what we disconnected
             std::cerr << "[Chain] ROLLBACK: Disconnecting " << connectedCount << " newly connected blocks..." << std::endl;
-            for (int j = connectedCount - 1; j >= 0; --j) {
+            for (int j = static_cast<int>(connectedCount) - 1; j >= 0; --j) {
                 if (!DisconnectTip(connectBlocks[j])) {
                     std::cerr << "[Chain] CRITICAL: Rollback failed during disconnect! Chain state corrupted!" << std::endl;
                     return false;
@@ -416,7 +416,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             }
 
             std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " old blocks..." << std::endl;
-            for (int j = disconnectedCount - 1; j >= 0; --j) {
+            for (int j = static_cast<int>(disconnectedCount) - 1; j >= 0; --j) {
                 CBlock reconnectBlock;
 
                 // CRITICAL-C002 FIX: Explicit error handling
@@ -452,7 +452,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
             // ROLLBACK: Same as above
             std::cerr << "[Chain] ROLLBACK: Disconnecting " << connectedCount << " newly connected blocks..." << std::endl;
-            for (int j = connectedCount - 1; j >= 0; --j) {
+            for (int j = static_cast<int>(connectedCount) - 1; j >= 0; --j) {
                 if (!DisconnectTip(connectBlocks[j])) {
                     std::cerr << "[Chain] CRITICAL: Rollback failed during disconnect! Chain state corrupted!" << std::endl;
                     return false;
@@ -460,7 +460,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             }
 
             std::cerr << "[Chain] ROLLBACK: Reconnecting " << disconnectedCount << " old blocks..." << std::endl;
-            for (int j = disconnectedCount - 1; j >= 0; --j) {
+            for (int j = static_cast<int>(disconnectedCount) - 1; j >= 0; --j) {
                 CBlock reconnectBlock;
 
                 // CRITICAL-C002 FIX: Explicit error handling

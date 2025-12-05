@@ -4,6 +4,7 @@
 #include <rpc/websocket.h>
 #include <rpc/ssl_wrapper.h>
 #include <util/strencodings.h>
+#include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <cstring>
