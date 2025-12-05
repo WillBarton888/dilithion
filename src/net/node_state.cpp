@@ -245,18 +245,27 @@ std::vector<NodeId> CNodeStateManager::CheckForStallingPeers() {
         auto timeout = state.GetBlockTimeout();
 
         if (download_time > timeout) {
-            // Peer is stalling
-            state.nStallingCount++;
-            state.m_stalling_since = now;
+            // BUG #93 FIX: Only count ONE stall per timeout period
+            // Previously we incremented nStallingCount on EVERY tick after timeout,
+            // causing peers to hit the 5-stall disconnect threshold within seconds.
+            // Now we check if we've already recorded a stall for this timeout period.
+            auto time_since_last_stall = now - state.m_stalling_since;
 
-            std::cout << "[NodeState] Peer " << nodeid << " stalling on block "
-                      << oldest.hash.GetHex().substr(0, 16) << "... "
-                      << "(attempt " << state.nStallingCount
-                      << ", timeout was " << timeout.count() << "s)" << std::endl;
+            // Only increment stall count if this is a NEW stall (more than one timeout period has passed)
+            // This means: first stall detected, OR the previous timeout period has fully elapsed
+            if (state.nStallingCount == 0 || time_since_last_stall >= timeout) {
+                state.nStallingCount++;
+                state.m_stalling_since = now;
+
+                std::cout << "[NodeState] Peer " << nodeid << " stalling on block "
+                          << oldest.hash.GetHex().substr(0, 16) << "... "
+                          << "(attempt " << state.nStallingCount
+                          << ", timeout was " << timeout.count() << "s)" << std::endl;
+            }
 
             // If stalling too many times, mark for disconnection
-            // During IBD, we're more aggressive (disconnect after 3 stalls)
-            // Post-IBD, we're more lenient (disconnect after 10 stalls)
+            // With adaptive timeouts (10s -> 20s -> 40s -> 80s -> 160s -> 320s),
+            // 5 stalls = minimum ~610 seconds (10+ minutes) of stalling behavior
             if (state.nStallingCount >= 5) {
                 stallingPeers.push_back(nodeid);
             }
