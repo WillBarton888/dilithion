@@ -4,6 +4,7 @@
 #include <consensus/chain.h>
 #include <consensus/pow.h>
 #include <consensus/reorg_wal.h>  // P1-4: WAL for atomic reorgs
+#include <core/chainparams.h>     // MAINNET: Checkpoint validation
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
 #include <util/assert.h>
@@ -149,6 +150,19 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         return false;
     }
 
+    // MAINNET SECURITY: Validate block against checkpoint if one exists at this height
+    // This ensures we never accept a block with a hash that doesn't match a checkpoint.
+    // Testnet has no checkpoints, so this check will always pass on testnet.
+    if (Dilithion::g_chainParams) {
+        if (!Dilithion::g_chainParams->CheckpointCheck(pindexNew->nHeight, pindexNew->GetBlockHash())) {
+            std::cerr << "[Chain] ERROR: Block hash does not match checkpoint!" << std::endl;
+            std::cerr << "  Height: " << pindexNew->nHeight << std::endl;
+            std::cerr << "  Block hash: " << pindexNew->GetBlockHash().GetHex() << std::endl;
+            std::cerr << "  This may indicate an attack or corrupted block data." << std::endl;
+            return false;
+        }
+    }
+
     // Case 1: Genesis block (first block in chain)
     if (pindexTip == nullptr) {
         std::cout << "[Chain] Activating genesis block at height " << pindexNew->nHeight << std::endl;
@@ -254,6 +268,22 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         std::cerr << "  Maximum allowed: " << MAX_REORG_DEPTH << " blocks" << std::endl;
         std::cerr << "  This may indicate a long-range attack or network partition" << std::endl;
         return false;
+    }
+
+    // MAINNET SECURITY: Checkpoint validation - prevent reorgs past checkpoints
+    // Checkpoints are hardcoded trusted block hashes that protect old transaction history.
+    // If a reorg would disconnect blocks before the last checkpoint, reject it.
+    // Testnet has no checkpoints to allow testing deep reorgs.
+    if (Dilithion::g_chainParams) {
+        const Dilithion::CCheckpoint* checkpoint = Dilithion::g_chainParams->GetLastCheckpoint(pindexTip->nHeight);
+        if (checkpoint && pindexFork->nHeight < checkpoint->nHeight) {
+            std::cerr << "[Chain] ERROR: Cannot reorganize past checkpoint" << std::endl;
+            std::cerr << "  Checkpoint height: " << checkpoint->nHeight << std::endl;
+            std::cerr << "  Fork point height: " << pindexFork->nHeight << std::endl;
+            std::cerr << "  This reorganization would undo blocks protected by a checkpoint." << std::endl;
+            std::cerr << "  Checkpoints protect user funds from deep chain attacks." << std::endl;
+            return false;
+        }
     }
 
     if (reorg_depth > 10) {

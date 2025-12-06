@@ -42,6 +42,16 @@ ChainParams ChainParams::Mainnet() {
     // Mining parameters
     params.initialReward = 50ULL * 100000000ULL; // 50 DIL (in ions: 1 DIL = 100,000,000 ions)
 
+    // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
+    // These prevent deep chain reorganizations and protect user funds
+    //
+    // IMPORTANT: After mainnet launch, add checkpoints every ~10,000 blocks:
+    //   params.checkpoints.emplace_back(10000, uint256S("0000..."));
+    //   params.checkpoints.emplace_back(20000, uint256S("0000..."));
+    //
+    // For now, only genesis is checkpointed (will be updated after mining)
+    // params.checkpoints.emplace_back(0, uint256S(params.genesisHash));
+
     return params;
 }
 
@@ -81,6 +91,11 @@ ChainParams ChainParams::Testnet() {
 
     // Mining parameters (same as mainnet)
     params.initialReward = 50ULL * 100000000ULL; // 50 DIL (same as mainnet)
+
+    // TESTNET: No checkpoints
+    // This intentionally allows testing chain reorganizations of any depth
+    // Testnet coins have no value, so deep reorg protection is not needed
+    // params.checkpoints is left empty
 
     return params;
 }

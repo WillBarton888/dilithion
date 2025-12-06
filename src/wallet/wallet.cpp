@@ -24,6 +24,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <iomanip>  // For std::fixed, std::setprecision
 #include <limits>
 
 // FIX-002 (PERSIST-003): File permissions
@@ -578,6 +579,31 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                         std::vector<uint8_t> addrPKH = GetPubKeyHashFromAddress(addr);
                         if (addrPKH == scriptPKH) {
                             AddTxOutUnlocked(tx.GetHash(), i, out.nValue, addr, height);
+
+                            // Notify user when mining reward is credited
+                            if (tx.IsCoinBase()) {
+                                // Calculate new balance (unlocked - we hold cs_wallet)
+                                int64_t newBalance = 0;
+                                for (const auto& pair : mapWalletTx) {
+                                    if (!pair.second.fSpent) {
+                                        newBalance += pair.second.nValue;
+                                    }
+                                }
+
+                                double rewardDIL = static_cast<double>(out.nValue) / 100000000.0;
+                                double balanceDIL = static_cast<double>(newBalance) / 100000000.0;
+
+                                std::cout << "\n";
+                                std::cout << "============================================================" << std::endl;
+                                std::cout << "  MINING REWARD CREDITED!" << std::endl;
+                                std::cout << "============================================================" << std::endl;
+                                std::cout << "  Block Height:    " << height << std::endl;
+                                std::cout << "  Reward:          +" << std::fixed << std::setprecision(8) << rewardDIL << " DIL" << std::endl;
+                                std::cout << "  New Balance:     " << std::fixed << std::setprecision(8) << balanceDIL << " DIL" << std::endl;
+                                std::cout << "  Address:         " << addr.ToString() << std::endl;
+                                std::cout << "============================================================" << std::endl;
+                                std::cout << "\n";
+                            }
                             break;
                         }
                     }

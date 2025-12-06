@@ -109,6 +109,9 @@ echo   If older than Windows 10 1803, consider updating Windows
 echo.
 echo For support, join our Discord: https://discord.gg/dilithion
 echo ============================================================
+echo.
+echo Press any key to exit...
+pause >nul
 exit /b 1
 
 :curl_found
@@ -120,6 +123,9 @@ set COMMAND=%1
 
 if "%COMMAND%"=="" (
     call :show_help
+    echo.
+    echo Press any key to exit...
+    pause >nul
     exit /b 1
 )
 
@@ -137,6 +143,9 @@ if /i "%COMMAND%"=="-h" goto show_help
 echo Error: Unknown command '%COMMAND%'
 echo.
 call :show_help
+echo.
+echo Press any key to exit...
+pause >nul
 exit /b 1
 
 REM ===== VALIDATION FUNCTIONS =====
