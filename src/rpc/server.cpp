@@ -3002,9 +3002,9 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
                 std::cout << "[RPC] Still waiting for FULL mode... " << seconds << "s elapsed" << std::endl;
             }
 
-            // Timeout after 120 seconds
-            if (seconds > 120) {
-                throw std::runtime_error("RandomX FULL mode initialization timeout (120s). Try again later.");
+            // Timeout after 600 seconds (10 minutes)
+            if (seconds > 600) {
+                throw std::runtime_error("RandomX FULL mode initialization timeout (10min). Try again later.");
             }
         }
         auto wait_time = std::chrono::duration_cast<std::chrono::seconds>(

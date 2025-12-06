@@ -3154,9 +3154,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     while (!randomx_is_mining_mode_ready() && g_node_state.running) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         auto elapsed = std::chrono::steady_clock::now() - wait_start;
-                        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > 120) {
-                            std::cerr << "  [WARN] FULL mode init timeout, starting with LIGHT mode" << std::endl;
+                        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > 600) {
+                            std::cerr << "  [WARN] FULL mode init timeout (10min), starting with LIGHT mode" << std::endl;
                             break;
+                        }
+                        // Show progress every 60 seconds
+                        auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+                        if (elapsed_sec > 0 && elapsed_sec % 60 == 0) {
+                            std::cout << "  [WAIT] Still initializing FULL mode... (" << elapsed_sec << "s)" << std::endl;
                         }
                     }
                     auto wait_time = std::chrono::duration_cast<std::chrono::seconds>(
