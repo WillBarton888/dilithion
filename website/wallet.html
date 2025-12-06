@@ -908,7 +908,8 @@
         async function rpcCall(method, params = []) {
             const url = `http://${rpcConfig.host}:${rpcConfig.port}/`;
             const headers = {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-Dilithion-RPC': '1'  // Required for CSRF protection
             };
 
             if (rpcConfig.user && rpcConfig.pass) {

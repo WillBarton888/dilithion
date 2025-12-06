@@ -695,6 +695,21 @@ void CRPCServer::HandleClient(int clientSocket) {
     buffer.push_back('\0');
     std::string request(buffer.data());
 
+    // CORS: Handle OPTIONS preflight requests for web wallet
+    // Browsers send OPTIONS before cross-origin requests with custom headers
+    if (request.find("OPTIONS ") == 0) {
+        std::string response = "HTTP/1.1 204 No Content\r\n"
+                               "Access-Control-Allow-Origin: *\r\n"
+                               "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
+                               "Access-Control-Allow-Headers: Content-Type, Authorization, X-Dilithion-RPC\r\n"
+                               "Access-Control-Max-Age: 86400\r\n"
+                               "Content-Length: 0\r\n"
+                               "Connection: close\r\n"
+                               "\r\n";
+        send_response_and_cleanup(response);
+        return;
+    }
+
     // RPC-004 FIX: CSRF Protection via Custom Header
     // Require X-Dilithion-RPC header to prevent Cross-Site Request Forgery
     // Browsers block custom headers in simple CORS requests, preventing CSRF attacks
@@ -737,6 +752,9 @@ void CRPCServer::HandleClient(int clientSocket) {
                                "Connection: close\r\n"
                                "X-Content-Type-Options: nosniff\r\n"
                                "X-Frame-Options: DENY\r\n"
+                               "Access-Control-Allow-Origin: *\r\n"
+                               "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
+                               "Access-Control-Allow-Headers: Content-Type, Authorization, X-Dilithion-RPC\r\n"
                                "\r\n"
                                "{\"error\":\"CSRF protection: Missing X-Dilithion-RPC header. Include 'X-Dilithion-RPC: 1' in request.\",\"code\":-32600}";
         send_response_and_cleanup(response);
@@ -1279,8 +1297,10 @@ std::string CRPCServer::BuildHTTPResponse(const std::string& body) {
     oss << "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n";  // Force HTTPS (future)
     oss << "Referrer-Policy: no-referrer\r\n";  // Don't leak referrer
 
-    // RPC-014 FIX: CORS - Only allow same-origin by default (no Access-Control-Allow-Origin header)
-    // If cross-origin access needed, implement explicit whitelist validation
+    // CORS headers for web wallet support
+    oss << "Access-Control-Allow-Origin: *\r\n";
+    oss << "Access-Control-Allow-Methods: POST, OPTIONS\r\n";
+    oss << "Access-Control-Allow-Headers: Content-Type, Authorization, X-Dilithion-RPC\r\n";
 
     oss << "\r\n";
     oss << body;
@@ -1302,6 +1322,11 @@ std::string CRPCServer::BuildHTTPUnauthorized() {
     oss << "X-XSS-Protection: 1; mode=block\r\n";
     oss << "Content-Security-Policy: default-src 'none'\r\n";
     oss << "Referrer-Policy: no-referrer\r\n";
+
+    // CORS headers for web wallet support
+    oss << "Access-Control-Allow-Origin: *\r\n";
+    oss << "Access-Control-Allow-Methods: POST, OPTIONS\r\n";
+    oss << "Access-Control-Allow-Headers: Content-Type, Authorization, X-Dilithion-RPC\r\n";
 
     oss << "\r\n";
     oss << body;
