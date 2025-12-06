@@ -31,17 +31,22 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <filesystem>
 
 using namespace std;
 
+// MEM-MED-001 FIX: Replace system() with std::filesystem for safe directory operations
 // Helper: Remove test directory
 void CleanupTestDir(const string& path) {
-    system(("rm -rf " + path).c_str());
+    std::error_code ec;
+    std::filesystem::remove_all(path, ec);
+    // Ignore errors - directory may not exist
 }
 
 // Helper: Create test directory
 void CreateTestDir(const string& path) {
-    system(("mkdir -p " + path).c_str());
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
 }
 
 bool TestBlockchainAndMempool() {

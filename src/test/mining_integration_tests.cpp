@@ -21,6 +21,7 @@
 #include <vector>
 #include <string>
 #include <cstdlib>
+#include <filesystem>  // MEM-MED-001 FIX: Replace system() with std::filesystem
 
 // ANSI color codes
 #define RESET   "\033[0m"
@@ -170,7 +171,9 @@ TEST(block_template_empty_mempool) {
 
     // Initialize UTXO set
     std::string utxoPath = ".test-mining-utxo";
-    system(("rm -rf " + utxoPath).c_str());
+    // MEM-MED-001 FIX: Use std::filesystem instead of system()
+    std::error_code ec;
+    std::filesystem::remove_all(utxoPath, ec);
     ASSERT(utxoSet.Open(utxoPath, true), "Failed to open UTXO set");
 
     std::vector<uint8_t> minerAddr = CreateMinerAddress();
@@ -201,7 +204,8 @@ TEST(block_template_empty_mempool) {
 
     // Cleanup
     utxoSet.Close();
-    system(("rm -rf " + utxoPath).c_str());
+    // MEM-MED-001 FIX: Use std::filesystem instead of system()
+    std::filesystem::remove_all(utxoPath, ec);
 }
 
 // =======================================================================

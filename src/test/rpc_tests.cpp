@@ -11,6 +11,7 @@
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include <filesystem>  // MEM-MED-001 FIX: Replace system() with std::filesystem
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -187,8 +188,9 @@ bool TestWalletRPCs() {
 
     server.Stop();
 
-    // Clean up test UTXO directory
-    (void)system("rm -rf .test_rpc_utxo");
+    // MEM-MED-001 FIX: Clean up test UTXO directory using std::filesystem
+    std::error_code ec;
+    std::filesystem::remove_all(".test_rpc_utxo", ec);
 
     return true;
 }

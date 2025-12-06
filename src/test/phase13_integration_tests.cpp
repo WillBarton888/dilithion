@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <atomic>
+#include <filesystem>
 
 using namespace std;
 
@@ -50,21 +51,17 @@ using namespace std;
 // HELPER FUNCTIONS
 // ============================================================================
 
-// Test directory management
+// MEM-MED-001 FIX: Replace system() with std::filesystem for safe directory operations
+// Test directory management - cross-platform using std::filesystem
 void CleanupTestDir(const string& path) {
-#ifdef _WIN32
-    system(("rmdir /s /q " + path + " 2>nul").c_str());
-#else
-    system(("rm -rf " + path).c_str());
-#endif
+    std::error_code ec;
+    std::filesystem::remove_all(path, ec);
+    // Ignore errors - directory may not exist
 }
 
 void CreateTestDir(const string& path) {
-#ifdef _WIN32
-    system(("mkdir " + path + " 2>nul").c_str());
-#else
-    system(("mkdir -p " + path).c_str());
-#endif
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
 }
 
 // Create a simple test transaction
