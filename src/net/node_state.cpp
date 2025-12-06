@@ -56,9 +56,6 @@ bool CNodeStateManager::CreateStateWithHandshake(NodeId nodeid, int nStartingHei
     state.nStartingHeight = nStartingHeight;
     state.fPreferredDownload = fPreferredDownload;
 
-    std::cout << "[NodeState] Created state for peer " << nodeid
-              << " (height=" << nStartingHeight << ", preferred=" << fPreferredDownload << ")" << std::endl;
-
     return true;
 }
 

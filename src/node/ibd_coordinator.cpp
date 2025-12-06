@@ -27,41 +27,18 @@ void CIbdCoordinator::Tick() {
     // Phase 5.1: Update state machine
     UpdateState();
 
-    // BUG #88: Use std::cout to guarantee output regardless of logging config
-    static int tick_count = 0;
-    tick_count++;
-    bool should_log = (tick_count % 10 == 1);  // Log every 10th tick to avoid spam
-
     // Check if IBD components are available
     if (!m_node_context.headers_manager || !m_node_context.block_fetcher) {
-        if (should_log) {
-            std::cout << "[IBD-TICK] RETURN: headers_manager="
-                      << (m_node_context.headers_manager ? "valid" : "NULL")
-                      << " block_fetcher=" << (m_node_context.block_fetcher ? "valid" : "NULL") << std::endl;
-        }
         return;
     }
 
     int header_height = m_node_context.headers_manager->GetBestHeight();
     int chain_height = m_chainstate.GetHeight();
 
-    // BUG #88: Always print this critical check
-    if (should_log) {
-        std::cout << "[IBD-TICK] tick=" << tick_count
-                  << " header=" << header_height
-                  << " chain=" << chain_height
-                  << " state=" << GetStateName() << std::endl;
-    }
-
     // If headers are not ahead, we're synced (IDLE or COMPLETE)
     if (header_height <= chain_height) {
         if (m_state != IBDState::IDLE && m_state != IBDState::COMPLETE) {
             m_state = IBDState::COMPLETE;
-            std::cout << "[IBD-TICK] IBD complete: chain synced (height=" << chain_height << ")" << std::endl;
-        }
-        if (should_log) {
-            std::cout << "[IBD-TICK] RETURN: header(" << header_height
-                      << ") <= chain(" << chain_height << ")" << std::endl;
         }
         return;
     }
@@ -69,36 +46,20 @@ void CIbdCoordinator::Tick() {
     ResetBackoffOnNewHeaders(header_height);
 
     auto now = std::chrono::steady_clock::now();
-    bool should_attempt = ShouldAttemptDownload();
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_ibd_attempt);
-    int backoff_seconds = std::min(30, (1 << std::min(m_ibd_no_peer_cycles, 5)));
-
-    if (!should_attempt) {
-        if (should_log) {
-            std::cout << "[IBD-TICK] RETURN: Backoff (elapsed=" << elapsed.count()
-                      << "s backoff=" << backoff_seconds << "s cycles=" << m_ibd_no_peer_cycles << ")" << std::endl;
-        }
+    if (!ShouldAttemptDownload()) {
         return;
     }
 
     size_t peer_count = m_node_context.peer_manager ? m_node_context.peer_manager->GetConnectionCount() : 0;
 
     if (peer_count == 0) {
-        if (should_log) {
-            std::cout << "[IBD-TICK] RETURN: peer_count=0" << std::endl;
-        }
         HandleNoPeers(now);
         return;
     }
 
     if (m_ibd_no_peer_cycles > 0) {
-        std::cout << "[IBD-TICK] Peers available - resuming block download" << std::endl;
         m_ibd_no_peer_cycles = 0;
     }
-
-    // BUG #88: If we reach here, we WILL download blocks
-    std::cout << "[IBD-TICK] PROCEEDING: header=" << header_height
-              << " chain=" << chain_height << " peers=" << peer_count << std::endl;
 
     BENCHMARK_START("ibd_tick");
     DownloadBlocks(header_height, chain_height, now);
@@ -154,15 +115,7 @@ bool CIbdCoordinator::ShouldAttemptDownload() const {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_ibd_attempt);
     int backoff_seconds = std::min(30, (1 << std::min(m_ibd_no_peer_cycles, 5)));
-    bool should_attempt = elapsed.count() >= backoff_seconds;
-    
-    // BUG #88: Debug logging for backoff logic
-    if (!should_attempt) {
-        LogPrintIBD(DEBUG, "[IBD-DEBUG] ShouldAttemptDownload: NO (elapsed=%lds backoff=%ds cycles=%d)",
-                   elapsed.count(), backoff_seconds, m_ibd_no_peer_cycles);
-    }
-    
-    return should_attempt;
+    return elapsed.count() >= backoff_seconds;
 }
 
 void CIbdCoordinator::HandleNoPeers(std::chrono::steady_clock::time_point now) {
@@ -249,10 +202,9 @@ bool CIbdCoordinator::FetchBlocks() {
             getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
             bool sent = m_node_context.connection_manager->SendMessage(peer, msg);
-            std::cout << "[IBD-DEBUG] GETDATA " << (sent ? "SENT" : "FAILED") << " to peer " << peer << " for " << hash.GetHex().substr(0, 16) << "..." << std::endl;
-            LogPrintIBD(DEBUG, "Sent GETDATA for block %s... (height %d) to peer %d", 
-                       hash.GetHex().substr(0, 16).c_str(), height, peer);
-            successful_requests++;
+            if (sent) {
+                successful_requests++;
+            }
         } else {
             // BUG #63 FIX: Re-queue block if no peer available
             m_node_context.block_fetcher->QueueBlockForDownload(hash, height, -1, true);

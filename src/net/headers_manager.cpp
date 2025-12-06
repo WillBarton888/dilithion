@@ -265,15 +265,6 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 {
     uint256 hash = header.GetHash();
 
-    // BUG #53 DEBUG: Detailed header validation logging
-    std::cout << "  version=" << header.nVersion << std::endl;
-    std::cout << "  prevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  merkleRoot=" << header.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  nTime=" << header.nTime << std::endl;
-    std::cout << "  nBits=0x" << std::hex << header.nBits << std::dec << std::endl;
-    std::cout << "  nNonce=" << header.nNonce << std::endl;
-    std::cout << "  computed hash=" << hash.GetHex() << std::endl;
-
     // 1. Check Proof of Work
     if (!CheckProofOfWork(hash, header.nBits)) {
         // Compute target for debug

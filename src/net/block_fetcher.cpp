@@ -480,15 +480,11 @@ void CBlockFetcher::RemoveFromQueue(const uint256& hash)
     // The item will be skipped when popped in GetNextBlocksToFetch
     // This is acceptable performance-wise as the queue is typically small
 
-    std::cout << "[BlockFetcher] Removed block from queue: "
-              << hash.GetHex().substr(0, 16) << "..." << std::endl;
 }
 
 void CBlockFetcher::OnPeerDisconnected(NodeId peer)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    std::cout << "[BlockFetcher] Peer " << peer << " disconnected, re-queuing in-flight blocks" << std::endl;
 
     // Re-queue all blocks that were in-flight from this peer
     if (mapPeerBlocks.count(peer) > 0) {
@@ -521,8 +517,6 @@ void CBlockFetcher::OnPeerDisconnected(NodeId peer)
 void CBlockFetcher::OnPeerConnected(NodeId peer)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    std::cout << "[BlockFetcher] Peer " << peer << " connected, initializing download state" << std::endl;
 
     // Initialize peer state
     mapPeerStates[peer] = PeerDownloadState();
