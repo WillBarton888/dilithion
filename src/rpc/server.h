@@ -132,6 +132,9 @@ private:
     class CBlockchainDB* m_blockchain;
     class CUTXOSet* m_utxo_set;
     class CChainState* m_chainstate;
+
+    // Network configuration
+    bool m_testnet{false};
     // CNetworkManager* m_network;  // TODO: Implement network manager
 
     // RPC handlers
@@ -357,6 +360,11 @@ public:
      * Register chain state instance
      */
     void RegisterChainState(class CChainState* chainstate) { m_chainstate = chainstate; }
+
+    /**
+     * Set testnet mode
+     */
+    void SetTestnet(bool testnet) { m_testnet = testnet; }
 
     /**
      * Register network manager instance

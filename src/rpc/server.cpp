@@ -2359,7 +2359,7 @@ std::string CRPCServer::RPC_GetBlockchainInfo(const std::string& params) {
 
     std::ostringstream oss;
     oss << "{";
-    oss << "\"chain\":\"main\",";
+    oss << "\"chain\":\"" << (m_testnet ? "testnet" : "main") << "\",";
     oss << "\"blocks\":" << height << ",";
     oss << "\"bestblockhash\":\"" << bestBlockHash.GetHex() << "\",";
     oss << "\"difficulty\":" << std::fixed << std::setprecision(8) << difficulty << ",";

@@ -2987,6 +2987,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterChainState(&g_chainstate);
         rpc_server.RegisterMempool(&mempool);
         rpc_server.RegisterUTXOSet(&utxo_set);
+        rpc_server.SetTestnet(config.testnet);
 
         // Phase 1: Initialize authentication and permissions
         std::string rpcuser = config_parser.GetString("rpcuser", "");
