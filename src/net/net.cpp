@@ -18,6 +18,7 @@
 #include <node/utxo_set.h>
 #include <consensus/tx_validation.h>
 #include <consensus/chain.h>  // BUG #50 FIX: For g_chainstate.GetHeight()
+#include <node/genesis.h>     // P2-3: For GetGenesisHash() validation
 #include <net/block_fetcher.h>  // BUG #68 FIX: For BlockFetcher peer disconnect notification
 #include <net/node_state.h>     // BUG #69: Bitcoin Core-style per-peer state management
 #include <random>
@@ -46,6 +47,18 @@ static const uint64_t MAX_BLOCK_TRANSACTIONS = 100000;  // Max transactions per 
 static const uint64_t MAX_TX_INPUTS = 10000;            // Max inputs per transaction
 static const uint64_t MAX_TX_OUTPUTS = 10000;           // Max outputs per transaction
 static const uint64_t MAX_SCRIPT_SIZE = 10000;          // Max script size in bytes
+
+// P2-1 FIX: Rate limiting for GETDATA messages (DoS protection)
+// Limits: 10 GETDATA messages per second per peer
+static std::map<int, std::vector<int64_t>> g_peer_getdata_timestamps;
+static std::mutex cs_getdata_rate;
+static const size_t MAX_GETDATA_PER_SECOND = 10;
+
+// P2-2 FIX: Per-IP connection cooldown to prevent rapid reconnection DoS
+// Prevents attackers from exhausting connection slots via reconnection churn
+static std::map<std::string, int64_t> g_last_connection_attempt;
+static std::mutex cs_connection_cooldown;
+static const int64_t CONNECTION_COOLDOWN_SECONDS = 30;
 
 // NET-016 FIX: Error message sanitization notes
 // Production deployment should implement proper logging framework with:
@@ -567,6 +580,28 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
 
 bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& stream) {
     try {
+        // P2-1 FIX: Rate limiting for GETDATA messages
+        // Prevents CPU exhaustion DoS via unlimited GETDATA requests
+        {
+            std::lock_guard<std::mutex> lock(cs_getdata_rate);
+            int64_t now = GetTime();
+            auto& timestamps = g_peer_getdata_timestamps[peer_id];
+
+            // Remove timestamps older than 1 second
+            timestamps.erase(
+                std::remove_if(timestamps.begin(), timestamps.end(),
+                    [now](int64_t ts) { return now - ts > 1; }),
+                timestamps.end());
+
+            if (timestamps.size() >= MAX_GETDATA_PER_SECOND) {
+                std::cout << "[P2P] RATE LIMIT: Too many GETDATA from peer " << peer_id
+                          << " (" << timestamps.size() << "/" << MAX_GETDATA_PER_SECOND << " per second)" << std::endl;
+                peer_manager.Misbehaving(peer_id, 10);
+                return false;
+            }
+            timestamps.push_back(now);
+        }
+
         // BUG #87 DEBUG: Log GETDATA processing
         std::cout << "[P2P] Processing GETDATA from peer " << peer_id << std::endl;
         // Read number of inv items
@@ -852,6 +887,28 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
         msg.locator.resize(locator_size);
         for (uint64_t i = 0; i < locator_size; i++) {
             msg.locator[i] = stream.ReadUint256();
+        }
+
+        // P2-3 FIX: Validate locator hashes against our chain
+        // This prevents eclipse attacks via fake block hashes in locator array
+        // Each hash must either be zero (genesis), in our chain, or explicitly known
+        uint256 genesis_hash = Genesis::GetGenesisHash();
+        for (const uint256& hash : msg.locator) {
+            // Skip zero hash (sometimes used as placeholder)
+            if (hash.IsNull()) continue;
+
+            // Genesis block hash is always valid
+            if (hash == genesis_hash) continue;
+
+            // Validate hash exists in our block index
+            // Note: extern CChainState g_chainstate declared in consensus/chain.h
+            extern CChainState g_chainstate;
+            if (!g_chainstate.HasBlockIndex(hash)) {
+                std::cout << "[P2P] SECURITY: Unknown locator hash from peer " << peer_id
+                          << ": " << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                peer_manager.Misbehaving(peer_id, 20);
+                return false;
+            }
         }
 
         // Read stop hash
@@ -1223,6 +1280,22 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
                                     addr.ip[14],
                                     addr.ip[15]);
 
+    // P2-2 FIX: Per-IP connection cooldown to prevent rapid reconnection DoS
+    // Prevents attackers from exhausting connection slots via reconnection churn
+    {
+        std::lock_guard<std::mutex> lock(cs_connection_cooldown);
+        auto it = g_last_connection_attempt.find(ip_str);
+        if (it != g_last_connection_attempt.end()) {
+            int64_t elapsed = GetTime() - it->second;
+            if (elapsed < CONNECTION_COOLDOWN_SECONDS) {
+                std::cout << "[P2P] Connection cooldown: rejecting " << ip_str
+                          << " (wait " << (CONNECTION_COOLDOWN_SECONDS - elapsed) << "s)" << std::endl;
+                return -1;
+            }
+        }
+        g_last_connection_attempt[ip_str] = GetTime();
+    }
+
     // ANTI-SELF-CONNECTION FIX (Bug #20 + Bug #58): Prevent nodes from connecting to themselves
     // Skip localhost addresses
     if (ip_str == "127.0.0.1" || ip_str == "::1" || ip_str == "0.0.0.0") {
@@ -1324,6 +1397,27 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
     // Check if we can accept more connections
     if (!peer_manager.CanAcceptConnection()) {
         return -1;  // Return -1 for failure
+    }
+
+    // P2-2 FIX: Per-IP connection cooldown for inbound connections
+    // Extract IP from IPv6-mapped IPv4 address
+    std::string ip_str = strprintf("%d.%d.%d.%d",
+                                    addr.ip[12],
+                                    addr.ip[13],
+                                    addr.ip[14],
+                                    addr.ip[15]);
+    {
+        std::lock_guard<std::mutex> lock(cs_connection_cooldown);
+        auto it = g_last_connection_attempt.find(ip_str);
+        if (it != g_last_connection_attempt.end()) {
+            int64_t elapsed = GetTime() - it->second;
+            if (elapsed < CONNECTION_COOLDOWN_SECONDS) {
+                std::cout << "[P2P] Connection cooldown: rejecting inbound from " << ip_str
+                          << " (wait " << (CONNECTION_COOLDOWN_SECONDS - elapsed) << "s)" << std::endl;
+                return -1;
+            }
+        }
+        g_last_connection_attempt[ip_str] = GetTime();
     }
 
     // Add peer
