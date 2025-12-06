@@ -979,13 +979,16 @@
         // Refresh balance
         async function refreshBalance() {
             try {
-                const balance = await rpcCall('getbalance');
-                const immature = await rpcCall('getimmaturebalance').catch(() => 0);
-                const total = balance + (immature || 0);
+                const result = await rpcCall('getbalance');
+                // getbalance returns an object with balance, unconfirmed_balance, immature_balance
+                const balance = result.balance || 0;
+                const unconfirmed = result.unconfirmed_balance || 0;
+                const immature = result.immature_balance || 0;
+                const total = balance + unconfirmed + immature;
 
                 document.getElementById('totalBalance').textContent = total.toFixed(8);
                 document.getElementById('matureBalance').textContent = balance.toFixed(8);
-                document.getElementById('immatureBalance').textContent = (immature || 0).toFixed(8);
+                document.getElementById('immatureBalance').textContent = immature.toFixed(8);
                 document.getElementById('availableForSend').textContent = balance.toFixed(8);
             } catch(e) {
                 console.error('Balance error:', e);
