@@ -66,6 +66,90 @@ static std::map<std::string, int64_t> g_last_connection_attempt;
 static std::mutex cs_connection_cooldown;
 static const int64_t CONNECTION_COOLDOWN_SECONDS = 30;
 
+// NET-013 FIX: Maximum size for rate limit maps to prevent memory exhaustion
+static const size_t MAX_RATE_LIMIT_MAP_SIZE = 1000;
+
+/**
+ * NET-011/NET-013 FIX: Cleanup rate limit state for a disconnected peer
+ * Prevents memory leaks from stale peer entries
+ */
+void CleanupPeerRateLimitState(int peer_id) {
+    {
+        std::lock_guard<std::mutex> lock(cs_getdata_rate);
+        g_peer_getdata_timestamps.erase(peer_id);
+    }
+    {
+        std::lock_guard<std::mutex> lock(cs_headers_rate);
+        g_peer_headers_timestamps.erase(peer_id);
+    }
+}
+
+/**
+ * NET-013 FIX: Periodic cleanup of stale rate limit entries
+ * Call this periodically (e.g., every 60 seconds) to prevent memory growth
+ */
+void PeriodicRateLimitCleanup() {
+    int64_t now = GetTime();
+
+    {
+        std::lock_guard<std::mutex> lock(cs_getdata_rate);
+        // Remove entries with no recent activity (older than 60 seconds)
+        for (auto it = g_peer_getdata_timestamps.begin(); it != g_peer_getdata_timestamps.end(); ) {
+            // Remove timestamps older than 60 seconds
+            auto& timestamps = it->second;
+            timestamps.erase(
+                std::remove_if(timestamps.begin(), timestamps.end(),
+                    [now](int64_t ts) { return now - ts > 60; }),
+                timestamps.end());
+
+            // If no timestamps left, remove the entry entirely
+            if (timestamps.empty()) {
+                it = g_peer_getdata_timestamps.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // If map is still too large, remove oldest entries (LRU eviction)
+        while (g_peer_getdata_timestamps.size() > MAX_RATE_LIMIT_MAP_SIZE) {
+            g_peer_getdata_timestamps.erase(g_peer_getdata_timestamps.begin());
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cs_headers_rate);
+        for (auto it = g_peer_headers_timestamps.begin(); it != g_peer_headers_timestamps.end(); ) {
+            auto& timestamps = it->second;
+            timestamps.erase(
+                std::remove_if(timestamps.begin(), timestamps.end(),
+                    [now](int64_t ts) { return now - ts > 60; }),
+                timestamps.end());
+
+            if (timestamps.empty()) {
+                it = g_peer_headers_timestamps.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        while (g_peer_headers_timestamps.size() > MAX_RATE_LIMIT_MAP_SIZE) {
+            g_peer_headers_timestamps.erase(g_peer_headers_timestamps.begin());
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cs_connection_cooldown);
+        // Clean up old connection cooldown entries (older than 5 minutes)
+        for (auto it = g_last_connection_attempt.begin(); it != g_last_connection_attempt.end(); ) {
+            if (now - it->second > 300) {  // 5 minutes
+                it = g_last_connection_attempt.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+}
+
 // NET-016 FIX: Error message sanitization notes
 // Production deployment should implement proper logging framework with:
 // - Log levels (DEBUG, INFO, WARN, ERROR)
@@ -538,6 +622,15 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
         auto* mempool = g_mempool.load();
 
         for (const NetProtocol::CInv& inv_item : inv) {
+            // NET-014/NET-018 FIX: Validate inventory type before processing
+            // Only MSG_TX_INV(1), MSG_BLOCK_INV(2), MSG_FILTERED_BLOCK(3), MSG_CMPCT_BLOCK(4) are valid
+            if (inv_item.type < 1 || inv_item.type > 4) {
+                std::cout << "[P2P] WARNING: Invalid INV type " << inv_item.type
+                          << " from peer " << peer_id << " - penalizing" << std::endl;
+                peer_manager.Misbehaving(peer_id, 10);
+                continue;  // Skip invalid items but continue processing valid ones
+            }
+
             if (inv_item.type == NetProtocol::MSG_TX_INV) {
                 // Check if we need this transaction
                 if (tx_relay && mempool) {
@@ -555,6 +648,7 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
                 // Existing block handling (keep as-is)
                 vToFetch.push_back(inv_item);
             }
+            // MSG_FILTERED_BLOCK(3) and MSG_CMPCT_BLOCK(4) are valid but not processed here
         }
 
         // Request transactions/blocks we don't have
@@ -627,6 +721,14 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             NetProtocol::CInv inv;
             inv.type = stream.ReadUint32();
             inv.hash = stream.ReadUint256();
+
+            // NET-020 FIX: Validate inventory type before adding
+            if (inv.type < 1 || inv.type > 4) {
+                std::cout << "[P2P] WARNING: Invalid GETDATA type " << inv.type
+                          << " from peer " << peer_id << " - penalizing" << std::endl;
+                peer_manager.Misbehaving(peer_id, 10);
+                continue;  // Skip invalid items
+            }
             getdata.push_back(inv);
         }
 

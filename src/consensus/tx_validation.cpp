@@ -78,6 +78,16 @@ bool CTransactionValidator::CheckTransactionBasic(const CTransaction& tx, std::s
         return false;
     }
 
+    // P4-CONS-001 FIX: Maximum output count to prevent DoS via large transactions
+    // Without this limit, attackers could create transactions with millions of outputs
+    // causing memory exhaustion and slow validation
+    static const size_t MAX_OUTPUT_COUNT = 10000;
+    if (tx.vout.size() > MAX_OUTPUT_COUNT) {
+        error = "Transaction has too many outputs (" + std::to_string(tx.vout.size()) +
+                " > max " + std::to_string(MAX_OUTPUT_COUNT) + ")";
+        return false;
+    }
+
     // Check output values are positive and within range
     CAmount totalOut = 0;
     for (const auto& txout : tx.vout) {

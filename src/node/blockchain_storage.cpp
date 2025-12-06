@@ -564,11 +564,13 @@ bool CBlockchainDB::WriteBlockIndex(const uint256& hash, const CBlockIndex& inde
     // Write data
     value.append(data);
 
-    // Calculate and append simple checksum (sum of all bytes mod 2^32)
-    uint32_t checksum = 0;
-    for (unsigned char c : data) {
-        checksum += c;
-    }
+    // DB-MED-003 FIX: Replace weak sum-of-bytes checksum with SHA3-256
+    // Old checksum was trivially weak - attackers could swap bytes while preserving sum
+    // SHA3-256 provides cryptographic integrity (first 4 bytes for backwards compatibility)
+    uint8_t checksum_hash[32];
+    SHA3_256(reinterpret_cast<const uint8_t*>(data.data()), data.size(), checksum_hash);
+    uint32_t checksum;
+    memcpy(&checksum, checksum_hash, sizeof(checksum));  // Use first 4 bytes of SHA3-256
     value.append(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
 
     // CRITICAL: Use sync=true to ensure block index is flushed to disk
@@ -654,14 +656,25 @@ bool CBlockchainDB::ReadBlockIndex(const uint256& hash, CBlockIndex& index) {
     uint32_t stored_checksum;
     std::memcpy(&stored_checksum, ptr + offset, sizeof(stored_checksum));
 
-    uint32_t calculated_checksum = 0;
-    for (unsigned char c : data) {
-        calculated_checksum += c;
-    }
+    // DB-MED-003 FIX: Use SHA3-256 based checksum (first 4 bytes)
+    uint8_t checksum_hash[32];
+    SHA3_256(reinterpret_cast<const uint8_t*>(data.data()), data.size(), checksum_hash);
+    uint32_t calculated_checksum;
+    memcpy(&calculated_checksum, checksum_hash, sizeof(calculated_checksum));
 
     if (stored_checksum != calculated_checksum) {
-        std::cerr << "[ERROR] ReadBlockIndex: Checksum mismatch. Stored: " << stored_checksum
-                  << ", Calculated: " << calculated_checksum << std::endl;
+        // DB-MED-007 FIX: Corruption recovery trigger
+        // Log detailed error and suggest recovery action
+        std::cerr << "[ERROR] ReadBlockIndex: Checksum mismatch - DATA CORRUPTION DETECTED" << std::endl;
+        std::cerr << "[ERROR]   Block hash: " << key.substr(1) << std::endl;
+        std::cerr << "[ERROR]   Stored checksum: 0x" << std::hex << stored_checksum << std::endl;
+        std::cerr << "[ERROR]   Calculated checksum: 0x" << std::hex << calculated_checksum << std::dec << std::endl;
+        std::cerr << "[ERROR]   RECOVERY: Restart with -reindex to rebuild the database" << std::endl;
+
+        LogPrintf(ALL, ERROR, "Block index corruption detected for block %s", key.substr(1).c_str());
+        LogPrintf(ALL, ERROR, "Checksum mismatch: stored=0x%08x, calculated=0x%08x", stored_checksum, calculated_checksum);
+        LogPrintf(ALL, ERROR, "RECOVERY REQUIRED: Use -reindex flag to rebuild database");
+
         return false;
     }
 

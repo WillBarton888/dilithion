@@ -2609,10 +2609,29 @@ std::string CRPCServer::RPC_WalletPassphrase(const std::string& params) {
         throw std::runtime_error("Missing passphrase parameter");
     }
 
-    pos = params.find(":", pos);
-    pos = params.find("\"", pos + 1);
+    // P4-RPC-001 FIX: Validate all find() results before arithmetic operations
+    size_t colon_pos = params.find(":", pos);
+    if (colon_pos == std::string::npos) {
+        throw std::runtime_error("Invalid passphrase format: missing colon");
+    }
+
+    pos = params.find("\"", colon_pos + 1);
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Invalid passphrase format: missing opening quote");
+    }
+
     size_t end = params.find("\"", pos + 1);
+    if (end == std::string::npos || end <= pos) {
+        throw std::runtime_error("Invalid passphrase format: missing closing quote");
+    }
+
     std::string passphrase = params.substr(pos + 1, end - pos - 1);
+
+    // P4-RPC-004 FIX: Limit passphrase length to prevent DoS via excessive PBKDF2 work
+    static const size_t MAX_PASSPHRASE_LENGTH = 1024;
+    if (passphrase.length() > MAX_PASSPHRASE_LENGTH) {
+        throw std::runtime_error("Passphrase too long (max " + std::to_string(MAX_PASSPHRASE_LENGTH) + " characters)");
+    }
 
     // Parse timeout (optional, default 60 seconds)
     int64_t timeout = 60;

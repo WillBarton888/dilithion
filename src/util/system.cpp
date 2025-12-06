@@ -60,11 +60,52 @@ static std::string GetHomeDir() {
 #endif
 }
 
+/**
+ * DB-MED-001 FIX: Validate path for security issues
+ * Prevents path traversal attacks via malicious environment variables
+ */
+static bool IsPathSafe(const std::string& path) {
+    // Check for null bytes (path truncation attack)
+    if (path.find('\0') != std::string::npos) {
+        std::cerr << "ERROR: Path contains null byte - potential injection attack" << std::endl;
+        return false;
+    }
+
+    // Check for relative path traversal sequences
+    if (path.find("..") != std::string::npos) {
+        std::cerr << "ERROR: Path contains '..' - potential path traversal attack" << std::endl;
+        return false;
+    }
+
+    // Check for control characters
+    for (char c : path) {
+        if (c < 32 && c != '\t') {
+            std::cerr << "ERROR: Path contains control characters" << std::endl;
+            return false;
+        }
+    }
+
+    // Path length sanity check (prevent DoS via extremely long paths)
+    if (path.length() > 4096) {
+        std::cerr << "ERROR: Path too long (max 4096 characters)" << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 std::string GetDataDir() {
     // Check for environment variable override
     const char* env_datadir = std::getenv("DILITHION_DATADIR");
     if (env_datadir) {
-        return std::string(env_datadir);
+        std::string path(env_datadir);
+        // DB-MED-001 FIX: Validate environment variable path
+        if (!IsPathSafe(path)) {
+            std::cerr << "WARNING: DILITHION_DATADIR contains unsafe path, ignoring" << std::endl;
+            // Fall through to default path
+        } else {
+            return path;
+        }
     }
 
     // Default: ~/.dilithion (or %USERPROFILE%\.dilithion on Windows)
@@ -85,7 +126,14 @@ std::string GetDataDir(bool testnet) {
     // Check for environment variable override
     const char* env_datadir = std::getenv("DILITHION_DATADIR");
     if (env_datadir) {
-        return std::string(env_datadir) + "-testnet";
+        std::string path(env_datadir);
+        // DB-MED-001 FIX: Validate environment variable path
+        if (!IsPathSafe(path)) {
+            std::cerr << "WARNING: DILITHION_DATADIR contains unsafe path, ignoring" << std::endl;
+            // Fall through to default path
+        } else {
+            return path + "-testnet";
+        }
     }
 
     // Default: ~/.dilithion-testnet

@@ -19,6 +19,7 @@
 #else
     #include <unistd.h>
     #include <pwd.h>
+    #include <sys/stat.h>
 #endif
 
 CConfigParser::CConfigParser() : m_loaded(false) {
@@ -103,6 +104,29 @@ bool CConfigParser::LoadConfigFile(const std::string& file_path) {
     m_config_file_path = file_path;
     m_settings.clear();
     m_loaded = false;
+
+    // DB-MED-004 FIX: Check config file permissions before loading
+    // Config file may contain RPC password - should be owner-readable only
+#ifndef _WIN32
+    struct stat file_stat;
+    if (stat(file_path.c_str(), &file_stat) == 0) {
+        // File exists - check permissions
+        mode_t mode = file_stat.st_mode;
+
+        // Warn if group or others can read the file
+        if (mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
+            LogPrintf(ALL, WARN, "Config file %s has insecure permissions (mode %o)",
+                      file_path.c_str(), mode & 0777);
+            LogPrintf(ALL, WARN, "Consider: chmod 600 %s", file_path.c_str());
+        }
+
+        // Warn if file is a symlink (potential attack vector)
+        if (S_ISLNK(mode)) {
+            LogPrintf(ALL, WARN, "Config file %s is a symlink - potential security risk",
+                      file_path.c_str());
+        }
+    }
+#endif
 
     std::ifstream file(file_path);
     if (!file.is_open()) {

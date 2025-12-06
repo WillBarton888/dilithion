@@ -388,6 +388,12 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
 }
 
 int64_t GetMedianTimePast(const CBlockIndex* pindex) {
+    // P4-CONS-008 FIX: Handle null pointer edge case
+    // If pindex is nullptr, return 0 (genesis block has no predecessor)
+    if (pindex == nullptr) {
+        return 0;
+    }
+
     std::vector<int64_t> vTimes;
     const CBlockIndex* pindexWalk = pindex;
 
@@ -395,6 +401,11 @@ int64_t GetMedianTimePast(const CBlockIndex* pindex) {
     for (int i = 0; i < 11 && pindexWalk != nullptr; i++) {
         vTimes.push_back(pindexWalk->nTime);
         pindexWalk = pindexWalk->pprev;
+    }
+
+    // P4-CONS-008 FIX: Guard against empty vector (should never happen after null check)
+    if (vTimes.empty()) {
+        return 0;
     }
 
     // Sort timestamps to find median
@@ -405,6 +416,13 @@ int64_t GetMedianTimePast(const CBlockIndex* pindex) {
 }
 
 bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPrev) {
+    // P4-CONS-010 FIX: Reject zero timestamp (invalid for non-genesis blocks)
+    // A block with timestamp 0 (Jan 1, 1970) is invalid
+    if (block.nTime == 0) {
+        std::cerr << "CheckBlockTimestamp(): block has zero timestamp" << std::endl;
+        return false;
+    }
+
     // Rule 1: Block time must not be more than 2 hours in the future
     // This prevents timestamp attacks and ensures nodes have reasonable clocks
     int64_t nMaxFutureBlockTime = GetTime() + 2 * 60 * 60; // 2 hours
