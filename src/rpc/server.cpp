@@ -1588,7 +1588,7 @@ std::vector<RPCResponse> CRPCServer::ExecuteBatchRPC(const std::vector<RPCReques
             RPCResponse error_resp = RPCResponse::ErrorStructured(-32600,
                 "Invalid Request", request.id, "RPC-INVALID-REQUEST",
                 {"Check JSON-RPC 2.0 format", "Verify request is a valid object"});
-            // CID 1675XXX FIX: Use std::move to avoid unnecessary copy
+            // Move error response (avoids unnecessary copy)
             responses.push_back(std::move(error_resp));
             continue;
         }
@@ -1601,7 +1601,7 @@ std::vector<RPCResponse> CRPCServer::ExecuteBatchRPC(const std::vector<RPCReques
         
         // Execute request
         RPCResponse resp = ExecuteRPC(request);
-        // CID 1675XXX FIX: Use std::move to avoid unnecessary copy
+        // Move response (avoids unnecessary copy)
         responses.push_back(std::move(resp));
     }
 
@@ -2232,13 +2232,22 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
             confirmations = currentHeight - utxos[i].nHeight + 1;
         }
 
+        // P5-LOW FIX: Get block hash from height
+        std::string blockhash_hex = "";
+        if (utxos[i].nHeight > 0) {
+            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(utxos[i].nHeight);
+            if (!hashes.empty()) {
+                blockhash_hex = hashes[0].GetHex();
+            }
+        }
+
         oss << "{";
         oss << "\"txid\":\"" << utxos[i].txid.GetHex() << "\",";
         oss << "\"address\":\"" << utxos[i].address.ToString() << "\",";
         oss << "\"category\":\"receive\",";
         oss << "\"amount\":" << FormatAmount(utxos[i].nValue) << ",";
         oss << "\"confirmations\":" << confirmations << ",";
-        oss << "\"blockhash\":\"\"";  // TODO: Get block hash from height
+        oss << "\"blockhash\":\"" << blockhash_hex << "\"";
         oss << "}";
     }
     oss << "]}";

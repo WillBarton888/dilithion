@@ -712,8 +712,8 @@ std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {
         }
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO
+    return result;
 }
 
 // CRITICAL-1 FIX: Thread-safe accessor methods moved from inline to .cpp

@@ -818,8 +818,8 @@ std::vector<CTransactionRef> CTxMemPool::GetOrderedTxs() const {
         result.push_back(entry_ptr->GetSharedTx());
         added++;
     }
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO
+    return result;
 }
 
 std::vector<CTransactionRef> CTxMemPool::GetTopTxs(size_t n) const {
@@ -843,8 +843,8 @@ std::vector<CTransactionRef> CTxMemPool::GetTopTxs(size_t n) const {
         result.push_back(entry_ptr->GetSharedTx());
         count++;
     }
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO
+    return result;
 }
 
 void CTxMemPool::Clear() {

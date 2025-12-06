@@ -187,8 +187,8 @@ std::vector<std::pair<uint256, NodeId>> CNodeStateManager::GetBlocksInFlight() c
         result.emplace_back(entry.first, entry.second.first);
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO
+    return result;
 }
 
 int CNodeStateManager::GetBlocksInFlightForPeer(NodeId nodeid) const {
@@ -224,8 +224,8 @@ std::vector<uint256> CNodeStateManager::GetAndClearPeerBlocks(NodeId nodeid) {
     state.vBlocksInFlight.clear();
     state.nBlocksInFlight = 0;
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO
+    return result;
 }
 
 std::vector<NodeId> CNodeStateManager::CheckForStallingPeers() {

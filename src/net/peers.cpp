@@ -137,8 +137,8 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetAllPeers() {
     for (const auto& pair : peers) {
         result.push_back(pair.second);
     }
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO (copy elision)
+    return result;
 }
 
 std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
@@ -149,8 +149,8 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
             result.push_back(pair.second);
         }
     }
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO (copy elision)
+    return result;
 }
 
 bool CPeerManager::CanAcceptConnection() const {
@@ -198,8 +198,8 @@ std::vector<NetProtocol::CAddress> CPeerManager::GetPeerAddresses(int max_count)
         }
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO
+    return result;
 }
 
 void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
@@ -565,8 +565,8 @@ std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int co
         result.push_back(addr);
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // P5-LOW FIX: Return without std::move to allow RVO
+    return result;
 }
 
 size_t CPeerManager::GetAddressCount() const {
