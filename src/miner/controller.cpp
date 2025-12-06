@@ -866,9 +866,7 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     (void)BENCHMARK_END("mining_merkle_root");
 
     // BUG #71 DEBUG: Log miner's merkle root computation
-    std::cout << "[DEBUG] CreateBlockTemplate: merkleRoot=" << hashMerkleRoot.GetHex() << std::endl;
     if (!allTxs.empty()) {
-        std::cout << "[DEBUG] CreateBlockTemplate: tx[0] hash=" << allTxs[0]->GetHash().GetHex() << std::endl;
     }
 
     // Step 5: Serialize all transactions into block.vtx
@@ -877,7 +875,6 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     std::vector<uint8_t> blockTxData;
 
     // BUG #11 DEBUG: Log transaction details
-    std::cout << "[DEBUG] CreateBlockTemplate: height=" << nHeight << ", allTxs.size()=" << allTxs.size() << std::endl;
 
     // Serialize transaction count (compact size)
     uint64_t txCount = allTxs.size();
@@ -899,9 +896,7 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     for (size_t i = 0; i < allTxs.size(); ++i) {
         const auto& tx = allTxs[i];
         std::vector<uint8_t> txData = tx->Serialize();
-        std::cout << "[DEBUG] CreateBlockTemplate: tx[" << i << "] serialized to " << txData.size() << " bytes" << std::endl;
         if (!txData.empty()) {
-            std::cout << "[DEBUG] CreateBlockTemplate: tx[" << i << "] first 20 bytes: ";
             for (size_t j = 0; j < std::min(size_t(20), txData.size()); ++j) {
                 printf("%02x ", txData[j]);
             }
@@ -912,7 +907,6 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
         blockTxData.insert(blockTxData.end(), std::make_move_iterator(txData.begin()), std::make_move_iterator(txData.end()));
     }
 
-    std::cout << "[DEBUG] CreateBlockTemplate: blockTxData.size() after serialization = " << blockTxData.size() << " bytes" << std::endl;
 
     // Step 6: Build block header
     CBlock block;

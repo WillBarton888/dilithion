@@ -413,15 +413,12 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
     std::string error;
 
     // BUG #11 DEBUG: Log block.vtx size and first bytes for debugging
-    std::cout << "[DEBUG] ApplyBlock: block.vtx.size() = " << block.vtx.size() << " bytes" << std::endl;
     if (!block.vtx.empty()) {
-        std::cout << "[DEBUG] ApplyBlock: First 20 bytes of vtx: ";
         for (size_t i = 0; i < std::min(size_t(20), block.vtx.size()); ++i) {
             printf("%02x ", block.vtx[i]);
         }
         std::cout << std::endl;
         if (block.vtx.size() > 20) {
-            std::cout << "[DEBUG] ApplyBlock: Last 20 bytes of vtx: ";
             for (size_t i = block.vtx.size() - 20; i < block.vtx.size(); ++i) {
                 printf("%02x ", block.vtx[i]);
             }

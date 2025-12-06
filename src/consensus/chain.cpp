@@ -31,7 +31,6 @@ bool CChainState::InitializeWAL(const std::string& dataDir) {
         return false;
     }
 
-    std::cout << "[Chain] WAL initialized successfully" << std::endl;
     return true;
 }
 
@@ -165,7 +164,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
     // Case 1: Genesis block (first block in chain)
     if (pindexTip == nullptr) {
-        std::cout << "[Chain] Activating genesis block at height " << pindexNew->nHeight << std::endl;
 
         if (!ConnectTip(pindexNew, block)) {
             std::cerr << "[Chain] ERROR: Failed to connect genesis block" << std::endl;
@@ -186,7 +184,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
     // Case 2: Extends current tip (simple case - no reorg needed)
     if (pindexNew->pprev == pindexTip) {
-        std::cout << "[Chain] Block extends current tip: height " << pindexNew->nHeight << std::endl;
 
         // Compare chain work to be safe (should always be greater if extending tip)
         if (!ChainWorkGreaterThan(pindexNew->nChainWork, pindexTip->nChainWork)) {
@@ -207,9 +204,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
         // Persist to database
         if (pdb != nullptr) {
-            std::cout << "[Chain] DEBUG: Writing best block to DB: " << pindexNew->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
             bool success = pdb->WriteBestBlock(pindexNew->GetBlockHash());
-            std::cout << "[Chain] DEBUG: WriteBestBlock returned: " << (success ? "SUCCESS" : "FAILED") << std::endl;
         } else {
             std::cerr << "[Chain] ERROR: pdb is nullptr! Cannot write best block!" << std::endl;
         }
@@ -221,7 +216,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     }
 
     // Case 3: Competing chain - need to compare chain work
-    std::cout << "[Chain] Received block on competing chain" << std::endl;
     std::cout << "  Current tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
               << " (height " << pindexTip->nHeight << ")" << std::endl;
     std::cout << "  New block:   " << pindexNew->GetBlockHash().GetHex().substr(0, 16)
@@ -229,7 +223,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
     // Compare chain work
     if (!ChainWorkGreaterThan(pindexNew->nChainWork, pindexTip->nChainWork)) {
-        std::cout << "[Chain] New chain has less or equal work - keeping current chain" << std::endl;
         std::cout << "  Current work: " << pindexTip->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
         std::cout << "  New work:     " << pindexNew->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
 
@@ -250,8 +243,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         return false;
     }
 
-    std::cout << "[Chain] Fork point: " << pindexFork->GetBlockHash().GetHex().substr(0, 16)
-              << " (height " << pindexFork->nHeight << ")" << std::endl;
 
     // VULN-008 FIX: Protect against excessively deep reorganizations
     // CID 1675248 FIX: Use int64_t to prevent overflow when computing reorg depth
@@ -319,7 +310,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     // Reverse connect list so we connect from fork point -> new tip
     std::reverse(connectBlocks.begin(), connectBlocks.end());
 
-    std::cout << "[Chain] Reorganization plan:" << std::endl;
     std::cout << "  Disconnect " << disconnectBlocks.size() << " block(s)" << std::endl;
     std::cout << "  Connect " << connectBlocks.size() << " block(s)" << std::endl;
 
@@ -334,7 +324,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     // atomic transactions or write-ahead logging, but this significantly reduces
     // the risk of corruption.
 
-    std::cout << "[Chain] PRE-VALIDATION: Checking all blocks can be loaded..." << std::endl;
 
     // Validate all disconnect blocks exist in database
     for (size_t i = 0; i < disconnectBlocks.size(); ++i) {
@@ -409,7 +398,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     // ============================================================================
 
     // Disconnect old chain
-    std::cout << "[Chain] Disconnecting old chain..." << std::endl;
 
     // P1-4: Enter disconnect phase in WAL
     if (m_reorgWAL) {
@@ -476,7 +464,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     }
 
     // Connect new chain
-    std::cout << "[Chain] Connecting new chain..." << std::endl;
 
     // P1-4: Enter connect phase in WAL
     if (m_reorgWAL) {
@@ -792,7 +779,6 @@ uint256 CChainState::GetChainWork() const {
 void CChainState::RegisterTipUpdateCallback(TipUpdateCallback callback) {
     std::lock_guard<std::mutex> lock(cs_main);
     m_tipCallbacks.push_back(callback);
-    std::cout << "[Chain] Registered tip update callback (total: " << m_tipCallbacks.size() << ")" << std::endl;
 }
 
 void CChainState::NotifyTipUpdate(const CBlockIndex* pindex) {
@@ -822,11 +808,9 @@ void CChainState::NotifyTipUpdate(const CBlockIndex* pindex) {
 void CChainState::RegisterBlockConnectCallback(BlockConnectCallback callback) {
     std::lock_guard<std::mutex> lock(cs_main);
     m_blockConnectCallbacks.push_back(callback);
-    std::cout << "[Chain] Registered block connect callback (total: " << m_blockConnectCallbacks.size() << ")" << std::endl;
 }
 
 void CChainState::RegisterBlockDisconnectCallback(BlockDisconnectCallback callback) {
     std::lock_guard<std::mutex> lock(cs_main);
     m_blockDisconnectCallbacks.push_back(callback);
-    std::cout << "[Chain] Registered block disconnect callback (total: " << m_blockDisconnectCallbacks.size() << ")" << std::endl;
 }

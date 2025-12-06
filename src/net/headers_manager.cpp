@@ -35,13 +35,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
     }
 
     if (headers.size() > MAX_HEADERS_BUFFER) {
-        std::cerr << "[HeadersManager] ERROR: Received " << headers.size()
-                  << " headers from peer " << peer << " (max " << MAX_HEADERS_BUFFER << ")" << std::endl;
         return false;
     }
 
-    std::cout << "[HeadersManager] Processing " << headers.size()
-              << " headers from peer " << peer << std::endl;
 
     // Process each header sequentially
     const HeaderWithChainWork* pprev = nullptr;
@@ -75,13 +71,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                 uint256 genesisHash = Genesis::GetGenesisHash();
                 if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
                     pprev = nullptr;  // Parent is genesis - this is block 1
-                    std::cout << "[HeadersManager] Accepting header " << hash.GetHex().substr(0, 16)
-                              << "... (parent is genesis)" << std::endl;
                 } else {
                     // True orphan - reject per Bitcoin Core design
                     // This prevents DoS attacks with disconnected headers
-                    std::cerr << "[HeadersManager] ERROR: Rejecting orphan header "
-                              << hash.GetHex().substr(0, 16) << "..." << std::endl;
                     std::cerr << "  Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
                               << "... not found in header tree" << std::endl;
                     std::cerr << "  Peer should send headers in order from common ancestor" << std::endl;
@@ -94,8 +86,6 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
         // Validate header
         if (!ValidateHeader(header, pprev ? &pprev->header : nullptr)) {
-            std::cerr << "[HeadersManager] ERROR: Invalid header "
-                      << hash.GetHex().substr(0, 16) << "..." << std::endl;
             return false;
         }
 
@@ -126,24 +116,17 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         }
     }
 
-    std::cerr << "[DEBUG] ProcessHeaders: Loop complete, about to update peer state" << std::endl;
 
     // Update peer state
     if (!headers.empty()) {
         uint256 lastHash = headers.back().GetHash();
         auto it = mapHeaders.find(lastHash);
         if (it != mapHeaders.end()) {
-            std::cerr << "[DEBUG] Calling UpdatePeerState for peer " << peer << std::endl;
             UpdatePeerState(peer, lastHash, it->second.height);
-            std::cerr << "[DEBUG] UpdatePeerState returned successfully" << std::endl;
         }
     }
 
-    std::cerr << "[DEBUG] About to print success message" << std::endl;
-    std::cout << "[HeadersManager] Successfully processed " << headers.size()
-              << " headers. Best height: " << nBestHeight << std::endl;
 
-    std::cerr << "[DEBUG] Returning true from ProcessHeaders" << std::endl;
     return true;
 }
 
@@ -156,36 +139,26 @@ bool CHeadersManager::ProcessHeadersWithDoSProtection(NodeId peer, const std::ve
     // Check if peer has active HeadersSyncState
     auto it = mapHeadersSyncStates.find(peer);
     if (it == mapHeadersSyncStates.end()) {
-        std::cerr << "[HeadersManager] No HeadersSyncState for peer " << peer
-                  << ", falling back to direct processing" << std::endl;
         return ProcessHeaders(peer, headers);
     }
 
     HeadersSyncState* sync_state = it->second.get();
     if (!sync_state || sync_state->GetState() == HeadersSyncState::State::FINAL) {
-        std::cerr << "[HeadersManager] HeadersSyncState finalized for peer " << peer
-                  << ", falling back to direct processing" << std::endl;
         mapHeadersSyncStates.erase(peer);
         return ProcessHeaders(peer, headers);
     }
 
-    std::cout << "[HeadersManager] Processing " << headers.size()
-              << " headers from peer " << peer << " with DoS protection"
-              << " (phase: " << static_cast<int>(sync_state->GetState()) << ")" << std::endl;
 
     // Process through HeadersSyncState
     auto result = sync_state->ProcessNextHeaders(headers, true);
 
     if (!result.success) {
-        std::cerr << "[HeadersManager] HeadersSyncState rejected headers from peer " << peer << std::endl;
         mapHeadersSyncStates.erase(peer);
         return false;
     }
 
     // If we got validated headers back, store them
     if (!result.pow_validated_headers.empty()) {
-        std::cout << "[HeadersManager] HeadersSyncState returned " << result.pow_validated_headers.size()
-                  << " validated headers for storage" << std::endl;
 
         // Store validated headers using existing logic (but without re-validation)
         std::lock_guard<std::mutex> lock(cs_headers);
@@ -218,13 +191,10 @@ bool CHeadersManager::ProcessHeadersWithDoSProtection(NodeId peer, const std::ve
             UpdateBestHeader(hash);
         }
 
-        std::cout << "[HeadersManager] Stored " << result.pow_validated_headers.size()
-                  << " headers. Best height: " << nBestHeight << std::endl;
     }
 
     // Check if sync is complete
     if (sync_state->GetState() == HeadersSyncState::State::FINAL) {
-        std::cout << "[HeadersManager] DoS-protected sync complete for peer " << peer << std::endl;
         mapHeadersSyncStates.erase(peer);
     }
 
@@ -259,7 +229,6 @@ bool CHeadersManager::InitializeDoSProtectedSync(NodeId peer, const uint256& min
 
     // Don't reinitialize if already exists
     if (mapHeadersSyncStates.find(peer) != mapHeadersSyncStates.end()) {
-        std::cout << "[HeadersManager] HeadersSyncState already exists for peer " << peer << std::endl;
         return true;
     }
 
@@ -288,8 +257,6 @@ bool CHeadersManager::InitializeDoSProtectedSync(NodeId peer, const uint256& min
 
     mapHeadersSyncStates[peer] = std::move(state);
 
-    std::cout << "[HeadersManager] Initialized DoS-protected sync for peer " << peer
-              << " (start height: " << chainStartHeight << ")" << std::endl;
 
     return true;
 }
@@ -299,7 +266,6 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
     uint256 hash = header.GetHash();
 
     // BUG #53 DEBUG: Detailed header validation logging
-    std::cout << "[HeadersManager] ValidateHeader:" << std::endl;
     std::cout << "  version=" << header.nVersion << std::endl;
     std::cout << "  prevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
     std::cout << "  merkleRoot=" << header.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
@@ -312,7 +278,6 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
     if (!CheckProofOfWork(hash, header.nBits)) {
         // Compute target for debug
         uint256 target = CompactToBig(header.nBits);
-        std::cerr << "[HeadersManager] Invalid PoW for header " << std::endl;
         std::cerr << "  hash=   " << hash.GetHex() << std::endl;
         std::cerr << "  target= " << target.GetHex() << std::endl;
         std::cerr << "  Hash must be < target to be valid" << std::endl;
@@ -336,21 +301,17 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
     // 2. Check timestamp is valid
     if (!CheckTimestamp(header, pprevData)) {
-        std::cerr << "[HeadersManager] Invalid timestamp for header "
-                  << hash.GetHex().substr(0, 16) << "..." << std::endl;
         return false;
     }
 
     // 3. Check difficulty transition (simplified - full implementation would check retarget logic)
     // For now, just check bits are within reasonable range
     if (header.nBits == 0) {
-        std::cerr << "[HeadersManager] Zero difficulty bits" << std::endl;
         return false;
     }
 
     // 4. Check version (should be > 0)
     if (header.nVersion <= 0) {
-        std::cerr << "[HeadersManager] Invalid version: " << header.nVersion << std::endl;
         return false;
     }
 
@@ -359,17 +320,13 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
 void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
 {
-    std::cout << "[HeadersManager] RequestHeaders for peer " << peer << std::endl;
 
     // Build locator (holds cs_headers briefly, DOES NOT access blockchain)
     std::vector<uint256> locator = GetLocator(hashStart);
     // cs_headers is now released
 
     if (locator.empty()) {
-        std::cout << "[HeadersManager] Empty locator, peer will send from genesis" << std::endl;
     } else {
-        std::cout << "[HeadersManager] Sending GETHEADERS with "
-                  << locator.size() << " locator hashes" << std::endl;
     }
 
     // Send message (no locks held - safe for network I/O)
@@ -380,9 +337,7 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
         NetProtocol::CGetHeadersMessage msg(locator, uint256());
         CNetMessage getheaders = msg_proc->CreateGetHeadersMessage(msg);
         conn_mgr->SendMessage(peer, getheaders);
-        std::cout << "[HeadersManager] Sent GETHEADERS to peer " << peer << std::endl;
     } else {
-        std::cerr << "[HeadersManager] ERROR: Cannot send GETHEADERS - networking not initialized" << std::endl;
     }
 }
 
@@ -390,15 +345,11 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
 {
     std::lock_guard<std::mutex> lock(cs_headers);
 
-    std::cout << "[HeadersManager] OnBlockActivated: " << hash.GetHex().substr(0, 16)
-              << "..." << std::endl;
 
     // Check if we already have this header
     auto it = mapHeaders.find(hash);
     if (it != mapHeaders.end()) {
         // Already have header - just update best header tracking
-        std::cout << "[HeadersManager] Header already exists at height " << it->second.height
-                  << ", updating best header" << std::endl;
         UpdateBestHeader(hash);
         return;
     }
@@ -411,16 +362,12 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
     if (parentIt != mapHeaders.end()) {
         pprev = &parentIt->second;
         height = pprev->height + 1;
-        std::cout << "[HeadersManager] Found parent at height " << pprev->height
-                  << ", new height: " << height << std::endl;
     } else {
         // Parent not in map - this could be genesis (height 0) or block 1 (height 1)
         // If this is genesis block, height should be 0
         if (header.hashPrevBlock.IsNull()) {
             height = 0;  // Genesis block
-            std::cout << "[HeadersManager] Genesis block detected (height 0)" << std::endl;
         } else {
-            std::cout << "[HeadersManager] Parent not in map, assuming height 1" << std::endl;
         }
     }
 
@@ -438,9 +385,6 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
     // Update best header
     UpdateBestHeader(hash);
 
-    std::cout << "[HeadersManager] Added header at height " << height
-              << ", total headers: " << mapHeaders.size()
-              << ", best height: " << nBestHeight << std::endl;
 }
 
 std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
@@ -461,7 +405,6 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
 
     if (it == mapHeaders.end()) {
         // No headers yet - return empty locator (peer will send from genesis)
-        std::cout << "[HeadersManager] No headers yet, returning empty locator" << std::endl;
         return locator;
     }
 
@@ -511,8 +454,6 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
         }
     }
 
-    std::cout << "[HeadersManager] Generated locator with " << locator.size()
-              << " hashes (starting from height " << startHeight << ")" << std::endl;
 
     return locator;
 }
@@ -630,7 +571,6 @@ void CHeadersManager::OnPeerConnected(NodeId peer)
 
     mapPeerStates[peer] = PeerSyncState();
 
-    std::cout << "[HeadersManager] Peer " << peer << " connected" << std::endl;
 }
 
 void CHeadersManager::OnPeerDisconnected(NodeId peer)
@@ -641,14 +581,12 @@ void CHeadersManager::OnPeerDisconnected(NodeId peer)
     mapPeerStartHeight.erase(peer);  // BUG #62: Clean up peer height tracking
     mapHeadersSyncStates.erase(peer);  // Clean up DoS protection state
 
-    std::cout << "[HeadersManager] Peer " << peer << " disconnected" << std::endl;
 }
 
 void CHeadersManager::SetPeerStartHeight(NodeId peer, int height)
 {
     std::lock_guard<std::mutex> lock(cs_headers);
     mapPeerStartHeight[peer] = height;
-    std::cout << "[HeadersManager] Peer " << peer << " start height: " << height << std::endl;
 }
 
 int CHeadersManager::GetPeerStartHeight(NodeId peer) const
@@ -720,7 +658,6 @@ void CHeadersManager::Clear()
     hashBestHeader = uint256();
     nBestHeight = -1;
 
-    std::cout << "[HeadersManager] Cleared all headers" << std::endl;
 }
 
 // ============================================================================
@@ -810,8 +747,6 @@ bool CHeadersManager::CheckTimestamp(const CBlockHeader& header, const HeaderWit
     // CID 1675246 FIX: Safe 64-to-32 bit time conversion (valid until 2106)
     uint32_t now = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);
     if (header.nTime > now + MAX_HEADERS_AGE_SECONDS) {
-        std::cerr << "[HeadersManager] Timestamp too far in future: "
-                  << header.nTime << " vs now " << now << std::endl;
         return false;
     }
 
@@ -819,8 +754,6 @@ bool CHeadersManager::CheckTimestamp(const CBlockHeader& header, const HeaderWit
     if (pprev != nullptr) {
         uint32_t medianPast = GetMedianTimePast(pprev, MEDIAN_TIME_SPAN);
         if (header.nTime <= medianPast) {
-            std::cerr << "[HeadersManager] Timestamp not greater than median past: "
-                      << header.nTime << " vs " << medianPast << std::endl;
             return false;
         }
     }
@@ -868,8 +801,6 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     if (hashBestHeader.IsNull()) {
         hashBestHeader = hash;
         nBestHeight = it->second.height;
-        std::cout << "[HeadersManager] First best header at height " << nBestHeight
-                  << ", hash " << hash.GetHex().substr(0, 16) << "..." << std::endl;
         return true;
     }
 
@@ -883,18 +814,9 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     // Bug #46 Fix: Use ChainWorkGreaterThan() for proper cumulative work comparison
     // This enables reorganization to chains with more work but fewer blocks
     if (ChainWorkGreaterThan(it->second.chainWork, bestIt->second.chainWork)) {
-        uint256 oldBestHash = hashBestHeader;
-        int oldBestHeight = nBestHeight;
 
         hashBestHeader = hash;
         nBestHeight = it->second.height;
-
-        std::cout << "[HeadersManager] *** NEW BEST CHAIN ***" << std::endl;
-        std::cout << "  Old: height=" << oldBestHeight
-                  << " hash=" << oldBestHash.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "  New: height=" << nBestHeight
-                  << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "  (Selected by cumulative work, not height)" << std::endl;
 
         return true;
     }

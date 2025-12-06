@@ -106,7 +106,6 @@ bool CBlockchainDB::ValidateDatabasePath(const std::string& path, std::string& c
         }
 
         canonical_path = canonical.string();
-        std::cout << "[DB-SECURITY] Validated database path: " << canonical_path << std::endl;
         return true;
 
     } catch (const std::filesystem::filesystem_error& e) {
@@ -157,8 +156,6 @@ bool CBlockchainDB::Open(const std::string& path, bool create_if_missing) {
             std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
             return false;
         }
-        std::cout << "[DB-INFO] Available disk space: "
-                  << (space.available / 1024 / 1024 / 1024) << " GB" << std::endl;
     } catch (const std::filesystem::filesystem_error& e) {
         ErrorMessage error = CErrorFormatter::DatabaseError("check disk space", e.what());
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
@@ -198,7 +195,6 @@ bool CBlockchainDB::Open(const std::string& path, bool create_if_missing) {
     }
 
     db.reset(raw_db);
-    std::cout << "[DB-INFO] Database opened successfully" << std::endl;
     return true;
 }
 
@@ -904,7 +900,6 @@ bool CBlockchainDB::WriteBlockWithIndex(const uint256& hash, const CBlock& block
         return false;
     }
 
-    std::cout << "[DB-INFO] Block + index written atomically" << std::endl;
     
     // Phase 4.2: Verify critical writes were persisted (optional, can be disabled for performance)
     #ifdef VERIFY_DB_WRITES

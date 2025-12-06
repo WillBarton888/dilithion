@@ -45,7 +45,6 @@ bool CAsyncBroadcaster::Start() {
     // Launch worker thread
     try {
         m_worker = std::thread(&CAsyncBroadcaster::WorkerThread, this);
-        std::cout << "[AsyncBroadcaster] Started successfully" << std::endl;
         return true;
     } catch (const std::exception& e) {
         m_running.store(false);
@@ -60,7 +59,6 @@ void CAsyncBroadcaster::Stop() {
         return;
     }
 
-    std::cout << "[AsyncBroadcaster] Stopping..." << std::endl;
 
     // Signal worker to stop
     m_running.store(false);
@@ -81,7 +79,6 @@ void CAsyncBroadcaster::Stop() {
         }
     }
 
-    std::cout << "[AsyncBroadcaster] Stopped" << std::endl;
 }
 
 // Queue a message for broadcast (non-blocking)
@@ -167,7 +164,6 @@ CAsyncBroadcaster::Stats CAsyncBroadcaster::GetStats() const {
 
 // Worker thread main loop
 void CAsyncBroadcaster::WorkerThread() {
-    std::cout << "[AsyncBroadcaster] Worker thread started" << std::endl;
 
     while (m_running.load()) {
         BroadcastTask task;
@@ -240,7 +236,6 @@ void CAsyncBroadcaster::WorkerThread() {
         }
     }
 
-    std::cout << "[AsyncBroadcaster] Worker thread stopped" << std::endl;
 }
 
 // Process a single broadcast task
@@ -254,10 +249,6 @@ bool CAsyncBroadcaster::ProcessTask(const BroadcastTask& task) {
     // Get command from header (first 12 bytes, null-terminated)
     std::string cmd_str = task.message.header.GetCommand();
 
-    std::cout << "[AsyncBroadcaster] Processing task: " << cmd_str
-              << " to " << task.peer_ids.size() << " peers"
-              << " (queued " << queue_time << "ms ago, priority " << task.priority << ")"
-              << std::endl;
 
     // Send to each peer
     for (int peer_id : task.peer_ids) {
@@ -276,8 +267,6 @@ bool CAsyncBroadcaster::ProcessTask(const BroadcastTask& task) {
         std::cerr << "[AsyncBroadcaster] Task completed with failures: "
                   << success_count << " sent, " << fail_count << " failed" << std::endl;
     } else {
-        std::cout << "[AsyncBroadcaster] Task completed successfully: "
-                  << success_count << " peers" << std::endl;
     }
 
     // Consider success if at least one peer received the message

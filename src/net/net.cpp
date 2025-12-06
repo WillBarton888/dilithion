@@ -379,9 +379,6 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         if (peer) {
             LogPrintf(NET, INFO, "Received VERSION from peer %d (version=%d, agent=%s, height=%d, services=0x%016llx)",
                       peer_id, msg.version, msg.user_agent.c_str(), msg.start_height, msg.services);
-            std::cout << "[HANDSHAKE-DIAG] Received VERSION from peer " << peer_id
-                      << " (agent: " << msg.user_agent << ", height: " << msg.start_height
-                      << ", old_state: " << peer->state << ")" << std::endl;
 
             peer->version = msg.version;
             peer->user_agent = msg.user_agent;
@@ -389,11 +386,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             peer->relay = msg.relay;
             peer->state = CPeer::STATE_VERSION_SENT;
 
-            std::cout << "[HANDSHAKE-DIAG] Peer " << peer_id << " state set to VERSION_SENT (3)"
-                      << std::endl;
         } else {
-            std::cout << "[HANDSHAKE-DIAG] ERROR: Received VERSION from unknown peer " << peer_id
-                      << std::endl;
         }
 
         // Call handler
@@ -417,19 +410,14 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
 bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
     auto peer = peer_manager.GetPeer(peer_id);
     if (!peer) {
-        std::cout << "[HANDSHAKE-DIAG] ERROR: Received VERACK from unknown peer " << peer_id
-                  << std::endl;
         return true;
     }
 
-    std::cout << "[HANDSHAKE-DIAG] Received VERACK from peer " << peer_id
-              << " (current_state: " << peer->state << ")" << std::endl;
 
     if (peer->state == CPeer::STATE_VERSION_SENT) {
         peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
         g_network_stats.handshake_complete++;
 
-        std::cout << "[HANDSHAKE-DIAG] ✅ HANDSHAKE COMPLETE with peer " << peer_id << std::endl;
 
         // BUG #85 FIX: Use atomic method that follows Bitcoin Core's pattern
         // All state modifications happen while holding the lock, preventing
@@ -445,9 +433,6 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
             on_verack(peer_id);
         }
     } else {
-        std::cout << "[HANDSHAKE-DIAG] WARNING: Received VERACK from peer " << peer_id
-                  << " but state is " << peer->state << " (expected STATE_VERSION_SENT=3)"
-                  << std::endl;
     }
     return true;
 }
@@ -1579,24 +1564,16 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
 bool CConnectionManager::PerformHandshake(int peer_id) {
     auto peer = peer_manager.GetPeer(peer_id);
     if (!peer || !peer->IsConnected()) {
-        std::cout << "[HANDSHAKE-DIAG] ERROR: Cannot perform handshake with peer " << peer_id
-                  << " (peer " << (peer ? "not connected" : "not found") << ")" << std::endl;
         return false;
     }
 
-    std::cout << "[HANDSHAKE-DIAG] Initiating handshake with peer " << peer_id
-              << " (current_state: " << peer->state << ")" << std::endl;
 
     // Send version message
     if (!SendVersionMessage(peer_id)) {
-        std::cout << "[HANDSHAKE-DIAG] ERROR: Failed to send VERSION to peer " << peer_id
-                  << std::endl;
         return false;
     }
 
     peer->state = CPeer::STATE_VERSION_SENT;
-    std::cout << "[HANDSHAKE-DIAG] Sent VERSION to peer " << peer_id
-              << ", state set to VERSION_SENT (3)" << std::endl;
 
     return true;
 }
@@ -1969,12 +1946,10 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
 }
 
 bool CConnectionManager::SendVersionMessage(int peer_id) {
-    std::cout << "[HANDSHAKE-DIAG] Sending VERSION message to peer " << peer_id << std::endl;
 
     // Get peer address
     auto peer = peer_manager.GetPeer(peer_id);
     if (!peer) {
-        std::cout << "[HANDSHAKE-DIAG] ERROR: Cannot send VERSION to unknown peer " << peer_id << std::endl;
         return false;
     }
 
@@ -1992,21 +1967,16 @@ bool CConnectionManager::SendVersionMessage(int peer_id) {
     CNetMessage msg = message_processor.CreateVersionMessage(remote_addr, local_addr);
     bool result = SendMessage(peer_id, msg);
     if (result) {
-        std::cout << "[HANDSHAKE-DIAG] VERSION message sent successfully to peer " << peer_id << std::endl;
     } else {
-        std::cout << "[HANDSHAKE-DIAG] ERROR: Failed to send VERSION message to peer " << peer_id << std::endl;
     }
     return result;
 }
 
 bool CConnectionManager::SendVerackMessage(int peer_id) {
-    std::cout << "[HANDSHAKE-DIAG] Sending VERACK message to peer " << peer_id << std::endl;
     CNetMessage msg = message_processor.CreateVerackMessage();
     bool result = SendMessage(peer_id, msg);
     if (result) {
-        std::cout << "[HANDSHAKE-DIAG] VERACK message sent successfully to peer " << peer_id << std::endl;
     } else {
-        std::cout << "[HANDSHAKE-DIAG] ERROR: Failed to send VERACK message to peer " << peer_id << std::endl;
     }
     return result;
 }

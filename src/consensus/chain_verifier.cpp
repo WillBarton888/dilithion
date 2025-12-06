@@ -126,15 +126,12 @@ bool CChainVerifier::RepairChain(bool testnet)
 {
     if (testnet) {
         // Testnet: Auto-wipe approach (following Ethereum Geth pattern)
-        std::cout << "[ChainVerifier] TESTNET: Attempting automatic blockchain wipe" << std::endl;
 
         if (!WipeBlockchainData(testnet)) {
             std::cerr << "[ChainVerifier] ERROR: Failed to wipe blockchain data" << std::endl;
             return false;
         }
 
-        std::cout << "[ChainVerifier] TESTNET: Blockchain data wiped successfully" << std::endl;
-        std::cout << "[ChainVerifier] TESTNET: Node will restart from genesis block" << std::endl;
         return true;
     } else {
         // Mainnet: Conservative approach (following Bitcoin Core pattern)
@@ -247,8 +244,6 @@ bool CChainVerifier::CheckChainContinuity(std::string& error)
     int blocksChecked = 0;
     const int MAX_BLOCKS_TO_CHECK = 1000;  // Check last 1000 blocks for performance
 
-    std::cout << "[ChainVerifier] Checking chain continuity from height "
-              << pTip->nHeight << "..." << std::endl;
 
     while (pCurrent != nullptr) {
         // Check if parent exists (unless genesis)
@@ -280,8 +275,6 @@ bool CChainVerifier::CheckChainContinuity(std::string& error)
 
         // Performance optimization: only check last N blocks
         if (blocksChecked >= MAX_BLOCKS_TO_CHECK) {
-            std::cout << "[ChainVerifier] Checked last " << MAX_BLOCKS_TO_CHECK
-                      << " blocks - continuity verified" << std::endl;
             break;
         }
 
@@ -289,8 +282,6 @@ bool CChainVerifier::CheckChainContinuity(std::string& error)
         pCurrent = pCurrent->pprev;
     }
 
-    std::cout << "[ChainVerifier] Chain continuity check passed ("
-              << blocksChecked << " blocks verified)" << std::endl;
     return true;
 }
 
@@ -303,8 +294,6 @@ bool CChainVerifier::ValidateBlockHeaders(std::string& error)
     // - Timestamp progression checks
     // - Block version validation
 
-    std::cout << "[ChainVerifier] WARNING: LEVEL_STANDARD validation not fully implemented" << std::endl;
-    std::cout << "[ChainVerifier] Running LEVEL_QUICK instead" << std::endl;
 
     return CheckChainContinuity(error);
 }
@@ -318,8 +307,6 @@ bool CChainVerifier::ValidateFullChain(std::string& error)
     // - UTXO set consistency
     // - Total coin supply verification
 
-    std::cout << "[ChainVerifier] WARNING: LEVEL_FULL validation not fully implemented" << std::endl;
-    std::cout << "[ChainVerifier] Running LEVEL_QUICK instead" << std::endl;
 
     return CheckChainContinuity(error);
 }
@@ -375,7 +362,6 @@ bool CChainVerifier::WipeBlockchainData(bool testnet)
         return false;
     }
 
-    std::cout << "[ChainVerifier] Wiping blockchain data from: " << dataDir << std::endl;
 
     // Define paths to wipe
     std::string blocksDir = dataDir + "/blocks";
@@ -385,15 +371,11 @@ bool CChainVerifier::WipeBlockchainData(bool testnet)
     try {
 #ifdef __APPLE__
         if (DirectoryExists(blocksDir)) {
-            std::cout << "[ChainVerifier] Removing: " << blocksDir << std::endl;
             RemoveDirectoryRecursive(blocksDir);
-            std::cout << "[ChainVerifier] Removed blocks directory" << std::endl;
         }
 #else
         if (std::filesystem::exists(blocksDir)) {
-            std::cout << "[ChainVerifier] Removing: " << blocksDir << std::endl;
             std::filesystem::remove_all(blocksDir);
-            std::cout << "[ChainVerifier] Removed blocks directory" << std::endl;
         }
 #endif
     } catch (const std::exception& e) {
@@ -405,15 +387,11 @@ bool CChainVerifier::WipeBlockchainData(bool testnet)
     try {
 #ifdef __APPLE__
         if (DirectoryExists(chainstateDir)) {
-            std::cout << "[ChainVerifier] Removing: " << chainstateDir << std::endl;
             RemoveDirectoryRecursive(chainstateDir);
-            std::cout << "[ChainVerifier] Removed chainstate directory" << std::endl;
         }
 #else
         if (std::filesystem::exists(chainstateDir)) {
-            std::cout << "[ChainVerifier] Removing: " << chainstateDir << std::endl;
             std::filesystem::remove_all(chainstateDir);
-            std::cout << "[ChainVerifier] Removed chainstate directory" << std::endl;
         }
 #endif
     } catch (const std::exception& e) {
@@ -421,8 +399,6 @@ bool CChainVerifier::WipeBlockchainData(bool testnet)
         return false;
     }
 
-    std::cout << "[ChainVerifier] Successfully wiped blockchain data" << std::endl;
-    std::cout << "[ChainVerifier] Preserved: peers.dat, wallet.dat, dilithion.conf" << std::endl;
 
     return true;
 }
