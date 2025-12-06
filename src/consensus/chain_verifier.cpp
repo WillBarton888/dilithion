@@ -6,10 +6,43 @@
 #include <node/genesis.h>
 #include <util/system.h>
 #include <iostream>
+
+// Cross-platform filesystem support
 #ifdef __APPLE__
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <cstring>
+
+// POSIX-based directory removal for macOS (recursive)
+static bool RemoveDirectoryRecursive(const std::string& path) {
+    DIR* dir = opendir(path.c_str());
+    if (!dir) return true;  // Directory doesn't exist, success
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        std::string fullPath = path + "/" + entry->d_name;
+        struct stat st;
+        if (stat(fullPath.c_str(), &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                RemoveDirectoryRecursive(fullPath);
+            } else {
+                unlink(fullPath.c_str());
+            }
+        }
+    }
+    closedir(dir);
+    return rmdir(path.c_str()) == 0;
+}
+
+static bool DirectoryExists(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
 #else
 #include <filesystem>
 #endif
@@ -348,25 +381,41 @@ bool CChainVerifier::WipeBlockchainData(bool testnet)
     std::string blocksDir = dataDir + "/blocks";
     std::string chainstateDir = dataDir + "/chainstate";
 
-    // Wipe blocks directory (using std::filesystem for security - no shell command injection)
+    // Wipe blocks directory (using platform-specific APIs for security - no shell command injection)
     try {
+#ifdef __APPLE__
+        if (DirectoryExists(blocksDir)) {
+            std::cout << "[ChainVerifier] Removing: " << blocksDir << std::endl;
+            RemoveDirectoryRecursive(blocksDir);
+            std::cout << "[ChainVerifier] Removed blocks directory" << std::endl;
+        }
+#else
         if (std::filesystem::exists(blocksDir)) {
             std::cout << "[ChainVerifier] Removing: " << blocksDir << std::endl;
             std::filesystem::remove_all(blocksDir);
             std::cout << "[ChainVerifier] Removed blocks directory" << std::endl;
         }
+#endif
     } catch (const std::exception& e) {
         std::cerr << "[ChainVerifier] ERROR: Failed to remove blocks directory: " << e.what() << std::endl;
         return false;
     }
 
-    // Wipe chainstate directory (using std::filesystem for security - no shell command injection)
+    // Wipe chainstate directory (using platform-specific APIs for security - no shell command injection)
     try {
+#ifdef __APPLE__
+        if (DirectoryExists(chainstateDir)) {
+            std::cout << "[ChainVerifier] Removing: " << chainstateDir << std::endl;
+            RemoveDirectoryRecursive(chainstateDir);
+            std::cout << "[ChainVerifier] Removed chainstate directory" << std::endl;
+        }
+#else
         if (std::filesystem::exists(chainstateDir)) {
             std::cout << "[ChainVerifier] Removing: " << chainstateDir << std::endl;
             std::filesystem::remove_all(chainstateDir);
             std::cout << "[ChainVerifier] Removed chainstate directory" << std::endl;
         }
+#endif
     } catch (const std::exception& e) {
         std::cerr << "[ChainVerifier] ERROR: Failed to remove chainstate directory: " << e.what() << std::endl;
         return false;
