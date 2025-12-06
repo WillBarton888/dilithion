@@ -603,6 +603,12 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                                 std::cout << "  Address:         " << addr.ToString() << std::endl;
                                 std::cout << "============================================================" << std::endl;
                                 std::cout << "\n";
+
+                                // BUG #99 FIX: Immediately save wallet after mining reward
+                                // This ensures check-wallet-balance can see the new balance
+                                if (m_autoSave && !m_walletFile.empty()) {
+                                    SaveUnlocked();
+                                }
                             }
                             break;
                         }
