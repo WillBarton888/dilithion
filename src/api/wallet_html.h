@@ -1,4 +1,16 @@
-<!DOCTYPE html>
+// Copyright (c) 2025 The Dilithion Core developers
+// Distributed under the MIT software license
+// AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY
+// Generated from website/wallet.html
+
+#ifndef DILITHION_API_WALLET_HTML_H
+#define DILITHION_API_WALLET_HTML_H
+
+#include <string>
+
+// Embedded wallet HTML content
+inline const std::string& GetWalletHTML() {
+    static const std::string wallet_html = R"WALLET_HTML(<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1207,3 +1219,8 @@
     </script>
 </body>
 </html>
+)WALLET_HTML";
+    return wallet_html;
+}
+
+#endif // DILITHION_API_WALLET_HTML_H

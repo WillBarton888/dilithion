@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <api/http_server.h>
+#include <api/wallet_html.h>
 #include <iostream>
 #include <cstring>
 #include <sstream>
@@ -216,6 +217,18 @@ void CHttpServer::HandleRequest(SOCKET client_socket) {
     std::string method, path;
     if (!ParseRequest(request, method, path)) {
         Send500(client_socket);
+        return;
+    }
+
+    // Handle GET /wallet or /wallet.html - serve embedded web wallet
+    if (method == "GET" && (path == "/wallet" || path == "/wallet.html" || path == "/")) {
+        try {
+            const std::string& html = GetWalletHTML();
+            SendResponse(client_socket, 200, "text/html; charset=utf-8", html);
+        } catch (const std::exception& e) {
+            std::cerr << "[HttpServer] Error serving wallet: " << e.what() << std::endl;
+            Send500(client_socket);
+        }
         return;
     }
 

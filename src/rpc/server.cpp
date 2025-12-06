@@ -633,12 +633,8 @@ void CRPCServer::HandleClient(int clientSocket) {
         // Validate bytesRead before casting to prevent integer overflow
         const size_t bufSize = buffer.size();
         if (bufSize >= 4 && bytesRead > 0) {
-            // CID 1675184 FIX: Check for overflow before casting and arithmetic
-            // bytesRead is int, so check it's positive and within reasonable bounds
-            if (bytesRead > static_cast<int>(SIZE_MAX)) {
-                std::cerr << "[RPC] ERROR: bytesRead exceeds SIZE_MAX, possible integer overflow" << std::endl;
-                return;
-            }
+            // CID 1675184 FIX: Safe cast - bytesRead is int and we verified > 0 above
+            // A positive int is always safely castable to size_t
             size_t bytesReadSize = static_cast<size_t>(bytesRead);
             
             // CID 1675184 FIX: Check for overflow in bytesReadSize + 3 before subtraction
