@@ -5,6 +5,7 @@
 #include <consensus/fees.h>
 #include <crypto/sha3.h>
 #include <core/chainparams.h>
+#include <util/time.h>  // P3-C1: For GetTime() in locktime validation
 #include <set>
 #include <algorithm>
 #include <cstdio>
@@ -161,6 +162,41 @@ bool CTransactionValidator::CheckTransactionInputs(const CTransaction& tx, CUTXO
     if (tx.IsCoinBase()) {
         txFee = 0;
         return true;
+    }
+
+    // P3-C1 FIX: Validate locktime (consensus-critical)
+    // If any input has sequence != 0xFFFFFFFF, locktime is enforced
+    // If locktime < 500,000,000: it's a block height (tx valid at that height)
+    // If locktime >= 500,000,000: it's a Unix timestamp (tx valid at that time)
+    bool locktime_active = false;
+    for (const auto& txin : tx.vin) {
+        if (txin.nSequence != 0xFFFFFFFF) {
+            locktime_active = true;
+            break;
+        }
+    }
+
+    if (locktime_active && tx.nLockTime != 0) {
+        static const uint32_t LOCKTIME_THRESHOLD = 500000000;  // BIP-113 threshold
+
+        if (tx.nLockTime < LOCKTIME_THRESHOLD) {
+            // Locktime is a block height
+            if (tx.nLockTime > currentHeight) {
+                error = "Transaction locktime not satisfied (block height " +
+                        std::to_string(tx.nLockTime) + " > current " +
+                        std::to_string(currentHeight) + ")";
+                return false;
+            }
+        } else {
+            // Locktime is a Unix timestamp
+            int64_t now = GetTime();
+            if (static_cast<int64_t>(tx.nLockTime) > now) {
+                error = "Transaction locktime not satisfied (timestamp " +
+                        std::to_string(tx.nLockTime) + " > current " +
+                        std::to_string(now) + ")";
+                return false;
+            }
+        }
     }
 
     // Verify all inputs exist in UTXO set

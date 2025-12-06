@@ -54,6 +54,12 @@ static std::map<int, std::vector<int64_t>> g_peer_getdata_timestamps;
 static std::mutex cs_getdata_rate;
 static const size_t MAX_GETDATA_PER_SECOND = 10;
 
+// P3-N2 FIX: Rate limiting for HEADERS messages (DoS protection)
+// Limits: 3 HEADERS messages per second per peer (headers are large)
+static std::map<int, std::vector<int64_t>> g_peer_headers_timestamps;
+static std::mutex cs_headers_rate;
+static const size_t MAX_HEADERS_PER_SECOND = 3;
+
 // P2-2 FIX: Per-IP connection cooldown to prevent rapid reconnection DoS
 // Prevents attackers from exhausting connection slots via reconnection churn
 static std::map<std::string, int64_t> g_last_connection_attempt;
@@ -937,6 +943,28 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
 
 bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& stream) {
     try {
+        // P3-N2 FIX: Rate limiting for HEADERS messages
+        // Prevents DoS via rapid HEADERS flooding (each can have 2000 headers)
+        {
+            std::lock_guard<std::mutex> lock(cs_headers_rate);
+            int64_t now = GetTime();
+            auto& timestamps = g_peer_headers_timestamps[peer_id];
+
+            // Remove timestamps older than 1 second
+            timestamps.erase(
+                std::remove_if(timestamps.begin(), timestamps.end(),
+                    [now](int64_t ts) { return now - ts > 1; }),
+                timestamps.end());
+
+            if (timestamps.size() >= MAX_HEADERS_PER_SECOND) {
+                std::cout << "[P2P] RATE LIMIT: Too many HEADERS from peer " << peer_id
+                          << " (" << timestamps.size() << "/" << MAX_HEADERS_PER_SECOND << " per second)" << std::endl;
+                peer_manager.Misbehaving(peer_id, 10);
+                return false;
+            }
+            timestamps.push_back(now);
+        }
+
         // Read header count
         uint64_t header_count = stream.ReadCompactSize();
 

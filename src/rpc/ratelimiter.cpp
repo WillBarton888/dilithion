@@ -28,8 +28,10 @@ const std::map<std::string, CRateLimiter::MethodRateLimit> CRateLimiter::METHOD_
     {"sendtoaddress",          {10.0, 0.167, 1.0}},  // 10/min - financial operations
     {"sendrawtransaction",     {10.0, 0.167, 1.0}},  // 10/min - financial operations
 
-    // === HIGH: Wallet State Changes (20-100/min) ===
-    {"getnewaddress",          {100.0, 1.67, 1.0}},  // 100/min - address enumeration vector
+    // === HIGH: Wallet State Changes (20/min) ===
+    // P3-R3 FIX: Reduced getnewaddress from 100/min to 20/min
+    // Prevents address enumeration attacks (probing wallet for addresses)
+    {"getnewaddress",          {20.0, 0.333, 1.0}},  // 20/min - address enumeration protection
     {"createhdwallet",         {20.0, 0.333, 1.0}},  // 20/min - wallet state manipulation
     {"restorehdwallet",        {20.0, 0.333, 1.0}},  // 20/min - wallet state manipulation
     {"exportmnemonic",         {20.0, 0.333, 1.0}},  // 20/min - sensitive data export

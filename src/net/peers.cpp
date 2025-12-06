@@ -638,6 +638,39 @@ void CPeerManager::PeriodicMaintenance() {
     // Evict peers if needed
     EvictPeersIfNeeded();
 
+    // P3-N8 FIX: Disconnect peers with stale handshakes
+    // If a peer hasn't completed handshake within 60 seconds, disconnect them
+    // This prevents attackers from occupying connection slots indefinitely
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        static const int64_t HANDSHAKE_TIMEOUT = 60;  // 60 seconds
+        int64_t now = GetTime();
+
+        std::vector<int> peers_to_disconnect;
+        for (const auto& pair : peers) {
+            CPeer* peer = pair.second.get();
+            if (peer->state == CPeer::STATE_CONNECTING ||
+                peer->state == CPeer::STATE_CONNECTED ||
+                peer->state == CPeer::STATE_VERSION_SENT) {
+                // Peer is in handshake state
+                int64_t age = now - peer->connect_time;
+                if (age > HANDSHAKE_TIMEOUT) {
+                    std::cout << "[PeerManager] P3-N8: Disconnecting peer " << peer->id
+                              << " - handshake timeout (" << age << "s)" << std::endl;
+                    peers_to_disconnect.push_back(peer->id);
+                }
+            }
+        }
+
+        // Disconnect stale peers (outside the loop to avoid iterator invalidation)
+        for (int peer_id : peers_to_disconnect) {
+            auto it = peers.find(peer_id);
+            if (it != peers.end()) {
+                it->second->Disconnect();
+            }
+        }
+    }
+
     // Save peers periodically (every 15 minutes)
     static int64_t last_save_time = 0;
     int64_t now = GetTime();
