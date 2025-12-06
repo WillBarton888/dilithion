@@ -410,12 +410,18 @@ void CMiningController::MiningWorker(uint32_t threadId) {
                 // BUG #24 FIX: Set the winning nonce in the block before callback
                 currentBlock.nNonce = nonce32;
 
-                // MINE-015 FIX: Safely call callback with null check
-                // Always check callback exists before invoking (prevents null dereference)
+                // MINE-015 FIX: Safely call callback with null check and exception handling
+                // MAINNET: See SetBlockFoundCallback() documentation for safety requirements
                 {
                     std::lock_guard<std::mutex> lock(m_callbackMutex);
                     if (m_blockFoundCallback) {
-                        m_blockFoundCallback(currentBlock);
+                        try {
+                            m_blockFoundCallback(currentBlock);
+                        } catch (const std::exception& e) {
+                            std::cerr << "[Miner] WARNING: Block callback threw exception: "
+                                      << e.what() << std::endl;
+                            // Continue mining - don't let callback failure stop the miner
+                        }
                     }
                     // If no callback set, block is found but not reported (silent mining)
                 }
@@ -782,9 +788,8 @@ std::vector<CTransactionRef> CMiningController::SelectTransactionsForBlock(
         }
     }
 
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // selectedTxs is a local variable that's no longer used after return
-    return std::move(selectedTxs);
+    // MAINNET FIX: Return without std::move to allow RVO (copy elision)
+    return selectedTxs;
 }
 
 std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
@@ -999,7 +1004,6 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     CBlockTemplate blockTemplate(block, hashTarget, nHeight);
 
     (void)BENCHMARK_END("mining_create_template");
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // blockTemplate is a local variable that's no longer used after return
-    return std::move(blockTemplate);
+    // MAINNET FIX: Return without std::move to allow RVO (copy elision)
+    return blockTemplate;
 }

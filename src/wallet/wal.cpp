@@ -187,9 +187,8 @@ std::vector<uint8_t> WALEntry::Serialize() const {
     uint32_t calculated_crc = calculate_crc32(buffer.data(), buffer.size());
     write_uint32_le(buffer, calculated_crc);
 
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // buffer is a local variable that's no longer used after return
-    return std::move(buffer);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return buffer;
 }
 
 bool WALEntry::Deserialize(const std::vector<uint8_t>& bytes) {

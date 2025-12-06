@@ -146,8 +146,8 @@ std::vector<std::pair<std::string, CBanEntry>> CBanManager::GetBanned() const {
             result.emplace_back(ip, entry);
         }
     }
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 size_t CBanManager::GetBannedCount() const {

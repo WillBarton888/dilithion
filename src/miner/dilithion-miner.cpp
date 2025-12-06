@@ -20,6 +20,9 @@
 #include <signal.h>
 #include <thread>
 #include <chrono>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 
 using namespace std;
 
@@ -78,11 +81,23 @@ int main(int argc, char* argv[]) {
     PrintBanner();
 
     // Parse command line arguments
+    // MAINNET FIX: Replace atoi() with strtol() for proper error handling
     uint32_t nThreads = 0; // 0 = auto-detect
     if (argc > 1) {
-        nThreads = static_cast<uint32_t>(atoi(argv[1]));
-        if (nThreads == 0) {
-            cerr << "Invalid thread count. Using auto-detect." << endl;
+        char* endptr = nullptr;
+        errno = 0;
+        long val = strtol(argv[1], &endptr, 10);
+
+        // Check for conversion errors
+        if (endptr == argv[1] || *endptr != '\0') {
+            cerr << "Invalid thread count: not a number. Using auto-detect." << endl;
+        } else if (errno == ERANGE || val < 0 || val > UINT32_MAX) {
+            cerr << "Thread count out of range. Using auto-detect." << endl;
+        } else if (val == 0) {
+            // 0 means auto-detect, which is valid
+            nThreads = 0;
+        } else {
+            nThreads = static_cast<uint32_t>(val);
         }
     }
 

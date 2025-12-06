@@ -23,8 +23,8 @@ std::string HexStr(const uint8_t* data, size_t len) {
         result.push_back(hexmap[data[i] & 0x0F]);         // Low nibble
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 std::string HexStr(const std::vector<uint8_t>& vch) {
@@ -51,8 +51,8 @@ std::vector<uint8_t> ParseHex(const std::string& str) {
         result.push_back(static_cast<uint8_t>((high << 4) | low));
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 bool IsHex(const std::string& str) {

@@ -200,6 +200,14 @@ public:
 
     /**
      * Set callback for when a valid block is found
+     *
+     * MAINNET SAFETY REQUIREMENTS:
+     * - Callback is called from mining worker thread with m_callbackMutex held
+     * - Callback MUST NOT call StopMining() (would deadlock on m_callbackMutex)
+     * - Callback MUST NOT delete the CMiningController instance
+     * - Callback should complete quickly to avoid blocking mining
+     * - Callback may throw exceptions (caught and logged by mining thread)
+     *
      * @param callback Function to call with found block
      */
     void SetBlockFoundCallback(std::function<void(const CBlock&)> callback);

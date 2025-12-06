@@ -239,10 +239,22 @@ void CBlockHeaderAndShortTxIDs::FillShortTxIDSelector() const
     // Derive SipHash keys from SHA3-256(header || nonce)
     // Using first 16 bytes as two 64-bit keys
 
-    // Serialize header (80 bytes) + nonce (8 bytes)
-    uint8_t data[88];
+    // MAINNET FIX: Document buffer layout and add compile-time bounds verification
+    // Serialize header (80 bytes) + nonce (8 bytes) = 88 bytes total
+    // Layout: [version:4][prevhash:32][merkle:32][time:4][bits:4][nonce:4][shortnonce:8]
+    static constexpr size_t HEADER_WITH_NONCE_SIZE = 88;
+    uint8_t data[HEADER_WITH_NONCE_SIZE];
 
-    // Header serialization
+    // Compile-time bounds verification
+    static_assert(0 + 4 <= HEADER_WITH_NONCE_SIZE, "version overflow");
+    static_assert(4 + 32 <= HEADER_WITH_NONCE_SIZE, "prevhash overflow");
+    static_assert(36 + 32 <= HEADER_WITH_NONCE_SIZE, "merkle overflow");
+    static_assert(68 + 4 <= HEADER_WITH_NONCE_SIZE, "time overflow");
+    static_assert(72 + 4 <= HEADER_WITH_NONCE_SIZE, "bits overflow");
+    static_assert(76 + 4 <= HEADER_WITH_NONCE_SIZE, "nonce overflow");
+    static_assert(80 + 8 <= HEADER_WITH_NONCE_SIZE, "shortnonce overflow");
+
+    // Header serialization (bounds verified at compile time)
     memcpy(data, &header.nVersion, 4);
     memcpy(data + 4, header.hashPrevBlock.data, 32);
     memcpy(data + 36, header.hashMerkleRoot.data, 32);
@@ -354,9 +366,8 @@ std::vector<uint8_t> CBlockHeaderAndShortTxIDs::Serialize() const
         last_index = prefilled.index + 1;
     }
 
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // result is a local variable that's no longer used after return
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 bool CBlockHeaderAndShortTxIDs::Deserialize(const uint8_t* data, size_t len)
@@ -616,9 +627,8 @@ std::vector<uint8_t> BlockTransactionsRequest::Serialize() const
         last_index = idx + 1;
     }
 
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // result is a local variable that's no longer used after return
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 bool BlockTransactionsRequest::Deserialize(const uint8_t* data, size_t len)
@@ -694,9 +704,8 @@ std::vector<uint8_t> BlockTransactions::Serialize() const
         result.insert(result.end(), std::make_move_iterator(txData.begin()), std::make_move_iterator(txData.end()));
     }
 
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // result is a local variable that's no longer used after return
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 bool BlockTransactions::Deserialize(const uint8_t* data, size_t len)

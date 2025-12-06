@@ -34,13 +34,23 @@ CNetAddr CNetAddr::FromIPv4(uint32_t ipv4) {
 }
 
 bool CNetAddr::FromString(const std::string& str, CNetAddr& addr) {
+    // MAINNET FIX: Replace sscanf() with safer C++ string stream parsing
+    // sscanf can parse values larger than intended; istringstream is safer
+
     // Try parsing as IPv4 first (e.g., "192.168.1.1")
+    std::istringstream iss(str);
     unsigned int a, b, c, d;
-    if (sscanf(str.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
-        if (a <= 255 && b <= 255 && c <= 255 && d <= 255) {
-            uint32_t ipv4 = (a << 24) | (b << 16) | (c << 8) | d;
-            addr = CNetAddr::FromIPv4(ipv4);
-            return true;
+    char dot1, dot2, dot3;
+
+    if (iss >> a >> dot1 >> b >> dot2 >> c >> dot3 >> d) {
+        // Verify we got dots and consumed the entire string
+        if (dot1 == '.' && dot2 == '.' && dot3 == '.' && iss.eof()) {
+            // Bounds check each octet
+            if (a <= 255 && b <= 255 && c <= 255 && d <= 255) {
+                uint32_t ipv4 = (a << 24) | (b << 16) | (c << 8) | d;
+                addr = CNetAddr::FromIPv4(ipv4);
+                return true;
+            }
         }
     }
 
@@ -240,8 +250,8 @@ std::vector<uint8_t> CNetAddr::GetGroup() const {
         }
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 std::string CNetAddr::ToString() const {

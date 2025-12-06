@@ -146,8 +146,8 @@ HeadersSyncState::ProcessingResult HeadersSyncState::ProcessNextHeaders(
         }
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(result);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return result;
 }
 
 std::vector<uint256> HeadersSyncState::NextHeadersRequestLocator() const {
@@ -167,8 +167,8 @@ std::vector<uint256> HeadersSyncState::NextHeadersRequestLocator() const {
         locator.push_back(m_chain_start_hash);
     }
 
-    // CID 1675315 FIX: Use std::move to avoid unnecessary copy
-    return std::move(locator);
+    // MAINNET FIX: Return without std::move to allow RVO
+    return locator;
 }
 
 uint32_t HeadersSyncState::GetPresyncTime() const {
