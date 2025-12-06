@@ -3122,6 +3122,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Following XMRig's proven pattern: "dataset ready" before thread creation
                 // Mining threads created in LIGHT mode get LIGHT VMs and never upgrade
                 if (!randomx_is_mining_mode_ready()) {
+                    // BUG #98 FIX: Must INITIALIZE FULL mode before waiting for it!
+                    // The "already synced" path was waiting but never calling init_mining_mode_async
+                    std::cout << "  Initializing RandomX mining mode (FULL)..." << std::endl;
+                    randomx_init_mining_mode_async(rx_key, strlen(rx_key));
                     std::cout << "  [WAIT] Waiting for RandomX FULL mode..." << std::endl;
                     auto wait_start = std::chrono::steady_clock::now();
                     while (!randomx_is_mining_mode_ready() && g_node_state.running) {
