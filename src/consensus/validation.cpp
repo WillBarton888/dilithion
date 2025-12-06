@@ -193,9 +193,12 @@ bool CBlockValidator::CheckBlockHeader(
         return false;
     }
 
-    // Check block version
-    if (block.nVersion < 1) {
-        error = "Invalid block version";
+    // Check block version (P1-1 FIX: Add upper bound to prevent consensus fork)
+    // Version 1: Initial release
+    // Version 2-4: Reserved for future protocol upgrades (soft/hard forks)
+    static constexpr int32_t MAX_BLOCK_VERSION = 4;
+    if (block.nVersion < 1 || block.nVersion > MAX_BLOCK_VERSION) {
+        error = "Invalid block version (must be 1-" + std::to_string(MAX_BLOCK_VERSION) + ")";
         return false;
     }
 
@@ -407,10 +410,14 @@ bool CBlockValidator::CheckBlock(
     // MEDIUM-C003 FIX: Reorder checks from cheapest to most expensive to prevent DoS
     // Check cheap conditions first before expensive PoW validation
 
-    // Check 1: Block size limit (CHEAPEST - prevents DoS from oversized blocks)
-    const size_t MAX_BLOCK_SIZE = 1000000;
+    // P1-5 FIX: Block size limit - check serialized transaction data size
+    // MAX_BLOCK_SIZE = 1MB (like Bitcoin's original limit)
+    // Note: block.vtx is a vector<uint8_t> containing serialized transaction data
+    static constexpr size_t MAX_BLOCK_SIZE = 1000000;  // 1 MB
+
+    // Check serialized transaction data size
     if (block.vtx.size() > MAX_BLOCK_SIZE) {
-        error = "Block size exceeds maximum";
+        error = "Block transaction data exceeds maximum size (" + std::to_string(block.vtx.size()) + " > " + std::to_string(MAX_BLOCK_SIZE) + " bytes)";
         return false;
     }
 

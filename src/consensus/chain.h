@@ -16,6 +16,7 @@
 // Forward declarations
 class CBlockchainDB;
 class CUTXOSet;
+class CReorgWAL;
 
 /**
  * Chain State Manager
@@ -38,6 +39,10 @@ private:
 
     // UTXO set reference for chain validation (CS-005)
     CUTXOSet* pUTXOSet;
+
+    // P1-4 FIX: Write-Ahead Log for atomic reorganizations
+    std::unique_ptr<CReorgWAL> m_reorgWAL;
+    bool m_requiresReindex{false};
 
     // CRITICAL-1 FIX: Mutex for thread-safe access to chain state
     // Protects mapBlockIndex, pindexTip, and all chain operations
@@ -74,6 +79,20 @@ public:
      * Initialize chain state with UTXO set (CS-005)
      */
     void SetUTXOSet(CUTXOSet* utxoSet) { pUTXOSet = utxoSet; }
+
+    /**
+     * P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations
+     * MUST be called after SetDatabase() with the data directory
+     * @param dataDir The data directory (e.g., ~/.dilithion-testnet)
+     * @return true if initialized successfully, false if incomplete reorg detected
+     */
+    bool InitializeWAL(const std::string& dataDir);
+
+    /**
+     * P1-4 FIX: Check if an incomplete reorg was detected on startup
+     * @return true if -reindex is required
+     */
+    bool RequiresReindex() const;
 
     /**
      * Get current chain tip (most work)

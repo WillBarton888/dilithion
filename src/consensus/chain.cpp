@@ -3,6 +3,7 @@
 
 #include <consensus/chain.h>
 #include <consensus/pow.h>
+#include <consensus/reorg_wal.h>  // P1-4: WAL for atomic reorgs
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
 #include <util/assert.h>
@@ -14,6 +15,27 @@ CChainState::CChainState() : pindexTip(nullptr), pdb(nullptr), pUTXOSet(nullptr)
 
 CChainState::~CChainState() {
     Cleanup();
+}
+
+// P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations
+bool CChainState::InitializeWAL(const std::string& dataDir) {
+    m_reorgWAL = std::make_unique<CReorgWAL>(dataDir);
+
+    if (m_reorgWAL->HasIncompleteReorg()) {
+        std::cerr << "[Chain] CRITICAL: Incomplete reorganization detected!" << std::endl;
+        std::cerr << "[Chain] " << m_reorgWAL->GetIncompleteReorgInfo() << std::endl;
+        std::cerr << "[Chain] The database may be in an inconsistent state." << std::endl;
+        std::cerr << "[Chain] Please restart with -reindex to rebuild the blockchain." << std::endl;
+        m_requiresReindex = true;
+        return false;
+    }
+
+    std::cout << "[Chain] WAL initialized successfully" << std::endl;
+    return true;
+}
+
+bool CChainState::RequiresReindex() const {
+    return m_requiresReindex;
 }
 
 void CChainState::Cleanup() {
@@ -326,11 +348,43 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
               << " blocks can be loaded" << std::endl;
 
     // ============================================================================
+    // P1-4 FIX: Write-Ahead Logging for Crash-Safe Reorganization
+    // ============================================================================
+    // Write intent to WAL BEFORE making any changes. If we crash during reorg,
+    // the WAL will be detected on startup and -reindex will be required.
+
+    // Build hash lists for WAL
+    std::vector<uint256> disconnectHashes;
+    for (const auto* pblockindex : disconnectBlocks) {
+        disconnectHashes.push_back(pblockindex->GetBlockHash());
+    }
+    std::vector<uint256> connectHashes;
+    for (const auto* pblockindex : connectBlocks) {
+        connectHashes.push_back(pblockindex->GetBlockHash());
+    }
+
+    if (m_reorgWAL) {
+        if (!m_reorgWAL->BeginReorg(pindexFork->GetBlockHash(),
+                                     pindexTip->GetBlockHash(),
+                                     pindexNew->GetBlockHash(),
+                                     disconnectHashes,
+                                     connectHashes)) {
+            std::cerr << "[Chain] ERROR: Failed to write reorg WAL - aborting" << std::endl;
+            return false;
+        }
+    }
+
+    // ============================================================================
     // CS-005: Chain Reorganization Rollback - Atomic Reorg with Rollback
     // ============================================================================
 
     // Disconnect old chain
     std::cout << "[Chain] Disconnecting old chain..." << std::endl;
+
+    // P1-4: Enter disconnect phase in WAL
+    if (m_reorgWAL) {
+        m_reorgWAL->EnterDisconnectPhase();
+    }
     size_t disconnectedCount = 0;
     for (size_t i = 0; i < disconnectBlocks.size(); ++i) {
         CBlockIndex* pindexDisconnect = disconnectBlocks[i];
@@ -376,14 +430,28 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             }
 
             std::cerr << "[Chain] Rollback complete. Reorg aborted." << std::endl;
+            // P1-4: Rollback succeeded, abort WAL
+            if (m_reorgWAL) {
+                m_reorgWAL->AbortReorg();
+            }
             return false;
         }
 
         disconnectedCount++;
+
+        // P1-4: Update disconnect progress in WAL
+        if (m_reorgWAL) {
+            m_reorgWAL->UpdateDisconnectProgress(static_cast<uint32_t>(disconnectedCount));
+        }
     }
 
     // Connect new chain
     std::cout << "[Chain] Connecting new chain..." << std::endl;
+
+    // P1-4: Enter connect phase in WAL
+    if (m_reorgWAL) {
+        m_reorgWAL->EnterConnectPhase();
+    }
     size_t connectedCount = 0;
     for (size_t i = 0; i < connectBlocks.size(); ++i) {
         CBlockIndex* pindexConnect = connectBlocks[i];
@@ -443,6 +511,10 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             }
 
             std::cerr << "[Chain] Rollback complete. Reorg aborted." << std::endl;
+            // P1-4: Rollback succeeded, abort WAL
+            if (m_reorgWAL) {
+                m_reorgWAL->AbortReorg();
+            }
             return false;
         }
 
@@ -487,10 +559,19 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             }
 
             std::cerr << "[Chain] Rollback complete. Reorg aborted." << std::endl;
+            // P1-4: Rollback succeeded, abort WAL
+            if (m_reorgWAL) {
+                m_reorgWAL->AbortReorg();
+            }
             return false;
         }
 
         connectedCount++;
+
+        // P1-4: Update connect progress in WAL
+        if (m_reorgWAL) {
+            m_reorgWAL->UpdateConnectProgress(static_cast<uint32_t>(connectedCount));
+        }
     }
 
     // Update tip
@@ -506,6 +587,11 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     std::cout << "[Chain] ✅ REORGANIZATION COMPLETE" << std::endl;
     std::cout << "  New tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
               << " (height " << pindexTip->nHeight << ")" << std::endl;
+
+    // P1-4: Reorg completed successfully - delete WAL
+    if (m_reorgWAL) {
+        m_reorgWAL->CompleteReorg();
+    }
 
     // Bug #40 fix: Notify registered callbacks of tip update after reorg
     NotifyTipUpdate(pindexTip);

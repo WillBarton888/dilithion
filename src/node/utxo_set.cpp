@@ -3,6 +3,7 @@
 
 #include <node/utxo_set.h>
 #include <consensus/validation.h>
+#include <crypto/sha3.h>  // P1-3: For undo data integrity checksum
 #include <leveldb/write_batch.h>
 #include <leveldb/options.h>
 #include <cstring>
@@ -563,6 +564,12 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
     // Step 4: Write spent count to undo data
     std::memcpy(undoData.data(), &spentCount, 4);
 
+    // P1-3 FIX: Add SHA3-256 integrity checksum to undo data
+    // This detects corruption during reorgs and prevents invalid state
+    uint8_t checksum[32];
+    SHA3_256(undoData.data(), undoData.size(), checksum);
+    undoData.insert(undoData.end(), checksum, checksum + 32);
+
     // Step 5: Store undo data with key "undo_<blockhash>"
     uint256 blockHash = block.GetHash();
     std::string undoKey = "undo_";
@@ -621,15 +628,33 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
         return false;
     }
 
-    if (undoValue.size() < 4) {
-        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Invalid undo data (too small)" << std::endl;
+    // P1-3 FIX: Verify SHA3-256 integrity checksum (32 bytes at end)
+    // Minimum size: 4 (spentCount) + 32 (checksum) = 36 bytes
+    if (undoValue.size() < 36) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Invalid undo data (too small: " << undoValue.size() << " bytes)" << std::endl;
         return false;
     }
 
-    // Parse undo data
-    const uint8_t* data = reinterpret_cast<const uint8_t*>(undoValue.data());
+    // Extract stored checksum (last 32 bytes)
+    const uint8_t* raw_data = reinterpret_cast<const uint8_t*>(undoValue.data());
+    size_t data_size = undoValue.size() - 32;  // Size without checksum
+    const uint8_t* stored_checksum = raw_data + data_size;
+
+    // Compute checksum of data (excluding stored checksum)
+    uint8_t computed_checksum[32];
+    SHA3_256(raw_data, data_size, computed_checksum);
+
+    // Verify checksum
+    if (std::memcmp(stored_checksum, computed_checksum, 32) != 0) {
+        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Undo data checksum mismatch - CORRUPTION DETECTED!" << std::endl;
+        std::cerr << "        Block hash: " << blockHash.GetHex() << std::endl;
+        return false;
+    }
+
+    // Parse undo data (excluding checksum)
+    const uint8_t* data = raw_data;
     const uint8_t* ptr = data;
-    const uint8_t* end = data + undoValue.size();
+    const uint8_t* end = data + data_size;  // P1-3: Exclude checksum from parsing
 
     uint32_t spentCount;
     std::memcpy(&spentCount, ptr, 4);

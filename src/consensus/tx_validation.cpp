@@ -106,6 +106,16 @@ bool CTransactionValidator::CheckTransactionBasic(const CTransaction& tx, std::s
             return false;
         }
 
+        // P1-2 FIX: Dust threshold as CONSENSUS rule (not just policy)
+        // This prevents UTXO set bloat attacks by creating millions of tiny outputs
+        // Threshold: 50000 ions = 0.0005 DIL (enough to cover minimum tx fee)
+        static constexpr CAmount CONSENSUS_DUST_THRESHOLD = 50000;
+        if (txout.nValue < CONSENSUS_DUST_THRESHOLD) {
+            error = "Output value below dust threshold (" + std::to_string(txout.nValue) +
+                    " < " + std::to_string(CONSENSUS_DUST_THRESHOLD) + " ions)";
+            return false;
+        }
+
         // Output value must be within monetary range
         if (!MoneyRange(txout.nValue)) {
             error = "Transaction output value out of range";

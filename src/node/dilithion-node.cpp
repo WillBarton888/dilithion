@@ -794,6 +794,20 @@ int main(int argc, char* argv[]) {
         std::cout << "Initializing chain state..." << std::endl;
         g_chainstate.SetDatabase(&blockchain);
         g_chainstate.SetUTXOSet(&utxo_set);
+
+        // P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations
+        if (!g_chainstate.InitializeWAL(config.datadir)) {
+            if (g_chainstate.RequiresReindex()) {
+                std::cerr << "========================================" << std::endl;
+                std::cerr << "CRITICAL: Incomplete reorganization detected!" << std::endl;
+                std::cerr << "The database may be in an inconsistent state." << std::endl;
+                std::cerr << "" << std::endl;
+                std::cerr << "Please restart with -reindex flag:" << std::endl;
+                std::cerr << "  dilithion-node --testnet -reindex" << std::endl;
+                std::cerr << "========================================" << std::endl;
+                return 1;
+            }
+        }
         std::cout << "  [OK] Chain state initialized" << std::endl;
 
         // Initialize RandomX (required for block hashing)
