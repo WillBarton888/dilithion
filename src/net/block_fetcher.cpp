@@ -44,10 +44,6 @@ void CBlockFetcher::QueueBlockForDownload(const uint256& hash, int height,
         mapPreferredPeers[hash] = announcing_peer;
     }
 
-    std::cout << "[BlockFetcher] Queued block for download: height=" << height
-              << " hash=" << hash.GetHex().substr(0, 16) << "..."
-              << (announcing_peer != -1 ? " from peer " + std::to_string(announcing_peer) : "")
-              << (highPriority ? " [HIGH PRIORITY]" : "") << std::endl;
 }
 
 NodeId CBlockFetcher::GetPreferredPeer(const uint256& hash) const
@@ -67,7 +63,6 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
 
     // Check peer capacity
     if (GetAvailableSlotsForPeer(peer) <= 0) {
-        std::cout << "[BlockFetcher] Peer " << peer << " at capacity, cannot request block" << std::endl;
         return false;
     }
 
@@ -100,12 +95,6 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
 
     // Remove from queue if present
     setQueuedHashes.erase(hash);
-
-    std::cout << "[BlockFetcher] Requested block from peer " << peer
-              << ": height=" << height
-              << " hash=" << hash.GetHex().substr(0, 16) << "..."
-              << " (in-flight: " << mapBlocksInFlight.size() << "/" << MAX_BLOCKS_IN_FLIGHT << ")"
-              << std::endl;
 
     // NOTE: Actual GETDATA message sending is handled by caller
     // This function just tracks the request state
@@ -160,11 +149,6 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // BUG #69: Also mark received in CNodeStateManager
     CNodeStateManager::Get().MarkBlockAsReceived(hash);
 
-    std::cout << "[BlockFetcher] Block received from peer " << peer
-              << " (response time: " << responseTime.count() << "ms)"
-              << " in-flight remaining: " << mapBlocksInFlight.size()
-              << std::endl;
-
     return true;
 }
 
@@ -207,11 +191,6 @@ std::vector<std::pair<uint256, int>> CBlockFetcher::GetNextBlocksToFetch(int max
     }
     queueBlocksToFetch = tempQueue;
 
-    if (!result.empty()) {
-        std::cout << "[BlockFetcher] Selected " << result.size() << " blocks for download "
-                  << "(queue size: " << queueBlocksToFetch.size() << ")" << std::endl;
-    }
-
     // MAINNET FIX: Return without std::move to allow RVO
     return result;
 }
@@ -233,10 +212,6 @@ std::vector<uint256> CBlockFetcher::CheckTimeouts()
         }
     }
 
-    if (!timedOut.empty()) {
-        std::cout << "[BlockFetcher] Found " << timedOut.size() << " timed-out block requests" << std::endl;
-    }
-
     return timedOut;
 }
 
@@ -254,11 +229,6 @@ void CBlockFetcher::RetryTimedOutBlocks(const std::vector<uint256>& timedOutHash
         NodeId stalledPeer = inFlight.peer;
         int height = inFlight.nHeight;
         int retries = inFlight.nRetries;
-
-        std::cout << "[BlockFetcher] Block request timed out: peer=" << stalledPeer
-                  << " height=" << height
-                  << " hash=" << hash.GetHex().substr(0, 16) << "..."
-                  << " retries=" << retries << std::endl;
 
         // Mark peer as stalled
         MarkPeerStalled(stalledPeer);
@@ -285,7 +255,6 @@ void CBlockFetcher::RetryTimedOutBlocks(const std::vector<uint256>& timedOutHash
             // Note: We track retries by re-adding to in-flight later with retry count
             queueBlocksToFetch.push(BlockDownloadRequest(hash, height, true));  // High priority for retries
             setQueuedHashes.insert(hash);
-            std::cout << "[BlockFetcher] Re-queued timed-out block for retry" << std::endl;
         } else {
             std::cerr << "[BlockFetcher] Block exceeded max retries, dropping: "
                       << hash.GetHex().substr(0, 16) << "..." << std::endl;
@@ -303,8 +272,6 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
         if (it != mapPeerStates.end()) {
             int availableSlots = GetAvailableSlotsForPeer(preferred_peer);
             if (availableSlots > 0 && IsPeerSuitable(preferred_peer)) {
-                std::cout << "[BlockFetcher] BUG #64: Using preferred peer " << preferred_peer
-                          << " that announced this block" << std::endl;
                 return preferred_peer;
             }
         }
@@ -370,14 +337,7 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 
     // BUG #61: Use fallback if no suitable peer found (prevents sync deadlock)
     if (bestPeer == -1 && fallbackPeer != -1) {
-        std::cout << "[BlockFetcher] BUG #61: Using fallback peer " << fallbackPeer
-                  << " (all peers marked as stalled - giving another chance)" << std::endl;
         return fallbackPeer;
-    }
-
-    if (bestPeer != -1) {
-        std::cout << "[BlockFetcher] Selected peer " << bestPeer
-                  << " for download (score: " << bestScore << ")" << std::endl;
     }
 
     return bestPeer;
@@ -398,8 +358,6 @@ void CBlockFetcher::UpdatePeerStats(NodeId peer, bool success, std::chrono::mill
         // BUG #61 FIX: Reset stall count on successful block download (Bitcoin Core approach)
         // This prevents permanent peer exclusion and allows recovery
         if (state.nStalls > 0) {
-            std::cout << "[BlockFetcher] BUG #61: Resetting stall count for peer " << peer
-                      << " (was " << state.nStalls << ") after successful download" << std::endl;
             state.nStalls = 0;
         }
         state.lastSuccessTime = std::chrono::steady_clock::now();
@@ -606,8 +564,6 @@ void CBlockFetcher::Clear()
     mapPeerStates.clear();
     nBlocksReceivedTotal = 0;
     lastBlockReceived = std::chrono::steady_clock::now();
-
-    std::cout << "[BlockFetcher] All state cleared" << std::endl;
 }
 
 // Private helper methods
@@ -642,9 +598,6 @@ void CBlockFetcher::MarkPeerStalled(NodeId peer)
     mapPeerStates[peer].preferred = false;  // Remove preferred status
     // BUG #61 FIX: Track when stall occurred for timeout calculation
     mapPeerStates[peer].lastStallTime = std::chrono::steady_clock::now();
-
-    std::cout << "[BlockFetcher] Peer " << peer << " stalled "
-              << "(total stalls: " << mapPeerStates[peer].nStalls << ")" << std::endl;
 
     // If peer stalls too much, it will be avoided by IsPeerSuitable (but not permanently - BUG #61)
 }

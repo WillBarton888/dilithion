@@ -1874,6 +1874,18 @@ bool CWallet::Load(const std::string& filename) {
         mapAddressToPath = std::move(temp_mapAddressToPath);
         mapPathToAddress = std::move(temp_mapPathToAddress);
 
+        // BUG #100 FIX: Set defaultAddress for HD wallets after loading
+        // Without this, GetPubKeyHash() returns empty for loaded HD wallets,
+        // causing mined blocks to not be credited to the wallet
+        if (fIsHDWallet && !mapPathToAddress.empty() && !defaultAddress.IsValid()) {
+            // Use the first receiving address (path 0/0/0) as default
+            CHDKeyPath firstPath = CHDKeyPath::ReceiveAddress(0, 0);
+            auto it = mapPathToAddress.find(firstPath);
+            if (it != mapPathToAddress.end()) {
+                defaultAddress = it->second;
+            }
+        }
+
         // BUG #56 FIX: Copy best block pointer
         // CID 1675318 FIX: All member variable writes below are protected by lock acquired at line 1260
         m_bestBlockHash = temp_bestBlockHash;
@@ -3589,6 +3601,14 @@ bool CWallet::InitializeHDWallet(const std::string& mnemonic, const std::string&
         vchEncryptedMnemonic.clear();
         vchMnemonicIV.clear();
         return false;
+    }
+
+    // BUG #100 FIX: Set defaultAddress for HD wallets so GetPubKeyHash() works for mining
+    // Without this, GetPubKeyHash() returns empty for HD wallets, causing mined blocks
+    // to not be credited to the wallet (coinbase hash comparison fails)
+    auto it = mapPathToAddress.find(firstPath);
+    if (it != mapPathToAddress.end()) {
+        defaultAddress = it->second;
     }
 
     nHDExternalChainIndex = 1;  // Next address index

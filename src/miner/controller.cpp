@@ -896,12 +896,6 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     for (size_t i = 0; i < allTxs.size(); ++i) {
         const auto& tx = allTxs[i];
         std::vector<uint8_t> txData = tx->Serialize();
-        if (!txData.empty()) {
-            for (size_t j = 0; j < std::min(size_t(20), txData.size()); ++j) {
-                printf("%02x ", txData[j]);
-            }
-            std::cout << std::endl;
-        }
         // CID 1675171 FIX: Use move iterators to avoid unnecessary copy
         // txData is a local variable that's no longer used after insert
         blockTxData.insert(blockTxData.end(), std::make_move_iterator(txData.begin()), std::make_move_iterator(txData.end()));

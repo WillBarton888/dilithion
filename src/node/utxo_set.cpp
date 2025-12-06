@@ -64,11 +64,6 @@ bool CUTXOSet::Open(const std::string& path, bool create_if_missing) {
         std::memcpy(&stats.nTotalAmount, ptr + 8, 8);
         std::memcpy(&stats.nHeight, ptr + 16, 4);
 
-        std::cout << "[INFO] CUTXOSet: Loaded statistics - UTXOs: " << stats.nUTXOs
-                  << ", Total: " << stats.nTotalAmount
-                  << ", Height: " << stats.nHeight << std::endl;
-    } else {
-        std::cout << "[INFO] CUTXOSet: Initializing new UTXO set" << std::endl;
     }
 
     return true;
@@ -412,20 +407,6 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
     std::vector<CTransactionRef> transactions;
     std::string error;
 
-    // BUG #11 DEBUG: Log block.vtx size and first bytes for debugging
-    if (!block.vtx.empty()) {
-        for (size_t i = 0; i < std::min(size_t(20), block.vtx.size()); ++i) {
-            printf("%02x ", block.vtx[i]);
-        }
-        std::cout << std::endl;
-        if (block.vtx.size() > 20) {
-            for (size_t i = block.vtx.size() - 20; i < block.vtx.size(); ++i) {
-                printf("%02x ", block.vtx[i]);
-            }
-            std::cout << std::endl;
-        }
-    }
-
     CBlockValidator validator;
     if (!validator.DeserializeBlockTransactions(block, transactions, error)) {
         std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Failed to deserialize transactions: "
@@ -590,10 +571,6 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
         std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Failed to flush statistics" << std::endl;
         return false;
     }
-
-    std::cout << "[INFO] CUTXOSet::ApplyBlock: Applied block at height " << height
-              << " (" << transactions.size() << " txs, " << spentCount << " inputs spent)"
-              << std::endl;
 
     return true;
 }
@@ -826,9 +803,6 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
         return false;
     }
 
-    std::cout << "[INFO] CUTXOSet::UndoBlock: Undid block (" << transactions.size()
-              << " txs, " << spentCount << " inputs restored)" << std::endl;
-
     return true;
 }
 
@@ -878,10 +852,6 @@ bool CUTXOSet::Flush() {
     // Clear pending changes
     cache_additions.clear();
     cache_deletions.clear();
-
-    std::cout << "[INFO] CUTXOSet::Flush: Successfully flushed "
-              << (cache_additions.size() + cache_deletions.size())
-              << " changes to disk" << std::endl;
 
     return true;
 }
@@ -941,9 +911,6 @@ bool CUTXOSet::UpdateStats() {
 
     stats.nUTXOs = utxo_count;
     stats.nTotalAmount = total_amount;
-
-    std::cout << "[INFO] CUTXOSet::UpdateStats: Updated statistics - UTXOs: " << stats.nUTXOs
-              << ", Total: " << stats.nTotalAmount << std::endl;
 
     return true;
 }
@@ -1023,13 +990,6 @@ bool CUTXOSet::VerifyConsistency() const {
         return false;
     }
 
-    // Verify statistics match (within pending changes)
-    std::cout << "[INFO] CUTXOSet::VerifyConsistency: DB has " << utxo_count << " UTXOs, "
-              << "stats show " << stats.nUTXOs << " (pending: +" << cache_additions.size()
-              << " -" << cache_deletions.size() << ")" << std::endl;
-
-    std::cout << "[INFO] CUTXOSet::VerifyConsistency: Consistency check passed" << std::endl;
-
     return true;
 }
 
@@ -1077,8 +1037,6 @@ bool CUTXOSet::Clear() {
     lru_list.clear();  // TX-004: Clear LRU list
     cache_additions.clear();
     cache_deletions.clear();
-
-    std::cout << "[INFO] CUTXOSet::Clear: UTXO set cleared successfully" << std::endl;
 
     return true;
 }

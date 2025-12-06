@@ -1370,8 +1370,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
 
         // Create and start HTTP API server for dashboard
-        // Use port 8334 for testnet API
-        int api_port = config.testnet ? 8334 : 8333;
+        // Use port 18334 for testnet, 8334 for mainnet (Bitcoin convention)
+        int api_port = config.testnet ? 18334 : 8334;
         CHttpServer http_server(api_port);
         g_node_state.http_server = &http_server;
 
@@ -1571,11 +1571,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
                       << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
 
-            // [CONVERGENCE-DIAG] Log BLOCK message
-            std::cout << "[CONVERGENCE-DIAG] BLOCK message received from peer " << peer_id << std::endl;
-            std::cout << "[CONVERGENCE-DIAG]   Block hash: " << blockHash.GetHex().substr(0,16) << "..." << std::endl;
-            std::cout << "[CONVERGENCE-DIAG]   Prev block: " << block.hashPrevBlock.GetHex().substr(0,16) << "..." << std::endl;
-
             // Basic validation: Check PoW
             if (!CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[P2P] ERROR: Block from peer " << peer_id << " has invalid PoW" << std::endl;
@@ -1686,13 +1681,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     return;
                 }
 
-                std::cout << "[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)" << std::endl;
-
                 // Add block to orphan manager (now validated)
                 if (g_node_context.orphan_manager->AddOrphanBlock(peer_id, block)) {
-                    std::cout << "[Orphan] Block added to orphan pool (count: "
-                              << g_node_context.orphan_manager->GetOrphanCount() << ")" << std::endl;
-
                     // Request the missing parent block from the peer
                     std::vector<NetProtocol::CInv> getdata;
                     getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock));
@@ -1745,9 +1735,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
                               << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
 
-                    // [CONVERGENCE-DIAG] Log reorg completion after receiving block
-                    std::cout << "[CONVERGENCE-DIAG] ✅ REORG COMPLETED after receiving block from peer " << peer_id << std::endl;
-
                     // Signal main loop to update mining template
                     g_node_state.new_block_found = true;
 
@@ -1769,22 +1756,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         g_node_state.new_block_found = true;
 
                         // BUG #32 FIX: Immediately update mining template when IBD block becomes new tip
-                        std::cout << "[BUG32-DEBUG] Checking immediate template update conditions:" << std::endl;
-                        std::cout << "[BUG32-DEBUG]   miner = " << (g_node_state.miner ? "valid" : "NULL") << std::endl;
-                        std::cout << "[BUG32-DEBUG]   wallet = " << (g_node_state.wallet ? "valid" : "NULL") << std::endl;
-                        std::cout << "[BUG32-DEBUG]   mining_enabled = " << (g_node_state.mining_enabled.load() ? "true" : "false") << std::endl;
-
                         if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                             std::cout << "[Mining] IBD block became new tip - updating template immediately..." << std::endl;
                             auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
                             if (templateOpt) {
                                 g_node_state.miner->UpdateTemplate(*templateOpt);
                                 std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
-                            } else {
-                                std::cout << "[BUG32-DEBUG] BuildMiningTemplate returned empty" << std::endl;
                             }
-                        } else {
-                            std::cout << "[BUG32-DEBUG] Conditions not met - template NOT updated immediately" << std::endl;
                         }
 
                         // BUG #43 FIX: Relay received blocks to other peers (Bitcoin Core standard)
@@ -1838,9 +1816,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 if (!orphanQueue.empty()) {
-                    std::cout << "[Orphan] Found " << orphanQueue.size()
-                              << " orphan block(s) that can now be processed" << std::endl;
-
                     // Iterative processing instead of recursion
                     while (!orphanQueue.empty() && processedCount < MAX_ORPHAN_CHAIN_DEPTH) {
                         uint256 orphanHash = orphanQueue.front();
@@ -1848,10 +1823,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                         CBlock orphanBlock;
                         if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
-                            std::cout << "[Orphan] Processing orphan: "
-                                      << orphanHash.GetHex().substr(0, 16) << "..."
-                                      << " (depth: " << processedCount + 1 << ")" << std::endl;
-
                             // Remove from orphan pool
                             g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
 
@@ -1913,10 +1884,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cerr << "  Remaining in queue: " << orphanQueue.size() << std::endl;
                         std::cerr << "  This may indicate a DoS attack or network partition" << std::endl;
                     }
-
-                    std::cout << "[Orphan] Orphan resolution complete" << std::endl;
-                    std::cout << "  Processed: " << processedCount << " block(s)" << std::endl;
-                    std::cout << "  Remaining orphans: " << g_node_context.orphan_manager->GetOrphanCount() << std::endl;
                 }
             } else {
                 std::cerr << "[P2P] ERROR: Failed to activate block in chain" << std::endl;
@@ -2337,9 +2304,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "  Our mined block triggered a reorg" << std::endl;
                     std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
                               << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
-
-                    // [CONVERGENCE-DIAG] Log reorg completion from locally mined block
-                    std::cout << "[CONVERGENCE-DIAG] ✅ REORG COMPLETED after locally mined block" << std::endl;
 
                     // Stop mining - need to reassess chain state
                     g_node_state.new_block_found = true;

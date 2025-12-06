@@ -33,7 +33,6 @@ bool COrphanManager::AddOrphanBlock(NodeId peer, const CBlock& block)
 
     // Check global memory limit before adding
     if (nOrphanBytes + blockSize > MAX_ORPHAN_BYTES) {
-        std::cout << "[OrphanManager] Approaching memory limit, evicting oldest orphans..." << std::endl;
         LimitOrphans();
 
         // After eviction, check again
@@ -58,12 +57,6 @@ bool COrphanManager::AddOrphanBlock(NodeId peer, const CBlock& block)
 
     // Update memory tracking
     nOrphanBytes += blockSize;
-
-    std::cout << "[OrphanManager] Added orphan block " << hash.GetHex().substr(0, 16) << "..."
-              << " (parent: " << block.hashPrevBlock.GetHex().substr(0, 16) << "...)"
-              << " from peer " << peer
-              << " | Total: " << mapOrphanBlocks.size() << " orphans, "
-              << (nOrphanBytes / 1024) << " KB" << std::endl;
 
     // Enforce limits after adding
     LimitOrphans();
@@ -104,9 +97,6 @@ bool COrphanManager::EraseOrphanBlock(const uint256& hash)
 
     // Remove from all indices
     EraseOrphanInternal(it);
-
-    std::cout << "[OrphanManager] Erased orphan block " << hash.GetHex().substr(0, 16) << "..."
-              << " | Remaining: " << mapOrphanBlocks.size() << " orphans" << std::endl;
 
     return true;
 }
@@ -194,10 +184,6 @@ size_t COrphanManager::EraseOrphansForPeer(NodeId peer)
     // Remove peer entry
     mapOrphanBlocksByPeer.erase(peer);
 
-    if (count > 0) {
-        std::cout << "[OrphanManager] Erased " << count << " orphans from peer " << peer << std::endl;
-    }
-
     return count;
 }
 
@@ -242,11 +228,6 @@ size_t COrphanManager::EraseExpiredOrphans(std::chrono::seconds maxAge)
         }
     }
 
-    if (count > 0) {
-        std::cout << "[OrphanManager] Erased " << count << " expired orphans (age > "
-                  << maxAge.count() << " seconds)" << std::endl;
-    }
-
     return count;
 }
 
@@ -284,8 +265,6 @@ void COrphanManager::Clear()
     mapOrphanBlocksByPrev.clear();
     mapOrphanBlocksByPeer.clear();
     nOrphanBytes = 0;
-
-    std::cout << "[OrphanManager] Cleared all orphans" << std::endl;
 }
 
 // ============================================================================
