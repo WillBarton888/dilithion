@@ -373,10 +373,13 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 
     // Send message (no locks held - safe for network I/O)
-    if (g_connection_manager && g_message_processor) {
+    // P0-5 FIX: Use .load() for atomic pointers
+    auto* conn_mgr = g_connection_manager.load();
+    auto* msg_proc = g_message_processor.load();
+    if (conn_mgr && msg_proc) {
         NetProtocol::CGetHeadersMessage msg(locator, uint256());
-        CNetMessage getheaders = g_message_processor->CreateGetHeadersMessage(msg);
-        g_connection_manager->SendMessage(peer, getheaders);
+        CNetMessage getheaders = msg_proc->CreateGetHeadersMessage(msg);
+        conn_mgr->SendMessage(peer, getheaders);
         std::cout << "[HeadersManager] Sent GETHEADERS to peer " << peer << std::endl;
     } else {
         std::cerr << "[HeadersManager] ERROR: Cannot send GETHEADERS - networking not initialized" << std::endl;

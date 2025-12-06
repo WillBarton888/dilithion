@@ -14,8 +14,7 @@ static int64_t GetTimeMillis() {
     ).count();
 }
 
-// External message processor (defined in net.cpp)
-extern CNetMessageProcessor* g_message_processor;
+// g_message_processor is now declared as std::atomic in net.h (P0-5 FIX)
 
 // Constructor
 CAsyncBroadcaster::CAsyncBroadcaster(CConnectionManager& conn_mgr)
@@ -141,7 +140,9 @@ bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const std::vector<in
 
     // Create INV message using message processor
     std::vector<NetProtocol::CInv> inv_vec = {block_inv};
-    CNetMessage invMsg = g_message_processor->CreateInvMessage(inv_vec);
+    auto* msg_processor = g_message_processor.load();
+    if (!msg_processor) return false;
+    CNetMessage invMsg = msg_processor->CreateInvMessage(inv_vec);
 
     // Queue with HIGH priority
     return QueueBroadcast(invMsg, peer_ids, PRIORITY_HIGH);

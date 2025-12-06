@@ -348,45 +348,25 @@ bool CChainVerifier::WipeBlockchainData(bool testnet)
     std::string blocksDir = dataDir + "/blocks";
     std::string chainstateDir = dataDir + "/chainstate";
 
-    // Wipe blocks directory
+    // Wipe blocks directory (using std::filesystem for security - no shell command injection)
     try {
-#ifdef __APPLE__
-        struct stat st;
-        if (stat(blocksDir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
-            std::cout << "[ChainVerifier] Removing: " << blocksDir << std::endl;
-            std::string cmd = "rm -rf \"" + blocksDir + "\"";
-            system(cmd.c_str());
-            std::cout << "[ChainVerifier] Removed blocks directory" << std::endl;
-        }
-#else
         if (std::filesystem::exists(blocksDir)) {
             std::cout << "[ChainVerifier] Removing: " << blocksDir << std::endl;
             std::filesystem::remove_all(blocksDir);
             std::cout << "[ChainVerifier] Removed blocks directory" << std::endl;
         }
-#endif
     } catch (const std::exception& e) {
         std::cerr << "[ChainVerifier] ERROR: Failed to remove blocks directory: " << e.what() << std::endl;
         return false;
     }
 
-    // Wipe chainstate directory
+    // Wipe chainstate directory (using std::filesystem for security - no shell command injection)
     try {
-#ifdef __APPLE__
-        struct stat st;
-        if (stat(chainstateDir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
-            std::cout << "[ChainVerifier] Removing: " << chainstateDir << std::endl;
-            std::string cmd = "rm -rf \"" + chainstateDir + "\"";
-            system(cmd.c_str());
-            std::cout << "[ChainVerifier] Removed chainstate directory" << std::endl;
-        }
-#else
         if (std::filesystem::exists(chainstateDir)) {
             std::cout << "[ChainVerifier] Removing: " << chainstateDir << std::endl;
             std::filesystem::remove_all(chainstateDir);
             std::cout << "[ChainVerifier] Removed chainstate directory" << std::endl;
         }
-#endif
     } catch (const std::exception& e) {
         std::cerr << "[ChainVerifier] ERROR: Failed to remove chainstate directory: " << e.what() << std::endl;
         return false;

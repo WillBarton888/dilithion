@@ -76,16 +76,40 @@ bool CUTXOSet::Open(const std::string& path, bool create_if_missing) {
 void CUTXOSet::Close() {
     std::lock_guard<std::recursive_mutex> lock(cs_utxo);
 
-    // Flush any pending changes
     if (db != nullptr) {
-        // Write statistics before closing
+        // P0-3 FIX: Flush all pending cache changes FIRST
+        // This ensures cache_additions and cache_deletions are persisted
+        if (!cache_additions.empty() || !cache_deletions.empty()) {
+            // Use batch write with sync for durability
+            leveldb::WriteBatch batch;
+
+            for (const auto& pair : cache_additions) {
+                std::string key = SerializeOutPoint(pair.first);
+                std::string value = SerializeUTXOEntry(pair.second);
+                batch.Put(key, value);
+            }
+
+            for (const auto& pair : cache_deletions) {
+                std::string key = SerializeOutPoint(pair.first);
+                batch.Delete(key);
+            }
+
+            leveldb::WriteOptions write_options;
+            write_options.sync = true;  // P0-2 FIX: Ensure durability
+            db->Write(write_options, &batch);
+        }
+
+        // Write final statistics with sync=true
         std::string stats_key = "utxo_stats";
         std::string stats_value;
         stats_value.resize(20);
         std::memcpy(&stats_value[0], &stats.nUTXOs, 8);
         std::memcpy(&stats_value[8], &stats.nTotalAmount, 8);
         std::memcpy(&stats_value[16], &stats.nHeight, 4);
-        db->Put(leveldb::WriteOptions(), stats_key, stats_value);
+
+        leveldb::WriteOptions sync_options;
+        sync_options.sync = true;  // P0-2 FIX: Ensure stats survive crash
+        db->Put(sync_options, stats_key, stats_value);
     }
 
     cache.clear();
@@ -548,8 +572,10 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
     // Step 6: Update height
     stats.nHeight = height;
 
-    // Step 7: Write batch to database
-    leveldb::Status status = db->Write(leveldb::WriteOptions(), &batch);
+    // Step 7: Write batch to database with sync for durability (P0-4 FIX)
+    leveldb::WriteOptions write_options;
+    write_options.sync = true;  // Critical: ensure block changes survive crash
+    leveldb::Status status = db->Write(write_options, &batch);
     if (!status.ok()) {
         std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Database write failed: " << status.ToString() << std::endl;
         return false;
@@ -763,8 +789,10 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
         stats.nHeight--;
     }
 
-    // Step 6: Write batch to database
-    status = db->Write(leveldb::WriteOptions(), &batch);
+    // Step 6: Write batch to database with sync for durability (P0-4 FIX)
+    leveldb::WriteOptions undo_write_options;
+    undo_write_options.sync = true;  // Critical: ensure undo changes survive crash
+    status = db->Write(undo_write_options, &batch);
     if (!status.ok()) {
         std::cerr << "[ERROR] CUTXOSet::UndoBlock: Database write failed: " << status.ToString() << std::endl;
         return false;
@@ -1008,8 +1036,10 @@ bool CUTXOSet::Clear() {
         }
     }
 
-    // Write batch to database
-    leveldb::Status status = db->Write(leveldb::WriteOptions(), &batch);
+    // Write batch to database with sync for durability (P0-4 FIX)
+    leveldb::WriteOptions clear_write_options;
+    clear_write_options.sync = true;  // Critical: ensure clear operation survives crash
+    leveldb::Status status = db->Write(clear_write_options, &batch);
     if (!status.ok()) {
         std::cerr << "[ERROR] CUTXOSet::Clear: Failed to clear database: " << status.ToString() << std::endl;
         return false;

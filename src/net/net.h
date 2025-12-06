@@ -18,6 +18,7 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <atomic>
 
 /**
  * CNetMessage - Network message processor
@@ -204,24 +205,27 @@ extern CNetworkStats g_network_stats;
 
 /**
  * Global transaction relay manager (Phase 5.3)
+ * P0-5 FIX: Use std::atomic to prevent initialization race conditions
  */
 class CTxRelayManager;
-extern CTxRelayManager* g_tx_relay_manager;
+extern std::atomic<CTxRelayManager*> g_tx_relay_manager;
 
 /**
  * Global pointers for transaction relay (Phase 5.3)
+ * P0-5 FIX: Use std::atomic to prevent initialization race conditions
  */
 class CTxMemPool;
 class CTransactionValidator;
 class CUTXOSet;
-extern CTxMemPool* g_mempool;
-extern CTransactionValidator* g_tx_validator;
-extern CUTXOSet* g_utxo_set;
-extern unsigned int g_chain_height;
+extern std::atomic<CTxMemPool*> g_mempool;
+extern std::atomic<CTransactionValidator*> g_tx_validator;
+extern std::atomic<CUTXOSet*> g_utxo_set;
+extern std::atomic<unsigned int> g_chain_height;
 
 // Global P2P networking pointers (NW-005)
-extern CConnectionManager* g_connection_manager;
-extern CNetMessageProcessor* g_message_processor;
+// P0-5 FIX: Use std::atomic to prevent initialization race conditions
+extern std::atomic<CConnectionManager*> g_connection_manager;
+extern std::atomic<CNetMessageProcessor*> g_message_processor;
 
 /**
  * Announce a transaction to all connected peers (Phase 5.3)

@@ -1114,8 +1114,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 return 1;
                             }
 
-                            // Clear mempool
-                            g_mempool->Clear();
+                            // Clear mempool (P0-5 FIX: use .load() for atomic)
+                            auto* mempool = g_mempool.load();
+                            if (mempool) mempool->Clear();
 
                             // Reopen UTXO set database
                             std::string chainstatePath = config.datadir + "/chainstate";
@@ -1282,7 +1283,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_block_fetcher = g_node_context.block_fetcher.get();
 
         // Initialize transaction relay manager (global)
-        g_tx_relay_manager = new CTxRelayManager();
+        // P0-5 FIX: Use .store() for atomic pointer
+        g_tx_relay_manager.store(new CTxRelayManager());
 
         // Initialize IBD managers (Bug #12 - Phase 4.1)
         std::cout << "Initializing IBD managers..." << std::endl;
@@ -1334,9 +1336,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         CFeelerManager feeler_manager(*g_node_context.peer_manager, connection_manager);
 
         // Set global pointers for transaction announcement (NW-005)
-        g_connection_manager = &connection_manager;
-        g_message_processor = &message_processor;
-        
+        // P0-5 FIX: Use .store() for atomic pointers
+        g_connection_manager.store(&connection_manager);
+        g_message_processor.store(&message_processor);
+
         // Phase 1.2: Store in NodeContext (Bitcoin Core pattern)
         g_node_context.connection_manager = &connection_manager;
         g_node_context.message_processor = &message_processor;
@@ -1345,15 +1348,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         CAsyncBroadcaster async_broadcaster(connection_manager);
         g_async_broadcaster = &async_broadcaster;  // Legacy global
         g_node_context.async_broadcaster = &async_broadcaster;
-        
+
         // Phase 1.2: Store node state flags in NodeContext
         // Note: atomic values must use .load() when copying
         g_node_context.running.store(g_node_state.running.load());
         g_node_context.mining_enabled.store(g_node_state.mining_enabled.load());
-        
-        // Keep legacy globals for backward compatibility
-        g_connection_manager = &connection_manager;
-        g_message_processor = &message_processor;
 
         if (!async_broadcaster.Start()) {
             std::cerr << "Failed to start async broadcaster" << std::endl;
@@ -3377,12 +3376,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
 
         // Clear global P2P networking pointers (NW-005)
-        g_connection_manager = nullptr;
-        g_message_processor = nullptr;
+        // P0-5 FIX: Use .store() for atomic pointers
+        g_connection_manager.store(nullptr);
+        g_message_processor.store(nullptr);
 
-        // Clean up transaction relay manager
-        delete g_tx_relay_manager;
-        g_tx_relay_manager = nullptr;
+        // Clean up transaction relay manager (P0-5 FIX: use load/store for atomic)
+        delete g_tx_relay_manager.load();
+        g_tx_relay_manager.store(nullptr);
 
         // Clear peer manager pointer (ownership in g_node_context)
         g_peer_manager = nullptr;
@@ -3441,10 +3441,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         #endif
         std::cerr << "===========================================================" << std::endl;
 
-        // Cleanup on error
-        if (g_tx_relay_manager) {
-            delete g_tx_relay_manager;
-            g_tx_relay_manager = nullptr;
+        // Cleanup on error (P0-5 FIX: use load/store for atomic)
+        auto* relay_mgr = g_tx_relay_manager.load();
+        if (relay_mgr) {
+            delete relay_mgr;
+            g_tx_relay_manager.store(nullptr);
         }
         // Phase 1.2: All cleanup handled by NodeContext.Shutdown()
         // No manual cleanup needed
@@ -3491,10 +3492,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         #endif
         std::cerr << "===========================================================" << std::endl;
 
-        // Cleanup on error
-        if (g_tx_relay_manager) {
-            delete g_tx_relay_manager;
-            g_tx_relay_manager = nullptr;
+        // Cleanup on error (P0-5 FIX: use load/store for atomic)
+        auto* relay_mgr = g_tx_relay_manager.load();
+        if (relay_mgr) {
+            delete relay_mgr;
+            g_tx_relay_manager.store(nullptr);
         }
         // Phase 1.2: All cleanup handled by NodeContext.Shutdown()
         if (Dilithion::g_chainParams) {

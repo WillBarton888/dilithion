@@ -58,18 +58,21 @@ static const uint64_t MAX_SCRIPT_SIZE = 10000;          // Max script size in by
 // Global network statistics
 CNetworkStats g_network_stats;
 
+// P0-5 FIX: Use std::atomic for global pointers to prevent initialization race conditions
+// These pointers may be accessed from multiple threads during startup/shutdown
+
 // Global transaction relay manager (Phase 5.3)
-CTxRelayManager* g_tx_relay_manager = nullptr;
+std::atomic<CTxRelayManager*> g_tx_relay_manager{nullptr};
 
 // Global pointers for transaction relay (Phase 5.3)
-CTxMemPool* g_mempool = nullptr;
-CTransactionValidator* g_tx_validator = nullptr;
-CUTXOSet* g_utxo_set = nullptr;
-unsigned int g_chain_height = 0;
+std::atomic<CTxMemPool*> g_mempool{nullptr};
+std::atomic<CTransactionValidator*> g_tx_validator{nullptr};
+std::atomic<CUTXOSet*> g_utxo_set{nullptr};
+std::atomic<unsigned int> g_chain_height{0};
 
 // Global pointers for P2P networking (NW-005)
-CConnectionManager* g_connection_manager = nullptr;
-CNetMessageProcessor* g_message_processor = nullptr;
+std::atomic<CConnectionManager*> g_connection_manager{nullptr};
+std::atomic<CNetMessageProcessor*> g_message_processor{nullptr};
 
 // Phase 1.2: Block fetcher now accessed via NodeContext
 // Legacy extern kept for backward compatibility during migration
@@ -511,13 +514,17 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
         // Phase 5.3: Handle transaction inventory announcements
         std::vector<NetProtocol::CInv> vToFetch;
 
+        // P0-5 FIX: Load atomic pointers once for this block
+        auto* tx_relay = g_tx_relay_manager.load();
+        auto* mempool = g_mempool.load();
+
         for (const NetProtocol::CInv& inv_item : inv) {
             if (inv_item.type == NetProtocol::MSG_TX_INV) {
                 // Check if we need this transaction
-                if (g_tx_relay_manager && g_mempool) {
-                    if (!g_tx_relay_manager->AlreadyHave(inv_item.hash, *g_mempool)) {
+                if (tx_relay && mempool) {
+                    if (!tx_relay->AlreadyHave(inv_item.hash, *mempool)) {
                         vToFetch.push_back(inv_item);
-                        g_tx_relay_manager->MarkRequested(inv_item.hash, peer_id);
+                        tx_relay->MarkRequested(inv_item.hash, peer_id);
 
                         std::cout << "[P2P] Requesting transaction "
                                   << inv_item.hash.GetHex().substr(0, 16)
@@ -583,15 +590,17 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         }
 
         // Phase 5.3: Handle transaction data requests
+        // P0-5 FIX: Load atomic pointer for mempool
+        auto* mempool_ptr = g_mempool.load();
         for (const NetProtocol::CInv& inv : getdata) {
             if (inv.type == NetProtocol::MSG_TX_INV) {
                 // Try to get transaction from mempool
-                if (g_mempool) {
+                if (mempool_ptr) {
                     // Create dummy transaction for mempool lookup
                     CTransactionRef tx_ref = MakeTransactionRef();
                     CTxMemPoolEntry entry(tx_ref, 0, 0, 0);
 
-                    if (g_mempool->GetTx(inv.hash, entry)) {
+                    if (mempool_ptr->GetTx(inv.hash, entry)) {
                         CTransactionRef tx = entry.GetSharedTx();
 
                         // Create TX message and send it
@@ -747,14 +756,21 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         std::cout << "[P2P] Received transaction " << txid.GetHex().substr(0, 16)
                   << "... from peer " << peer_id << std::endl;
 
+        // P0-5 FIX: Load atomic pointers for transaction processing
+        auto* tx_relay = g_tx_relay_manager.load();
+        auto* mempool = g_mempool.load();
+        auto* tx_validator = g_tx_validator.load();
+        auto* utxo_set = g_utxo_set.load();
+        unsigned int chain_height = g_chain_height.load();
+
         // Phase 5.3: Transaction relay processing
-        if (g_tx_relay_manager) {
+        if (tx_relay) {
             // Remove from in-flight
-            g_tx_relay_manager->RemoveInFlight(txid);
+            tx_relay->RemoveInFlight(txid);
         }
 
         // Check if we already have it
-        if (g_mempool && g_mempool->Exists(txid)) {
+        if (mempool && mempool->Exists(txid)) {
             std::cout << "[P2P] Transaction " << txid.GetHex().substr(0, 16)
                       << "... already in mempool" << std::endl;
             on_tx(peer_id, tx);
@@ -762,11 +778,11 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         }
 
         // Validate transaction
-        if (g_tx_validator && g_utxo_set && g_mempool) {
+        if (tx_validator && utxo_set && mempool) {
             std::string error;
             CAmount fee = 0;
 
-            if (!g_tx_validator->CheckTransaction(tx, *g_utxo_set, g_chain_height, fee, error)) {
+            if (!tx_validator->CheckTransaction(tx, *utxo_set, chain_height, fee, error)) {
                 std::cout << "[P2P] Invalid transaction " << txid.GetHex().substr(0, 16)
                           << "... from peer " << peer_id << ": " << error << std::endl;
                 // DoS hardening: Penalize peer for sending invalid transactions
@@ -784,7 +800,7 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
             int64_t current_time = GetTime();
             CTransactionRef tx_ref = MakeTransactionRef(std::move(tx));
 
-            if (!g_mempool->AddTx(tx_ref, fee, current_time, g_chain_height, &mempool_error)) {
+            if (!mempool->AddTx(tx_ref, fee, current_time, chain_height, &mempool_error)) {
                 std::cout << "[P2P] Failed to add tx " << txid.GetHex().substr(0, 16)
                           << "... to mempool: " << mempool_error << std::endl;
                 return true;  // Not necessarily peer's fault
@@ -1818,8 +1834,10 @@ void CConnectionManager::Cleanup() {
 void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
     // Check if networking infrastructure is initialized
     // Phase 1.2: Use NodeContext for peer manager
+    // P0-5 FIX: Load atomic pointer
+    auto* tx_relay = g_tx_relay_manager.load();
     extern NodeContext g_node_context;
-    if (!g_node_context.peer_manager || !g_node_context.connection_manager || !g_node_context.message_processor || !g_tx_relay_manager) {
+    if (!g_node_context.peer_manager || !g_node_context.connection_manager || !g_node_context.message_processor || !tx_relay) {
         std::cout << "[TX-RELAY] Cannot announce transaction " << txid.GetHex().substr(0, 16)
                   << "... (networking not initialized)" << std::endl;
         return;
@@ -1855,7 +1873,7 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
         }
 
         // Check if we should announce to this peer
-        if (!g_tx_relay_manager->ShouldAnnounce(peer->id, txid)) {
+        if (!tx_relay->ShouldAnnounce(peer->id, txid)) {
             skipped_count++;
             continue;
         }
@@ -1864,14 +1882,13 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
         std::vector<NetProtocol::CInv> inv_vec;
         inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, txid));
 
-        extern NodeContext g_node_context;
         CNetMessage inv_message = g_node_context.message_processor->CreateInvMessage(inv_vec);
 
         // Send INV message to peer
         // Only mark as announced if send succeeds (audit recommendation)
         if (g_node_context.connection_manager->SendMessage(peer->id, inv_message)) {
             // Mark as announced to prevent duplicates
-            g_tx_relay_manager->MarkAnnounced(peer->id, txid);
+            tx_relay->MarkAnnounced(peer->id, txid);
             announced_count++;
         } else {
             // Send failed - don't mark as announced, will retry on next call
