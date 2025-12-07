@@ -637,9 +637,18 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
             // Create GETDATA message
             CNetMessage getdata_msg = CreateGetDataMessage(vToFetch);
 
-            // Send via connection manager (need to get connection manager reference)
-            // For now, use the handler callback
-            on_getdata(peer_id, vToFetch);  // This will trigger sending getdata
+            // BUG #106 FIX: Actually send the GETDATA request to the peer!
+            extern NodeContext g_node_context;
+            if (g_node_context.connection_manager) {
+                if (g_node_context.connection_manager->SendMessage(peer_id, getdata_msg)) {
+                    std::cout << "[P2P] Sent GETDATA for " << vToFetch.size()
+                              << " item(s) to peer " << peer_id << std::endl;
+                } else {
+                    std::cout << "[P2P] Failed to send GETDATA to peer " << peer_id << std::endl;
+                }
+            } else {
+                std::cout << "[P2P] Cannot send GETDATA - connection manager not initialized" << std::endl;
+            }
         }
 
         // Call handler for any additional processing
@@ -727,14 +736,24 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                     if (mempool_ptr->GetTx(inv.hash, entry)) {
                         CTransactionRef tx = entry.GetSharedTx();
 
-                        // Create TX message and send it
+                        // Create TX message
                         CNetMessage tx_msg = CreateTxMessage(*tx);
 
-                        // Note: Actual sending will be done by handler
-                        // For now, just log
-                        std::cout << "[P2P] Serving transaction "
-                                  << inv.hash.GetHex().substr(0, 16)
-                                  << "... to peer " << peer_id << std::endl;
+                        // BUG #106 FIX: Actually send the transaction to the requesting peer!
+                        extern NodeContext g_node_context;
+                        if (g_node_context.connection_manager) {
+                            if (g_node_context.connection_manager->SendMessage(peer_id, tx_msg)) {
+                                std::cout << "[P2P] Sent transaction "
+                                          << inv.hash.GetHex().substr(0, 16)
+                                          << "... to peer " << peer_id << std::endl;
+                            } else {
+                                std::cout << "[P2P] Failed to send transaction "
+                                          << inv.hash.GetHex().substr(0, 16)
+                                          << "... to peer " << peer_id << std::endl;
+                            }
+                        } else {
+                            std::cout << "[P2P] Cannot send transaction - connection manager not initialized" << std::endl;
+                        }
                     } else {
                         std::cout << "[P2P] Transaction "
                                   << inv.hash.GetHex().substr(0, 16)
