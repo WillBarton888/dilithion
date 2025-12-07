@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <ctime>
 #include <chrono>
+#include <iostream>  // For std::cout, std::endl (BUG #109 debug)
 
 static const size_t DEFAULT_MAX_MEMPOOL_SIZE = 300 * 1024 * 1024;
 
