@@ -157,6 +157,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getblock"] = [this](const std::string& p) { return RPC_GetBlock(p); };
     m_handlers["getblockhash"] = [this](const std::string& p) { return RPC_GetBlockHash(p); };
     m_handlers["gettxout"] = [this](const std::string& p) { return RPC_GetTxOut(p); };
+    m_handlers["checkchain"] = [this](const std::string& p) { return RPC_CheckChain(p); };
 
     // Wallet encryption
     m_handlers["encryptwallet"] = [this](const std::string& p) { return RPC_EncryptWallet(p); };
@@ -2443,6 +2444,98 @@ std::string CRPCServer::RPC_GetBlockchainInfo(const std::string& params) {
     return oss.str();
 }
 
+std::string CRPCServer::RPC_CheckChain(const std::string& params) {
+    // Testnet checkpoints - known good block hashes at specific heights
+    // These are the OFFICIAL chain block hashes that all nodes should match
+    static const std::vector<std::pair<int, std::string>> checkpoints = {
+        {1,   "000087e5438d7d4720807da15bfc816106ae559f6ff95a9edb99ef7de1404fd9"},
+        {100, "00007e60b39eb965e39994423646ea60dadf168d4e4daaa93b36ad88d8e3fb21"},
+        {200, "00001b7f26c4a78b28d67631b6763889f6647645058720415199f0f10c104973"},
+        {300, "00009351e8783aea6cf96c2fb4b3ba5bc0f06688f44515633fb04f8f31474860"},
+        {400, "00001b1b87af63d293ab68cd5d4c4a9a291e14ad4a9fa73220592510b1b555bc"},
+        {500, "0000deb0189c1b87e02c1a070e34da0d29e33cf6aae88b18900a92a31dd7ea3e"},
+        {534, "00007b7f83c0c1b96010eb0f19bf0911e732c16ebf32dfcdd0bde7dac76b239e"},
+    };
+
+    if (!m_blockchain || !m_chainstate) {
+        throw std::runtime_error("Blockchain not initialized");
+    }
+
+    int localHeight = m_chainstate->GetHeight();
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"your_height\":" << localHeight << ",";
+
+    bool chainValid = true;
+    int forkHeight = -1;
+    std::string forkLocalHash = "";
+    std::string forkExpectedHash = "";
+    int checkpointsVerified = 0;
+
+    oss << "\"checkpoints\":[";
+    bool first = true;
+
+    for (const auto& cp : checkpoints) {
+        int height = cp.first;
+        const std::string& expectedHash = cp.second;
+
+        if (!first) oss << ",";
+        first = false;
+
+        oss << "{\"height\":" << height << ",";
+
+        if (height > localHeight) {
+            oss << "\"status\":\"not_reached\",";
+            oss << "\"expected\":\"" << expectedHash.substr(0, 16) << "...\"}";
+            continue;
+        }
+
+        // Get local block hash at this height
+        std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(height);
+        if (hashes.empty()) {
+            oss << "\"status\":\"missing\",";
+            oss << "\"expected\":\"" << expectedHash.substr(0, 16) << "...\"}";
+            chainValid = false;
+            if (forkHeight < 0) forkHeight = height;
+            continue;
+        }
+
+        std::string localHash = hashes[0].GetHex();
+
+        if (localHash == expectedHash) {
+            oss << "\"status\":\"OK\",";
+            oss << "\"hash\":\"" << localHash.substr(0, 16) << "...\"}";
+            checkpointsVerified++;
+        } else {
+            oss << "\"status\":\"MISMATCH\",";
+            oss << "\"your_hash\":\"" << localHash.substr(0, 16) << "...\",";
+            oss << "\"expected\":\"" << expectedHash.substr(0, 16) << "...\"}";
+            chainValid = false;
+            if (forkHeight < 0) {
+                forkHeight = height;
+                forkLocalHash = localHash;
+                forkExpectedHash = expectedHash;
+            }
+        }
+    }
+    oss << "],";
+
+    oss << "\"checkpoints_verified\":" << checkpointsVerified << ",";
+    oss << "\"chain_valid\":" << (chainValid ? "true" : "false");
+
+    if (!chainValid && forkHeight > 0) {
+        oss << ",\"fork_detected_at_height\":" << forkHeight;
+        oss << ",\"your_hash_at_fork\":\"" << forkLocalHash << "\"";
+        oss << ",\"expected_hash_at_fork\":\"" << forkExpectedHash << "\"";
+        oss << ",\"action_required\":\"Your chain forked! Delete data folder and resync: "
+            << "Windows: Remove-Item -Recurse -Force $env:APPDATA\\\\.dilithion-testnet | "
+            << "Linux/Mac: rm -rf ~/.dilithion-testnet\"";
+    }
+
+    oss << "}";
+    return oss.str();
+}
+
 std::string CRPCServer::RPC_GetBlock(const std::string& params) {
     if (!m_blockchain) {
         throw std::runtime_error("Blockchain not initialized");
@@ -3260,6 +3353,7 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getblock - Get block by hash\",";
     oss << "\"getblockhash - Get block hash by height\",";
     oss << "\"gettxout - Get UTXO information\",";
+    oss << "\"checkchain - Verify your chain matches official checkpoints (detect forks)\",";
 
     // Wallet encryption
     oss << "\"encryptwallet - Encrypt wallet with passphrase\",";

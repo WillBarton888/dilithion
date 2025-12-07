@@ -264,6 +264,7 @@ private:
     std::string RPC_GetBlock(const std::string& params);
     std::string RPC_GetBlockHash(const std::string& params);
     std::string RPC_GetTxOut(const std::string& params);
+    std::string RPC_CheckChain(const std::string& params);
 
     // Wallet encryption methods
     std::string RPC_EncryptWallet(const std::string& params);
