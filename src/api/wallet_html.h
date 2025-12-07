@@ -1164,11 +1164,12 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        // Refresh transactions
+        // Refresh transactions - BUG #104 FIX: Use listtransactions to include sent tx
         async function refreshTransactions() {
             try {
-                const utxos = await rpcCall('listunspent', [0, 9999999]);
-                renderTransactions(utxos);
+                const result = await rpcCall('listtransactions', {});
+                const transactions = result.transactions || [];
+                renderTransactions(transactions);
             } catch(e) {
                 console.error('Transaction error:', e);
                 document.getElementById('recentTxList').innerHTML =
@@ -1178,9 +1179,9 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        // Render transaction list
-        function renderTransactions(utxos) {
-            if (!utxos || utxos.length === 0) {
+        // Render transaction list - BUG #104 FIX: Show both sent and received
+        function renderTransactions(transactions) {
+            if (!transactions || transactions.length === 0) {
                 const html = '<div class="empty-state">No transactions yet</div>';
                 document.getElementById('recentTxList').innerHTML = html;
                 document.getElementById('txList').innerHTML = html;
@@ -1188,24 +1189,37 @@ inline const std::string& GetWalletHTML() {
             }
 
             let html = '';
-            utxos.slice(0, 10).forEach(utxo => {
-                const confirmations = utxo.confirmations || 0;
-                const amount = utxo.amount || 0;
-                const txid = utxo.txid || 'unknown';
+            transactions.slice(0, 10).forEach(tx => {
+                const confirmations = tx.confirmations || 0;
+                const amount = tx.amount || 0;
+                const txid = tx.txid || 'unknown';
+                const category = tx.category || 'receive';
+                const isSend = category === 'send';
+                const fee = tx.fee || 0;
+
+                const iconClass = isSend ? 'sent' : 'received';
+                const typeText = isSend ? 'Sent' : 'Received';
+                const amountClass = isSend ? 'negative' : 'positive';
+                const amountPrefix = isSend ? '' : '+';
+                const displayAmount = Math.abs(amount).toFixed(8);
+                const feeText = isSend && fee > 0 ? ` (fee: ${fee.toFixed(4)})` : '';
 
                 html += `
                     <div class="tx-item">
-                        <div class="tx-icon received">
+                        <div class="tx-icon ${iconClass}">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+                                ${isSend
+                                    ? '<polyline points="22 2 15 22 11 13 2 9 22 2"></polyline>'
+                                    : '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>'
+                                }
                             </svg>
                         </div>
                         <div class="tx-details">
-                            <div class="tx-type">Received</div>
+                            <div class="tx-type">${typeText}</div>
                             <div class="tx-hash">${txid.substring(0, 16)}...${txid.substring(txid.length - 8)}</div>
                         </div>
                         <div>
-                            <div class="tx-amount positive">+${amount.toFixed(8)} DIL</div>
+                            <div class="tx-amount ${amountClass}">${amountPrefix}${displayAmount} DIL${feeText}</div>
                             <div class="tx-confirmations">${confirmations} confirmations</div>
                         </div>
                     </div>
