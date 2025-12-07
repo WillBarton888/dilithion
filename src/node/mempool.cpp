@@ -483,7 +483,14 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
         // Step 3: Insert pointer into setEntries (can throw on allocation)
         // MEMPOOL-017: Store pointer to entry in map (pointer stability guaranteed by std::map)
         const CTxMemPoolEntry* entry_ptr = &(map_result.first->second);
-        setEntries.insert(entry_ptr);
+        auto set_result = setEntries.insert(entry_ptr);
+
+        // BUG #109 DEBUG: Track setEntries insertion
+        std::cout << "[MEMPOOL-DEBUG] AddTx: txid=" << txid.GetHex().substr(0, 16)
+                  << " mapTx.size()=" << mapTx.size()
+                  << " setEntries.size()=" << setEntries.size()
+                  << " insert_success=" << set_result.second << std::endl;
+
         guard.MarkSetInserted();
 
         // Step 4: Track spent outpoints (can throw on allocation)
@@ -801,6 +808,10 @@ std::optional<CTxMemPoolEntry> CTxMemPool::GetTxIfExists(const uint256& txid) co
 
 std::vector<CTransactionRef> CTxMemPool::GetOrderedTxs() const {
     std::lock_guard<std::mutex> lock(cs);
+
+    // BUG #109 DEBUG: Log mempool state when GetOrderedTxs is called
+    std::cout << "[MEMPOOL-DEBUG] GetOrderedTxs: mapTx.size()=" << mapTx.size()
+              << " setEntries.size()=" << setEntries.size() << std::endl;
 
     // MEMPOOL-015 FIX: Limit GetOrderedTxs to prevent DoS via unbounded allocation
     // Without limit, 1.2M transactions → 9.6MB vector allocation + O(n) iteration
