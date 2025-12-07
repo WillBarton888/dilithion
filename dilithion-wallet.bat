@@ -265,7 +265,7 @@ REM Generate random temp file
 set "TEMP_FILE=%TEMP%\dilithion-%RANDOM%%RANDOM%%TIME:~-5,5%.json"
 
 set "JSON={\"jsonrpc\":\"2.0\",\"method\":\"getbalance\",\"params\":{},\"id\":1}"
-"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -d "%JSON%" > "!TEMP_FILE!"
+"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -H "X-Dilithion-RPC: 1" -d "%JSON%" > "!TEMP_FILE!"
 
 REM Check if file was created (connection successful)
 if not exist "!TEMP_FILE!" (
@@ -301,7 +301,7 @@ echo.
 set "TEMP_FILE=%TEMP%\dilithion-%RANDOM%%RANDOM%%TIME:~-5,5%.json"
 
 set "JSON={\"jsonrpc\":\"2.0\",\"method\":\"getnewaddress\",\"params\":{},\"id\":1}"
-"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -d "%JSON%" > "!TEMP_FILE!"
+"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -H "X-Dilithion-RPC: 1" -d "%JSON%" > "!TEMP_FILE!"
 
 if not exist "!TEMP_FILE!" (
     echo Error: Could not connect to Dilithion node at %RPC_URL%
@@ -326,7 +326,7 @@ echo.
 set "TEMP_FILE=%TEMP%\dilithion-%RANDOM%%RANDOM%%TIME:~-5,5%.json"
 
 set "JSON={\"jsonrpc\":\"2.0\",\"method\":\"getaddresses\",\"params\":{},\"id\":1}"
-"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -d "%JSON%" > "!TEMP_FILE!"
+"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -H "X-Dilithion-RPC: 1" -d "%JSON%" > "!TEMP_FILE!"
 
 if not exist "!TEMP_FILE!" (
     echo Error: Could not connect to Dilithion node at %RPC_URL%
@@ -349,7 +349,7 @@ echo.
 set "TEMP_FILE=%TEMP%\dilithion-%RANDOM%%RANDOM%%TIME:~-5,5%.json"
 
 set "JSON={\"jsonrpc\":\"2.0\",\"method\":\"listunspent\",\"params\":{},\"id\":1}"
-"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -d "%JSON%" > "!TEMP_FILE!"
+"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -H "X-Dilithion-RPC: 1" -d "%JSON%" > "!TEMP_FILE!"
 
 if not exist "!TEMP_FILE!" (
     echo Error: Could not connect to Dilithion node at %RPC_URL%
@@ -426,7 +426,7 @@ REM Write JSON to temp file (SECURITY: prevents command injection)
     echo {"jsonrpc":"2.0","method":"sendtoaddress","params":{"address":"%ADDRESS%","amount":%AMOUNT%},"id":1}
 ) > "!JSON_FILE!"
 
-"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -d @"!JSON_FILE!" > "!TEMP_FILE!"
+"%CURL_CMD%" --max-time %CURL_TIMEOUT% -s -X POST "%RPC_URL%" -H "Content-Type: application/json" -H "X-Dilithion-RPC: 1" -d @"!JSON_FILE!" > "!TEMP_FILE!"
 
 if not exist "!TEMP_FILE!" (
     echo Error: Could not connect to Dilithion node at %RPC_URL%

@@ -571,6 +571,84 @@ inline const std::string& GetWalletHTML() {
                 font-size: 1.5rem;
             }
         }
+
+        /* Confirmation Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 450px;
+            width: 90%;
+            border: 1px solid var(--border);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        }
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .modal-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .modal-label {
+            color: var(--text-secondary);
+        }
+        .modal-value {
+            font-weight: 500;
+            text-align: right;
+            word-break: break-all;
+            max-width: 60%;
+        }
+        .modal-value.address {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+        }
+        .modal-warning {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 16px 0;
+            font-size: 0.9rem;
+            color: #f59e0b;
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        .modal-buttons .btn {
+            flex: 1;
+        }
+        .btn-cancel {
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+        .btn-cancel:hover {
+            background: var(--bg-card-hover);
+        }
     </style>
 </head>
 <body>
@@ -884,6 +962,47 @@ inline const std::string& GetWalletHTML() {
         </div>
     </main>
 
+    <!-- Send Confirmation Modal -->
+    <div class="modal-overlay" id="confirmModal">
+        <div class="modal">
+            <div class="modal-title">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+                Confirm Transaction
+            </div>
+            <div class="modal-row">
+                <span class="modal-label">To Address</span>
+                <span class="modal-value address" id="confirmAddress">-</span>
+            </div>
+            <div class="modal-row">
+                <span class="modal-label">Amount</span>
+                <span class="modal-value" id="confirmAmount">-</span>
+            </div>
+            <div class="modal-row">
+                <span class="modal-label">Network Fee</span>
+                <span class="modal-value" id="confirmFee">~0.0001 DIL</span>
+            </div>
+            <div class="modal-row" style="border-bottom: 2px solid var(--accent);">
+                <span class="modal-label" style="font-weight: 600;">Total</span>
+                <span class="modal-value" id="confirmTotal" style="color: var(--accent);">-</span>
+            </div>
+            <div class="modal-warning">
+                <strong>Warning:</strong> This transaction cannot be reversed. Please verify the address carefully.
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-cancel" onclick="hideConfirmModal()">Cancel</button>
+                <button class="btn btn-primary" id="confirmSendBtn" onclick="confirmSend()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    Confirm Send
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Wallet State
         let connected = false;
@@ -1140,24 +1259,66 @@ inline const std::string& GetWalletHTML() {
             });
         }
 
-        // Handle send
-        async function handleSend(event) {
+        // Pending transaction data for confirmation
+        let pendingTx = { address: '', amount: 0 };
+        const ESTIMATED_FEE = 0.0001;
+
+        // Show confirmation modal
+        function showConfirmModal(address, amount) {
+            pendingTx = { address, amount };
+            document.getElementById('confirmAddress').textContent = address;
+            document.getElementById('confirmAmount').textContent = amount.toFixed(8) + ' DIL';
+            document.getElementById('confirmFee').textContent = '~' + ESTIMATED_FEE + ' DIL';
+            document.getElementById('confirmTotal').textContent = (amount + ESTIMATED_FEE).toFixed(8) + ' DIL';
+            document.getElementById('confirmModal').classList.add('active');
+        }
+
+        // Hide confirmation modal
+        function hideConfirmModal() {
+            document.getElementById('confirmModal').classList.remove('active');
+            pendingTx = { address: '', amount: 0 };
+        }
+
+        // Close modal on overlay click or Escape key
+        document.getElementById('confirmModal').addEventListener('click', (e) => {
+            if (e.target.id === 'confirmModal') hideConfirmModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') hideConfirmModal();
+        });
+
+        // Handle send - shows confirmation modal
+        function handleSend(event) {
             event.preventDefault();
-            const address = document.getElementById('sendAddress').value;
+            const address = document.getElementById('sendAddress').value.trim();
             const amount = parseFloat(document.getElementById('sendAmount').value);
             const alertDiv = document.getElementById('sendAlert');
-            const sendBtn = document.getElementById('sendBtn');
 
             if (!address || !amount || amount <= 0) {
                 alertDiv.innerHTML = '<div class="alert alert-error">Please enter a valid address and amount</div>';
                 return;
             }
 
-            sendBtn.disabled = true;
-            sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
+            // Clear any previous alerts
+            alertDiv.innerHTML = '';
+
+            // Show confirmation modal
+            showConfirmModal(address, amount);
+        }
+
+        // Confirm and send the transaction
+        async function confirmSend() {
+            const address = pendingTx.address;
+            const amount = pendingTx.amount;
+            const alertDiv = document.getElementById('sendAlert');
+            const confirmBtn = document.getElementById('confirmSendBtn');
+
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
 
             try {
                 const txid = await rpcCall('sendtoaddress', {address: address, amount: parseFloat(amount)});
+                hideConfirmModal();
                 alertDiv.innerHTML = `
                     <div class="alert alert-success">
                         Transaction sent successfully!<br>
@@ -1171,16 +1332,16 @@ inline const std::string& GetWalletHTML() {
                 await refreshBalance();
                 await refreshTransactions();
             } catch(e) {
+                hideConfirmModal();
                 alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
             }
 
-            sendBtn.disabled = false;
-            sendBtn.innerHTML = `
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = `
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
-                Send Transaction
+                Confirm Send
             `;
         }
 
