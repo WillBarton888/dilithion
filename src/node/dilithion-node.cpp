@@ -42,6 +42,7 @@
 #include <consensus/pow.h>
 #include <consensus/chain.h>
 #include <consensus/validation.h>  // CRITICAL-3 FIX: For CBlockValidator
+#include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
@@ -775,6 +776,7 @@ int main(int argc, char* argv[]) {
 
         std::cout << "Initializing mempool..." << std::endl;
         CTxMemPool mempool;
+        g_mempool.store(&mempool);  // BUG #108 FIX: Set global pointer for TX relay
         std::cout << "  [OK] Mempool initialized" << std::endl;
 
         // Initialize UTXO set
@@ -787,6 +789,11 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::cout << "  [OK] UTXO set opened" << std::endl;
+        g_utxo_set.store(&utxo_set);  // BUG #108 FIX: Set global pointer for TX validation
+
+        // Initialize transaction validator
+        CTransactionValidator tx_validator;
+        g_tx_validator.store(&tx_validator);  // BUG #108 FIX: Set global pointer for TX validation
 
         // Initialize chain state
         std::cout << "Initializing chain state..." << std::endl;
@@ -1189,6 +1196,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 g_chainstate.SetTip(pindexTip);
+                g_chain_height.store(static_cast<unsigned int>(pindexTip->nHeight));  // BUG #108 FIX: Set global height for TX validation
                 std::cout << "  [OK] Loaded chain state: " << chainHashes.size() + 1 << " blocks (height "
                           << pindexTip->nHeight << ")" << std::endl;
             } else {
