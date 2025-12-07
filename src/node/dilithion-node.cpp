@@ -66,6 +66,7 @@
 #include <atomic>
 #include <optional>
 #include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
+#include <set>  // BUG #109 FIX: For tracking spent outpoints in block template
 #include <filesystem>  // BUG #56: For wallet file existence check
 
 #ifdef _WIN32
@@ -477,9 +478,101 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     coinbaseIn.nSequence = 0xffffffff;
     coinbaseTx.vin.push_back(coinbaseIn);
 
-    // Coinbase output (reward to miner)
+    // BUG #109 FIX: Include mempool transactions in mined blocks
+    // Previously, this function only included the coinbase transaction.
+    // Now we select valid transactions from mempool just like CreateBlockTemplate does.
+
+    // Load mempool and UTXO set from global atomic pointers
+    CTxMemPool* mempool = g_mempool.load();
+    CUTXOSet* utxoSet = g_utxo_set.load();
+
+    // Select transactions from mempool if available
+    std::vector<CTransactionRef> selectedTxs;
+    uint64_t totalFees = 0;
+
+    if (mempool && utxoSet) {
+        // Get transactions ordered by fee rate (highest first)
+        std::vector<CTransactionRef> candidateTxs = mempool->GetOrderedTxs();
+
+        // Limit candidates and set resource limits
+        const size_t MAX_CANDIDATES = 50000;
+        const size_t MAX_BLOCK_SIZE = 1000000;  // 1 MB
+        size_t currentBlockSize = 200;  // Reserve for coinbase
+
+        if (candidateTxs.size() > MAX_CANDIDATES) {
+            candidateTxs.resize(MAX_CANDIDATES);
+        }
+
+        std::set<COutPoint> spentInBlock;
+        CTransactionValidator validator;
+
+        for (const auto& tx : candidateTxs) {
+            if (tx->IsCoinBase()) continue;
+
+            size_t txSize = tx->GetSerializedSize();
+            if (currentBlockSize + txSize > MAX_BLOCK_SIZE) continue;
+
+            // Check inputs are available and not double-spent in this block
+            bool allInputsAvailable = true;
+            bool hasConflict = false;
+
+            for (const auto& txin : tx->vin) {
+                if (spentInBlock.count(txin.prevout) > 0) {
+                    hasConflict = true;
+                    break;
+                }
+
+                CUTXOEntry utxoEntry;
+                bool foundInUTXO = utxoSet->GetUTXO(txin.prevout, utxoEntry);
+
+                bool foundInBlock = false;
+                for (const auto& selectedTx : selectedTxs) {
+                    if (selectedTx->GetHash() == txin.prevout.hash &&
+                        txin.prevout.n < selectedTx->vout.size()) {
+                        foundInBlock = true;
+                        break;
+                    }
+                }
+
+                if (!foundInUTXO && !foundInBlock) {
+                    allInputsAvailable = false;
+                    break;
+                }
+            }
+
+            if (hasConflict || !allInputsAvailable) continue;
+
+            // Validate transaction (signature, coinbase maturity, etc.)
+            std::string validationError;
+            CAmount txFee = 0;
+            if (!validator.CheckTransaction(*tx, *utxoSet, nHeight, txFee, validationError)) {
+                continue;
+            }
+
+            // Sanity check on fee
+            const uint64_t MAX_REASONABLE_FEE = 10 * COIN;
+            if (txFee > MAX_REASONABLE_FEE) continue;
+
+            // Add transaction to block
+            selectedTxs.push_back(tx);
+            currentBlockSize += txSize;
+            totalFees += static_cast<uint64_t>(txFee);
+
+            // Mark inputs as spent
+            for (const auto& txin : tx->vin) {
+                spentInBlock.insert(txin.prevout);
+            }
+        }
+
+        if (!selectedTxs.empty()) {
+            std::cout << "[Mining] Including " << selectedTxs.size()
+                      << " mempool transactions, fees: " << totalFees << " ions" << std::endl;
+        }
+    }
+
+    // Coinbase output (reward to miner = subsidy + fees)
     CTxOut coinbaseOut;
-    coinbaseOut.nValue = nSubsidy;
+    coinbaseOut.nValue = nSubsidy + static_cast<int64_t>(totalFees);
     coinbaseOut.scriptPubKey = WalletCrypto::CreateScriptPubKey(minerPubKeyHash);
     coinbaseTx.vout.push_back(coinbaseOut);
 
@@ -489,24 +582,55 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         g_currentCoinbase = MakeTransactionRef(coinbaseTx);
     }
 
-    // BUG #11 FIX: Serialize coinbase for block with transaction count prefix
-    // Must match format expected by DeserializeBlockTransactions: [count][tx1][tx2]...
-    // This bug only affected BuildMiningTemplate (used after first block found).
-    // RPC CreateBlockTemplate in controller.cpp already had this correct.
+    // BUG #109 FIX: Serialize ALL transactions (coinbase + mempool) with proper count
+    size_t txCount = 1 + selectedTxs.size();  // coinbase + selected transactions
+
     std::vector<uint8_t> coinbaseData = coinbaseTx.Serialize();
     block.vtx.clear();
-    block.vtx.reserve(1 + coinbaseData.size());
-    block.vtx.push_back(1);  // Transaction count = 1 (only coinbase)
+
+    // Estimate total size and reserve
+    size_t totalSize = 1 + coinbaseData.size();  // count + coinbase
+    for (const auto& tx : selectedTxs) {
+        totalSize += tx->GetSerializedSize();
+    }
+    block.vtx.reserve(totalSize + 10);
+
+    // Write transaction count (compact size encoding)
+    if (txCount < 253) {
+        block.vtx.push_back(static_cast<uint8_t>(txCount));
+    } else if (txCount <= 0xFFFF) {
+        block.vtx.push_back(253);
+        block.vtx.push_back(txCount & 0xFF);
+        block.vtx.push_back((txCount >> 8) & 0xFF);
+    } else {
+        block.vtx.push_back(254);
+        block.vtx.push_back(txCount & 0xFF);
+        block.vtx.push_back((txCount >> 8) & 0xFF);
+        block.vtx.push_back((txCount >> 16) & 0xFF);
+        block.vtx.push_back((txCount >> 24) & 0xFF);
+    }
+
+    // Add coinbase transaction
     block.vtx.insert(block.vtx.end(), coinbaseData.begin(), coinbaseData.end());
 
-    // BUG #71 FIX: Calculate merkle root from transaction hash, NOT from raw vtx
-    // The merkle root for a single transaction IS the transaction hash
-    // The bug was hashing block.vtx (which includes count prefix) instead of the tx alone
-    uint8_t merkleHash[32];
-    extern void SHA3_256(const uint8_t* data, size_t len, uint8_t hash[32]);
-    // Hash the transaction data ONLY (coinbaseData), not the vtx with count prefix
-    SHA3_256(coinbaseData.data(), coinbaseData.size(), merkleHash);
-    memcpy(block.hashMerkleRoot.data, merkleHash, 32);
+    // Add all selected transactions
+    for (const auto& tx : selectedTxs) {
+        std::vector<uint8_t> txData = tx->Serialize();
+        block.vtx.insert(block.vtx.end(), txData.begin(), txData.end());
+    }
+
+    // BUG #109 FIX: Calculate merkle root from ALL transaction hashes
+    // Build vector of all transactions for merkle computation
+    std::vector<CTransactionRef> allTransactions;
+    allTransactions.reserve(1 + selectedTxs.size());
+    allTransactions.push_back(MakeTransactionRef(coinbaseTx));
+    for (const auto& tx : selectedTxs) {
+        allTransactions.push_back(tx);
+    }
+
+    // Use CBlockValidator to compute merkle root properly
+    CBlockValidator blockValidator;
+    block.hashMerkleRoot = blockValidator.BuildMerkleRoot(allTransactions);
 
     // Calculate target from nBits (compact format)
     uint256 hashTarget = CompactToBig(block.nBits);
