@@ -2561,7 +2561,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (connection_manager.PerformHandshake(peer_id)) {
                             std::cout << "[P2P] Sent version message to peer " << peer_id << std::endl;
                         } else {
-                            std::cout << "[P2P] Failed to send version to peer " << peer_id << std::endl;
+                            // BUG #105 FIX: Disconnect peer if handshake fails to prevent zombie peers
+                            // Previously, failed handshakes left peers in the map, causing connection limit issues
+                            std::cout << "[P2P] Failed to send version to peer " << peer_id << ", disconnecting" << std::endl;
+                            connection_manager.DisconnectPeer(peer_id, "handshake_failed");
                         }
                     } else {
                         std::cout << "[P2P] Failed to accept peer connection" << std::endl;

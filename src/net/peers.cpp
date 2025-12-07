@@ -93,11 +93,21 @@ std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) 
     std::string ip = addr.ToStringIP();
 
     if (banman.IsBanned(ip)) {
+        std::cout << "[PeerManager] AddPeer rejected: IP " << ip << " is banned" << std::endl;
         return nullptr;
     }
 
-    // Check connection limit
-    if (peers.size() >= MAX_TOTAL_CONNECTIONS) {
+    // BUG #105 FIX: Check connection limit using CONNECTED peer count, not map size
+    // Previously used peers.size() which included disconnected/zombie peers
+    size_t connected = 0;
+    for (const auto& pair : peers) {
+        if (pair.second->IsConnected()) {
+            connected++;
+        }
+    }
+    if (connected >= MAX_TOTAL_CONNECTIONS) {
+        std::cout << "[PeerManager] AddPeer rejected: at connection limit ("
+                  << connected << "/" << MAX_TOTAL_CONNECTIONS << ")" << std::endl;
         return nullptr;
     }
 
@@ -148,7 +158,15 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
 
 bool CPeerManager::CanAcceptConnection() const {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
-    return peers.size() < MAX_TOTAL_CONNECTIONS;
+    // BUG #105 FIX: Count only CONNECTED peers, not total map entries
+    // Previously used peers.size() which included disconnected/zombie peers
+    size_t connected = 0;
+    for (const auto& pair : peers) {
+        if (pair.second->IsConnected()) {
+            connected++;
+        }
+    }
+    return connected < MAX_TOTAL_CONNECTIONS;
 }
 
 size_t CPeerManager::GetConnectionCount() const {

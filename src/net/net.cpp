@@ -1507,6 +1507,7 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
                                          std::unique_ptr<CSocket> socket) {
     // Check if we can accept more connections
     if (!peer_manager.CanAcceptConnection()) {
+        std::cout << "[P2P] AcceptConnection rejected: at connection limit" << std::endl;
         return -1;  // Return -1 for failure
     }
 
@@ -1528,13 +1529,21 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
                 return -1;
             }
         }
-        g_last_connection_attempt[ip_str] = GetTime();
+        // BUG #105 FIX: Don't set cooldown here - only set after SUCCESSFUL connection
+        // Previously set cooldown before AddPeer, causing banned IPs to also get cooldown
     }
 
     // Add peer
     auto peer = peer_manager.AddPeer(addr);
     if (!peer) {
+        std::cout << "[P2P] AcceptConnection rejected: AddPeer failed for " << ip_str << std::endl;
         return -1;
+    }
+
+    // BUG #105 FIX: Set cooldown only after successful connection
+    {
+        std::lock_guard<std::mutex> lock(cs_connection_cooldown);
+        g_last_connection_attempt[ip_str] = GetTime();
     }
 
     peer->state = CPeer::STATE_CONNECTED;
