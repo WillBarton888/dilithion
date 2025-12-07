@@ -180,6 +180,21 @@ struct CWalletTx {
 };
 
 /**
+ * BUG #104 FIX: Structure to track sent (outgoing) transactions
+ * These are transactions where we spent from our wallet to another address
+ */
+struct CSentTx {
+    uint256 txid;           // Transaction ID
+    CDilithiumAddress toAddress;  // Recipient address
+    int64_t nValue;         // Amount sent (excluding fee)
+    int64_t nFee;           // Transaction fee
+    int64_t nTime;          // Timestamp when sent
+    uint32_t nHeight;       // Block height when confirmed (0 = unconfirmed/mempool)
+
+    CSentTx() : nValue(0), nFee(0), nTime(0), nHeight(0) {}
+};
+
+/**
  * Wallet - manages keys, addresses, and transactions
  *
  * Features:
@@ -210,6 +225,10 @@ private:
     // When a transaction has multiple outputs to wallet, old code overwrote entries
     // New code uses COutPoint(txid, vout) as key to store each output separately
     std::map<COutPoint, CWalletTx> mapWalletTx;
+
+    // BUG #104 FIX: Track sent (outgoing) transactions
+    // Key is txid since we only have one send per transaction
+    std::map<uint256, CSentTx> mapSentTx;
 
     // Encryption
     CMasterKey masterKey;                           // Master key (encrypted with passphrase)
@@ -944,6 +963,39 @@ public:
      * @return Vector of wallet transaction outputs
      */
     std::vector<CWalletTx> ListUnspentOutputs(class CUTXOSet& utxo_set, unsigned int current_height, unsigned int min_confirmations = 1) const;
+
+    // ========================================================================
+    // BUG #104 FIX: Sent Transaction Tracking
+    // ========================================================================
+
+    /**
+     * Record a sent transaction in the wallet
+     *
+     * @param txid Transaction ID
+     * @param toAddress Recipient address
+     * @param nValue Amount sent (excluding fee)
+     * @param nFee Transaction fee
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    void RecordSentTransaction(const uint256& txid, const CDilithiumAddress& toAddress,
+                               int64_t nValue, int64_t nFee);
+
+    /**
+     * Get all sent transactions
+     *
+     * @return Vector of sent transactions
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    std::vector<CSentTx> ListSentTransactions() const;
+
+    /**
+     * Update sent transaction with confirmation height
+     *
+     * @param txid Transaction ID to update
+     * @param nHeight Block height where confirmed
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    void UpdateSentTransactionHeight(const uint256& txid, uint32_t nHeight);
 
     // ========================================================================
     // WALLET-006 FIX: UTXO Locking Mechanism

@@ -2995,6 +2995,58 @@ std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned 
 }
 
 // ============================================================================
+// BUG #104 FIX: Sent Transaction Tracking
+// ============================================================================
+
+void CWallet::RecordSentTransaction(const uint256& txid, const CDilithiumAddress& toAddress,
+                                    int64_t nValue, int64_t nFee) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    CSentTx stx;
+    stx.txid = txid;
+    stx.toAddress = toAddress;
+    stx.nValue = nValue;
+    stx.nFee = nFee;
+    stx.nTime = std::time(nullptr);
+    stx.nHeight = 0;  // Unconfirmed initially
+
+    mapSentTx[txid] = stx;
+
+    // Trigger auto-save if enabled
+    if (m_autoSave && !m_walletFile.empty()) {
+        // Note: Full save would happen on next block/periodic save
+        // For now, just mark as dirty
+    }
+}
+
+std::vector<CSentTx> CWallet::ListSentTransactions() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    std::vector<CSentTx> result;
+    result.reserve(mapSentTx.size());
+
+    for (const auto& pair : mapSentTx) {
+        result.push_back(pair.second);
+    }
+
+    // Sort by time (newest first)
+    std::sort(result.begin(), result.end(), [](const CSentTx& a, const CSentTx& b) {
+        return a.nTime > b.nTime;
+    });
+
+    return result;
+}
+
+void CWallet::UpdateSentTransactionHeight(const uint256& txid, uint32_t nHeight) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    auto it = mapSentTx.find(txid);
+    if (it != mapSentTx.end()) {
+        it->second.nHeight = nHeight;
+    }
+}
+
+// ============================================================================
 // WALLET-006 FIX: UTXO Locking Mechanism
 // ============================================================================
 

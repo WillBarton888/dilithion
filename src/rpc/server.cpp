@@ -8,6 +8,7 @@
 #include <rpc/ssl_wrapper.h>  // Phase 3: SSL/TLS support
 #include <rpc/websocket.h>  // Phase 4: WebSocket support
 #include <api/wallet_html.h>  // Web wallet UI
+#include <wallet/wallet.h>  // BUG #104 FIX: For CSentTx
 #include <crypto/sha3.h>  // For hashing params
 #include <wallet/passphrase_validator.h>
 #include <node/mempool.h>
@@ -1952,8 +1953,9 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
         throw std::runtime_error("Failed to send transaction: " + error);
     }
 
-    // Return txid
+    // BUG #104 FIX: Record sent transaction in wallet history
     uint256 txid = tx->GetHash();
+    m_wallet->RecordSentTransaction(txid, recipient_address, amount, fee);
     std::ostringstream oss;
     oss << "{\"txid\":\"" << txid.GetHex() << "\"}";
     return oss.str();
@@ -2256,36 +2258,91 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
         throw std::runtime_error("Chain state not initialized");
     }
 
-    // For now, return wallet UTXOs as "received" transactions
     unsigned int currentHeight = m_chainstate->GetHeight();
+
+    // BUG #104 FIX: Collect both received and sent transactions
+    // Structure to hold unified transaction info for sorting
+    struct TxInfo {
+        std::string txid;
+        std::string address;
+        std::string category;  // "receive" or "send"
+        int64_t amount;        // positive for receive, negative for send
+        int64_t fee;           // only for sends
+        unsigned int confirmations;
+        std::string blockhash;
+        int64_t time;          // for sorting
+    };
+    std::vector<TxInfo> allTx;
+
+    // Get received transactions (UTXOs)
     std::vector<CWalletTx> utxos = m_wallet->ListUnspentOutputs(*m_utxo_set, currentHeight);
+    for (const auto& utxo : utxos) {
+        TxInfo info;
+        info.txid = utxo.txid.GetHex();
+        info.address = utxo.address.ToString();
+        info.category = "receive";
+        info.amount = utxo.nValue;
+        info.fee = 0;
+        info.confirmations = 0;
+        if (utxo.nHeight > 0 && currentHeight >= utxo.nHeight) {
+            info.confirmations = currentHeight - utxo.nHeight + 1;
+        }
+        info.blockhash = "";
+        if (utxo.nHeight > 0) {
+            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(utxo.nHeight);
+            if (!hashes.empty()) {
+                info.blockhash = hashes[0].GetHex();
+            }
+        }
+        // Estimate time from height (10 min blocks)
+        info.time = utxo.nHeight > 0 ? static_cast<int64_t>(utxo.nHeight) * 600 : std::time(nullptr);
+        allTx.push_back(info);
+    }
+
+    // BUG #104 FIX: Get sent transactions
+    std::vector<CSentTx> sentTxs = m_wallet->ListSentTransactions();
+    for (const auto& stx : sentTxs) {
+        TxInfo info;
+        info.txid = stx.txid.GetHex();
+        info.address = stx.toAddress.ToString();
+        info.category = "send";
+        info.amount = -stx.nValue;  // Negative for sends
+        info.fee = stx.nFee;
+        info.confirmations = 0;
+        if (stx.nHeight > 0 && currentHeight >= stx.nHeight) {
+            info.confirmations = currentHeight - stx.nHeight + 1;
+        }
+        info.blockhash = "";
+        if (stx.nHeight > 0) {
+            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(stx.nHeight);
+            if (!hashes.empty()) {
+                info.blockhash = hashes[0].GetHex();
+            }
+        }
+        info.time = stx.nTime;
+        allTx.push_back(info);
+    }
+
+    // Sort by time (newest first)
+    std::sort(allTx.begin(), allTx.end(), [](const TxInfo& a, const TxInfo& b) {
+        return a.time > b.time;
+    });
 
     std::ostringstream oss;
     oss << "{\"transactions\":[";
-    for (size_t i = 0; i < utxos.size(); ++i) {
+    for (size_t i = 0; i < allTx.size(); ++i) {
         if (i > 0) oss << ",";
-
-        unsigned int confirmations = 0;
-        if (utxos[i].nHeight > 0 && currentHeight >= utxos[i].nHeight) {
-            confirmations = currentHeight - utxos[i].nHeight + 1;
-        }
-
-        // P5-LOW FIX: Get block hash from height
-        std::string blockhash_hex = "";
-        if (utxos[i].nHeight > 0) {
-            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(utxos[i].nHeight);
-            if (!hashes.empty()) {
-                blockhash_hex = hashes[0].GetHex();
-            }
-        }
-
+        const auto& tx = allTx[i];
         oss << "{";
-        oss << "\"txid\":\"" << utxos[i].txid.GetHex() << "\",";
-        oss << "\"address\":\"" << utxos[i].address.ToString() << "\",";
-        oss << "\"category\":\"receive\",";
-        oss << "\"amount\":" << FormatAmount(utxos[i].nValue) << ",";
-        oss << "\"confirmations\":" << confirmations << ",";
-        oss << "\"blockhash\":\"" << blockhash_hex << "\"";
+        oss << "\"txid\":\"" << tx.txid << "\",";
+        oss << "\"address\":\"" << tx.address << "\",";
+        oss << "\"category\":\"" << tx.category << "\",";
+        oss << "\"amount\":" << FormatAmount(tx.amount) << ",";
+        if (tx.category == "send") {
+            oss << "\"fee\":" << FormatAmount(tx.fee) << ",";
+        }
+        oss << "\"confirmations\":" << tx.confirmations << ",";
+        oss << "\"blockhash\":\"" << tx.blockhash << "\"";
         oss << "}";
     }
     oss << "]}";
