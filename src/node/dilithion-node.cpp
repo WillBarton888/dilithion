@@ -490,9 +490,15 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     std::vector<CTransactionRef> selectedTxs;
     uint64_t totalFees = 0;
 
+    // DEBUG: Log mempool and UTXO set state
+    std::cout << "[BuildMiningTemplate] DEBUG: mempool=" << (mempool ? "valid" : "NULL")
+              << ", utxoSet=" << (utxoSet ? "valid" : "NULL") << std::endl;
+
     if (mempool && utxoSet) {
         // Get transactions ordered by fee rate (highest first)
         std::vector<CTransactionRef> candidateTxs = mempool->GetOrderedTxs();
+
+        std::cout << "[BuildMiningTemplate] DEBUG: candidateTxs.size()=" << candidateTxs.size() << std::endl;
 
         // Limit candidates and set resource limits
         const size_t MAX_CANDIDATES = 50000;
@@ -540,12 +546,19 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 }
             }
 
-            if (hasConflict || !allInputsAvailable) continue;
+            if (hasConflict || !allInputsAvailable) {
+                std::cout << "[BuildMiningTemplate] DEBUG: TX " << tx->GetHash().GetHex().substr(0, 16)
+                          << " rejected: hasConflict=" << hasConflict
+                          << ", allInputsAvailable=" << allInputsAvailable << std::endl;
+                continue;
+            }
 
             // Validate transaction (signature, coinbase maturity, etc.)
             std::string validationError;
             CAmount txFee = 0;
             if (!validator.CheckTransaction(*tx, *utxoSet, nHeight, txFee, validationError)) {
+                std::cout << "[BuildMiningTemplate] DEBUG: TX " << tx->GetHash().GetHex().substr(0, 16)
+                          << " FAILED CheckTransaction: " << validationError << std::endl;
                 continue;
             }
 
@@ -557,6 +570,9 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             selectedTxs.push_back(tx);
             currentBlockSize += txSize;
             totalFees += static_cast<uint64_t>(txFee);
+
+            std::cout << "[BuildMiningTemplate] DEBUG: TX " << tx->GetHash().GetHex().substr(0, 16)
+                      << " SELECTED for block (fee=" << txFee << ")" << std::endl;
 
             // Mark inputs as spent
             for (const auto& txin : tx->vin) {
