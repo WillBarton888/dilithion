@@ -1145,7 +1145,7 @@
             sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
 
             try {
-                const txid = await rpcCall('sendtoaddress', [address, amount]);
+                const txid = await rpcCall('sendtoaddress', {address: address, amount: parseFloat(amount)});
                 alertDiv.innerHTML = `
                     <div class="alert alert-success">
                         Transaction sent successfully!<br>
