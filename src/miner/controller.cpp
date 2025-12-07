@@ -262,7 +262,7 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         // Each thread gets its own range to avoid collisions between threads
         const uint32_t nonceStep = m_nThreads;
         uint64_t nonce64 = threadId;  // 64-bit counter
-        uint32_t templateVersion = 0;  // Track template changes
+        uint64_t templateVersion = 0;  // BUG #109 FIX: Track template version for race detection
 
         // Hash buffer
         uint8_t hashBuffer[RANDOMX_HASH_SIZE];
@@ -296,7 +296,8 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         }
 
         // BUG #27 FIX: Only fetch template when changed (check pointer, not copy block)
-        // This eliminates millions of block copies per second
+        // BUG #109 FIX: Use template version counter for race detection
+        // This eliminates millions of block copies per second and prevents race conditions
         bool needNewTemplate = false;
         {
             std::lock_guard<std::mutex> lock(m_templateMutex);
@@ -305,16 +306,27 @@ void CMiningController::MiningWorker(uint32_t threadId) {
                 // CID 1675230 FIX: Release lock before sleeping to prevent blocking other threads
                 // The lock is automatically released when the lock_guard goes out of scope
             } else {
-                // Check if template changed by comparing header fields
-                if (!templateValid ||
+                // BUG #109 FIX: Primary check - use template version for race detection
+                // Version counter is atomically incremented when template is built, ensuring
+                // all threads see the same version for the same template
+                uint64_t newVersion = m_pTemplate->nVersion;
+                
+                // Check if template version changed (primary detection method)
+                bool versionChanged = (newVersion != templateVersion);
+                
+                // Fallback: Also check header fields in case version wasn't set
+                // This provides defense-in-depth against version counter bugs
+                bool headerChanged = !templateValid ||
                     !(m_pTemplate->block.hashPrevBlock == currentBlock.hashPrevBlock) ||
                     !(m_pTemplate->block.hashMerkleRoot == currentBlock.hashMerkleRoot) ||
                     m_pTemplate->block.nTime != currentBlock.nTime ||
-                    m_pTemplate->block.nBits != currentBlock.nBits) {
+                    m_pTemplate->block.nBits != currentBlock.nBits;
 
+                if (versionChanged || headerChanged) {
                     // Template changed - copy it once
                     currentBlock = m_pTemplate->block;
                     currentHashTarget = m_pTemplate->hashTarget;
+                    templateVersion = newVersion;  // Update tracked version
                     templateValid = true;
                     needNewTemplate = true;
                 }
@@ -397,6 +409,23 @@ void CMiningController::MiningWorker(uint32_t threadId) {
 
             // Check if valid block
             if (CheckProofOfWork(hash, currentHashTarget)) {
+                // BUG #109 FIX: Verify template version hasn't changed before submitting block
+                // This prevents submitting a block built with a stale template
+                // (e.g., if template was updated while we were mining)
+                bool templateStillValid = false;
+                {
+                    std::lock_guard<std::mutex> lock(m_templateMutex);
+                    if (m_pTemplate && m_pTemplate->nVersion == templateVersion) {
+                        templateStillValid = true;
+                    }
+                }
+                
+                if (!templateStillValid) {
+                    // Template changed while we were mining - discard this block
+                    // The new template will be picked up on next iteration
+                    continue;
+                }
+                
                 // Double-check mining flag to prevent race during shutdown
                 // If StopMining() was called between finding block and this check,
                 // discard the block to prevent database corruption
