@@ -73,15 +73,20 @@ struct CMiningStats {
 
 /**
  * Block template for mining
+ *
+ * BUG #109 FIX: Added version counter to prevent race condition
+ * Mining threads check this version before using the template
+ * If version mismatches the global counter, threads abort and get new template
  */
 struct CBlockTemplate {
     CBlock block;
     uint256 hashTarget;
     uint32_t nHeight;
+    uint64_t nVersion{0};  // BUG #109: Template version for race detection
 
-    CBlockTemplate() : nHeight(0) {}
-    CBlockTemplate(const CBlock& blk, const uint256& target, uint32_t height)
-        : block(blk), hashTarget(target), nHeight(height) {}
+    CBlockTemplate() : nHeight(0), nVersion(0) {}
+    CBlockTemplate(const CBlock& blk, const uint256& target, uint32_t height, uint64_t version = 0)
+        : block(blk), hashTarget(target), nHeight(height), nVersion(version) {}
 };
 
 /**

@@ -17,6 +17,7 @@
 class CBlockchainDB;
 class CUTXOSet;
 class CReorgWAL;
+class CTxMemPool;  // BUG #109 FIX: Mempool for confirmed TX cleanup
 
 /**
  * Chain State Manager
@@ -39,6 +40,11 @@ private:
 
     // UTXO set reference for chain validation (CS-005)
     CUTXOSet* pUTXOSet;
+
+    // BUG #109 FIX: Mempool reference for removing confirmed transactions
+    // When a block is connected, we must remove its transactions from mempool
+    // to prevent UTXO/mempool inconsistency (inputs appearing unavailable)
+    CTxMemPool* pMemPool{nullptr};
 
     // P1-4 FIX: Write-Ahead Log for atomic reorganizations
     std::unique_ptr<CReorgWAL> m_reorgWAL;
@@ -79,6 +85,12 @@ public:
      * Initialize chain state with UTXO set (CS-005)
      */
     void SetUTXOSet(CUTXOSet* utxoSet) { pUTXOSet = utxoSet; }
+
+    /**
+     * BUG #109 FIX: Initialize chain state with mempool
+     * Required for removing confirmed transactions when blocks are connected
+     */
+    void SetMemPool(CTxMemPool* mempool) { pMemPool = mempool; }
 
     /**
      * P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations

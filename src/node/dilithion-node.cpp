@@ -94,6 +94,7 @@ struct NodeState {
     std::atomic<bool> running{false};
     std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
     std::atomic<bool> mining_enabled{false};   // Whether user requested --mine
+    std::atomic<uint64_t> template_version{0}; // BUG #109 FIX: Template version counter for race detection
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
     CWallet* wallet = nullptr;
@@ -518,13 +519,19 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             size_t txSize = tx->GetSerializedSize();
             if (currentBlockSize + txSize > MAX_BLOCK_SIZE) continue;
 
+            // ========================================================================
+            // BUG #109 FIX (Part 4): Enhanced input availability logging
+            // ========================================================================
             // Check inputs are available and not double-spent in this block
             bool allInputsAvailable = true;
             bool hasConflict = false;
+            std::string missingInputInfo;  // For detailed logging
 
             for (const auto& txin : tx->vin) {
                 if (spentInBlock.count(txin.prevout) > 0) {
                     hasConflict = true;
+                    missingInputInfo = "input " + txin.prevout.hash.GetHex().substr(0, 16) +
+                                      ":" + std::to_string(txin.prevout.n) + " already spent in this block";
                     break;
                 }
 
@@ -542,14 +549,16 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
                 if (!foundInUTXO && !foundInBlock) {
                     allInputsAvailable = false;
+                    missingInputInfo = "input " + txin.prevout.hash.GetHex().substr(0, 16) +
+                                      ":" + std::to_string(txin.prevout.n) +
+                                      " NOT in UTXO set and NOT in selected block txs";
                     break;
                 }
             }
 
             if (hasConflict || !allInputsAvailable) {
                 std::cout << "[BuildMiningTemplate] DEBUG: TX " << tx->GetHash().GetHex().substr(0, 16)
-                          << " rejected: hasConflict=" << hasConflict
-                          << ", allInputsAvailable=" << allInputsAvailable << std::endl;
+                          << " rejected: " << missingInputInfo << std::endl;
                 continue;
             }
 
@@ -666,7 +675,9 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     }
 
     // Create and return block template
-    return CBlockTemplate(block, hashTarget, nHeight);
+    // BUG #109 FIX: Increment and set template version for race detection
+    uint64_t version = ++g_node_state.template_version;
+    return CBlockTemplate(block, hashTarget, nHeight, version);
 }
 
 int main(int argc, char* argv[]) {
@@ -939,6 +950,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Initializing chain state..." << std::endl;
         g_chainstate.SetDatabase(&blockchain);
         g_chainstate.SetUTXOSet(&utxo_set);
+        g_chainstate.SetMemPool(&mempool);  // BUG #109 FIX: Enable mempool cleanup on block connect
 
         // P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations
         if (!g_chainstate.InitializeWAL(config.datadir)) {
@@ -3278,10 +3290,26 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_state.new_block_found.load()) {
                 std::cout << "[Mining] New block found, updating template..." << std::endl;
 
-                // Stop current mining
+                // ========================================================================
+                // BUG #109 FIX: Stop mining and WAIT for threads to fully stop
+                // ========================================================================
+                // CRITICAL: We must wait for all mining threads to stop before building
+                // a new template. Otherwise, threads may continue mining on old template
+                // and submit blocks with stale transactions.
                 if (miner.IsMining()) {
                     miner.StopMining();
+                    // Wait for threads to actually stop (up to 2 seconds)
+                    int wait_count = 0;
+                    while (miner.IsMining() && wait_count < 20) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        wait_count++;
+                    }
+                    if (wait_count >= 20) {
+                        std::cerr << "[Mining] WARNING: Mining threads slow to stop" << std::endl;
+                    }
                 }
+                // Additional small delay to ensure any in-flight block submission completes
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
                 // Build new template for next block (only if mining was requested)
                 if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {

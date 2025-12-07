@@ -4,9 +4,11 @@
 #include <consensus/chain.h>
 #include <consensus/pow.h>
 #include <consensus/reorg_wal.h>  // P1-4: WAL for atomic reorgs
+#include <consensus/validation.h> // BUG #109 FIX: DeserializeBlockTransactions
 #include <core/chainparams.h>     // MAINNET: Checkpoint validation
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
+#include <node/mempool.h>         // BUG #109 FIX: RemoveConfirmedTxs
 #include <util/assert.h>
 #include <iostream>
 #include <algorithm>
@@ -653,6 +655,34 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
             std::cerr << "[Chain] ERROR: Block connect callback " << i << " threw exception: " << e.what() << std::endl;
         } catch (...) {
             std::cerr << "[Chain] ERROR: Block connect callback " << i << " threw unknown exception" << std::endl;
+        }
+    }
+
+    // ========================================================================
+    // BUG #109 FIX: Remove confirmed transactions from mempool
+    // ========================================================================
+    // CRITICAL: After UTXO set is updated, we must remove confirmed transactions
+    // from mempool to prevent:
+    // 1. UTXO/mempool inconsistency (inputs appearing unavailable)
+    // 2. Transactions remaining in mempool after being confirmed
+    // 3. Template building seeing stale transactions with unavailable inputs
+    if (pMemPool != nullptr) {
+        // Deserialize block transactions (block.vtx is raw bytes)
+        CBlockValidator validator;
+        std::vector<CTransactionRef> block_txs;
+        std::string error;
+
+        if (validator.DeserializeBlockTransactions(block, block_txs, error)) {
+            size_t mempoolSizeBefore = pMemPool->Size();
+            pMemPool->RemoveConfirmedTxs(block_txs);
+            size_t mempoolSizeAfter = pMemPool->Size();
+
+            if (mempoolSizeBefore != mempoolSizeAfter) {
+                std::cout << "[Chain] BUG #109: Removed " << (mempoolSizeBefore - mempoolSizeAfter)
+                          << " confirmed tx from mempool (height " << pindex->nHeight << ")" << std::endl;
+            }
+        } else {
+            std::cerr << "[Chain] WARNING: Failed to deserialize block txs for mempool cleanup: " << error << std::endl;
         }
     }
 
