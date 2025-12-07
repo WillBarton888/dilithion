@@ -197,7 +197,7 @@
 
     <!-- UPDATE NOTICE -->
     <div style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; padding: 15px 20px; text-align: center; font-weight: 600; box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);">
-        ✅ NEW RELEASE (Dec 7, 2025): <strong>v1.1.19 is now available!</strong> Sent transactions now appear in transaction history - BUG #104 fixed
+        ✅ NEW RELEASE (Dec 7, 2025): <strong>v1.1.21 is now available!</strong> CRITICAL FIX: Transaction relay bug - transactions now propagate properly - BUG #106 fixed
     </div>
 
     <!-- Hero Section with Countdown -->
@@ -514,9 +514,9 @@
             <p class="section-subtitle">Choose your platform and get started</p>
 
             <div class="download-notice" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(22, 163, 74, 0.1)); border-left: 4px solid #22c55e; padding: 20px; margin-bottom: 30px; border-radius: 8px;">
-                <h3 style="margin-top: 0; color: #22c55e;">✅ v1.1.19 Available - All Platforms!</h3>
-                <p><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Windows v1.1.19 • <svg class="inline-icon"><use href="#icon-check"/></svg> macOS v1.1.19 • <svg class="inline-icon"><use href="#icon-check"/></svg> Linux v1.1.19</strong></p>
-                <p style="background: rgba(34, 197, 94, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;"><strong>✅ FIX:</strong> Web wallet now correctly shows "Testnet" instead of "Mainnet" when connected to testnet node.</p>
+                <h3 style="margin-top: 0; color: #22c55e;">✅ v1.1.21 Available - All Platforms!</h3>
+                <p><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Windows v1.1.21 • <svg class="inline-icon"><use href="#icon-check"/></svg> macOS v1.1.21 • <svg class="inline-icon"><use href="#icon-check"/></svg> Linux v1.1.21</strong></p>
+                <p style="background: rgba(34, 197, 94, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;"><strong>✅ CRITICAL FIX:</strong> P2P zombie peer bug causing connection exhaustion (BUG #105). Peers now maintain stable connections.</p>
                 <p><strong>Easy Installation:</strong> Download, extract, and run! No compiler needed. No configuration required.</p>
                 <p>Each package includes one-click launcher scripts, interactive setup wizard, and beginner-friendly README.</p>
                 <p><strong>Get mining in under 60 seconds!</strong></p>
@@ -526,33 +526,33 @@
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-windows"/></svg></div>
                     <h3>Windows</h3>
-                    <p>Windows 10/11 (64-bit x86-64) - Latest: v1.1.19 (Dec 7)</p>
+                    <p>Windows 10/11 (64-bit x86-64) - Latest: v1.1.21 (Dec 7)</p>
                     <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/WillBarton888/dilithion/releases/download/testnet-v1.1.19/dilithion-testnet-v1.1.19-windows-x64.zip" class="btn btn-download" style="flex: 1;">Download ZIP (5.7 MB)</a>
-                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.19" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/testnet-v1.1.21/dilithion-testnet-v1.1.21-windows-x64.zip" class="btn btn-download" style="flex: 1;">Download ZIP (5.7 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.21" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
                     </div>
-                    <span class="version">v1.1.19-testnet • x64 • Embedded web wallet</span>
+                    <span class="version">v1.1.21-testnet • x64 • Embedded web wallet</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-MINING.bat, SETUP-AND-START.bat, dilithion-wallet.bat, README, Binaries, Runtime DLLs</p>
                     <p style="margin-top: 10px; font-size: 0.85rem; color: #22c55e;">
-                        <span style="font-weight: 600;">✅ v1.1.19:</span> Web wallet displays sent transactions with red icon
+                        <span style="font-weight: 600;">✅ v1.1.21:</span> Transaction relay fix - transactions propagate properly
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">b34ec522f2f13f4482822a3f9e27d0cd250a59acffbd01f42a5a40d05f771cb3</code>
+                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">f90b6a7cae2475805466b7342b41c2d09dc6647cdb29d38e52faff651a7f7d3a</code>
                     </p>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-linux"/></svg></div>
                     <h3>Linux</h3>
-                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Latest: v1.1.19 (Dec 7)</p>
+                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Latest: v1.1.21 (Dec 7)</p>
                     <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/WillBarton888/dilithion/releases/download/testnet-v1.1.19/dilithion-testnet-v1.1.19-linux-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (1.8 MB)</a>
-                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.19" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/testnet-v1.1.21/dilithion-testnet-v1.1.21-linux-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (1.8 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.21" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
                     </div>
-                    <span class="version">v1.1.19-testnet • x64 • Embedded web wallet</span>
+                    <span class="version">v1.1.21-testnet • x64 • Embedded web wallet</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: dilithion-node binary</p>
                     <p style="margin-top: 10px; font-size: 0.85rem; color: #22c55e;">
-                        <span style="font-weight: 600;">✅ v1.1.19:</span> Web wallet displays sent transactions with red icon
+                        <span style="font-weight: 600;">✅ v1.1.21:</span> Transaction relay fix - transactions propagate properly
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
                         <strong>Install dependencies:</strong><br>
@@ -561,22 +561,22 @@
                         Arch: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo pacman -S leveldb snappy</code>
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">0541e760170c0bd4c5765db51345924281b9cd0b6578f0b7e4fa642cbfe621de</code>
+                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">373023c64ee6393f28055335f4e27ff6486eefcad43b72f9b72bdbcf736cc14a</code>
                     </p>
                 </div>
 
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-macos"/></svg></div>
                     <h3>macOS</h3>
-                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3 & Intel) - Latest: v1.1.19 (Dec 7)</p>
+                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3 & Intel) - Latest: v1.1.21 (Dec 7)</p>
                     <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/WillBarton888/dilithion/releases/download/testnet-v1.1.19/dilithion-testnet-v1.1.19-macos-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (4.0 MB)</a>
-                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.19" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/testnet-v1.1.21/dilithion-testnet-v1.1.21-macos-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (4.0 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.21" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
                     </div>
-                    <span class="version">v1.1.19-testnet • x64 • Embedded web wallet</span>
+                    <span class="version">v1.1.21-testnet • x64 • Embedded web wallet</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: start-mining.sh, setup-and-start.sh, README, Binaries</p>
                     <p style="margin-top: 10px; font-size: 0.85rem; color: #22c55e;">
-                        <span style="font-weight: 600;">✅ v1.1.19:</span> Web wallet displays sent transactions with red icon
+                        <span style="font-weight: 600;">✅ v1.1.21:</span> Transaction relay fix - transactions propagate properly
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
                         <span style="color: #f59e0b;">⚠️ macOS Gatekeeper: Unsigned files may show "cannot be verified" warning.</span><br>
@@ -584,7 +584,7 @@
                     </p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">Requires: leveldb (install via Homebrew: brew install leveldb)</p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">20320410c2482a2054f83206623440437573ae1ce04b89df20c94ac9d71e0524</code>
+                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">07e4114652031726ac2a806917b7109edf20ed0c501b1add3efc663ae1e7e6c7</code>
                     </p>
                 </div>
             </div>
@@ -884,7 +884,7 @@
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank">Testnet Guide</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/CLI-WALLET-GUIDE.md" target="_blank">CLI Wallet Guide</a></li>
                         <li><a href="wallet.html" target="_blank">Web Wallet (Beta)</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.19" target="_blank">Latest Release (v1.1.19)</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/releases/tag/testnet-v1.1.21" target="_blank">Latest Release (v1.1.21)</a></li>
                         <li><a href="WHITEPAPER.html" target="_blank">Whitepaper (HTML)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md" target="_blank">Whitepaper (Markdown)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion" target="_blank">GitHub Repository</a></li>
