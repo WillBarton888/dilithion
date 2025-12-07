@@ -252,6 +252,8 @@
         .info-value {
             font-family: 'JetBrains Mono', monospace;
             font-size: 0.9rem;
+            word-break: break-all;
+            overflow-wrap: break-word;
         }
 
         /* Forms */
@@ -563,7 +565,16 @@
     <!-- Sidebar -->
     <nav class="sidebar">
         <div class="logo">
-            <img src="dilithion-logo.png" alt="Dilithion">
+            <svg width="40" height="40" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#6366f1"/>
+                        <stop offset="100%" style="stop-color:#8b5cf6"/>
+                    </linearGradient>
+                </defs>
+                <path d="M50 5 L90 25 L90 55 C90 75 70 90 50 95 C30 90 10 75 10 55 L10 25 Z" fill="url(#logoGrad)"/>
+                <path d="M50 20 L35 50 L45 50 L40 80 L65 45 L52 45 L60 20 Z" fill="white"/>
+            </svg>
             <span class="logo-text">Dilithion</span>
         </div>
 
@@ -785,13 +796,13 @@
                         <span class="info-value" id="blockHeight">-</span>
                     </div>
                     <div class="info-item">
-                        <span class="info-label">Best Block Hash</span>
-                        <span class="info-value" id="bestBlock" style="font-size: 0.7rem;">-</span>
-                    </div>
-                    <div class="info-item">
                         <span class="info-label">Difficulty</span>
                         <span class="info-value" id="difficulty">-</span>
                     </div>
+                </div>
+                <div style="margin-top: 16px;">
+                    <span class="info-label">Best Block Hash</span>
+                    <div class="info-value" id="bestBlock" style="font-size: 0.75rem; margin-top: 4px; word-break: break-all;">-</div>
                 </div>
             </div>
 
