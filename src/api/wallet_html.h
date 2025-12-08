@@ -447,6 +447,16 @@ inline const std::string& GetWalletHTML() {
             color: var(--error);
         }
 
+        .tx-icon.spent {
+            background: rgba(100, 116, 139, 0.2);
+            color: var(--text-muted);
+        }
+
+        .tx-icon.mining {
+            background: rgba(234, 179, 8, 0.2);
+            color: #f59e0b;
+        }
+
         .tx-details {
             flex: 1;
         }
@@ -1167,8 +1177,11 @@ inline const std::string& GetWalletHTML() {
         // Refresh transactions - BUG #104 FIX: Use listtransactions to include sent tx
         async function refreshTransactions() {
             try {
+                console.log('[Wallet] Fetching transactions...');
                 const result = await rpcCall('listtransactions', {});
+                console.log('[Wallet] RPC result:', result);
                 const transactions = result.transactions || [];
+                console.log('[Wallet] Transactions count:', transactions.length);
                 renderTransactions(transactions);
             } catch(e) {
                 console.error('Transaction error:', e);
@@ -1177,6 +1190,24 @@ inline const std::string& GetWalletHTML() {
                 document.getElementById('txList').innerHTML =
                     '<div class="empty-state">Unable to load transactions</div>';
             }
+        }
+
+        // Format timestamp for display
+        function formatTimestamp(unixTime) {
+            if (!unixTime) return 'Pending';
+            const date = new Date(unixTime * 1000);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         }
 
         // Render transaction list - BUG #104 FIX: Show both sent and received
@@ -1189,33 +1220,67 @@ inline const std::string& GetWalletHTML() {
             }
 
             let html = '';
-            transactions.slice(0, 10).forEach(tx => {
+            transactions.slice(0, 50).forEach(tx => {
                 const confirmations = tx.confirmations || 0;
                 const amount = tx.amount || 0;
                 const txid = tx.txid || 'unknown';
                 const category = tx.category || 'receive';
                 const isSend = category === 'send';
+                const isMining = category === 'generate' || category === 'immature';
+                const isSpent = category === 'spent';  // BUG #113 FIX: Handle spent outputs
                 const fee = tx.fee || 0;
+                const timestamp = tx.time || tx.blocktime || 0;
+                const address = tx.address || '';
 
-                const iconClass = isSend ? 'sent' : 'received';
-                const typeText = isSend ? 'Sent' : 'Received';
+                // Determine origin type and icon
+                let iconClass, typeText, originLabel;
+                if (isMining) {
+                    iconClass = 'mining';
+                    typeText = 'Mining Reward';
+                    originLabel = 'Block Subsidy';
+                } else if (isSend) {
+                    iconClass = 'sent';
+                    typeText = 'Sent';
+                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                } else if (isSpent) {
+                    // BUG #113 FIX: Show spent received outputs
+                    iconClass = 'spent';
+                    typeText = 'Received (Spent)';
+                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                } else {
+                    iconClass = 'received';
+                    typeText = 'Received';
+                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                }
+
                 const amountClass = isSend ? 'negative' : 'positive';
                 const amountPrefix = isSend ? '' : '+';
                 const displayAmount = Math.abs(amount).toFixed(8);
                 const feeText = isSend && fee > 0 ? ` (fee: ${fee.toFixed(4)})` : '';
+                const timeText = formatTimestamp(timestamp);
+
+                // BUG #113 FIX: Different icon for each transaction type
+                let iconSvg;
+                if (isMining) {
+                    iconSvg = '<circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path>';
+                } else if (isSend) {
+                    iconSvg = '<polyline points="22 2 15 22 11 13 2 9 22 2"></polyline>';
+                } else if (isSpent) {
+                    iconSvg = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+                } else {
+                    iconSvg = '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>';
+                }
 
                 html += `
                     <div class="tx-item">
                         <div class="tx-icon ${iconClass}">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                ${isSend
-                                    ? '<polyline points="22 2 15 22 11 13 2 9 22 2"></polyline>'
-                                    : '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>'
-                                }
+                                ${iconSvg}
                             </svg>
                         </div>
                         <div class="tx-details">
-                            <div class="tx-type">${typeText}</div>
+                            <div class="tx-type">${typeText} <span style="color:#888;font-size:12px;">${timeText}</span></div>
+                            <div class="tx-hash" style="font-size:11px;color:#666;">${originLabel}</div>
                             <div class="tx-hash">${txid.substring(0, 16)}...${txid.substring(txid.length - 8)}</div>
                         </div>
                         <div>
@@ -1389,13 +1454,14 @@ inline const std::string& GetWalletHTML() {
         loadSettings();
         connect();
 
-        // Auto-refresh every 10 seconds
+        // BUG #115 FIX: Faster auto-refresh (5 seconds) and include transactions
         setInterval(() => {
             if (connected) {
                 refreshBalance();
                 refreshBlockchainInfo();
+                refreshTransactions();  // BUG #115: Also refresh transaction history
             }
-        }, 10000);
+        }, 5000);  // BUG #115: Reduced from 10 to 5 seconds
     </script>
 </body>
 </html>

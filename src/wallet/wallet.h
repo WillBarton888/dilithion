@@ -975,6 +975,17 @@ public:
      */
     std::vector<CWalletTx> ListUnspentOutputs(class CUTXOSet& utxo_set, unsigned int current_height, unsigned int min_confirmations = 1) const;
 
+    /**
+     * BUG #113 FIX: List ALL wallet outputs for transaction history
+     *
+     * Returns all outputs ever received by this wallet, including spent ones.
+     * Used for displaying complete transaction history in wallet UI.
+     *
+     * @param current_height Current blockchain height (for confirmation count)
+     * @return Vector of all wallet transaction outputs (spent and unspent)
+     */
+    std::vector<CWalletTx> ListAllOutputs(unsigned int current_height) const;
+
     // ========================================================================
     // BUG #104 FIX: Sent Transaction Tracking
     // ========================================================================

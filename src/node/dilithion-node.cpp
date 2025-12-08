@@ -1738,9 +1738,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 return;
             }
 
-            // Check if we already have this block in memory
-            if (g_chainstate.HasBlockIndex(blockHash)) {
-                std::cout << "[P2P] Block already in chain state, skipping" << std::endl;
+            // BUG #114 FIX: Check if we have the actual block DATA, not just the header
+            // Headers-only entries are created by ProcessHeaders() during IBD
+            // We must NOT skip blocks that only have headers - we need the full data!
+            CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
+            if (pindex && pindex->HaveData()) {
+                std::cout << "[P2P] Block already in chain state (have data), skipping" << std::endl;
                 // BUG #86 FIX: Mark block as received even when skipping
                 // Otherwise it stays "in-flight" forever, causing timeout/retry loops
                 if (g_node_context.block_fetcher) {
@@ -2303,9 +2306,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout.flush();
             if (wallet.RescanFromHeight(g_chainstate, blockchain, 0, chain_height)) {
                 unsigned int height = static_cast<unsigned int>(chain_height);
-                int64_t total = wallet.GetBalance();
+                // BUG #114 FIX: Use GetAvailableBalance() for consistency with RPC
+                // Previously used GetBalance() - GetImmatureBalance() which could differ
+                int64_t mature = wallet.GetAvailableBalance(utxo_set, height);
                 int64_t immature = wallet.GetImmatureBalance(utxo_set, height);
-                int64_t mature = total - immature;
+                int64_t total = mature + immature;
                 std::cout << "  [OK] Full scan complete" << std::endl;
                 std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
                           << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
@@ -2324,9 +2329,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout.flush();
             if (wallet.RescanFromHeight(g_chainstate, blockchain, wallet_height + 1, chain_height)) {
                 unsigned int height = static_cast<unsigned int>(chain_height);
-                int64_t total = wallet.GetBalance();
+                // BUG #114 FIX: Use GetAvailableBalance() for consistency with RPC
+                int64_t mature = wallet.GetAvailableBalance(utxo_set, height);
                 int64_t immature = wallet.GetImmatureBalance(utxo_set, height);
-                int64_t mature = total - immature;
+                int64_t total = mature + immature;
                 std::cout << "  [OK] Incremental scan complete" << std::endl;
                 std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
                           << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
@@ -2341,9 +2347,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         } else {
             // wallet_height == chain_height: Already synced, no scan needed
             unsigned int height = static_cast<unsigned int>(chain_height);
-            int64_t total = wallet.GetBalance();
+            // BUG #114 FIX: Use GetAvailableBalance() for consistency with RPC
+            int64_t mature = wallet.GetAvailableBalance(utxo_set, height);
             int64_t immature = wallet.GetImmatureBalance(utxo_set, height);
-            int64_t mature = total - immature;
+            int64_t total = mature + immature;
             std::cout << "  [OK] Wallet already synced to chain tip" << std::endl;
             std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
                       << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
@@ -2488,17 +2495,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             // Get current height for maturity calculation
                             unsigned int current_height = static_cast<unsigned int>(g_chainstate.GetHeight());
 
-                            // Total balance (all unspent including immature)
-                            int64_t total_balance = wallet.GetBalance();
-                            double totalDIL = static_cast<double>(total_balance) / 100000000.0;
+                            // BUG #114 FIX: Use GetAvailableBalance() for consistency with RPC
+                            // Mature balance (spendable) - verified against UTXO set
+                            int64_t mature_balance = wallet.GetAvailableBalance(utxo_set, current_height);
+                            double matureDIL = static_cast<double>(mature_balance) / 100000000.0;
 
                             // Immature balance (coinbase not yet mature)
                             int64_t immature_balance = wallet.GetImmatureBalance(utxo_set, current_height);
                             double immatureDIL = static_cast<double>(immature_balance) / 100000000.0;
 
-                            // Mature balance (spendable)
-                            int64_t mature_balance = total_balance - immature_balance;
-                            double matureDIL = static_cast<double>(mature_balance) / 100000000.0;
+                            // Total balance
+                            int64_t total_balance = mature_balance + immature_balance;
+                            double totalDIL = static_cast<double>(total_balance) / 100000000.0;
 
                             std::cout << "[Wallet] Balance: " << std::fixed << std::setprecision(8)
                                       << matureDIL << " DIL (mature/spendable)" << std::endl;

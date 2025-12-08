@@ -2284,13 +2284,13 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
     };
     std::vector<TxInfo> allTx;
 
-    // Get received transactions (UTXOs)
-    std::vector<CWalletTx> utxos = m_wallet->ListUnspentOutputs(*m_utxo_set, currentHeight);
-    for (const auto& utxo : utxos) {
+    // BUG #113 FIX: Get ALL received transactions (including spent) for complete history
+    std::vector<CWalletTx> allOutputs = m_wallet->ListAllOutputs(currentHeight);
+    for (const auto& utxo : allOutputs) {
         TxInfo info;
         info.txid = utxo.txid.GetHex();
         info.address = utxo.address.ToString();
-        info.category = "receive";
+        info.category = utxo.fSpent ? "spent" : "receive";  // Mark spent outputs
         info.amount = utxo.nValue;
         info.fee = 0;
         info.confirmations = 0;

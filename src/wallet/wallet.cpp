@@ -3001,6 +3001,24 @@ std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned 
 }
 
 // ============================================================================
+// BUG #113 FIX: List ALL wallet outputs for transaction history
+// ============================================================================
+
+std::vector<CWalletTx> CWallet::ListAllOutputs(unsigned int current_height) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    std::vector<CWalletTx> allOutputs;
+
+    for (const auto& pair : mapWalletTx) {
+        CWalletTx wtx = pair.second;
+        // Include all outputs - spent and unspent - for complete history
+        allOutputs.push_back(wtx);
+    }
+
+    return allOutputs;
+}
+
+// ============================================================================
 // BUG #104 FIX: Sent Transaction Tracking
 // ============================================================================
 
