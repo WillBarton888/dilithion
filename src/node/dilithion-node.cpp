@@ -3423,6 +3423,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "[Mining] Hash rate: " << miner.GetHashRate() << " H/s, "
                          << "Total hashes: " << stats.nHashesComputed << std::endl;
 
+                // ========================================================================
+                // BUG #109 FIX: Periodic template refresh to include mempool transactions
+                // ========================================================================
+                // Previously, templates were only rebuilt when a new block was found.
+                // This caused transactions to never be mined because the miner kept
+                // using stale templates without mempool transactions.
+                //
+                // Now we refresh the template every 10 seconds if:
+                // 1. Mining is active
+                // 2. Mempool has transactions
+                // 3. We're not in IBD
+                //
+                // This is similar to Bitcoin Core's getblocktemplate behavior.
+                if (miner.IsMining() && !IsInitialBlockDownload()) {
+                    CTxMemPool* mempool = g_mempool.load();
+                    if (mempool && mempool->Size() > 0) {
+                        std::cout << "[Mining] BUG #109: Mempool has " << mempool->Size()
+                                  << " tx(s), refreshing template..." << std::endl;
+                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false);
+                        if (templateOpt) {
+                            miner.UpdateTemplate(*templateOpt);
+                            std::cout << "[Mining] Template refreshed with mempool transactions" << std::endl;
+                        }
+                    }
+                }
+
                 // BUG #49: Check if mining in isolation
                 if (miner.IsMining()) {
                     size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
