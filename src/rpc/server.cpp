@@ -1766,7 +1766,16 @@ std::string CRPCServer::RPC_GetNewAddress(const std::string& params) {
         throw std::runtime_error("Wallet not initialized");
     }
 
-    CDilithiumAddress addr = m_wallet->GetNewAddress();
+    CDilithiumAddress addr;
+    // For HD wallets, derive a new address for privacy
+    // This implements proper BIP44-style address generation
+    if (m_wallet->IsHDWallet()) {
+        addr = m_wallet->GetNewHDAddress();
+    } else {
+        // Legacy wallet - return default address
+        addr = m_wallet->GetNewAddress();
+    }
+
     if (!addr.IsValid()) {
         throw std::runtime_error("Failed to get address");
     }
