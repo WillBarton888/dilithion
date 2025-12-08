@@ -367,11 +367,22 @@ private:
     /**
      * Lock wallet (unlocked version)
      * Internal helper that assumes caller already holds cs_wallet lock
-     * 
+     *
      * @return true if successful
      * @note Caller must hold cs_wallet lock
      */
     bool LockUnlocked();
+
+    /**
+     * BUG #112 FIX: Update sent transaction height (unlocked version)
+     * Internal helper that assumes caller already holds cs_wallet lock
+     * Called from blockConnected to update TX confirmation heights
+     *
+     * @param txid Transaction ID to update
+     * @param nHeight Block height where confirmed
+     * @note Caller must hold cs_wallet lock
+     */
+    void UpdateSentTransactionHeightUnlocked(const uint256& txid, uint32_t nHeight);
 
 public:
     CWallet();

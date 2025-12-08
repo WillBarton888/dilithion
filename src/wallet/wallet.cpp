@@ -17,6 +17,7 @@
 #include <consensus/chain.h>  // BUG #56 FIX: For CChainState (RescanFromHeight)
 #include <consensus/tx_validation.h>
 #include <consensus/sighash.h>  // WALLET-015 FIX: SIGHASH types
+#include <consensus/validation.h>  // BUG #112 FIX: For CBlockValidator::DeserializeBlockTransactions
 #include <core/chainparams.h>  // CHAIN-ID FIX: For replay protection
 
 #include <algorithm>
@@ -545,24 +546,21 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
         return;
     }
 
-    // Parse transactions from block.vtx
-    // block.vtx contains multiple serialized transactions concatenated together
-    const uint8_t* ptr = block.vtx.data();
-    const uint8_t* end = block.vtx.data() + block.vtx.size();
+    // BUG #112 FIX: Correctly parse transactions from block.vtx
+    // block.vtx format is: [count][tx1][tx2]... (count is compact size)
+    // Use CBlockValidator::DeserializeBlockTransactions which handles this correctly
+    CBlockValidator validator;
+    std::vector<CTransactionRef> transactions;
+    std::string deserializeError;
 
-    while (ptr < end) {
-        // Deserialize one transaction
-        CTransaction tx;
-        size_t bytesConsumed = 0;
-        std::string deserializeError;
+    if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
+        // Failed to parse transactions - log error and return
+        std::cerr << "[WALLET] ERROR: Failed to deserialize block transactions: " << deserializeError << std::endl;
+        return;
+    }
 
-        if (!tx.Deserialize(ptr, end - ptr, &deserializeError, &bytesConsumed)) {
-            // Failed to parse transaction - skip rest of this block
-            break;
-        }
-
-        // Move pointer forward
-        ptr += bytesConsumed;
+    for (const CTransactionRef& txRef : transactions) {
+        const CTransaction& tx = *txRef;
 
         if (connecting) {
             // Block connected: add outputs, mark inputs spent
@@ -626,6 +624,10 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                     }
                 }
             }
+
+            // BUG #112 FIX: Update sent transaction confirmation height
+            // If this TX was sent by us (in mapSentTx), update its height
+            UpdateSentTransactionHeightUnlocked(tx.GetHash(), height);
         } else {
             // Block disconnected: remove outputs, restore inputs
 
@@ -652,6 +654,10 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                     mapWalletTx.erase(it);
                 }
             }
+
+            // BUG #112 FIX: Reset sent transaction height on disconnect
+            // If this TX was sent by us and is being disconnected, mark as unconfirmed
+            UpdateSentTransactionHeightUnlocked(tx.GetHash(), 0);
         }
     }
 }
@@ -3039,7 +3045,12 @@ std::vector<CSentTx> CWallet::ListSentTransactions() const {
 
 void CWallet::UpdateSentTransactionHeight(const uint256& txid, uint32_t nHeight) {
     std::lock_guard<std::mutex> lock(cs_wallet);
+    UpdateSentTransactionHeightUnlocked(txid, nHeight);
+}
 
+// BUG #112 FIX: Unlocked version for use from blockConnected (which already holds cs_wallet)
+void CWallet::UpdateSentTransactionHeightUnlocked(const uint256& txid, uint32_t nHeight) {
+    // NOTE: Caller must hold cs_wallet lock
     auto it = mapSentTx.find(txid);
     if (it != mapSentTx.end()) {
         it->second.nHeight = nHeight;
