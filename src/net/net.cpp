@@ -49,10 +49,10 @@ static const uint64_t MAX_TX_OUTPUTS = 10000;           // Max outputs per trans
 static const uint64_t MAX_SCRIPT_SIZE = 10000;          // Max script size in bytes
 
 // P2-1 FIX: Rate limiting for GETDATA messages (DoS protection)
-// Limits: 10 GETDATA messages per second per peer
+// Limits: 50 GETDATA messages per second per peer (increased from 10 for IBD sync)
 static std::map<int, std::vector<int64_t>> g_peer_getdata_timestamps;
 static std::mutex cs_getdata_rate;
-static const size_t MAX_GETDATA_PER_SECOND = 10;
+static const size_t MAX_GETDATA_PER_SECOND = 50;
 
 // P3-N2 FIX: Rate limiting for HEADERS messages (DoS protection)
 // Limits: 3 HEADERS messages per second per peer (headers are large)
@@ -686,7 +686,7 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             if (timestamps.size() >= MAX_GETDATA_PER_SECOND) {
                 std::cout << "[P2P] RATE LIMIT: Too many GETDATA from peer " << peer_id
                           << " (" << timestamps.size() << "/" << MAX_GETDATA_PER_SECOND << " per second)" << std::endl;
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 2);  // Reduced from 10 - IBD sync is legitimate
                 return false;
             }
             timestamps.push_back(now);
@@ -1832,6 +1832,10 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
 #endif
         // Real socket error - disconnect
         // Network: Record connection failure
+#ifdef _WIN32
+        std::cout << "[P2P] DEBUG: Socket receive error for peer " << peer_id
+                  << ", WSAGetLastError=" << err << std::endl;
+#endif
         connection_quality.RecordError(peer_id);
         partition_detector.RecordConnectionFailure();
         DisconnectPeer(peer_id, "socket receive error");
