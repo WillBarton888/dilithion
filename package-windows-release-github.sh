@@ -30,7 +30,6 @@ mkdir -p "releases/${RELEASE_NAME}"
 echo "[2/5] Copying binaries and wallet tools..."
 cp dilithion-node.exe "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy dilithion-node.exe"; exit 1; }
 cp check-wallet-balance.exe "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy check-wallet-balance.exe"; exit 1; }
-cp genesis_gen.exe "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy genesis_gen.exe"; exit 1; }
 cp dilithion-wallet.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy dilithion-wallet.bat"; exit 1; }
 
 # Copy required DLLs from MSYS2
@@ -47,13 +46,8 @@ echo "   [SUCCESS] All 6 DLLs copied successfully"
 echo "[4/5] Copying launcher scripts and documentation..."
 cp SETUP-AND-START.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy SETUP-AND-START.bat"; exit 1; }
 cp START-MINING.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy START-MINING.bat"; exit 1; }
-cp SETUP-AND-START-NO-COLOR.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy SETUP-AND-START-NO-COLOR.bat"; exit 1; }
-cp TEST-DEBUG.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy TEST-DEBUG.bat"; exit 1; }
-cp ULTRA-DEBUG.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy ULTRA-DEBUG.bat"; exit 1; }
-cp FIX-WINDOWS-DEFENDER.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy FIX-WINDOWS-DEFENDER.bat"; exit 1; }
 cp README-WINDOWS.txt "${RELEASE_DIR}/README.txt" || { echo "ERROR: Failed to copy README-WINDOWS.txt"; exit 1; }
-cp TESTNET-GUIDE.md "${RELEASE_DIR}/TESTNET-GUIDE.md" || { echo "ERROR: Failed to copy TESTNET-GUIDE.md"; exit 1; }
-cp ANTIVIRUS-SOLUTION.md "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy ANTIVIRUS-SOLUTION.md"; exit 1; }
+cp wallet.html "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy wallet.html"; exit 1; }
 echo "   All scripts and documentation copied successfully"
 
 # Create the ZIP archive
