@@ -958,14 +958,6 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
     std::vector<int> result;
 
-    // BUG #126 DEBUG: Log peer selection process
-    static int debug_counter = 0;
-    bool should_log = (++debug_counter % 100 == 1);  // Log every 100th call
-
-    if (should_log) {
-        std::cout << "[PeerManager] GetValidPeersForDownload: checking " << peers.size() << " peer(s)" << std::endl;
-    }
-
     for (const auto& pair : peers) {
         CPeer* peer = pair.second.get();
 
@@ -974,25 +966,15 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
 
         // Must have completed handshake
         if (!peer->IsHandshakeComplete()) {
-            if (should_log) {
-                std::cout << "[PeerManager] Peer " << pair.first << " rejected: handshake not complete (state=" << peer->state << ")" << std::endl;
-            }
             continue;
         }
 
         // Must be suitable for download (not stalling too much)
         if (!peer->IsSuitableForDownload()) {
-            if (should_log) {
-                std::cout << "[PeerManager] Peer " << pair.first << " rejected: not suitable for download" << std::endl;
-            }
             continue;
         }
 
         result.push_back(pair.first);
-    }
-
-    if (should_log) {
-        std::cout << "[PeerManager] GetValidPeersForDownload: returning " << result.size() << " valid peer(s)" << std::endl;
     }
 
     return result;
