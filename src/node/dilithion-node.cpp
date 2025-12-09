@@ -1619,6 +1619,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_node_context.block_fetcher->OnPeerConnected(peer_id);
             }
 
+            // Phase C FIX: Notify CPeerManager of handshake completion
+            // This is CRITICAL for IsPeerSuitableForDownload() to return true
+            if (g_node_context.peer_manager && g_node_context.headers_manager) {
+                int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
+                g_node_context.peer_manager->OnPeerHandshakeComplete(peer_id, peerHeight, false);
+                std::cout << "[P2P] Registered peer " << peer_id << " with CPeerManager (height=" << peerHeight << ")" << std::endl;
+            }
+
             // Check if headers_manager is initialized
             if (!g_node_context.headers_manager) {
                 return;
