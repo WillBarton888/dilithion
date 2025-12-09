@@ -29,6 +29,7 @@
 #include <net/tx_relay.h>
 #include <net/socket.h>
 #include <net/async_broadcaster.h>
+#include <net/message_queue.h>  // BUG #125: Async message processing
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
@@ -1528,6 +1529,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return 1;
         }
 
+        // BUG #125: Create and start async message processing queue
+        // This decouples network I/O from message processing to prevent blocking
+        CMessageProcessorQueue message_queue(message_processor, 2);  // 2 worker threads
+        g_message_queue.store(&message_queue);
+        g_node_context.message_queue = &message_queue;
+
+        if (!message_queue.Start()) {
+            std::cerr << "Failed to start message queue" << std::endl;
+            return 1;
+        }
+        std::cout << "  [OK] Async message processing enabled (2 workers)" << std::endl;
 
         // Create and start HTTP API server for dashboard
         // Use port 18334 for testnet, 8334 for mainnet (Bitcoin convention)
@@ -3511,10 +3523,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << " ✓" << std::endl;
         }
 
+        // BUG #125: Stop message queue before P2P shutdown
+        std::cout << "[Shutdown] Stopping message queue..." << std::flush;
+        message_queue.Stop();
+        g_message_queue.store(nullptr);
+        g_node_context.message_queue = nullptr;
+        std::cout << " done" << std::endl;
+
         std::cout << "[Shutdown] Stopping P2P server..." << std::flush;
         connection_manager.Cleanup();  // Close all peer sockets
         p2p_socket.Close();
-        
+
         // Phase 1.2: Shutdown NodeContext (Bitcoin Core pattern)
         std::cout << "[Shutdown] NodeContext shutdown complete" << std::endl;
         g_node_context.Shutdown();

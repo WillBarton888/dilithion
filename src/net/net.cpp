@@ -21,6 +21,7 @@
 #include <node/genesis.h>     // P2-3: For GetGenesisHash() validation
 #include <net/block_fetcher.h>  // BUG #68 FIX: For BlockFetcher peer disconnect notification
 #include <net/node_state.h>     // BUG #69: Bitcoin Core-style per-peer state management
+#include <net/message_queue.h>  // BUG #125: Async message processing
 #include <random>
 #include <thread>   // BUG #91: For std::this_thread::sleep_for
 #include <chrono>   // BUG #91: For std::chrono::milliseconds
@@ -1972,16 +1973,29 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
             peer->last_recv = GetTime();
         }
 
-        // Process message
-        bool success = message_processor.ProcessMessage(peer_id, message);
-        
+        // Process message - BUG #125: Use async queue if available
+        bool success = false;
+        CMessageProcessorQueue* queue = g_message_queue.load();
+        if (queue && queue->IsRunning()) {
+            // Async path: enqueue message for background processing
+            CMessageProcessorQueue::Priority priority =
+                CMessageProcessorQueue::GetMessagePriority(message);
+            success = queue->EnqueueMessage(peer_id, message, priority);
+            // Note: success here means queued, not processed
+            // Quality tracking happens after actual processing in worker thread
+        } else {
+            // Sync path (fallback): process immediately
+            success = message_processor.ProcessMessage(peer_id, message);
+        }
+
         // Network: Track connection quality and partition detection
+        // Note: In async mode, this tracks queueing success, not processing
         if (success) {
-            // Successful message processing
+            // Successful message queueing/processing
             connection_quality.RecordMessageReceived(peer_id);
             partition_detector.RecordMessageExchange();
         } else {
-            // Failed message processing
+            // Failed message queueing/processing
             connection_quality.RecordError(peer_id);
         }
         

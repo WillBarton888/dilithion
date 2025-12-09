@@ -156,6 +156,7 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/dns.cpp \
                src/net/tx_relay.cpp \
                src/net/async_broadcaster.cpp \
+               src/net/message_queue.cpp \
                src/net/headers_manager.cpp \
                src/net/orphan_manager.cpp \
                src/net/block_fetcher.cpp \

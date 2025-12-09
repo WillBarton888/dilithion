@@ -694,7 +694,7 @@ void CPeerManager::PeriodicMaintenance() {
     // This prevents attackers from occupying connection slots indefinitely
     {
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
-        static const int64_t HANDSHAKE_TIMEOUT = 60;  // 60 seconds
+        static const int64_t HANDSHAKE_TIMEOUT = 300;  // BUG #125: 300 seconds for IBD
         int64_t now = GetTime();
 
         std::vector<int> peers_to_disconnect;

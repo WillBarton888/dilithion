@@ -17,6 +17,7 @@ class CHeadersManager;
 class COrphanManager;
 class CBlockFetcher;
 class CAsyncBroadcaster;
+class CMessageProcessorQueue;  // BUG #125: Async message processing
 class CRPCServer;
 class CMiningController;
 class CWallet;
@@ -50,6 +51,7 @@ struct NodeContext {
 
     // Transaction relay
     CAsyncBroadcaster* async_broadcaster{nullptr};
+    CMessageProcessorQueue* message_queue{nullptr};  // BUG #125: Async message processing
 
     // Node services
     CRPCServer* rpc_server{nullptr};
