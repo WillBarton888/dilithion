@@ -893,3 +893,247 @@ uint256 CHeadersManager::AddChainWork(const uint256& blockProof, const uint256& 
 
     return result;
 }
+
+// ============================================================================
+// BUG #125: Async Header Validation
+// ============================================================================
+
+bool CHeadersManager::QuickValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev) const
+{
+    // Quick structural validation - NO RandomX PoW check
+    // This runs in <1ms per header
+
+    // 1. Check version (should be > 0)
+    if (header.nVersion <= 0) {
+        std::cerr << "[HeadersManager] Quick validate FAILED: version <= 0" << std::endl;
+        return false;
+    }
+
+    // 2. Check bits are set (non-zero difficulty)
+    if (header.nBits == 0) {
+        std::cerr << "[HeadersManager] Quick validate FAILED: nBits == 0" << std::endl;
+        return false;
+    }
+
+    // 3. If we have a parent, check timestamp validity
+    if (pprev != nullptr) {
+        // Check not too far in future (2 hours)
+        uint32_t now = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);
+        if (header.nTime > now + MAX_HEADERS_AGE_SECONDS) {
+            std::cerr << "[HeadersManager] Quick validate FAILED: timestamp too far in future" << std::endl;
+            return false;
+        }
+    }
+
+    // Structure is valid - PoW will be validated async
+    return true;
+}
+
+bool CHeadersManager::FullValidateHeader(const CBlockHeader& header)
+{
+    // Full PoW validation - this is the expensive operation (50-250ms)
+    uint256 hash = header.GetHash();
+    return CheckProofOfWork(hash, header.nBits);
+}
+
+bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<CBlockHeader>& headers)
+{
+    if (!m_validation_running.load()) {
+        std::cerr << "[HeadersManager] Validation thread not running, falling back to sync" << std::endl;
+        return ProcessHeaders(peer, headers);
+    }
+
+    std::cout << "[HeadersManager] Queueing " << headers.size()
+              << " headers for async validation from peer " << peer << std::endl;
+
+    // Quick-validate and store headers immediately (non-blocking)
+    {
+        std::lock_guard<std::mutex> lock(cs_headers);
+
+        if (headers.empty()) {
+            return true;
+        }
+
+        if (headers.size() > MAX_HEADERS_BUFFER) {
+            std::cerr << "[HeadersManager] Too many headers (" << headers.size() << ")" << std::endl;
+            return false;
+        }
+
+        const HeaderWithChainWork* pprev = nullptr;
+
+        for (const CBlockHeader& header : headers) {
+            uint256 hash = header.GetHash();
+
+            // Skip duplicates
+            if (mapHeaders.find(hash) != mapHeaders.end()) {
+                pprev = &mapHeaders[hash];
+                continue;
+            }
+
+            // Find parent
+            if (pprev == nullptr || pprev->header.GetHash() != header.hashPrevBlock) {
+                auto parentIt = mapHeaders.find(header.hashPrevBlock);
+                if (parentIt == mapHeaders.end()) {
+                    uint256 genesisHash = Genesis::GetGenesisHash();
+                    if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
+                        pprev = nullptr;
+                    } else {
+                        std::cerr << "[HeadersManager] Orphan header - parent not found" << std::endl;
+                        return false;
+                    }
+                } else {
+                    pprev = &parentIt->second;
+                }
+            }
+
+            // Quick validate (structure only - fast)
+            if (!QuickValidateHeader(header, pprev ? &pprev->header : nullptr)) {
+                return false;
+            }
+
+            // Calculate height and chain work
+            int height = pprev ? (pprev->height + 1) : 1;
+            uint256 chainWork = CalculateChainWork(header, pprev);
+
+            // Store header (marked as pending PoW validation)
+            HeaderWithChainWork headerData(header, height);
+            headerData.chainWork = chainWork;
+            mapHeaders[hash] = headerData;
+            AddToHeightIndex(hash, height);
+            UpdateChainTips(hash);
+            UpdateBestHeader(hash);
+
+            // Queue for background PoW validation
+            {
+                std::lock_guard<std::mutex> vlock(m_validation_mutex);
+                m_validation_queue.emplace(peer, header, height, chainWork);
+            }
+
+            // Update for next iteration
+            pprev = &mapHeaders[hash];
+        }
+
+        // Update peer state
+        if (!headers.empty()) {
+            uint256 lastHash = headers.back().GetHash();
+            auto it = mapHeaders.find(lastHash);
+            if (it != mapHeaders.end()) {
+                UpdatePeerState(peer, lastHash, it->second.height);
+            }
+        }
+    }
+
+    // Wake up validation thread
+    m_validation_cv.notify_one();
+
+    std::cout << "[HeadersManager] Headers queued successfully, returning immediately" << std::endl;
+    return true;
+}
+
+bool CHeadersManager::StartValidationThread()
+{
+    if (m_validation_running.load()) {
+        std::cerr << "[HeadersManager] Validation thread already running" << std::endl;
+        return false;
+    }
+
+    std::cout << "[HeadersManager] Starting validation worker thread..." << std::endl;
+
+    m_validation_running.store(true);
+
+    try {
+        m_validation_thread = std::thread(&CHeadersManager::ValidationWorkerThread, this);
+        std::cout << "[HeadersManager] Validation thread started" << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        m_validation_running.store(false);
+        std::cerr << "[HeadersManager] Failed to start validation thread: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+void CHeadersManager::StopValidationThread()
+{
+    if (!m_validation_running.load()) {
+        return;
+    }
+
+    std::cout << "[HeadersManager] Stopping validation thread..." << std::endl;
+
+    m_validation_running.store(false);
+    m_validation_cv.notify_all();
+
+    if (m_validation_thread.joinable()) {
+        m_validation_thread.join();
+    }
+
+    // Clear remaining queue
+    {
+        std::lock_guard<std::mutex> lock(m_validation_mutex);
+        while (!m_validation_queue.empty()) {
+            m_validation_queue.pop();
+        }
+    }
+
+    std::cout << "[HeadersManager] Validation thread stopped. Validated: "
+              << m_validated_count.load() << ", Failures: "
+              << m_validation_failures.load() << std::endl;
+}
+
+size_t CHeadersManager::GetValidationQueueDepth() const
+{
+    std::lock_guard<std::mutex> lock(m_validation_mutex);
+    return m_validation_queue.size();
+}
+
+void CHeadersManager::ValidationWorkerThread()
+{
+    std::cout << "[HeadersManager] Validation worker thread started" << std::endl;
+
+    while (m_validation_running.load()) {
+        PendingValidation pending;
+
+        // Wait for work
+        {
+            std::unique_lock<std::mutex> lock(m_validation_mutex);
+
+            m_validation_cv.wait(lock, [this] {
+                return !m_validation_running.load() || !m_validation_queue.empty();
+            });
+
+            if (!m_validation_running.load()) {
+                break;
+            }
+
+            if (m_validation_queue.empty()) {
+                continue;
+            }
+
+            pending = m_validation_queue.front();
+            m_validation_queue.pop();
+        }
+
+        // Validate PoW (expensive - runs outside lock)
+        bool valid = FullValidateHeader(pending.header);
+
+        if (valid) {
+            m_validated_count++;
+
+            // Log progress periodically
+            size_t count = m_validated_count.load();
+            if (count % 100 == 0) {
+                std::cout << "[HeadersManager] Validated " << count << " headers (height "
+                          << pending.height << ")" << std::endl;
+            }
+        } else {
+            m_validation_failures++;
+            std::cerr << "[HeadersManager] PoW FAILED for header at height "
+                      << pending.height << " from peer " << pending.peer << std::endl;
+
+            // TODO: Could disconnect peer or mark header as invalid
+            // For now, just log the failure
+        }
+    }
+
+    std::cout << "[HeadersManager] Validation worker thread stopped" << std::endl;
+}

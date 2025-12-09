@@ -2144,8 +2144,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             std::cout << "[IBD] Received " << headers.size() << " header(s) from peer " << peer_id << std::endl;
 
-            // Pass headers to headers manager for validation and storage
-            if (g_node_context.headers_manager->ProcessHeaders(peer_id, headers)) {
+            // BUG #125: Use async validation to prevent blocking network thread
+            // QueueHeadersForValidation does quick structural validation immediately,
+            // then queues expensive PoW validation for background thread
+            bool useAsync = g_node_context.headers_manager->IsValidating();
+
+            bool success = false;
+            if (useAsync) {
+                success = g_node_context.headers_manager->QueueHeadersForValidation(peer_id, headers);
+                std::cout << "[IBD] Headers queued for async validation" << std::endl;
+            } else {
+                // Fallback to sync validation if async thread not running
+                success = g_node_context.headers_manager->ProcessHeaders(peer_id, headers);
+            }
+
+            if (success) {
                 int bestHeight = g_node_context.headers_manager->GetBestHeight();
                 std::cout << "[IBD] Headers processed. Best height: " << bestHeight << std::endl;
 

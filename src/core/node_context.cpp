@@ -40,6 +40,12 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
         orphan_manager = std::make_unique<COrphanManager>();
         block_fetcher = std::make_unique<CBlockFetcher>();
         LogPrintf(IBD, INFO, "Initialized IBD managers (headers, orphan, block_fetcher)");
+
+        // BUG #125: Start async header validation thread
+        if (headers_manager && !headers_manager->StartValidationThread()) {
+            LogPrintf(IBD, WARN, "Failed to start header validation thread");
+            // Non-fatal - will fall back to sync validation
+        }
     } catch (const std::exception& e) {
         LogPrintf(IBD, ERROR, "Failed to initialize IBD managers: %s", e.what());
         return false;
@@ -77,6 +83,11 @@ void NodeContext::Shutdown() {
     // Reset IBD managers (unique_ptr will handle cleanup)
     block_fetcher.reset();
     orphan_manager.reset();
+
+    // BUG #125: Stop validation thread before destroying headers_manager
+    if (headers_manager) {
+        headers_manager->StopValidationThread();
+    }
     headers_manager.reset();
 
     // Reset peer manager (unique_ptr will handle cleanup)

@@ -7,11 +7,15 @@
 #include <primitives/block.h>
 #include <net/headerssync.h>
 #include <chrono>
+#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <set>
+#include <thread>
 #include <vector>
+#include <atomic>
 
 /**
  * @file headers_manager.h
@@ -113,6 +117,80 @@ public:
      * @return true if header is valid
      */
     bool ValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev);
+
+    // ========================================================================
+    // BUG #125: Async Header Validation (Non-blocking)
+    // ========================================================================
+
+    /**
+     * @brief Quick validation - structure check only (<1ms per header)
+     *
+     * Validates WITHOUT expensive RandomX PoW check:
+     * - Version > 0
+     * - nBits non-zero
+     * - Parent exists in header chain
+     * - Not a duplicate header
+     *
+     * Use this for immediate validation during ProcessHeaders().
+     *
+     * @param header Header to validate
+     * @param pprev Parent header (nullptr for genesis)
+     * @return true if structure is valid
+     */
+    bool QuickValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev) const;
+
+    /**
+     * @brief Full validation - RandomX PoW check only (50-250ms per header)
+     *
+     * Performs expensive Proof-of-Work validation using RandomX.
+     * Should be called from background validation thread.
+     *
+     * @param header Header to validate
+     * @return true if PoW is valid
+     */
+    bool FullValidateHeader(const CBlockHeader& header);
+
+    /**
+     * @brief Queue headers for background PoW validation
+     *
+     * Headers are quick-validated immediately, then queued for
+     * background PoW validation. Returns immediately (non-blocking).
+     *
+     * @param peer Peer ID that sent the headers
+     * @param headers Headers to validate
+     * @return true if headers were queued successfully
+     */
+    bool QueueHeadersForValidation(NodeId peer, const std::vector<CBlockHeader>& headers);
+
+    /**
+     * @brief Start the background validation worker thread
+     *
+     * Call once during node initialization.
+     *
+     * @return true if started successfully
+     */
+    bool StartValidationThread();
+
+    /**
+     * @brief Stop the background validation worker thread
+     *
+     * Call during node shutdown. Waits for thread to finish.
+     */
+    void StopValidationThread();
+
+    /**
+     * @brief Check if validation thread is running
+     *
+     * @return true if validation thread is active
+     */
+    bool IsValidating() const { return m_validation_running.load(); }
+
+    /**
+     * @brief Get validation queue depth
+     *
+     * @return Number of headers waiting for PoW validation
+     */
+    size_t GetValidationQueueDepth() const;
 
     /**
      * @brief Request headers from a peer
@@ -360,6 +438,54 @@ private:
 
     // Thread safety
     mutable std::mutex cs_headers;          ///< Protects all data members
+
+    // ========================================================================
+    // BUG #125: Async Validation Queue
+    // ========================================================================
+
+    /**
+     * @struct PendingValidation
+     * @brief Header awaiting PoW validation in background thread
+     */
+    struct PendingValidation {
+        NodeId peer;                        ///< Peer that sent this header
+        CBlockHeader header;                ///< Header to validate
+        int height;                         ///< Height in chain (for logging)
+        uint256 chainWork;                  ///< Accumulated chain work
+
+        PendingValidation() : peer(-1), height(0) {}
+        PendingValidation(NodeId p, const CBlockHeader& h, int ht, const uint256& work)
+            : peer(p), header(h), height(ht), chainWork(work) {}
+    };
+
+    //! Queue of headers pending PoW validation
+    std::queue<PendingValidation> m_validation_queue;
+
+    //! Mutex protecting validation queue
+    mutable std::mutex m_validation_mutex;
+
+    //! Condition variable for validation queue
+    std::condition_variable m_validation_cv;
+
+    //! Validation worker thread
+    std::thread m_validation_thread;
+
+    //! Flag indicating validation thread should run
+    std::atomic<bool> m_validation_running{false};
+
+    //! Count of successfully validated headers (for stats)
+    std::atomic<size_t> m_validated_count{0};
+
+    //! Count of failed validations (for stats)
+    std::atomic<size_t> m_validation_failures{0};
+
+    /**
+     * @brief Background validation worker thread main loop
+     *
+     * Waits for headers in queue and validates PoW.
+     * Uses per-thread RandomX VM via randomx_hash_thread().
+     */
+    void ValidationWorkerThread();
 
     // Internal helpers
 
