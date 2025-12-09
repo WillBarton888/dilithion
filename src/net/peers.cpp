@@ -7,6 +7,7 @@
 #include <util/logging.h>
 #include <algorithm>
 #include <iostream>
+#include <set>
 
 // Global peer manager instance (raw pointer - ownership in g_node_context)
 CPeerManager* g_peer_manager = nullptr;
@@ -589,10 +590,16 @@ void CPeerManager::MarkAddressTried(const NetProtocol::CAddress& addr) {
 
 std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int count) {
     std::vector<NetProtocol::CAddress> result;
+    std::set<std::string> seen_ips;  // Track already-selected addresses to prevent duplicates
 
     // Use AddrMan's deterministic selection algorithm
     // This provides eclipse attack protection via the bucket system
-    for (int i = 0; i < count; i++) {
+    int attempts = 0;
+    int max_attempts = count * 3;  // Allow some failed attempts due to duplicates
+
+    while ((int)result.size() < count && attempts < max_attempts) {
+        attempts++;
+
         // Select returns pair<CAddress, int64_t> where int64_t is last try time
         auto [selected_addr, last_try] = addrman.Select();
 
@@ -600,6 +607,13 @@ std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int co
         if (!selected_addr.IsValid()) {
             break;  // No more addresses available
         }
+
+        // Get IP string for deduplication
+        std::string ip_str = selected_addr.ToStringIP();
+        if (seen_ips.count(ip_str)) {
+            continue;  // Skip duplicate
+        }
+        seen_ips.insert(ip_str);
 
         // Convert CAddress (which inherits from CService/CNetAddr) back to NetProtocol::CAddress
         NetProtocol::CAddress addr;
