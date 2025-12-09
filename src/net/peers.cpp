@@ -284,7 +284,9 @@ void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
     CService service(netaddr, addr.port);
 
     // Add to AddrMan - bucket system handles deduplication and limits
-    addrman.Add(service, CNetAddr());  // No source address for now
+    // Must create CNetworkAddr (which extends CService) for proper Add()
+    CNetworkAddr networkAddr(service, addr.services, addr.time);
+    addrman.Add(networkAddr, CNetAddr());  // No source address for now
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
