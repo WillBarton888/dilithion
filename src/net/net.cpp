@@ -392,7 +392,11 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             peer->user_agent = msg.user_agent;
             peer->start_height = msg.start_height;
             peer->relay = msg.relay;
-            peer->state = CPeer::STATE_VERSION_SENT;
+            // BUG #127 FIX: Only advance state if not already past VERSION_SENT
+            // Prevents overwriting HANDSHAKE_COMPLETE if VERACK received first
+            if (peer->state < CPeer::STATE_VERSION_SENT) {
+                peer->state = CPeer::STATE_VERSION_SENT;
+            }
         } else {
             std::cout << "[P2P] WARNING: Could not create peer " << peer_id << " (connection limit reached?)" << std::endl;
         }
