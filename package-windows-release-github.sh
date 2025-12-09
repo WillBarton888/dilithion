@@ -47,7 +47,7 @@ echo "[4/5] Copying launcher scripts and documentation..."
 cp SETUP-AND-START.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy SETUP-AND-START.bat"; exit 1; }
 cp START-MINING.bat "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy START-MINING.bat"; exit 1; }
 cp README-WINDOWS.txt "${RELEASE_DIR}/README.txt" || { echo "ERROR: Failed to copy README-WINDOWS.txt"; exit 1; }
-cp wallet.html "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy wallet.html"; exit 1; }
+cp website/wallet.html "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy wallet.html"; exit 1; }
 echo "   All scripts and documentation copied successfully"
 
 # Create the ZIP archive

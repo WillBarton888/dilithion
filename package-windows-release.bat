@@ -50,7 +50,7 @@ echo [4/5] Copying launcher scripts and documentation...
 copy SETUP-AND-START.bat %RELEASE_DIR%\ || goto :copy_error
 copy START-MINING.bat %RELEASE_DIR%\ || goto :copy_error
 copy README-WINDOWS.txt %RELEASE_DIR%\README.txt || goto :copy_error
-copy wallet.html %RELEASE_DIR%\ || goto :copy_error
+copy website\wallet.html %RELEASE_DIR%\ || goto :copy_error
 echo    - All scripts and documentation copied successfully
 
 REM Create the ZIP archive
