@@ -119,6 +119,46 @@ std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) 
     return peer;
 }
 
+std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // BUG #124 FIX: Add peer with specific ID for inbound connections
+    // Inbound connections don't go through AddPeer(), so we need to create the peer
+    // with the exact ID that CConnectionManager uses
+
+    // Check if peer already exists
+    auto it = peers.find(peer_id);
+    if (it != peers.end()) {
+        return it->second;
+    }
+
+    // BUG #105 FIX: Check connection limit using CONNECTED peer count
+    size_t connected = 0;
+    for (const auto& pair : peers) {
+        if (pair.second->IsConnected()) {
+            connected++;
+        }
+    }
+    if (connected >= MAX_TOTAL_CONNECTIONS) {
+        std::cout << "[PeerManager] AddPeerWithId rejected: at connection limit ("
+                  << connected << "/" << MAX_TOTAL_CONNECTIONS << ")" << std::endl;
+        return nullptr;
+    }
+
+    // Create new peer with the specified ID
+    auto peer = std::make_shared<CPeer>();
+    peer->id = peer_id;
+    peer->state = CPeer::STATE_CONNECTED;
+    peers[peer_id] = peer;
+
+    // Update next_peer_id if needed to avoid ID collisions
+    if (peer_id >= next_peer_id) {
+        next_peer_id = peer_id + 1;
+    }
+
+    return peer;
+}
+
 void CPeerManager::RemovePeer(int peer_id) {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
     auto it = peers.find(peer_id);

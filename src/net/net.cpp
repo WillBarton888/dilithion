@@ -370,8 +370,19 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             // Don't reject, but log for monitoring
         }
 
-        // Update peer info
+        // Update peer info - create peer if not exists (BUG #124 FIX)
+        // Inbound connections don't go through AddPeer(), so we must create the peer here
         auto peer = peer_manager.GetPeer(peer_id);
+        if (!peer) {
+            // BUG #124: Inbound connections weren't registered in CPeerManager
+            // This caused "no suitable peers" error because GetValidPeersForDownload() returned empty
+            // Use AddPeerWithId to ensure the peer ID matches the connection manager's ID
+            peer = peer_manager.AddPeerWithId(peer_id);
+            if (peer) {
+                std::cout << "[PeerManager] Created peer " << peer_id << " for inbound connection" << std::endl;
+            }
+        }
+
         if (peer) {
             LogPrintf(NET, INFO, "Received VERSION from peer %d (version=%d, agent=%s, height=%d, services=0x%016llx)",
                       peer_id, msg.version, msg.user_agent.c_str(), msg.start_height, msg.services);
@@ -381,8 +392,8 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             peer->start_height = msg.start_height;
             peer->relay = msg.relay;
             peer->state = CPeer::STATE_VERSION_SENT;
-
         } else {
+            std::cout << "[P2P] WARNING: Could not create peer " << peer_id << " (connection limit reached?)" << std::endl;
         }
 
         // Call handler

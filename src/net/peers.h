@@ -206,6 +206,7 @@ public:
 
     // Peer management
     std::shared_ptr<CPeer> AddPeer(const NetProtocol::CAddress& addr);
+    std::shared_ptr<CPeer> AddPeerWithId(int peer_id);  // BUG #124: Add peer with specific ID for inbound connections
     void RemovePeer(int peer_id);
     std::shared_ptr<CPeer> GetPeer(int peer_id);
     std::vector<std::shared_ptr<CPeer>> GetAllPeers();
