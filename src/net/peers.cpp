@@ -963,7 +963,13 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
 
     auto it = peers.find(peer_id);
     if (it == peers.end()) {
-        return false;
+        // Phase C fix: Create peer entry if not exists (CConnectionManager doesn't call AddPeer)
+        auto new_peer = std::make_shared<CPeer>();
+        new_peer->id = peer_id;
+        new_peer->state = CPeer::STATE_CONNECTED;
+        peers[peer_id] = new_peer;
+        it = peers.find(peer_id);
+        std::cout << "[PeerManager] Created peer " << peer_id << " on-the-fly" << std::endl;
     }
 
     CPeer* peer = it->second.get();
