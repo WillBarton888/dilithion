@@ -611,6 +611,12 @@
                 </svg>
                 <span>History</span>
             </div>
+            <div class="nav-item" data-page="backup">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                <span>Backup & Recover</span>
+            </div>
         </div>
 
         <div class="nav-section">
@@ -837,6 +843,89 @@
                         <span class="info-value" id="hashRate">-</span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Backup & Recovery Page -->
+        <div class="page" id="page-backup">
+            <div class="page-header">
+                <h1 class="page-title">Backup & Recover</h1>
+                <p class="page-subtitle">Secure your wallet with a recovery phrase</p>
+            </div>
+
+            <!-- Recovery Alert -->
+            <div id="backupAlert"></div>
+
+            <!-- Show Mnemonic Section -->
+            <div class="card">
+                <div class="card-title">Export Recovery Phrase</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                    Your 24-word recovery phrase is the only way to restore your wallet.
+                    Keep it safe and never share it with anyone.
+                </p>
+                <div id="mnemonicDisplay" style="display: none;">
+                    <div class="alert" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--warning); margin-bottom: 16px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; flex-shrink: 0;">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
+                            <line x1="12" y1="9" x2="12" y2="13"></line>
+                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                        </svg>
+                        <span>Write down these words in order and store them securely offline. Anyone with this phrase can access your funds.</span>
+                    </div>
+                    <div class="mnemonic-grid" id="mnemonicWords" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px;">
+                    </div>
+                    <button class="btn btn-secondary" onclick="hideMnemonic()">Hide Recovery Phrase</button>
+                </div>
+                <div id="mnemonicHidden">
+                    <div class="form-group">
+                        <label class="form-label">Wallet Password (if encrypted)</label>
+                        <input type="password" class="form-input" id="exportPassword" placeholder="Enter your wallet password">
+                    </div>
+                    <button class="btn btn-primary" onclick="showMnemonic()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        Show Recovery Phrase
+                    </button>
+                </div>
+            </div>
+
+            <!-- Recover Wallet Section -->
+            <div class="card">
+                <div class="card-title">Recover Wallet</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                    Restore your wallet using your 24-word recovery phrase. This will only work on an empty wallet.
+                </p>
+                <div class="form-group">
+                    <label class="form-label">Recovery Phrase (24 words)</label>
+                    <textarea class="form-input" id="recoveryMnemonic" rows="4" placeholder="Enter your 24-word recovery phrase, separated by spaces" style="resize: vertical; font-family: 'JetBrains Mono', monospace;"></textarea>
+                    <div class="form-hint">Enter all 24 words in the correct order, separated by spaces</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Passphrase (optional)</label>
+                    <input type="password" class="form-input" id="recoveryPassphrase" placeholder="Leave empty if you didn't set a passphrase">
+                    <div class="form-hint">Only enter if you used a passphrase when creating the wallet</div>
+                </div>
+                <button class="btn btn-primary" onclick="recoverWallet()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1014.85-9.36L1 10"></path>
+                    </svg>
+                    Recover Wallet
+                </button>
+            </div>
+
+            <!-- Security Tips -->
+            <div class="card">
+                <div class="card-title">Security Tips</div>
+                <ul style="color: var(--text-secondary); margin-left: 20px; line-height: 1.8;">
+                    <li>Never share your recovery phrase with anyone</li>
+                    <li>Write it down on paper and store it in a secure location</li>
+                    <li>Consider using a metal backup for fire/water resistance</li>
+                    <li>Never store your recovery phrase digitally or take photos of it</li>
+                    <li>Verify your backup works before storing significant funds</li>
+                </ul>
             </div>
         </div>
 
@@ -1196,6 +1285,173 @@
                     btn.classList.remove('copied');
                 }, 2000);
             });
+        }
+
+        // Mnemonic auto-hide timeout
+        let mnemonicHideTimeout = null;
+        let mnemonicCountdownInterval = null;
+        const MNEMONIC_DISPLAY_SECONDS = 60;
+
+        // Show mnemonic recovery phrase
+        async function showMnemonic() {
+            const alertDiv = document.getElementById('backupAlert');
+            const password = document.getElementById('exportPassword').value;
+
+            // Show confirmation dialog first
+            const confirmed = confirm(
+                "WARNING: You are about to display your recovery phrase.\n\n" +
+                "Anyone who sees these 24 words can steal ALL your funds.\n\n" +
+                "Make sure:\n" +
+                "- No one is watching your screen\n" +
+                "- No screen recording is active\n" +
+                "- You are in a private location\n\n" +
+                "The phrase will auto-hide after 60 seconds.\n\n" +
+                "Do you want to continue?"
+            );
+
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                // First unlock wallet if password provided
+                if (password) {
+                    try {
+                        await rpcCall('walletpassphrase', {passphrase: password, timeout: 60});
+                    } catch(e) {
+                        // Wallet might not be encrypted, continue anyway
+                    }
+                }
+
+                const result = await rpcCall('exportmnemonic', {});
+
+                if (result && result.mnemonic) {
+                    const words = result.mnemonic.split(' ');
+                    const wordsContainer = document.getElementById('mnemonicWords');
+                    wordsContainer.innerHTML = '';
+
+                    words.forEach((word, index) => {
+                        const wordDiv = document.createElement('div');
+                        wordDiv.style.cssText = 'background: var(--bg-darker); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); font-family: "JetBrains Mono", monospace; font-size: 0.85rem;';
+                        wordDiv.innerHTML = `<span style="color: var(--text-muted); margin-right: 8px;">${index + 1}.</span>${word}`;
+                        wordsContainer.appendChild(wordDiv);
+                    });
+
+                    document.getElementById('mnemonicDisplay').style.display = 'block';
+                    document.getElementById('mnemonicHidden').style.display = 'none';
+                    alertDiv.innerHTML = '';
+
+                    // Start auto-hide countdown
+                    startMnemonicCountdown();
+                } else {
+                    throw new Error('No mnemonic returned. This wallet may not be an HD wallet.');
+                }
+            } catch(e) {
+                alertDiv.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+            }
+        }
+
+        // Start countdown timer for auto-hide
+        function startMnemonicCountdown() {
+            // Clear any existing timers
+            clearMnemonicTimers();
+
+            let secondsLeft = MNEMONIC_DISPLAY_SECONDS;
+            const hideBtn = document.querySelector('#mnemonicDisplay button');
+
+            // Update button text with countdown every second
+            mnemonicCountdownInterval = setInterval(() => {
+                if (secondsLeft > 0 && document.getElementById('mnemonicDisplay').style.display !== 'none') {
+                    hideBtn.textContent = `Hide Recovery Phrase (${secondsLeft}s)`;
+                    secondsLeft--;
+                } else {
+                    clearMnemonicTimers();
+                }
+            }, 1000);
+
+            // Auto-hide after timeout
+            mnemonicHideTimeout = setTimeout(() => {
+                hideMnemonic();
+            }, MNEMONIC_DISPLAY_SECONDS * 1000);
+        }
+
+        // Clear mnemonic timers
+        function clearMnemonicTimers() {
+            if (mnemonicHideTimeout) {
+                clearTimeout(mnemonicHideTimeout);
+                mnemonicHideTimeout = null;
+            }
+            if (mnemonicCountdownInterval) {
+                clearInterval(mnemonicCountdownInterval);
+                mnemonicCountdownInterval = null;
+            }
+        }
+
+        // Hide mnemonic
+        function hideMnemonic() {
+            // Clear timers
+            clearMnemonicTimers();
+
+            document.getElementById('mnemonicDisplay').style.display = 'none';
+            document.getElementById('mnemonicHidden').style.display = 'block';
+            document.getElementById('mnemonicWords').innerHTML = '';
+            document.getElementById('exportPassword').value = '';
+
+            // Reset button text
+            const hideBtn = document.querySelector('#mnemonicDisplay button');
+            if (hideBtn) {
+                hideBtn.textContent = 'Hide Recovery Phrase';
+            }
+
+            // Lock wallet again
+            rpcCall('walletlock', {}).catch(() => {});
+        }
+
+        // Recover wallet from mnemonic
+        async function recoverWallet() {
+            const alertDiv = document.getElementById('backupAlert');
+            const mnemonicInput = document.getElementById('recoveryMnemonic').value.trim();
+            const passphrase = document.getElementById('recoveryPassphrase').value;
+
+            // Validate mnemonic
+            const words = mnemonicInput.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+            if (words.length !== 24) {
+                alertDiv.innerHTML = `<div class="alert alert-error">Invalid recovery phrase. Please enter exactly 24 words. You entered ${words.length} words.</div>`;
+                return;
+            }
+
+            const mnemonic = words.join(' ');
+
+            alertDiv.innerHTML = '<div class="alert" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary);">Recovering wallet... This may take a moment.</div>';
+
+            try {
+                const params = {mnemonic: mnemonic};
+                if (passphrase) {
+                    params.passphrase = passphrase;
+                }
+
+                const result = await rpcCall('restorehdwallet', params);
+
+                alertDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        Wallet recovered successfully!<br>
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;">
+                            Address: ${result.address || 'Generated'}
+                        </span>
+                    </div>
+                `;
+
+                // Clear the input fields
+                document.getElementById('recoveryMnemonic').value = '';
+                document.getElementById('recoveryPassphrase').value = '';
+
+                // Refresh wallet data
+                await refreshBalance();
+                await refreshReceiveAddress();
+                await refreshTransactions();
+            } catch(e) {
+                alertDiv.innerHTML = `<div class="alert alert-error">Recovery failed: ${e.message}</div>`;
+            }
         }
 
         // Handle send
