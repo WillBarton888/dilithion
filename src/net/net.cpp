@@ -488,8 +488,37 @@ bool CNetMessageProcessor::ProcessPongMessage(int peer_id, CDataStream& stream) 
 }
 
 bool CNetMessageProcessor::ProcessGetAddrMessage(int peer_id) {
-    // Peer is requesting addresses
-    // Would send back known peer addresses
+    // Peer is requesting addresses - respond with known addresses
+    // Bitcoin Core pattern: return up to 1000 addresses (23% of AddrMan, capped)
+
+    std::vector<NetProtocol::CAddress> addrs;
+
+    // Get addresses from connected peers (up to 10)
+    auto connected_addrs = peer_manager.GetPeerAddresses(10);
+    addrs.insert(addrs.end(), connected_addrs.begin(), connected_addrs.end());
+
+    // Get addresses from AddrMan (up to 990 more to reach 1000 total)
+    auto addrman_addrs = peer_manager.SelectAddressesToConnect(990);
+    for (const auto& addr : addrman_addrs) {
+        if (addr.IsRoutable()) {
+            addrs.push_back(addr);
+        }
+    }
+
+    if (addrs.empty()) {
+        std::cout << "[P2P] GETADDR from peer " << peer_id << " - no addresses to share" << std::endl;
+        return true;
+    }
+
+    // Create and send ADDR message
+    CNetMessage addr_msg = CreateAddrMessage(addrs);
+
+    auto* conn_mgr = g_connection_manager.load();
+    if (conn_mgr && conn_mgr->SendMessage(peer_id, addr_msg)) {
+        std::cout << "[P2P] Sent " << addrs.size() << " addresses to peer "
+                  << peer_id << " in response to GETADDR" << std::endl;
+    }
+
     return true;
 }
 

@@ -1639,6 +1639,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "[P2P] Registered peer " << peer_id << " with CPeerManager (height=" << peerHeight << ")" << std::endl;
             }
 
+            // Request addresses from peer (Bitcoin Core pattern for peer discovery)
+            auto* msg_proc = g_message_processor.load();
+            auto* conn_mgr = g_connection_manager.load();
+            if (msg_proc && conn_mgr) {
+                CNetMessage getaddr_msg = msg_proc->CreateGetAddrMessage();
+                if (conn_mgr->SendMessage(peer_id, getaddr_msg)) {
+                    std::cout << "[P2P] Sent GETADDR to peer " << peer_id << std::endl;
+                }
+            }
+
+            // Phase 5: Mark peer's address as "good" on successful handshake
+            // This moves the address from "new" to "tried" table in AddrMan
+            if (g_node_context.peer_manager) {
+                auto peer = g_node_context.peer_manager->GetPeer(peer_id);
+                if (peer && peer->addr.IsRoutable()) {
+                    g_node_context.peer_manager->MarkAddressGood(peer->addr);
+                }
+            }
+
             // Check if headers_manager is initialized
             if (!g_node_context.headers_manager) {
                 return;
@@ -1669,6 +1688,40 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Register pong handler (keepalive response received)
         message_processor.SetPongHandler([](int peer_id, uint64_t nonce) {
             // Silently acknowledge - keepalive working
+        });
+
+        // Register ADDR handler to receive addresses from peers
+        message_processor.SetAddrHandler([](int peer_id, const std::vector<NetProtocol::CAddress>& addrs) {
+            if (addrs.empty()) {
+                return;
+            }
+
+            std::cout << "[P2P] Received " << addrs.size() << " addresses from peer " << peer_id << std::endl;
+
+            // Add each address to AddrMan via peer manager
+            int added = 0;
+            for (const auto& addr : addrs) {
+                // Skip non-routable addresses
+                if (!addr.IsRoutable()) {
+                    continue;
+                }
+
+                // Skip localhost
+                std::string ip = addr.ToStringIP();
+                if (ip == "127.0.0.1" || ip == "::1" || ip.empty()) {
+                    continue;
+                }
+
+                // Add to address manager
+                if (g_node_context.peer_manager) {
+                    g_node_context.peer_manager->AddPeerAddress(addr);
+                    added++;
+                }
+            }
+
+            if (added > 0) {
+                std::cout << "[P2P] Added " << added << " new addresses to AddrMan from peer " << peer_id << std::endl;
+            }
         });
 
         // Register inv handler to request announced blocks
@@ -3124,6 +3177,71 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (cycles_without_peers > 0) {
                             std::cout << "[P2P-Maintenance] Peer connectivity restored (" << peer_count << " peers)" << std::endl;
                             cycles_without_peers = 0;
+                        }
+                    }
+
+                    // ThreadOpenConnections: Proactively connect to addresses from AddrMan
+                    // Bitcoin Core pattern: maintain target of 8 outbound connections
+                    constexpr size_t TARGET_OUTBOUND = 8;
+                    if (g_node_context.peer_manager) {
+                        size_t outbound_count = g_node_context.peer_manager->GetOutboundCount();
+
+                        if (outbound_count < TARGET_OUTBOUND) {
+                            size_t needed = TARGET_OUTBOUND - outbound_count;
+
+                            // Get addresses from AddrMan (request extra in case some fail or are connected)
+                            auto addrs = g_node_context.peer_manager->SelectAddressesToConnect(static_cast<int>(needed * 3));
+
+                            if (!addrs.empty()) {
+                                // Get currently connected peer IPs to skip
+                                std::set<std::string> connected_ips;
+                                auto connected_peers = g_node_context.peer_manager->GetConnectedPeers();
+                                for (const auto& peer : connected_peers) {
+                                    if (peer) {
+                                        connected_ips.insert(peer->addr.ToStringIP());
+                                    }
+                                }
+
+                                size_t connections_made = 0;
+                                for (const auto& addr : addrs) {
+                                    if (connections_made >= needed) break;
+
+                                    std::string ip_str = addr.ToStringIP();
+
+                                    // Skip already connected
+                                    if (connected_ips.count(ip_str)) {
+                                        continue;
+                                    }
+
+                                    // Skip non-routable
+                                    if (!addr.IsRoutable()) {
+                                        continue;
+                                    }
+
+                                    // Mark as tried before attempting
+                                    g_node_context.peer_manager->MarkAddressTried(addr);
+
+                                    try {
+                                        int peer_id = connection_manager.ConnectToPeer(addr);
+                                        if (peer_id >= 0) {
+                                            if (connection_manager.PerformHandshake(peer_id)) {
+                                                std::cout << "[P2P-OpenConn] Connected to " << ip_str
+                                                          << " from AddrMan" << std::endl;
+                                                connections_made++;
+                                                // Phase 5: Mark as good on successful handshake
+                                                g_node_context.peer_manager->MarkAddressGood(addr);
+                                            }
+                                        }
+                                    } catch (const std::exception& e) {
+                                        // Connection failed - that's OK, we'll try others
+                                    }
+                                }
+
+                                if (connections_made > 0) {
+                                    std::cout << "[P2P-OpenConn] Made " << connections_made
+                                              << " new connection(s) from AddrMan" << std::endl;
+                                }
+                            }
                         }
                     }
 
