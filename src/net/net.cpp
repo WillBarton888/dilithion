@@ -424,6 +424,10 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
             true  // fPreferredDownload
         );
 
+        // Phase 3.2: Also notify CPeerManager for unified peer tracking
+        // This initializes block sync state in the CPeer object
+        peer_manager.OnPeerHandshakeComplete(peer_id, peer->start_height, true);
+
         // Trigger VERACK handler (for IBD initialization)
         if (on_verack) {
             on_verack(peer_id);
@@ -1628,6 +1632,10 @@ void CConnectionManager::DisconnectPeer(int peer_id, const std::string& reason) 
     // This cleans up in-flight block tracking and prevents stale state
     CNodeStateManager::Get().RemoveState(peer_id);
 
+    // Phase 3.2: Notify CPeerManager of disconnect
+    // This re-queues any in-flight blocks from this peer to mapBlocksInFlight
+    peer_manager.OnPeerDisconnected(peer_id);
+
     // Remove peer from peer manager
     peer_manager.RemovePeer(peer_id);
 
@@ -2001,10 +2009,13 @@ bool CConnectionManager::SendVersionMessage(int peer_id) {
 }
 
 bool CConnectionManager::SendVerackMessage(int peer_id) {
+    std::cout << "[P2P] Sending VERACK to peer " << peer_id << std::endl;
     CNetMessage msg = message_processor.CreateVerackMessage();
     bool result = SendMessage(peer_id, msg);
     if (result) {
+        std::cout << "[P2P] VERACK sent successfully to peer " << peer_id << std::endl;
     } else {
+        std::cerr << "[P2P] FAILED to send VERACK to peer " << peer_id << std::endl;
     }
     return result;
 }

@@ -690,3 +690,309 @@ void CPeerManager::PeriodicMaintenance() {
         last_save_time = now;
     }
 }
+
+// =============================================================================
+// Phase 3.2: Block tracking methods (ported from CNodeStateManager)
+// =============================================================================
+
+bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const CBlockIndex* pindex)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // Check if already in flight
+    if (mapBlocksInFlight.count(hash)) {
+        return false;
+    }
+
+    // Check global limit
+    if (mapBlocksInFlight.size() >= static_cast<size_t>(MAX_BLOCKS_IN_FLIGHT_TOTAL)) {
+        return false;
+    }
+
+    // Get peer
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return false;
+    }
+
+    CPeer* peer = it->second.get();
+
+    // Check per-peer limit
+    if (peer->nBlocksInFlight >= MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        return false;
+    }
+
+    // Add to peer's in-flight list
+    QueuedBlock qb(hash, pindex);
+    peer->vBlocksInFlight.push_back(qb);
+    peer->nBlocksInFlight++;
+
+    // Add to global map
+    auto list_it = std::prev(peer->vBlocksInFlight.end());
+    mapBlocksInFlight[hash] = std::make_pair(peer_id, list_it);
+
+    return true;
+}
+
+int CPeerManager::MarkBlockAsReceived(const uint256& hash)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = mapBlocksInFlight.find(hash);
+    if (it == mapBlocksInFlight.end()) {
+        return -1;
+    }
+
+    int peer_id = it->second.first;
+    auto list_it = it->second.second;
+
+    // Get peer and remove from their list
+    auto peer_it = peers.find(peer_id);
+    if (peer_it != peers.end()) {
+        CPeer* peer = peer_it->second.get();
+        peer->vBlocksInFlight.erase(list_it);
+        peer->nBlocksInFlight--;
+
+        // Reset stall count on successful receive
+        peer->nStallingCount = 0;
+        peer->nBlocksDownloaded++;
+        peer->lastSuccessTime = std::chrono::steady_clock::now();
+    }
+
+    // Remove from global map
+    mapBlocksInFlight.erase(it);
+
+    return peer_id;
+}
+
+int CPeerManager::RemoveBlockFromFlight(const uint256& hash)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = mapBlocksInFlight.find(hash);
+    if (it == mapBlocksInFlight.end()) {
+        return -1;
+    }
+
+    int peer_id = it->second.first;
+    auto list_it = it->second.second;
+
+    // Get peer and remove from their list (don't reset stall count - this is timeout)
+    auto peer_it = peers.find(peer_id);
+    if (peer_it != peers.end()) {
+        CPeer* peer = peer_it->second.get();
+        peer->vBlocksInFlight.erase(list_it);
+        peer->nBlocksInFlight--;
+    }
+
+    // Remove from global map
+    mapBlocksInFlight.erase(it);
+
+    return peer_id;
+}
+
+bool CPeerManager::IsBlockInFlight(const uint256& hash) const
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    return mapBlocksInFlight.count(hash) > 0;
+}
+
+int CPeerManager::GetBlockPeer(const uint256& hash) const
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    auto it = mapBlocksInFlight.find(hash);
+    if (it != mapBlocksInFlight.end()) {
+        return it->second.first;
+    }
+    return -1;
+}
+
+std::vector<std::pair<uint256, int>> CPeerManager::GetBlocksInFlight() const
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    std::vector<std::pair<uint256, int>> result;
+    for (const auto& entry : mapBlocksInFlight) {
+        result.push_back(std::make_pair(entry.first, entry.second.first));
+    }
+    return result;
+}
+
+int CPeerManager::GetBlocksInFlightForPeer(int peer_id) const
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    auto it = peers.find(peer_id);
+    if (it != peers.end()) {
+        return it->second->nBlocksInFlight;
+    }
+    return 0;
+}
+
+std::vector<uint256> CPeerManager::GetAndClearPeerBlocks(int peer_id)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    std::vector<uint256> result;
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return result;
+    }
+
+    CPeer* peer = it->second.get();
+
+    // Collect all block hashes
+    for (const auto& qb : peer->vBlocksInFlight) {
+        result.push_back(qb.hash);
+        mapBlocksInFlight.erase(qb.hash);
+    }
+
+    // Clear peer's list
+    peer->vBlocksInFlight.clear();
+    peer->nBlocksInFlight = 0;
+
+    return result;
+}
+
+std::vector<int> CPeerManager::CheckForStallingPeers()
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    std::vector<int> stallingPeers;
+    auto now = std::chrono::steady_clock::now();
+
+    for (auto& pair : peers) {
+        CPeer* peer = pair.second.get();
+        if (peer->vBlocksInFlight.empty()) {
+            continue;
+        }
+
+        // Check oldest block in flight
+        const QueuedBlock& oldest = peer->vBlocksInFlight.front();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - oldest.time);
+        auto timeout = peer->GetBlockTimeout();
+
+        if (elapsed > timeout) {
+            peer->nStallingCount++;
+            peer->lastStallTime = now;
+
+            // Reset the timer for next check
+            peer->vBlocksInFlight.front().time = now;
+
+            // If stalling too many times, mark for disconnection
+            if (peer->nStallingCount >= 5) {
+                stallingPeers.push_back(pair.first);
+            }
+        }
+    }
+
+    return stallingPeers;
+}
+
+void CPeerManager::UpdatePeerStats(int peer_id, bool success, std::chrono::milliseconds responseTime)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return;
+    }
+
+    CPeer* peer = it->second.get();
+
+    if (success) {
+        peer->nBlocksDownloaded++;
+        peer->lastSuccessTime = std::chrono::steady_clock::now();
+
+        // Update average response time (exponential moving average)
+        if (responseTime.count() > 0) {
+            peer->avgResponseTime = std::chrono::milliseconds(
+                (peer->avgResponseTime.count() * 7 + responseTime.count()) / 8
+            );
+        }
+    } else {
+        peer->nStallingCount++;
+        peer->lastStallTime = std::chrono::steady_clock::now();
+    }
+}
+
+std::vector<int> CPeerManager::GetValidPeersForDownload() const
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    std::vector<int> result;
+
+    for (const auto& pair : peers) {
+        CPeer* peer = pair.second.get();
+
+        // NOTE: Socket check removed - sockets are in CConnectionManager::peer_sockets, not CPeer::m_sock
+        // Phase D will migrate sockets to CPeer, then this check can be restored
+
+        // Must have completed handshake
+        if (!peer->IsHandshakeComplete()) {
+            continue;
+        }
+
+        // Must be suitable for download (not stalling too much)
+        if (!peer->IsSuitableForDownload()) {
+            continue;
+        }
+
+        result.push_back(pair.first);
+    }
+
+    return result;
+}
+
+bool CPeerManager::IsPeerSuitableForDownload(int peer_id) const
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return false;
+    }
+
+    CPeer* peer = it->second.get();
+
+    // NOTE: HasValidSocket check removed - sockets are in CConnectionManager::peer_sockets, not CPeer::m_sock
+    // Phase D will migrate sockets to CPeer, then this check can be restored
+    return peer->IsHandshakeComplete() &&
+           peer->IsSuitableForDownload();
+}
+
+bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return false;
+    }
+
+    CPeer* peer = it->second.get();
+
+    peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
+    peer->start_height = starting_height;
+    peer->fPreferredDownload = preferred;
+    peer->fSyncStarted = false;
+
+    // Initialize timing
+    auto now = std::chrono::steady_clock::now();
+    peer->m_stalling_since = now;
+    peer->m_downloading_since = now;
+    peer->m_last_block_announcement = now;
+    peer->lastSuccessTime = now;
+    peer->lastStallTime = now;
+
+    return true;
+}
+
+void CPeerManager::OnPeerDisconnected(int peer_id)
+{
+    // Re-queue any in-flight blocks from this peer
+    std::vector<uint256> orphaned_blocks = GetAndClearPeerBlocks(peer_id);
+
+    if (!orphaned_blocks.empty()) {
+        std::cout << "[PeerManager] Peer " << peer_id << " disconnected with "
+                  << orphaned_blocks.size() << " blocks in flight" << std::endl;
+    }
+
+    // The actual peer removal is handled by RemovePeer()
+}

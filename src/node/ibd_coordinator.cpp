@@ -3,7 +3,6 @@
 
 #include <node/ibd_coordinator.h>
 
-#include <algorithm>
 #include <iostream>
 #include <vector>
 
@@ -12,7 +11,6 @@
 #include <net/block_fetcher.h>
 #include <net/headers_manager.h>
 #include <net/net.h>  // CConnectionManager, CNetMessageProcessor
-#include <net/node_state.h>
 #include <net/peers.h>
 #include <net/protocol.h>
 #include <util/logging.h>
@@ -225,7 +223,12 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         m_node_context.block_fetcher->RetryTimedOutBlocks(timed_out);
     }
 
-    auto stalling_peers = CNodeStateManager::Get().CheckForStallingPeers();
+    // Phase C: CPeerManager is now the single source of truth for stall detection
+    std::vector<NodeId> stalling_peers;
+    if (m_node_context.peer_manager) {
+        stalling_peers = m_node_context.peer_manager->CheckForStallingPeers();
+    }
+
     for (NodeId peer : stalling_peers) {
         LogPrintIBD(WARN, "Disconnecting stalling peer %d", peer);
         m_node_context.connection_manager->DisconnectPeer(peer, "stalling block download");

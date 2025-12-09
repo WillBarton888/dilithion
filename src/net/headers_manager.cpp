@@ -28,15 +28,25 @@ CHeadersManager::CHeadersManager()
 
 bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader>& headers)
 {
+    std::cout << "[HeadersManager] ProcessHeaders called: peer=" << peer
+              << ", count=" << headers.size() << std::endl;
+
     std::lock_guard<std::mutex> lock(cs_headers);
+    std::cout << "[HeadersManager] Lock acquired" << std::endl;
 
     if (headers.empty()) {
+        std::cout << "[HeadersManager] Empty headers, returning true" << std::endl;
         return true;  // Empty is valid (no new headers)
     }
 
     if (headers.size() > MAX_HEADERS_BUFFER) {
+        std::cout << "[HeadersManager] Too many headers (" << headers.size()
+                  << " > " << MAX_HEADERS_BUFFER << "), returning false" << std::endl;
         return false;
     }
+
+    std::cout << "[HeadersManager] Processing " << headers.size() << " headers, first hash: "
+              << headers[0].GetHash().GetHex().substr(0, 16) << "..." << std::endl;
 
 
     // Process each header sequentially
@@ -64,22 +74,33 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
         // Bug #46 Fix: Find parent - allow headers from competing chains
         if (pprev == nullptr || pprev->header.GetHash() != header.hashPrevBlock) {
+            if (i == 0) {
+                std::cout << "[HeadersManager] First header parent: "
+                          << header.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cout << "[HeadersManager] mapHeaders.size() = " << mapHeaders.size() << std::endl;
+            }
             auto parentIt = mapHeaders.find(header.hashPrevBlock);
             if (parentIt == mapHeaders.end()) {
                 // Bug #46 Fix: Check if parent is genesis block
                 // This allows the first block on ANY valid chain to be accepted
                 uint256 genesisHash = Genesis::GetGenesisHash();
+                std::cout << "[HeadersManager] Parent not in mapHeaders, checking genesis. Genesis="
+                          << genesisHash.GetHex().substr(0, 16) << "..." << std::endl;
                 if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
+                    std::cout << "[HeadersManager] Parent is genesis block" << std::endl;
                     pprev = nullptr;  // Parent is genesis - this is block 1
                 } else {
                     // True orphan - reject per Bitcoin Core design
                     // This prevents DoS attacks with disconnected headers
-                    std::cerr << "  Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
+                    std::cerr << "[HeadersManager] ORPHAN: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
                               << "... not found in header tree" << std::endl;
                     std::cerr << "  Peer should send headers in order from common ancestor" << std::endl;
                     return false;  // Orphan header - reject
                 }
             } else {
+                if (i == 0) {
+                    std::cout << "[HeadersManager] Found parent at height " << parentIt->second.height << std::endl;
+                }
                 pprev = &parentIt->second;
             }
         }

@@ -9,13 +9,21 @@
 #include <net/banman.h>   // Bitcoin Core-style ban manager with persistence
 #include <net/peer_discovery.h>  // Network: Enhanced peer discovery
 #include <net/connection_quality.h>  // Network: Connection quality metrics
+#include <net/socket.h>   // Phase 2: Socket in CPeer
+#include <net/node_state.h>  // Phase 3: For QueuedBlock
+#include <primitives/block.h>  // Phase 3: For uint256
 #include <util/time.h>
 #include <string>
 #include <vector>
+#include <list>
 #include <map>
 #include <set>
 #include <mutex>
 #include <memory>
+#include <chrono>
+
+// Forward declaration
+class CBlockIndex;
 
 /**
  * CPeer - Represents a network peer connection
@@ -46,16 +54,87 @@ public:
     int misbehavior_score;           // Accumulated misbehavior points
     int64_t ban_time;                // Time when ban expires (0 = not banned)
 
+    // === Phase 2: Socket moved from CConnectionManager to CPeer ===
+private:
+    std::shared_ptr<CSocket> m_sock;
+    mutable std::mutex m_sock_mutex;
+    std::vector<uint8_t> m_recv_buffer;
+    mutable std::mutex m_recv_mutex;
+
+public:
+    bool HasValidSocket() const {
+        std::lock_guard<std::mutex> lock(m_sock_mutex);
+        return m_sock && m_sock->IsValid();
+    }
+
+    std::shared_ptr<CSocket> GetSocket() const {
+        std::lock_guard<std::mutex> lock(m_sock_mutex);
+        return m_sock;
+    }
+
+    void SetSocket(std::shared_ptr<CSocket> sock) {
+        std::lock_guard<std::mutex> lock(m_sock_mutex);
+        m_sock = std::move(sock);
+    }
+
+    void ClearSocket() {
+        std::lock_guard<std::mutex> lock(m_sock_mutex);
+        if (m_sock) { m_sock->Close(); m_sock.reset(); }
+    }
+
+    // === Phase 3: Block Sync State ===
+    std::list<QueuedBlock> vBlocksInFlight;
+    int nBlocksInFlight = 0;
+    const CBlockIndex* pindexBestKnownBlock = nullptr;
+    const CBlockIndex* pindexLastCommonBlock = nullptr;
+    bool fSyncStarted = false;
+    bool fPreferredDownload = false;
+
+    std::chrono::steady_clock::time_point m_stalling_since;
+    std::chrono::steady_clock::time_point m_downloading_since;
+    std::chrono::steady_clock::time_point m_last_block_announcement;
+    int nStallingCount = 0;
+
+    std::chrono::milliseconds avgResponseTime{1000};
+    int nBlocksDownloaded = 0;
+    std::chrono::steady_clock::time_point lastSuccessTime;
+    std::chrono::steady_clock::time_point lastStallTime;
+
+    static constexpr int STALL_THRESHOLD = 100;
+    static constexpr auto STALL_FORGIVENESS_TIMEOUT = std::chrono::minutes(5);
+
+    std::chrono::seconds GetBlockTimeout() const {
+        int timeout_seconds = 10 << std::min(nStallingCount, 5);
+        return std::chrono::seconds(timeout_seconds);
+    }
+
+    bool IsSuitableForDownload() const {
+        auto now = std::chrono::steady_clock::now();
+        auto stallAge = std::chrono::duration_cast<std::chrono::minutes>(now - lastStallTime);
+        if (stallAge >= STALL_FORGIVENESS_TIMEOUT) return true;
+        return nStallingCount < STALL_THRESHOLD;
+    }
+
     CPeer()
         : id(0), state(STATE_DISCONNECTED), connect_time(0),
           last_recv(0), last_send(0), version(0), start_height(0),
-          relay(true), misbehavior_score(0), ban_time(0) {}
+          relay(true), misbehavior_score(0), ban_time(0),
+          m_stalling_since(std::chrono::steady_clock::now()),
+          m_downloading_since(std::chrono::steady_clock::now()),
+          m_last_block_announcement(std::chrono::steady_clock::now()),
+          lastSuccessTime(std::chrono::steady_clock::now()),
+          lastStallTime(std::chrono::steady_clock::now()) {}
 
     CPeer(int id_in, const NetProtocol::CAddress& addr_in)
         : id(id_in), addr(addr_in), state(STATE_DISCONNECTED),
           connect_time(GetTime()), last_recv(0), last_send(0),
           version(0), start_height(0), relay(true),
-          misbehavior_score(0), ban_time(0) {}
+          misbehavior_score(0), ban_time(0),
+          m_stalling_since(std::chrono::steady_clock::now()),
+          m_downloading_since(std::chrono::steady_clock::now()),
+          m_last_block_announcement(std::chrono::steady_clock::now()),
+          lastSuccessTime(std::chrono::steady_clock::now()),
+          lastStallTime(std::chrono::steady_clock::now()) {}
 
     bool IsConnected() const {
         return state >= STATE_CONNECTED && state < STATE_BANNED;
@@ -69,12 +148,9 @@ public:
         return state == STATE_BANNED || (ban_time > 0 && GetTime() < ban_time);
     }
 
-    // Increase misbehavior score (returns true if should ban)
     bool Misbehaving(int howmuch);
-
     void Ban(int64_t ban_until);
     void Disconnect();
-
     std::string ToString() const;
 };
 
@@ -212,6 +288,34 @@ public:
      * - Save peers to disk
      */
     void PeriodicMaintenance();
+
+    // === Phase 3.2: Block tracking (Bitcoin Core CNode pattern) ===
+    // Global block-to-peer mapping for quick lookup
+    std::map<uint256, std::pair<int, std::list<QueuedBlock>::iterator>> mapBlocksInFlight;
+
+    // Block flight limits
+    static constexpr int MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
+    static constexpr int MAX_BLOCKS_IN_FLIGHT_TOTAL = 64;
+
+    // Block tracking methods
+    bool MarkBlockAsInFlight(int peer_id, const uint256& hash, const CBlockIndex* pindex);
+    int MarkBlockAsReceived(const uint256& hash);
+    int RemoveBlockFromFlight(const uint256& hash);
+    bool IsBlockInFlight(const uint256& hash) const;
+    int GetBlockPeer(const uint256& hash) const;
+    std::vector<std::pair<uint256, int>> GetBlocksInFlight() const;
+    int GetBlocksInFlightForPeer(int peer_id) const;
+    std::vector<uint256> GetAndClearPeerBlocks(int peer_id);
+    std::vector<int> CheckForStallingPeers();
+    void UpdatePeerStats(int peer_id, bool success, std::chrono::milliseconds responseTime);
+
+    // Peer suitability for download
+    std::vector<int> GetValidPeersForDownload() const;
+    bool IsPeerSuitableForDownload(int peer_id) const;
+
+    // Lifecycle callbacks
+    bool OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred);
+    void OnPeerDisconnected(int peer_id);
 };
 
 /**

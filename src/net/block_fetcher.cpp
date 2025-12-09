@@ -3,6 +3,7 @@
 
 #include <net/block_fetcher.h>
 #include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer block tracking
+#include <net/peers.h>       // Phase A: Unified CPeerManager block tracking
 #include <iostream>
 #include <algorithm>
 #include <sstream>
@@ -82,9 +83,10 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     // Track peer's blocks
     mapPeerBlocks[peer].insert(hash);
 
-    // BUG #69: Also track in CNodeStateManager for bidirectional tracking
-    // This provides single source of truth for in-flight blocks across the codebase
-    CNodeStateManager::Get().MarkBlockAsInFlight(peer, hash, nullptr);
+    // Phase C: CPeerManager is now the single source of truth for block tracking
+    if (g_peer_manager) {
+        g_peer_manager->MarkBlockAsInFlight(peer, hash, nullptr);
+    }
 
     // Update peer state
     if (mapPeerStates.count(peer) == 0) {
@@ -146,8 +148,10 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // BUG #64: Clean up preferred peer tracking
     mapPreferredPeers.erase(hash);
 
-    // BUG #69: Also mark received in CNodeStateManager
-    CNodeStateManager::Get().MarkBlockAsReceived(hash);
+    // Phase C: CPeerManager is now the single source of truth for block tracking
+    if (g_peer_manager) {
+        g_peer_manager->MarkBlockAsReceived(hash);
+    }
 
     return true;
 }
@@ -266,7 +270,81 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // BUG #64: First try the preferred peer (the one that announced the block)
+    // Phase B: Use CPeerManager as primary source for peer selection
+    // Note: hash is used in fallback path below during migration
+    if (g_peer_manager) {
+        // BUG #64: First try the preferred peer (the one that announced the block)
+        if (preferred_peer != -1 && g_peer_manager->IsPeerSuitableForDownload(preferred_peer)) {
+            auto peer = g_peer_manager->GetPeer(preferred_peer);
+            if (peer && peer->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+                return preferred_peer;
+            }
+        }
+
+        // Get all valid peers from CPeerManager
+        std::vector<int> valid_peers = g_peer_manager->GetValidPeersForDownload();
+
+        NodeId bestPeer = -1;
+        NodeId fallbackPeer = -1;
+        int bestScore = -1;
+
+        for (int peer_id : valid_peers) {
+            auto peer = g_peer_manager->GetPeer(peer_id);
+            if (!peer) continue;
+
+            // Must have capacity (use CPeerManager limit)
+            if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+                continue;
+            }
+
+            // Check if suitable (uses CPeer::IsSuitableForDownload)
+            bool suitable = peer->IsSuitableForDownload();
+            if (!suitable) {
+                if (fallbackPeer == -1) {
+                    fallbackPeer = peer_id;
+                }
+                continue;
+            }
+
+            // Calculate score (higher is better)
+            int score = 1000;
+
+            // Preferred peers get bonus
+            if (peer->fPreferredDownload) {
+                score += 500;
+            }
+
+            // Penalize for stalls
+            score -= peer->nStallingCount * 100;
+
+            // Bonus for fast response time (inverse of time in ms)
+            if (peer->avgResponseTime.count() > 0) {
+                score += 1000 / (peer->avgResponseTime.count() / 100 + 1);
+            }
+
+            // Bonus for successful downloads
+            score += peer->nBlocksDownloaded * 10;
+
+            // Penalize if already has many blocks in-flight (spread load)
+            score -= peer->nBlocksInFlight * 50;
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestPeer = peer_id;
+            }
+        }
+
+        // BUG #61: Use fallback if no suitable peer found
+        if (bestPeer == -1 && fallbackPeer != -1) {
+            return fallbackPeer;
+        }
+
+        if (bestPeer != -1) {
+            return bestPeer;
+        }
+    }
+
+    // Fallback to mapPeerStates if CPeerManager unavailable or returned no peers
     if (preferred_peer != -1) {
         auto it = mapPeerStates.find(preferred_peer);
         if (it != mapPeerStates.end()) {
@@ -277,56 +355,30 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
         }
     }
 
-    // Find best peer based on:
-    // 1. Has available capacity
-    // 2. Low stall count
-    // 3. Fast response time
-    // 4. Preferred status
-
     NodeId bestPeer = -1;
-    NodeId fallbackPeer = -1;  // BUG #61: Track stalled peer as fallback
+    NodeId fallbackPeer = -1;
     int bestScore = -1;
 
     for (const auto& entry : mapPeerStates) {
         NodeId peer = entry.first;
         const PeerDownloadState& state = entry.second;
 
-        // Must have capacity
         int availableSlots = GetAvailableSlotsForPeer(peer);
-        if (availableSlots <= 0) {
-            continue;
-        }
+        if (availableSlots <= 0) continue;
 
-        // Check if suitable (not stalled too often)
         bool suitable = IsPeerSuitable(peer);
         if (!suitable) {
-            // BUG #61: Track as fallback even if stalled
-            if (fallbackPeer == -1) {
-                fallbackPeer = peer;
-            }
+            if (fallbackPeer == -1) fallbackPeer = peer;
             continue;
         }
 
-        // Calculate score (higher is better)
         int score = 1000;
-
-        // Preferred peers get bonus
-        if (state.preferred) {
-            score += 500;
-        }
-
-        // Penalize for stalls
+        if (state.preferred) score += 500;
         score -= state.nStalls * 100;
-
-        // Bonus for fast response time (inverse of time in ms)
         if (state.avgResponseTime.count() > 0) {
-            score += 1000 / (state.avgResponseTime.count() / 100 + 1);  // Avoid division by zero
+            score += 1000 / (state.avgResponseTime.count() / 100 + 1);
         }
-
-        // Bonus for successful downloads
         score += state.nBlocksDownloaded * 10;
-
-        // Penalize if already has many blocks in-flight (spread load)
         score -= state.nBlocksInFlight * 50;
 
         if (score > bestScore) {
@@ -335,7 +387,6 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
         }
     }
 
-    // BUG #61: Use fallback if no suitable peer found (prevents sync deadlock)
     if (bestPeer == -1 && fallbackPeer != -1) {
         return fallbackPeer;
     }
@@ -348,6 +399,12 @@ void CBlockFetcher::UpdatePeerStats(NodeId peer, bool success, std::chrono::mill
     // Note: Caller should hold lock
     // This method is called from MarkBlockReceived which already holds the lock
 
+    // Phase B: Delegate to CPeerManager (primary source of truth)
+    if (g_peer_manager) {
+        g_peer_manager->UpdatePeerStats(peer, success, responseTime);
+    }
+
+    // Fallback: Also update local mapPeerStates during transition
     if (mapPeerStates.count(peer) == 0) {
         mapPeerStates[peer] = PeerDownloadState();
     }
@@ -355,27 +412,19 @@ void CBlockFetcher::UpdatePeerStats(NodeId peer, bool success, std::chrono::mill
     PeerDownloadState& state = mapPeerStates[peer];
 
     if (success) {
-        // BUG #61 FIX: Reset stall count on successful block download (Bitcoin Core approach)
-        // This prevents permanent peer exclusion and allows recovery
         if (state.nStalls > 0) {
             state.nStalls = 0;
         }
         state.lastSuccessTime = std::chrono::steady_clock::now();
 
-        // Update average response time (exponential moving average)
         if (responseTime.count() > 0) {
-            // EMA: new_avg = alpha * new_value + (1 - alpha) * old_avg
-            // Using alpha = 0.3 for responsiveness
             int64_t newAvg = (3 * responseTime.count() + 7 * state.avgResponseTime.count()) / 10;
             state.avgResponseTime = std::chrono::milliseconds(newAvg);
         }
 
-        // Mark as preferred if consistently fast (< 2 seconds avg) and reliable (< 2 stalls)
         if (state.avgResponseTime < std::chrono::seconds(2) && state.nStalls < 2) {
             state.preferred = true;
         }
-    } else {
-        // Failure - already handled by MarkPeerStalled
     }
 }
 
@@ -605,6 +654,13 @@ void CBlockFetcher::MarkPeerStalled(NodeId peer)
 bool CBlockFetcher::IsPeerSuitable(NodeId peer) const
 {
     // Caller should hold lock
+
+    // Phase B: Use CPeerManager as primary source
+    if (g_peer_manager) {
+        return g_peer_manager->IsPeerSuitableForDownload(peer);
+    }
+
+    // Fallback to mapPeerStates during migration
     auto it = mapPeerStates.find(peer);
     if (it == mapPeerStates.end()) {
         return true;  // New peer, give it a chance
