@@ -290,21 +290,29 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 
         for (int peer_id : valid_peers) {
             auto peer = g_peer_manager->GetPeer(peer_id);
-            if (!peer) continue;
+            if (!peer) {
+                std::cout << "[BUG-146-DEBUG] peer " << peer_id << " is null in SelectPeerForDownload" << std::endl;
+                continue;
+            }
 
             // Must have capacity (use CPeerManager limit)
+            std::cout << "[BUG-146-DEBUG] peer " << peer_id << " nBlocksInFlight=" << peer->nBlocksInFlight
+                      << " max=" << CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER << std::endl;
             if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+                std::cout << "[BUG-146-DEBUG] peer " << peer_id << " SKIPPED - at capacity" << std::endl;
                 continue;
             }
 
             // Check if suitable (uses CPeer::IsSuitableForDownload)
             bool suitable = peer->IsSuitableForDownload();
             if (!suitable) {
+                std::cout << "[BUG-146-DEBUG] peer " << peer_id << " NOT suitable for download" << std::endl;
                 if (fallbackPeer == -1) {
                     fallbackPeer = peer_id;
                 }
                 continue;
             }
+            std::cout << "[BUG-146-DEBUG] peer " << peer_id << " IS suitable, calculating score" << std::endl;
 
             // Calculate score (higher is better)
             int score = 1000;
@@ -336,12 +344,16 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 
         // BUG #61: Use fallback if no suitable peer found
         if (bestPeer == -1 && fallbackPeer != -1) {
+            std::cout << "[BUG-146-DEBUG] SelectPeerForDownload: using fallback peer " << fallbackPeer << std::endl;
             return fallbackPeer;
         }
 
         if (bestPeer != -1) {
+            std::cout << "[BUG-146-DEBUG] SelectPeerForDownload: returning bestPeer " << bestPeer << std::endl;
             return bestPeer;
         }
+
+        std::cout << "[BUG-146-DEBUG] SelectPeerForDownload: no peer found (bestPeer=-1, fallbackPeer=" << fallbackPeer << ")" << std::endl;
     }
 
     // Fallback to mapPeerStates if CPeerManager unavailable or returned no peers
