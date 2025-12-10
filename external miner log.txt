@@ -1,0 +1,190 @@
+[IBD-TICK] tick=291 header=2816 chain=2816 state=COMPLETE
+[IBD-TICK] RETURN: header(2816) <= chain(2816)
+[Mining] Hash rate: 1176 H/s, Total hashes: 89908
+[IBD-TICK] tick=301 header=2816 chain=2816 state=COMPLETE
+[IBD-TICK] RETURN: header(2816) <= chain(2816)
+
+======================================
+[OK] BLOCK FOUND!
+======================================
+Block hash: 0000741c83f3abe59936dee68d2a614a2259721d0d27f593baef8d60877fe0aa
+Block time: 1764931667
+Nonce: 100634
+Difficulty: 0x1f010000
+======================================
+
+[Wallet] Coinbase credited: 50.00000000 DIL
+[Wallet] Total Balance: 600.00000000 DIL (60000000000 ions)
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 2816)
+[Blockchain] DEBUG: Calling WriteBlockIndex for 0000741c83f3abe5...
+[Blockchain] DEBUG: WriteBlockIndex succeeded
+[Chain] Received block on competing chain
+  Current tip: 0000a17025646412 (height 2816)
+  New block:   0000741c83f3abe5 (height 2816)
+[Chain] New chain has less or equal work - keeping current chain
+  Current work: 0000000000000000...
+  New work:     0000000000000000...
+[Blockchain] WARNING: Mined block is valid but not on best chain
+  This should not happen during solo mining
+  Current tip: 0000a17025646412 (height 2816)
+[Mining] New block found, updating template...
+[Mining] Building template - reading best block from DB...
+[Mining] Building template on best block: 0000a17025646412...
+[Mining] Detected RAM: 16171 MB
+[Mining] Using RandomX FULL mode (~100 H/s)
+[Mining] Resumed mining on block height 2817
+[Mining] Hash rate: 1168 H/s, Total hashes: 4724
+[IBD-TICK] tick=311 header=2816 chain=2816 state=COMPLETE
+
+======================================[IBD-TICK] RETURN: header(
+2816[OK] BLOCK FOUND!) <= chain(
+2816)======================================
+
+Block hash: 0000c63f012a581ba434d4d4d14618899c5d9a0b42955dad186f375d6462bbe2
+Block time: 1764931754
+Nonce: 6882
+Difficulty: 0x1f010000
+======================================
+
+[Wallet] Coinbase credited: 50.00000000 DIL
+[Wallet] Total Balance: 650.00000000 DIL (65000000000 ions)
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 2817)
+[Blockchain] DEBUG: Calling WriteBlockIndex for 0000c63f012a581b...
+[Blockchain] DEBUG: WriteBlockIndex succeeded
+[Chain] Block extends current tip: height 2817
+[DEBUG] ApplyBlock: block.vtx.size() = 115 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: fd 6d 4f cb 1e 5a 7b f9 6f 1b 9b 51 24 ec 88 ac 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 2817 (1 txs, 0 inputs spent)
+[Chain] DEBUG: Writing best block to DB: 0000c63f012a581b...
+[Chain] DEBUG: WriteBestBlock returned: SUCCESS
+[HeadersManager] OnBlockActivated: 0000c63f012a581b...
+[HeadersManager] Found parent at height 2816, new height: 2817
+[HeadersManager] *** NEW BEST CHAIN ***
+  Old: height=2816 hash=0000a17025646412...
+  New: height=2817 hash=0000c63f012a581b...
+  (Selected by cumulative work, not height)
+[HeadersManager] Added header at height 2817, total headers: 2822, best height: 2817
+[Blockchain] Block became new chain tip at height 2817
+[Mining] Locally mined block became new tip - updating template immediately...
+[Mining] Building template - reading best block from DB...
+[Mining] Building template on best block: 0000c63f012a581b...
+[Mining] Template updated to height 2818
+[P2P] Queued block broadcast to [AsyncBroadcaster] Processing task: 1inv peer(s) (async) to
+1 peers (queued 1ms ago, priority 2)
+[AsyncBroadcaster] Task completed successfully: 1 peers
+[P2P-DEBUG] ProcessMessage: peer=1 cmd='getdata' payload=37 bytes
+[P2P] Processing GETDATA from peer 1
+[P2P] Invoking GETDATA handler for 1 items from peer 1
+[BLOCK-SERVE] Sending block 0000c63f012a581b... to peer 1 (vtx=115 bytes, msg=220 bytes)
+[BLOCK-SERVE] SendMessage SUCCEEDED for block to peer 1
+[Mining] Hash rate: 1163 H/s, Total hashes: 17289
+[IBD-TICK] tick=321 header=2817 chain=2817 state=COMPLETE
+[IBD-TICK] RETURN: header(2817) <= chain(2817)
+[Mining] Hash rate: 1178 H/s, Total hashes: 30865
+
+======================================
+[OK] BLOCK FOUND!
+======================================
+Block hash: 0000b2a2671965bc2d4a1d246f407ca151923af9c0c9d42f09f4e217291dcac8
+Block time: 1764931760
+Nonce: 29795
+Difficulty: 0x1f010000
+======================================
+
+[Wallet] Coinbase credited: 50.00000000 DIL
+[Wallet] Total Balance: 700.00000000 DIL (70000000000 ions)
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 2818)
+[Blockchain] DEBUG: Calling WriteBlockIndex for 0000b2a2671965bc...
+[Blockchain] DEBUG: WriteBlockIndex succeeded
+[Chain] Block extends current tip: height 2818
+[DEBUG] ApplyBlock: block.vtx.size() = 115 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: fd 6d 4f cb 1e 5a 7b f9 6f 1b 9b 51 24 ec 88 ac 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 2818 (1 txs, 0 inputs spent)
+[Chain] DEBUG: Writing best block to DB: 0000b2a2671965bc...
+[Chain] DEBUG: WriteBestBlock returned: SUCCESS
+[HeadersManager] OnBlockActivated: 0000b2a2671965bc...
+[HeadersManager] Found parent at height 2817, new height: 2818
+[HeadersManager] *** NEW BEST CHAIN ***
+  Old: height=2817 hash=0000c63f012a581b...
+  New: height=2818 hash=0000b2a2671965bc...
+  (Selected by cumulative work, not height)
+[HeadersManager] Added header at height 2818, total headers: 2823, best height: 2818
+[Blockchain] Block became new chain tip at height 2818
+[Mining] Locally mined block became new tip - updating template immediately...
+[Mining] Building template - reading best block from DB...
+[Mining] Building template on best block: 0000b2a2671965bc...
+[Mining] Template updated to height 2819
+[P2P] Queued block broadcast to [AsyncBroadcaster] Processing task: 1inv peer(s) (async)
+ to 1 peers (queued 0ms ago, priority 2)
+[AsyncBroadcaster] Task completed successfully: 1 peers
+[P2P-DEBUG] ProcessMessage: peer=1 cmd='getdata' payload=[IBD-TICK] tick=37331 bytes header=
+2818 chain=[P2P] Processing GETDATA from peer 28181 state=
+COMPLETE
+[P2P] Invoking GETDATA handler for 1[IBD-TICK] RETURN: header( items from peer 28181) <= chain(
+2818)
+[BLOCK-SERVE] Sending block 0000b2a2671965bc... to peer 1 (vtx=115 bytes, msg=220 bytes)
+[BLOCK-SERVE] SendMessage SUCCEEDED for block to peer 1
+[Mining] Hash rate: 1157 H/s, Total hashes: 42987
+[IBD-TICK] tick=341 header=2818 chain=2818 state=COMPLETE
+[IBD-TICK] RETURN: header(2818) <= chain(2818)
+[Mining] Hash rate: 1171 H/s, Total hashes: 56376
+[IBD-TICK] tick=351 header=2818 chain=2818 state=COMPLETE
+[IBD-TICK] RETURN: header(2818) <= chain(2818)
+[Mining] Hash rate: 1174 H/s, Total hashes: 70350
+[IBD-TICK] tick=361 header=2818 chain=2818 state=COMPLETE
+[IBD-TICK] RETURN: header(2818) <= chain(2818)
+
+======================================
+[OK] BLOCK FOUND!
+======================================
+Block hash: 000035402d2a6f1b3a206eb2cfed920d7953b553e55562c0a4c1b4202e410060
+Block time: 1764931781
+Nonce: 76431
+Difficulty: 0x1f010000
+======================================
+
+[Wallet] Coinbase credited: 50.00000000 DIL
+[Wallet] Total Balance: 750.00000000 DIL (75000000000 ions)
+
+[Blockchain] Block saved to database
+[Blockchain] Block index created (height 2819)
+[Blockchain] DEBUG: Calling WriteBlockIndex for 000035402d2a6f1b...
+[Blockchain] DEBUG: WriteBlockIndex succeeded
+[Chain] Block extends current tip: height 2819
+[DEBUG] ApplyBlock: block.vtx.size() = 115 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: fd 6d 4f cb 1e 5a 7b f9 6f 1b 9b 51 24 ec 88 ac 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 2819 (1 txs, 0 inputs spent)
+[Chain] DEBUG: Writing best block to DB: 000035402d2a6f1b...
+[Chain] DEBUG: WriteBestBlock returned: SUCCESS
+[HeadersManager] OnBlockActivated: 000035402d2a6f1b...
+[HeadersManager] Found parent at height 2818, new height: 2819
+[HeadersManager] *** NEW BEST CHAIN ***
+  Old: height=2818 hash=0000b2a2671965bc...
+  New: height=2819 hash=000035402d2a6f1b...
+  (Selected by cumulative work, not height)
+[HeadersManager] Added header at height 2819, total headers: 2824, best height: 2819
+[Blockchain] Block became new chain tip at height 2819
+[Mining] Locally mined block became new tip - updating template immediately...
+[Mining] Building template - reading best block from DB...
+[Mining] Building template on best block: 000035402d2a6f1b...
+[Mining] Template updated to height 2820
+[P2P] Queued block broadcast to [AsyncBroadcaster] Processing task: inv1 to  peer(s) (async)1 peers (queued 0ms ago, priority
+2)
+[AsyncBroadcaster] Task completed successfully: 1 peers[P2P-DEBUG] ProcessMessage: peer=
+1 cmd='getdata' payload=37 bytes
+[P2P] Processing GETDATA from peer 1
+[P2P] Invoking GETDATA handler for 1 items from peer 1
+[BLOCK-SERVE] Sending block 000035402d2a6f1b... to peer 1 (vtx=115 bytes, msg=220 bytes)
+[BLOCK-SERVE] SendMessage SUCCEEDED for block to peer 1

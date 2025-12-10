@@ -1,0 +1,138 @@
+ ========================================================
+   DILITHION TESTNET MINER - STARTING
+ ========================================================
+
+ Connecting to seed nodes...
+ Initializing mining with Auto-Detect...
+
+ The node will start shortly.
+ Press Ctrl+C anytime to stop mining.
+
+ ========================================================
+
+2025-12-06 09:55:02 [INFO] Configuration loaded from: C:\Users\will\AppData\Roaming\.dilithion-testnet\dilithion.conf
+======================================
+Dilithion Node v1.1.1
+Post-Quantum Cryptocurrency
+======================================
+
+Network: TESTNET (production difficulty, ~60s blocks)
+2025-12-06 09:55:02 [INFO] Dilithion Node v1.1.1 starting
+2025-12-06 09:55:02 [INFO] Data directory: C:\Users\will\AppData\Roaming\.dilithion-testnet
+2025-12-06 09:55:02 [INFO] P2P port: 18444
+2025-12-06 09:55:02 [INFO] RPC port: 18332
+Data directory: C:\Users\will\AppData\Roaming\.dilithion-testnet
+P2P port: 18444
+RPC port: 18332
+
+[DEBUG] Entering main initialization try block
+[DEBUG] Phase 1: Initializing blockchain storage...
+2025-12-06 09:55:02 [INFO] Initializing blockchain storage...
+Initializing blockchain storage...
+[DB-SECURITY] Validated database path: C:\Users\will\AppData\Roaming\.dilithion-testnet\blocks
+[DB-INFO] Available disk space: 63 GB
+[DB-INFO] Database opened successfully
+2025-12-06 09:55:03 [INFO] Blockchain database opened successfully
+  [OK] Blockchain database opened
+Initializing mempool...
+  [OK] Mempool initialized
+Initializing UTXO set...
+[INFO] CUTXOSet: Initializing new UTXO set
+  [OK] UTXO set opened
+Initializing chain state...
+  [OK] Chain state initialized
+Initializing RandomX...
+  Detected RAM: 16171 MB
+  Initializing validation mode (LIGHT)...
+  [VALIDATION] Initializing LIGHT mode for block validation...
+  [OK] Validation mode ready (LIGHT, 346ms)
+  Starting mining mode init (FULL) in background...
+  [MINING] Background initialization started (non-blocking)
+[1/6] Loading genesis block...  Network: testnet
+  Genesis hash:   [MINING] Starting FULL mode initialization in background...
+411c351d903c4bcc1ba0fe5c47a2056974fbb0bdb191dc25339a1b393c29e8fc
+  Genesis time: 1730000000
+ Γ£ô
+  [OK] Genesis block verified
+Initializing blockchain with genesis block...
+  [OK] Genesis block saved to database
+  [OK] Genesis block index saved (height 0)
+[Chain] Activating genesis block at height 0
+[DEBUG] ApplyBlock: block.vtx.size() = 134 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: 29 ff ff ff ff 01 00 f2 05 2a 01 00 00 00 01 6a 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 0 (1 txs, 0 inputs spent)
+  [OK] Genesis block set as blockchain tip
+Validating blockchain integrity...
+[ChainVerifier] Checking chain continuity from height 0...
+[ChainVerifier] Chain continuity check passed (1 blocks verified)
+  [OK] Chain integrity validation passed
+Initializing P2P components...
+Initializing NodeContext...
+[PeerManager] Loaded 0 peer addresses from C:\Users\will\AppData\Roaming\.dilithion-testnet/peers.dat
+2025-12-06 09:55:03 [INFO] [NET] Initialized peer manager
+2025-12-06 09:55:03 [INFO] [IBD] Initialized IBD managers (headers, orphan, block_fetcher)
+2025-12-06 09:55:03 [INFO] NodeContext initialized successfully
+  [OK] NodeContext initialized
+Initializing IBD managers...
+  [OK] Headers manager initialized
+  [OK] Orphan manager initialized (max 100 blocks / 100 MB)
+  [OK] Block fetcher initialized (max 16 blocks in-flight)
+[Chain] Registered tip update callback (total: 1)
+  [OK] Chain tip callback registered for HeadersManager
+Populating HeadersManager with existing chain...
+[HeadersManager] OnBlockActivated: 411c351d903c4bcc...
+[HeadersManager] Genesis block detected (height 0)
+[HeadersManager] First best header at height 0, hash 411c351d903c4bcc...
+[HeadersManager] Added header at height 0, total headers: 1, best height: 0
+  [OK] Populated HeadersManager with 1 header(s) from height 0 to 0
+[AsyncBroadcaster] Started successfully
+[AsyncBroadcaster] Initialized and started
+[AsyncBroadcaster] Worker thread started
+[HttpServer] Started on port 8334
+[HttpServer] API server started on port 8334
+[HttpServer] Dashboard endpoint: http://localhost:8334/api/stats
+[HttpServer] Server thread started
+  [OK] P2P components ready (not started)
+Initializing mining controller...
+  [OK] Mining controller initialized (12 threads)
+Initializing wallet...
+  Wallet file: C:\Users\will\AppData\Roaming\.dilithion-testnet/wallet.dat
+  No existing wallet found, creating new one
+  Generating HD wallet with 24-word recovery phrase...
+
+ΓòöΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòù
+Γòæ              IMPORTANT: YOUR 24-WORD RECOVERY PHRASE                        Γòæ
+ΓòáΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòú
+Γòæ  Write these words on paper and store in a safe place.                      Γòæ
+Γòæ  This is the ONLY way to recover your wallet if you lose access.            Γòæ
+Γòæ  NEVER share this phrase with anyone or store it digitally.                 Γòæ
+ΓòáΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòú
+Γòæ  1.spatial    2.duty       3.rotate     4.obey       5.silly      6.deposit    Γòæ
+Γòæ  7.train      8.mosquito   9.lunar      10.current   11.order     12.injury    Γòæ
+Γòæ  13.pave      14.shift     15.motion    16.bleak     17.dress     18.trick     Γòæ
+Γòæ  19.glass     20.prosper   21.home      22.place     23.family    24.sketch    Γòæ
+ΓòÜΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓò¥
+
+  [OK] HD Wallet created successfully!
+
+ΓòöΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòù
+Γòæ              YOUR PUBLIC RECEIVING ADDRESS (Copy & Share)                   Γòæ
+ΓòáΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòú
+Γòæ                                                                              Γòæ
+Γòæ  DQHjYsaVnZbaXNUJtcCYjorkQbBnXFYUzh                                          Γòæ
+Γòæ                                                                              Γòæ
+ΓòáΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòú
+Γòæ  Share this address to receive DIL. Safe to share publicly.                 Γòæ
+ΓòÜΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓò¥
+
+ΓòöΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòù
+Γòæ  IMPORTANT: Have you written down your 24-word recovery phrase?             Γòæ
+Γòæ                                                                              Γòæ
+Γòæ  This is your ONLY backup. If you lose it, your funds are GONE FOREVER.     Γòæ
+Γòæ  Store it safely on PAPER - never digitally!                                Γòæ
+ΓòÜΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓò¥
+
+  >>> Type 'Y' to confirm you have saved your recovery phrase:   [MINING] Initializing dataset with 12 threads...
+  [OK] Mining mode ready (FULL, 3s)

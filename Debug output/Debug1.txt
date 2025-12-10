@@ -1,0 +1,158 @@
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: dd ac c6 99 31 7a cb 57 95 dd ee 52 d6 92 88 ac 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 1224 (1 txs, 0 inputs spent)
+[Chain] DEBUG: Writing best block to DB: 0000320e4dcc072a...
+[Chain] DEBUG: WriteBestBlock returned: SUCCESS
+[HeadersManager] OnBlockActivated: 0000320e4dcc072a...
+[HeadersManager] Header already exists at height 1224, updating best header
+[P2P] Block activated successfully
+[P2P] Updated best block to height 1224
+[BUG32-DEBUG] Checking immediate template update conditions:
+[BUG32-DEBUG]   miner = valid
+[BUG32-DEBUG]   wallet = valid
+[BUG32-DEBUG]   mining_enabled = true
+[BUG32-DEBUG] Conditions not met - template NOT updated immediately
+[P2P] No other peers to relay block to
+[BlockFetcher] Block received from peer 1 (response time: 903ms) in-flight remaining: 1
+[P2P-DEBUG] ProcessMessage: peer=1 cmd='block' payload=196 bytes
+[P2P] Received block from peer 1: 0000f173f3620ade...
+[CONVERGENCE-DIAG] BLOCK message received from peer 1
+[CONVERGENCE-DIAG]   Block hash: 0000f173f3620ade...
+[CONVERGENCE-DIAG]   Prev block: 0000320e4dcc072a...
+[P2P] Block saved to database
+[P2P] Block index created (height 1225)
+[Chain] Block extends current tip: height 1225
+[DEBUG] ApplyBlock: block.vtx.size() = 115 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: dd ac c6 99 31 7a cb 57 95 dd ee 52 d6 92 88 ac 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 1225 (1 txs, 0 inputs spent)
+[Chain] DEBUG: Writing best block to DB: 0000f173f3620ade...
+[Chain] DEBUG: WriteBestBlock returned: SUCCESS
+[HeadersManager] OnBlockActivated: 0000f173f3620ade...
+[HeadersManager] Header already exists at height 1225, updating best header
+[P2P] Block activated successfully
+[P2P] Updated best block to height 1225
+[BUG32-DEBUG] Checking immediate template update conditions:
+[BUG32-DEBUG]   miner = valid
+[BUG32-DEBUG]   wallet = valid
+[BUG32-DEBUG]   mining_enabled = true
+[BUG32-DEBUG] Conditions not met - template NOT updated immediately
+[P2P] No other peers to relay block to
+[BlockFetcher] Block received from peer 1 (response time: 972ms) in-flight remaining: 0
+[P2P-DEBUG] ProcessMessage: peer=1 cmd='block' payload=196 bytes
+[P2P] Received block from peer 1: 000035f9adfc51e1...
+[CONVERGENCE-DIAG] BLOCK message received from peer 1
+[CONVERGENCE-DIAG]   Block hash: 000035f9adfc51e1...
+[CONVERGENCE-DIAG]   Prev block: 00000161c7aa676f...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00000161c7aa676f...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=2e42e49d65804d99335743e41a197ea45e7d9e39db844e28a98c0b39face7298
+[DEBUG] VerifyMerkleRoot: calculatedRoot=2e42e49d65804d99335743e41a197ea45e7d9e39db844e28a98c0b39face7298
+[DEBUG] VerifyMerkleRoot: tx[0] hash=2e42e49d65804d99335743e41a197ea45e7d9e39db844e28a98c0b39face7298
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[Mining] New block found, updating template...
+  [IBD] Progress: height=1225 peers_best=2643
+[IBD-TICK] PROCEEDING: header=2644 chain=1225 peers=1
+2025-12-05 19:25:07 [INFO] [IBD] Headers ahead of chain - downloading blocks (header=2644 chain=1225)
+2025-12-05 19:25:07 [INFO] [IBD] Queueing 100 blocks for download...
+[OrphanManager] Added orphan block 000035f9adfc51e1... (parent: [BlockFetcher] Selected 16 blocks for download (queue size: 1403)
+00000161c7aa676f...) from peer 1 | Total: 44 orphans, 12 KB
+2025-12-05 19:25:07 [INFO] [IBD] Fetching 16 blocks (max 16 in-flight)...
+[Orphan] Block added to orphan pool (count: 44)
+[P2P] Requesting parent block from peer 1
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1226 hash=00009a234a5dfc1f... (in-flight: 1/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 00009a234a5dfc1f...
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1227 hash=00004d5a373b6ca8... (in-flight: 2/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 00004d5a373b6ca8...
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1228 hash=000043ccff960102... (in-flight: 3/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 000043ccff960102...
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1229 hash=0000b9a15f4c3dbe... (in-flight: 4/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 0000b9a15f4c3dbe...
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1230 hash=0000b2d4162010f8... (in-flight: 5/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 0000b2d4162010f8...
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1231 hash=00000d404c6cb686... (in-flight: 6/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 00000d404c6cb686...
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1232 hash=0000e9a5a12131fc... (in-flight: 7/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 0000e9a5a12131fc...
+[BlockFetcher] BUG #64: Using preferred peer 1 that announced this block
+[BlockFetcher] Requested block from peer 1: height=1233 hash=0000af488cf9d49d... (in-flight: 8/16)
+[IBD-DEBUG] GETDATA SENT to peer 1 for 0000af488cf9d49d...
+[BlockFetcher] Queued block for download: height=1234 hash=00004d2975acd566... [HIGH PRIORITY]
+[BlockFetcher] Queued block for download: height=1235 hash=0000800d8b85c716... [HIGH PRIORITY]
+[BlockFetcher] Queued block for download: height=1236 hash=00002af293d79b21... [HIGH PRIORITY]
+[BlockFetcher] Queued block for download: height=1237 hash=00002e9f450c199f... [HIGH PRIORITY]
+[BlockFetcher] Queued block for download: height=1238 hash=0000a7c24cbdd151... [HIGH PRIORITY]
+[BlockFetcher] Queued block for download: height=1239 hash=0000e5d6a9020de8... [HIGH PRIORITY]
+[BlockFetcher] Queued block for download: height=1240 hash=0000efafca66a406... [HIGH PRIORITY]
+[BlockFetcher] Queued block for download: height=1241 hash=00005cc62a77c914... [HIGH PRIORITY]
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[P2P-DEBUG] ProcessMessage: peer=1 cmd='block' payload=196 bytes
+[P2P] Received block from peer 1: 00000161c7aa676f...
+[CONVERGENCE-DIAG] BLOCK message received from peer 1
+[CONVERGENCE-DIAG]   Block hash: 00000161c7aa676f...
+[CONVERGENCE-DIAG]   Prev block: 0000e58a903c1c55...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000e58a903c1c55...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=0f0cd5a8f7629b1bd188711a3836da663539c2ef384730e36c98007273023b76
+[DEBUG] VerifyMerkleRoot: calculatedRoot=0f0cd5a8f7629b1bd188711a3836da663539c2ef384730e36c98007273023b76
+[DEBUG] VerifyMerkleRoot: tx[0] hash=0f0cd5a8f7629b1bd188711a3836da663539c2ef384730e36c98007273023b76
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00000161c7aa676f... (parent: 0000e58a903c1c55...) from peer 1 | Total: 45 orphans, 12 KB
+[Orphan] Block added to orphan pool (count: 45)
+[P2P] Requesting parent block from peer 1
+[P2P-DEBUG] ProcessMessage: peer=1 cmd='block' payload=196 bytes
+[P2P] Received block from peer 1: 00009a234a5dfc1f...
+[CONVERGENCE-DIAG] BLOCK message received from peer 1
+[CONVERGENCE-DIAG]   Block hash: 00009a234a5dfc1f...
+[CONVERGENCE-DIAG]   Prev block: 0000f173f3620ade...
+[P2P] Block saved to database
+[P2P] Block index created (height 1226)
+[Chain] Block extends current tip: height 1226
+[DEBUG] ApplyBlock: block.vtx.size() = 115 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: dd ac c6 99 31 7a cb 57 95 dd ee 52 d6 92 88 ac 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 1226 (1 txs, 0 inputs spent)
+[Chain] DEBUG: Writing best block to DB: 00009a234a5dfc1f...
+[Chain] DEBUG: WriteBestBlock returned: SUCCESS
+[HeadersManager] OnBlockActivated: 00009a234a5dfc1f...
+[HeadersManager] Header already exists at height 1226, updating best header
+[P2P] Block activated successfully
+[P2P] Updated best block to height 1226
+[BUG32-DEBUG] Checking immediate template update conditions:
+[BUG32-DEBUG]   miner = valid
+[BUG32-DEBUG]   wallet = valid
+[BUG32-DEBUG]   mining_enabled = true
+[BUG32-DEBUG] Conditions not met - template NOT updated immediately
+[P2P] No other peers to relay block to
+[BlockFetcher] Block received from peer 1 (response time: 627ms) in-flight remaining: 7
+[P2P-DEBUG] ProcessMessage: peer=1 cmd='block' payload=196 bytes
+[P2P] Received block from peer 1: 00004d5a373b6ca8...
+[CONVERGENCE-DIAG] BLOCK message received from peer 1
+[CONVERGENCE-DIAG]   Block hash: 00004d5a373b6ca8...
+[CONVERGENCE-DIAG]   Prev block: 00009a234a5dfc1f...
+[P2P] Block saved to database
+[P2P] Block index created (height 1227)
+[Chain] Block extends current tip: height 1227
+[DEBUG] ApplyBlock: block.vtx.size() = 115 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: dd ac c6 99 31 7a cb 57 95 dd ee 52 d6 92 88 ac 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 1227 (1 txs, 0 inputs spent)
+[Chain] DEBUG: Writing best block to DB: 00004d5a373b6ca8...
+[Chain] DEBUG: WriteBestBlock returned: SUCCESS
+[HeadersManager] OnBlockActivated: 00004d5a373b6ca8...
+[HeadersManager] Header already exists at height 1227, updating best header

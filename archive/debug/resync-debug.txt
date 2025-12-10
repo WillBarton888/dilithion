@@ -1,0 +1,138 @@
+======================================
+Dilithion Node v1.0.16
+Post-Quantum Cryptocurrency
+======================================
+
+Network: MAINNET
+Data directory: C:\Users\will\.dilithion
+P2P port: 22866
+RPC port: 8332
+
+Initializing blockchain storage...
+[DB-SECURITY] Validated database path: C:\Users\will\.dilithion\blocks
+[DB-INFO] Available disk space: 277 GB
+[DB-INFO] Database opened successfully
+  [OK] Blockchain database opened
+Initializing mempool...
+  [OK] Mempool initialized
+Initializing UTXO set...
+[INFO] CUTXOSet: Initializing new UTXO set
+  [OK] UTXO set opened
+Initializing chain state...
+  [OK] Chain state initialized
+Initializing RandomX...
+  Detected RAM: 32688 MB
+  Selected mode: FULL (~100 H/s)
+  [ASYNC] RandomX initialization thread launched (non-blocking)
+  [ASYNC] RandomX initialization started (continuing startup...)
+  [WAIT] Waiting for RandomX initialization...
+  [WAIT] Waiting for RandomX initialization to complete...
+  [ASYNC] RandomX initialization started in background thread
+  [ASYNC] Mode: FULL
+  [FULL MODE] Initializing RandomX dataset with 20 threads...
+  [FULL MODE] Dataset initialized in 20s
+  [OK] RandomX initialized (async, 21s)
+  [WAIT] RandomX initialization complete
+Loading genesis block...
+  Network: mainnet
+  Genesis hash: 522a7e5cf6e7df105abaf69417f0e5381c65402e1f0294c929aac73969603b6d
+  Genesis time: 1767225600
+  [OK] Genesis block verified
+Initializing blockchain with genesis block...
+  [OK] Genesis block saved to database
+  [OK] Genesis block index saved (height 0)
+[Chain] Activating genesis block at height 0
+[DEBUG] ApplyBlock: block.vtx.size() = 220 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: 6e ff ff ff ff 01 00 f2 05 2a 01 00 00 00 01 6a 00 00 00 00 
+[DEBUG] DeserializeBlockTransactions: vtx size = 220
+[DEBUG] First 10 bytes: 01 01 00 00 00 01 00 00 00 00 
+[DEBUG] Transaction count from vtx: 1 (firstByte=0x1)
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 0 (1 txs, 0 inputs spent)
+  [OK] Genesis block set as blockchain tip
+Validating blockchain integrity...
+[ChainVerifier] Checking chain continuity from height 0...
+[ChainVerifier] Chain continuity check passed (1 blocks verified)
+  [OK] Chain integrity validation passed
+Initializing P2P components...
+Initializing IBD managers...
+  [OK] Headers manager initialized
+  [OK] Orphan manager initialized (max 100 blocks / 100 MB)
+  [OK] Block fetcher initialized (max 16 blocks in-flight)
+[Chain] Registered tip update callback (total: 1)
+  [OK] Chain tip callback registered for HeadersManager
+Populating HeadersManager with existing chain...
+[HeadersManager] OnBlockActivated: 522a7e5cf6e7df10...
+[HeadersManager] Genesis block detected (height 0)
+[HeadersManager] First best header at height 0, hash 522a7e5cf6e7df10...
+[HeadersManager] Added header at height 0, total headers: 1, best height: 0
+  [OK] Populated HeadersManager with 1 header(s) from height 0 to 0
+[AsyncBroadcaster] Started successfully
+[AsyncBroadcaster] Initialized and started
+[AsyncBroadcaster] Worker thread started
+[HttpServer] Started on port 8333
+[HttpServer] API server started on port 8333
+[HttpServer] Dashboard endpoint: http://localhost:8333/api/stats
+  [OK] P2P components ready (not started)
+Initializing mining controller...
+  [OK] Mining controller initialized (20 threads)
+Initializing wallet...
+  Generating initial address...
+[HttpServer] Server thread started
+  [OK] Initial address: DKmcJ53gjc6xxV5Lbt81LQjr7sjTaXmUCH
+Starting P2P networking server...
+  [OK] P2P server listening on port 22866
+Connecting to seed nodes...
+  Connecting to 134.122.4.164:18444...
+  [OK] P2P accept thread started
+[HANDSHAKE-DIAG] AddPeer called for 134.122.4.164:18444 (services=0000000000000001, time=1763981654) (IP: 134.122.4.164, current peers: 0/125)
+[HANDSHAKE-DIAG] ✅ Peer 1 added successfully
+    [OK] Connected to seed node (peer_id=1)
+[HANDSHAKE-DIAG] Initiating handshake with peer 1 (current_state: 2)
+[HANDSHAKE-DIAG] Sending VERSION message to peer 1
+[HANDSHAKE-DIAG] VERSION message sent successfully to peer 1
+[HANDSHAKE-DIAG] Sent VERSION to peer 1, state set to VERSION_SENT (3)
+    [OK] Sent version message to peer 1
+  Connecting to 209.97.177.197:18444...
+[HANDSHAKE-DIAG] AddPeer called for 209.97.177.197:18444 (services=0000000000000001, time=1763981654) (IP: 209.97.177.197, current peers: 1/125)
+[HANDSHAKE-DIAG] ✅ Peer 2 added successfully
+    [OK] Connected to seed node (peer_id=2)
+[HANDSHAKE-DIAG] Initiating handshake with peer 2 (current_state: 2)
+[HANDSHAKE-DIAG] Sending VERSION message to peer 2
+[HANDSHAKE-DIAG] VERSION message sent successfully to peer 2
+[HANDSHAKE-DIAG] Sent VERSION to peer 2, state set to VERSION_SENT (3)
+    [OK] Sent version message to peer 2
+  Connecting to 188.166.255.63:18444...
+[HANDSHAKE-DIAG] AddPeer called for 188.166.255.63:18444 (services=0000000000000001, time=1763981654) (IP: 188.166.255.63, current peers: 2/125)
+[HANDSHAKE-DIAG] ✅ Peer 3 added successfully
+    [OK] Connected to seed node (peer_id=3)
+[HANDSHAKE-DIAG] Initiating handshake with peer 3 (current_state: 2)
+[HANDSHAKE-DIAG] Sending VERSION message to peer 3
+[HANDSHAKE-DIAG] VERSION message sent successfully to peer 3
+[HANDSHAKE-DIAG] Sent VERSION to peer 3, state set to VERSION_SENT (3)
+    [OK] Sent version message to peer 3
+Initializing RPC server...
+[RPC] Server bound to 127.0.0.1:8332 (localhost only)
+[RPC] SECURITY: For remote access, use SSH tunneling
+  [OK] P2P receive thread started
+[P2P] ERROR: Invalid magic from peer 1 (got 0xdab5bffa, expected 0xd1714102)
+[P2P] Disconnected peer 1 (reason: invalid message magic)
+  [OK] P2P maintenance thread started
+[RPC] Started thread pool with 8 workers
+  [OK] RPC server listening on port 8332
+
+======================================
+Node Status: RUNNING
+======================================
+
+RPC Interface:
+  URL: http://localhost:8332
+  Methods: getnewaddress, getbalance, getmininginfo, help
+
+Press Ctrl+C to stop
+
+[P2P] ERROR: Invalid magic from peer 2 (got 0xdab5bffa, expected 0xd1714102)
+[P2P] Disconnected peer 2 (reason: invalid message magic)
+[P2P] ERROR: Invalid magic from peer 3 (got 0xdab5bffa, expected 0xd1714102)
+[P2P] Disconnected peer 3 (reason: invalid message magic)

@@ -1,0 +1,2127 @@
+
+ ========================================================
+   DILITHION TESTNET MINER - STARTING
+ ========================================================
+
+ Connecting to seed nodes...
+ Initializing mining with Auto-Detect...
+
+ The node will start shortly.
+ Press Ctrl+C anytime to stop mining.
+
+ ========================================================
+
+2025-12-05 13:52:53 [INFO] Configuration loaded from: C:\Users\will\AppData\Roaming\.dilithion-testnet\dilithion.conf
+======================================
+Dilithion Node v1.0.16
+Post-Quantum Cryptocurrency
+======================================
+
+Network: TESTNET (production difficulty, ~60s blocks)
+2025-12-05 13:52:54 [INFO] Dilithion Node v1.0.16 starting
+2025-12-05 13:52:54 [INFO] Data directory: C:\Users\will\AppData\Roaming\.dilithion-testnet
+2025-12-05 13:52:54 [INFO] P2P port: 18444
+2025-12-05 13:52:54 [INFO] RPC port: 18332
+Data directory: C:\Users\will\AppData\Roaming\.dilithion-testnet
+P2P port: 18444
+RPC port: 18332
+
+[DEBUG] Entering main initialization try block
+[DEBUG] Phase 1: Initializing blockchain storage...
+2025-12-05 13:52:54 [INFO] Initializing blockchain storage...
+Initializing blockchain storage...
+[DB-SECURITY] Validated database path: C:\Users\will\AppData\Roaming\.dilithion-testnet\blocks
+[DB-INFO] Available disk space: 64 GB
+[DB-INFO] Database opened successfully
+2025-12-05 13:53:03 [INFO] Blockchain database opened successfully
+  [OK] Blockchain database opened
+Initializing mempool...
+  [OK] Mempool initialized
+Initializing UTXO set...
+[INFO] CUTXOSet: Initializing new UTXO set
+  [OK] UTXO set opened
+Initializing chain state...
+  [OK] Chain state initialized
+Initializing RandomX...
+  Detected RAM: 16171 MB
+  Initializing validation mode (LIGHT)...
+  [VALIDATION] Initializing LIGHT mode for block validation...
+  [OK] Validation mode ready (LIGHT, 584ms)
+  Starting mining mode init (FULL) in background...
+  [MINING] Background initialization started (non-blocking)
+  [MINING] Starting FULL mode initialization in background...
+[1/6] Loading genesis block...  Network: testnet
+  Genesis hash: 411c351d903c4bcc1ba0fe5c47a2056974fbb0bdb191dc25339a1b393c29e8fc
+  Genesis time: 1730000000
+ Γ£ô
+  [OK] Genesis block verified
+Initializing blockchain with genesis block...
+  [OK] Genesis block saved to database
+  [OK] Genesis block index saved (height 0)
+[Chain] Activating genesis block at height 0
+[DEBUG] ApplyBlock: block.vtx.size() = 134 bytes
+[DEBUG] ApplyBlock: First 20 bytes of vtx: 01 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[DEBUG] ApplyBlock: Last 20 bytes of vtx: 29 ff ff ff ff 01 00 f2 05 2a 01 00 00 00 01 6a 00 00 00 00
+[INFO] CUTXOSet::Flush: Successfully flushed 0 changes to disk
+[INFO] CUTXOSet::ApplyBlock: Applied block at height 0 (1 txs, 0 inputs spent)
+  [OK] Genesis block set as blockchain tip
+Validating blockchain integrity...
+[ChainVerifier] Checking chain continuity from height 0...
+[ChainVerifier] Chain continuity check passed (1 blocks verified)
+  [OK] Chain integrity validation passed
+Initializing P2P components...
+Initializing NodeContext...
+[PeerManager] Loaded 0 peer addresses from C:\Users\will\AppData\Roaming\.dilithion-testnet/peers.dat
+2025-12-05 13:53:04 [INFO] [NET] Initialized peer manager
+2025-12-05 13:53:04 [INFO] [IBD] Initialized IBD managers (headers, orphan, block_fetcher)
+2025-12-05 13:53:04 [INFO] NodeContext initialized successfully
+  [OK] NodeContext initialized
+Initializing IBD managers...
+  [OK] Headers manager initialized
+  [OK] Orphan manager initialized (max 100 blocks / 100 MB)
+  [OK] Block fetcher initialized (max 16 blocks in-flight)
+[Chain] Registered tip update callback (total: 1)
+  [OK] Chain tip callback registered for HeadersManager
+Populating HeadersManager with existing chain...
+[HeadersManager] OnBlockActivated: 411c351d903c4bcc...
+[HeadersManager] Genesis block detected (height 0)
+[HeadersManager] First best header at height 0, hash 411c351d903c4bcc...
+[HeadersManager] Added header at height 0, total headers: 1, best height: 0
+  [OK] Populated HeadersManager with 1 header(s) from height 0 to 0
+[AsyncBroadcaster] Started successfully
+[AsyncBroadcaster] Initialized and started
+[AsyncBroadcaster] Worker thread started
+[HttpServer] Started on port 8334[HttpServer] Server thread started
+
+[HttpServer] API server started on port 8334
+[HttpServer] Dashboard endpoint: http://localhost:8334/api/stats
+  [OK] P2P components ready (not started)
+Initializing mining controller...
+  [OK] Mining controller initialized (12 threads)
+Initializing wallet...
+  Wallet file: C:\Users\will\AppData\Roaming\.dilithion-testnet/wallet.dat
+  No existing wallet found, creating new one
+  Generating initial address...
+  [OK] Initial address: DMZ4UDNPWUX1Dq7sD75YtaLJ6ge9B6LkUz
+  [OK] Auto-save enabled
+[Chain] Registered block connect callback (total: 1)
+[Chain] Registered block disconnect callback (total: 1)
+  [OK] Registered chain notification callbacks
+  Wallet best block: -1, Chain height: 0
+  Rescanning blockchain (full scan from genesis)...
+[WALLET] Rescanning blocks 0 to 0...
+[WALLET] Rescan complete: 1 blocks, 0 wallet outputs found
+  [OK] Full scan complete, balance: 0.00000000 DIL
+  [OK] New wallet saved
+[DEBUG] Phase 2.5: Starting P2P networking server...
+[4/6] Starting P2P networking server...[DEBUG] g_node_state.running set to true
+[DEBUG] Initializing Winsock (Windows socket layer)...
+[DEBUG] Winsock initialized successfully
+ Γ£ô
+  [OK] P2P server listening on port 18444
+[DEBUG] Creating P2P accept thread...
+[DEBUG] P2P accept thread created successfully
+[DEBUG] P2P accept thread entry point reached
+  [OK] P2P accept thread started
+Connecting to seed nodes...
+  Connecting to 134.122.4.164:18444...
+[HANDSHAKE-DIAG] AddPeer called for 134.122.4.164:18444 (services=0x0000000000000001, time=1764904984) (IP: 134.122.4.164, current peers: 0/125)
+[HANDSHAKE-DIAG] Γ£à Peer 1 added successfully
+    [OK] Connected to seed node (peer_id=1)
+[HANDSHAKE-DIAG] Initiating handshake with peer 1 (current_state: 2)
+[HANDSHAKE-DIAG] Sending VERSION message to peer 1
+[HANDSHAKE-DIAG] VERSION message sent successfully to peer 1
+[HANDSHAKE-DIAG] Sent VERSION to peer 1, state set to VERSION_SENT (3)
+    [OK] Sent version message to peer 1
+  Connecting to 209.97.177.197:18444...
+  [MINING] Initializing dataset with 12 threads...
+[HANDSHAKE-DIAG] AddPeer called for 209.97.177.197:18444 (services=0x0000000000000001, time=1764904984) (IP: 209.97.177.197, current peers: 1/125)
+[HANDSHAKE-DIAG] Γ£à Peer 2 added successfully
+    [OK] Connected to seed node (peer_id=2)
+[HANDSHAKE-DIAG] Initiating handshake with peer 2 (current_state: 2)
+[HANDSHAKE-DIAG] Sending VERSION message to peer 2
+[HANDSHAKE-DIAG] VERSION message sent successfully to peer 2
+[HANDSHAKE-DIAG] Sent VERSION to peer 2, state set to VERSION_SENT (3)
+    [OK] Sent version message to peer 2
+  Connecting to 188.166.255.63:18444...
+[HANDSHAKE-DIAG] AddPeer called for 188.166.255.63:18444 (services=0x0000000000000001, time=1764904984) (IP: 188.166.255.63, current peers: 2/125)
+[HANDSHAKE-DIAG] Γ£à Peer 3 added successfully
+    [OK] Connected to seed node (peer_id=3)
+[HANDSHAKE-DIAG] Initiating handshake with peer 3 (current_state: 2)
+[HANDSHAKE-DIAG] Sending VERSION message to peer 3
+[HANDSHAKE-DIAG] VERSION message sent successfully to peer 3
+[HANDSHAKE-DIAG] Sent VERSION to peer 3, state set to VERSION_SENT (3)
+    [OK] Sent version message to peer 3
+[DEBUG] Creating P2P receive thread...
+[DEBUG] P2P receive thread created successfully
+[DEBUG] Creating P2P maintenance thread...
+  [OK] P2P receive thread started
+[BlockFetcher] Peer 1[ DEBUG] P2P maintenance thread created successfully [OK] P2P maintenance thread started disconnected, re-queuing in-flight blocks
+
+
+[[DEBUG] All P2P threads created successfully - proceeding to RPC initializationP2P] Disconnected peer [PeerManager] Saved 0
+1 peer addresses to C:\Users\will\AppData\Roaming\.dilithion-testnet/peers.dat (reason: socket receive error
+)[
+DEBUG] Phase 4: Initializing RPC server...[P2P-DEBUG] ProcessMessage: peer=
+2 cmd='version[4/6] Initializing RPC server...' payload=103  [INFO] RPC authentication disabled (no rpcuser/rpcpassword in config) bytes
+
+2025-12-05 13:53:06 [INFO] [NET] Received VERSION from peer 2 (version=70001, agent=/Dilithion:0.1.0/, height=2290, services=0x0000000000000001)
+[RPC-LOGGER] Logging initialized
+  Request log: [HANDSHAKE-DIAG] Received VERSION from peer C:\Users\will\AppData\Roaming\.dilithion-testnet/rpc.log2
+ (agent:   Audit log: C:\Users\will\AppData\Roaming\.dilithion-testnet/rpc_audit.log/Dilithion:0.1.0/
+, height: 2290[RPC] Server bound to 127.0.0.1:, old_state: 318332) (localhost only)
+
+[RPC] SECURITY: For remote access, use SSH tunneling[HANDSHAKE-DIAG] Peer
+2 state set to VERSION_SENT (3)
+[P2P] Handshake with peer 2 (/Dilithion:0.1.0/) start_height=2290[RPC] Started thread pool with
+8 workers[HeadersManager] Peer
+2 start height:   [OK] RPC server listening on port 229018332
+
+
+[HANDSHAKE-DIAG] Sending VERACK message to peer Mining enabled - checking sync status...2
+
+  [IBD] Node is syncing - mining will start after sync[HANDSHAKE-DIAG] VERACK message sent successfully to peer
+2  [IBD] Main loop will handle block downloads, mining deferred...
+
+
+[P2P-DEBUG] ProcessMessage: peer=======================================2
+ cmd='verackNode Status: RUNNING' payload=
+0 bytes======================================
+
+
+[HANDSHAKE-DIAG] Received VERACK from peer RPC Interface:2
+ (current_state:   URL: http://localhost:318332)
+
+  Methods: getnewaddress, getbalance, getmininginfo, help[HANDSHAKE-DIAG] Γ£à HANDSHAKE COMPLETE with peer
+2
+
+[NodeState] Created state for peer 2 (height=2290Press Ctrl+C to stop, preferred=
+1)
+
+[P2P] Handshake complete with peer 2025-12-05 13:53:06 [INFO] [IBD] IBD Coordinator initialized2
+
+[BUG85-DEBUG] About to call OnPeerConnected, block_fetcher=valid
+[BUG85-DEBUG] Calling OnPeerConnected...
+[BlockFetcher] Peer 2 connected, initializing download state
+[BUG85-DEBUG] OnPeerConnected returned
+[P2P] Our height: 0, Peer height: 2290
+[P2P] Peer 2 is ahead or we are at genesis, requesting headers
+[HeadersManager] RequestHeaders for peer 2
+[HeadersManager] Generated locator with 1 hashes (starting from height 0)
+[HeadersManager] Sending GETHEADERS with 1 locator hashes
+[HeadersManager] Sent GETHEADERS to peer 2
+[P2P] Headers request sent
+[BlockFetcher] Peer 3 disconnected, re-queuing in-flight blocks
+[P2P] Disconnected peer 3 (reason: socket receive error)
+[IBD-TICK] tick=1 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='headers' payload=162003 bytes
+ΓÜá Network Operation Failed
+  Failed to process message: Invalid payload size for 'headers'
+
+  Cause: Network connectivity issue or peer unavailable
+
+  To resolve:
+    1. Check your internet connection
+    2. Verify firewall settings allow P2P connections
+    3. Try adding more nodes with --addnode
+    4. Check if the node is behind a NAT/firewall
+
+  Error code: NET_process message
+
+[P2P] ERROR: Invalid payload size for 'headers' from peer 2 (got 162003 bytes, expected 1-162000)
+  [OK] Mining mode ready (FULL, 5s)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=11 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=21 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=31 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=41 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[P2P-DEBUG] ProcessMessage: peer=[IBD-TICK] tick=51 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 0000f3f27fbecc30...
+[P2P] Peer 2 announced new block: 0000f3f27fbecc30...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000f3f27fbecc30...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000f3f27fbecc30...
+[CONVERGENCE-DIAG]   Prev block: 00007532b50c825a...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00007532b50c825a...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=7f367071054bd69ad00d4bd6a978b419a8c4bfb3d7f7f8972ca0a220e9434627
+[DEBUG] VerifyMerkleRoot: calculatedRoot=7f367071054bd69ad00d4bd6a978b419a8c4bfb3d7f7f8972ca0a220e9434627
+[DEBUG] VerifyMerkleRoot: tx[0] hash=7f367071054bd69ad00d4bd6a978b419a8c4bfb3d7f7f8972ca0a220e9434627
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000f3f27fbecc30... (parent: 00007532b50c825a...) from peer 2 | Total: 1 orphans, 0 KB
+[Orphan] Block added to orphan pool (count: 1)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00007532b50c825a...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00007532b50c825a...
+[CONVERGENCE-DIAG]   Prev block: 0000481f7fc70af0...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000481f7fc70af0...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=335668f028fd051df44292803966ecfd638448f69992c1d0fbbfa731cd7a4bbd
+[DEBUG] VerifyMerkleRoot: calculatedRoot=335668f028fd051df44292803966ecfd638448f69992c1d0fbbfa731cd7a4bbd
+[DEBUG] VerifyMerkleRoot: tx[0] hash=335668f028fd051df44292803966ecfd638448f69992c1d0fbbfa731cd7a4bbd
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00007532b50c825a... (parent: 0000481f7fc70af0...) from peer 2 | Total: 2 orphans, 0 KB
+[Orphan] Block added to orphan pool (count: 2)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000481f7fc70af0...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000481f7fc70af0...
+[CONVERGENCE-DIAG]   Prev block: 000030eaca1db8a3...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000030eaca1db8a3...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=25c1a142f2465a9f21b20e0de7a19514f997c65ec0c79a49f8d0c796006cc507
+[DEBUG] VerifyMerkleRoot: calculatedRoot=25c1a142f2465a9f21b20e0de7a19514f997c65ec0c79a49f8d0c796006cc507
+[DEBUG] VerifyMerkleRoot: tx[0] hash=25c1a142f2465a9f21b20e0de7a19514f997c65ec0c79a49f8d0c796006cc507
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000481f7fc70af0... (parent: 000030eaca1db8a3...) from peer 2 | Total: 3 orphans, 0 KB
+[Orphan] Block added to orphan pool (count: 3)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000030eaca1db8a3...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000030eaca1db8a3...
+[CONVERGENCE-DIAG]   Prev block: 0000123e2dc43e01...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000123e2dc43e01...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=676f2c83dba3391579b43ffc9bc39cd80e4985f7f53f98f33fb4ffd2e4c6106a
+[DEBUG] VerifyMerkleRoot: calculatedRoot=676f2c83dba3391579b43ffc9bc39cd80e4985f7f53f98f33fb4ffd2e4c6106a
+[DEBUG] VerifyMerkleRoot: tx[0] hash=676f2c83dba3391579b43ffc9bc39cd80e4985f7f53f98f33fb4ffd2e4c6106a
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000030eaca1db8a3... (parent: 0000123e2dc43e01...) from peer 2 | Total: 4 orphans, 1 KB
+[Orphan] Block added to orphan pool (count: 4)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000123e2dc43e01...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000123e2dc43e01...
+[CONVERGENCE-DIAG]   Prev block: 00006bd77f1be620...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00006bd77f1be620...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=1aaf69781f785b863b2b84c726926ab50212ee9437f207d8bd897763224c26e1
+[DEBUG] VerifyMerkleRoot: calculatedRoot=1aaf69781f785b863b2b84c726926ab50212ee9437f207d8bd897763224c26e1
+[DEBUG] VerifyMerkleRoot: tx[0] hash=1aaf69781f785b863b2b84c726926ab50212ee9437f207d8bd897763224c26e1
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000123e2dc43e01... (parent: 00006bd77f1be620...) from peer 2 | Total: 5 orphans, 1 KB
+[Orphan] Block added to orphan pool (count: 5)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00006bd77f1be620...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00006bd77f1be620...
+[CONVERGENCE-DIAG]   Prev block: 000093f0dee002fb...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000093f0dee002fb...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=92a2b6e219fa736d3fcb9cdd27863a0fd7f28028cd009f23d8777479e640b2d3
+[DEBUG] VerifyMerkleRoot: calculatedRoot=92a2b6e219fa736d3fcb9cdd27863a0fd7f28028cd009f23d8777479e640b2d3
+[DEBUG] VerifyMerkleRoot: tx[0] hash=92a2b6e219fa736d3fcb9cdd27863a0fd7f28028cd009f23d8777479e640b2d3
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00006bd77f1be620... (parent: 000093f0dee002fb...) from peer 2 | Total: 6 orphans, 1 KB
+[Orphan] Block added to orphan pool (count: 6)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000093f0dee002fb...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000093f0dee002fb...
+[CONVERGENCE-DIAG]   Prev block: 0000d12800681ff5...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000d12800681ff5...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=687621f125ad0b9621e54f232e2f55f6f8dc3e1215f7717d68073277971366dc
+[DEBUG] VerifyMerkleRoot: calculatedRoot=687621f125ad0b9621e54f232e2f55f6f8dc3e1215f7717d68073277971366dc
+[DEBUG] VerifyMerkleRoot: tx[0] hash=687621f125ad0b9621e54f232e2f55f6f8dc3e1215f7717d68073277971366dc
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000093f0dee002fb... (parent: 0000d12800681ff5...) from peer 2 | Total: 7 orphans, 2 KB
+[Orphan] Block added to orphan pool (count: 7)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000d12800681ff5...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000d12800681ff5...
+[CONVERGENCE-DIAG]   Prev block: 00008679b89edf50...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00008679b89edf50...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=d6fe707bda99912eafce90c9ce3bc00a4b55fdc2db61d82a1a060555503d1a01
+[DEBUG] VerifyMerkleRoot: calculatedRoot=d6fe707bda99912eafce90c9ce3bc00a4b55fdc2db61d82a1a060555503d1a01
+[DEBUG] VerifyMerkleRoot: tx[0] hash=d6fe707bda99912eafce90c9ce3bc00a4b55fdc2db61d82a1a060555503d1a01
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000d12800681ff5... (parent: 00008679b89edf50...) from peer 2 | Total: 8 orphans, 2 KB
+[Orphan] Block added to orphan pool (count: 8)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00008679b89edf50...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00008679b89edf50...
+[CONVERGENCE-DIAG]   Prev block: 00003f1c5998e0bc...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00003f1c5998e0bc...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=0e59e7a99856e65a3be8b3cbd9664f6ddd6d281d14e57d826cdee799e41607e1
+[DEBUG] VerifyMerkleRoot: calculatedRoot=0e59e7a99856e65a3be8b3cbd9664f6ddd6d281d14e57d826cdee799e41607e1
+[DEBUG] VerifyMerkleRoot: tx[0] hash=0e59e7a99856e65a3be8b3cbd9664f6ddd6d281d14e57d826cdee799e41607e1
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00008679b89edf50... (parent: 00003f1c5998e0bc...) from peer 2 | Total: 9 orphans, 2 KB
+[Orphan] Block added to orphan pool (count: 9)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00003f1c5998e0bc...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00003f1c5998e0bc...
+[CONVERGENCE-DIAG]   Prev block: 0000c19034a9b9ad...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000c19034a9b9ad...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=7c2dd7bc85045fe42fdcbd52e7c943b88e09a57fc91a8d5649f916d3fa103e6a
+[DEBUG] VerifyMerkleRoot: calculatedRoot=7c2dd7bc85045fe42fdcbd52e7c943b88e09a57fc91a8d5649f916d3fa103e6a
+[DEBUG] VerifyMerkleRoot: tx[0] hash=7c2dd7bc85045fe42fdcbd52e7c943b88e09a57fc91a8d5649f916d3fa103e6a
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00003f1c5998e0bc... (parent: 0000c19034a9b9ad...) from peer 2 | Total: 10 orphans, 2 KB
+[Orphan] Block added to orphan pool (count: 10)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000c19034a9b9ad...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000c19034a9b9ad...
+[CONVERGENCE-DIAG]   Prev block: 0000ef2461d626e1...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000ef2461d626e1...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=f416022065961f92f7d76bb405a782d6f0e2efec4f6c19711bd627cae3c490b6
+[DEBUG] VerifyMerkleRoot: calculatedRoot=f416022065961f92f7d76bb405a782d6f0e2efec4f6c19711bd627cae3c490b6
+[DEBUG] VerifyMerkleRoot: tx[0] hash=f416022065961f92f7d76bb405a782d6f0e2efec4f6c19711bd627cae3c490b6
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000c19034a9b9ad... (parent: 0000ef2461d626e1...) from peer 2 | Total: 11 orphans, 3 KB
+[Orphan] Block added to orphan pool (count: 11)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000ef2461d626e1...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000ef2461d626e1...
+[CONVERGENCE-DIAG]   Prev block: 0000e07382a02cdf...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000e07382a02cdf...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=7a22884cebab98eb5ebbd1b628b2812e4c2ffbf94264d08415d0c9bd31e5a55c
+[DEBUG] VerifyMerkleRoot: calculatedRoot=7a22884cebab98eb5ebbd1b628b2812e4c2ffbf94264d08415d0c9bd31e5a55c
+[DEBUG] VerifyMerkleRoot: tx[0] hash=7a22884cebab98eb5ebbd1b628b2812e4c2ffbf94264d08415d0c9bd31e5a55c
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000ef2461d626e1... (parent: 0000e07382a02cdf...) from peer 2 | Total: 12 orphans, 3 KB
+[Orphan] Block added to orphan pool (count: 12)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000e07382a02cdf...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000e07382a02cdf...
+[CONVERGENCE-DIAG]   Prev block: 000081964abbf4e9...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000081964abbf4e9...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=960a6e2534a0ab109cb9dd2c775a8d37e5d3ee22fb1da188031b430d1396de7a
+[DEBUG] VerifyMerkleRoot: calculatedRoot=960a6e2534a0ab109cb9dd2c775a8d37e5d3ee22fb1da188031b430d1396de7a
+[DEBUG] VerifyMerkleRoot: tx[0] hash=960a6e2534a0ab109cb9dd2c775a8d37e5d3ee22fb1da188031b430d1396de7a
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000e07382a02cdf... (parent: 000081964abbf4e9...) from peer 2 | Total: 13 orphans, 3 KB
+[Orphan] Block added to orphan pool (count: 13)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 0000d81d6443b816...
+[P2P] Peer 2 announced new block: 0000d81d6443b816...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000081964abbf4e9...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000081964abbf4e9...
+[CONVERGENCE-DIAG]   Prev block: 000076532aede22d...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000076532aede22d...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=4ccc3d362ccc8f3f3393564ff5b4205a7fd36fba02e47a1e078c4efc2112f32d
+[DEBUG] VerifyMerkleRoot: calculatedRoot=4ccc3d362ccc8f3f3393564ff5b4205a7fd36fba02e47a1e078c4efc2112f32d
+[DEBUG] VerifyMerkleRoot: tx[0] hash=4ccc3d362ccc8f3f3393564ff5b4205a7fd36fba02e47a1e078c4efc2112f32d
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000081964abbf4e9... (parent: 000076532aede22d...) from peer 2 | Total: 14 orphans, 4 KB
+[Orphan] Block added to orphan pool (count: 14)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000d81d6443b816...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000d81d6443b816...
+[CONVERGENCE-DIAG]   Prev block: 0000f3f27fbecc30...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000f3f27fbecc30...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=8514df530116b1a3b207c81a5872bdba5f498fe58757be1c8b898e107db1ddbd
+[DEBUG] VerifyMerkleRoot: calculatedRoot=8514df530116b1a3b207c81a5872bdba5f498fe58757be1c8b898e107db1ddbd
+[DEBUG] VerifyMerkleRoot: tx[0] hash=8514df530116b1a3b207c81a5872bdba5f498fe58757be1c8b898e107db1ddbd
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000d81d6443b816... (parent: 0000f3f27fbecc30...) from peer 2 | Total: 15 orphans, 4 KB
+[Orphan] Block added to orphan pool (count: 15)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000076532aede22d...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000076532aede22d...
+[CONVERGENCE-DIAG]   Prev block: 0000a9087da28dd5...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000a9087da28dd5...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=4fb0a36bdb87e1c893bfb3f6565dea23f6f3f98e08c2307bae2f27216706e9f7
+[DEBUG] VerifyMerkleRoot: calculatedRoot=4fb0a36bdb87e1c893bfb3f6565dea23f6f3f98e08c2307bae2f27216706e9f7
+[DEBUG] VerifyMerkleRoot: tx[0] hash=4fb0a36bdb87e1c893bfb3f6565dea23f6f3f98e08c2307bae2f27216706e9f7
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000076532aede22d... (parent: 0000a9087da28dd5...) from peer 2 | Total: 16 orphans, 4 KB
+[Orphan] Block added to orphan pool (count: 16)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000f3f27fbecc30...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000f3f27fbecc30...
+[CONVERGENCE-DIAG]   Prev block: 00007532b50c825a...
+[P2P] Block in DB but parent still missing, skipping
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000a9087da28dd5...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000a9087da28dd5...
+[CONVERGENCE-DIAG]   Prev block: 000085135ae13202...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000085135ae13202...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e1b6bec4d7fb42c0141b7fa92f9bc3c3c24b879d6bcab3725663b9a068e9d7c8
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e1b6bec4d7fb42c0141b7fa92f9bc3c3c24b879d6bcab3725663b9a068e9d7c8
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e1b6bec4d7fb42c0141b7fa92f9bc3c3c24b879d6bcab3725663b9a068e9d7c8
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000a9087da28dd5... (parent: 000085135ae13202...) from peer 2 | Total: 17 orphans, 4 KB
+[Orphan] Block added to orphan pool (count: 17)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000085135ae13202...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000085135ae13202...
+[CONVERGENCE-DIAG]   Prev block: 00006e140875077e...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00006e140875077e...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=4caec158b5076424289537805a258905d97afb6bc08d54c56452bfe808f65b04
+[DEBUG] VerifyMerkleRoot: calculatedRoot=4caec158b5076424289537805a258905d97afb6bc08d54c56452bfe808f65b04
+[DEBUG] VerifyMerkleRoot: tx[0] hash=4caec158b5076424289537805a258905d97afb6bc08d54c56452bfe808f65b04
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000085135ae13202... (parent: 00006e140875077e...) from peer 2 | Total: 18 orphans, 5 KB
+[Orphan] Block added to orphan pool (count: 18)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00006e140875077e...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00006e140875077e...
+[CONVERGENCE-DIAG]   Prev block: 00004906ca124caa...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00004906ca124caa...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e6c7d98c5e4cdbf1ac7ae8c7487d155f6aef6bd7758ff3551959f54704edb546
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e6c7d98c5e4cdbf1ac7ae8c7487d155f6aef6bd7758ff3551959f54704edb546
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e6c7d98c5e4cdbf1ac7ae8c7487d155f6aef6bd7758ff3551959f54704edb546
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00006e140875077e... (parent: 00004906ca124caa...) from peer 2 | Total: 19 orphans, 5 KB
+[Orphan] Block added to orphan pool (count: 19)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00004906ca124caa...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00004906ca124caa...
+[CONVERGENCE-DIAG]   Prev block: 0000b08ed2229b42...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000b08ed2229b42...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=06bcc8c65518cdfd366051b02106af708d2e367e16d57073cb9dca1d56e06add
+[DEBUG] VerifyMerkleRoot: calculatedRoot=06bcc8c65518cdfd366051b02106af708d2e367e16d57073cb9dca1d56e06add
+[DEBUG] VerifyMerkleRoot: tx[0] hash=06bcc8c65518cdfd366051b02106af708d2e367e16d57073cb9dca1d56e06add
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00004906ca124caa... (parent: 0000b08ed2229b42...) from peer 2 | Total: 20 orphans, 5 KB
+[Orphan] Block added to orphan pool (count: 20)
+[P2P] Requesting parent block from peer 2
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000b08ed2229b42...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000b08ed2229b42...
+[CONVERGENCE-DIAG]   Prev block: 0000ee3c31b80c60...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000ee3c31b80c60...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=16198c11a71cde50c770026435ff8a689e7eb7e37100f6524a1d8a5be683cb86
+[DEBUG] VerifyMerkleRoot: calculatedRoot=16198c11a71cde50c770026435ff8a689e7eb7e37100f6524a1d8a5be683cb86
+[DEBUG] VerifyMerkleRoot: tx[0] hash=16198c11a71cde50c770026435ff8a689e7eb7e37100f6524a1d8a5be683cb86
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000b08ed2229b42... (parent: 0000ee3c31b80c60...) from peer 2 | Total: 21 orphans, 6 KB
+[Orphan] Block added to orphan pool (count: 21)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000ee3c31b80c60...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000ee3c31b80c60...
+[CONVERGENCE-DIAG]   Prev block: 0000dc0f520246af...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000dc0f520246af...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=b7cb30a00268740ca9bbf3c9ebc7112ee4f8107f42c9c76ab858cf6b614217d7
+[DEBUG] VerifyMerkleRoot: calculatedRoot=b7cb30a00268740ca9bbf3c9ebc7112ee4f8107f42c9c76ab858cf6b614217d7
+[DEBUG] VerifyMerkleRoot: tx[0] hash=b7cb30a00268740ca9bbf3c9ebc7112ee4f8107f42c9c76ab858cf6b614217d7
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000ee3c31b80c60... (parent: 0000dc0f520246af...) from peer 2 | Total: 22 orphans, 6 KB
+[Orphan] Block added to orphan pool (count: 22)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000dc0f520246af...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000dc0f520246af...
+[CONVERGENCE-DIAG]   Prev block: 0000295adea8f746...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000295adea8f746...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=17a10f03cefe471f5d4f9fe2bb3fc2e214495c61f2731ebebd31780e967d4437
+[DEBUG] VerifyMerkleRoot: calculatedRoot=17a10f03cefe471f5d4f9fe2bb3fc2e214495c61f2731ebebd31780e967d4437
+[DEBUG] VerifyMerkleRoot: tx[0] hash=17a10f03cefe471f5d4f9fe2bb3fc2e214495c61f2731ebebd31780e967d4437
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000dc0f520246af... (parent: 0000295adea8f746...) from peer 2 | Total: 23 orphans, 6 KB
+[Orphan] Block added to orphan pool (count: 23)
+[P2P] Requesting parent block from peer 2
+[IBD-TICK] tick=61 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000295adea8f746...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000295adea8f746...
+[CONVERGENCE-DIAG]   Prev block: 00000f891ffd8596...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00000f891ffd8596...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=9c2661892f8bb7e263ece463c5453dbd4ca5ad0ef28b04b327c3bafd15121fe2
+[DEBUG] VerifyMerkleRoot: calculatedRoot=9c2661892f8bb7e263ece463c5453dbd4ca5ad0ef28b04b327c3bafd15121fe2
+[DEBUG] VerifyMerkleRoot: tx[0] hash=9c2661892f8bb7e263ece463c5453dbd4ca5ad0ef28b04b327c3bafd15121fe2
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000295adea8f746... (parent: 00000f891ffd8596...) from peer 2 | Total: 24 orphans, 6 KB
+[Orphan] Block added to orphan pool (count: 24)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00000f891ffd8596...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00000f891ffd8596...
+[CONVERGENCE-DIAG]   Prev block: 000032ca792ae12a...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000032ca792ae12a...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=2fb79ec738d3bac2e2408fab09fab95c12b67513e754f5dd5026b12fed352aad
+[DEBUG] VerifyMerkleRoot: calculatedRoot=2fb79ec738d3bac2e2408fab09fab95c12b67513e754f5dd5026b12fed352aad
+[DEBUG] VerifyMerkleRoot: tx[0] hash=2fb79ec738d3bac2e2408fab09fab95c12b67513e754f5dd5026b12fed352aad
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00000f891ffd8596... (parent: 000032ca792ae12a...) from peer 2 | Total: 25 orphans, 7 KB
+[Orphan] Block added to orphan pool (count: 25)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000032ca792ae12a...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000032ca792ae12a...
+[CONVERGENCE-DIAG]   Prev block: 0000dd199af88cbe...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000dd199af88cbe...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=531a1eaf1d077461bf6b47bb4aed4fff5feedf9f885e43c3d6a71702d2080bc1
+[DEBUG] VerifyMerkleRoot: calculatedRoot=531a1eaf1d077461bf6b47bb4aed4fff5feedf9f885e43c3d6a71702d2080bc1
+[DEBUG] VerifyMerkleRoot: tx[0] hash=531a1eaf1d077461bf6b47bb4aed4fff5feedf9f885e43c3d6a71702d2080bc1
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000032ca792ae12a... (parent: 0000dd199af88cbe...) from peer 2 | Total: 26 orphans, 7 KB
+[Orphan] Block added to orphan pool (count: 26)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000dd199af88cbe...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000dd199af88cbe...
+[CONVERGENCE-DIAG]   Prev block: 000045e1c4a1688b...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000045e1c4a1688b...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=d82594ce96265970f039c68531688b9907b7e4743f7141ffb1eda0137b68ea6e
+[DEBUG] VerifyMerkleRoot: calculatedRoot=d82594ce96265970f039c68531688b9907b7e4743f7141ffb1eda0137b68ea6e
+[DEBUG] VerifyMerkleRoot: tx[0] hash=d82594ce96265970f039c68531688b9907b7e4743f7141ffb1eda0137b68ea6e
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000dd199af88cbe... (parent: 000045e1c4a1688b...) from peer 2 | Total: 27 orphans, 7 KB
+[Orphan] Block added to orphan pool (count: 27)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000045e1c4a1688b...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000045e1c4a1688b...
+[CONVERGENCE-DIAG]   Prev block: 000055dd1630b963...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000055dd1630b963...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=efcf8ee82ea7ce29090e84daff773a3e42671d0cd762a3dd6c55993448aaede3
+[DEBUG] VerifyMerkleRoot: calculatedRoot=efcf8ee82ea7ce29090e84daff773a3e42671d0cd762a3dd6c55993448aaede3
+[DEBUG] VerifyMerkleRoot: tx[0] hash=efcf8ee82ea7ce29090e84daff773a3e42671d0cd762a3dd6c55993448aaede3
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000045e1c4a1688b... (parent: 000055dd1630b963...) from peer 2 | Total: 28 orphans, 8 KB
+[Orphan] Block added to orphan pool (count: 28)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000055dd1630b963...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000055dd1630b963...
+[CONVERGENCE-DIAG]   Prev block: 0000ef65a47067a4...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000ef65a47067a4...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=465a0e00e520f3689b28a4a9bd6a28c18b6ebfeaf3ba5235c6fd7aba1382bf56
+[DEBUG] VerifyMerkleRoot: calculatedRoot=465a0e00e520f3689b28a4a9bd6a28c18b6ebfeaf3ba5235c6fd7aba1382bf56
+[DEBUG] VerifyMerkleRoot: tx[0] hash=465a0e00e520f3689b28a4a9bd6a28c18b6ebfeaf3ba5235c6fd7aba1382bf56
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000055dd1630b963... (parent: 0000ef65a47067a4...) from peer 2 | Total: 29 orphans, 8 KB
+[Orphan] Block added to orphan pool (count: 29)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000ef65a47067a4...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000ef65a47067a4...
+[CONVERGENCE-DIAG]   Prev block: 0000f56bcd121f47...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000f56bcd121f47...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=301a539281f5142250a4097e499c71cb63d2a646b7d5949e1bbd8d88091ca89b
+[DEBUG] VerifyMerkleRoot: calculatedRoot=301a539281f5142250a4097e499c71cb63d2a646b7d5949e1bbd8d88091ca89b
+[DEBUG] VerifyMerkleRoot: tx[0] hash=301a539281f5142250a4097e499c71cb63d2a646b7d5949e1bbd8d88091ca89b
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000ef65a47067a4... (parent: 0000f56bcd121f47...) from peer 2 | Total: 30 orphans, 8 KB
+[Orphan] Block added to orphan pool (count: 30)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000f56bcd121f47...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000f56bcd121f47...
+[CONVERGENCE-DIAG]   Prev block: 0000ed8fed67c7fc...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000ed8fed67c7fc...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=1d1ed8722b38090158c2507ce4e4233eac91e61e4b4076b7528ab02af006bbc1
+[DEBUG] VerifyMerkleRoot: calculatedRoot=1d1ed8722b38090158c2507ce4e4233eac91e61e4b4076b7528ab02af006bbc1
+[DEBUG] VerifyMerkleRoot: tx[0] hash=1d1ed8722b38090158c2507ce4e4233eac91e61e4b4076b7528ab02af006bbc1
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000f56bcd121f47... (parent: 0000ed8fed67c7fc...) from peer 2 | Total: 31 orphans, 8 KB
+[Orphan] Block added to orphan pool (count: 31)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000ed8fed67c7fc...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000ed8fed67c7fc...
+[CONVERGENCE-DIAG]   Prev block: 000023d9ac19f121...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000023d9ac19f121...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=75a58b0c05ef572ad2b46afe1fc4f31f1de3bbaf14978f5e8c9f9a6e4204e94b
+[DEBUG] VerifyMerkleRoot: calculatedRoot=75a58b0c05ef572ad2b46afe1fc4f31f1de3bbaf14978f5e8c9f9a6e4204e94b
+[DEBUG] VerifyMerkleRoot: tx[0] hash=75a58b0c05ef572ad2b46afe1fc4f31f1de3bbaf14978f5e8c9f9a6e4204e94b
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000ed8fed67c7fc... (parent: 000023d9ac19f121...) from peer 2 | Total: 32 orphans, 9 KB
+[Orphan] Block added to orphan pool (count: 32)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000023d9ac19f121...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000023d9ac19f121...
+[CONVERGENCE-DIAG]   Prev block: 00007f89e8e75950...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00007f89e8e75950...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=0c59cdb35c4c3a73605aa3fb8f0df9c096de3aaa11baaca03395114bb5f27139
+[DEBUG] VerifyMerkleRoot: calculatedRoot=0c59cdb35c4c3a73605aa3fb8f0df9c096de3aaa11baaca03395114bb5f27139
+[DEBUG] VerifyMerkleRoot: tx[0] hash=0c59cdb35c4c3a73605aa3fb8f0df9c096de3aaa11baaca03395114bb5f27139
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000023d9ac19f121... (parent: 00007f89e8e75950...) from peer 2 | Total: 33 orphans, 9 KB
+[Orphan] Block added to orphan pool (count: 33)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00007f89e8e75950...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00007f89e8e75950...
+[CONVERGENCE-DIAG]   Prev block: 000023f1a85175f9...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000023f1a85175f9...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=beb977610b39393c60da9776fbc8bb0af409a26cdd6fa60a900f0c745de6193f
+[DEBUG] VerifyMerkleRoot: calculatedRoot=beb977610b39393c60da9776fbc8bb0af409a26cdd6fa60a900f0c745de6193f
+[DEBUG] VerifyMerkleRoot: tx[0] hash=beb977610b39393c60da9776fbc8bb0af409a26cdd6fa60a900f0c745de6193f
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00007f89e8e75950... (parent: 000023f1a85175f9...) from peer 2 | Total: 34 orphans, 9 KB
+[Orphan] Block added to orphan pool (count: 34)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000023f1a85175f9...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000023f1a85175f9...
+[CONVERGENCE-DIAG]   Prev block: 00006d0c794fef22...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00006d0c794fef22...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=8db1668a5e87b09fa3abccadef5c0ab5ed54c909bc8acd408b3dfacf54885bde
+[DEBUG] VerifyMerkleRoot: calculatedRoot=8db1668a5e87b09fa3abccadef5c0ab5ed54c909bc8acd408b3dfacf54885bde
+[DEBUG] VerifyMerkleRoot: tx[0] hash=8db1668a5e87b09fa3abccadef5c0ab5ed54c909bc8acd408b3dfacf54885bde
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000023f1a85175f9... (parent: 00006d0c794fef22...) from peer 2 | Total: 35 orphans, 10 KB
+[Orphan] Block added to orphan pool (count: 35)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00006d0c794fef22...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00006d0c794fef22...
+[CONVERGENCE-DIAG]   Prev block: 0000da6e1491ece8...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000da6e1491ece8...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=d149490f8c99cea4306fb4f02f0c2aed77ead95f045eb03fd5a06564b76cf9bc
+[DEBUG] VerifyMerkleRoot: calculatedRoot=d149490f8c99cea4306fb4f02f0c2aed77ead95f045eb03fd5a06564b76cf9bc
+[DEBUG] VerifyMerkleRoot: tx[0] hash=d149490f8c99cea4306fb4f02f0c2aed77ead95f045eb03fd5a06564b76cf9bc
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00006d0c794fef22... (parent: 0000da6e1491ece8...) from peer 2 | Total: 36 orphans, 10 KB
+[Orphan] Block added to orphan pool (count: 36)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000da6e1491ece8...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000da6e1491ece8...
+[CONVERGENCE-DIAG]   Prev block: 00007c2b07bc5a5b...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00007c2b07bc5a5b...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=f8b67b96ddbdb33ad2ebfb01a7b7be16bcd120e0ed5a2144215a0a6192eb0c86
+[DEBUG] VerifyMerkleRoot: calculatedRoot=f8b67b96ddbdb33ad2ebfb01a7b7be16bcd120e0ed5a2144215a0a6192eb0c86
+[DEBUG] VerifyMerkleRoot: tx[0] hash=f8b67b96ddbdb33ad2ebfb01a7b7be16bcd120e0ed5a2144215a0a6192eb0c86
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000da6e1491ece8... (parent: 00007c2b07bc5a5b...) from peer 2 | Total: 37 orphans, 10 KB
+[Orphan] Block added to orphan pool (count: 37)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00007c2b07bc5a5b...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00007c2b07bc5a5b...
+[CONVERGENCE-DIAG]   Prev block: 0000cf7e741ca9fa...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000cf7e741ca9fa...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=37d6b316ba8bde836d001badd4b5ac850200f5851bd0b18a503d13069b649228
+[DEBUG] VerifyMerkleRoot: calculatedRoot=37d6b316ba8bde836d001badd4b5ac850200f5851bd0b18a503d13069b649228
+[DEBUG] VerifyMerkleRoot: tx[0] hash=37d6b316ba8bde836d001badd4b5ac850200f5851bd0b18a503d13069b649228
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00007c2b07bc5a5b... (parent: 0000cf7e741ca9fa...) from peer 2 | Total: 38 orphans, 10 KB
+[Orphan] Block added to orphan pool (count: 38)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000cf7e741ca9fa...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000cf7e741ca9fa...
+[CONVERGENCE-DIAG]   Prev block: 0000bb502de843db...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000bb502de843db...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e294d40aea3dc922c35742a8ed817112840e17420b92c025f354ff80561aa11c
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e294d40aea3dc922c35742a8ed817112840e17420b92c025f354ff80561aa11c
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e294d40aea3dc922c35742a8ed817112840e17420b92c025f354ff80561aa11c
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000cf7e741ca9fa... (parent: 0000bb502de843db...) from peer 2 | Total: 39 orphans, 11 KB
+[Orphan] Block added to orphan pool (count: 39)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000bb502de843db...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000bb502de843db...
+[CONVERGENCE-DIAG]   Prev block: 0000e9de3ade50a0...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000e9de3ade50a0...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e5efef4c1c2ef33ef4d3fa6883c24e1769059bc3cef7668dcbbf61548f04d14b
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e5efef4c1c2ef33ef4d3fa6883c24e1769059bc3cef7668dcbbf61548f04d14b
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e5efef4c1c2ef33ef4d3fa6883c24e1769059bc3cef7668dcbbf61548f04d14b
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000bb502de843db... (parent: 0000e9de3ade50a0...) from peer 2 | Total: 40 orphans, 11 KB
+[Orphan] Block added to orphan pool (count: 40)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000e9de3ade50a0...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000e9de3ade50a0...
+[CONVERGENCE-DIAG]   Prev block: 000088e5e4656ed4...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000088e5e4656ed4...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=9b802bb06e7cdb1f5152418368abeabbbc36fc604bd6b18be75dda79874891c3
+[DEBUG] VerifyMerkleRoot: calculatedRoot=9b802bb06e7cdb1f5152418368abeabbbc36fc604bd6b18be75dda79874891c3
+[DEBUG] VerifyMerkleRoot: tx[0] hash=9b802bb06e7cdb1f5152418368abeabbbc36fc604bd6b18be75dda79874891c3
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000e9de3ade50a0... (parent: 000088e5e4656ed4...) from peer 2 | Total: 41 orphans, 11 KB
+[Orphan] Block added to orphan pool (count: 41)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000088e5e4656ed4...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000088e5e4656ed4...
+[CONVERGENCE-DIAG]   Prev block: 000038dfb0f779a6...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000038dfb0f779a6...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e9e0241e040022ce25425df2ccd97d2965ae22e0191a22322010833be1e2db72
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e9e0241e040022ce25425df2ccd97d2965ae22e0191a22322010833be1e2db72
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e9e0241e040022ce25425df2ccd97d2965ae22e0191a22322010833be1e2db72
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000088e5e4656ed4... (parent: 000038dfb0f779a6...) from peer 2 | Total: 42 orphans, 12 KB
+[Orphan] Block added to orphan pool (count: 42)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000038dfb0f779a6...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000038dfb0f779a6...
+[CONVERGENCE-DIAG]   Prev block: 000063170cbc237b...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000063170cbc237b...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e5e656ebbd9d67fa05867acdc0e7ee4eac945ceeeec49c478b801174596854b1
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e5e656ebbd9d67fa05867acdc0e7ee4eac945ceeeec49c478b801174596854b1
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e5e656ebbd9d67fa05867acdc0e7ee4eac945ceeeec49c478b801174596854b1
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000038dfb0f779a6... (parent: 000063170cbc237b...) from peer 2 | Total: 43 orphans, 12 KB
+[Orphan] Block added to orphan pool (count: 43)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000063170cbc237b...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000063170cbc237b...
+[CONVERGENCE-DIAG]   Prev block: 0000667d771ab6ad...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000667d771ab6ad...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=d4c2e2f6a7ce96284a22e19fcaa941bf72dea2384f4d0f9ef5d8d8d3525bb186
+[DEBUG] VerifyMerkleRoot: calculatedRoot=d4c2e2f6a7ce96284a22e19fcaa941bf72dea2384f4d0f9ef5d8d8d3525bb186
+[DEBUG] VerifyMerkleRoot: tx[0] hash=d4c2e2f6a7ce96284a22e19fcaa941bf72dea2384f4d0f9ef5d8d8d3525bb186
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000063170cbc237b... (parent: 0000667d771ab6ad...) from peer 2 | Total: 44 orphans, 12 KB
+[Orphan] Block added to orphan pool (count: 44)
+[P2P] Requesting parent block from peer 2
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000667d771ab6ad...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000667d771ab6ad...
+[CONVERGENCE-DIAG]   Prev block: 00006780e50d2138...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00006780e50d2138...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=574630547242c5254c29473f42906e992df7c7f9ed48d6498a996c2dce8837fa
+[DEBUG] VerifyMerkleRoot: calculatedRoot=574630547242c5254c29473f42906e992df7c7f9ed48d6498a996c2dce8837fa
+[DEBUG] VerifyMerkleRoot: tx[0] hash=574630547242c5254c29473f42906e992df7c7f9ed48d6498a996c2dce8837fa
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000667d771ab6ad... (parent: 00006780e50d2138...) from peer 2 | Total: 45 orphans, 12 KB
+[Orphan] Block added to orphan pool (count: 45)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00006780e50d2138...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00006780e50d2138...
+[CONVERGENCE-DIAG]   Prev block: 00008393bcab7ca2...
+[IBD-TICK] tick=71 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P] Block saved to database
+[P2P] Parent block not found: 00008393bcab7ca2...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=4dd93ead7702ea2df107ec19a197d3491e717ecf881651a023c71aef9f19b9da
+[DEBUG] VerifyMerkleRoot: calculatedRoot=4dd93ead7702ea2df107ec19a197d3491e717ecf881651a023c71aef9f19b9da
+[DEBUG] VerifyMerkleRoot: tx[0] hash=4dd93ead7702ea2df107ec19a197d3491e717ecf881651a023c71aef9f19b9da
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00006780e50d2138... (parent: 00008393bcab7ca2...) from peer 2 | Total: 46 orphans, 13 KB
+[Orphan] Block added to orphan pool (count: 46)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00008393bcab7ca2...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00008393bcab7ca2...
+[CONVERGENCE-DIAG]   Prev block: 0000d6059e9e01ae...
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=81 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=91 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000d6059e9e01ae...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=02b826f9b25d40c425c7a19897d8d8b2b406218da7f0e76f2a1b02693da6f677
+[DEBUG] VerifyMerkleRoot: calculatedRoot=02b826f9b25d40c425c7a19897d8d8b2b406218da7f0e76f2a1b02693da6f677
+[DEBUG] VerifyMerkleRoot: tx[0] hash=02b826f9b25d40c425c7a19897d8d8b2b406218da7f0e76f2a1b02693da6f677
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00008393bcab7ca2... (parent: 0000d6059e9e01ae...) from peer 2 | Total: 47 orphans, 13 KB
+[Orphan] Block added to orphan pool (count: 47)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000d6059e9e01ae...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000d6059e9e01ae...
+[CONVERGENCE-DIAG]   Prev block: 000028576684e62e...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000028576684e62e...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e3627dc762ba03c8829fc777e3c4c3d137912558fcc7fb41d4fcd4e0e74752aa
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e3627dc762ba03c8829fc777e3c4c3d137912558fcc7fb41d4fcd4e0e74752aa
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e3627dc762ba03c8829fc777e3c4c3d137912558fcc7fb41d4fcd4e0e74752aa
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000d6059e9e01ae... (parent: 000028576684e62e...) from peer 2 | Total: 48 orphans, 13 KB
+[Orphan] Block added to orphan pool (count: 48)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000028576684e62e...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000028576684e62e...
+[CONVERGENCE-DIAG]   Prev block: 0000090659b86c9e...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000090659b86c9e...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=4e33762825c03e2dc664550d4d4b13234cddd71f29ac2917ce57d7ab594f3ca7
+[DEBUG] VerifyMerkleRoot: calculatedRoot=4e33762825c03e2dc664550d4d4b13234cddd71f29ac2917ce57d7ab594f3ca7
+[DEBUG] VerifyMerkleRoot: tx[0] hash=4e33762825c03e2dc664550d4d4b13234cddd71f29ac2917ce57d7ab594f3ca7
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000028576684e62e... (parent: 0000090659b86c9e...) from peer 2 | Total: 49 orphans, 14 KB
+[Orphan] Block added to orphan pool (count: 49)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 0000cb15f1bf8380...
+[P2P] Peer 2 announced new block: 0000cb15f1bf8380...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000090659b86c9e...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000090659b86c9e...
+[CONVERGENCE-DIAG]   Prev block: 00002fbc01c345dc...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00002fbc01c345dc...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=c5c567c9efd042fcaadbbe525ea42596f03632e136361aecfb3680644917b7e5
+[DEBUG] VerifyMerkleRoot: calculatedRoot=c5c567c9efd042fcaadbbe525ea42596f03632e136361aecfb3680644917b7e5
+[DEBUG] VerifyMerkleRoot: tx[0] hash=c5c567c9efd042fcaadbbe525ea42596f03632e136361aecfb3680644917b7e5
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000090659b86c9e... (parent: 00002fbc01c345dc...) from peer 2 | Total: 50 orphans, 14 KB
+[Orphan] Block added to orphan pool (count: 50)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000cb15f1bf8380...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000cb15f1bf8380...
+[CONVERGENCE-DIAG]   Prev block: 0000d81d6443b816...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000d81d6443b816...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=df93797562519adae6d3703b717e0435394c45957fce0b1019ab7e46f002eb06
+[DEBUG] VerifyMerkleRoot: calculatedRoot=df93797562519adae6d3703b717e0435394c45957fce0b1019ab7e46f002eb06
+[DEBUG] VerifyMerkleRoot: tx[0] hash=df93797562519adae6d3703b717e0435394c45957fce0b1019ab7e46f002eb06
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000cb15f1bf8380... (parent: 0000d81d6443b816...) from peer 2 | Total: 51 orphans, 14 KB
+[Orphan] Block added to orphan pool (count: 51)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00002fbc01c345dc...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00002fbc01c345dc...
+[CONVERGENCE-DIAG]   Prev block: 0000e46958785f01...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000e46958785f01...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=1446035cfd418c64f46ea6b0b3cd56532e0cb929b19c7d8d60862507d1cb7aa3
+[DEBUG] VerifyMerkleRoot: calculatedRoot=1446035cfd418c64f46ea6b0b3cd56532e0cb929b19c7d8d60862507d1cb7aa3
+[DEBUG] VerifyMerkleRoot: tx[0] hash=1446035cfd418c64f46ea6b0b3cd56532e0cb929b19c7d8d60862507d1cb7aa3
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00002fbc01c345dc... (parent: 0000e46958785f01...) from peer 2 | Total: 52 orphans, 14 KB
+[Orphan] Block added to orphan pool (count: 52)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000d81d6443b816...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000d81d6443b816...
+[CONVERGENCE-DIAG]   Prev block: 0000f3f27fbecc30...
+[P2P] Block in DB but parent still missing, skipping
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000e46958785f01...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000e46958785f01...
+[CONVERGENCE-DIAG]   Prev block: 000045045989e7c5...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000045045989e7c5...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=c9d1e57e769875e424c269c27b01090bf1852ddcc2affd0bbdf386ea596e805e
+[DEBUG] VerifyMerkleRoot: calculatedRoot=c9d1e57e769875e424c269c27b01090bf1852ddcc2affd0bbdf386ea596e805e
+[DEBUG] VerifyMerkleRoot: tx[0] hash=c9d1e57e769875e424c269c27b01090bf1852ddcc2affd0bbdf386ea596e805e
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000e46958785f01... (parent: 000045045989e7c5...) from peer 2 | Total: 53 orphans, 15 KB
+[Orphan] Block added to orphan pool (count: 53)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000045045989e7c5...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000045045989e7c5...
+[CONVERGENCE-DIAG]   Prev block: 0000554902c188a2...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000554902c188a2...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=b59cd3ee9b7bf59a20b35b65c4bf2fe447af029aced5bffe812dcff7595c3e98
+[DEBUG] VerifyMerkleRoot: calculatedRoot=b59cd3ee9b7bf59a20b35b65c4bf2fe447af029aced5bffe812dcff7595c3e98
+[DEBUG] VerifyMerkleRoot: tx[0] hash=b59cd3ee9b7bf59a20b35b65c4bf2fe447af029aced5bffe812dcff7595c3e98
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000045045989e7c5... (parent: 0000554902c188a2...) from peer 2 | Total: 54 orphans, 15 KB
+[Orphan] Block added to orphan pool (count: 54)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000554902c188a2...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000554902c188a2...
+[CONVERGENCE-DIAG]   Prev block: 0000471a0816b09d...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000471a0816b09d...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=4d2cc61a74d8ded0d724f971d0daa6341e0a05c550deac71534bf10ccac07bbb
+[DEBUG] VerifyMerkleRoot: calculatedRoot=4d2cc61a74d8ded0d724f971d0daa6341e0a05c550deac71534bf10ccac07bbb
+[DEBUG] VerifyMerkleRoot: tx[0] hash=4d2cc61a74d8ded0d724f971d0daa6341e0a05c550deac71534bf10ccac07bbb
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000554902c188a2... (parent: 0000471a0816b09d...) from peer 2 | Total: 55 orphans, 15 KB
+[Orphan] Block added to orphan pool (count: 55)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000471a0816b09d...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000471a0816b09d...
+[CONVERGENCE-DIAG]   Prev block: 0000eb0d27c8bc53...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000eb0d27c8bc53...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=1742ecfc0638979894e0f32e634256cef64c804b10711cd9f9f3c546e5edaaf9
+[DEBUG] VerifyMerkleRoot: calculatedRoot=1742ecfc0638979894e0f32e634256cef64c804b10711cd9f9f3c546e5edaaf9
+[DEBUG] VerifyMerkleRoot: tx[0] hash=1742ecfc0638979894e0f32e634256cef64c804b10711cd9f9f3c546e5edaaf9
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000471a0816b09d... (parent: 0000eb0d27c8bc53...) from peer 2 | Total: 56 orphans, 16 KB
+[Orphan] Block added to orphan pool (count: 56)
+[P2P] Requesting parent block from peer 2
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000eb0d27c8bc53...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000eb0d27c8bc53...
+[CONVERGENCE-DIAG]   Prev block: 0000f18ec61f262a...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000f18ec61f262a...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=190129de13de71793338c02ea672a16d33da46ff492fd6e6666c24d6c22a99dc
+[DEBUG] VerifyMerkleRoot: calculatedRoot=190129de13de71793338c02ea672a16d33da46ff492fd6e6666c24d6c22a99dc
+[DEBUG] VerifyMerkleRoot: tx[0] hash=190129de13de71793338c02ea672a16d33da46ff492fd6e6666c24d6c22a99dc
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000eb0d27c8bc53... (parent: 0000f18ec61f262a...) from peer 2 | Total: 57 orphans, 16 KB
+[Orphan] Block added to orphan pool (count: 57)
+[P2P] Requesting parent block from peer 2
+[IBD-TICK] tick=101 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000f18ec61f262a...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000f18ec61f262a...
+[CONVERGENCE-DIAG]   Prev block: 00003c3bf57fb97d...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00003c3bf57fb97d...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=62e8ceeb1bc02f08f01862545c3712d663075f8bbe2dc5016a502a4b6df0bbfe
+[DEBUG] VerifyMerkleRoot: calculatedRoot=62e8ceeb1bc02f08f01862545c3712d663075f8bbe2dc5016a502a4b6df0bbfe
+[DEBUG] VerifyMerkleRoot: tx[0] hash=62e8ceeb1bc02f08f01862545c3712d663075f8bbe2dc5016a502a4b6df0bbfe
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000f18ec61f262a... (parent: 00003c3bf57fb97d...) from peer 2 | Total: 58 orphans, 16 KB
+[Orphan] Block added to orphan pool (count: 58)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00003c3bf57fb97d...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00003c3bf57fb97d...
+[CONVERGENCE-DIAG]   Prev block: 00009ecec2f8ec66...
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=111 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=121 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P] Block saved to database
+[P2P] Parent block not found: 00009ecec2f8ec66...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=86a13e1471eaa422c3805638a88292690b894f4dbbc7f8168de88f89ef5cc4ad
+[DEBUG] VerifyMerkleRoot: calculatedRoot=86a13e1471eaa422c3805638a88292690b894f4dbbc7f8168de88f89ef5cc4ad
+[DEBUG] VerifyMerkleRoot: tx[0] hash=86a13e1471eaa422c3805638a88292690b894f4dbbc7f8168de88f89ef5cc4ad
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00003c3bf57fb97d... (parent: 00009ecec2f8ec66...) from peer 2 | Total: 59 orphans, 16 KB
+[Orphan] Block added to orphan pool (count: 59)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 000069752d86669f...
+[P2P] Peer 2 announced new block: 000069752d86669f...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00009ecec2f8ec66...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00009ecec2f8ec66...
+[CONVERGENCE-DIAG]   Prev block: 0000470cb8dfe557...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000470cb8dfe557...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=aa7dfcf14e64c220be4d7e076341f645ab99ce4375fb875644f447bb23873d95
+[DEBUG] VerifyMerkleRoot: calculatedRoot=aa7dfcf14e64c220be4d7e076341f645ab99ce4375fb875644f447bb23873d95
+[DEBUG] VerifyMerkleRoot: tx[0] hash=aa7dfcf14e64c220be4d7e076341f645ab99ce4375fb875644f447bb23873d95
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00009ecec2f8ec66... (parent: 0000470cb8dfe557...) from peer 2 | Total: 60 orphans, 17 KB
+[Orphan] Block added to orphan pool (count: 60)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000069752d86669f...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000069752d86669f...
+[CONVERGENCE-DIAG]   Prev block: 0000cb15f1bf8380...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000cb15f1bf8380...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=a8bd1c95ddb5b3922cbccf8e7a2a3054583cea8a61d7698299245da2a5b7c561
+[DEBUG] VerifyMerkleRoot: calculatedRoot=a8bd1c95ddb5b3922cbccf8e7a2a3054583cea8a61d7698299245da2a5b7c561
+[DEBUG] VerifyMerkleRoot: tx[0] hash=a8bd1c95ddb5b3922cbccf8e7a2a3054583cea8a61d7698299245da2a5b7c561
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000069752d86669f... (parent: 0000cb15f1bf8380...) from peer 2 | Total: 61 orphans, 17 KB
+[Orphan] Block added to orphan pool (count: 61)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000470cb8dfe557...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000470cb8dfe557...
+[CONVERGENCE-DIAG]   Prev block: 0000c2fe9da72211...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000c2fe9da72211...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=6053e5c2a7dbae67c6e8fc737b77455d2b4962ddb222652e5625be61a5648d88
+[DEBUG] VerifyMerkleRoot: calculatedRoot=6053e5c2a7dbae67c6e8fc737b77455d2b4962ddb222652e5625be61a5648d88
+[DEBUG] VerifyMerkleRoot: tx[0] hash=6053e5c2a7dbae67c6e8fc737b77455d2b4962ddb222652e5625be61a5648d88
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000470cb8dfe557... (parent: 0000c2fe9da72211...) from peer 2 | Total: 62 orphans, 17 KB
+[Orphan] Block added to orphan pool (count: 62)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000cb15f1bf8380...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000cb15f1bf8380...
+[CONVERGENCE-DIAG]   Prev block: 0000d81d6443b816...
+[P2P] Block in DB but parent still missing, skipping
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000c2fe9da72211...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000c2fe9da72211...
+[CONVERGENCE-DIAG]   Prev block: 0000994d8aef1d03...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000994d8aef1d03...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=de1a907bf80330dd94c03ad3ea118cf6b87f479ddec3a74ae629e34ad7459603
+[DEBUG] VerifyMerkleRoot: calculatedRoot=de1a907bf80330dd94c03ad3ea118cf6b87f479ddec3a74ae629e34ad7459603
+[DEBUG] VerifyMerkleRoot: tx[0] hash=de1a907bf80330dd94c03ad3ea118cf6b87f479ddec3a74ae629e34ad7459603
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000c2fe9da72211... (parent: 0000994d8aef1d03...) from peer 2 | Total: 63 orphans, 18 KB
+[Orphan] Block added to orphan pool (count: 63)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000994d8aef1d03...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000994d8aef1d03...
+[CONVERGENCE-DIAG]   Prev block: 0000dd1ef0921994...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000dd1ef0921994...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=78a9489783416a10596a8d343472d96dbdebcf1f2b010edbfbfe95a9b91c55ca
+[DEBUG] VerifyMerkleRoot: calculatedRoot=78a9489783416a10596a8d343472d96dbdebcf1f2b010edbfbfe95a9b91c55ca
+[DEBUG] VerifyMerkleRoot: tx[0] hash=78a9489783416a10596a8d343472d96dbdebcf1f2b010edbfbfe95a9b91c55ca
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000994d8aef1d03... (parent: 0000dd1ef0921994...) from peer 2 | Total: 64 orphans, 18 KB
+[Orphan] Block added to orphan pool (count: 64)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000dd1ef0921994...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000dd1ef0921994...
+[CONVERGENCE-DIAG]   Prev block: 0000848d2ed0ceb8...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000848d2ed0ceb8...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=82b3bfde8e5eae07c8c8922bad7980ac5bca8820443cf838fba7e2780ea5df3a
+[DEBUG] VerifyMerkleRoot: calculatedRoot=82b3bfde8e5eae07c8c8922bad7980ac5bca8820443cf838fba7e2780ea5df3a
+[DEBUG] VerifyMerkleRoot: tx[0] hash=82b3bfde8e5eae07c8c8922bad7980ac5bca8820443cf838fba7e2780ea5df3a
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000dd1ef0921994... (parent: 0000848d2ed0ceb8...) from peer 2 | Total: 65 orphans, 18 KB
+[Orphan] Block added to orphan pool (count: 65)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000848d2ed0ceb8...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000848d2ed0ceb8...
+[CONVERGENCE-DIAG]   Prev block: 000003054ad335da...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000003054ad335da...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=6f1a32e4415ee3bd93406ada84c5543f5fc2a9de81a92965d0c306ac12f0c64b
+[DEBUG] VerifyMerkleRoot: calculatedRoot=6f1a32e4415ee3bd93406ada84c5543f5fc2a9de81a92965d0c306ac12f0c64b
+[DEBUG] VerifyMerkleRoot: tx[0] hash=6f1a32e4415ee3bd93406ada84c5543f5fc2a9de81a92965d0c306ac12f0c64b
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000848d2ed0ceb8... (parent: 000003054ad335da...) from peer 2 | Total: 66 orphans, 19 KB
+[Orphan] Block added to orphan pool (count: 66)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000003054ad335da...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000003054ad335da...
+[CONVERGENCE-DIAG]   Prev block: 0000c83cd49eab05...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000c83cd49eab05...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=0e9def0551548eb1d8844fc41528fe6222a8ad9b2847ee2aeccadf71fbcd4e54
+[DEBUG] VerifyMerkleRoot: calculatedRoot=0e9def0551548eb1d8844fc41528fe6222a8ad9b2847ee2aeccadf71fbcd4e54
+[DEBUG] VerifyMerkleRoot: tx[0] hash=0e9def0551548eb1d8844fc41528fe6222a8ad9b2847ee2aeccadf71fbcd4e54
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000003054ad335da... (parent: 0000c83cd49eab05...) from peer 2 | Total: 67 orphans, 19 KB
+[Orphan] Block added to orphan pool (count: 67)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000c83cd49eab05...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000c83cd49eab05...
+[CONVERGENCE-DIAG]   Prev block: 00004b8d145a902b...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00004b8d145a902b...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=12292f72eacbcaaeb151f7ebcc5a39b41546be63b2d347d4fb61f27d841007e9
+[DEBUG] VerifyMerkleRoot: calculatedRoot=12292f72eacbcaaeb151f7ebcc5a39b41546be63b2d347d4fb61f27d841007e9
+[DEBUG] VerifyMerkleRoot: tx[0] hash=12292f72eacbcaaeb151f7ebcc5a39b41546be63b2d347d4fb61f27d841007e9
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000c83cd49eab05... (parent: 00004b8d145a902b...) from peer 2 | Total: 68 orphans, 19 KB
+[Orphan] Block added to orphan pool (count: 68)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00004b8d145a902b...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00004b8d145a902b...
+[CONVERGENCE-DIAG]   Prev block: 000039accbdd2444...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000039accbdd2444...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=3d05f10f4842cfddd07029b24a0bf005a682af96cdbe95e3c24599293efdc520
+[DEBUG] VerifyMerkleRoot: calculatedRoot=3d05f10f4842cfddd07029b24a0bf005a682af96cdbe95e3c24599293efdc520
+[DEBUG] VerifyMerkleRoot: tx[0] hash=3d05f10f4842cfddd07029b24a0bf005a682af96cdbe95e3c24599293efdc520
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00004b8d145a902b... (parent: 000039accbdd2444...) from peer 2 | Total: 69 orphans, 19 KB
+[Orphan] Block added to orphan pool (count: 69)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000039accbdd2444...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000039accbdd2444...
+[CONVERGENCE-DIAG]   Prev block: 00002e0e48d336ae...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00002e0e48d336ae...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=31202d2250efcfe889b15a14125f404e2dc81616b046a68863060a75c344f2cf
+[DEBUG] VerifyMerkleRoot: calculatedRoot=31202d2250efcfe889b15a14125f404e2dc81616b046a68863060a75c344f2cf
+[DEBUG] VerifyMerkleRoot: tx[0] hash=31202d2250efcfe889b15a14125f404e2dc81616b046a68863060a75c344f2cf
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000039accbdd2444... (parent: 00002e0e48d336ae...) from peer 2 | Total: 70 orphans, 20 KB
+[Orphan] Block added to orphan pool (count: 70)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00002e0e48d336ae...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00002e0e48d336ae...
+[CONVERGENCE-DIAG]   Prev block: 00003b92eee277bf...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00003b92eee277bf...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=c6460f623c0147102893f1d91c4078b2e1cf1b5e50c41b907027d59a2b1877c7
+[DEBUG] VerifyMerkleRoot: calculatedRoot=c6460f623c0147102893f1d91c4078b2e1cf1b5e50c41b907027d59a2b1877c7
+[DEBUG] VerifyMerkleRoot: tx[0] hash=c6460f623c0147102893f1d91c4078b2e1cf1b5e50c41b907027d59a2b1877c7
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00002e0e48d336ae... (parent: 00003b92eee277bf...) from peer 2 | Total: 71 orphans, 20 KB
+[Orphan] Block added to orphan pool (count: 71)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00003b92eee277bf...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00003b92eee277bf...
+[CONVERGENCE-DIAG]   Prev block: 0000c7bcc88c14ec...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000c7bcc88c14ec...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=ee3ffdef1fd7dd3bdd9689bd8919a40c2fbb0e146265bde6654fd089aebcff29
+[DEBUG] VerifyMerkleRoot: calculatedRoot=ee3ffdef1fd7dd3bdd9689bd8919a40c2fbb0e146265bde6654fd089aebcff29
+[DEBUG] VerifyMerkleRoot: tx[0] hash=ee3ffdef1fd7dd3bdd9689bd8919a40c2fbb0e146265bde6654fd089aebcff29
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00003b92eee277bf... (parent: 0000c7bcc88c14ec...) from peer 2 | Total: 72 orphans, 20 KB
+[Orphan] Block added to orphan pool (count: 72)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000c7bcc88c14ec...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000c7bcc88c14ec...
+[CONVERGENCE-DIAG]   Prev block: 0000a10bf2d1539c...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000a10bf2d1539c...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=550b31b8e43de1e173556fa74e5f5b52dc8ab7814b0f57a9843c7beb97ea7a98
+[DEBUG] VerifyMerkleRoot: calculatedRoot=550b31b8e43de1e173556fa74e5f5b52dc8ab7814b0f57a9843c7beb97ea7a98
+[DEBUG] VerifyMerkleRoot: tx[0] hash=550b31b8e43de1e173556fa74e5f5b52dc8ab7814b0f57a9843c7beb97ea7a98
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000c7bcc88c14ec... (parent: 0000a10bf2d1539c...) from peer 2 | Total: 73 orphans, 21 KB
+[Orphan] Block added to orphan pool (count: 73)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000a10bf2d1539c...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000a10bf2d1539c...
+[CONVERGENCE-DIAG]   Prev block: 000062b1b5075b9a...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000062b1b5075b9a...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=1969c49d112edc0dc7b8947890c442f939308492ce5889e035a3d88fd99b9eeb
+[DEBUG] VerifyMerkleRoot: calculatedRoot=1969c49d112edc0dc7b8947890c442f939308492ce5889e035a3d88fd99b9eeb
+[DEBUG] VerifyMerkleRoot: tx[0] hash=1969c49d112edc0dc7b8947890c442f939308492ce5889e035a3d88fd99b9eeb
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000a10bf2d1539c... (parent: 000062b1b5075b9a...) from peer 2 | Total: 74 orphans, 21 KB
+[Orphan] Block added to orphan pool (count: 74)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000062b1b5075b9a...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000062b1b5075b9a...
+[CONVERGENCE-DIAG]   Prev block: 00003af934a4e4f8...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00003af934a4e4f8...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=11ceb4e7125f154d9cdfbe14c2d67244b61ad7711dda13c5753a9fda91a91b41
+[DEBUG] VerifyMerkleRoot: calculatedRoot=11ceb4e7125f154d9cdfbe14c2d67244b61ad7711dda13c5753a9fda91a91b41
+[DEBUG] VerifyMerkleRoot: tx[0] hash=11ceb4e7125f154d9cdfbe14c2d67244b61ad7711dda13c5753a9fda91a91b41
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000062b1b5075b9a... (parent: 00003af934a4e4f8...) from peer 2 | Total: 75 orphans, 21 KB
+[Orphan] Block added to orphan pool (count: 75)
+[P2P] Requesting parent block from peer 2
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00003af934a4e4f8...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00003af934a4e4f8...
+[CONVERGENCE-DIAG]   Prev block: 000006f508d2c095...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000006f508d2c095...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=f5ff15a58376e602918387f17cbd62b34a099b5a333c523940bdf56479f5ae5b
+[DEBUG] VerifyMerkleRoot: calculatedRoot=f5ff15a58376e602918387f17cbd62b34a099b5a333c523940bdf56479f5ae5b
+[DEBUG] VerifyMerkleRoot: tx[0] hash=f5ff15a58376e602918387f17cbd62b34a099b5a333c523940bdf56479f5ae5b
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00003af934a4e4f8... (parent: 000006f508d2c095...) from peer 2 | Total: 76 orphans, 21 KB
+[Orphan] Block added to orphan pool (count: 76)
+[P2P] Requesting parent block from peer 2
+[IBD-TICK] tick=131 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000006f508d2c095...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000006f508d2c095...
+[CONVERGENCE-DIAG]   Prev block: 00008b0ea9382611...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00008b0ea9382611...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=c3dd043f4b3b8035d6421920e32e247a69d35d4fbfff6d279da0375b1ccf0a23
+[DEBUG] VerifyMerkleRoot: calculatedRoot=c3dd043f4b3b8035d6421920e32e247a69d35d4fbfff6d279da0375b1ccf0a23
+[DEBUG] VerifyMerkleRoot: tx[0] hash=c3dd043f4b3b8035d6421920e32e247a69d35d4fbfff6d279da0375b1ccf0a23
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000006f508d2c095... (parent: 00008b0ea9382611...) from peer 2 | Total: 77 orphans, 22 KB
+[Orphan] Block added to orphan pool (count: 77)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00008b0ea9382611...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00008b0ea9382611...
+[CONVERGENCE-DIAG]   Prev block: 000000f30e3cd9a4...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000000f30e3cd9a4...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=0efb7ba9ea674592cb62041e14857d3692a9131fbf8e37ba5a6184ac3bcdd639
+[DEBUG] VerifyMerkleRoot: calculatedRoot=0efb7ba9ea674592cb62041e14857d3692a9131fbf8e37ba5a6184ac3bcdd639
+[DEBUG] VerifyMerkleRoot: tx[0] hash=0efb7ba9ea674592cb62041e14857d3692a9131fbf8e37ba5a6184ac3bcdd639
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00008b0ea9382611... (parent: 000000f30e3cd9a4...) from peer 2 | Total: 78 orphans, 22 KB
+[Orphan] Block added to orphan pool (count: 78)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000000f30e3cd9a4...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000000f30e3cd9a4...
+[CONVERGENCE-DIAG]   Prev block: 0000f7314622dbca...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000f7314622dbca...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=fae7f4d9eef86bc6d23a57b7bff87c9b3efdc4bda96a506b67b289d7403d4c9f
+[DEBUG] VerifyMerkleRoot: calculatedRoot=fae7f4d9eef86bc6d23a57b7bff87c9b3efdc4bda96a506b67b289d7403d4c9f
+[DEBUG] VerifyMerkleRoot: tx[0] hash=fae7f4d9eef86bc6d23a57b7bff87c9b3efdc4bda96a506b67b289d7403d4c9f
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000000f30e3cd9a4... (parent: 0000f7314622dbca...) from peer 2 | Total: 79 orphans, 22 KB
+[Orphan] Block added to orphan pool (count: 79)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000f7314622dbca...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000f7314622dbca...
+[CONVERGENCE-DIAG]   Prev block: 00009688a4d4bf69...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00009688a4d4bf69...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=e24ee54eadee8f0652d329acaedcd93ed954711e32cb84a35a6103f8d682f6da
+[DEBUG] VerifyMerkleRoot: calculatedRoot=e24ee54eadee8f0652d329acaedcd93ed954711e32cb84a35a6103f8d682f6da
+[DEBUG] VerifyMerkleRoot: tx[0] hash=e24ee54eadee8f0652d329acaedcd93ed954711e32cb84a35a6103f8d682f6da
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000f7314622dbca... (parent: 00009688a4d4bf69...) from peer 2 | Total: 80 orphans, 23 KB
+[Orphan] Block added to orphan pool (count: 80)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00009688a4d4bf69...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00009688a4d4bf69...
+[CONVERGENCE-DIAG]   Prev block: 00007d3ac6e78601...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00007d3ac6e78601...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=5520435a2202c41e1bce149a182cf61bc5f88fa8a9f07447d9da8224a4c51f0d
+[DEBUG] VerifyMerkleRoot: calculatedRoot=5520435a2202c41e1bce149a182cf61bc5f88fa8a9f07447d9da8224a4c51f0d
+[DEBUG] VerifyMerkleRoot: tx[0] hash=5520435a2202c41e1bce149a182cf61bc5f88fa8a9f07447d9da8224a4c51f0d
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00009688a4d4bf69... (parent: 00007d3ac6e78601...) from peer 2 | Total: 81 orphans, 23 KB
+[Orphan] Block added to orphan pool (count: 81)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00007d3ac6e78601...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00007d3ac6e78601...
+[CONVERGENCE-DIAG]   Prev block: 00000c0b5e5b978b...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00000c0b5e5b978b...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=4fb3a05ca51686a8b85a60fc1e1be3ecc3f681de4350840afcccf74af0f26eec
+[DEBUG] VerifyMerkleRoot: calculatedRoot=4fb3a05ca51686a8b85a60fc1e1be3ecc3f681de4350840afcccf74af0f26eec
+[DEBUG] VerifyMerkleRoot: tx[0] hash=4fb3a05ca51686a8b85a60fc1e1be3ecc3f681de4350840afcccf74af0f26eec
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00007d3ac6e78601... (parent: 00000c0b5e5b978b...) from peer 2 | Total: 82 orphans, 23 KB
+[Orphan] Block added to orphan pool (count: 82)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00000c0b5e5b978b...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00000c0b5e5b978b...
+[CONVERGENCE-DIAG]   Prev block: 00003a4f7deb2632...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00003a4f7deb2632...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=ad3cb23577055c26d69dcc5755638ad39f558329bd67f7011fa10d95efb4f5e6
+[DEBUG] VerifyMerkleRoot: calculatedRoot=ad3cb23577055c26d69dcc5755638ad39f558329bd67f7011fa10d95efb4f5e6
+[DEBUG] VerifyMerkleRoot: tx[0] hash=ad3cb23577055c26d69dcc5755638ad39f558329bd67f7011fa10d95efb4f5e6
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00000c0b5e5b978b... (parent: 00003a4f7deb2632...) from peer 2 | Total: 83 orphans, 23 KB
+[Orphan] Block added to orphan pool (count: 83)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00003a4f7deb2632...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00003a4f7deb2632...
+[CONVERGENCE-DIAG]   Prev block: 000017c4ebbf485e...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000017c4ebbf485e...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=a5592b94a5159b7ff5777f3b7c63ad465dc0db32d7e2e6ffc470f9b652fbc2f2
+[DEBUG] VerifyMerkleRoot: calculatedRoot=a5592b94a5159b7ff5777f3b7c63ad465dc0db32d7e2e6ffc470f9b652fbc2f2
+[DEBUG] VerifyMerkleRoot: tx[0] hash=a5592b94a5159b7ff5777f3b7c63ad465dc0db32d7e2e6ffc470f9b652fbc2f2
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00003a4f7deb2632... (parent: 000017c4ebbf485e...) from peer 2 | Total: 84 orphans, 24 KB
+[Orphan] Block added to orphan pool (count: 84)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000017c4ebbf485e...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000017c4ebbf485e...
+[CONVERGENCE-DIAG]   Prev block: 000081d81538ec4e...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000081d81538ec4e...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=aad8bcb66177d1eeb5e5605e917ea02aaff57d05f65a48327018ffa7891ff872
+[DEBUG] VerifyMerkleRoot: calculatedRoot=aad8bcb66177d1eeb5e5605e917ea02aaff57d05f65a48327018ffa7891ff872
+[DEBUG] VerifyMerkleRoot: tx[0] hash=aad8bcb66177d1eeb5e5605e917ea02aaff57d05f65a48327018ffa7891ff872
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000017c4ebbf485e... (parent: 000081d81538ec4e...) from peer 2 | Total: 85 orphans, 24 KB
+[Orphan] Block added to orphan pool (count: 85)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000081d81538ec4e...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000081d81538ec4e...
+[CONVERGENCE-DIAG]   Prev block: 000020a35057fecb...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000020a35057fecb...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=12d76723e1131d4889ca4ce93e0af85c3bc5605db71de880428e6a7d6046cf2f
+[DEBUG] VerifyMerkleRoot: calculatedRoot=12d76723e1131d4889ca4ce93e0af85c3bc5605db71de880428e6a7d6046cf2f
+[DEBUG] VerifyMerkleRoot: tx[0] hash=12d76723e1131d4889ca4ce93e0af85c3bc5605db71de880428e6a7d6046cf2f
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000081d81538ec4e... (parent: 000020a35057fecb...) from peer 2 | Total: 86 orphans, 24 KB
+[Orphan] Block added to orphan pool (count: 86)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000020a35057fecb...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000020a35057fecb...
+[CONVERGENCE-DIAG]   Prev block: 000049b517277c56...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000049b517277c56...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=06e274c80357d77059711a09de63b2a2ed66a3959cb03a14509992c44f5e2bc5
+[DEBUG] VerifyMerkleRoot: calculatedRoot=06e274c80357d77059711a09de63b2a2ed66a3959cb03a14509992c44f5e2bc5
+[DEBUG] VerifyMerkleRoot: tx[0] hash=06e274c80357d77059711a09de63b2a2ed66a3959cb03a14509992c44f5e2bc5
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000020a35057fecb... (parent: 000049b517277c56...) from peer 2 | Total: 87 orphans, 25 KB
+[Orphan] Block added to orphan pool (count: 87)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000049b517277c56...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000049b517277c56...
+[CONVERGENCE-DIAG]   Prev block: 00008c81e6191f7c...
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=141 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P] Block saved to database
+[P2P] Parent block not found: 00008c81e6191f7c...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=7f566bb941e861e160f491b66c763c95242f500f51399824f9ff3cfdeecf87f5
+[DEBUG] VerifyMerkleRoot: calculatedRoot=7f566bb941e861e160f491b66c763c95242f500f51399824f9ff3cfdeecf87f5
+[DEBUG] VerifyMerkleRoot: tx[0] hash=7f566bb941e861e160f491b66c763c95242f500f51399824f9ff3cfdeecf87f5
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000049b517277c56... (parent: 00008c81e6191f7c...) from peer 2 | Total: 88 orphans, 25 KB
+[Orphan] Block added to orphan pool (count: 88)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 0000038bea76f92a...
+[P2P] Peer 2 announced new block: 0000038bea76f92a...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00008c81e6191f7c...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00008c81e6191f7c...
+[CONVERGENCE-DIAG]   Prev block: 0000f4858913b878...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000f4858913b878...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=b89ef566698afe996fb2cd7f5f14dab1f7fa367728cfb7c2e8396946b594d776
+[DEBUG] VerifyMerkleRoot: calculatedRoot=b89ef566698afe996fb2cd7f5f14dab1f7fa367728cfb7c2e8396946b594d776
+[DEBUG] VerifyMerkleRoot: tx[0] hash=b89ef566698afe996fb2cd7f5f14dab1f7fa367728cfb7c2e8396946b594d776
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00008c81e6191f7c... (parent: 0000f4858913b878...) from peer 2 | Total: 89 orphans, 25 KB
+[Orphan] Block added to orphan pool (count: 89)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000038bea76f92a...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000038bea76f92a...
+[CONVERGENCE-DIAG]   Prev block: 000069752d86669f...
+[P2P] Block saved to database
+[P2P] Parent block not found: 000069752d86669f...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=69744f0db117186cbbfc695e0b48a6f32832bc324964153f5e365dcace5021df
+[DEBUG] VerifyMerkleRoot: calculatedRoot=69744f0db117186cbbfc695e0b48a6f32832bc324964153f5e365dcace5021df
+[DEBUG] VerifyMerkleRoot: tx[0] hash=69744f0db117186cbbfc695e0b48a6f32832bc324964153f5e365dcace5021df
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000038bea76f92a... (parent: 000069752d86669f...) from peer 2 | Total: 90 orphans, 25 KB
+[Orphan] Block added to orphan pool (count: 90)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000f4858913b878...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000f4858913b878...
+[CONVERGENCE-DIAG]   Prev block: 0000a8075b3b263a...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000a8075b3b263a...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=78d4178f2503040dd04ad458c0554e88d439ff1072c422aeff900df0bb714725
+[DEBUG] VerifyMerkleRoot: calculatedRoot=78d4178f2503040dd04ad458c0554e88d439ff1072c422aeff900df0bb714725
+[DEBUG] VerifyMerkleRoot: tx[0] hash=78d4178f2503040dd04ad458c0554e88d439ff1072c422aeff900df0bb714725
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000f4858913b878... (parent: 0000a8075b3b263a...) from peer 2 | Total: 91 orphans, 26 KB
+[Orphan] Block added to orphan pool (count: 91)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000069752d86669f...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000069752d86669f...
+[CONVERGENCE-DIAG]   Prev block: 0000cb15f1bf8380...
+[P2P] Block in DB but parent still missing, skipping
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000a8075b3b263a...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000a8075b3b263a...
+[CONVERGENCE-DIAG]   Prev block: 0000f6a7e1321ba2...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000f6a7e1321ba2...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=6dff03b4acfd79728daf4ce88a946961516bb51033992249d0ac507847cce1b2
+[DEBUG] VerifyMerkleRoot: calculatedRoot=6dff03b4acfd79728daf4ce88a946961516bb51033992249d0ac507847cce1b2
+[DEBUG] VerifyMerkleRoot: tx[0] hash=6dff03b4acfd79728daf4ce88a946961516bb51033992249d0ac507847cce1b2
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000a8075b3b263a... (parent: 0000f6a7e1321ba2...) from peer 2 | Total: 92 orphans, 26 KB
+[Orphan] Block added to orphan pool (count: 92)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 00004d0065181096...
+[P2P] Peer 2 announced new block: 00004d0065181096...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000f6a7e1321ba2...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000f6a7e1321ba2...
+[CONVERGENCE-DIAG]   Prev block: 0000bc00d0eb6dfe...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000bc00d0eb6dfe...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=ef6c91ef739de5a37c237671adf2f4005d1bfe7ded90fe9ee8d867a647f6fb96
+[DEBUG] VerifyMerkleRoot: calculatedRoot=ef6c91ef739de5a37c237671adf2f4005d1bfe7ded90fe9ee8d867a647f6fb96
+[DEBUG] VerifyMerkleRoot: tx[0] hash=ef6c91ef739de5a37c237671adf2f4005d1bfe7ded90fe9ee8d867a647f6fb96
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000f6a7e1321ba2... (parent: 0000bc00d0eb6dfe...) from peer 2 | Total: 93 orphans, 26 KB
+[Orphan] Block added to orphan pool (count: 93)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00004d0065181096...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00004d0065181096...
+[CONVERGENCE-DIAG]   Prev block: 0000038bea76f92a...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000038bea76f92a...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=19c185f53bdf10150d6c5a7276fe2a501d081476fa466c1312a21fdf62ed2b77
+[DEBUG] VerifyMerkleRoot: calculatedRoot=19c185f53bdf10150d6c5a7276fe2a501d081476fa466c1312a21fdf62ed2b77
+[DEBUG] VerifyMerkleRoot: tx[0] hash=19c185f53bdf10150d6c5a7276fe2a501d081476fa466c1312a21fdf62ed2b77
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00004d0065181096... (parent: 0000038bea76f92a...) from peer 2 | Total: 94 orphans, 27 KB
+[Orphan] Block added to orphan pool (count: 94)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000bc00d0eb6dfe...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000bc00d0eb6dfe...
+[CONVERGENCE-DIAG]   Prev block: 0000b3168172db0f...
+[PeerManager] Peer 2 misbehavior score decayed to 10
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000b3168172db0f...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=7dc815c28ac5557f05d048c9217d7239c1e4d5b7e2b46e5185f4a189678bdc45
+[DEBUG] VerifyMerkleRoot: calculatedRoot=7dc815c28ac5557f05d048c9217d7239c1e4d5b7e2b46e5185f4a189678bdc45
+[DEBUG] VerifyMerkleRoot: tx[0] hash=7dc815c28ac5557f05d048c9217d7239c1e4d5b7e2b46e5185f4a189678bdc45
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000bc00d0eb6dfe... (parent: 0000b3168172db0f...) from peer 2 | Total: 95 orphans, 27 KB
+[Orphan] Block added to orphan pool (count: 95)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000038bea76f92a...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000038bea76f92a...
+[CONVERGENCE-DIAG]   Prev block: 000069752d86669f...
+[P2P] Block in DB but parent still missing, skipping
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000b3168172db0f...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000b3168172db0f...
+[CONVERGENCE-DIAG]   Prev block: 0000cca1678dd230...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000cca1678dd230...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=82b8cb3ec5017b22c427714ee6374187db44bffd53cba8b44c353e6e27fa3fcc
+[DEBUG] VerifyMerkleRoot: calculatedRoot=82b8cb3ec5017b22c427714ee6374187db44bffd53cba8b44c353e6e27fa3fcc
+[DEBUG] VerifyMerkleRoot: tx[0] hash=82b8cb3ec5017b22c427714ee6374187db44bffd53cba8b44c353e6e27fa3fcc
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000b3168172db0f... (parent: 0000cca1678dd230...) from peer 2 | Total: 96 orphans, 27 KB
+[Orphan] Block added to orphan pool (count: 96)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000cca1678dd230...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000cca1678dd230...
+[CONVERGENCE-DIAG]   Prev block: 000016ef78c94683...
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[P2P] Block saved to database
+[P2P] Parent block not found: 000016ef78c94683...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=378d5cf8aecd547ac5c18adbc3e1177a9ccb0b3bc180b0a2591006fd8e735739
+[DEBUG] VerifyMerkleRoot: calculatedRoot=378d5cf8aecd547ac5c18adbc3e1177a9ccb0b3bc180b0a2591006fd8e735739
+[DEBUG] VerifyMerkleRoot: tx[0] hash=378d5cf8aecd547ac5c18adbc3e1177a9ccb0b3bc180b0a2591006fd8e735739
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000cca1678dd230... (parent: 000016ef78c94683...) from peer 2 | Total: 97 orphans, 27 KB
+[Orphan] Block added to orphan pool (count: 97)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 000016ef78c94683...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 000016ef78c94683...
+[CONVERGENCE-DIAG]   Prev block: 00003a3cef1fdb74...
+[IBD-TICK] tick=151 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P] Block saved to database
+[P2P] Parent block not found: 00003a3cef1fdb74...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=6ac189b55aeee7220462db166f76676e13c3a412d60e794b420271e5daaabbee
+[DEBUG] VerifyMerkleRoot: calculatedRoot=6ac189b55aeee7220462db166f76676e13c3a412d60e794b420271e5daaabbee
+[DEBUG] VerifyMerkleRoot: tx[0] hash=6ac189b55aeee7220462db166f76676e13c3a412d60e794b420271e5daaabbee
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 000016ef78c94683... (parent: 00003a3cef1fdb74...) from peer 2 | Total: 98 orphans, 28 KB
+[Orphan] Block added to orphan pool (count: 98)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00003a3cef1fdb74...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00003a3cef1fdb74...
+[CONVERGENCE-DIAG]   Prev block: 0000a6f9c6d163c8...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000a6f9c6d163c8...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=da48975c5087f063db5fb5bfecb9b4dc0d78c9d81b46c4a294d6efe932615819
+[DEBUG] VerifyMerkleRoot: calculatedRoot=da48975c5087f063db5fb5bfecb9b4dc0d78c9d81b46c4a294d6efe932615819
+[DEBUG] VerifyMerkleRoot: tx[0] hash=da48975c5087f063db5fb5bfecb9b4dc0d78c9d81b46c4a294d6efe932615819
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 00003a3cef1fdb74... (parent: 0000a6f9c6d163c8...) from peer 2 | Total: 99 orphans, 28 KB
+[Orphan] Block added to orphan pool (count: 99)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000a6f9c6d163c8...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000a6f9c6d163c8...
+[CONVERGENCE-DIAG]   Prev block: 0000365b4e706e96...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000365b4e706e96...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=6e5311e2bd84de1fe2a983a7ed600a5e5216c82482d7507bf292ab5011fc2efc
+[DEBUG] VerifyMerkleRoot: calculatedRoot=6e5311e2bd84de1fe2a983a7ed600a5e5216c82482d7507bf292ab5011fc2efc
+[DEBUG] VerifyMerkleRoot: tx[0] hash=6e5311e2bd84de1fe2a983a7ed600a5e5216c82482d7507bf292ab5011fc2efc
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Added orphan block 0000a6f9c6d163c8... (parent: 0000365b4e706e96...) from peer 2 | Total: 100 orphans, 28 KB
+[Orphan] Block added to orphan pool (count: 100)
+[P2P] Requesting parent block from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000365b4e706e96...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000365b4e706e96...
+[CONVERGENCE-DIAG]   Prev block: 0000b05f209c6a4c...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000b05f209c6a4c...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=51884ae148a3512873b0038ddd4ff53db076d342f825b1e158e07188e11e9b53
+[DEBUG] VerifyMerkleRoot: calculatedRoot=51884ae148a3512873b0038ddd4ff53db076d342f825b1e158e07188e11e9b53
+[DEBUG] VerifyMerkleRoot: tx[0] hash=51884ae148a3512873b0038ddd4ff53db076d342f825b1e158e07188e11e9b53
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Peer 2 exceeded orphan limit (100)
+[Orphan] ERROR: Failed to add block to orphan pool
+  Pool may be full or block already exists
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=161 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 00006ff88ff8c188...
+[P2P] Peer 2 announced new block: 00006ff88ff8c188...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 00006ff88ff8c188...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 00006ff88ff8c188...
+[CONVERGENCE-DIAG]   Prev block: 00004d0065181096...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00004d0065181096...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=1e488b1e75e0f994fb2c90ce68fa4522350a3bd28f9e50d62ebae7e4a087a73a
+[DEBUG] VerifyMerkleRoot: calculatedRoot=1e488b1e75e0f994fb2c90ce68fa4522350a3bd28f9e50d62ebae7e4a087a73a
+[DEBUG] VerifyMerkleRoot: tx[0] hash=1e488b1e75e0f994fb2c90ce68fa4522350a3bd28f9e50d62ebae7e4a087a73a
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Peer 2 exceeded orphan limit (100)
+[Orphan] ERROR: Failed to add block to orphan pool
+  Pool may be full or block already exists
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=171 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 0000558c27bd5178...
+[P2P] Peer 2 announced new block: 0000558c27bd5178...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000558c27bd5178...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000558c27bd5178...
+[CONVERGENCE-DIAG]   Prev block: 00006ff88ff8c188...
+[P2P] Block saved to database
+[P2P] Parent block not found: 00006ff88ff8c188...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=0748fa3194c3aaf2d34ea18bedfc49cf18fafe2da5a5d09757b49067ca432f20
+[DEBUG] VerifyMerkleRoot: calculatedRoot=0748fa3194c3aaf2d34ea18bedfc49cf18fafe2da5a5d09757b49067ca432f20
+[DEBUG] VerifyMerkleRoot: tx[0] hash=0748fa3194c3aaf2d34ea18bedfc49cf18fafe2da5a5d09757b49067ca432f20
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Peer 2 exceeded orphan limit (100)
+[Orphan] ERROR: Failed to add block to orphan pool
+  Pool may be full or block already exists
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=181 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=191 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=201 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=211 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 0000de699e787d69...
+[P2P] Peer 2 announced new block: 0000de699e787d69...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000de699e787d69...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000de699e787d69...
+[CONVERGENCE-DIAG]   Prev block: 0000558c27bd5178...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000558c27bd5178...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=fead6c3b5a56dde5e65be50fff41bb5cf192722be7be9799271c11de83522e13
+[DEBUG] VerifyMerkleRoot: calculatedRoot=fead6c3b5a56dde5e65be50fff41bb5cf192722be7be9799271c11de83522e13
+[DEBUG] VerifyMerkleRoot: tx[0] hash=fead6c3b5a56dde5e65be50fff41bb5cf192722be7be9799271c11de83522e13
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Peer 2 exceeded orphan limit (100)
+[Orphan] ERROR: Failed to add block to orphan pool
+  Pool may be full or block already exists
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=221 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=231 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=241 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='inv' payload=37 bytes
+[P2P] Peer 2 requested unknown block: 0000fa5bc6ee2edf...
+[P2P] Peer 2 announced new block: 0000fa5bc6ee2edf...
+[P2P] Requesting 1 block(s) from peer 2
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='block' payload=196 bytes
+[P2P] Received block from peer 2: 0000fa5bc6ee2edf...
+[CONVERGENCE-DIAG] BLOCK message received from peer 2
+[CONVERGENCE-DIAG]   Block hash: 0000fa5bc6ee2edf...
+[CONVERGENCE-DIAG]   Prev block: 0000de699e787d69...
+[P2P] Block saved to database
+[P2P] Parent block not found: 0000de699e787d69...
+[P2P] Storing block as orphan and requesting parent
+[DEBUG] VerifyMerkleRoot: txCount=1
+[DEBUG] VerifyMerkleRoot: blockMerkleRoot=c854c355f83e8ebc78598233960c93711318e5bb07188ba34cf440a55a0db303
+[DEBUG] VerifyMerkleRoot: calculatedRoot=c854c355f83e8ebc78598233960c93711318e5bb07188ba34cf440a55a0db303
+[DEBUG] VerifyMerkleRoot: tx[0] hash=c854c355f83e8ebc78598233960c93711318e5bb07188ba34cf440a55a0db303
+[Orphan] Block validation passed (merkle root verified, no duplicates/double-spends)
+[OrphanManager] Peer 2 exceeded orphan limit (100)
+[Orphan] ERROR: Failed to add block to orphan pool
+  Pool may be full or block already exists
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=251 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=261 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=271 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=281 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=291 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[PeerManager] Peer 2 misbehavior score decayed to 0
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=301 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=311 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=321 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+[P2P-DEBUG] ProcessMessage: peer=2 cmd='ping' payload=8 bytes
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=331 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=341 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290
+[Mining] Hash rate: 0 H/s, Total hashes: 0
+[IBD-TICK] tick=351 header=0 chain=0 state=IDLE
+[IBD-TICK] RETURN: header(0) <= chain(0)
+  [IBD] Progress: height=0 peers_best=2290

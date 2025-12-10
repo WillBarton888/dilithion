@@ -1,0 +1,32 @@
+======================================
+Dilithion Node v1.0.16
+Post-Quantum Cryptocurrency
+======================================
+
+Network: MAINNET
+Data directory: C:\Users\will\.dilithion
+P2P port: 22866
+RPC port: 8332
+
+Initializing blockchain storage...
+[DB-SECURITY] Validated database path: C:\Users\will\.dilithion\blocks
+[DB-INFO] Available disk space: 277 GB
+[DB-INFO] Database opened successfully
+  [OK] Blockchain database opened
+Initializing mempool...
+  [OK] Mempool initialized
+Initializing UTXO set...
+[INFO] CUTXOSet: Loaded statistics - UTXOs: 1, Total: 5000000000, Height: 0
+  [OK] UTXO set opened
+Initializing chain state...
+  [OK] Chain state initialized
+Initializing RandomX...
+  Detected RAM: 32688 MB
+  Selected mode: FULL (~100 H/s)
+  [ASYNC] RandomX initialization thread launched (non-blocking)
+  [ASYNC] RandomX initialization started (continuing startup...)
+  [WAIT] Waiting for RandomX initialization...
+  [WAIT] Waiting for RandomX initialization to complete...
+  [ASYNC] RandomX initialization started in background thread
+  [ASYNC] Mode: FULL
+  [FULL MODE] Initializing RandomX dataset with 20 threads...

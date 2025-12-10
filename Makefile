@@ -6,6 +6,12 @@
 # Configuration
 # ============================================================================
 
+# Version detection from git tags
+# Tries to get version from git tag, falls back to "dev" if not available
+GIT_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date +%Y-%m-%d 2>/dev/null || echo "unknown")
+
 # Detect operating system
 UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
 

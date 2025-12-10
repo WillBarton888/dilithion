@@ -1,0 +1,3 @@
+ffc4ed9fa1300f00556c935e437d5784f55c53d90f78cafad54ea215b026b7ba  dilithion-testnet-v1.1.2-windows-x64.zip
+926dfa7873038c8755b5af57f891f8735eadec787f3ef7b46ef0ac05f0965314  dilithion-testnet-v1.1.2-linux-x64.tar.gz
+8ee02aabe5e377c7489d48c7e75c7cf68bd38dfa17a9945646ad4cbd3877015f  dilithion-testnet-v1.1.2-macos-x64.tar.gz

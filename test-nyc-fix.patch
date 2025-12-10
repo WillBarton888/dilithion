@@ -1,0 +1,26 @@
+--- a/src/crypto/randomx_hash.cpp
++++ b/src/crypto/randomx_hash.cpp
+@@ -98,10 +98,21 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int l
+         // Following XMRig/Monero pattern: divide dataset into chunks and init in parallel
+         // This prevents deadlock and speeds up initialization significantly
+         unsigned long dataset_item_count = randomx_dataset_item_count();
++
++        // NYC FIX: Validate dataset_item_count is valid
++        if (dataset_item_count == 0) {
++            randomx_release_cache(g_randomx_cache);
++            g_randomx_cache = nullptr;
++            throw std::runtime_error("RandomX dataset_item_count returned 0");
++        }
++
+         unsigned int num_threads = std::thread::hardware_concurrency();
+         if (num_threads == 0) num_threads = 2;  // Default to 2 if detection fails
+
+-        std::cout << "  [FULL MODE] Initializing RandomX dataset with " << num_threads << " threads..." << std::endl;
++        // NYC FIX: Force single-threaded initialization to avoid multi-CPU issues
++        // This is a temporary workaround until the root cause is identified
++        num_threads = 1;  // FORCE SINGLE THREAD
++
++        std::cout << "  [FULL MODE] Initializing RandomX dataset with " << num_threads << " thread(s)..." << std::endl;
+
+         std::vector<std::thread> init_threads;
+         unsigned long items_per_thread = dataset_item_count / num_threads;

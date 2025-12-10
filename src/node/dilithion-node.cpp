@@ -1662,10 +1662,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "[VERSION-HANDLER-1] ENTERED for peer " << peer_id << std::endl;
             std::cout.flush();
             // BUG #62 FIX: Store peer's starting height for later header sync decision
+            std::cout << "[VERSION-HANDLER-2] headers=" << (g_node_context.headers_manager ? "Y" : "N") << std::endl; std::cout.flush();
             if (g_node_context.headers_manager) {
                 g_node_context.headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
-            std::cout << "[VERSION-HANDLER-2] After SetPeerStartHeight" << std::endl; std::cout.flush();
             }
+            std::cout << "[VERSION-HANDLER-3] After headers" << std::endl; std::cout.flush();
 
             // Debug: Get CNode to check inbound status
             CNode* node = nullptr;

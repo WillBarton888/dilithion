@@ -1,0 +1,10 @@
+(gdb) (gdb) Starting program: C:\Users\will\dilithion\dilithion-node.exe --help
+[New Thread 70548.0x11df0]
+[New Thread 70548.0x11bf8]
+[New Thread 70548.0x11a98]
+[Thread 70548.0xf534 exited with code 3221225785]
+[Thread 70548.0x11a98 exited with code 3221225785]
+[Thread 70548.0x11bf8 exited with code 3221225785]
+During startup program exited with code 0xc0000139.
+(gdb) No stack.
+(gdb) 
