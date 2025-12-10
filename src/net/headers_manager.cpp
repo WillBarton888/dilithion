@@ -348,8 +348,12 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     if (conn_mgr && msg_proc) {
         NetProtocol::CGetHeadersMessage msg(locator, uint256());
         CNetMessage getheaders = msg_proc->CreateGetHeadersMessage(msg);
-        conn_mgr->SendMessage(peer, getheaders);
+        bool sent = conn_mgr->SendMessage(peer, getheaders);
+        std::cout << "[IBD] RequestHeaders: SendMessage(" << peer << ") GETHEADERS = " 
+                  << (sent ? "SUCCESS" : "FAILED") << " (locator size=" << locator.size() << ")" << std::endl;
     } else {
+        std::cout << "[IBD] RequestHeaders: FAILED - conn_mgr=" << (conn_mgr ? "valid" : "null")
+                  << " msg_proc=" << (msg_proc ? "valid" : "null") << std::endl;
     }
 }
 
