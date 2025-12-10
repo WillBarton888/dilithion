@@ -521,18 +521,23 @@ void CConnman::ThreadMessageHandler() {
         // Phase 1: Collect messages while holding cs_vNodes (short lock duration)
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
-            // BUG #144 DEBUG: Log m_nodes size when collecting messages
+            // BUG #145 DEBUG: Always log when there are nodes with pending messages
             static int debug_counter = 0;
+            ++debug_counter;
             bool any_has_msgs = false;
+            std::string pending_nodes;
             for (const auto& node : m_nodes) {
                 if (node->HasProcessMsgs()) {
                     any_has_msgs = true;
-                    break;
+                    pending_nodes += std::to_string(node->id) + " ";
                 }
             }
-            if (any_has_msgs || ++debug_counter % 100 == 1) {
-                std::cout << "[TMH-DEBUG] Checking " << m_nodes.size() << " nodes for messages"
-                          << (any_has_msgs ? " (has pending)" : "") << std::endl;
+            if (any_has_msgs) {
+                std::cout << "[TMH-DEBUG] iter=" << debug_counter << " nodes=" << m_nodes.size()
+                          << " PENDING in nodes: " << pending_nodes << std::endl;
+            } else if (debug_counter % 1000 == 1) {
+                std::cout << "[TMH-DEBUG] iter=" << debug_counter << " nodes=" << m_nodes.size()
+                          << " (no pending)" << std::endl;
             }
             for (auto& node : m_nodes) {
                 if (node->fDisconnect.load()) continue;
