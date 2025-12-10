@@ -1611,14 +1611,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         assert(g_node_context.peer_manager != nullptr && "peer_manager must be initialized");
         assert(g_tx_relay_manager != nullptr && "g_tx_relay_manager must be initialized");
 
-        // Register version handler to automatically respond with verack
+        // Register version handler to automatically respond with version + verack
+        // Bitcoin handshake: A->B: VERSION, B->A: VERSION + VERACK, A->B: VERACK
         message_processor.SetVersionHandler([&connection_manager](int peer_id, const NetProtocol::CVersionMessage& msg) {
             // BUG #62 FIX: Store peer's starting height for later header sync decision
             if (g_node_context.headers_manager) {
                 g_node_context.headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
             }
 
-            // Send verack in response
+            // BUG #128 FIX: Send VERSION back first (Bitcoin protocol requirement)
+            // When receiving VERSION, we must respond with VERSION + VERACK
+            connection_manager.SendVersionMessage(peer_id);
+
+            // Then send VERACK to acknowledge their VERSION
             connection_manager.SendVerackMessage(peer_id);
         });
 
