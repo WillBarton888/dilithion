@@ -1514,12 +1514,21 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
         }
     }
 
-    // Check if we're already connected to this exact address (prevents duplicate connections)
+    // Check if we already have a peer for this IP (prevents duplicate connections)
+    // Use state != STATE_DISCONNECTED to catch peers in any active state (connecting, connected, etc.)
     auto existing_peers = peer_manager.GetAllPeers();
     for (const auto& existing_peer : existing_peers) {
-        if (existing_peer->IsConnected() && existing_peer->addr.ToString() == addr.ToString()) {
-            std::cout << "[P2P] Already connected to " << ip_str << ":" << addr.port << ", skipping" << std::endl;
-            return -1;
+        if (existing_peer->state != CPeer::STATE_DISCONNECTED) {
+            std::string existing_ip = strprintf("%d.%d.%d.%d",
+                                                 existing_peer->addr.ip[12],
+                                                 existing_peer->addr.ip[13],
+                                                 existing_peer->addr.ip[14],
+                                                 existing_peer->addr.ip[15]);
+            if (existing_ip == ip_str) {
+                std::cout << "[P2P] Already have peer for " << ip_str << " (peer_id=" << existing_peer->id 
+                          << ", state=" << existing_peer->state << "), skipping outbound" << std::endl;
+                return -1;
+            }
         }
     }
 
@@ -1606,18 +1615,21 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
     // When both nodes try to connect to each other simultaneously, we get
     // duplicate peers for the same IP (one inbound, one outbound). This causes
     // one connection to be closed, breaking the handshake.
-    // Solution: Reject inbound if we already have an active connection to this IP.
+    // Solution: Reject inbound if we already have ANY peer (connecting or connected) for this IP.
+    // We check state != STATE_DISCONNECTED to include CONNECTING, CONNECTED, VERSION_SENT,
+    // and HANDSHAKE_COMPLETE states - this prevents race conditions where an outbound
+    // connection is being established while an inbound arrives.
     auto existing_peers = peer_manager.GetAllPeers();
     for (const auto& existing_peer : existing_peers) {
-        if (existing_peer->IsConnected()) {
+        if (existing_peer->state != CPeer::STATE_DISCONNECTED) {
             std::string existing_ip = strprintf("%d.%d.%d.%d",
                                                  existing_peer->addr.ip[12],
                                                  existing_peer->addr.ip[13],
                                                  existing_peer->addr.ip[14],
                                                  existing_peer->addr.ip[15]);
             if (existing_ip == ip_str) {
-                std::cout << "[P2P] AcceptConnection rejected: already connected to " << ip_str 
-                          << " (existing peer_id=" << existing_peer->id << ")" << std::endl;
+                std::cout << "[P2P] AcceptConnection rejected: already have peer for " << ip_str
+                          << " (peer_id=" << existing_peer->id << ", state=" << existing_peer->state << ")" << std::endl;
                 return -1;
             }
         }
