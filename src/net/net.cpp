@@ -1981,6 +1981,9 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
                         // Next ReceiveMessages() call (50ms later) will try again
                         return;
                     }
+                    // BUG #134 FIX: Add small delay between retries to let VERACK arrive
+                    // Network RTT between nodes is ~100-300ms, so 10ms delay is reasonable
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     // Try reading again in next loop iteration
                     continue;
                 }
@@ -2044,6 +2047,8 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
                     // Next ReceiveMessages() call will try again
                     return;
                 }
+                // BUG #134 FIX: Add small delay between retries to let more data arrive
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 // Try reading again in next loop iteration
                 continue;
             }
