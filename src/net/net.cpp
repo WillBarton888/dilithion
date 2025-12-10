@@ -278,6 +278,9 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
     g_network_stats.messages_recv++;
     g_network_stats.bytes_recv += message.GetTotalSize();
 
+    // BUG #132 DEBUG: Log all incoming messages to trace handshake
+    std::cout << "[MSG-RECV] peer=" << peer_id << " cmd=" << command << std::endl;
+
     // Dispatch based on command
     if (command == "version") {
         return ProcessVersionMessage(peer_id, stream);
