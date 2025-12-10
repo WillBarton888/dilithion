@@ -2770,26 +2770,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         CSocketInit socket_init;
         std::cerr.flush();
 
-        // Create P2P listening socket
-        CSocket p2p_socket;
-        g_node_state.p2p_socket = &p2p_socket;
-
-        // Bind to P2P port
-        if (!p2p_socket.Bind(config.p2pport)) {
-            std::cerr << "Failed to bind P2P socket on port " << config.p2pport << std::endl;
-            std::cerr << "Error: " << p2p_socket.GetLastErrorString() << std::endl;
-            return 1;
-        }
-
-        // Start listening
-        if (!p2p_socket.Listen(10)) {
-            std::cerr << "Failed to listen on P2P socket" << std::endl;
-            std::cerr << "Error: " << p2p_socket.GetLastErrorString() << std::endl;
-            return 1;
-        }
+        // Phase 5: CConnman handles socket binding and listening internally
+        // The old CSocket p2p_socket code is removed - CConnman already bound to port in NodeContext init
+        // g_node_state.p2p_socket is no longer used - kept as nullptr for backward compatibility
 
         std::cout << " ✓" << std::endl;
-        std::cout << "  [OK] P2P server listening on port " << config.p2pport << std::endl;
+        std::cout << "  [OK] P2P server listening on port " << config.p2pport << " (CConnman)" << std::endl;
 
         // Phase 5: CConnman handles accept internally via ThreadSocketHandler
         // No need for separate p2p_thread - accept is handled in CConnman::SocketHandler()
