@@ -1581,27 +1581,22 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
         return -1;  // Return -1 for failure
     }
 
-    // P2-2 FIX: Per-IP connection cooldown for inbound connections
-    // Extract IP from IPv6-mapped IPv4 address
+    // BUG #131 FIX: Remove cooldown check for inbound connections
+    // The cooldown was incorrectly blocking inbound connections when outbound attempts
+    // to the same IP had previously failed. For example:
+    // 1. NYC tries to connect outbound to Singapore (fails) -> sets cooldown
+    // 2. Singapore connects inbound to NYC -> wrongly rejected due to cooldown
+    //
+    // Bitcoin Core doesn't block inbound based on outbound failures. Inbound connections
+    // should only be limited by max connection count (checked above), not cooldowns.
+    // Cooldowns are only for preventing rapid outbound reconnection attempts.
+
+    // Extract IP for logging and AddPeer
     std::string ip_str = strprintf("%d.%d.%d.%d",
                                     addr.ip[12],
                                     addr.ip[13],
                                     addr.ip[14],
                                     addr.ip[15]);
-    {
-        std::lock_guard<std::mutex> lock(cs_connection_cooldown);
-        auto it = g_last_connection_attempt.find(ip_str);
-        if (it != g_last_connection_attempt.end()) {
-            int64_t elapsed = GetTime() - it->second;
-            if (elapsed < CONNECTION_COOLDOWN_SECONDS) {
-                std::cout << "[P2P] Connection cooldown: rejecting inbound from " << ip_str
-                          << " (wait " << (CONNECTION_COOLDOWN_SECONDS - elapsed) << "s)" << std::endl;
-                return -1;
-            }
-        }
-        // BUG #105 FIX: Don't set cooldown here - only set after SUCCESSFUL connection
-        // Previously set cooldown before AddPeer, causing banned IPs to also get cooldown
-    }
 
     // Add peer
     auto peer = peer_manager.AddPeer(addr);
