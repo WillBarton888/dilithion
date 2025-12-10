@@ -49,7 +49,7 @@ void test_cnode_lifecycle() {
     CNode node(1, addr, false);  // node_id=1, outbound
     assert(node.id == 1);
     assert(!node.fInbound);
-    assert(node.state.load() == CNode::STATE_CONNECTING);
+    assert(node.state.load() == CNode::STATE_DISCONNECTED);  // Initial state
     assert(node.GetSocket() < 0);  // No socket yet
 
     // Set socket
@@ -375,6 +375,10 @@ void test_node_state_transitions() {
     CNode node(1, addr, false);
 
     // Initial state
+    assert(node.state.load() == CNode::STATE_DISCONNECTED);
+
+    // Transition to connecting, then connected
+    node.state.store(CNode::STATE_CONNECTING);
     assert(node.state.load() == CNode::STATE_CONNECTING);
 
     // Transition to connected
