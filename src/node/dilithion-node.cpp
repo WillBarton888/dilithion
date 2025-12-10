@@ -1658,26 +1658,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Register version handler to automatically respond with version + verack
         // Bitcoin handshake: A->B: VERSION, B->A: VERSION + VERACK, A->B: VERACK
         message_processor.SetVersionHandler([](int peer_id, const NetProtocol::CVersionMessage& msg) {
-            // BUG #141 DEBUG: Confirm handler entry
-            std::cout << "[VERSION-HANDLER-1] ENTERED for peer " << peer_id << std::endl;
-            std::cout.flush();
             // BUG #62 FIX: Store peer's starting height for later header sync decision
-            std::cout << "[VERSION-HANDLER-2] headers=" << (g_node_context.headers_manager ? "Y" : "N") << std::endl; std::cout.flush();
             if (g_node_context.headers_manager) {
                 g_node_context.headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
-            }
-            std::cout << "[VERSION-HANDLER-3] After headers" << std::endl; std::cout.flush();
-
-            // Debug: Get CNode to check inbound status
-            CNode* node = nullptr;
-            bool is_inbound = false;
-            if (g_node_context.connman) {
-                std::cout << "[VERSION-HANDLER-4] Before GetNode" << std::endl; std::cout.flush();
-                node = g_node_context.connman->GetNode(peer_id);
-                std::cout << "[VERSION-HANDLER-5] After GetNode, node=" << (node ? "valid" : "null") << std::endl; std::cout.flush();
-                if (node) {
-                    is_inbound = node->fInbound;
-                }
             }
 
             // BUG #129 FIX: Only send VERSION for inbound connections (state < VERSION_SENT)
@@ -1685,15 +1668,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Sending VERSION again causes an infinite VERSION ping-pong loop
             auto peer = g_node_context.peer_manager->GetPeer(peer_id);
 
-            // Debug logging for handshake flow analysis
-            std::cout << "[P2P-DEBUG] VERSION handler: peer_id=" << peer_id
-                      << " inbound=" << (is_inbound ? "true" : "false")
-                      << " peer_state=" << (peer ? (int)peer->state : -1)
-                      << " peer_ip=" << (peer ? peer->addr.ToStringIP() : "null")
-                      << std::endl;
-
             if (peer && peer->state < CPeer::STATE_VERSION_SENT) {
-                // Create and send version message
+                // Create and send version message for inbound peer
                 NetProtocol::CAddress local_addr;
                 local_addr.services = NetProtocol::NODE_NETWORK;
                 local_addr.SetIPv4(0);  // 0.0.0.0
@@ -1701,40 +1677,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 CNetMessage version_msg = g_node_context.message_processor->CreateVersionMessage(peer->addr, local_addr);
                 if (g_node_context.connman) {
                     g_node_context.connman->PushMessage(peer_id, version_msg);
-                    // Update state after sending VERSION
                     peer->state = CPeer::STATE_VERSION_SENT;
-                    std::cout << "[P2P] SetVersionHandler: SendVersionMessage(" << peer_id << ") = SUCCESS (inbound connection)" << std::endl;
                 }
-            } else {
-                std::cout << "[P2P] SetVersionHandler: peer " << peer_id << " state=" << (peer ? (int)peer->state : -1)
-                          << " >= VERSION_SENT(3), only sending VERACK" << std::endl;
             }
 
             // Always send VERACK to acknowledge their VERSION
             if (g_node_context.connman && g_node_context.message_processor) {
                 CNetMessage verack_msg = g_node_context.message_processor->CreateVerackMessage();
                 g_node_context.connman->PushMessage(peer_id, verack_msg);
-                std::cout << "[P2P] SetVersionHandler: Sent VERACK to peer " << peer_id << std::endl;
             }
         });
 
         // Register verack handler to trigger IBD when handshake completes
         message_processor.SetVerackHandler([](int peer_id) {
-            // Debug: Get CNode to check inbound status
-            bool is_inbound = false;
-            if (g_node_context.connman) {
-                CNode* node = g_node_context.connman->GetNode(peer_id);
-                if (node) {
-                    is_inbound = node->fInbound;
-                }
-            }
-            auto peer = g_node_context.peer_manager->GetPeer(peer_id);
-            std::cout << "[P2P-DEBUG] VERACK handler: peer_id=" << peer_id
-                      << " inbound=" << (is_inbound ? "true" : "false")
-                      << " peer_state=" << (peer ? (int)peer->state : -1)
-                      << std::endl;
-
-            std::cout << "[P2P] Handshake complete with peer " << peer_id << std::endl;
+            LogPrintf(NET, INFO, "Handshake complete with peer %d\n", peer_id);
 
             // BUG #36 FIX: Register peer with BlockFetcher so it can download blocks
             if (g_node_context.block_fetcher) {
@@ -1746,14 +1702,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_context.peer_manager && g_node_context.headers_manager) {
                 int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
                 g_node_context.peer_manager->OnPeerHandshakeComplete(peer_id, peerHeight, false);
-                std::cout << "[P2P] Registered peer " << peer_id << " with CPeerManager (height=" << peerHeight << ")" << std::endl;
             }
 
             // Request addresses from peer (Bitcoin Core pattern for peer discovery)
             if (g_node_context.connman && g_node_context.message_processor) {
                 CNetMessage getaddr_msg = g_node_context.message_processor->CreateGetAddrMessage();
                 g_node_context.connman->PushMessage(peer_id, getaddr_msg);
-                std::cout << "[P2P] Sent GETADDR to peer " << peer_id << std::endl;
             }
 
             // Phase 5: Mark peer's address as "good" on successful handshake
@@ -1767,15 +1721,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // Check if headers_manager is initialized
             if (!g_node_context.headers_manager) {
-                std::cout << "[DEBUG] SetVerackHandler: headers_manager is NULL, skipping IBD" << std::endl;
                 return;
             }
 
             // BUG #62 FIX: Compare our height with peer's announced height
             int ourHeight = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
             int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
-
-            std::cout << "[IBD] SetVerackHandler: ourHeight=" << ourHeight << " peerHeight=" << peerHeight << std::endl;
 
             // Request headers if peer is ahead OR if we're at genesis
             if (peerHeight > ourHeight || ourHeight == 0) {
@@ -1785,10 +1736,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 } else {
                     ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
                 }
-                std::cout << "[IBD] Requesting headers from peer " << peer_id << " from block " << ourBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
                 g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
-            } else {
-                std::cout << "[IBD] Not requesting headers - peer not ahead (peer=" << peerHeight << " us=" << ourHeight << ")" << std::endl;
             }
         });
 

@@ -406,11 +406,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         }
 
         // Call handler
-        std::cout << "[DEBUG] About to call on_version for peer " << peer_id << std::endl;
-        std::cout.flush();
         on_version(peer_id, msg);
-        std::cout << "[DEBUG] on_version returned for peer " << peer_id << std::endl;
-        std::cout.flush();
 
         return true;
     } catch (const std::out_of_range& e) {
