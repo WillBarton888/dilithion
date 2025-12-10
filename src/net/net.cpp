@@ -1877,76 +1877,88 @@ bool CConnectionManager::SendMessage(int peer_id, const CNetMessage& message) {
 void CConnectionManager::ReceiveMessages(int peer_id) {
     // BUG #45 FIX: Properly handle partial reads on non-blocking sockets
     // Previous code discarded partial data, causing stream misalignment
-
-    // Step 1: Read available data from socket into temporary buffer
-    uint8_t temp_buf[4096];
-    int received = 0;
-
-    {
-        std::lock_guard<std::mutex> lock(cs_sockets);
-        auto it = peer_sockets.find(peer_id);
-        if (it == peer_sockets.end() || !it->second || !it->second->IsValid()) {
-            return;  // Socket not found - normal, skip silently
-        }
-
-        received = it->second->Recv(temp_buf, sizeof(temp_buf));
-    }
-
-    // BUG #66 FIX: Properly handle recv() return values
-    // recv() == 0: Connection closed gracefully (EOF) - MUST disconnect
-    // recv() < 0 && EAGAIN/EWOULDBLOCK: No data available (normal for non-blocking)
-    // recv() < 0 && other error: Socket error - should disconnect
-    if (received == 0) {
-        // Connection closed gracefully by remote peer
-        // Network: Record connection failure
-        connection_quality.RecordError(peer_id);
-        partition_detector.RecordConnectionFailure();
-        DisconnectPeer(peer_id, "connection closed by peer");
-        return;
-    }
-
-    if (received < 0) {
-        // Check if it's just "no data available" (normal for non-blocking)
-#ifdef _WIN32
-        int err = WSAGetLastError();
-        if (err == WSAEWOULDBLOCK) {
-            return;  // No data available, normal for non-blocking
-        }
-#else
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return;  // No data available, normal for non-blocking
-        }
-#endif
-        // Real socket error - disconnect
-        // Network: Record connection failure
-#ifdef _WIN32
-        std::cout << "[P2P] DEBUG: Socket receive error for peer " << peer_id
-                  << ", WSAGetLastError=" << err << std::endl;
-#endif
-        connection_quality.RecordError(peer_id);
-        partition_detector.RecordConnectionFailure();
-        DisconnectPeer(peer_id, "socket receive error");
-        return;
-    }
-
-    // Step 2: Append received data to peer's receive buffer
-    {
-        std::lock_guard<std::mutex> lock(cs_recv_buffers);
-        auto& buffer = peer_recv_buffers[peer_id];
-        buffer.insert(buffer.end(), temp_buf, temp_buf + received);
-
-        // Limit buffer size to prevent memory exhaustion attacks
-        if (buffer.size() > NetProtocol::MAX_MESSAGE_SIZE * 2) {
-            std::cout << "[P2P] ERROR: Receive buffer overflow for peer " << peer_id
-                      << " (" << buffer.size() << " bytes), disconnecting" << std::endl;
-            buffer.clear();
-            DisconnectPeer(peer_id, "receive buffer overflow");
-            return;
-        }
-    }
+    // BUG #134 FIX: Continue reading from socket in processing loop to catch
+    // rapid message exchanges (e.g., VERSION -> VERACK handshake)
 
     // Step 3: Try to extract and process complete messages from buffer
+    // Also read from socket continuously to catch messages arriving during processing
     while (true) {
+        // Step 1: Read available data from socket into temporary buffer
+        // This happens in the loop to catch messages arriving during processing
+        uint8_t temp_buf[4096];
+        int received = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(cs_sockets);
+            auto it = peer_sockets.find(peer_id);
+            if (it == peer_sockets.end() || !it->second || !it->second->IsValid()) {
+                return;  // Socket not found - normal, skip silently
+            }
+
+            received = it->second->Recv(temp_buf, sizeof(temp_buf));
+        }
+
+        // BUG #66 FIX: Properly handle recv() return values
+        // recv() == 0: Connection closed gracefully (EOF) - MUST disconnect
+        // recv() < 0 && EAGAIN/EWOULDBLOCK: No data available (normal for non-blocking)
+        // recv() < 0 && other error: Socket error - should disconnect
+        if (received == 0) {
+            // Connection closed gracefully by remote peer
+            // Network: Record connection failure
+            connection_quality.RecordError(peer_id);
+            partition_detector.RecordConnectionFailure();
+            DisconnectPeer(peer_id, "connection closed by peer");
+            return;
+        }
+
+        if (received < 0) {
+            // Check if it's just "no data available" (normal for non-blocking)
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK) {
+                // No data available - continue to process any messages already in buffer
+                // Don't return immediately, as there might be messages in buffer to process
+                received = 0;  // Mark as no new data
+            } else {
+                // Real socket error - disconnect
+                connection_quality.RecordError(peer_id);
+                partition_detector.RecordConnectionFailure();
+                DisconnectPeer(peer_id, "socket receive error");
+                return;
+            }
+#else
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // No data available - continue to process any messages already in buffer
+                received = 0;  // Mark as no new data
+            } else {
+                // Real socket error - disconnect
+                connection_quality.RecordError(peer_id);
+                partition_detector.RecordConnectionFailure();
+                DisconnectPeer(peer_id, "socket receive error");
+                return;
+            }
+#endif
+        }
+
+        // Step 2: Append received data to peer's receive buffer (if any)
+        if (received > 0) {
+            {
+                std::lock_guard<std::mutex> lock(cs_recv_buffers);
+                auto& buffer = peer_recv_buffers[peer_id];
+                buffer.insert(buffer.end(), temp_buf, temp_buf + received);
+
+                // Limit buffer size to prevent memory exhaustion attacks
+                if (buffer.size() > NetProtocol::MAX_MESSAGE_SIZE * 2) {
+                    std::cout << "[P2P] ERROR: Receive buffer overflow for peer " << peer_id
+                              << " (" << buffer.size() << " bytes), disconnecting" << std::endl;
+                    buffer.clear();
+                    DisconnectPeer(peer_id, "receive buffer overflow");
+                    return;
+                }
+            }
+        }
+
+        // Step 3: Try to extract and process complete messages from buffer
         std::vector<uint8_t> buffer_copy;
 
         {
