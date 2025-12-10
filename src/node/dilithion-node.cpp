@@ -1690,46 +1690,72 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register verack handler to trigger IBD when handshake completes
         message_processor.SetVerackHandler([](int peer_id) {
+            std::cout << "[VERACK-CB] START peer=" << peer_id << std::endl;
+            std::cout.flush();
             LogPrintf(NET, INFO, "Handshake complete with peer %d\n", peer_id);
 
             // BUG #36 FIX: Register peer with BlockFetcher so it can download blocks
+            std::cout << "[VERACK-CB] step 1: BlockFetcher..." << std::endl;
+            std::cout.flush();
             if (g_node_context.block_fetcher) {
                 g_node_context.block_fetcher->OnPeerConnected(peer_id);
             }
+            std::cout << "[VERACK-CB] step 1 done" << std::endl;
+            std::cout.flush();
 
             // Phase C FIX: Notify CPeerManager of handshake completion
             // This is CRITICAL for IsPeerSuitableForDownload() to return true
+            std::cout << "[VERACK-CB] step 2: OnPeerHandshakeComplete..." << std::endl;
+            std::cout.flush();
             if (g_node_context.peer_manager && g_node_context.headers_manager) {
                 int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
                 g_node_context.peer_manager->OnPeerHandshakeComplete(peer_id, peerHeight, false);
             }
+            std::cout << "[VERACK-CB] step 2 done" << std::endl;
+            std::cout.flush();
 
             // Request addresses from peer (Bitcoin Core pattern for peer discovery)
+            std::cout << "[VERACK-CB] step 3: PushMessage GETADDR..." << std::endl;
+            std::cout.flush();
             if (g_node_context.connman && g_node_context.message_processor) {
                 CNetMessage getaddr_msg = g_node_context.message_processor->CreateGetAddrMessage();
                 g_node_context.connman->PushMessage(peer_id, getaddr_msg);
             }
+            std::cout << "[VERACK-CB] step 3 done" << std::endl;
+            std::cout.flush();
 
             // Phase 5: Mark peer's address as "good" on successful handshake
             // This moves the address from "new" to "tried" table in AddrMan
+            std::cout << "[VERACK-CB] step 4: MarkAddressGood..." << std::endl;
+            std::cout.flush();
             if (g_node_context.peer_manager) {
                 auto peer = g_node_context.peer_manager->GetPeer(peer_id);
                 if (peer && peer->addr.IsRoutable()) {
                     g_node_context.peer_manager->MarkAddressGood(peer->addr);
                 }
             }
+            std::cout << "[VERACK-CB] step 4 done" << std::endl;
+            std::cout.flush();
 
             // Check if headers_manager is initialized
             if (!g_node_context.headers_manager) {
+                std::cout << "[VERACK-CB] RETURN (no headers_manager)" << std::endl;
+                std::cout.flush();
                 return;
             }
 
             // BUG #62 FIX: Compare our height with peer's announced height
+            std::cout << "[VERACK-CB] step 5: check heights..." << std::endl;
+            std::cout.flush();
             int ourHeight = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
             int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
+            std::cout << "[VERACK-CB] ourHeight=" << ourHeight << " peerHeight=" << peerHeight << std::endl;
+            std::cout.flush();
 
             // Request headers if peer is ahead OR if we're at genesis
             if (peerHeight > ourHeight || ourHeight == 0) {
+                std::cout << "[VERACK-CB] step 6: RequestHeaders..." << std::endl;
+                std::cout.flush();
                 uint256 ourBestBlock;
                 if (g_chainstate.GetTip()) {
                     ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
@@ -1737,7 +1763,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
                 }
                 g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
+                std::cout << "[VERACK-CB] step 6 done" << std::endl;
+                std::cout.flush();
             }
+            std::cout << "[VERACK-CB] END" << std::endl;
+            std::cout.flush();
         });
 
         // Register ping handler to automatically respond with pong
