@@ -1880,6 +1880,10 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
     // BUG #134 FIX: Continue reading from socket in processing loop to catch
     // rapid message exchanges (e.g., VERSION -> VERACK handshake)
 
+    // Track consecutive empty reads to avoid infinite loops
+    int consecutive_empty_reads = 0;
+    const int MAX_CONSECUTIVE_EMPTY_READS = 3;  // Try 3 times before giving up
+
     // Step 3: Try to extract and process complete messages from buffer
     // Also read from socket continuously to catch messages arriving during processing
     while (true) {
@@ -1967,8 +1971,28 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
 
             // Need at least 24 bytes for header
             if (buffer.size() < 24) {
-                return;  // Not enough data yet, wait for more
+                // BUG #134 FIX: Don't return immediately - continue loop to read from socket again
+                // VERACK might arrive while we're processing VERSION, so we need to keep trying
+                // Only return if we've tried reading multiple times with no data
+                if (received <= 0) {
+                    consecutive_empty_reads++;
+                    if (consecutive_empty_reads >= MAX_CONSECUTIVE_EMPTY_READS) {
+                        // We've tried reading multiple times with no data - safe to return
+                        // Next ReceiveMessages() call (50ms later) will try again
+                        return;
+                    }
+                    // Try reading again in next loop iteration
+                    continue;
+                }
+                // Reset counter if we received data
+                consecutive_empty_reads = 0;
+                // If we received data but buffer is still < 24, continue loop to process it
+                // This handles partial message reads
+                continue;
             }
+            
+            // Reset counter when we have data to process
+            consecutive_empty_reads = 0;
 
             buffer_copy = buffer;  // Work with copy to avoid holding lock
         }
@@ -2010,8 +2034,27 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
 
         // Check if we have the complete message
         if (buffer_copy.size() < total_size) {
-            return;  // Not enough data yet, wait for more
+            // BUG #134 FIX: Don't return immediately - continue loop to read from socket again
+            // Partial message - we need more data. Continue loop to read more from socket.
+            // Only return if we've tried reading multiple times with no data
+            if (received <= 0) {
+                consecutive_empty_reads++;
+                if (consecutive_empty_reads >= MAX_CONSECUTIVE_EMPTY_READS) {
+                    // We've tried reading multiple times with no data - safe to return
+                    // Next ReceiveMessages() call will try again
+                    return;
+                }
+                // Try reading again in next loop iteration
+                continue;
+            }
+            // Reset counter if we received data
+            consecutive_empty_reads = 0;
+            // If we received data but message is still incomplete, continue loop to read more
+            continue;
         }
+        
+        // Reset counter when processing a complete message
+        consecutive_empty_reads = 0;
 
         // Extract payload if present
         if (message.header.payload_size > 0) {
