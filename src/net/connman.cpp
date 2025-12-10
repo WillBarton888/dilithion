@@ -846,8 +846,15 @@ void CConnman::SocketHandler() {
                                 CNetMessage version_msg = m_msg_processor->CreateVersionMessage(node->addr, local_addr);
                                 PushMessage(node.get(), version_msg);
                                 node->fVersionSent.store(true);
-                                std::cout << "[CONNECT-DEBUG] Sent VERSION after connect to node " << node->id << std::endl;
-                                std::cout.flush();
+
+                                // BUG #142 FIX: Update CPeer state to VERSION_SENT
+                                // ProcessVerackMessage checks peer->state, not node->fVersionSent
+                                if (m_peer_manager) {
+                                    auto peer = m_peer_manager->GetPeer(node->id);
+                                    if (peer) {
+                                        peer->state = CPeer::STATE_VERSION_SENT;
+                                    }
+                                }
                             }
                         }
                     } else {
