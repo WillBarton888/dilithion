@@ -1672,7 +1672,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             CNode* node = nullptr;
             bool is_inbound = false;
             if (g_node_context.connman) {
+                std::cout << "[VERSION-HANDLER-4] Before GetNode" << std::endl; std::cout.flush();
                 node = g_node_context.connman->GetNode(peer_id);
+                std::cout << "[VERSION-HANDLER-5] After GetNode, node=" << (node ? "valid" : "null") << std::endl; std::cout.flush();
                 if (node) {
                     is_inbound = node->fInbound;
                 }

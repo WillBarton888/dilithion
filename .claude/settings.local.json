@@ -252,7 +252,15 @@
       "Bash(ssh root@188.166.255.63 \"rm -f /root/.dilithion-testnet/blocks/LOCK /root/.dilithion-testnet/chainstate/LOCK 2>/dev/null; cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
       "Bash(ssh root@209.97.177.197 \"rm -f /root/.dilithion-testnet/blocks/LOCK /root/.dilithion-testnet/chainstate/LOCK 2>/dev/null; cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
       "Bash(ssh root@134.122.4.164:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(ssh root@209.97.177.197 \"cd /root/dilithion && rm -f src/compat/mingw_c11_compat.h src/compat/mingw_compat.h src/util/compat.h && git checkout . && git pull && make clean && make -j4 dilithion-node 2>&1 | tail -10\")",
+      "Bash(ssh root@134.122.4.164 \"pkill -9 dilithion-node 2>/dev/null; cd /root/dilithion && git pull && make -j4 dilithion-node 2>&1 | tail -5\")",
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion-node 2>/dev/null; cd /root/dilithion && git pull && make -j4 dilithion-node 2>&1 | tail -5\")",
+      "Bash(ssh root@134.122.4.164 \"cd /root/dilithion && rm -rf releases/ && rm -f src/compat/mingw_c11_compat.h src/compat/mingw_compat.h src/util/compat.h && git checkout . && git pull && make -j4 dilithion-node 2>&1 | tail -5\")",
+      "Bash(ssh root@188.166.255.63 \"cd /root/dilithion && rm -f src/compat/mingw_c11_compat.h src/compat/mingw_compat.h src/util/compat.h && git checkout . && git pull && make -j4 dilithion-node 2>&1 | tail -5\")",
+      "Bash(ssh root@209.97.177.197 \"cd /root/dilithion && rm -f src/compat/mingw_c11_compat.h src/compat/mingw_compat.h src/util/compat.h && git checkout . && git pull && make -j4 dilithion-node 2>&1 | tail -5\")",
+      "Bash(ssh root@209.97.177.197:*)",
+      "Bash(ssh root@188.166.255.63 \"rm -f /root/.dilithion-testnet/blocks/LOCK /root/.dilithion-testnet/*.LOCK; cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")"
     ],
     "deny": [],
     "ask": []
