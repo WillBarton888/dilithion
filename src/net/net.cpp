@@ -434,6 +434,7 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
 
     if (peer->state == CPeer::STATE_VERSION_SENT) {
         peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
+        std::cout << "[BUG-146-DEBUG] peer " << peer_id << " state changed to " << (int)peer->state << std::endl;
         g_network_stats.handshake_complete++;
 
         // FIX Issue 2: Also update CNode::state to keep in sync with CPeer::state

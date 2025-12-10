@@ -988,17 +988,20 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
 
         // Must have completed handshake
         if (!peer->IsHandshakeComplete()) {
+            std::cout << "[BUG-146-DEBUG] peer " << pair.first << " state=" << (int)peer->state << " NOT handshake complete" << std::endl;
             continue;
         }
 
         // Must be suitable for download (not stalling too much)
         if (!peer->IsSuitableForDownload()) {
+            std::cout << "[BUG-146-DEBUG] peer " << pair.first << " NOT suitable for download" << std::endl;
             continue;
         }
 
         result.push_back(pair.first);
     }
 
+    std::cout << "[BUG-146-DEBUG] GetValidPeersForDownload returning " << result.size() << " peers" << std::endl;
     return result;
 }
 
