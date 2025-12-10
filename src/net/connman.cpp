@@ -723,13 +723,28 @@ void CConnman::SocketHandler() {
     }
 
     // Handle listen socket (new connections)
+    // BUG #137 FIX: Loop to accept ALL pending connections, not just one
+    // Multiple connections can arrive between select() calls
     if (m_listen_socket >= 0 && recv_set.count(m_listen_socket)) {
-        // Phase 2: Accept new connection
-        struct sockaddr_in client_addr;
-        socklen_t addr_len = sizeof(client_addr);
-        
-        int client_fd = accept(m_listen_socket, (struct sockaddr*)&client_addr, &addr_len);
-        if (client_fd >= 0) {
+        while (true) {
+            struct sockaddr_in client_addr;
+            socklen_t addr_len = sizeof(client_addr);
+
+            int client_fd = accept(m_listen_socket, (struct sockaddr*)&client_addr, &addr_len);
+            if (client_fd < 0) {
+#ifdef _WIN32
+                int err = WSAGetLastError();
+                if (err != WSAEWOULDBLOCK) {
+                    LogPrintf(NET, ERROR, "[CConnman] Accept failed: %d\n", err);
+                }
+#else
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    LogPrintf(NET, ERROR, "[CConnman] Accept failed: %d\n", errno);
+                }
+#endif
+                break;  // No more pending connections
+            }
+
             // Set non-blocking
 #ifdef _WIN32
             u_long mode = 1;
@@ -755,12 +770,6 @@ void CConnman::SocketHandler() {
             addr.port = port;
             addr.services = NetProtocol::NODE_NETWORK;
 
-            // Create CSocket wrapper for the accepted connection
-            auto client_socket = std::make_unique<CSocket>();
-            // We need to set the FD directly - CSocket doesn't have a constructor that takes FD
-            // For now, we'll create the CNode and set the FD directly
-            // TODO: Add CSocket constructor that takes FD
-
             // Create CNode
             int node_id = m_next_node_id++;
             auto node = std::make_unique<CNode>(node_id, addr, true);  // true = inbound
@@ -776,26 +785,11 @@ void CConnman::SocketHandler() {
             }
 
             // Register with CPeerManager for state synchronization
-            // FIX Issue 1: Pass CNode pointer so CPeerManager can sync state
             m_peer_manager->RegisterNode(node_id, pnode, addr, true);
 
             LogPrintf(NET, INFO, "[CConnman] Accepted inbound connection from %s:%d (node %d)\n",
                       ip_str, port, node_id);
         }
-#ifdef _WIN32
-        else {
-            int err = WSAGetLastError();
-            if (err != WSAEWOULDBLOCK) {
-                LogPrintf(NET, ERROR, "[CConnman] Accept failed: %d\n", err);
-            }
-        }
-#else
-        else {
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                LogPrintf(NET, ERROR, "[CConnman] Accept failed: %d\n", errno);
-            }
-        }
-#endif
     }
 
     // Handle each node
