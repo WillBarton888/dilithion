@@ -3,11 +3,13 @@
 
 #include <net/headers_manager.h>
 #include <net/net.h>
+#include <net/connman.h>
 #include <net/protocol.h>
 #include <consensus/params.h>
 #include <consensus/pow.h>
 #include <util/time.h>
 #include <node/genesis.h>
+#include <core/node_context.h>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -342,17 +344,16 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 
     // Send message (no locks held - safe for network I/O)
-    // P0-5 FIX: Use .load() for atomic pointers
-    auto* conn_mgr = g_connection_manager.load();
+    // BUG #143 FIX: Use g_node_context.connman instead of deprecated g_connection_manager
+    auto* connman = g_node_context.connman.get();
     auto* msg_proc = g_message_processor.load();
-    if (conn_mgr && msg_proc) {
+    if (connman && msg_proc) {
         NetProtocol::CGetHeadersMessage msg(locator, uint256());
         CNetMessage getheaders = msg_proc->CreateGetHeadersMessage(msg);
-        bool sent = conn_mgr->SendMessage(peer, getheaders);
-        std::cout << "[IBD] RequestHeaders: SendMessage(" << peer << ") GETHEADERS = " 
-                  << (sent ? "SUCCESS" : "FAILED") << " (locator size=" << locator.size() << ")" << std::endl;
+        connman->PushMessage(peer, getheaders);
+        std::cout << "[IBD] RequestHeaders: PushMessage(" << peer << ") GETHEADERS (locator size=" << locator.size() << ")" << std::endl;
     } else {
-        std::cout << "[IBD] RequestHeaders: FAILED - conn_mgr=" << (conn_mgr ? "valid" : "null")
+        std::cout << "[IBD] RequestHeaders: FAILED - connman=" << (connman ? "valid" : "null")
                   << " msg_proc=" << (msg_proc ? "valid" : "null") << std::endl;
     }
 }
