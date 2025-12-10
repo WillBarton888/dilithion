@@ -3,6 +3,7 @@
 
 #include <core/node_context.h>
 #include <net/peers.h>
+#include <net/connman.h>  // Phase 2: For CConnman destructor
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
@@ -76,6 +77,12 @@ void NodeContext::Shutdown() {
         connection_manager = nullptr;
     }
 
+    // Phase 2: Stop CConnman
+    if (connman) {
+        connman->Stop();
+        connman.reset();
+    }
+
     if (message_processor) {
         message_processor = nullptr;
     }
@@ -108,6 +115,7 @@ void NodeContext::Reset() {
     chainstate = nullptr;
     peer_manager.reset();
     connection_manager = nullptr;
+    connman.reset();  // Phase 2: Reset CConnman
     message_processor = nullptr;
     headers_manager.reset();
     orphan_manager.reset();
