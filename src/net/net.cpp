@@ -1514,8 +1514,11 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
         }
     }
 
-    // Check if we already have a peer for this IP (prevents duplicate connections)
-    // Use state != STATE_DISCONNECTED to catch peers in any active state (connecting, connected, etc.)
+    // BUG #133 v3 FIX: Add peer in STATE_CONNECTING BEFORE Connect() to prevent race condition.
+    // The TOCTOU race was: check for peer -> Connect() blocks -> AcceptConnection adds peer -> AddPeer creates duplicate.
+    // Solution: Add peer first in CONNECTING state, so any AcceptConnection during Connect() sees it.
+    
+    // Check if we already have a peer for this IP
     auto existing_peers = peer_manager.GetAllPeers();
     for (const auto& existing_peer : existing_peers) {
         if (existing_peer->state != CPeer::STATE_DISCONNECTED) {
@@ -1532,23 +1535,30 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
         }
     }
 
+    // Add peer in STATE_CONNECTING BEFORE attempting connection
+    // This ensures AcceptConnection sees this peer during the Connect() window
+    auto peer = peer_manager.AddPeer(addr);
+    if (!peer) {
+        return -1;
+    }
+    peer->state = CPeer::STATE_CONNECTING;
+    peer->connect_time = GetTime();
+    
     // Create socket for outbound connection
     auto socket = std::make_unique<CSocket>();
 
-    // Connect to peer
+    // Connect to peer (may block during TCP handshake)
     if (!socket->Connect(ip_str, addr.port)) {
-        // Network: Record connection failure for partition detection
+        // Connection failed - clean up the peer we added
         partition_detector.RecordConnectionFailure();
+        peer->state = CPeer::STATE_DISCONNECTED;
         return -1;
     }
 
     // ANTI-SELF-CONNECTION: Check if we connected to our own listening socket
-    // This happens when a seed node tries to connect to itself via its external IP
     std::string local_addr = socket->GetLocalAddress();
     std::string peer_addr = socket->GetPeerAddress();
 
-    // If local and peer addresses are the same IP (different ports), we may have connected to ourselves
-    // Extract just the IP part (before the colon)
     std::string local_ip = local_addr.substr(0, local_addr.find(':'));
     std::string peer_ip = peer_addr.substr(0, peer_addr.find(':'));
 
@@ -1556,24 +1566,14 @@ int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
         std::cout << "[P2P] Detected self-connection: local=" << local_addr
                   << ", peer=" << peer_addr << " - disconnecting" << std::endl;
         socket->Close();
+        peer->state = CPeer::STATE_DISCONNECTED;
         return -1;
     }
 
-    // Set socket to non-blocking mode
+    // Connection successful - update peer state
     socket->SetNonBlocking(true);
-
-    // Set send timeout to prevent blocking on send (5 seconds)
     socket->SetSendTimeout(5000);
-
-    // Add peer
-    auto peer = peer_manager.AddPeer(addr);
-    if (!peer) {
-        socket->Close();
-        return -1;
-    }
-
     peer->state = CPeer::STATE_CONNECTED;
-    peer->connect_time = GetTime();
 
     // Store socket
     {
