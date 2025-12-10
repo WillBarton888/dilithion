@@ -1543,11 +1543,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         connman_opts.nMaxInbound = 117;
         connman_opts.nMaxTotal = 125;
         
-        if (!connman->Start(*g_node_context.peer_manager, message_processor, connman_opts)) {
-            std::cerr << "Failed to start CConnman" << std::endl;
-            return 1;
-        }
-        
+        // BUG #138 FIX: Set g_node_context pointers BEFORE starting threads
+        // This allows handlers to access connman immediately when messages arrive
+        // Start() is called AFTER handlers are registered (see below after SetHeadersHandler)
+
         // Set global pointers for transaction announcement (NW-005)
         // P0-5 FIX: Use .store() for atomic pointers
         g_message_processor.store(&message_processor);
@@ -2354,7 +2353,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         });
 
-        std::cout << "  [OK] P2P components ready (not started)" << std::endl;
+        // BUG #138 FIX: Start CConnman AFTER all handlers are registered
+        // This ensures no messages are processed before handlers are in place
+        if (!g_node_context.connman->Start(*g_node_context.peer_manager, message_processor, connman_opts)) {
+            std::cerr << "Failed to start CConnman" << std::endl;
+            return 1;
+        }
+
+        std::cout << "  [OK] P2P components ready and started" << std::endl;
 
         // Phase 3: Initialize mining controller
         std::cout << "Initializing mining controller..." << std::endl;
