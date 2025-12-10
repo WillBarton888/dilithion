@@ -264,7 +264,11 @@
       "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion-node 2>/dev/null; rm -f /root/.dilithion-testnet/*/LOCK /root/.dilithion-testnet/*.LOCK; cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
       "Bash(ssh root@188.166.255.63 \"tail -50 /root/node.log | grep -E ''(VERSION|VERACK|SetVersionHandler|on_version)''\")",
       "Bash(ssh root@188.166.255.63 \"tail -100 /root/node.log | grep -E ''(height|block|sync|header|IBD|chain)'' | tail -20\")",
-      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion-node; cd /root/dilithion && git pull && make -j4 dilithion-node 2>&1 | tail -3 && rm -f /root/.dilithion-testnet/*/LOCK && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")"
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion-node; cd /root/dilithion && git pull && make -j4 dilithion-node 2>&1 | tail -3 && rm -f /root/.dilithion-testnet/*/LOCK && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@188.166.255.63 \"grep -E ''(Handshake complete|RequestHeaders|GETHEADERS|PushMessage|verack|VERSION)'' /root/node.log | tail -20\")",
+      "Bash(ssh root@134.122.4.164 \"grep -E ''(VERSION|VERACK|Handshake|verack)'' /root/node.log | tail -20\")",
+      "Bash(ssh root@188.166.255.63 \"grep ''Best block'' /root/node.log | tail -1\")",
+      "Bash(ssh root@188.166.255.63:*)"
     ],
     "deny": [],
     "ask": []

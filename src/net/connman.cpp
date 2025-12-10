@@ -521,11 +521,21 @@ void CConnman::ThreadMessageHandler() {
         // Phase 1: Collect messages while holding cs_vNodes (short lock duration)
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
+            // BUG #144 DEBUG: Log m_nodes size when collecting messages
+            if (!m_nodes.empty()) {
+                static int debug_counter = 0;
+                if (++debug_counter % 100 == 1) {  // Log every 100th iteration
+                    std::cout << "[TMH-DEBUG] Checking " << m_nodes.size() << " nodes for messages" << std::endl;
+                }
+            }
             for (auto& node : m_nodes) {
                 if (node->fDisconnect.load()) continue;
 
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
+                    // BUG #144 DEBUG: Log when message is collected
+                    std::cout << "[TMH-DEBUG] Collected message '" << processed_msg.command
+                              << "' from node " << node->id << std::endl;
                     pending_messages.push_back({node->id, std::move(processed_msg)});
 
                     // Limit messages collected per iteration to prevent unbounded growth
