@@ -846,6 +846,7 @@ void CConnman::SocketHandler() {
                                 CNetMessage version_msg = m_msg_processor->CreateVersionMessage(node->addr, local_addr);
                                 PushMessage(node.get(), version_msg);
                                 node->fVersionSent.store(true);
+                                LogPrintf(NET, INFO, "[CConnman] Sent VERSION to node %d after connect\n", node->id);
 
                                 // BUG #142 FIX: Update CPeer state to VERSION_SENT
                                 // ProcessVerackMessage checks peer->state, not node->fVersionSent
@@ -855,6 +856,8 @@ void CConnman::SocketHandler() {
                                         peer->state = CPeer::STATE_VERSION_SENT;
                                     }
                                 }
+                            } else {
+                                LogPrintf(NET, WARN, "[CConnman] Cannot send VERSION to node %d - m_msg_processor is null\n", node->id);
                             }
                         }
                     } else {
