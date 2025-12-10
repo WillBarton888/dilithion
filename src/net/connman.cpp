@@ -32,6 +32,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <ifaddrs.h>
 #endif
 
 // Socket timeout for select() in milliseconds
@@ -52,6 +53,50 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
     // Reset interrupt flags
     interruptNet.store(false);
     flagInterruptMsgProc.store(false);
+
+    // Detect local addresses for self-connection prevention
+    {
+        std::lock_guard<std::mutex> lock(cs_localAddresses);
+        m_localAddresses.insert("127.0.0.1");
+        m_localAddresses.insert("0.0.0.0");
+
+#ifdef _WIN32
+        // Windows: Use gethostname + getaddrinfo
+        char hostname[256];
+        if (gethostname(hostname, sizeof(hostname)) == 0) {
+            struct addrinfo hints, *res, *p;
+            memset(&hints, 0, sizeof(hints));
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
+                for (p = res; p != nullptr; p = p->ai_next) {
+                    struct sockaddr_in* ipv4 = (struct sockaddr_in*)p->ai_addr;
+                    char ip_str[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str));
+                    m_localAddresses.insert(ip_str);
+                    LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                }
+                freeaddrinfo(res);
+            }
+        }
+#else
+        // Linux/macOS: Use getifaddrs
+        struct ifaddrs *ifaddr, *ifa;
+        if (getifaddrs(&ifaddr) == 0) {
+            for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+                if (ifa->ifa_addr == nullptr) continue;
+                if (ifa->ifa_addr->sa_family == AF_INET) {
+                    struct sockaddr_in* ipv4 = (struct sockaddr_in*)ifa->ifa_addr;
+                    char ip_str[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str));
+                    m_localAddresses.insert(ip_str);
+                    LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                }
+            }
+            freeifaddrs(ifaddr);
+        }
+#endif
+    }
 
     // Phase 2: Create listen socket if fListen
     if (m_options.fListen) {
@@ -193,6 +238,21 @@ void CConnman::Interrupt() {
 
 CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     // Phase 2: Implement outbound connection
+
+    // Extract IP string from address (needed for logging and self-connection check)
+    std::string ip_str = strprintf("%d.%d.%d.%d",
+                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
+
+    // Prevent self-connection: check if target is our own listen address
+    if (m_options.fListen && addr.port == m_options.nListenPort) {
+        // Check if connecting to our own IP (or localhost)
+        if (IsOurAddress(addr)) {
+            LogPrintf(NET, WARN, "[CConnman] Preventing self-connection to %s:%d\n",
+                      ip_str.c_str(), addr.port);
+            return nullptr;
+        }
+    }
+
     // Check connection limits
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
@@ -208,10 +268,6 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
             return nullptr;
         }
     }
-
-    // Extract IP string from address
-    std::string ip_str = strprintf("%d.%d.%d.%d",
-                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
 
     // Create socket
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -588,6 +644,12 @@ void CConnman::ThreadOpenConnections() {
             CNode* pnode = ConnectNode(addr);
             if (pnode) {
                 int peer_id = pnode->id;
+
+                // Debug: Log outbound connection state before VERSION
+                auto peer = m_peer_manager->GetPeer(peer_id);
+                LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: node %d initial state=%d (outbound to %s)\n",
+                          peer_id, peer ? (int)peer->state : -1, ip_str.c_str());
+
                 // Send VERSION message for outbound connection
                 NetProtocol::CAddress local_addr;
                 local_addr.services = NetProtocol::NODE_NETWORK;
@@ -597,9 +659,9 @@ void CConnman::ThreadOpenConnections() {
                 PushMessage(peer_id, version_msg);
 
                 // Update peer state to VERSION_SENT for outbound connections
-                auto peer = m_peer_manager->GetPeer(peer_id);
                 if (peer) {
                     peer->state = CPeer::STATE_VERSION_SENT;
+                    LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: node %d state set to VERSION_SENT(3) after sending VERSION\n", peer_id);
                 }
 
                 LogPrintf(NET, INFO, "[CConnman] Connected to %s (node %d)\n", ip_str.c_str(), peer_id);
@@ -626,15 +688,27 @@ void CConnman::SocketHandler() {
         for (const auto& node : m_nodes) {
             int sock = node->GetSocket();
             if (sock < 0) continue;
-            if (node->fDisconnect.load()) continue;
+            if (node->fDisconnect.load()) {
+                LogPrintf(NET, DEBUG, "[CConnman] Node %d marked for disconnect, skipping\n", node->id);
+                continue;
+            }
 
             recv_set.insert(sock);
             // Add to send_set if: has messages to send OR connection is in progress
             // For non-blocking connect(), writability indicates connection completed
-            if (node->HasSendMsgs() || node->state.load() == CNode::STATE_CONNECTING) {
+            int node_state = node->state.load();
+            bool has_send = node->HasSendMsgs();
+            if (has_send || node_state == CNode::STATE_CONNECTING) {
                 send_set.insert(sock);
             }
             error_set.insert(sock);
+
+            // Debug: Log each node's state periodically (every 100th call)
+            static int call_count = 0;
+            if (++call_count % 100 == 0) {
+                LogPrintf(NET, DEBUG, "[CConnman] SocketHandler: node %d state=%d has_send=%d sock=%d\n",
+                          node->id, node_state, has_send, sock);
+            }
         }
     }
 
@@ -864,6 +938,7 @@ bool CConnman::ReceiveMsgBytes(CNode* pnode) {
         if (err == WSAEWOULDBLOCK) {
             return true;  // No data, but socket OK
         }
+        LogPrintf(NET, DEBUG, "[CConnman] recv() error on node %d: %d\n", pnode->id, err);
         return false;  // Real error
     }
 #else
@@ -872,13 +947,19 @@ bool CConnman::ReceiveMsgBytes(CNode* pnode) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return true;  // No data, but socket OK
         }
+        LogPrintf(NET, DEBUG, "[CConnman] recv() error on node %d: errno=%d\n", pnode->id, errno);
         return false;  // Real error
     }
 #endif
 
     if (nBytes == 0) {
+        LogPrintf(NET, INFO, "[CConnman] Connection closed by peer (node %d)\n", pnode->id);
         return false;  // Connection closed
     }
+
+    // Log received bytes
+    LogPrintf(NET, DEBUG, "[CConnman] Received %d bytes from node %d (total recv: %zu)\n",
+              nBytes, pnode->id, pnode->nRecvBytes.load() + nBytes);
 
     // Append to node's receive buffer
     pnode->AppendRecvBytes(buf, nBytes);
@@ -1047,4 +1128,19 @@ void CConnman::DisconnectNodes() {
             ++it;
         }
     }
+}
+
+bool CConnman::IsOurAddress(const NetProtocol::CAddress& addr) const {
+    // Extract IP string from address
+    std::string ip_str = strprintf("%d.%d.%d.%d",
+                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
+
+    // Check localhost variants
+    if (ip_str == "127.0.0.1" || ip_str == "0.0.0.0") {
+        return true;
+    }
+
+    // Check against known local addresses
+    std::lock_guard<std::mutex> lock(cs_localAddresses);
+    return m_localAddresses.count(ip_str) > 0;
 }

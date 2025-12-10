@@ -243,6 +243,13 @@ private:
      */
     void DisconnectNodes();
 
+    /**
+     * Check if an address is our own (for self-connection prevention)
+     * @param addr Address to check
+     * @return true if this is our own address
+     */
+    bool IsOurAddress(const NetProtocol::CAddress& addr) const;
+
     //
     // Node management
     //
@@ -276,6 +283,10 @@ private:
     //
 
     CConnmanOptions m_options;
+
+    // Local addresses (for self-connection prevention)
+    mutable std::mutex cs_localAddresses;
+    std::set<std::string> m_localAddresses;
 
     //
     // External references (set in Start())
