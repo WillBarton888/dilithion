@@ -93,6 +93,7 @@ public:
     std::atomic<State> state{STATE_DISCONNECTED};
     std::atomic<bool> fDisconnect{false};   // Set to trigger disconnect
     std::atomic<bool> fSuccessfullyConnected{false};  // Handshake complete
+    std::atomic<bool> fVersionSent{false};  // VERSION message sent (BUG #139)
 
     //
     // Protocol state

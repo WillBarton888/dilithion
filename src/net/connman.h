@@ -150,6 +150,11 @@ public:
      */
     void PushMessage(int nodeid, const class CNetMessage& msg);
 
+    /**
+     * Push CNetMessage by node pointer
+     */
+    void PushMessage(CNode* pnode, const class CNetMessage& msg);
+
     //
     // Message handler registration
     //

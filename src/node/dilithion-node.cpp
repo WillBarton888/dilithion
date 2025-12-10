@@ -96,31 +96,21 @@ extern CChainState g_chainstate;
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 extern NodeContext g_node_context;
 
-// Phase 5: Helper function to connect to a peer and send VERSION message (for outbound connections)
+// Phase 5: Helper function to connect to a peer (for outbound connections)
+// BUG #139 FIX: Don't send VERSION here - SocketHandler will send it
+// after connection completes (STATE_CONNECTING -> STATE_CONNECTED)
 // Can be called from any thread since it uses g_node_context
 static int ConnectAndHandshake(const NetProtocol::CAddress& addr) {
-    if (!g_node_context.connman || !g_node_context.message_processor || !g_node_context.peer_manager) {
+    if (!g_node_context.connman || !g_node_context.peer_manager) {
         return -1;
     }
     CNode* pnode = g_node_context.connman->ConnectNode(addr);
     if (!pnode) {
         return -1;
     }
-    int peer_id = pnode->id;
-    // Send VERSION message for outbound connection
-    NetProtocol::CAddress local_addr;
-    local_addr.services = NetProtocol::NODE_NETWORK;
-    local_addr.SetIPv4(0);  // 0.0.0.0
-    local_addr.port = 0;
-    CNetMessage version_msg = g_node_context.message_processor->CreateVersionMessage(addr, local_addr);
-    g_node_context.connman->PushMessage(peer_id, version_msg);
-    // Update peer state to VERSION_SENT for outbound connections
-    // This prevents the version handler from sending VERSION again
-    auto peer = g_node_context.peer_manager->GetPeer(peer_id);
-    if (peer) {
-        peer->state = CPeer::STATE_VERSION_SENT;
-    }
-    return peer_id;
+    // BUG #139: Don't send VERSION here - connection is still in progress
+    // SocketHandler will detect connection completion and send VERSION
+    return pnode->id;
 }
 
 // Global node state for signal handling (defined in src/core/globals.cpp)
@@ -2894,8 +2884,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Phase 5: Use CConnman to connect and send VERSION
                     int peer_id = ConnectAndHandshake(addr);
                     if (peer_id >= 0) {
-                        std::cout << "    [OK] Connected to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
-                        std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
+                        std::cout << "    [OK] Initiated connection to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
+                        std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
                     } else {
                         std::cout << "    [FAIL] Failed to connect to " << node_addr << std::endl;
                     }
@@ -2946,11 +2936,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                     addr.SetIPv4(ip_addr);
 
-                    // Phase 5: Use CConnman to connect and send VERSION
+                    // Phase 5: Use CConnman to initiate connection
                     int peer_id = ConnectAndHandshake(addr);
                     if (peer_id >= 0) {
                         std::cout << "    [OK] Added node " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
-                        std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
+                        std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
                     } else {
                         std::cout << "    [FAIL] Failed to add node " << node_addr << std::endl;
                     }
@@ -2972,11 +2962,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 std::cout << "  Connecting to " << ip_str << ":" << port << "..." << std::endl;
 
-                // Phase 5: Use CConnman to connect and send VERSION
+                // Phase 5: Use CConnman to initiate connection
                 int peer_id = ConnectAndHandshake(seed_addr);
                 if (peer_id >= 0) {
                     std::cout << "    [OK] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
-                    std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
+                    std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
                 } else {
                     std::cout << "    [FAIL] Failed to connect to " << ip_str << ":" << port << std::endl;
                 }

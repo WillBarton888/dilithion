@@ -476,6 +476,15 @@ void CConnman::PushMessage(int nodeid, const CNetMessage& msg) {
     PushMessage(nodeid, std::move(serialized));
 }
 
+void CConnman::PushMessage(CNode* pnode, const CNetMessage& msg) {
+    if (!pnode) return;
+    // Convert CNetMessage to CSerializedNetMsg
+    std::string command = msg.header.GetCommand();
+    std::vector<uint8_t> data = msg.Serialize();
+    CSerializedNetMsg serialized(std::move(command), std::move(data));
+    PushMessage(pnode, std::move(serialized));
+}
+
 void CConnman::WakeMessageHandler() {
     {
         std::lock_guard<std::mutex> lock(mutexMsgProc);
@@ -643,28 +652,10 @@ void CConnman::ThreadOpenConnections() {
             // Attempt connection
             CNode* pnode = ConnectNode(addr);
             if (pnode) {
-                int peer_id = pnode->id;
-
-                // Debug: Log outbound connection state before VERSION
-                auto peer = m_peer_manager->GetPeer(peer_id);
-                LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: node %d initial state=%d (outbound to %s)\n",
-                          peer_id, peer ? (int)peer->state : -1, ip_str.c_str());
-
-                // Send VERSION message for outbound connection
-                NetProtocol::CAddress local_addr;
-                local_addr.services = NetProtocol::NODE_NETWORK;
-                local_addr.SetIPv4(0);  // 0.0.0.0
-                local_addr.port = 0;
-                CNetMessage version_msg = m_msg_processor->CreateVersionMessage(addr, local_addr);
-                PushMessage(peer_id, version_msg);
-
-                // Update peer state to VERSION_SENT for outbound connections
-                if (peer) {
-                    peer->state = CPeer::STATE_VERSION_SENT;
-                    LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: node %d state set to VERSION_SENT(3) after sending VERSION\n", peer_id);
-                }
-
-                LogPrintf(NET, INFO, "[CConnman] Connected to %s (node %d)\n", ip_str.c_str(), peer_id);
+                // BUG #139 FIX: Don't send VERSION here - SocketHandler will send it
+                // after connection completes (STATE_CONNECTING -> STATE_CONNECTED)
+                LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: initiated connection to %s (node %d)\n",
+                          ip_str.c_str(), pnode->id);
                 connections_made++;
                 // Mark as good on successful connection
                 m_peer_manager->MarkAddressGood(addr);
@@ -821,6 +812,22 @@ void CConnman::SocketHandler() {
                         // Connection succeeded
                         node->state.store(CNode::STATE_CONNECTED);
                         LogPrintf(NET, INFO, "[CConnman] Connection established to node %d\n", node->id);
+
+                        // BUG #139 FIX: Send VERSION immediately after connection completes
+                        // Only send if node is outbound and VERSION hasn't been sent yet
+                        if (!node->fInbound && !node->fVersionSent.load()) {
+                            if (m_msg_processor) {
+                                NetProtocol::CAddress local_addr;
+                                local_addr.services = NetProtocol::NODE_NETWORK;
+                                local_addr.SetIPv4(0);
+                                local_addr.port = 0;
+                                CNetMessage version_msg = m_msg_processor->CreateVersionMessage(node->addr, local_addr);
+                                PushMessage(node.get(), version_msg);
+                                node->fVersionSent.store(true);
+                                std::cout << "[CONNECT-DEBUG] Sent VERSION after connect to node " << node->id << std::endl;
+                                std::cout.flush();
+                            }
+                        }
                     } else {
                         // Connection failed
                         LogPrintf(NET, WARN, "[CConnman] Connection to node %d failed: error %d\n", node->id, error);
