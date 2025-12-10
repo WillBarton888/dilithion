@@ -510,7 +510,15 @@ void CConnman::ThreadMessageHandler() {
     while (!flagInterruptMsgProc.load()) {
         bool fMoreWork = false;
 
-        // Process messages from each node
+        // BUG #141 FIX: Collect messages while holding lock, process outside lock
+        // This prevents deadlock when message handlers acquire other locks (cs_headers)
+        struct PendingMessage {
+            int node_id;
+            CProcessedMsg msg;
+        };
+        std::vector<PendingMessage> pending_messages;
+
+        // Phase 1: Collect messages while holding cs_vNodes (short lock duration)
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
             for (auto& node : m_nodes) {
@@ -518,48 +526,62 @@ void CConnman::ThreadMessageHandler() {
 
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
-                    // Check if node was disconnected during processing
-                    if (node->fDisconnect.load()) {
+                    pending_messages.push_back({node->id, std::move(processed_msg)});
+
+                    // Limit messages collected per iteration to prevent unbounded growth
+                    if (pending_messages.size() >= 100) {
+                        fMoreWork = true;
                         break;
                     }
+                }
 
-                    // Convert CProcessedMsg to CNetMessage
-                    CNetMessage message(processed_msg.command, processed_msg.data);
+                if (node->HasProcessMsgs()) {
+                    fMoreWork = true;
+                }
+            }
+        }
+        // cs_vNodes is now RELEASED - safe to call handlers that acquire other locks
 
-                    // Process the message using CNetMessageProcessor
-                    bool success = false;
-                    if (m_msg_processor) {
-                        success = m_msg_processor->ProcessMessage(node->id, message);
-                    } else if (m_msg_handler) {
-                        // Fallback to callback if processor not set
-                        success = m_msg_handler(node.get(), processed_msg.command, processed_msg.data);
+        // Phase 2: Process collected messages WITHOUT holding cs_vNodes
+        for (const auto& pending : pending_messages) {
+            // Convert CProcessedMsg to CNetMessage
+            CNetMessage message(pending.msg.command, pending.msg.data);
+
+            // Process the message using CNetMessageProcessor
+            bool success = false;
+            if (m_msg_processor) {
+                success = m_msg_processor->ProcessMessage(pending.node_id, message);
+            } else if (m_msg_handler) {
+                // Fallback to callback if processor not set
+                // Need to get node pointer - acquire lock briefly
+                std::lock_guard<std::mutex> lock(cs_vNodes);
+                for (auto& node : m_nodes) {
+                    if (node->id == pending.node_id && !node->fDisconnect.load()) {
+                        success = m_msg_handler(node.get(), pending.msg.command, pending.msg.data);
+                        break;
                     }
+                }
+            }
 
-                    // Handle processing failure
-                    if (!success) {
-                        LogPrintf(NET, WARN, "[CConnman] Failed to process message '%s' from node %d\n",
-                                  processed_msg.command.c_str(), node->id);
-                        // ProcessMessage handles misbehavior tracking internally
-                        // Check if node should be disconnected due to accumulated misbehavior
-                        if (m_peer_manager) {
-                            auto peer = m_peer_manager->GetPeer(node->id);
-                            if (peer && peer->misbehavior_score > 100) {
-                                LogPrintf(NET, INFO, "[CConnman] Disconnecting node %d due to misbehavior (score: %d)\n",
-                                          node->id, peer->misbehavior_score);
+            // Handle processing failure
+            if (!success) {
+                LogPrintf(NET, WARN, "[CConnman] Failed to process message '%s' from node %d\n",
+                          pending.msg.command.c_str(), pending.node_id);
+                // ProcessMessage handles misbehavior tracking internally
+                // Check if node should be disconnected due to accumulated misbehavior
+                if (m_peer_manager) {
+                    auto peer = m_peer_manager->GetPeer(pending.node_id);
+                    if (peer && peer->misbehavior_score > 100) {
+                        LogPrintf(NET, INFO, "[CConnman] Disconnecting node %d due to misbehavior (score: %d)\n",
+                                  pending.node_id, peer->misbehavior_score);
+                        // Mark for disconnect - need to find node
+                        std::lock_guard<std::mutex> lock(cs_vNodes);
+                        for (auto& node : m_nodes) {
+                            if (node->id == pending.node_id) {
                                 node->MarkDisconnect();
-                                break;  // Stop processing messages from this node
+                                break;
                             }
                         }
-                    }
-
-                    // Check if node was marked for disconnect during message processing
-                    if (node->fDisconnect.load()) {
-                        break;
-                    }
-
-                    // Check for more work
-                    if (node->HasProcessMsgs()) {
-                        fMoreWork = true;
                     }
                 }
             }
