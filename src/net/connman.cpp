@@ -629,7 +629,9 @@ void CConnman::SocketHandler() {
             if (node->fDisconnect.load()) continue;
 
             recv_set.insert(sock);
-            if (node->HasSendMsgs()) {
+            // Add to send_set if: has messages to send OR connection is in progress
+            // For non-blocking connect(), writability indicates connection completed
+            if (node->HasSendMsgs() || node->state.load() == CNode::STATE_CONNECTING) {
                 send_set.insert(sock);
             }
             error_set.insert(sock);
@@ -737,6 +739,33 @@ void CConnman::SocketHandler() {
                 continue;
             }
 
+            // Check for connect completion (writability on CONNECTING socket)
+            if (node->state.load() == CNode::STATE_CONNECTING && send_set.count(sock)) {
+                // Check if connection completed successfully
+                int error = 0;
+                socklen_t len = sizeof(error);
+#ifdef _WIN32
+                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, (char*)&error, &len) == 0) {
+#else
+                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
+#endif
+                    if (error == 0) {
+                        // Connection succeeded
+                        node->state.store(CNode::STATE_CONNECTED);
+                        LogPrintf(NET, INFO, "[CConnman] Connection established to node %d\n", node->id);
+                    } else {
+                        // Connection failed
+                        LogPrintf(NET, WARN, "[CConnman] Connection to node %d failed: error %d\n", node->id, error);
+                        node->MarkDisconnect();
+                        continue;
+                    }
+                } else {
+                    // getsockopt failed
+                    node->MarkDisconnect();
+                    continue;
+                }
+            }
+
             // Receive
             if (recv_set.count(sock)) {
                 if (!ReceiveMsgBytes(node.get())) {
@@ -746,8 +775,8 @@ void CConnman::SocketHandler() {
                 }
             }
 
-            // Send
-            if (send_set.count(sock)) {
+            // Send (only if not just connecting)
+            if (send_set.count(sock) && node->state.load() != CNode::STATE_CONNECTING) {
                 if (!SendMessages(node.get())) {
                     node->MarkDisconnect();
                 }
