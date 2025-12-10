@@ -730,10 +730,16 @@ void CPeerManager::PeriodicMaintenance() {
         }
 
         // Disconnect stale peers (outside the loop to avoid iterator invalidation)
+        // BUG #144 FIX: Also mark CNode for disconnect so CConnman removes it from m_nodes
         for (int peer_id : peers_to_disconnect) {
             auto it = peers.find(peer_id);
             if (it != peers.end()) {
                 it->second->Disconnect();
+                // Also mark the CNode for disconnect
+                CNode* node = GetNode(peer_id);
+                if (node) {
+                    node->MarkDisconnect();
+                }
             }
         }
     }
