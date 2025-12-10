@@ -1674,12 +1674,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // Check if headers_manager is initialized
             if (!g_node_context.headers_manager) {
+                std::cout << "[DEBUG] SetVerackHandler: headers_manager is NULL, skipping IBD" << std::endl;
                 return;
             }
 
             // BUG #62 FIX: Compare our height with peer's announced height
             int ourHeight = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
             int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
+
+            std::cout << "[IBD] SetVerackHandler: ourHeight=" << ourHeight << " peerHeight=" << peerHeight << std::endl;
 
             // Request headers if peer is ahead OR if we're at genesis
             if (peerHeight > ourHeight || ourHeight == 0) {
@@ -1689,7 +1692,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 } else {
                     ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
                 }
+                std::cout << "[IBD] Requesting headers from peer " << peer_id << " from block " << ourBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
                 g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
+            } else {
+                std::cout << "[IBD] Not requesting headers - peer not ahead (peer=" << peerHeight << " us=" << ourHeight << ")" << std::endl;
             }
         });
 
