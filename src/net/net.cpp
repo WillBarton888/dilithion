@@ -1602,6 +1602,27 @@ int CConnectionManager::AcceptConnection(const NetProtocol::CAddress& addr,
                                     addr.ip[14],
                                     addr.ip[15]);
 
+    // BUG #133 FIX: Check for duplicate IP before accepting inbound connection
+    // When both nodes try to connect to each other simultaneously, we get
+    // duplicate peers for the same IP (one inbound, one outbound). This causes
+    // one connection to be closed, breaking the handshake.
+    // Solution: Reject inbound if we already have an active connection to this IP.
+    auto existing_peers = peer_manager.GetAllPeers();
+    for (const auto& existing_peer : existing_peers) {
+        if (existing_peer->IsConnected()) {
+            std::string existing_ip = strprintf("%d.%d.%d.%d",
+                                                 existing_peer->addr.ip[12],
+                                                 existing_peer->addr.ip[13],
+                                                 existing_peer->addr.ip[14],
+                                                 existing_peer->addr.ip[15]);
+            if (existing_ip == ip_str) {
+                std::cout << "[P2P] AcceptConnection rejected: already connected to " << ip_str 
+                          << " (existing peer_id=" << existing_peer->id << ")" << std::endl;
+                return -1;
+            }
+        }
+    }
+
     // Add peer
     auto peer = peer_manager.AddPeer(addr);
     if (!peer) {
