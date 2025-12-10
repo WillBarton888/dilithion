@@ -951,9 +951,10 @@ bool CConnman::ReceiveMsgBytes(CNode* pnode) {
         return false;  // Connection closed
     }
 
-    // Log received bytes
-    LogPrintf(NET, DEBUG, "[CConnman] Received %d bytes from node %d (total recv: %zu)\n",
-              nBytes, pnode->id, pnode->nRecvBytes.load() + nBytes);
+    // Log received bytes - ALWAYS log for debugging handshake issues
+    std::cout << "[RECV-DEBUG] Received " << nBytes << " bytes from node " << pnode->id
+              << " (total: " << (pnode->nRecvBytes.load() + nBytes) << ")" << std::endl;
+    std::cout.flush();
 
     // Append to node's receive buffer
     pnode->AppendRecvBytes(buf, nBytes);
@@ -1028,6 +1029,11 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // Need at least 24 bytes for message header
         if (buffer.size() < 24) {
+            if (buffer.size() > 0) {
+                std::cout << "[EXTRACT-DEBUG] Node " << pnode->id << " waiting for more data (have "
+                          << buffer.size() << ", need 24)" << std::endl;
+                std::cout.flush();
+            }
             break;  // Not enough data for header
         }
 
@@ -1105,6 +1111,12 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // Create processed message and push to queue
         std::string command = header.GetCommand();
+
+        // Debug: Log successful message extraction
+        std::cout << "[EXTRACT-DEBUG] Node " << pnode->id << " extracted message: '" << command
+                  << "' (payload: " << payload.size() << " bytes)" << std::endl;
+        std::cout.flush();
+
         CProcessedMsg processed_msg(std::move(command), std::move(payload));
         pnode->PushProcessMsg(std::move(processed_msg));
     }
