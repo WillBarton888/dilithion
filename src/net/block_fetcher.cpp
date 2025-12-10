@@ -62,8 +62,16 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Check peer capacity
-    if (GetAvailableSlotsForPeer(peer) <= 0) {
+    // BUG #146 FIX: Check peer capacity using CPeerManager (primary source of truth)
+    // CPeerManager has limit of 16 blocks per peer, mapPeerStates has limit of 8
+    // Must use consistent source with SelectPeerForDownload
+    if (g_peer_manager) {
+        auto peer_obj = g_peer_manager->GetPeer(peer);
+        if (peer_obj && peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+            return false;
+        }
+    } else if (GetAvailableSlotsForPeer(peer) <= 0) {
+        // Fallback to local mapPeerStates only when CPeerManager unavailable
         return false;
     }
 
@@ -290,29 +298,21 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 
         for (int peer_id : valid_peers) {
             auto peer = g_peer_manager->GetPeer(peer_id);
-            if (!peer) {
-                std::cout << "[BUG-146-DEBUG] peer " << peer_id << " is null in SelectPeerForDownload" << std::endl;
-                continue;
-            }
+            if (!peer) continue;
 
             // Must have capacity (use CPeerManager limit)
-            std::cout << "[BUG-146-DEBUG] peer " << peer_id << " nBlocksInFlight=" << peer->nBlocksInFlight
-                      << " max=" << CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER << std::endl;
             if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-                std::cout << "[BUG-146-DEBUG] peer " << peer_id << " SKIPPED - at capacity" << std::endl;
                 continue;
             }
 
             // Check if suitable (uses CPeer::IsSuitableForDownload)
             bool suitable = peer->IsSuitableForDownload();
             if (!suitable) {
-                std::cout << "[BUG-146-DEBUG] peer " << peer_id << " NOT suitable for download" << std::endl;
                 if (fallbackPeer == -1) {
                     fallbackPeer = peer_id;
                 }
                 continue;
             }
-            std::cout << "[BUG-146-DEBUG] peer " << peer_id << " IS suitable, calculating score" << std::endl;
 
             // Calculate score (higher is better)
             int score = 1000;
@@ -344,16 +344,12 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 
         // BUG #61: Use fallback if no suitable peer found
         if (bestPeer == -1 && fallbackPeer != -1) {
-            std::cout << "[BUG-146-DEBUG] SelectPeerForDownload: using fallback peer " << fallbackPeer << std::endl;
             return fallbackPeer;
         }
 
         if (bestPeer != -1) {
-            std::cout << "[BUG-146-DEBUG] SelectPeerForDownload: returning bestPeer " << bestPeer << std::endl;
             return bestPeer;
         }
-
-        std::cout << "[BUG-146-DEBUG] SelectPeerForDownload: no peer found (bestPeer=-1, fallbackPeer=" << fallbackPeer << ")" << std::endl;
     }
 
     // Fallback to mapPeerStates if CPeerManager unavailable or returned no peers
