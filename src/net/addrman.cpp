@@ -444,12 +444,16 @@ std::pair<CNetworkAddr, int64_t> CAddrMan::Select(bool newOnly) const {
     // 50% chance of tried vs new (unless newOnly)
     bool fChanceTried = !newOnly && (nTried > 0) && (nNew == 0 || (insecure_rand() % 2 == 0));
 
+    // BUG #145 FIX: Add maximum iteration count to prevent infinite loops
+    // If all bucket slots are empty (inconsistent state), the while(true) would spin forever
+    constexpr int MAX_SELECT_ITERATIONS = 10000;
+
     if (fChanceTried) {
         // Select from tried table
         double fChanceFactor = 1.0;
         int64_t nNow = GetAdjustedTime();
 
-        while (true) {
+        for (int iterations = 0; iterations < MAX_SELECT_ITERATIONS; ++iterations) {
             // Random bucket
             int nKBucket = insecure_rand() % ADDRMAN_TRIED_BUCKET_COUNT;
             int nKBucketPos = insecure_rand() % ADDRMAN_BUCKET_SIZE;
@@ -469,12 +473,14 @@ std::pair<CNetworkAddr, int64_t> CAddrMan::Select(bool newOnly) const {
 
             fChanceFactor *= 1.2;
         }
+        // Max iterations reached - return empty to prevent infinite loop
+        return std::make_pair(CNetworkAddr(), 0);
     } else {
         // Select from new table
         double fChanceFactor = 1.0;
         int64_t nNow = GetAdjustedTime();
 
-        while (true) {
+        for (int iterations = 0; iterations < MAX_SELECT_ITERATIONS; ++iterations) {
             int nUBucket = insecure_rand() % ADDRMAN_NEW_BUCKET_COUNT;
             int nUBucketPos = insecure_rand() % ADDRMAN_BUCKET_SIZE;
 
@@ -492,13 +498,11 @@ std::pair<CNetworkAddr, int64_t> CAddrMan::Select(bool newOnly) const {
 
             fChanceFactor *= 1.2;
         }
+        // Max iterations reached - return empty to prevent infinite loop
+        return std::make_pair(CNetworkAddr(), 0);
     }
 
-    // CID 1675299 FIX: This code is structurally unreachable because both if/else branches
-    // contain while(true) loops that always return. However, we keep an assertion here
-    // as a safety check in case of a logic error that would cause infinite loops.
-    // If we somehow reach here, it indicates a serious bug in the selection logic.
-    assert(false && "CAddrMan::Select: Unreachable code reached - selection logic error");
+    // BUG #145 FIX: Now unreachable since both branches explicitly return after max iterations
     return std::make_pair(CNetworkAddr(), 0);
 }
 
