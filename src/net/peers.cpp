@@ -1058,3 +1058,149 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
 
     // The actual peer removal is handled by RemovePeer()
 }
+
+// Phase 1: CNode management methods (event-driven networking)
+// These methods replace CPeer methods for new event-driven architecture
+
+CNode* CPeerManager::AddNode(const NetProtocol::CAddress& addr, bool inbound) {
+    // DEPRECATED: CConnman now owns CNode objects directly.
+    // This function creates a CNode but doesn't add it to CConnman.
+    // Use CConnman::ConnectNode() or CConnman::AcceptConnection() instead.
+    //
+    // This function is kept for backward compatibility but should not be used.
+    // It will be removed in a future cleanup.
+
+    std::string ip = addr.ToStringIP();
+    if (banman.IsBanned(ip)) {
+        std::cout << "[PeerManager] AddNode rejected: IP " << ip << " is banned" << std::endl;
+        return nullptr;
+    }
+
+    // Check connection limits
+    if (!CanAcceptConnection()) {
+        std::cout << "[PeerManager] AddNode rejected: connection limit reached" << std::endl;
+        return nullptr;
+    }
+
+    // Generate new node ID
+    int node_id = next_peer_id++;
+
+    // Create CNode (caller is responsible for managing this memory!)
+    // WARNING: This is a memory leak if caller doesn't delete the returned CNode.
+    CNode* node_ptr = new CNode(node_id, addr, inbound);
+
+    // Store reference (not ownership)
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+        node_refs[node_id] = node_ptr;
+    }
+
+    // Create CPeer for legacy compatibility
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        if (peers.find(node_id) == peers.end()) {
+            auto peer = std::make_shared<CPeer>(node_id, addr);
+            peer->state = inbound ? CPeer::STATE_CONNECTED : CPeer::STATE_CONNECTING;
+            peers[node_id] = peer;
+        }
+    }
+
+    std::cout << "[PeerManager] AddNode (DEPRECATED): created CNode " << node_id << " (" << ip << ":" << addr.port
+              << ", inbound=" << (inbound ? "true" : "false") << ")" << std::endl;
+
+    return node_ptr;
+}
+
+void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAddress& addr, bool inbound) {
+    // FIX Issue 1: Store reference to CConnman's CNode (non-owning)
+    // CConnman owns CNode objects. CPeerManager stores raw pointers for state sync.
+
+    std::string ip = addr.ToStringIP();
+
+    // Check if IP is banned
+    if (banman.IsBanned(ip)) {
+        std::cout << "[PeerManager] RegisterNode rejected: IP " << ip << " is banned" << std::endl;
+        return;
+    }
+
+    // Store reference to CNode (owned by CConnman)
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+        node_refs[node_id] = node;
+    }
+
+    // Create CPeer for legacy compatibility (handshake state tracking)
+    // This will be used by ProcessVersionMessage/ProcessVerackMessage
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        if (peers.find(node_id) == peers.end()) {
+            auto peer = std::make_shared<CPeer>(node_id, addr);
+            peer->state = inbound ? CPeer::STATE_CONNECTED : CPeer::STATE_CONNECTING;
+            peers[node_id] = peer;
+        }
+    }
+
+    // Update next_peer_id if needed
+    if (node_id >= next_peer_id) {
+        next_peer_id = node_id + 1;
+    }
+
+    std::cout << "[PeerManager] Registered node " << node_id << " (" << ip << ":" << addr.port
+              << ", inbound=" << (inbound ? "true" : "false") << ")" << std::endl;
+}
+
+void CPeerManager::RemoveNode(int node_id) {
+    // Remove node reference (don't delete - CConnman owns it)
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+        node_refs.erase(node_id);
+    }
+
+    // Also remove CPeer
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        peers.erase(node_id);
+    }
+
+    std::cout << "[PeerManager] Removed node " << node_id << std::endl;
+}
+
+CNode* CPeerManager::GetNode(int node_id) {
+    std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+
+    auto it = node_refs.find(node_id);
+    if (it != node_refs.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+std::vector<CNode*> CPeerManager::GetAllNodes() {
+    std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+
+    std::vector<CNode*> result;
+    result.reserve(node_refs.size());
+
+    for (auto& pair : node_refs) {
+        if (pair.second) {
+            result.push_back(pair.second);
+        }
+    }
+
+    return result;
+}
+
+std::vector<CNode*> CPeerManager::GetConnectedNodes() {
+    std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+
+    std::vector<CNode*> result;
+
+    for (auto& pair : node_refs) {
+        CNode* node = pair.second;
+        if (node && node->IsConnected()) {
+            result.push_back(node);
+        }
+    }
+
+    return result;
+}

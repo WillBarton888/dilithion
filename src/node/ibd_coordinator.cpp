@@ -10,7 +10,8 @@
 #include <core/node_context.h>
 #include <net/block_fetcher.h>
 #include <net/headers_manager.h>
-#include <net/net.h>  // CConnectionManager, CNetMessageProcessor
+#include <net/net.h>  // CNetMessageProcessor
+#include <net/connman.h>  // Phase 5: CConnman
 #include <net/peers.h>
 #include <net/protocol.h>
 #include <util/logging.h>
@@ -174,7 +175,7 @@ void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) 
 }
 
 bool CIbdCoordinator::FetchBlocks() {
-    if (!m_node_context.block_fetcher || !m_node_context.message_processor || !m_node_context.connection_manager) {
+    if (!m_node_context.block_fetcher || !m_node_context.message_processor || !m_node_context.connman) {
         return false;
     }
 
@@ -199,10 +200,8 @@ bool CIbdCoordinator::FetchBlocks() {
             std::vector<NetProtocol::CInv> getdata;
             getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-            bool sent = m_node_context.connection_manager->SendMessage(peer, msg);
-            if (sent) {
-                successful_requests++;
-            }
+            m_node_context.connman->PushMessage(peer, msg);
+            successful_requests++;
         } else {
             // BUG #63 FIX: Re-queue block if no peer available
             m_node_context.block_fetcher->QueueBlockForDownload(hash, height, -1, true);
@@ -213,7 +212,7 @@ bool CIbdCoordinator::FetchBlocks() {
 }
 
 void CIbdCoordinator::RetryTimeoutsAndStalls() {
-    if (!m_node_context.block_fetcher || !m_node_context.connection_manager) {
+    if (!m_node_context.block_fetcher || !m_node_context.connman) {
         return;
     }
 
@@ -231,7 +230,7 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
 
     for (NodeId peer : stalling_peers) {
         LogPrintIBD(WARN, "Disconnecting stalling peer %d", peer);
-        m_node_context.connection_manager->DisconnectPeer(peer, "stalling block download");
+        m_node_context.connman->DisconnectNode(peer, "stalling block download");
     }
 }
 

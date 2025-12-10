@@ -10,7 +10,8 @@
 #include <mutex>
 
 class CPeerManager;
-class CConnectionManager;
+class CConnman;
+class CNetMessageProcessor;
 
 /**
  * Feeler Connection Manager
@@ -28,7 +29,7 @@ class CConnectionManager;
  */
 class CFeelerManager {
 public:
-    CFeelerManager(CPeerManager& peer_manager, CConnectionManager& connection_manager);
+    CFeelerManager(CPeerManager& peer_manager, CConnman* connman, CNetMessageProcessor* msg_processor);
     ~CFeelerManager() = default;
 
     /**
@@ -61,7 +62,8 @@ public:
 
 private:
     CPeerManager& m_peer_manager;
-    CConnectionManager& m_connection_manager;
+    CConnman* m_connman;
+    CNetMessageProcessor* m_msg_processor;
 
     // Track active feeler connections
     std::map<int, std::chrono::steady_clock::time_point> m_active_feelers;

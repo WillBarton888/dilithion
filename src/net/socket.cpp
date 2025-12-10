@@ -460,6 +460,28 @@ std::string CSocket::GetLastErrorString() const {
 #endif
 }
 
+int CSocket::GetFD() const {
+    // Phase 2: Return raw socket file descriptor for select()/poll()
+    // On Windows, SOCKET is unsigned but we cast to int for compatibility
+    // Caller should check IsValid() first
+#ifdef _WIN32
+    return static_cast<int>(sock_fd);
+#else
+    return static_cast<int>(sock_fd);
+#endif
+}
+
+int CSocket::ReleaseFD() {
+    // Phase 2: Release socket FD ownership
+    // Transfers ownership to caller - CSocket will not close it
+    if (!IsValid()) {
+        return -1;
+    }
+    int fd = GetFD();
+    Reset();  // Clear our reference so destructor won't close it
+    return fd;
+}
+
 // CResolvedAddr implementation
 
 std::string CResolvedAddr::ToString() const {

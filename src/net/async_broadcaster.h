@@ -14,7 +14,7 @@
 #include <vector>
 
 // Forward declaration
-class CConnectionManager;
+class CConnman;
 
 /**
  * CAsyncBroadcaster - Asynchronous message broadcasting system
@@ -27,7 +27,7 @@ class CConnectionManager;
  * - Thread-safe operation
  *
  * Usage:
- *   CAsyncBroadcaster broadcaster(connection_manager);
+ *   CAsyncBroadcaster broadcaster(connman);
  *   broadcaster.Start();
  *   broadcaster.BroadcastBlock(block_hash, peer_ids);  // Returns immediately
  */
@@ -82,9 +82,9 @@ public:
 
     /**
      * Constructor
-     * @param conn_mgr Reference to connection manager for sending messages
+     * @param connman Pointer to connection manager for sending messages
      */
-    explicit CAsyncBroadcaster(CConnectionManager& conn_mgr);
+    explicit CAsyncBroadcaster(CConnman* connman);
 
     /**
      * Destructor - ensures worker thread is stopped
@@ -191,8 +191,8 @@ private:
      */
     void UpdateStats(int64_t task_duration_ms, bool success);
 
-    // Connection manager reference
-    CConnectionManager& m_connection_manager;
+    // Connection manager pointer
+    CConnman* m_connman;
 
     // Task queue (priority queue for task ordering)
     std::priority_queue<BroadcastTask> m_queue;

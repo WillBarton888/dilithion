@@ -12,6 +12,7 @@
 class CChainState;
 class CPeerManager;
 class CConnectionManager;
+class CConnman;  // Phase 2: Event-driven connection manager
 class CNetMessageProcessor;
 class CHeadersManager;
 class COrphanManager;
@@ -41,7 +42,8 @@ struct NodeContext {
 
     // P2P networking
     std::unique_ptr<CPeerManager> peer_manager;
-    CConnectionManager* connection_manager{nullptr};
+    CConnectionManager* connection_manager{nullptr};  // Legacy - will be removed in Phase 5
+    std::unique_ptr<CConnman> connman;  // Phase 2: Event-driven connection manager
     CNetMessageProcessor* message_processor{nullptr};
 
     // IBD (Initial Block Download) managers

@@ -56,6 +56,17 @@ public:
     std::string GetLocalAddress() const;
     uint16_t GetLocalPort() const;
 
+    // Phase 2: Get raw socket file descriptor for select()/poll()
+    // Returns the underlying socket FD (int on Unix, SOCKET on Windows)
+    // Note: On Windows, SOCKET is unsigned, but we return int for compatibility
+    int GetFD() const;
+
+    // Phase 2: Release socket FD ownership
+    // Transfers ownership of the socket FD to caller
+    // After calling this, CSocket will not close the FD in destructor
+    // Returns the socket FD, or -1 if invalid
+    int ReleaseFD();
+
     // Error handling
     int GetLastError() const;
     std::string GetLastErrorString() const;

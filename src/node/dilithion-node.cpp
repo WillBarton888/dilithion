@@ -35,6 +35,7 @@
 #include <net/block_fetcher.h>
 #include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer state and stalling detection
 #include <net/feeler.h>  // Bitcoin Core-style feeler connections
+#include <net/connman.h>  // Phase 5: Event-driven connection manager
 #include <api/http_server.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
@@ -89,6 +90,38 @@
 
 // Global chain state (defined in src/core/globals.cpp)
 extern CChainState g_chainstate;
+
+// Phase 1.2: NodeContext for centralized global state management (Bitcoin Core pattern)
+#include <core/node_context.h>
+#include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
+extern NodeContext g_node_context;
+
+// Phase 5: Helper function to connect to a peer and send VERSION message (for outbound connections)
+// Can be called from any thread since it uses g_node_context
+static int ConnectAndHandshake(const NetProtocol::CAddress& addr) {
+    if (!g_node_context.connman || !g_node_context.message_processor || !g_node_context.peer_manager) {
+        return -1;
+    }
+    CNode* pnode = g_node_context.connman->ConnectNode(addr);
+    if (!pnode) {
+        return -1;
+    }
+    int peer_id = pnode->id;
+    // Send VERSION message for outbound connection
+    NetProtocol::CAddress local_addr;
+    local_addr.services = NetProtocol::NODE_NETWORK;
+    local_addr.SetIPv4(0);  // 0.0.0.0
+    local_addr.port = 0;
+    CNetMessage version_msg = g_node_context.message_processor->CreateVersionMessage(addr, local_addr);
+    g_node_context.connman->PushMessage(peer_id, version_msg);
+    // Update peer state to VERSION_SENT for outbound connections
+    // This prevents the version handler from sending VERSION again
+    auto peer = g_node_context.peer_manager->GetPeer(peer_id);
+    if (peer) {
+        peer->state = CPeer::STATE_VERSION_SENT;
+    }
+    return peer_id;
+}
 
 // Global node state for signal handling (defined in src/core/globals.cpp)
 struct NodeState {
@@ -1500,22 +1533,36 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Create message processor and connection manager (local, using NodeContext peer manager)
         CNetMessageProcessor message_processor(*g_node_context.peer_manager);
-        CConnectionManager connection_manager(*g_node_context.peer_manager, message_processor);
-
-        // Create feeler connection manager (Bitcoin Core-style eclipse attack protection)
-        CFeelerManager feeler_manager(*g_node_context.peer_manager, connection_manager);
-
+        
+        // Phase 5: Replace CConnectionManager with CConnman (event-driven networking)
+        auto connman = std::make_unique<CConnman>();
+        CConnmanOptions connman_opts;
+        connman_opts.fListen = true;
+        connman_opts.nListenPort = config.p2pport;
+        connman_opts.nMaxOutbound = 8;
+        connman_opts.nMaxInbound = 117;
+        connman_opts.nMaxTotal = 125;
+        
+        if (!connman->Start(*g_node_context.peer_manager, message_processor, connman_opts)) {
+            std::cerr << "Failed to start CConnman" << std::endl;
+            return 1;
+        }
+        
         // Set global pointers for transaction announcement (NW-005)
         // P0-5 FIX: Use .store() for atomic pointers
-        g_connection_manager.store(&connection_manager);
         g_message_processor.store(&message_processor);
 
         // Phase 1.2: Store in NodeContext (Bitcoin Core pattern)
-        g_node_context.connection_manager = &connection_manager;
+        g_node_context.connman = std::move(connman);
         g_node_context.message_processor = &message_processor;
+        
+        // Legacy: Keep connection_manager pointer for backward compatibility during migration
+        // TODO Phase 5: Remove after full migration
+        g_node_context.connection_manager = nullptr;
 
-        // Create and start async broadcaster for non-blocking message broadcasting
-        CAsyncBroadcaster async_broadcaster(connection_manager);
+        // Phase 5: Create and start async broadcaster for non-blocking message broadcasting
+        // Now uses CConnman instead of CConnectionManager
+        CAsyncBroadcaster async_broadcaster(g_node_context.connman.get());
         g_async_broadcaster = &async_broadcaster;  // Legacy global
         g_node_context.async_broadcaster = &async_broadcaster;
 
@@ -1524,10 +1571,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_node_context.running.store(g_node_state.running.load());
         g_node_context.mining_enabled.store(g_node_state.mining_enabled.load());
 
+        // Phase 5: Start async broadcaster
         if (!async_broadcaster.Start()) {
             std::cerr << "Failed to start async broadcaster" << std::endl;
             return 1;
         }
+
+        // Phase 5: Create feeler connection manager (Bitcoin Core-style eclipse attack protection)
+        // Now uses CConnman instead of CConnectionManager
+        CFeelerManager feeler_manager(*g_node_context.peer_manager, g_node_context.connman.get(), &message_processor);
 
         // BUG #125: Create and start async message processing queue
         // This decouples network I/O from message processing to prevent blocking
@@ -1606,34 +1658,46 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "[HttpServer] Dashboard endpoint: http://localhost:" << api_port << "/api/stats" << std::endl;
 
         // Verify global pointers are properly initialized (audit recommendation)
-        assert(g_node_context.connection_manager != nullptr && "connection_manager must be initialized");
+        assert(g_node_context.connman != nullptr && "connman must be initialized");
         assert(g_node_context.message_processor != nullptr && "message_processor must be initialized");
         assert(g_node_context.peer_manager != nullptr && "peer_manager must be initialized");
         assert(g_tx_relay_manager != nullptr && "g_tx_relay_manager must be initialized");
 
         // Register version handler to automatically respond with version + verack
         // Bitcoin handshake: A->B: VERSION, B->A: VERSION + VERACK, A->B: VERACK
-        message_processor.SetVersionHandler([&connection_manager](int peer_id, const NetProtocol::CVersionMessage& msg) {
+        message_processor.SetVersionHandler([](int peer_id, const NetProtocol::CVersionMessage& msg) {
             // BUG #62 FIX: Store peer's starting height for later header sync decision
             if (g_node_context.headers_manager) {
                 g_node_context.headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
             }
 
             // BUG #129 FIX: Only send VERSION for inbound connections (state < VERSION_SENT)
-            // For outbound connections, we already sent VERSION in PerformHandshake()
+            // For outbound connections, we already sent VERSION in ConnectAndHandshake()
             // Sending VERSION again causes an infinite VERSION ping-pong loop
             auto peer = g_node_context.peer_manager->GetPeer(peer_id);
             if (peer && peer->state < CPeer::STATE_VERSION_SENT) {
-                bool version_sent = connection_manager.SendVersionMessage(peer_id);
-                std::cout << "[P2P] SetVersionHandler: SendVersionMessage(" << peer_id << ") = "
-                          << (version_sent ? "SUCCESS" : "FAILED") << " (inbound connection)" << std::endl;
+                // Create and send version message
+                NetProtocol::CAddress local_addr;
+                local_addr.services = NetProtocol::NODE_NETWORK;
+                local_addr.SetIPv4(0);  // 0.0.0.0
+                local_addr.port = 0;
+                CNetMessage version_msg = g_node_context.message_processor->CreateVersionMessage(peer->addr, local_addr);
+                if (g_node_context.connman) {
+                    g_node_context.connman->PushMessage(peer_id, version_msg);
+                    // Update state after sending VERSION
+                    peer->state = CPeer::STATE_VERSION_SENT;
+                    std::cout << "[P2P] SetVersionHandler: SendVersionMessage(" << peer_id << ") = SUCCESS (inbound connection)" << std::endl;
+                }
             } else {
                 std::cout << "[P2P] SetVersionHandler: peer " << peer_id << " already sent VERSION (state="
                           << (peer ? (int)peer->state : -1) << "), only sending VERACK" << std::endl;
             }
 
             // Always send VERACK to acknowledge their VERSION
-            connection_manager.SendVerackMessage(peer_id);
+            if (g_node_context.connman && g_node_context.message_processor) {
+                CNetMessage verack_msg = g_node_context.message_processor->CreateVerackMessage();
+                g_node_context.connman->PushMessage(peer_id, verack_msg);
+            }
         });
 
         // Register verack handler to trigger IBD when handshake completes
@@ -1654,13 +1718,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Request addresses from peer (Bitcoin Core pattern for peer discovery)
-            auto* msg_proc = g_message_processor.load();
-            auto* conn_mgr = g_connection_manager.load();
-            if (msg_proc && conn_mgr) {
-                CNetMessage getaddr_msg = msg_proc->CreateGetAddrMessage();
-                if (conn_mgr->SendMessage(peer_id, getaddr_msg)) {
-                    std::cout << "[P2P] Sent GETADDR to peer " << peer_id << std::endl;
-                }
+            if (g_node_context.connman && g_node_context.message_processor) {
+                CNetMessage getaddr_msg = g_node_context.message_processor->CreateGetAddrMessage();
+                g_node_context.connman->PushMessage(peer_id, getaddr_msg);
+                std::cout << "[P2P] Sent GETADDR to peer " << peer_id << std::endl;
             }
 
             // Phase 5: Mark peer's address as "good" on successful handshake
@@ -1700,9 +1761,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Register ping handler to automatically respond with pong
-        message_processor.SetPingHandler([&connection_manager](int peer_id, uint64_t nonce) {
+        message_processor.SetPingHandler([](int peer_id, uint64_t nonce) {
             // Silently respond with pong - keepalive is automatic
-            connection_manager.SendPongMessage(peer_id, nonce);
+            if (g_node_context.connman && g_node_context.message_processor) {
+                CNetMessage pong_msg = g_node_context.message_processor->CreatePongMessage(nonce);
+                g_node_context.connman->PushMessage(peer_id, pong_msg);
+            }
         });
 
         // Register pong handler (keepalive response received)
@@ -1745,7 +1809,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Register inv handler to request announced blocks
-        message_processor.SetInvHandler([&blockchain, &connection_manager, &message_processor](
+        message_processor.SetInvHandler([&blockchain](
             int peer_id, const std::vector<NetProtocol::CInv>& inv_items) {
 
             bool hasUnknownBlocks = false;
@@ -1783,15 +1847,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Also request the specific blocks (may succeed if we have their parents)
-            if (!getdata.empty()) {
+            if (!getdata.empty() && g_node_context.connman && g_node_context.message_processor) {
                 std::cout << "[P2P] Requesting " << getdata.size() << " block(s) from peer " << peer_id << std::endl;
-                CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
-                connection_manager.SendMessage(peer_id, msg);
+                CNetMessage msg = g_node_context.message_processor->CreateGetDataMessage(getdata);
+                g_node_context.connman->PushMessage(peer_id, msg);
             }
         });
 
         // Register getdata handler to serve blocks to requesting peers
-        message_processor.SetGetDataHandler([&blockchain, &connection_manager, &message_processor](
+        message_processor.SetGetDataHandler([&blockchain](
             int peer_id, const std::vector<NetProtocol::CInv>& requested_items) {
 
             for (const auto& item : requested_items) {
@@ -1800,14 +1864,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     CBlock block;
                     if (blockchain.ReadBlock(item.hash, block)) {
                         // Send block to requesting peer
-                        CNetMessage blockMsg = message_processor.CreateBlockMessage(block);
-                        auto serialized = blockMsg.Serialize();
-                        std::cout << "[BLOCK-SERVE] Sending block " << item.hash.GetHex().substr(0, 16)
-                                  << "... to peer " << peer_id
-                                  << " (vtx=" << block.vtx.size() << " bytes, msg=" << serialized.size() << " bytes)" << std::endl;
-                        bool sent = connection_manager.SendMessage(peer_id, blockMsg);
-                        std::cout << "[BLOCK-SERVE] SendMessage " << (sent ? "SUCCEEDED" : "FAILED")
-                                  << " for block to peer " << peer_id << std::endl;
+                        if (g_node_context.connman && g_node_context.message_processor) {
+                            CNetMessage blockMsg = g_node_context.message_processor->CreateBlockMessage(block);
+                            auto serialized = blockMsg.Serialize();
+                            std::cout << "[BLOCK-SERVE] Sending block " << item.hash.GetHex().substr(0, 16)
+                                      << "... to peer " << peer_id
+                                      << " (vtx=" << block.vtx.size() << " bytes, msg=" << serialized.size() << " bytes)" << std::endl;
+                            g_node_context.connman->PushMessage(peer_id, blockMsg);
+                            std::cout << "[BLOCK-SERVE] PushMessage SUCCEEDED for block to peer " << peer_id << std::endl;
+                        }
                     } else {
                         std::cout << "[P2P] Peer " << peer_id << " requested unknown block: "
                                   << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
@@ -1818,7 +1883,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Register block handler to validate and save received blocks
-        message_processor.SetBlockHandler([&blockchain, &message_processor, &connection_manager](int peer_id, const CBlock& block) {
+        message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
             uint256 blockHash = block.GetHash();
 
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
@@ -1944,8 +2009,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock));
 
                     std::cout << "[P2P] Requesting parent block from peer " << peer_id << std::endl;
-                    CNetMessage msg = message_processor.CreateGetDataMessage(getdata);
-                    connection_manager.SendMessage(peer_id, msg);
+                    if (g_node_context.connman && g_node_context.message_processor) {
+                        CNetMessage msg = g_node_context.message_processor->CreateGetDataMessage(getdata);
+                        g_node_context.connman->PushMessage(peer_id, msg);
+                    }
                 } else {
                     std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;
                     std::cerr << "  Pool may be full or block already exists" << std::endl;
@@ -2147,7 +2214,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Register GETHEADERS handler - respond with block headers from our chain (Bug #12 - Phase 4.2)
-        message_processor.SetGetHeadersHandler([&blockchain, &connection_manager, &message_processor](
+        message_processor.SetGetHeadersHandler([&blockchain](
             int peer_id, const NetProtocol::CGetHeadersMessage& msg) {
 
             std::cout << "[IBD] Peer " << peer_id << " requested headers (locator size: "
@@ -2205,8 +2272,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // Always send HEADERS response, even if empty (Bitcoin Core protocol requirement)
             std::cout << "[IBD] Sending " << headers.size() << " header(s) to peer " << peer_id << std::endl;
-            CNetMessage headersMsg = message_processor.CreateHeadersMessage(headers);
-            connection_manager.SendMessage(peer_id, headersMsg);
+            if (g_node_context.connman && g_node_context.message_processor) {
+                CNetMessage headersMsg = g_node_context.message_processor->CreateHeadersMessage(headers);
+                g_node_context.connman->PushMessage(peer_id, headersMsg);
+            }
         });
 
         // Register HEADERS handler - process received headers (Bug #12 - Phase 4.2)
@@ -2477,7 +2546,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
 
         // Set up block found callback to save mined blocks and credit wallet
-        miner.SetBlockFoundCallback([&blockchain, &connection_manager, &message_processor, &wallet, &utxo_set](const CBlock& block) {
+        miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
             // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
             if (!g_node_state.running) {
                 // Shutting down - discard this block to prevent race condition
@@ -2722,154 +2791,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << " ✓" << std::endl;
         std::cout << "  [OK] P2P server listening on port " << config.p2pport << std::endl;
 
-        // Set socket to non-blocking for graceful shutdown
-        p2p_socket.SetNonBlocking(true);
-        p2p_socket.SetReuseAddr(true);
-
-        // BUG #88: Windows startup crash fix - wrap thread creation in try/catch
-        std::cerr.flush();
-        std::thread p2p_thread;
-        try {
-            p2p_thread = std::thread([&p2p_socket, &connection_manager]() {
-                // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
-                try {
-                    std::cerr.flush();
-                    std::cout << "  [OK] P2P accept thread started" << std::endl;
-
-                while (g_node_state.running) {
-                // Accept new connection (non-blocking)
-                auto client = p2p_socket.Accept();
-
-                if (client && client->IsValid()) {
-                    std::string peer_addr = client->GetPeerAddress();
-                    uint16_t peer_port = client->GetPeerPort();
-
-                    std::cout << "[P2P] New peer connected: " << peer_addr << ":" << peer_port << std::endl;
-
-                    // Create NetProtocol::CAddress from peer info
-                    NetProtocol::CAddress addr;
-                    addr.time = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);  // CID 1675257 FIX
-                    addr.services = NetProtocol::NODE_NETWORK;
-                    addr.port = peer_port;
-
-                    // Parse IPv4 address using inet_pton (Bitcoin Core standard)
-                    struct in_addr ipv4_addr;
-                    if (inet_pton(AF_INET, peer_addr.c_str(), &ipv4_addr) == 1) {
-                        // Convert from network byte order to host byte order
-                        uint32_t ipv4 = ntohl(ipv4_addr.s_addr);
-                        addr.SetIPv4(ipv4);
-
-                        // Bitcoin Core-style validation: IsRoutable() check
-                        if (!addr.IsRoutable()) {
-                            std::cout << "[P2P] Rejecting non-routable inbound connection from "
-                                      << peer_addr << " (loopback/private/multicast)" << std::endl;
-                            continue; // Drop non-routable addresses (Bitcoin Core behavior)
-                        }
-
-                        // CID 1675194 FIX: Save and restore ostream format state
-                        std::ios_base::fmtflags oldFlags = std::cout.flags();
-                        std::cout.flags(oldFlags);  // Restore original format flags
-                        std::cout << ")" << std::endl;
-
-                        // BUG #58 FIX: Check for self-connection on ACCEPT side
-                        // When seed nodes try to connect to themselves via external IP,
-                        // the outbound check may happen AFTER accept() creates a peer entry.
-                        // We need to detect and reject self-connections on the inbound side too.
-                        //
-                        // Detection method: Get our own local addresses using gethostname + getaddrinfo
-                        // and check if the peer IP matches any of our local interface IPs.
-                        bool isSelfConnection = false;
-
-                        // Method 1: Check if peer IP matches any local interface IP
-                        // Get local hostname and resolve to IPs
-                        char hostname[256];
-                        if (gethostname(hostname, sizeof(hostname)) == 0) {
-                            struct addrinfo hints, *result;
-                            memset(&hints, 0, sizeof(hints));
-                            hints.ai_family = AF_INET;
-                            hints.ai_socktype = SOCK_STREAM;
-
-                            if (getaddrinfo(hostname, nullptr, &hints, &result) == 0) {
-                                for (struct addrinfo* p = result; p != nullptr; p = p->ai_next) {
-                                    struct sockaddr_in* addr_in = (struct sockaddr_in*)p->ai_addr;
-                                    char local_ip[INET_ADDRSTRLEN];
-                                    inet_ntop(AF_INET, &addr_in->sin_addr, local_ip, INET_ADDRSTRLEN);
-
-                                    if (peer_addr == local_ip) {
-                                        isSelfConnection = true;
-                                        std::cout << "[P2P] Detected INBOUND self-connection from " << peer_addr
-                                                  << " (matches local interface " << local_ip << ") - rejecting" << std::endl;
-                                        break;
-                                    }
-                                }
-                                freeaddrinfo(result);
-                            }
-                        }
-
-                        // Method 2: Also check if peer IP matches our socket's local address
-                        // (handles cases where hostname resolution doesn't work)
-                        if (!isSelfConnection) {
-                            std::string socket_local_ip = client->GetLocalAddress();
-                            if (!socket_local_ip.empty() && socket_local_ip == peer_addr) {
-                                isSelfConnection = true;
-                                std::cout << "[P2P] Detected INBOUND self-connection from " << peer_addr
-                                          << " (matches socket local IP) - rejecting" << std::endl;
-                            }
-                        }
-
-                        if (isSelfConnection) {
-                            continue; // Drop self-connection
-                        }
-                    } else {
-                        std::cout << "[P2P] ERROR: Failed to parse inbound peer IPv4: " << peer_addr
-                                  << " (invalid format)" << std::endl;
-                        continue; // Invalid IP format - drop connection
-                    }
-
-                    // Handle connection via connection manager
-                    int peer_id = connection_manager.AcceptConnection(addr, std::move(client));
-                    if (peer_id >= 0) {
-                        std::cout << "[P2P] Peer accepted and added to connection pool (peer_id=" << peer_id << ")" << std::endl;
-
-                        // Perform version/verack handshake
-                        if (connection_manager.PerformHandshake(peer_id)) {
-                            std::cout << "[P2P] Sent version message to peer " << peer_id << std::endl;
-                        } else {
-                            // BUG #105 FIX: Disconnect peer if handshake fails to prevent zombie peers
-                            // Previously, failed handshakes left peers in the map, causing connection limit issues
-                            std::cout << "[P2P] Failed to send version to peer " << peer_id << ", disconnecting" << std::endl;
-                            connection_manager.DisconnectPeer(peer_id, "handshake_failed");
-                        }
-                    } else {
-                        std::cout << "[P2P] Failed to accept peer connection" << std::endl;
-                        // Note: socket is already moved, no need to close
-                    }
-                } else {
-                    // No connection available, sleep briefly to avoid busy-wait
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            }
-
-                std::cout << "  P2P accept thread stopping..." << std::endl;
-            } catch (const std::exception& e) {
-                // Phase 1.1: Prevent silent thread crashes
-                LogPrintf(NET, ERROR, "P2P accept thread exception: %s", e.what());
-                std::cerr << "[P2P-Accept] FATAL: Thread exception: " << e.what() << std::endl;
-            } catch (...) {
-                LogPrintf(NET, ERROR, "P2P accept thread unknown exception");
-                std::cerr << "[P2P-Accept] FATAL: Unknown thread exception" << std::endl;
-            }
-            });
-            std::cerr.flush();
-        } catch (const std::exception& e) {
-            std::cerr.flush();
-            g_node_state.running = false;
-            throw;  // Re-throw to be caught by outer try/catch
-        } catch (...) {
-            std::cerr.flush();
-            g_node_state.running = false;
-            throw;
-        }
+        // Phase 5: CConnman handles accept internally via ThreadSocketHandler
+        // No need for separate p2p_thread - accept is handled in CConnman::SocketHandler()
+        std::cout << "  [OK] P2P accept handled by CConnman::ThreadSocketHandler" << std::endl;
 
         // Helper function to parse IPv4 address string to uint32_t
         auto parseIPv4 = [](const std::string& ip) -> uint32_t {
@@ -2942,16 +2866,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                     addr.SetIPv4(ip_addr);
 
-                    int peer_id = connection_manager.ConnectToPeer(addr);
+                    // Phase 5: Use CConnman to connect and send VERSION
+                    int peer_id = ConnectAndHandshake(addr);
                     if (peer_id >= 0) {
                         std::cout << "    [OK] Connected to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
-
-                        // Perform version/verack handshake
-                        if (connection_manager.PerformHandshake(peer_id)) {
-                            std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
-                        } else {
-                            std::cout << "    [FAIL] Failed to send version to peer " << peer_id << std::endl;
-                        }
+                        std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
                     } else {
                         std::cout << "    [FAIL] Failed to connect to " << node_addr << std::endl;
                     }
@@ -3002,14 +2921,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                     addr.SetIPv4(ip_addr);
 
-                    int peer_id = connection_manager.ConnectToPeer(addr);
+                    // Phase 5: Use CConnman to connect and send VERSION
+                    int peer_id = ConnectAndHandshake(addr);
                     if (peer_id >= 0) {
                         std::cout << "    [OK] Added node " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
-
-                        // Perform version/verack handshake
-                        if (connection_manager.PerformHandshake(peer_id)) {
-                            std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
-                        }
+                        std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
                     } else {
                         std::cout << "    [FAIL] Failed to add node " << node_addr << std::endl;
                     }
@@ -3031,104 +2947,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 std::cout << "  Connecting to " << ip_str << ":" << port << "..." << std::endl;
 
-                int peer_id = connection_manager.ConnectToPeer(seed_addr);
+                // Phase 5: Use CConnman to connect and send VERSION
+                int peer_id = ConnectAndHandshake(seed_addr);
                 if (peer_id >= 0) {
                     std::cout << "    [OK] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
-
-                    // Perform version/verack handshake
-                    if (connection_manager.PerformHandshake(peer_id)) {
-                        std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
-                    } else {
-                        std::cout << "    [FAIL] Failed to send version to peer " << peer_id << std::endl;
-                    }
+                    std::cout << "    [OK] Sent version message to peer " << peer_id << std::endl;
                 } else {
                     std::cout << "    [FAIL] Failed to connect to " << ip_str << ":" << port << std::endl;
                 }
             }
         }
 
-        // Launch P2P message receive thread
-        // BUG #85 FIX: Add exception handling to prevent std::terminate
-        // BUG #88: Windows startup crash fix - wrap thread creation in try/catch
-        std::cerr.flush();
-        std::thread p2p_recv_thread;
-        try {
-            p2p_recv_thread = std::thread([&connection_manager]() {
-            // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
-            try {
-                std::cout << "  [OK] P2P receive thread started" << std::endl;
-
-                while (g_node_state.running) {
-                try {
-                    // Get all connected peers
-                    auto peers = g_node_context.peer_manager->GetConnectedPeers();
-
-                    // Try to receive messages from each peer
-                    for (const auto& peer : peers) {
-                        try {
-                            connection_manager.ReceiveMessages(peer->id);
-                        } catch (const std::system_error& e) {
-                            // BUG #85: Log and continue instead of crashing
-                            std::cerr << "[P2P-Recv] System error processing peer " << peer->id
-                                      << ": " << e.what() << " (code: " << e.code() << ")" << std::endl;
-                            // Disconnect this peer but don't crash
-                            try {
-                                connection_manager.DisconnectPeer(peer->id, "system_error during receive");
-                            } catch (...) {}
-                        } catch (const std::exception& e) {
-                            std::cerr << "[P2P-Recv] Exception processing peer " << peer->id
-                                      << ": " << e.what() << std::endl;
-                            try {
-                                connection_manager.DisconnectPeer(peer->id, "exception during receive");
-                            } catch (...) {}
-                        }
-                    }
-
-                    // Sleep briefly to avoid busy-wait
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                } catch (const std::system_error& e) {
-                    std::cerr << "[P2P-Recv] CRITICAL system error in recv loop: " << e.what()
-                              << " (code: " << e.code() << ")" << std::endl;
-                    // Brief pause before retrying
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                } catch (const std::exception& e) {
-                    std::cerr << "[P2P-Recv] CRITICAL exception in recv loop: " << e.what() << std::endl;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                } catch (...) {
-                    std::cerr << "[P2P-Recv] CRITICAL unknown exception in recv loop" << std::endl;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                }
-            }
-
-                std::cout << "  P2P receive thread stopping..." << std::endl;
-            } catch (const std::exception& e) {
-                // Phase 1.1: Prevent silent thread crashes (outer catch for unexpected exceptions)
-                LogPrintf(NET, ERROR, "P2P receive thread exception: %s", e.what());
-                std::cerr << "[P2P-Recv] FATAL: Thread exception: " << e.what() << std::endl;
-            } catch (...) {
-                LogPrintf(NET, ERROR, "P2P receive thread unknown exception");
-                std::cerr << "[P2P-Recv] FATAL: Unknown thread exception" << std::endl;
-            }
-            });
-            std::cerr.flush();
-        } catch (const std::exception& e) {
-            std::cerr.flush();
-            g_node_state.running = false;
-            throw;
-        } catch (...) {
-            std::cerr.flush();
-            g_node_state.running = false;
-            throw;
-        }
+        // Phase 5: CConnman handles message receiving internally via ThreadSocketHandler and ThreadMessageHandler
+        // No need for separate p2p_recv_thread
+        std::cout << "  [OK] P2P receive handled by CConnman::ThreadSocketHandler and ThreadMessageHandler" << std::endl;
 
         // Launch P2P maintenance thread (ping/pong keepalive, reconnection, score decay)
         // BUG #49 FIX: Add automatic peer reconnection and misbehavior score decay
         // BUG #85 FIX: Add exception handling to prevent std::terminate
         // BUG #88: Windows startup crash fix - wrap thread creation in try/catch
+        // Phase 5: Updated to use CConnman instead of CConnectionManager
         std::cerr.flush();
         std::thread p2p_maint_thread;
         try {
-            p2p_maint_thread = std::thread([&connection_manager, &feeler_manager]() {
+            p2p_maint_thread = std::thread([&feeler_manager]() {
             // Phase 1.1: Wrap thread entry point in try/catch to prevent silent crashes
             try {
                 std::cout << "  [OK] P2P maintenance thread started" << std::endl;
@@ -3138,8 +2980,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 while (g_node_state.running) {
                     try {
-                    // Send periodic pings, check timeouts
-                    connection_manager.PeriodicMaintenance();
+                    // Phase 5: Proactive outbound connections handled by CConnman::ThreadOpenConnections
+                    // This thread handles reactive reconnection and other maintenance
+                    // Ping/pong is handled automatically by message handlers
 
                     // BUG #49: Check if we need to reconnect to seed nodes
                     size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
@@ -3167,17 +3010,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                                     std::cout << "[P2P-Maintenance] Attempting connection to seed " << ip_str << ":" << port << std::endl;
 
-                                    int peer_id = connection_manager.ConnectToPeer(seed_addr);
+                                    // Phase 5: Use CConnman to connect and send VERSION
+                                    int peer_id = ConnectAndHandshake(seed_addr);
                                     if (peer_id >= 0) {
                                         std::cout << "[P2P-Maintenance] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
-
-                                        // Perform handshake
-                                        if (connection_manager.PerformHandshake(peer_id)) {
-                                            std::cout << "[P2P-Maintenance] Handshake successful with peer " << peer_id << std::endl;
-                                            successful_connections++;
-                                        } else {
-                                            std::cout << "[P2P-Maintenance] Handshake failed with peer " << peer_id << std::endl;
-                                        }
+                                        std::cout << "[P2P-Maintenance] Sent VERSION to peer " << peer_id << std::endl;
+                                        successful_connections++;
                                     } else {
                                         std::cout << "[P2P-Maintenance] Failed to connect to seed " << ip_str << ":" << port << std::endl;
                                     }
@@ -3242,15 +3080,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     g_node_context.peer_manager->MarkAddressTried(addr);
 
                                     try {
-                                        int peer_id = connection_manager.ConnectToPeer(addr);
+                                        // Phase 5: Use CConnman to connect and send VERSION
+                                        int peer_id = ConnectAndHandshake(addr);
                                         if (peer_id >= 0) {
-                                            if (connection_manager.PerformHandshake(peer_id)) {
-                                                std::cout << "[P2P-OpenConn] Connected to " << ip_str
-                                                          << " from AddrMan" << std::endl;
-                                                connections_made++;
-                                                // Phase 5: Mark as good on successful handshake
-                                                g_node_context.peer_manager->MarkAddressGood(addr);
-                                            }
+                                            std::cout << "[P2P-OpenConn] Connected to " << ip_str
+                                                      << " from AddrMan (peer_id=" << peer_id << ")" << std::endl;
+                                            connections_made++;
+                                            // Phase 5: Mark as good on successful connection
+                                            g_node_context.peer_manager->MarkAddressGood(addr);
                                         }
                                     } catch (const std::exception& e) {
                                         // Connection failed - that's OK, we'll try others
@@ -3275,6 +3112,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                     // Process feeler connections (Bitcoin Core-style eclipse attack protection)
                     // Feeler connections test addresses we haven't tried recently
+                    // Phase 5: Re-enabled after CFeelerManager migration to CConnman
                     feeler_manager.ProcessFeelerConnections();
 
                     // Sleep for 30 seconds between maintenance cycles
@@ -3682,25 +3520,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << " done" << std::endl;
 
         std::cout << "[Shutdown] Stopping P2P server..." << std::flush;
-        connection_manager.Cleanup();  // Close all peer sockets
+        // Phase 5: Stop CConnman (handles all socket cleanup internally)
+        if (g_node_context.connman) {
+            g_node_context.connman->Stop();
+        }
         p2p_socket.Close();
 
         // Phase 1.2: Shutdown NodeContext (Bitcoin Core pattern)
         std::cout << "[Shutdown] NodeContext shutdown complete" << std::endl;
         g_node_context.Shutdown();
-        if (p2p_thread.joinable()) {
-            p2p_thread.join();
-        }
-        if (p2p_recv_thread.joinable()) {
-            p2p_recv_thread.join();
-        }
+        
+        // Phase 5: p2p_thread and p2p_recv_thread removed - handled by CConnman
+        // Only join maintenance thread
         if (p2p_maint_thread.joinable()) {
             p2p_maint_thread.join();
         }
 
         // Clear global P2P networking pointers (NW-005)
         // P0-5 FIX: Use .store() for atomic pointers
-        g_connection_manager.store(nullptr);
         g_message_processor.store(nullptr);
 
         // Clean up transaction relay manager (P0-5 FIX: use load/store for atomic)

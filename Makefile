@@ -169,7 +169,10 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/feeler.cpp \
                src/net/bandwidth_throttle.cpp \
                src/net/connection_quality.cpp \
-               src/net/partition_detector.cpp
+               src/net/partition_detector.cpp \
+               src/net/connman.cpp \
+               src/net/node.cpp \
+               src/net/sock.cpp
 
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \
@@ -249,6 +252,7 @@ WALLET_ENCRYPTION_INTEGRATION_TEST_SOURCE := src/test/wallet_encryption_integrat
 WALLET_PERSISTENCE_TEST_SOURCE := src/test/wallet_persistence_tests.cpp
 INTEGRATION_TEST_SOURCE := src/test/integration_tests.cpp
 NET_TEST_SOURCE := src/test/net_tests.cpp
+CONNMAN_TEST_SOURCE := src/test/connman_tests.cpp
 TX_VALIDATION_TEST_SOURCE := src/test/tx_validation_tests.cpp
 TX_RELAY_TEST_SOURCE := src/test/tx_relay_tests.cpp
 MINING_INTEGRATION_TEST_SOURCE := src/test/mining_integration_tests.cpp
@@ -316,7 +320,7 @@ check-wallet-balance: $(CORE_OBJECTS) $(OBJ_DIR)/check-wallet-balance.o $(DILITH
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests tx_validation_tests tx_relay_tests mining_integration_tests test_passphrase_validator
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests test_passphrase_validator
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS)
@@ -376,6 +380,10 @@ integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/integration_tests.o $(DILITHI
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 net_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/net_tests.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+connman_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/connman_tests.o $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 

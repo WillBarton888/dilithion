@@ -118,8 +118,17 @@ private:
 
 /**
  * Connection handshake helper
+ *
+ * DEPRECATED: This class is being replaced by CConnman (event-driven networking).
+ * CConnman now owns CNode objects and handles socket I/O with proper select() blocking.
+ * This class remains for backward compatibility with:
+ * - headers_manager.cpp (SendMessage for GETHEADERS)
+ * - net.cpp (SendMessage for VERACK)
+ *
+ * Migration plan: Move all SendMessage calls to use CConnman::PushMessage(),
+ * then remove this class entirely.
  */
-class CConnectionManager {
+class [[deprecated("Use CConnman instead")]] CConnectionManager {
 public:
     CConnectionManager(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc);
 

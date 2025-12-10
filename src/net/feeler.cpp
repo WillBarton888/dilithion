@@ -4,12 +4,14 @@
 #include <net/feeler.h>
 #include <net/peers.h>
 #include <net/net.h>
+#include <net/connman.h>  // Phase 5: CConnman
 #include <util/logging.h>
 #include <algorithm>
 
-CFeelerManager::CFeelerManager(CPeerManager& peer_manager, CConnectionManager& connection_manager)
+CFeelerManager::CFeelerManager(CPeerManager& peer_manager, CConnman* connman, CNetMessageProcessor* msg_processor)
     : m_peer_manager(peer_manager),
-      m_connection_manager(connection_manager),
+      m_connman(connman),
+      m_msg_processor(msg_processor),
       m_last_feeler_time(std::chrono::steady_clock::now()) {
 }
 
@@ -39,11 +41,32 @@ bool CFeelerManager::ProcessFeelerConnections() {
 
     NetProtocol::CAddress addr = addresses[0];
 
-    // Initiate feeler connection
-    int peer_id = m_connection_manager.ConnectToPeer(addr);
-    if (peer_id < 0) {
+    // Phase 5: Use CConnman to initiate feeler connection
+    if (!m_connman || !m_msg_processor) {
+        LogPrintNet(DEBUG, "No connection manager or message processor available for feeler connection");
+        return false;
+    }
+
+    CNode* pnode = m_connman->ConnectNode(addr);
+    if (!pnode) {
         LogPrintNet(DEBUG, "Failed to initiate feeler connection to %s", addr.ToString().c_str());
         return false;
+    }
+
+    int peer_id = pnode->id;
+
+    // Send VERSION message for outbound feeler connection
+    NetProtocol::CAddress local_addr;
+    local_addr.services = NetProtocol::NODE_NETWORK;
+    local_addr.SetIPv4(0);  // 0.0.0.0
+    local_addr.port = 0;
+    CNetMessage version_msg = m_msg_processor->CreateVersionMessage(addr, local_addr);
+    m_connman->PushMessage(peer_id, version_msg);
+
+    // Update peer state to VERSION_SENT for outbound connections
+    auto peer = m_peer_manager.GetPeer(peer_id);
+    if (peer) {
+        peer->state = CPeer::STATE_VERSION_SENT;
     }
 
     // Track this as a feeler connection
@@ -88,7 +111,9 @@ void CFeelerManager::FeelerConnectionComplete(int peer_id, bool success) {
     // Remove from active feelers
     m_active_feelers.erase(it);
 
-    // Disconnect feeler immediately (they're short-lived)
-    m_connection_manager.DisconnectPeer(peer_id, "Feeler connection complete");
+    // Phase 5: Disconnect feeler immediately (they're short-lived)
+    if (m_connman) {
+        m_connman->DisconnectNode(peer_id, "Feeler connection complete");
+    }
 }
 

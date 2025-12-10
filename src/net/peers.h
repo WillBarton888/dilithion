@@ -11,6 +11,7 @@
 #include <net/connection_quality.h>  // Network: Connection quality metrics
 #include <net/socket.h>   // Phase 2: Socket in CPeer
 #include <net/node_state.h>  // Phase 3: For QueuedBlock
+#include <net/node.h>     // Phase 1: CNode for event-driven networking
 #include <primitives/block.h>  // Phase 3: For uint256
 #include <util/time.h>
 #include <string>
@@ -164,6 +165,12 @@ private:
     mutable std::recursive_mutex cs_peers;
     std::map<int, std::shared_ptr<CPeer>> peers;
 
+    // Phase 1: CNode management (event-driven networking)
+    // CNode objects are owned by CConnman. CPeerManager stores raw pointers
+    // for state synchronization. DO NOT delete these pointers.
+    mutable std::recursive_mutex cs_nodes;
+    std::map<int, CNode*> node_refs;  // Non-owning references to CConnman's CNode objects
+
     // Bitcoin Core-style ban manager with banlist.dat persistence
     // Replaces simple banned_ips map with structured ban entries
     CBanManager banman;
@@ -204,13 +211,22 @@ public:
     bool SavePeers();   // Save address database to peers.dat
     bool LoadPeers();   // Load address database from peers.dat
 
-    // Peer management
+    // Peer management (legacy CPeer - will be deprecated)
     std::shared_ptr<CPeer> AddPeer(const NetProtocol::CAddress& addr);
     std::shared_ptr<CPeer> AddPeerWithId(int peer_id);  // BUG #124: Add peer with specific ID for inbound connections
     void RemovePeer(int peer_id);
     std::shared_ptr<CPeer> GetPeer(int peer_id);
     std::vector<std::shared_ptr<CPeer>> GetAllPeers();
     std::vector<std::shared_ptr<CPeer>> GetConnectedPeers();
+
+    // Phase 1: CNode management (event-driven networking)
+    // CNode objects are owned by CConnman. These methods manage references only.
+    CNode* AddNode(const NetProtocol::CAddress& addr, bool inbound = false);
+    void RegisterNode(int node_id, CNode* node, const NetProtocol::CAddress& addr, bool inbound);
+    void RemoveNode(int node_id);
+    CNode* GetNode(int node_id);
+    std::vector<CNode*> GetAllNodes();
+    std::vector<CNode*> GetConnectedNodes();
 
     // Connection management
     bool CanAcceptConnection() const;

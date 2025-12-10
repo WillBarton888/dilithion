@@ -3,6 +3,7 @@
 
 #include <net/async_broadcaster.h>
 #include <net/net.h>
+#include <net/connman.h>  // Phase 5: CConnman
 #include <net/protocol.h>
 #include <iostream>
 #include <chrono>
@@ -17,8 +18,8 @@ static int64_t GetTimeMillis() {
 // g_message_processor is now declared as std::atomic in net.h (P0-5 FIX)
 
 // Constructor
-CAsyncBroadcaster::CAsyncBroadcaster(CConnectionManager& conn_mgr)
-    : m_connection_manager(conn_mgr) {
+CAsyncBroadcaster::CAsyncBroadcaster(CConnman* connman)
+    : m_connman(connman) {
 }
 
 // Destructor
@@ -251,14 +252,22 @@ bool CAsyncBroadcaster::ProcessTask(const BroadcastTask& task) {
 
 
     // Send to each peer
-    for (int peer_id : task.peer_ids) {
-        bool sent = m_connection_manager.SendMessage(peer_id, task.message);
+    if (!m_connman) {
+        std::cerr << "[AsyncBroadcaster] No connection manager available" << std::endl;
+        return false;
+    }
 
-        if (sent) {
+    for (int peer_id : task.peer_ids) {
+        // Phase 5: Use CConnman::PushMessage instead of SendMessage
+        // PushMessage doesn't return a bool, so we check if node exists
+        CNode* pnode = m_connman->GetNode(peer_id);
+        if (pnode && !pnode->fDisconnect.load()) {
+            m_connman->PushMessage(peer_id, task.message);
             success_count++;
         } else {
             fail_count++;
-            std::cerr << "[AsyncBroadcaster] Failed to send to peer " << peer_id << std::endl;
+            std::cerr << "[AsyncBroadcaster] Failed to send to peer " << peer_id 
+                      << " (node not found or disconnected)" << std::endl;
         }
     }
 

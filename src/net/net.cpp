@@ -436,6 +436,17 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
         peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
         g_network_stats.handshake_complete++;
 
+        // FIX Issue 2: Also update CNode::state to keep in sync with CPeer::state
+        // CNode is owned by CConnman but tracked in CPeerManager::nodes map
+        CNode* node = peer_manager.GetNode(peer_id);
+        if (node) {
+            node->state.store(CNode::STATE_HANDSHAKE_COMPLETE);
+            node->fSuccessfullyConnected.store(true);
+            node->nVersion = peer->version;
+            node->strSubVer = peer->user_agent;
+            node->nStartingHeight = peer->start_height;
+            node->fRelay = peer->relay;
+        }
 
         // BUG #85 FIX: Use atomic method that follows Bitcoin Core's pattern
         // All state modifications happen while holding the lock, preventing

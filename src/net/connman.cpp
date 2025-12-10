@@ -1,0 +1,1021 @@
+// Copyright (c) 2025 The Dilithion Core developers
+// Distributed under the MIT software license
+//
+// CConnman - Event-driven connection manager implementation
+// See: docs/developer/LIBEVENT-NETWORKING-PORT-PLAN.md
+
+#include <net/connman.h>
+#include <net/peers.h>
+#include <net/net.h>
+#include <net/socket.h>
+#include <net/sock.h>
+#include <net/protocol.h>
+#include <net/serialize.h>
+#include <net/banman.h>  // For MisbehaviorType
+#include <util/time.h>
+#include <util/logging.h>
+#include <util/strencodings.h>  // For strprintf
+
+#include <algorithm>
+#include <cstring>
+#include <iostream>  // For std::cout
+#include <thread>  // For std::this_thread
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#endif
+
+// Socket timeout for select() in milliseconds
+static constexpr int SELECT_TIMEOUT_MS = 50;
+
+CConnman::CConnman() = default;
+
+CConnman::~CConnman() {
+    Interrupt();
+    Stop();
+}
+
+bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, const CConnmanOptions& options) {
+    m_peer_manager = &peer_mgr;
+    m_msg_processor = &msg_proc;
+    m_options = options;
+
+    // Reset interrupt flags
+    interruptNet.store(false);
+    flagInterruptMsgProc.store(false);
+
+    // Phase 2: Create listen socket if fListen
+    if (m_options.fListen) {
+        m_listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (m_listen_socket < 0) {
+            LogPrintf(NET, ERROR, "[CConnman] Failed to create listen socket\n");
+            return false;
+        }
+
+        // Set socket options
+        int reuse = 1;
+        setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+
+        // Bind to port
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(m_options.nListenPort);
+
+        if (bind(m_listen_socket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            LogPrintf(NET, ERROR, "[CConnman] Failed to bind listen socket to port %d\n", m_options.nListenPort);
+#ifdef _WIN32
+            closesocket(m_listen_socket);
+#else
+            close(m_listen_socket);
+#endif
+            m_listen_socket = -1;
+            return false;
+        }
+
+        // Listen
+        if (listen(m_listen_socket, 10) < 0) {
+            LogPrintf(NET, ERROR, "[CConnman] Failed to listen on socket\n");
+#ifdef _WIN32
+            closesocket(m_listen_socket);
+#else
+            close(m_listen_socket);
+#endif
+            m_listen_socket = -1;
+            return false;
+        }
+
+        // Set non-blocking
+#ifdef _WIN32
+        u_long mode = 1;
+        ioctlsocket(m_listen_socket, FIONBIO, &mode);
+#else
+        int flags = fcntl(m_listen_socket, F_GETFL, 0);
+        fcntl(m_listen_socket, F_SETFL, flags | O_NONBLOCK);
+#endif
+
+        LogPrintf(NET, INFO, "[CConnman] Listening on port %d\n", m_options.nListenPort);
+    }
+
+    // Phase 2: Start ThreadSocketHandler
+    try {
+        threadSocketHandler = std::thread(&CConnman::ThreadSocketHandler, this);
+    } catch (const std::exception& e) {
+        LogPrintf(NET, ERROR, "[CConnman] Failed to start ThreadSocketHandler: %s\n", e.what());
+        return false;
+    }
+
+    // Phase 2: Start ThreadMessageHandler
+    try {
+        threadMessageHandler = std::thread(&CConnman::ThreadMessageHandler, this);
+    } catch (const std::exception& e) {
+        LogPrintf(NET, ERROR, "[CConnman] Failed to start ThreadMessageHandler: %s\n", e.what());
+        Interrupt();
+        if (threadSocketHandler.joinable()) {
+            threadSocketHandler.join();
+        }
+        return false;
+    }
+
+    // Phase 2: Start ThreadOpenConnections
+    try {
+        threadOpenConnections = std::thread(&CConnman::ThreadOpenConnections, this);
+    } catch (const std::exception& e) {
+        LogPrintf(NET, ERROR, "[CConnman] Failed to start ThreadOpenConnections: %s\n", e.what());
+        Interrupt();
+        if (threadSocketHandler.joinable()) {
+            threadSocketHandler.join();
+        }
+        if (threadMessageHandler.joinable()) {
+            threadMessageHandler.join();
+        }
+        return false;
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] Started successfully\n");
+    return true;
+}
+
+void CConnman::Stop() {
+    // Signal interrupt
+    Interrupt();
+
+    // Wait for threads
+    if (threadSocketHandler.joinable()) {
+        threadSocketHandler.join();
+    }
+    if (threadMessageHandler.joinable()) {
+        threadMessageHandler.join();
+    }
+    if (threadOpenConnections.joinable()) {
+        threadOpenConnections.join();
+    }
+
+    // Close listen socket
+    if (m_listen_socket >= 0) {
+#ifdef _WIN32
+        closesocket(m_listen_socket);
+#else
+        close(m_listen_socket);
+#endif
+        m_listen_socket = -1;
+    }
+
+    // Disconnect all nodes
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        for (auto& node : m_nodes) {
+            node->CloseSocket();
+        }
+        m_nodes.clear();
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] Stopped\n");
+}
+
+void CConnman::Interrupt() {
+    interruptNet.store(true);
+    flagInterruptMsgProc.store(true);
+
+    // Wake message handler
+    WakeMessageHandler();
+}
+
+CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
+    // Phase 2: Implement outbound connection
+    // Check connection limits
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        size_t outbound_count = 0;
+        for (const auto& node : m_nodes) {
+            if (!node->fInbound) {
+                outbound_count++;
+            }
+        }
+        if (outbound_count >= static_cast<size_t>(m_options.nMaxOutbound)) {
+            LogPrintf(NET, WARN, "[CConnman] Outbound connection limit reached (%zu/%d)\n",
+                      outbound_count, m_options.nMaxOutbound);
+            return nullptr;
+        }
+    }
+
+    // Extract IP string from address
+    std::string ip_str = strprintf("%d.%d.%d.%d",
+                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
+
+    // Create socket
+    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) {
+        LogPrintf(NET, ERROR, "[CConnman] Failed to create socket for %s:%d\n",
+                  ip_str.c_str(), addr.port);
+        return nullptr;
+    }
+
+    // Set non-blocking
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(sock, FIONBIO, &mode);
+#else
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+#endif
+
+    // Connect
+    struct sockaddr_in sockaddr;
+    memset(&sockaddr, 0, sizeof(sockaddr));
+    sockaddr.sin_family = AF_INET;
+    inet_pton(AF_INET, ip_str.c_str(), &sockaddr.sin_addr);
+    sockaddr.sin_port = htons(addr.port);
+
+    int result = connect(sock, (struct sockaddr*)&sockaddr, sizeof(sockaddr));
+#ifdef _WIN32
+    int err = WSAGetLastError();
+    if (result < 0 && err != WSAEWOULDBLOCK && err != WSAEINPROGRESS) {
+        closesocket(sock);
+        LogPrintf(NET, ERROR, "[CConnman] Failed to connect to %s:%d (error %d)\n",
+                  ip_str.c_str(), addr.port, err);
+        return nullptr;
+    }
+#else
+    if (result < 0 && errno != EINPROGRESS && errno != EAGAIN) {
+        close(sock);
+        LogPrintf(NET, ERROR, "[CConnman] Failed to connect to %s:%d (error %d)\n",
+                  ip_str.c_str(), addr.port, errno);
+        return nullptr;
+    }
+#endif
+
+    // Phase 2: Create CNode directly (CConnman owns nodes)
+    int node_id = m_next_node_id++;
+    auto node = std::make_unique<CNode>(node_id, addr, false);  // false = outbound
+    CNode* pnode = node.get();
+
+    // Set socket and state
+    pnode->SetSocket(sock);
+    pnode->state.store(CNode::STATE_CONNECTING);
+
+    // Add to m_nodes
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        m_nodes.push_back(std::move(node));
+    }
+
+    // Register with CPeerManager for state synchronization
+    // FIX Issue 1: Pass CNode pointer so CPeerManager can sync state
+    m_peer_manager->RegisterNode(node_id, pnode, addr, false);
+
+    LogPrintf(NET, INFO, "[CConnman] Connecting to %s:%d (node %d)\n",
+              ip_str.c_str(), addr.port, pnode->id);
+    return pnode;
+}
+
+bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtocol::CAddress& addr) {
+    // Phase 2: Implement inbound connection acceptance
+    if (!socket || !socket->IsValid()) {
+        LogPrintf(NET, ERROR, "[CConnman] AcceptConnection: invalid socket\n");
+        return false;
+    }
+
+    // Check connection limits
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        size_t inbound_count = 0;
+        size_t total_count = m_nodes.size();
+        for (const auto& node : m_nodes) {
+            if (node->fInbound) {
+                inbound_count++;
+            }
+        }
+        if (inbound_count >= static_cast<size_t>(m_options.nMaxInbound)) {
+            LogPrintf(NET, WARN, "[CConnman] Inbound connection limit reached (%zu/%d)\n",
+                      inbound_count, m_options.nMaxInbound);
+            return false;
+        }
+        if (total_count >= static_cast<size_t>(m_options.nMaxTotal)) {
+            LogPrintf(NET, WARN, "[CConnman] Total connection limit reached (%zu/%d)\n",
+                      total_count, m_options.nMaxTotal);
+            return false;
+        }
+    }
+
+    // Extract IP string
+    std::string ip_str = strprintf("%d.%d.%d.%d",
+                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
+
+    // Check if IP is banned
+    if (m_peer_manager && m_peer_manager->IsBanned(ip_str)) {
+        LogPrintf(NET, WARN, "[CConnman] Rejecting connection from banned IP %s\n", ip_str.c_str());
+        return false;
+    }
+
+    // Phase 2: Create CNode directly (CConnman owns nodes)
+    int node_id = m_next_node_id++;
+    auto node = std::make_unique<CNode>(node_id, addr, true);  // true = inbound
+    CNode* pnode = node.get();
+
+    // Get socket FD from CSocket and release ownership
+    // ReleaseFD() transfers ownership so CSocket won't close it
+    int sock_fd = socket->ReleaseFD();
+    if (sock_fd < 0) {
+        LogPrintf(NET, ERROR, "[CConnman] AcceptConnection: failed to get socket FD\n");
+        return false;
+    }
+    
+    // Set socket options on the raw FD
+    // Set non-blocking
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(sock_fd, FIONBIO, &mode);
+#else
+    int flags = fcntl(sock_fd, F_GETFL, 0);
+    fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+
+    pnode->SetSocket(sock_fd);
+    pnode->state.store(CNode::STATE_CONNECTED);
+
+    // Socket is now released and owned by CNode
+    socket.reset();
+
+    // Add to m_nodes
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        m_nodes.push_back(std::move(node));
+    }
+
+    // Register with CPeerManager for state synchronization
+    // FIX Issue 1: Pass CNode pointer so CPeerManager can sync state
+    m_peer_manager->RegisterNode(node_id, pnode, addr, true);
+
+    LogPrintf(NET, INFO, "[CConnman] Accepted connection from %s:%d (node %d)\n",
+              ip_str.c_str(), addr.port, node_id);
+    return true;
+}
+
+void CConnman::DisconnectNode(int nodeid, const std::string& reason) {
+    std::lock_guard<std::mutex> lock(cs_vNodes);
+    for (auto& node : m_nodes) {
+        if (node->id == nodeid) {
+            if (!reason.empty()) {
+                LogPrintf(NET, INFO, "[CConnman] Disconnecting node %d: %s\n", nodeid, reason.c_str());
+            }
+            node->MarkDisconnect();
+            return;
+        }
+    }
+}
+
+std::vector<CNode*> CConnman::GetNodes() const {
+    std::vector<CNode*> result;
+    std::lock_guard<std::mutex> lock(cs_vNodes);
+    result.reserve(m_nodes.size());
+    for (const auto& node : m_nodes) {
+        result.push_back(node.get());
+    }
+    return result;
+}
+
+CNode* CConnman::GetNode(int nodeid) const {
+    std::lock_guard<std::mutex> lock(cs_vNodes);
+    for (const auto& node : m_nodes) {
+        if (node->id == nodeid) {
+            return node.get();
+        }
+    }
+    return nullptr;
+}
+
+size_t CConnman::GetNodeCount() const {
+    std::lock_guard<std::mutex> lock(cs_vNodes);
+    return m_nodes.size();
+}
+
+void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg) {
+    if (!pnode) return;
+    pnode->PushSendMsg(std::move(msg));
+}
+
+void CConnman::PushMessage(int nodeid, CSerializedNetMsg&& msg) {
+    CNode* pnode = GetNode(nodeid);
+    if (pnode) {
+        PushMessage(pnode, std::move(msg));
+    }
+}
+
+void CConnman::PushMessage(int nodeid, const CNetMessage& msg) {
+    // Convert CNetMessage to CSerializedNetMsg
+    std::string command = msg.header.GetCommand();
+    std::vector<uint8_t> data = msg.Serialize();
+    CSerializedNetMsg serialized(std::move(command), std::move(data));
+    PushMessage(nodeid, std::move(serialized));
+}
+
+void CConnman::WakeMessageHandler() {
+    {
+        std::lock_guard<std::mutex> lock(mutexMsgProc);
+        fMsgProcWake.store(true);
+    }
+    condMsgProc.notify_one();
+}
+
+void CConnman::ThreadSocketHandler() {
+    LogPrintf(NET, INFO, "[CConnman] ThreadSocketHandler started\n");
+
+    while (!interruptNet.load()) {
+        DisconnectNodes();
+        SocketHandler();
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] ThreadSocketHandler stopped\n");
+}
+
+void CConnman::ThreadMessageHandler() {
+    LogPrintf(NET, INFO, "[CConnman] ThreadMessageHandler started\n");
+
+    while (!flagInterruptMsgProc.load()) {
+        bool fMoreWork = false;
+
+        // Process messages from each node
+        {
+            std::lock_guard<std::mutex> lock(cs_vNodes);
+            for (auto& node : m_nodes) {
+                if (node->fDisconnect.load()) continue;
+
+                CProcessedMsg processed_msg;
+                while (node->PopProcessMsg(processed_msg)) {
+                    // Check if node was disconnected during processing
+                    if (node->fDisconnect.load()) {
+                        break;
+                    }
+
+                    // Convert CProcessedMsg to CNetMessage
+                    CNetMessage message(processed_msg.command, processed_msg.data);
+
+                    // Process the message using CNetMessageProcessor
+                    bool success = false;
+                    if (m_msg_processor) {
+                        success = m_msg_processor->ProcessMessage(node->id, message);
+                    } else if (m_msg_handler) {
+                        // Fallback to callback if processor not set
+                        success = m_msg_handler(node.get(), processed_msg.command, processed_msg.data);
+                    }
+
+                    // Handle processing failure
+                    if (!success) {
+                        LogPrintf(NET, WARN, "[CConnman] Failed to process message '%s' from node %d\n",
+                                  processed_msg.command.c_str(), node->id);
+                        // ProcessMessage handles misbehavior tracking internally
+                        // Check if node should be disconnected due to accumulated misbehavior
+                        if (m_peer_manager) {
+                            auto peer = m_peer_manager->GetPeer(node->id);
+                            if (peer && peer->misbehavior_score > 100) {
+                                LogPrintf(NET, INFO, "[CConnman] Disconnecting node %d due to misbehavior (score: %d)\n",
+                                          node->id, peer->misbehavior_score);
+                                node->MarkDisconnect();
+                                break;  // Stop processing messages from this node
+                            }
+                        }
+                    }
+
+                    // Check if node was marked for disconnect during message processing
+                    if (node->fDisconnect.load()) {
+                        break;
+                    }
+
+                    // Check for more work
+                    if (node->HasProcessMsgs()) {
+                        fMoreWork = true;
+                    }
+                }
+            }
+        }
+
+        // Wait for more work
+        if (!fMoreWork && !flagInterruptMsgProc.load()) {
+            std::unique_lock<std::mutex> lock(mutexMsgProc);
+            condMsgProc.wait_for(lock, std::chrono::milliseconds(100), [this] {
+                return fMsgProcWake.load() || flagInterruptMsgProc.load();
+            });
+            fMsgProcWake.store(false);
+        }
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] ThreadMessageHandler stopped\n");
+}
+
+void CConnman::ThreadOpenConnections() {
+    LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections started\n");
+
+    // Bitcoin Core pattern: Maintain target of 8 outbound connections
+    constexpr size_t TARGET_OUTBOUND = 8;
+    constexpr int CONNECTION_INTERVAL_SECONDS = 60;  // Check every minute
+
+    while (!interruptNet.load()) {
+        // Wait for connection interval or interrupt
+        for (int i = 0; i < CONNECTION_INTERVAL_SECONDS && !interruptNet.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        if (interruptNet.load()) {
+            break;
+        }
+
+        if (!m_peer_manager || !m_msg_processor) {
+            continue;  // Not initialized yet
+        }
+
+        // Check if we need more outbound connections
+        size_t outbound_count = m_peer_manager->GetOutboundCount();
+        if (outbound_count >= TARGET_OUTBOUND) {
+            continue;  // Already have enough
+        }
+
+        size_t needed = TARGET_OUTBOUND - outbound_count;
+        LogPrintf(NET, DEBUG, "[CConnman] Need %zu more outbound connections (have %zu, target %zu)\n",
+                  needed, outbound_count, TARGET_OUTBOUND);
+
+        // Get addresses from AddrMan (request extra in case some fail or are connected)
+        auto addrs = m_peer_manager->SelectAddressesToConnect(static_cast<int>(needed * 3));
+        if (addrs.empty()) {
+            LogPrintf(NET, DEBUG, "[CConnman] No addresses available for outbound connections\n");
+            continue;
+        }
+
+        // Get currently connected peer IPs to skip
+        std::set<std::string> connected_ips;
+        {
+            std::lock_guard<std::mutex> lock(cs_vNodes);
+            for (const auto& node : m_nodes) {
+                if (node && !node->fInbound && !node->fDisconnect.load()) {
+                    connected_ips.insert(node->addr.ToStringIP());
+                }
+            }
+        }
+
+        // Attempt connections
+        size_t connections_made = 0;
+        for (const auto& addr : addrs) {
+            if (connections_made >= needed) {
+                break;
+            }
+
+            std::string ip_str = addr.ToStringIP();
+
+            // Skip already connected
+            if (connected_ips.count(ip_str)) {
+                continue;
+            }
+
+            // Skip non-routable
+            if (!addr.IsRoutable()) {
+                continue;
+            }
+
+            // Mark as tried before attempting
+            m_peer_manager->MarkAddressTried(addr);
+
+            // Attempt connection
+            CNode* pnode = ConnectNode(addr);
+            if (pnode) {
+                int peer_id = pnode->id;
+                // Send VERSION message for outbound connection
+                NetProtocol::CAddress local_addr;
+                local_addr.services = NetProtocol::NODE_NETWORK;
+                local_addr.SetIPv4(0);  // 0.0.0.0
+                local_addr.port = 0;
+                CNetMessage version_msg = m_msg_processor->CreateVersionMessage(addr, local_addr);
+                PushMessage(peer_id, version_msg);
+
+                // Update peer state to VERSION_SENT for outbound connections
+                auto peer = m_peer_manager->GetPeer(peer_id);
+                if (peer) {
+                    peer->state = CPeer::STATE_VERSION_SENT;
+                }
+
+                LogPrintf(NET, INFO, "[CConnman] Connected to %s (node %d)\n", ip_str.c_str(), peer_id);
+                connections_made++;
+                // Mark as good on successful connection
+                m_peer_manager->MarkAddressGood(addr);
+            }
+        }
+
+        if (connections_made > 0) {
+            LogPrintf(NET, INFO, "[CConnman] Made %zu new outbound connection(s)\n", connections_made);
+        }
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections stopped\n");
+}
+
+void CConnman::SocketHandler() {
+    std::set<int> recv_set, send_set, error_set;
+
+    // Collect sockets
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        for (const auto& node : m_nodes) {
+            int sock = node->GetSocket();
+            if (sock < 0) continue;
+            if (node->fDisconnect.load()) continue;
+
+            recv_set.insert(sock);
+            if (node->HasSendMsgs()) {
+                send_set.insert(sock);
+            }
+            error_set.insert(sock);
+        }
+    }
+
+    // Add listen socket
+    if (m_listen_socket >= 0) {
+        recv_set.insert(m_listen_socket);
+    }
+
+    // Wait for events
+    if (!SocketEventsSelect(recv_set, send_set, error_set)) {
+        return;  // Timeout or interrupt
+    }
+
+    // Handle listen socket (new connections)
+    if (m_listen_socket >= 0 && recv_set.count(m_listen_socket)) {
+        // Phase 2: Accept new connection
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        
+        int client_fd = accept(m_listen_socket, (struct sockaddr*)&client_addr, &addr_len);
+        if (client_fd >= 0) {
+            // Set non-blocking
+#ifdef _WIN32
+            u_long mode = 1;
+            ioctlsocket(client_fd, FIONBIO, &mode);
+#else
+            int flags = fcntl(client_fd, F_GETFL, 0);
+            fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+
+            // Extract address
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &client_addr.sin_addr, ip_str, INET_ADDRSTRLEN);
+            uint16_t port = ntohs(client_addr.sin_port);
+
+            // Create address
+            NetProtocol::CAddress addr;
+            // Convert IP string to bytes (IPv4-mapped IPv6 format)
+            struct in_addr in;
+            inet_pton(AF_INET, ip_str, &in);
+            // Set IPv4 address in IPv6-mapped format (bytes 12-15)
+            memset(addr.ip, 0, 16);
+            memcpy(&addr.ip[12], &in.s_addr, 4);
+            addr.port = port;
+            addr.services = NetProtocol::NODE_NETWORK;
+
+            // Create CSocket wrapper for the accepted connection
+            auto client_socket = std::make_unique<CSocket>();
+            // We need to set the FD directly - CSocket doesn't have a constructor that takes FD
+            // For now, we'll create the CNode and set the FD directly
+            // TODO: Add CSocket constructor that takes FD
+
+            // Create CNode
+            int node_id = m_next_node_id++;
+            auto node = std::make_unique<CNode>(node_id, addr, true);  // true = inbound
+            CNode* pnode = node.get();
+
+            pnode->SetSocket(client_fd);
+            pnode->state.store(CNode::STATE_CONNECTED);
+
+            // Add to m_nodes
+            {
+                std::lock_guard<std::mutex> lock(cs_vNodes);
+                m_nodes.push_back(std::move(node));
+            }
+
+            // Register with CPeerManager for state synchronization
+            // FIX Issue 1: Pass CNode pointer so CPeerManager can sync state
+            m_peer_manager->RegisterNode(node_id, pnode, addr, true);
+
+            LogPrintf(NET, INFO, "[CConnman] Accepted inbound connection from %s:%d (node %d)\n",
+                      ip_str, port, node_id);
+        }
+#ifdef _WIN32
+        else {
+            int err = WSAGetLastError();
+            if (err != WSAEWOULDBLOCK) {
+                LogPrintf(NET, ERROR, "[CConnman] Accept failed: %d\n", err);
+            }
+        }
+#else
+        else {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                LogPrintf(NET, ERROR, "[CConnman] Accept failed: %d\n", errno);
+            }
+        }
+#endif
+    }
+
+    // Handle each node
+    bool fWakeMessageHandler = false;
+
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        for (auto& node : m_nodes) {
+            int sock = node->GetSocket();
+            if (sock < 0) continue;
+
+            // Check for errors
+            if (error_set.count(sock)) {
+                node->MarkDisconnect();
+                continue;
+            }
+
+            // Receive
+            if (recv_set.count(sock)) {
+                if (!ReceiveMsgBytes(node.get())) {
+                    node->MarkDisconnect();
+                } else if (node->HasProcessMsgs()) {
+                    fWakeMessageHandler = true;
+                }
+            }
+
+            // Send
+            if (send_set.count(sock)) {
+                if (!SendMessages(node.get())) {
+                    node->MarkDisconnect();
+                }
+            }
+        }
+    }
+
+    if (fWakeMessageHandler) {
+        WakeMessageHandler();
+    }
+}
+
+bool CConnman::SocketEventsSelect(std::set<int>& recv_set, std::set<int>& send_set, std::set<int>& error_set) {
+    if (recv_set.empty() && send_set.empty()) {
+        // Nothing to wait for, just sleep briefly
+        std::this_thread::sleep_for(std::chrono::milliseconds(SELECT_TIMEOUT_MS));
+        return false;
+    }
+
+    fd_set fd_recv, fd_send, fd_error;
+    FD_ZERO(&fd_recv);
+    FD_ZERO(&fd_send);
+    FD_ZERO(&fd_error);
+
+    int max_fd = 0;
+
+    for (int sock : recv_set) {
+        FD_SET(sock, &fd_recv);
+        if (sock > max_fd) max_fd = sock;
+    }
+    for (int sock : send_set) {
+        FD_SET(sock, &fd_send);
+        if (sock > max_fd) max_fd = sock;
+    }
+    for (int sock : error_set) {
+        FD_SET(sock, &fd_error);
+        if (sock > max_fd) max_fd = sock;
+    }
+
+    struct timeval timeout;
+    timeout.tv_sec = SELECT_TIMEOUT_MS / 1000;
+    timeout.tv_usec = (SELECT_TIMEOUT_MS % 1000) * 1000;
+
+    int result = select(max_fd + 1, &fd_recv, &fd_send, &fd_error, &timeout);
+
+    if (result <= 0) {
+        recv_set.clear();
+        send_set.clear();
+        error_set.clear();
+        return false;
+    }
+
+    // Update sets to only include ready sockets
+    std::set<int> ready_recv, ready_send, ready_error;
+    for (int sock : recv_set) {
+        if (FD_ISSET(sock, &fd_recv)) ready_recv.insert(sock);
+    }
+    for (int sock : send_set) {
+        if (FD_ISSET(sock, &fd_send)) ready_send.insert(sock);
+    }
+    for (int sock : error_set) {
+        if (FD_ISSET(sock, &fd_error)) ready_error.insert(sock);
+    }
+
+    recv_set = std::move(ready_recv);
+    send_set = std::move(ready_send);
+    error_set = std::move(ready_error);
+
+    return true;
+}
+
+bool CConnman::ReceiveMsgBytes(CNode* pnode) {
+    if (!pnode) return false;
+
+    int sock = pnode->GetSocket();
+    if (sock < 0) return false;
+
+    uint8_t buf[4096];
+    int nBytes;
+
+#ifdef _WIN32
+    nBytes = recv(sock, reinterpret_cast<char*>(buf), sizeof(buf), 0);
+    if (nBytes == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        if (err == WSAEWOULDBLOCK) {
+            return true;  // No data, but socket OK
+        }
+        return false;  // Real error
+    }
+#else
+    nBytes = recv(sock, buf, sizeof(buf), MSG_DONTWAIT);
+    if (nBytes < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return true;  // No data, but socket OK
+        }
+        return false;  // Real error
+    }
+#endif
+
+    if (nBytes == 0) {
+        return false;  // Connection closed
+    }
+
+    // Append to node's receive buffer
+    pnode->AppendRecvBytes(buf, nBytes);
+    pnode->nRecvBytes.fetch_add(nBytes);
+    pnode->nLastRecv.store(GetTime());
+
+    // Extract complete messages from buffer and push to processing queue
+    ExtractMessages(pnode);
+
+    return true;
+}
+
+bool CConnman::SendMessages(CNode* pnode) {
+    if (!pnode) return false;
+
+    int sock = pnode->GetSocket();
+    if (sock < 0) return false;
+
+    while (pnode->HasSendMsgs()) {
+        const CSerializedNetMsg* msg = pnode->GetSendMsg();
+        if (!msg || msg->data.empty()) break;
+
+        // Get current send offset (for partial sends)
+        size_t offset = pnode->GetSendOffset();
+        size_t remaining = msg->data.size() - offset;
+        
+        if (remaining == 0) {
+            // Message fully sent, move to next
+            pnode->MarkBytesSent(msg->data.size());
+            continue;
+        }
+
+        int nBytes;
+#ifdef _WIN32
+        nBytes = send(sock, reinterpret_cast<const char*>(msg->data.data() + offset),
+                      static_cast<int>(remaining), 0);
+        if (nBytes == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK) {
+                break;  // Would block, try later
+            }
+            return false;  // Real error
+        }
+#else
+        nBytes = send(sock, msg->data.data() + offset, remaining, MSG_NOSIGNAL | MSG_DONTWAIT);
+        if (nBytes < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;  // Would block, try later
+            }
+            return false;  // Real error
+        }
+#endif
+
+        if (nBytes > 0) {
+            pnode->MarkBytesSent(nBytes);
+            pnode->nSendBytes.fetch_add(nBytes);
+            pnode->nLastSend.store(GetTime());
+        }
+    }
+
+    return true;
+}
+
+void CConnman::ExtractMessages(CNode* pnode) {
+    if (!pnode) return;
+
+    // Extract complete messages from receive buffer
+    // Loop until no more complete messages can be extracted
+    while (true) {
+        std::lock_guard<std::mutex> lock(pnode->GetRecvMutex());
+        auto& buffer = pnode->GetRecvBuffer();
+
+        // Need at least 24 bytes for message header
+        if (buffer.size() < 24) {
+            break;  // Not enough data for header
+        }
+
+        // Parse message header
+        NetProtocol::CMessageHeader header;
+        std::memcpy(&header.magic, buffer.data(), 4);
+        std::memcpy(header.command, buffer.data() + 4, 12);
+        std::memcpy(&header.payload_size, buffer.data() + 16, 4);
+        std::memcpy(&header.checksum, buffer.data() + 20, 4);
+
+        // Validate header
+        if (!header.IsValid(NetProtocol::g_network_magic)) {
+            std::cout << "[P2P] ERROR: Invalid magic from node " << pnode->id
+                      << " (got 0x" << std::hex << header.magic
+                      << ", expected 0x" << NetProtocol::g_network_magic << std::dec << ")" << std::endl;
+            
+            // Clear buffer and disconnect on invalid magic
+            buffer.clear();
+            pnode->MarkDisconnect();
+            return;
+        }
+
+        // Check payload size
+        if (header.payload_size > NetProtocol::MAX_MESSAGE_SIZE) {
+            std::cout << "[P2P] ERROR: Payload too large from node " << pnode->id
+                      << " (" << header.payload_size << " bytes)" << std::endl;
+            
+            // Clear buffer and disconnect on oversized message
+            buffer.clear();
+            pnode->MarkDisconnect();
+            return;
+        }
+
+        // Calculate total message size
+        size_t total_size = 24 + header.payload_size;
+
+        // Check if we have the complete message
+        if (buffer.size() < total_size) {
+            break;  // Partial message, need more data
+        }
+
+        // Extract payload
+        std::vector<uint8_t> payload;
+        if (header.payload_size > 0) {
+            payload.assign(buffer.begin() + 24, buffer.begin() + 24 + header.payload_size);
+
+            // Verify checksum (Bitcoin Core pattern - critical for message integrity)
+            uint32_t calculated_checksum = CDataStream::CalculateChecksum(payload);
+            if (calculated_checksum != header.checksum) {
+                std::cout << "[P2P] ERROR: Checksum mismatch from node " << pnode->id
+                          << " (got 0x" << std::hex << header.checksum
+                          << ", expected 0x" << calculated_checksum << std::dec << ")" << std::endl;
+                
+                // Clear buffer and disconnect on checksum failure
+                buffer.clear();
+                pnode->MarkDisconnect();
+                
+                // Penalize node for checksum failure (could be attack or corruption)
+                if (m_peer_manager) {
+                    // Find corresponding peer if it exists
+                    auto peers = m_peer_manager->GetAllPeers();
+                    for (auto& peer : peers) {
+                        if (peer->id == pnode->id) {
+                            m_peer_manager->Misbehaving(peer->id, 50, MisbehaviorType::INVALID_CHECKSUM);
+                            break;
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
+        // Remove processed message from buffer
+        buffer.erase(buffer.begin(), buffer.begin() + total_size);
+
+        // Create processed message and push to queue
+        std::string command = header.GetCommand();
+        CProcessedMsg processed_msg(std::move(command), std::move(payload));
+        pnode->PushProcessMsg(std::move(processed_msg));
+    }
+}
+
+void CConnman::DisconnectNodes() {
+    std::lock_guard<std::mutex> lock(cs_vNodes);
+
+    auto it = m_nodes.begin();
+    while (it != m_nodes.end()) {
+        if ((*it)->fDisconnect.load()) {
+            (*it)->CloseSocket();
+            it = m_nodes.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
