@@ -3510,7 +3510,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (g_node_context.connman) {
             g_node_context.connman->Stop();
         }
-        p2p_socket.Close();
+        // p2p_socket removed - CConnman handles socket cleanup
 
         // Phase 1.2: Shutdown NodeContext (Bitcoin Core pattern)
         std::cout << "[Shutdown] NodeContext shutdown complete" << std::endl;
