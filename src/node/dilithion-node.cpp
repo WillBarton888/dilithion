@@ -1621,7 +1621,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // BUG #128 FIX: Send VERSION back first (Bitcoin protocol requirement)
             // When receiving VERSION, we must respond with VERSION + VERACK
-            connection_manager.SendVersionMessage(peer_id);
+            bool version_sent = connection_manager.SendVersionMessage(peer_id);
+            std::cout << "[P2P] SetVersionHandler: SendVersionMessage(" << peer_id << ") = " << (version_sent ? "SUCCESS" : "FAILED") << std::endl;
 
             // Then send VERACK to acknowledge their VERSION
             connection_manager.SendVerackMessage(peer_id);
