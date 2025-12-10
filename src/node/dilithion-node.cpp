@@ -1638,13 +1638,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return json.str();
         });
 
-        if (!http_server.Start()) {
-            std::cerr << "Failed to start HTTP API server on port " << api_port << std::endl;
-            return 1;
+        // BUG #140 FIX: Make HTTP server failure non-fatal
+        // The stats endpoint is optional - core P2P functionality should continue
+        bool http_started = http_server.Start();
+        if (!http_started) {
+            std::cerr << "[HttpServer] WARNING: Failed to start HTTP API server on port " << api_port << std::endl;
+            std::cerr << "[HttpServer] Stats endpoint will be unavailable, but P2P will continue" << std::endl;
+        } else {
+            std::cout << "[HttpServer] API server started on port " << api_port << std::endl;
+            std::cout << "[HttpServer] Dashboard endpoint: http://localhost:" << api_port << "/api/stats" << std::endl;
         }
-
-        std::cout << "[HttpServer] API server started on port " << api_port << std::endl;
-        std::cout << "[HttpServer] Dashboard endpoint: http://localhost:" << api_port << "/api/stats" << std::endl;
 
         // Verify global pointers are properly initialized (audit recommendation)
         assert(g_node_context.connman != nullptr && "connman must be initialized");
