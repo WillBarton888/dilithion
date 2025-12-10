@@ -422,9 +422,11 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
 bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
     auto peer = peer_manager.GetPeer(peer_id);
     if (!peer) {
+        std::cout << "[P2P] ProcessVerackMessage: peer " << peer_id << " not found" << std::endl;
         return true;
     }
 
+    std::cout << "[P2P] ProcessVerackMessage: peer " << peer_id << " state=" << (int)peer->state << std::endl;
 
     if (peer->state == CPeer::STATE_VERSION_SENT) {
         peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
