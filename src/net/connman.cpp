@@ -507,15 +507,7 @@ void CConnman::ThreadSocketHandler() {
 void CConnman::ThreadMessageHandler() {
     LogPrintf(NET, INFO, "[CConnman] ThreadMessageHandler started\n");
 
-    // BUG #145 DEBUG: Counter at function scope so we can track across iterations
-    static int tmh_iter = 0;
-
     while (!flagInterruptMsgProc.load()) {
-        ++tmh_iter;
-        // BUG #145 DEBUG: Log EVERY iteration to see if TMH is looping
-        std::cout << "[TMH] ITER " << tmh_iter << " START" << std::endl;
-        std::cout.flush();
-
         bool fMoreWork = false;
 
         // BUG #141 FIX: Collect messages while holding lock, process outside lock
@@ -527,33 +519,13 @@ void CConnman::ThreadMessageHandler() {
         std::vector<PendingMessage> pending_messages;
 
         // Phase 1: Collect messages while holding cs_vNodes (short lock duration)
-        std::cout << "[TMH] ITER " << tmh_iter << " acquiring cs_vNodes..." << std::endl;
-        std::cout.flush();
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
-            std::cout << "[TMH] ITER " << tmh_iter << " got cs_vNodes, nodes=" << m_nodes.size() << std::endl;
-            std::cout.flush();
-
-            bool any_has_msgs = false;
-            std::string pending_nodes;
-            for (const auto& node : m_nodes) {
-                if (node->HasProcessMsgs()) {
-                    any_has_msgs = true;
-                    pending_nodes += std::to_string(node->id) + " ";
-                }
-            }
-            if (any_has_msgs) {
-                std::cout << "[TMH] ITER " << tmh_iter << " PENDING in nodes: " << pending_nodes << std::endl;
-                std::cout.flush();
-            }
             for (auto& node : m_nodes) {
                 if (node->fDisconnect.load()) continue;
 
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
-                    // BUG #144 DEBUG: Log when message is collected
-                    std::cout << "[TMH-DEBUG] Collected message '" << processed_msg.command
-                              << "' from node " << node->id << std::endl;
                     pending_messages.push_back({node->id, std::move(processed_msg)});
 
                     // Limit messages collected per iteration to prevent unbounded growth
@@ -569,24 +541,16 @@ void CConnman::ThreadMessageHandler() {
             }
         }
         // cs_vNodes is now RELEASED - safe to call handlers that acquire other locks
-        std::cout << "[TMH] ITER " << tmh_iter << " released cs_vNodes, collected " << pending_messages.size() << " messages" << std::endl;
-        std::cout.flush();
 
         // Phase 2: Process collected messages WITHOUT holding cs_vNodes
         for (const auto& pending : pending_messages) {
-            std::cout << "[TMH] ITER " << tmh_iter << " processing '" << pending.msg.command << "' from node " << pending.node_id << std::endl;
-            std::cout.flush();
             // Convert CProcessedMsg to CNetMessage
             CNetMessage message(pending.msg.command, pending.msg.data);
 
             // Process the message using CNetMessageProcessor
             bool success = false;
             if (m_msg_processor) {
-                std::cout << "[TMH] ITER " << tmh_iter << " calling ProcessMessage..." << std::endl;
-                std::cout.flush();
                 success = m_msg_processor->ProcessMessage(pending.node_id, message);
-                std::cout << "[TMH] ITER " << tmh_iter << " ProcessMessage returned " << (success ? "true" : "false") << std::endl;
-                std::cout.flush();
             } else if (m_msg_handler) {
                 // Fallback to callback if processor not set
                 // Need to get node pointer - acquire lock briefly
@@ -625,18 +589,11 @@ void CConnman::ThreadMessageHandler() {
 
         // Wait for more work
         if (!fMoreWork && !flagInterruptMsgProc.load()) {
-            std::cout << "[TMH] ITER " << tmh_iter << " waiting on condMsgProc..." << std::endl;
-            std::cout.flush();
             std::unique_lock<std::mutex> lock(mutexMsgProc);
             condMsgProc.wait_for(lock, std::chrono::milliseconds(100), [this] {
                 return fMsgProcWake.load() || flagInterruptMsgProc.load();
             });
             fMsgProcWake.store(false);
-            std::cout << "[TMH] ITER " << tmh_iter << " woke up from wait" << std::endl;
-            std::cout.flush();
-        } else {
-            std::cout << "[TMH] ITER " << tmh_iter << " skipping wait (fMoreWork=" << fMoreWork << ")" << std::endl;
-            std::cout.flush();
         }
     }
 
@@ -1033,11 +990,6 @@ bool CConnman::ReceiveMsgBytes(CNode* pnode) {
         return false;  // Connection closed
     }
 
-    // Log received bytes - ALWAYS log for debugging handshake issues
-    std::cout << "[RECV-DEBUG] Received " << nBytes << " bytes from node " << pnode->id
-              << " (total: " << (pnode->nRecvBytes.load() + nBytes) << ")" << std::endl;
-    std::cout.flush();
-
     // Append to node's receive buffer
     pnode->AppendRecvBytes(buf, nBytes);
     pnode->nRecvBytes.fetch_add(nBytes);
@@ -1111,11 +1063,6 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // Need at least 24 bytes for message header
         if (buffer.size() < 24) {
-            if (buffer.size() > 0) {
-                std::cout << "[EXTRACT-DEBUG] Node " << pnode->id << " waiting for more data (have "
-                          << buffer.size() << ", need 24)" << std::endl;
-                std::cout.flush();
-            }
             break;  // Not enough data for header
         }
 
@@ -1194,18 +1141,8 @@ void CConnman::ExtractMessages(CNode* pnode) {
         // Create processed message and push to queue
         std::string command = header.GetCommand();
 
-        // Debug: Log successful message extraction
-        std::cout << "[EXTRACT-DEBUG] Node " << pnode->id << " extracted message: '" << command
-                  << "' (payload: " << payload.size() << " bytes)" << std::endl;
-        std::cout.flush();
-
         CProcessedMsg processed_msg(std::move(command), std::move(payload));
         pnode->PushProcessMsg(std::move(processed_msg));
-
-        // BUG #144 DEBUG: Log queue state after push
-        std::cout << "[PUSH-DEBUG] Node " << pnode->id << " queue has "
-                  << (pnode->HasProcessMsgs() ? "messages" : "NO messages") << " after push" << std::endl;
-        std::cout.flush();
     }
 }
 
