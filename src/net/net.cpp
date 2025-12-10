@@ -214,6 +214,7 @@ CNetMessageProcessor::CNetMessageProcessor(CPeerManager& peer_mgr)
 {
     // Default handlers do nothing
     on_version = [](int, const NetProtocol::CVersionMessage&) {};
+    on_verack = [](int) {};  // BUG #132 FIX: Initialize on_verack to prevent race condition
     on_ping = [](int, uint64_t) {};
     on_pong = [](int, uint64_t) {};
     on_addr = [](int, const std::vector<NetProtocol::CAddress>&) {};
