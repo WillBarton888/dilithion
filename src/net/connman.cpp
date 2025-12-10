@@ -522,11 +522,17 @@ void CConnman::ThreadMessageHandler() {
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
             // BUG #144 DEBUG: Log m_nodes size when collecting messages
-            if (!m_nodes.empty()) {
-                static int debug_counter = 0;
-                if (++debug_counter % 100 == 1) {  // Log every 100th iteration
-                    std::cout << "[TMH-DEBUG] Checking " << m_nodes.size() << " nodes for messages" << std::endl;
+            static int debug_counter = 0;
+            bool any_has_msgs = false;
+            for (const auto& node : m_nodes) {
+                if (node->HasProcessMsgs()) {
+                    any_has_msgs = true;
+                    break;
                 }
+            }
+            if (any_has_msgs || ++debug_counter % 100 == 1) {
+                std::cout << "[TMH-DEBUG] Checking " << m_nodes.size() << " nodes for messages"
+                          << (any_has_msgs ? " (has pending)" : "") << std::endl;
             }
             for (auto& node : m_nodes) {
                 if (node->fDisconnect.load()) continue;
@@ -1168,6 +1174,11 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         CProcessedMsg processed_msg(std::move(command), std::move(payload));
         pnode->PushProcessMsg(std::move(processed_msg));
+
+        // BUG #144 DEBUG: Log queue state after push
+        std::cout << "[PUSH-DEBUG] Node " << pnode->id << " queue has "
+                  << (pnode->HasProcessMsgs() ? "messages" : "NO messages") << " after push" << std::endl;
+        std::cout.flush();
     }
 }
 
