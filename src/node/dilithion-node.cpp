@@ -1619,12 +1619,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_node_context.headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
             }
 
-            // BUG #128 FIX: Send VERSION back first (Bitcoin protocol requirement)
-            // When receiving VERSION, we must respond with VERSION + VERACK
-            bool version_sent = connection_manager.SendVersionMessage(peer_id);
-            std::cout << "[P2P] SetVersionHandler: SendVersionMessage(" << peer_id << ") = " << (version_sent ? "SUCCESS" : "FAILED") << std::endl;
+            // BUG #129 FIX: Only send VERSION for inbound connections (state < VERSION_SENT)
+            // For outbound connections, we already sent VERSION in PerformHandshake()
+            // Sending VERSION again causes an infinite VERSION ping-pong loop
+            auto peer = g_node_context.peer_manager->GetPeer(peer_id);
+            if (peer && peer->state < CPeer::STATE_VERSION_SENT) {
+                bool version_sent = connection_manager.SendVersionMessage(peer_id);
+                std::cout << "[P2P] SetVersionHandler: SendVersionMessage(" << peer_id << ") = "
+                          << (version_sent ? "SUCCESS" : "FAILED") << " (inbound connection)" << std::endl;
+            } else {
+                std::cout << "[P2P] SetVersionHandler: peer " << peer_id << " already sent VERSION (state="
+                          << (peer ? (int)peer->state : -1) << "), only sending VERACK" << std::endl;
+            }
 
-            // Then send VERACK to acknowledge their VERSION
+            // Always send VERACK to acknowledge their VERSION
             connection_manager.SendVerackMessage(peer_id);
         });
 
