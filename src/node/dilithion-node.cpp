@@ -1658,6 +1658,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Register version handler to automatically respond with version + verack
         // Bitcoin handshake: A->B: VERSION, B->A: VERSION + VERACK, A->B: VERACK
         message_processor.SetVersionHandler([](int peer_id, const NetProtocol::CVersionMessage& msg) {
+            // BUG #141 DEBUG: Confirm handler entry
+            std::cout << "[VERSION-HANDLER] ENTERED for peer " << peer_id << std::endl;
+            std::cout.flush();
             // BUG #62 FIX: Store peer's starting height for later header sync decision
             if (g_node_context.headers_manager) {
                 g_node_context.headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
