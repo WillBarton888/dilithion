@@ -984,14 +984,9 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
     std::lock_guard<std::recursive_mutex> lock_nodes(cs_nodes);
     std::vector<int> result;
 
-    // BUG #148 DEBUG: Log peer count for debugging
-    static int debug_counter = 0;
-    bool should_log = (debug_counter++ % 30 == 0);  // Log every 30 calls
-
-    if (should_log) {
-        std::cout << "[DEBUG] GetValidPeersForDownload: peers.size()=" << peers.size()
-                  << ", node_refs.size()=" << node_refs.size() << std::endl;
-    }
+    // BUG #148 DEBUG: Always log when result is empty to diagnose the issue
+    std::cout << "[DEBUG] GetValidPeersForDownload: peers.size()=" << peers.size()
+              << ", node_refs.size()=" << node_refs.size() << std::endl;
 
     for (const auto& pair : peers) {
         int peer_id = pair.first;
@@ -1000,32 +995,35 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
         // BUG #148 FIX: Check if CNode still exists (prevents zombie peer access)
         auto node_it = node_refs.find(peer_id);
         if (node_it == node_refs.end() || node_it->second == nullptr) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " skipped: not in node_refs" << std::endl;
+            std::cout << "[DEBUG] Peer " << peer_id << " SKIP: not in node_refs" << std::endl;
             continue;
         }
 
         CNode* node = node_it->second;
 
         // BUG #148 FIX: Check if CNode has valid socket
-        if (!node->HasValidSocket() || node->fDisconnect.load()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " skipped: invalid socket or disconnecting" << std::endl;
+        if (!node->HasValidSocket()) {
+            std::cout << "[DEBUG] Peer " << peer_id << " SKIP: invalid socket" << std::endl;
+            continue;
+        }
+        if (node->fDisconnect.load()) {
+            std::cout << "[DEBUG] Peer " << peer_id << " SKIP: fDisconnect=true" << std::endl;
             continue;
         }
 
         // BUG #148 FIX: Check CPeer::state for handshake completion
-        // CNode::state might not be updated if GetNode() returned nullptr in ProcessVerackMessage
-        // CPeer::state is always updated, so use it as the authoritative source
         if (!peer->IsHandshakeComplete()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " skipped: handshake incomplete (state=" << peer->state << ")" << std::endl;
+            std::cout << "[DEBUG] Peer " << peer_id << " SKIP: handshake incomplete (CPeer::state=" << peer->state << ")" << std::endl;
             continue;
         }
 
         // Must be suitable for download (not stalling too much)
         if (!peer->IsSuitableForDownload()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " skipped: not suitable (stall=" << peer->nStallingCount << ")" << std::endl;
+            std::cout << "[DEBUG] Peer " << peer_id << " SKIP: not suitable (stall=" << peer->nStallingCount << ")" << std::endl;
             continue;
         }
 
+        std::cout << "[DEBUG] Peer " << peer_id << " VALID for download" << std::endl;
         result.push_back(pair.first);
     }
 
