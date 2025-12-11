@@ -986,7 +986,12 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
 
     // BUG #148 DEBUG: Log peer count for debugging
     static int debug_counter = 0;
-    bool should_log = (debug_counter++ % 60 == 0);  // Log every 60 calls
+    bool should_log = (debug_counter++ % 30 == 0);  // Log every 30 calls
+
+    if (should_log) {
+        std::cout << "[DEBUG] GetValidPeersForDownload: peers.size()=" << peers.size()
+                  << ", node_refs.size()=" << node_refs.size() << std::endl;
+    }
 
     for (const auto& pair : peers) {
         int peer_id = pair.first;
