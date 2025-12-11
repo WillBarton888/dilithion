@@ -115,10 +115,18 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Check if block was in-flight
+    // BUG #148 FIX: ALWAYS notify CPeerManager even if block wasn't tracked here
+    // This ensures CPeer::nBlocksInFlight is decremented for ALL received blocks,
+    // not just ones tracked by CBlockFetcher. Without this fix, unsolicited blocks
+    // or blocks tracked only by CPeerManager would leave nBlocksInFlight stuck at 16.
+    if (g_peer_manager) {
+        g_peer_manager->MarkBlockAsReceived(hash);
+    }
+
+    // Check if block was in-flight in CBlockFetcher's tracking
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
-        // Not tracked, but that's okay (could be unsolicited block)
+        // Not tracked locally, but CPeerManager was already notified above
         return false;
     }
 
@@ -156,10 +164,7 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // BUG #64: Clean up preferred peer tracking
     mapPreferredPeers.erase(hash);
 
-    // Phase C: CPeerManager is now the single source of truth for block tracking
-    if (g_peer_manager) {
-        g_peer_manager->MarkBlockAsReceived(hash);
-    }
+    // Note: CPeerManager::MarkBlockAsReceived already called at top of function
 
     return true;
 }
