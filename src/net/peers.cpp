@@ -1002,8 +1002,10 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
             continue;
         }
 
-        // Must have completed handshake (check CNode state, not CPeer state)
-        if (!node->IsHandshakeComplete()) {
+        // BUG #148 FIX: Check CPeer::state for handshake completion
+        // CNode::state might not be updated if GetNode() returned nullptr in ProcessVerackMessage
+        // CPeer::state is always updated, so use it as the authoritative source
+        if (!peer->IsHandshakeComplete()) {
             continue;
         }
 
@@ -1044,8 +1046,9 @@ bool CPeerManager::IsPeerSuitableForDownload(int peer_id) const
         return false;
     }
 
-    // Check CNode state (authoritative), not CPeer state
-    return node->IsHandshakeComplete() &&
+    // BUG #148 FIX: Check CPeer state (authoritative), not CNode state
+    // CNode::state might not be updated if GetNode() returned nullptr in ProcessVerackMessage
+    return peer->IsHandshakeComplete() &&
            peer->IsSuitableForDownload();
 }
 
