@@ -833,6 +833,9 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
+    // BUG #148 DEBUG: Log entry
+    std::cout << "[DEBUG] MarkBlockAsReceived(peer=" << peer_id << ", hash=" << hash.GetHex().substr(0, 16) << ")" << std::endl;
+
     // BUG #148 FIX: Try to remove from tracking first (handles tracked blocks)
     auto it = mapBlocksInFlight.find(hash);
     if (it != mapBlocksInFlight.end()) {
@@ -856,11 +859,15 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
         auto peer_it = peers.find(peer_id);
         if (peer_it != peers.end()) {
             CPeer* peer = peer_it->second.get();
+            int old_count = peer->nBlocksInFlight;
             if (peer->nBlocksInFlight > 0) {
                 peer->nBlocksInFlight--;
             }
             peer->nBlocksDownloaded++;
             peer->lastSuccessTime = std::chrono::steady_clock::now();
+            std::cout << "[DEBUG] Untracked block from peer " << peer_id << " - nBlocksInFlight: " << old_count << " -> " << peer->nBlocksInFlight << std::endl;
+        } else {
+            std::cout << "[DEBUG] Peer " << peer_id << " not found in peers map!" << std::endl;
         }
     }
 }

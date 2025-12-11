@@ -290,7 +290,8 @@
       "Bash(for ip in 134.122.4.164 188.166.255.63 209.97.177.197)",
       "Bash(do echo \"=== $ip ===\")",
       "Bash(grep -rn \"VERACK\\|verack\\|Verack\" \"c:\\Users\\will\\dilithion\\src\\net\"\" --include=\"*.cpp\" | grep -i \"send)",
-      "Bash(queue \")"
+      "Bash(queue \")",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []
