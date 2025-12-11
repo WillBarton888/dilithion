@@ -205,15 +205,34 @@ bool CIbdCoordinator::FetchBlocks() {
     LogPrintIBD(INFO, "Fetching %zu blocks...", blocks_to_fetch.size());
 
     // BUG #147 FIX: Batch GETDATA messages by peer instead of one per block
-    // Step 1: Assign blocks to peers
+    // BUG #148 PERF: Assign sequential blocks to SAME peer to reduce orphan creation
+    // When blocks 5,6,7,8 go to the same peer, they arrive in order → no orphans
+    // Step 1: Assign blocks to peers with sequential preference
     std::map<NodeId, std::vector<std::pair<uint256, int>>> peer_blocks;
     std::vector<std::pair<uint256, int>> requeue_blocks;
 
+    NodeId lastPeer = -1;
+    int lastHeight = -1;
+
     for (const auto& [hash, height] : blocks_to_fetch) {
         NodeId preferred = m_node_context.block_fetcher->GetPreferredPeer(hash);
+
+        // PERF: If this block is sequential (height = lastHeight + 1), prefer same peer
+        // This reduces orphan creation by keeping blocks in order from same source
+        if (lastPeer != -1 && height == lastHeight + 1 && preferred == -1) {
+            // Check if last peer still has capacity
+            auto lastPeerObj = m_node_context.peer_manager ?
+                               m_node_context.peer_manager->GetPeer(lastPeer) : nullptr;
+            if (lastPeerObj && lastPeerObj->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+                preferred = lastPeer;  // Prefer continuing with same peer
+            }
+        }
+
         NodeId peer = m_node_context.block_fetcher->SelectPeerForDownload(hash, preferred);
         if (peer != -1 && m_node_context.block_fetcher->RequestBlock(peer, hash, height)) {
             peer_blocks[peer].emplace_back(hash, height);
+            lastPeer = peer;
+            lastHeight = height;
         } else {
             // BUG #63 FIX: Re-queue block if no peer available
             requeue_blocks.emplace_back(hash, height);
