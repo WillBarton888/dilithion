@@ -92,10 +92,13 @@ ChainParams ChainParams::Testnet() {
     // Mining parameters (same as mainnet)
     params.initialReward = 50ULL * 100000000ULL; // 50 DIL (same as mainnet)
 
-    // TESTNET: No checkpoints
-    // This intentionally allows testing chain reorganizations of any depth
-    // Testnet coins have no value, so deep reorg protection is not needed
-    // params.checkpoints is left empty
+    // TESTNET: Checkpoints for IBD optimization
+    // PoW validation is skipped for headers at/before the highest checkpoint
+    // This dramatically speeds up Initial Block Download (~100ms -> ~1ms per header)
+    // Reorgs can still be tested on blocks AFTER the highest checkpoint
+    params.checkpoints.emplace_back(1000, uint256S("0000cb60f4051a278b03a4133a6cefda689a5788a215c6209b160a9be632b5ca"));
+    params.checkpoints.emplace_back(2000, uint256S("000099b421f37840b53ec623a201c817a7ea9fcfa48e69e5c3461727fd92282f"));
+    params.checkpoints.emplace_back(3000, uint256S("00002c1ca3bbbd9c7dd7b0903873b36724e1ee31c53f70ab7c81123228d9edb4"));
 
     return params;
 }

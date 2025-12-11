@@ -145,10 +145,14 @@ public:
      * Performs expensive Proof-of-Work validation using RandomX.
      * Should be called from background validation thread.
      *
+     * CHECKPOINT OPTIMIZATION: If height <= highest checkpoint, PoW validation
+     * is skipped (returns true) since the block hash is trusted by checkpoint.
+     *
      * @param header Header to validate
-     * @return true if PoW is valid
+     * @param height Block height (for checkpoint-aware PoW skip)
+     * @return true if PoW is valid (or skipped due to checkpoint)
      */
-    bool FullValidateHeader(const CBlockHeader& header);
+    bool FullValidateHeader(const CBlockHeader& header, int height);
 
     /**
      * @brief Queue headers for background PoW validation

@@ -117,6 +117,25 @@ public:
         }
         return true;  // No checkpoint at this height
     }
+
+    /**
+     * Get the height of the highest checkpoint
+     *
+     * Used by HeadersManager to skip PoW validation for headers at/before this height.
+     * This dramatically speeds up IBD by skipping expensive RandomX validation for
+     * headers that are protected by checkpoints.
+     *
+     * @return Highest checkpoint height, or -1 if no checkpoints
+     */
+    int GetHighestCheckpointHeight() const {
+        int highest = -1;
+        for (const auto& cp : checkpoints) {
+            if (cp.nHeight > highest) {
+                highest = cp.nHeight;
+            }
+        }
+        return highest;
+    }
 };
 
 // Global chain parameters (initialized at startup)

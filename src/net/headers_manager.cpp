@@ -10,6 +10,7 @@
 #include <util/time.h>
 #include <node/genesis.h>
 #include <core/node_context.h>
+#include <core/chainparams.h>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -934,8 +935,19 @@ bool CHeadersManager::QuickValidateHeader(const CBlockHeader& header, const CBlo
     return true;
 }
 
-bool CHeadersManager::FullValidateHeader(const CBlockHeader& header)
+bool CHeadersManager::FullValidateHeader(const CBlockHeader& header, int height)
 {
+    // CHECKPOINT OPTIMIZATION: Skip expensive PoW validation for headers at/before
+    // the highest checkpoint. These headers are trusted by the hardcoded checkpoint.
+    // This dramatically speeds up IBD (~100ms -> <1ms per header for checkpointed blocks).
+    if (Dilithion::g_chainParams) {
+        int highestCheckpoint = Dilithion::g_chainParams->GetHighestCheckpointHeight();
+        if (highestCheckpoint >= 0 && height <= highestCheckpoint) {
+            // PoW validation skipped - block is at/before checkpoint
+            return true;
+        }
+    }
+
     // Full PoW validation - this is the expensive operation (50-250ms)
     uint256 hash = header.GetHash();
     return CheckProofOfWork(hash, header.nBits);
@@ -1118,8 +1130,8 @@ void CHeadersManager::ValidationWorkerThread()
             m_validation_queue.pop();
         }
 
-        // Validate PoW (expensive - runs outside lock)
-        bool valid = FullValidateHeader(pending.header);
+        // Validate PoW (expensive - runs outside lock, unless checkpointed)
+        bool valid = FullValidateHeader(pending.header, pending.height);
 
         if (valid) {
             m_validated_count++;
