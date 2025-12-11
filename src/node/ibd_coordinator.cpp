@@ -113,7 +113,18 @@ void CIbdCoordinator::ResetBackoffOnNewHeaders(int header_height) {
 bool CIbdCoordinator::ShouldAttemptDownload() const {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_ibd_attempt);
-    int backoff_seconds = std::min(30, (1 << std::min(m_ibd_no_peer_cycles, 5)));
+
+    // BUG #147 FIX: During active IBD (blocks download), be aggressive - minimal backoff
+    // Only use exponential backoff when truly stuck (no work available, no peers)
+    int backoff_seconds;
+    if (m_state == IBDState::BLOCKS_DOWNLOAD) {
+        // During IBD: 1 second between attempts, even if peer selection failed once
+        backoff_seconds = 1;
+    } else {
+        // Not in IBD: use exponential backoff (1, 2, 4, 8, 16, 30 seconds)
+        backoff_seconds = std::min(30, (1 << std::min(m_ibd_no_peer_cycles, 5)));
+    }
+
     return elapsed.count() >= backoff_seconds;
 }
 
@@ -179,7 +190,8 @@ bool CIbdCoordinator::FetchBlocks() {
         return false;
     }
 
-    auto blocks_to_fetch = m_node_context.block_fetcher->GetNextBlocksToFetch(16);
+    // BUG #147 FIX: Request more blocks per tick (128, matching Bitcoin Core)
+    auto blocks_to_fetch = m_node_context.block_fetcher->GetNextBlocksToFetch(128);
     if (blocks_to_fetch.empty() && m_node_context.block_fetcher->GetBlocksInFlight() == 0) {
         m_ibd_no_peer_cycles++;
         LogPrintIBD(WARN, "No blocks could be fetched (no suitable peers?)");
@@ -190,22 +202,41 @@ bool CIbdCoordinator::FetchBlocks() {
         return true;  // Work in flight already, nothing new to request.
     }
 
-    LogPrintIBD(INFO, "Fetching %zu blocks (max 16 in-flight)...", blocks_to_fetch.size());
+    LogPrintIBD(INFO, "Fetching %zu blocks...", blocks_to_fetch.size());
 
-    int successful_requests = 0;
+    // BUG #147 FIX: Batch GETDATA messages by peer instead of one per block
+    // Step 1: Assign blocks to peers
+    std::map<NodeId, std::vector<std::pair<uint256, int>>> peer_blocks;
+    std::vector<std::pair<uint256, int>> requeue_blocks;
+
     for (const auto& [hash, height] : blocks_to_fetch) {
         NodeId preferred = m_node_context.block_fetcher->GetPreferredPeer(hash);
         NodeId peer = m_node_context.block_fetcher->SelectPeerForDownload(hash, preferred);
         if (peer != -1 && m_node_context.block_fetcher->RequestBlock(peer, hash, height)) {
-            std::vector<NetProtocol::CInv> getdata;
-            getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-            CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-            m_node_context.connman->PushMessage(peer, msg);
-            successful_requests++;
+            peer_blocks[peer].emplace_back(hash, height);
         } else {
             // BUG #63 FIX: Re-queue block if no peer available
-            m_node_context.block_fetcher->QueueBlockForDownload(hash, height, -1, true);
+            requeue_blocks.emplace_back(hash, height);
         }
+    }
+
+    // Re-queue failed blocks
+    for (const auto& [hash, height] : requeue_blocks) {
+        m_node_context.block_fetcher->QueueBlockForDownload(hash, height, -1, true);
+    }
+
+    // Step 2: Send ONE batched GETDATA per peer
+    int successful_requests = 0;
+    for (const auto& [peer, blocks] : peer_blocks) {
+        std::vector<NetProtocol::CInv> getdata;
+        getdata.reserve(blocks.size());
+        for (const auto& [hash, height] : blocks) {
+            getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
+        }
+        CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+        m_node_context.connman->PushMessage(peer, msg);
+        successful_requests += blocks.size();
+        LogPrintIBD(DEBUG, "Sent batched GETDATA for %zu blocks to peer %d", blocks.size(), peer);
     }
 
     return successful_requests > 0;

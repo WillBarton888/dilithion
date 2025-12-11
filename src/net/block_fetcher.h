@@ -356,8 +356,9 @@ private:
     int nBlocksReceivedTotal;                                ///< Total blocks received
 
     // Configuration
-    static constexpr int MAX_BLOCKS_IN_FLIGHT = 16;          ///< Max total blocks downloading
-    static constexpr int MAX_BLOCKS_PER_PEER = 8;            ///< Max blocks per peer
+    // BUG #147 FIX: Match Bitcoin Core's IBD parameters
+    static constexpr int MAX_BLOCKS_IN_FLIGHT = 128;         ///< Max total blocks downloading (Bitcoin Core: 128)
+    static constexpr int MAX_BLOCKS_PER_PEER = 16;           ///< Max blocks per peer
     static constexpr auto BLOCK_DOWNLOAD_TIMEOUT = std::chrono::seconds(60);  ///< Timeout per block
     static constexpr auto STALE_TIP_TIMEOUT = std::chrono::minutes(5);        ///< Time before tip considered stale
     static constexpr int MAX_RETRIES = 3;                    ///< Max retry attempts per block
