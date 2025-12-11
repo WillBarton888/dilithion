@@ -1998,6 +1998,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "  Pool may be full or block already exists" << std::endl;
                 }
 
+                // BUG #148 FIX: Mark block as received even when storing as orphan
+                // Without this, nBlocksInFlight never decrements for orphan blocks,
+                // causing peers to get stuck at capacity (16/16).
+                if (g_node_context.block_fetcher) {
+                    g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                }
+
                 // Cannot process orphan block yet - return early
                 // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
