@@ -1375,6 +1375,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_chain_height.store(static_cast<unsigned int>(pindexTip->nHeight));  // BUG #108 FIX: Set global height for TX validation
                 std::cout << "  [OK] Loaded chain state: " << chainHashes.size() + 1 << " blocks (height "
                           << pindexTip->nHeight << ")" << std::endl;
+
+                // TEMPORARY DEBUG: Dump checkpoint hashes for heights 1000, 2000, 3000
+                std::cout << "\n=== CHECKPOINT HASHES FOR TESTNET ===" << std::endl;
+                std::vector<int> checkpoint_heights = {1000, 2000, 3000};
+                for (int h : checkpoint_heights) {
+                    if (pindexTip->nHeight >= h) {
+                        auto hashes = g_chainstate.GetBlocksAtHeight(h);
+                        if (!hashes.empty()) {
+                            std::cout << "Height " << h << ": " << hashes[0].GetHex() << std::endl;
+                        }
+                    }
+                }
+                std::cout << "=== END CHECKPOINT HASHES ===\n" << std::endl;
+
             } else {
                 std::cerr << "ERROR: Cannot read best block from database!" << std::endl;
                 delete Dilithion::g_chainParams;
