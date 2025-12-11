@@ -392,28 +392,33 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             LogPrintf(NET, INFO, "Received VERSION from peer %d (version=%d, agent=%s, height=%d, services=0x%016llx)",
                       peer_id, msg.version, msg.user_agent.c_str(), msg.start_height, msg.services);
 
+            // Store peer data (but DON'T update state yet - handler needs to check state)
             peer->version = msg.version;
             peer->user_agent = msg.user_agent;
             peer->start_height = msg.start_height;
             peer->relay = msg.relay;
-            // BUG #127 FIX: Only advance state if not already past VERSION_SENT
-            // Prevents overwriting HANDSHAKE_COMPLETE if VERACK received first
-            if (peer->state < CPeer::STATE_VERSION_SENT) {
-                peer->state = CPeer::STATE_VERSION_SENT;
-            }
-
-            // BUG #148 FIX: Also update CNode::state to prevent state drift
-            // CNode::state is checked in GetValidPeersForDownload()
-            CNode* node = peer_manager.GetNode(peer_id);
-            if (node && node->state.load() < CNode::STATE_VERSION_SENT) {
-                node->state.store(CNode::STATE_VERSION_SENT);
-            }
         } else {
             std::cout << "[P2P] WARNING: Could not create peer " << peer_id << " (connection limit reached?)" << std::endl;
         }
 
-        // Call handler
+        // Call handler BEFORE updating state - handler checks state to decide if
+        // we need to send VERSION back to inbound peers
         on_version(peer_id, msg);
+
+        // BUG #148 FIX: Update state AFTER handler has had chance to respond
+        // This fixes the bug where inbound peers never got our VERSION because
+        // we bumped state before the handler could check it
+        if (peer) {
+            if (peer->state < CPeer::STATE_VERSION_SENT) {
+                peer->state = CPeer::STATE_VERSION_SENT;
+            }
+
+            // Also update CNode::state to prevent state drift
+            CNode* node = peer_manager.GetNode(peer_id);
+            if (node && node->state.load() < CNode::STATE_VERSION_SENT) {
+                node->state.store(CNode::STATE_VERSION_SENT);
+            }
+        }
 
         return true;
     } catch (const std::out_of_range& e) {
