@@ -708,9 +708,11 @@ void CPeerManager::PeriodicMaintenance() {
     // P3-N8 FIX: Disconnect peers with stale handshakes
     // If a peer hasn't completed handshake within 60 seconds, disconnect them
     // This prevents attackers from occupying connection slots indefinitely
+    // BUG #148 FIX: Reduced from 300s to 60s - handshake should complete within seconds,
+    // not minutes. 300s was causing zombie peers to occupy slots too long.
     {
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
-        static const int64_t HANDSHAKE_TIMEOUT = 300;  // BUG #125: 300 seconds for IBD
+        static const int64_t HANDSHAKE_TIMEOUT = 60;  // BUG #148: Reduced from 300s
         int64_t now = GetTime();
 
         std::vector<int> peers_to_disconnect;
@@ -977,37 +979,50 @@ void CPeerManager::UpdatePeerStats(int peer_id, bool success, std::chrono::milli
 
 std::vector<int> CPeerManager::GetValidPeersForDownload() const
 {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    // BUG #148 FIX: Lock both mutexes to check node validity
+    std::lock_guard<std::recursive_mutex> lock_peers(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock_nodes(cs_nodes);
     std::vector<int> result;
 
     for (const auto& pair : peers) {
+        int peer_id = pair.first;
         CPeer* peer = pair.second.get();
 
-        // NOTE: Socket check removed - sockets are in CConnectionManager::peer_sockets, not CPeer::m_sock
-        // Phase D will migrate sockets to CPeer, then this check can be restored
+        // BUG #148 FIX: Check if CNode still exists (prevents zombie peer access)
+        auto node_it = node_refs.find(peer_id);
+        if (node_it == node_refs.end() || node_it->second == nullptr) {
+            // Node was removed by CConnman but CPeer still exists - skip this peer
+            continue;
+        }
 
-        // Must have completed handshake
-        if (!peer->IsHandshakeComplete()) {
-            std::cout << "[BUG-146-DEBUG] peer " << pair.first << " state=" << (int)peer->state << " NOT handshake complete" << std::endl;
+        CNode* node = node_it->second;
+
+        // BUG #148 FIX: Check if CNode has valid socket
+        if (!node->HasValidSocket() || node->fDisconnect.load()) {
+            continue;
+        }
+
+        // Must have completed handshake (check CNode state, not CPeer state)
+        if (!node->IsHandshakeComplete()) {
             continue;
         }
 
         // Must be suitable for download (not stalling too much)
         if (!peer->IsSuitableForDownload()) {
-            std::cout << "[BUG-146-DEBUG] peer " << pair.first << " NOT suitable for download" << std::endl;
             continue;
         }
 
         result.push_back(pair.first);
     }
 
-    std::cout << "[BUG-146-DEBUG] GetValidPeersForDownload returning " << result.size() << " peers" << std::endl;
     return result;
 }
 
 bool CPeerManager::IsPeerSuitableForDownload(int peer_id) const
 {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    // BUG #148 FIX: Lock both mutexes to check node validity
+    std::lock_guard<std::recursive_mutex> lock_peers(cs_peers);
+    std::lock_guard<std::recursive_mutex> lock_nodes(cs_nodes);
 
     auto it = peers.find(peer_id);
     if (it == peers.end()) {
@@ -1016,9 +1031,21 @@ bool CPeerManager::IsPeerSuitableForDownload(int peer_id) const
 
     CPeer* peer = it->second.get();
 
-    // NOTE: HasValidSocket check removed - sockets are in CConnectionManager::peer_sockets, not CPeer::m_sock
-    // Phase D will migrate sockets to CPeer, then this check can be restored
-    return peer->IsHandshakeComplete() &&
+    // BUG #148 FIX: Check if CNode still exists
+    auto node_it = node_refs.find(peer_id);
+    if (node_it == node_refs.end() || node_it->second == nullptr) {
+        return false;
+    }
+
+    CNode* node = node_it->second;
+
+    // BUG #148 FIX: Check if CNode has valid socket
+    if (!node->HasValidSocket() || node->fDisconnect.load()) {
+        return false;
+    }
+
+    // Check CNode state (authoritative), not CPeer state
+    return node->IsHandshakeComplete() &&
            peer->IsSuitableForDownload();
 }
 

@@ -401,6 +401,13 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             if (peer->state < CPeer::STATE_VERSION_SENT) {
                 peer->state = CPeer::STATE_VERSION_SENT;
             }
+
+            // BUG #148 FIX: Also update CNode::state to prevent state drift
+            // CNode::state is checked in GetValidPeersForDownload()
+            CNode* node = peer_manager.GetNode(peer_id);
+            if (node && node->state.load() < CNode::STATE_VERSION_SENT) {
+                node->state.store(CNode::STATE_VERSION_SENT);
+            }
         } else {
             std::cout << "[P2P] WARNING: Could not create peer " << peer_id << " (connection limit reached?)" << std::endl;
         }
@@ -430,11 +437,15 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
         return true;
     }
 
-    std::cout << "[P2P] ProcessVerackMessage: peer " << peer_id << " state=" << (int)peer->state << std::endl;
+    // BUG #148 FIX: More robust VERACK handling - complete handshake if:
+    // 1. We're in VERSION_SENT state (normal case), OR
+    // 2. We're in CONNECTED state and have received VERSION (race condition case)
+    // This prevents stuck handshakes due to race conditions
+    bool should_complete = (peer->state == CPeer::STATE_VERSION_SENT) ||
+                           (peer->state == CPeer::STATE_CONNECTED && peer->version > 0);
 
-    if (peer->state == CPeer::STATE_VERSION_SENT) {
+    if (should_complete && peer->state != CPeer::STATE_HANDSHAKE_COMPLETE) {
         peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
-        std::cout << "[BUG-146-DEBUG] peer " << peer_id << " state changed to " << (int)peer->state << std::endl;
         g_network_stats.handshake_complete++;
 
         // FIX Issue 2: Also update CNode::state to keep in sync with CPeer::state
@@ -466,7 +477,9 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
         if (on_verack) {
             on_verack(peer_id);
         }
-    } else {
+
+        LogPrintf(NET, INFO, "Handshake complete with peer %d (version=%d, height=%d)",
+                  peer_id, peer->version, peer->start_height);
     }
     return true;
 }

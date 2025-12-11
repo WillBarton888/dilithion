@@ -846,6 +846,8 @@ void CConnman::SocketHandler() {
                                 CNetMessage version_msg = m_msg_processor->CreateVersionMessage(node->addr, local_addr);
                                 PushMessage(node.get(), version_msg);
                                 node->fVersionSent.store(true);
+                                // BUG #148 FIX: Also update CNode::state to prevent state drift
+                                node->state.store(CNode::STATE_VERSION_SENT);
                                 LogPrintf(NET, INFO, "[CConnman] Sent VERSION to node %d after connect\n", node->id);
 
                                 // BUG #142 FIX: Update CPeer state to VERSION_SENT
@@ -1147,15 +1149,30 @@ void CConnman::ExtractMessages(CNode* pnode) {
 }
 
 void CConnman::DisconnectNodes() {
-    std::lock_guard<std::mutex> lock(cs_vNodes);
+    // BUG #148 FIX: Collect nodes to disconnect first, then notify CPeerManager
+    // This prevents zombie peers in CPeerManager that reference destroyed CNodes
+    std::vector<int> nodes_to_remove;
 
-    auto it = m_nodes.begin();
-    while (it != m_nodes.end()) {
-        if ((*it)->fDisconnect.load()) {
-            (*it)->CloseSocket();
-            it = m_nodes.erase(it);
-        } else {
-            ++it;
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+
+        auto it = m_nodes.begin();
+        while (it != m_nodes.end()) {
+            if ((*it)->fDisconnect.load()) {
+                nodes_to_remove.push_back((*it)->id);
+                (*it)->CloseSocket();
+                it = m_nodes.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    // Notify CPeerManager AFTER releasing cs_vNodes to avoid lock ordering issues
+    if (m_peer_manager) {
+        for (int node_id : nodes_to_remove) {
+            m_peer_manager->OnPeerDisconnected(node_id);
+            m_peer_manager->RemoveNode(node_id);
         }
     }
 }
