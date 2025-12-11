@@ -119,8 +119,9 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // This ensures CPeer::nBlocksInFlight is decremented for ALL received blocks,
     // not just ones tracked by CBlockFetcher. Without this fix, unsolicited blocks
     // or blocks tracked only by CPeerManager would leave nBlocksInFlight stuck at 16.
+    // Pass both peer_id and hash so it can always decrement the right peer's counter.
     if (g_peer_manager) {
-        g_peer_manager->MarkBlockAsReceived(hash);
+        g_peer_manager->MarkBlockAsReceived(peer, hash);
     }
 
     // Check if block was in-flight in CBlockFetcher's tracking

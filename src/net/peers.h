@@ -317,6 +317,7 @@ public:
     // Block tracking methods
     bool MarkBlockAsInFlight(int peer_id, const uint256& hash, const CBlockIndex* pindex);
     int MarkBlockAsReceived(const uint256& hash);
+    void MarkBlockAsReceived(int peer_id, const uint256& hash);  // BUG #148 FIX: Always decrement peer's nBlocksInFlight
     int RemoveBlockFromFlight(const uint256& hash);
     bool IsBlockInFlight(const uint256& hash) const;
     int GetBlockPeer(const uint256& hash) const;

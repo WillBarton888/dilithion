@@ -829,6 +829,42 @@ int CPeerManager::MarkBlockAsReceived(const uint256& hash)
     return peer_id;
 }
 
+void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    // BUG #148 FIX: Try to remove from tracking first (handles tracked blocks)
+    auto it = mapBlocksInFlight.find(hash);
+    if (it != mapBlocksInFlight.end()) {
+        int tracked_peer = it->second.first;
+        auto list_it = it->second.second;
+
+        // Remove from tracked peer's list
+        auto peer_it = peers.find(tracked_peer);
+        if (peer_it != peers.end()) {
+            CPeer* peer = peer_it->second.get();
+            peer->vBlocksInFlight.erase(list_it);
+            peer->nBlocksInFlight--;
+            peer->nStallingCount = 0;
+            peer->nBlocksDownloaded++;
+            peer->lastSuccessTime = std::chrono::steady_clock::now();
+        }
+        mapBlocksInFlight.erase(it);
+    } else {
+        // BUG #148 FIX: Block wasn't tracked, but still decrement the receiving peer's counter
+        // This handles unsolicited blocks and tracking desync issues
+        auto peer_it = peers.find(peer_id);
+        if (peer_it != peers.end()) {
+            CPeer* peer = peer_it->second.get();
+            if (peer->nBlocksInFlight > 0) {
+                peer->nBlocksInFlight--;
+            }
+            peer->nBlocksDownloaded++;
+            peer->lastSuccessTime = std::chrono::steady_clock::now();
+        }
+    }
+}
+
 int CPeerManager::RemoveBlockFromFlight(const uint256& hash)
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
