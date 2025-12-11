@@ -463,6 +463,12 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
             node->strSubVer = peer->user_agent;
             node->nStartingHeight = peer->start_height;
             node->fRelay = peer->relay;
+        } else {
+            // BUG #148 DEBUG: Log when GetNode fails - this causes "no suitable peers"
+            // because GetValidPeersForDownload checks CNode::state, not CPeer::state
+            std::cout << "[P2P] WARNING: ProcessVerackMessage - GetNode(" << peer_id
+                      << ") returned nullptr! CNode state NOT updated to HANDSHAKE_COMPLETE. "
+                      << "This peer will be excluded from block downloads." << std::endl;
         }
 
         // BUG #85 FIX: Use atomic method that follows Bitcoin Core's pattern
