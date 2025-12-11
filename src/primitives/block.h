@@ -52,6 +52,13 @@ public:
 // Stream output operator for Boost.Test (defined in block.cpp)
 std::ostream& operator<<(std::ostream& os, const uint256& h);
 
+/** Helper function to construct uint256 from hex string (like Bitcoin Core's uint256S) */
+inline uint256 uint256S(const std::string& str) {
+    uint256 result;
+    result.SetHex(str);
+    return result;
+}
+
 class CBlockHeader {
 public:
     int32_t nVersion;
