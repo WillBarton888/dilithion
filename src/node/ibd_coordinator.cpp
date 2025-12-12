@@ -217,6 +217,8 @@ bool CIbdCoordinator::FetchBlocks() {
 
     NodeId lastPeer = -1;
     int lastHeight = -1;
+    static int debug_fetch_count = 0;
+    bool should_debug = (debug_fetch_count++ < 3);
 
     for (const auto& [hash, height] : blocks_to_fetch) {
         NodeId preferred = m_node_context.block_fetcher->GetPreferredPeer(hash);
@@ -233,7 +235,14 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         NodeId peer = m_node_context.block_fetcher->SelectPeerForDownload(hash, preferred);
-        if (peer != -1 && m_node_context.block_fetcher->RequestBlock(peer, hash, height)) {
+        bool request_ok = (peer != -1) && m_node_context.block_fetcher->RequestBlock(peer, hash, height);
+
+        if (should_debug && height <= 5) {
+            std::cout << "[DEBUG] FetchBlocks: height=" << height << " hash=" << hash.GetHex().substr(0,16)
+                      << " peer=" << peer << " request_ok=" << request_ok << std::endl;
+        }
+
+        if (request_ok) {
             peer_blocks[peer].emplace_back(hash, height);
             lastPeer = peer;
             lastHeight = height;
@@ -241,6 +250,11 @@ bool CIbdCoordinator::FetchBlocks() {
             // BUG #63 FIX: Re-queue block if no peer available
             requeue_blocks.emplace_back(hash, height);
         }
+    }
+
+    if (should_debug) {
+        std::cout << "[DEBUG] FetchBlocks: peer_blocks.size()=" << peer_blocks.size()
+                  << " requeue_blocks.size()=" << requeue_blocks.size() << std::endl;
     }
 
     // Re-queue failed blocks
