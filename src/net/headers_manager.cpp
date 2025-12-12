@@ -940,6 +940,19 @@ bool CHeadersManager::FullValidateHeader(const CBlockHeader& header, int height)
     // CHECKPOINT OPTIMIZATION: Skip expensive PoW validation for headers at/before
     // the highest checkpoint. These headers are trusted by the hardcoded checkpoint.
     // This dramatically speeds up IBD (~100ms -> <1ms per header for checkpointed blocks).
+
+    // DEBUG: Log checkpoint check (first 10 headers only)
+    static int debug_count = 0;
+    if (debug_count < 10) {
+        debug_count++;
+        std::cout << "[DEBUG] FullValidateHeader height=" << height
+                  << " g_chainParams=" << (Dilithion::g_chainParams ? "SET" : "NULL");
+        if (Dilithion::g_chainParams) {
+            std::cout << " highestCheckpoint=" << Dilithion::g_chainParams->GetHighestCheckpointHeight();
+        }
+        std::cout << std::endl;
+    }
+
     if (Dilithion::g_chainParams) {
         int highestCheckpoint = Dilithion::g_chainParams->GetHighestCheckpointHeight();
         if (highestCheckpoint >= 0 && height <= highestCheckpoint) {
