@@ -292,33 +292,8 @@ public:
     void Clear();
 
 private:
-    /**
-     * @struct PeerDownloadState
-     * @brief Tracks download performance for each peer
-     */
-    struct PeerDownloadState {
-        int nBlocksInFlight;                        ///< Current blocks downloading from peer
-        std::chrono::milliseconds avgResponseTime;  ///< Average response time
-        int nStalls;                                ///< Number of timeouts/stalls
-        int nBlocksDownloaded;                      ///< Total blocks successfully downloaded
-        bool preferred;                             ///< Marked as preferred peer (fast/reliable)
-        std::chrono::time_point<std::chrono::steady_clock> lastRequest;     ///< Last request time
-        std::chrono::time_point<std::chrono::steady_clock> lastStallTime;   ///< BUG #61: When last stall occurred
-        std::chrono::time_point<std::chrono::steady_clock> lastSuccessTime; ///< BUG #61: When last success occurred
-
-        PeerDownloadState()
-            : nBlocksInFlight(0),
-              avgResponseTime(1000),  // Start with 1 second estimate
-              nStalls(0),
-              nBlocksDownloaded(0),
-              preferred(false)
-        {
-            auto now = std::chrono::steady_clock::now();
-            lastRequest = now;
-            lastStallTime = now;     // BUG #61: Initialize (no stalls yet)
-            lastSuccessTime = now;   // BUG #61: Initialize
-        }
-    };
+    // Phase 1 State Consolidation: PeerDownloadState removed - now tracked in CPeerManager::CPeer
+    // All peer statistics (nBlocksInFlight, avgResponseTime, nStalls, etc.) are in CPeer
 
     /**
      * @struct BlockDownloadRequest
@@ -348,8 +323,7 @@ private:
     std::set<uint256> setQueuedHashes;                       ///< Fast lookup for queued blocks
     std::map<uint256, NodeId> mapPreferredPeers;             ///< BUG #64: Block -> Announcing peer
 
-    // Peer tracking
-    std::map<NodeId, PeerDownloadState> mapPeerStates;       ///< Peer -> Download state
+    // Phase 1: Peer tracking removed - now in CPeerManager exclusively
 
     // Stale tip detection
     std::chrono::time_point<std::chrono::steady_clock> lastBlockReceived;  ///< Last successful download
@@ -377,30 +351,8 @@ private:
      */
     int GetAvailableSlots() const;
 
-    /**
-     * @brief Get available slots for specific peer
-     *
-     * @param peer Peer ID
-     * @return Number of additional blocks that can be requested from this peer
-     */
-    int GetAvailableSlotsForPeer(NodeId peer) const;
-
-    /**
-     * @brief Mark peer as stalled (timed out)
-     *
-     * @param peer Peer ID
-     */
-    void MarkPeerStalled(NodeId peer);
-
-    /**
-     * @brief Check if peer is suitable for download
-     *
-     * Checks if peer is not overloaded or stalled too often.
-     *
-     * @param peer Peer ID
-     * @return true if peer can be used for download
-     */
-    bool IsPeerSuitable(NodeId peer) const;
+    // Phase 1: GetAvailableSlotsForPeer, MarkPeerStalled, IsPeerSuitable moved to CPeerManager
+    // CBlockFetcher now delegates all peer management to CPeerManager
 
     /**
      * @brief Update download speed tracking

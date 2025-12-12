@@ -62,46 +62,30 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // BUG #146 FIX: Check peer capacity using CPeerManager (primary source of truth)
-    // CPeerManager has limit of 16 blocks per peer, mapPeerStates has limit of 8
-    // Must use consistent source with SelectPeerForDownload
-    if (g_peer_manager) {
-        auto peer_obj = g_peer_manager->GetPeer(peer);
-        if (peer_obj && peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-            return false;
-        }
-    } else if (GetAvailableSlotsForPeer(peer) <= 0) {
-        // Fallback to local mapPeerStates only when CPeerManager unavailable
-        return false;
+    // Phase 1: CPeerManager is single source of truth for peer capacity
+    if (!g_peer_manager) {
+        return false;  // Cannot operate without peer manager
     }
 
-    // BUG #61 FIX: Removed redundant IsPeerSuitable check
-    // SelectPeerForDownload already handles all peer selection logic including
-    // fallback peers, so RequestBlock should trust its decision
+    auto peer_obj = g_peer_manager->GetPeer(peer);
+    if (!peer_obj || peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        return false;
+    }
 
     // Check if already in-flight
     if (mapBlocksInFlight.count(hash) > 0) {
         return false;
     }
 
-    // Create in-flight entry
+    // Create in-flight entry (for timeout tracking only)
     CBlockInFlight inFlight(hash, peer, height);
     mapBlocksInFlight[hash] = inFlight;
 
-    // Track peer's blocks
+    // Track peer's blocks (for disconnect handling)
     mapPeerBlocks[peer].insert(hash);
 
-    // Phase C: CPeerManager is now the single source of truth for block tracking
-    if (g_peer_manager) {
-        g_peer_manager->MarkBlockAsInFlight(peer, hash, nullptr);
-    }
-
-    // Update peer state
-    if (mapPeerStates.count(peer) == 0) {
-        mapPeerStates[peer] = PeerDownloadState();
-    }
-    mapPeerStates[peer].nBlocksInFlight++;
-    mapPeerStates[peer].lastRequest = std::chrono::steady_clock::now();
+    // Phase 1: CPeerManager is single source of truth for block tracking
+    g_peer_manager->MarkBlockAsInFlight(peer, hash, nullptr);
 
     // Remove from queue if present
     setQueuedHashes.erase(hash);
@@ -115,47 +99,39 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // BUG #148 FIX: ALWAYS notify CPeerManager even if block wasn't tracked here
-    // This ensures CPeer::nBlocksInFlight is decremented for ALL received blocks,
-    // not just ones tracked by CBlockFetcher. Without this fix, unsolicited blocks
-    // or blocks tracked only by CPeerManager would leave nBlocksInFlight stuck at 16.
-    // Pass both peer_id and hash so it can always decrement the right peer's counter.
+    // Phase 1: CPeerManager is single source of truth - always notify
     if (g_peer_manager) {
         g_peer_manager->MarkBlockAsReceived(peer, hash);
     }
 
-    // Check if block was in-flight in CBlockFetcher's tracking
+    // Check if block was in-flight in local tracking (for timeout tracking)
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
         // Not tracked locally, but CPeerManager was already notified above
         return false;
     }
 
-    // Calculate response time
+    // Calculate response time and update CPeerManager stats
     auto timeReceived = std::chrono::steady_clock::now();
     auto responseTime = std::chrono::duration_cast<std::chrono::milliseconds>(
         timeReceived - it->second.timeRequested
     );
 
-    // Update peer statistics (success)
-    UpdatePeerStats(peer, true, responseTime);
+    // Phase 1: Delegate peer stats update to CPeerManager
+    if (g_peer_manager) {
+        g_peer_manager->UpdatePeerStats(peer, true, responseTime);
+    }
 
-    // Remove from in-flight tracking
+    // Remove from local in-flight tracking
     NodeId requestedPeer = it->second.peer;
     mapBlocksInFlight.erase(it);
 
-    // Update peer's block set
+    // Update peer's block set (for disconnect handling)
     if (mapPeerBlocks.count(requestedPeer) > 0) {
         mapPeerBlocks[requestedPeer].erase(hash);
         if (mapPeerBlocks[requestedPeer].empty()) {
             mapPeerBlocks.erase(requestedPeer);
         }
-    }
-
-    // Update peer state
-    if (mapPeerStates.count(requestedPeer) > 0) {
-        mapPeerStates[requestedPeer].nBlocksInFlight--;
-        mapPeerStates[requestedPeer].nBlocksDownloaded++;
     }
 
     // Update global statistics
@@ -164,8 +140,6 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 
     // BUG #64: Clean up preferred peer tracking
     mapPreferredPeers.erase(hash);
-
-    // Note: CPeerManager::MarkBlockAsReceived already called at top of function
 
     return true;
 }
@@ -248,10 +222,12 @@ void CBlockFetcher::RetryTimedOutBlocks(const std::vector<uint256>& timedOutHash
         int height = inFlight.nHeight;
         int retries = inFlight.nRetries;
 
-        // Mark peer as stalled
-        MarkPeerStalled(stalledPeer);
+        // Phase 1: Mark peer as stalled via CPeerManager
+        if (g_peer_manager) {
+            g_peer_manager->UpdatePeerStats(stalledPeer, false, std::chrono::milliseconds(0));
+        }
 
-        // Remove from in-flight tracking
+        // Remove from local in-flight tracking
         mapBlocksInFlight.erase(it);
 
         // Update peer's block set
@@ -262,16 +238,15 @@ void CBlockFetcher::RetryTimedOutBlocks(const std::vector<uint256>& timedOutHash
             }
         }
 
-        // Update peer state
-        if (mapPeerStates.count(stalledPeer) > 0) {
-            mapPeerStates[stalledPeer].nBlocksInFlight--;
+        // Phase 1: Notify CPeerManager of block removal
+        if (g_peer_manager) {
+            g_peer_manager->RemoveBlockFromFlight(hash);
         }
 
         // Re-queue if not exceeded max retries
         if (retries < MAX_RETRIES) {
             // Re-queue with high priority and incremented retry count
-            // Note: We track retries by re-adding to in-flight later with retry count
-            queueBlocksToFetch.push(BlockDownloadRequest(hash, height, true));  // High priority for retries
+            queueBlocksToFetch.push(BlockDownloadRequest(hash, height, -1, true));  // High priority for retries
             setQueuedHashes.insert(hash);
         } else {
             std::cerr << "[BlockFetcher] Block exceeded max retries, dropping: "
@@ -284,141 +259,75 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Phase B: Use CPeerManager as primary source for peer selection
-    // Note: hash is used in fallback path below during migration
-    if (g_peer_manager) {
-        // BUG #64: First try the preferred peer (the one that announced the block)
-        if (preferred_peer != -1 && g_peer_manager->IsPeerSuitableForDownload(preferred_peer)) {
-            auto peer = g_peer_manager->GetPeer(preferred_peer);
-            if (peer && peer->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-                return preferred_peer;
-            }
-        }
-
-        // Get all valid peers from CPeerManager
-        std::vector<int> valid_peers = g_peer_manager->GetValidPeersForDownload();
-
-        // BUG #148 DEBUG: Log why peer selection fails
-        static int select_debug_counter = 0;
-        bool should_log_select = (select_debug_counter++ % 100 == 0);
-        if (should_log_select) {
-            std::cout << "[DEBUG] SelectPeerForDownload: valid_peers.size()=" << valid_peers.size() << std::endl;
-        }
-
-        NodeId bestPeer = -1;
-        NodeId fallbackPeer = -1;
-        int bestScore = -1;
-
-        for (int peer_id : valid_peers) {
-            auto peer = g_peer_manager->GetPeer(peer_id);
-            if (!peer) {
-                if (should_log_select) std::cout << "[DEBUG] SelectPeer " << peer_id << ": GetPeer returned null" << std::endl;
-                continue;
-            }
-
-            // Must have capacity (use CPeerManager limit)
-            if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-                if (should_log_select) std::cout << "[DEBUG] SelectPeer " << peer_id << ": at capacity (" << peer->nBlocksInFlight << " >= 16)" << std::endl;
-                continue;
-            }
-
-            // Check if suitable (uses CPeer::IsSuitableForDownload)
-            bool suitable = peer->IsSuitableForDownload();
-            if (!suitable) {
-                if (should_log_select) std::cout << "[DEBUG] SelectPeer " << peer_id << ": not suitable (stalls=" << peer->nStallingCount << ")" << std::endl;
-                if (fallbackPeer == -1) {
-                    fallbackPeer = peer_id;
-                }
-                continue;
-            }
-
-            if (should_log_select) std::cout << "[DEBUG] SelectPeer " << peer_id << ": SELECTED (score calc...)" << std::endl;
-
-            // Calculate score (higher is better)
-            int score = 1000;
-
-            // Preferred peers get bonus
-            if (peer->fPreferredDownload) {
-                score += 500;
-            }
-
-            // Penalize for stalls
-            score -= peer->nStallingCount * 100;
-
-            // Bonus for fast response time (inverse of time in ms)
-            if (peer->avgResponseTime.count() > 0) {
-                score += 1000 / (peer->avgResponseTime.count() / 100 + 1);
-            }
-
-            // Bonus for successful downloads
-            score += peer->nBlocksDownloaded * 10;
-
-            // Penalize if already has many blocks in-flight (spread load)
-            score -= peer->nBlocksInFlight * 50;
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestPeer = peer_id;
-            }
-        }
-
-        // BUG #61: Use fallback if no suitable peer found
-        if (bestPeer == -1 && fallbackPeer != -1) {
-            if (should_log_select) std::cout << "[DEBUG] SelectPeer: using fallback=" << fallbackPeer << std::endl;
-            return fallbackPeer;
-        }
-
-        if (bestPeer != -1) {
-            if (should_log_select) std::cout << "[DEBUG] SelectPeer: using best=" << bestPeer << std::endl;
-            return bestPeer;
-        }
-
-        if (should_log_select) std::cout << "[DEBUG] SelectPeer: NO PEER FOUND (bestPeer=-1, fallback=-1)" << std::endl;
+    // Phase 1: CPeerManager is single source of truth for peer selection
+    if (!g_peer_manager) {
+        return -1;  // Cannot operate without peer manager
     }
 
-    // Fallback to mapPeerStates if CPeerManager unavailable or returned no peers
-    if (preferred_peer != -1) {
-        auto it = mapPeerStates.find(preferred_peer);
-        if (it != mapPeerStates.end()) {
-            int availableSlots = GetAvailableSlotsForPeer(preferred_peer);
-            if (availableSlots > 0 && IsPeerSuitable(preferred_peer)) {
-                return preferred_peer;
-            }
+    // Try the preferred peer first (the one that announced the block)
+    if (preferred_peer != -1 && g_peer_manager->IsPeerSuitableForDownload(preferred_peer)) {
+        auto peer = g_peer_manager->GetPeer(preferred_peer);
+        if (peer && peer->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+            return preferred_peer;
         }
     }
+
+    // Get all valid peers from CPeerManager
+    std::vector<int> valid_peers = g_peer_manager->GetValidPeersForDownload();
 
     NodeId bestPeer = -1;
     NodeId fallbackPeer = -1;
     int bestScore = -1;
 
-    for (const auto& entry : mapPeerStates) {
-        NodeId peer = entry.first;
-        const PeerDownloadState& state = entry.second;
-
-        int availableSlots = GetAvailableSlotsForPeer(peer);
-        if (availableSlots <= 0) continue;
-
-        bool suitable = IsPeerSuitable(peer);
-        if (!suitable) {
-            if (fallbackPeer == -1) fallbackPeer = peer;
+    for (int peer_id : valid_peers) {
+        auto peer = g_peer_manager->GetPeer(peer_id);
+        if (!peer) {
             continue;
         }
 
-        int score = 1000;
-        if (state.preferred) score += 500;
-        score -= state.nStalls * 100;
-        if (state.avgResponseTime.count() > 0) {
-            score += 1000 / (state.avgResponseTime.count() / 100 + 1);
+        // Must have capacity
+        if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+            continue;
         }
-        score += state.nBlocksDownloaded * 10;
-        score -= state.nBlocksInFlight * 50;
+
+        // Check if suitable (uses CPeer::IsSuitableForDownload)
+        bool suitable = peer->IsSuitableForDownload();
+        if (!suitable) {
+            if (fallbackPeer == -1) {
+                fallbackPeer = peer_id;
+            }
+            continue;
+        }
+
+        // Calculate score (higher is better)
+        int score = 1000;
+
+        // Preferred peers get bonus
+        if (peer->fPreferredDownload) {
+            score += 500;
+        }
+
+        // Penalize for stalls
+        score -= peer->nStallingCount * 100;
+
+        // Bonus for fast response time (inverse of time in ms)
+        if (peer->avgResponseTime.count() > 0) {
+            score += 1000 / (peer->avgResponseTime.count() / 100 + 1);
+        }
+
+        // Bonus for successful downloads
+        score += peer->nBlocksDownloaded * 10;
+
+        // Penalize if already has many blocks in-flight (spread load)
+        score -= peer->nBlocksInFlight * 50;
 
         if (score > bestScore) {
             bestScore = score;
-            bestPeer = peer;
+            bestPeer = peer_id;
         }
     }
 
+    // Use fallback if no suitable peer found
     if (bestPeer == -1 && fallbackPeer != -1) {
         return fallbackPeer;
     }
@@ -429,34 +338,9 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 void CBlockFetcher::UpdatePeerStats(NodeId peer, bool success, std::chrono::milliseconds responseTime)
 {
     // Note: Caller should hold lock
-    // This method is called from MarkBlockReceived which already holds the lock
-
-    // Phase B: Delegate to CPeerManager (primary source of truth)
+    // Phase 1: Delegate entirely to CPeerManager (single source of truth)
     if (g_peer_manager) {
         g_peer_manager->UpdatePeerStats(peer, success, responseTime);
-    }
-
-    // Fallback: Also update local mapPeerStates during transition
-    if (mapPeerStates.count(peer) == 0) {
-        mapPeerStates[peer] = PeerDownloadState();
-    }
-
-    PeerDownloadState& state = mapPeerStates[peer];
-
-    if (success) {
-        if (state.nStalls > 0) {
-            state.nStalls = 0;
-        }
-        state.lastSuccessTime = std::chrono::steady_clock::now();
-
-        if (responseTime.count() > 0) {
-            int64_t newAvg = (3 * responseTime.count() + 7 * state.avgResponseTime.count()) / 10;
-            state.avgResponseTime = std::chrono::milliseconds(newAvg);
-        }
-
-        if (state.avgResponseTime < std::chrono::seconds(2) && state.nStalls < 2) {
-            state.preferred = true;
-        }
     }
 }
 
@@ -480,14 +364,11 @@ int CBlockFetcher::GetBlocksInFlight() const
 
 int CBlockFetcher::GetBlocksInFlightForPeer(NodeId peer) const
 {
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    auto it = mapPeerStates.find(peer);
-    if (it == mapPeerStates.end()) {
-        return 0;
+    // Phase 1: Delegate to CPeerManager (single source of truth)
+    if (g_peer_manager) {
+        return g_peer_manager->GetBlocksInFlightForPeer(peer);
     }
-
-    return it->second.nBlocksInFlight;
+    return 0;
 }
 
 std::vector<uint256> CBlockFetcher::GetQueuedBlocks() const
@@ -538,9 +419,14 @@ void CBlockFetcher::OnPeerDisconnected(NodeId peer)
                 // Remove from in-flight
                 mapBlocksInFlight.erase(it);
 
+                // Phase 1: Notify CPeerManager
+                if (g_peer_manager) {
+                    g_peer_manager->RemoveBlockFromFlight(hash);
+                }
+
                 // Re-queue with high priority
                 if (retries < MAX_RETRIES) {
-                    queueBlocksToFetch.push(BlockDownloadRequest(hash, height, true));
+                    queueBlocksToFetch.push(BlockDownloadRequest(hash, height, -1, true));
                     setQueuedHashes.insert(hash);
                 }
             }
@@ -549,16 +435,13 @@ void CBlockFetcher::OnPeerDisconnected(NodeId peer)
         mapPeerBlocks.erase(peer);
     }
 
-    // Clean up peer state
-    mapPeerStates.erase(peer);
+    // Phase 1: CPeerManager handles peer state cleanup - we don't track locally
 }
 
 void CBlockFetcher::OnPeerConnected(NodeId peer)
 {
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    // Initialize peer state
-    mapPeerStates[peer] = PeerDownloadState();
+    // Phase 1: CPeerManager handles peer state initialization - we don't track locally
+    // This method is kept for API compatibility but now a no-op
 }
 
 bool CBlockFetcher::IsStaleTip() const
@@ -590,21 +473,25 @@ std::string CBlockFetcher::GetDownloadStatus() const
     ss << "BlockFetcher Status:\n";
     ss << "  Blocks in-flight: " << mapBlocksInFlight.size() << "/" << MAX_BLOCKS_IN_FLIGHT << "\n";
     ss << "  Blocks queued: " << setQueuedHashes.size() << "\n";
-    ss << "  Active peers: " << mapPeerStates.size() << "\n";
     ss << "  Total blocks received: " << nBlocksReceivedTotal << "\n";
 
-    // Peer breakdown
-    ss << "  Per-peer status:\n";
-    for (const auto& entry : mapPeerStates) {
-        NodeId peer = entry.first;
-        const PeerDownloadState& state = entry.second;
-        ss << "    Peer " << peer << ": "
-           << state.nBlocksInFlight << " in-flight, "
-           << state.nBlocksDownloaded << " downloaded, "
-           << state.nStalls << " stalls, "
-           << "avg " << state.avgResponseTime.count() << "ms"
-           << (state.preferred ? " [PREFERRED]" : "")
-           << "\n";
+    // Phase 1: Peer breakdown from CPeerManager
+    if (g_peer_manager) {
+        auto peers = g_peer_manager->GetValidPeersForDownload();
+        ss << "  Active peers: " << peers.size() << "\n";
+        ss << "  Per-peer status:\n";
+        for (int peer_id : peers) {
+            auto peer = g_peer_manager->GetPeer(peer_id);
+            if (peer) {
+                ss << "    Peer " << peer_id << ": "
+                   << peer->nBlocksInFlight << " in-flight, "
+                   << peer->nBlocksDownloaded << " downloaded, "
+                   << peer->nStallingCount << " stalls, "
+                   << "avg " << peer->avgResponseTime.count() << "ms"
+                   << (peer->fPreferredDownload ? " [PREFERRED]" : "")
+                   << "\n";
+            }
+        }
     }
 
     return ss.str();
@@ -640,9 +527,9 @@ void CBlockFetcher::Clear()
         queueBlocksToFetch.pop();
     }
     setQueuedHashes.clear();
-    mapPreferredPeers.clear();  // BUG #64: Clear preferred peers
+    mapPreferredPeers.clear();
 
-    mapPeerStates.clear();
+    // Phase 1: Peer state is in CPeerManager, not cleared here
     nBlocksReceivedTotal = 0;
     lastBlockReceived = std::chrono::steady_clock::now();
 }
@@ -656,68 +543,8 @@ int CBlockFetcher::GetAvailableSlots() const
     return MAX_BLOCKS_IN_FLIGHT - inFlight;
 }
 
-int CBlockFetcher::GetAvailableSlotsForPeer(NodeId peer) const
-{
-    // Caller should hold lock
-    auto it = mapPeerStates.find(peer);
-    if (it == mapPeerStates.end()) {
-        return MAX_BLOCKS_PER_PEER;
-    }
-
-    int inFlight = it->second.nBlocksInFlight;
-    return MAX_BLOCKS_PER_PEER - inFlight;
-}
-
-void CBlockFetcher::MarkPeerStalled(NodeId peer)
-{
-    // Caller should hold lock
-    if (mapPeerStates.count(peer) == 0) {
-        mapPeerStates[peer] = PeerDownloadState();
-    }
-
-    mapPeerStates[peer].nStalls++;
-    mapPeerStates[peer].preferred = false;  // Remove preferred status
-    // BUG #61 FIX: Track when stall occurred for timeout calculation
-    mapPeerStates[peer].lastStallTime = std::chrono::steady_clock::now();
-
-    // If peer stalls too much, it will be avoided by IsPeerSuitable (but not permanently - BUG #61)
-}
-
-bool CBlockFetcher::IsPeerSuitable(NodeId peer) const
-{
-    // Caller should hold lock
-
-    // Phase B: Use CPeerManager as primary source
-    if (g_peer_manager) {
-        return g_peer_manager->IsPeerSuitableForDownload(peer);
-    }
-
-    // Fallback to mapPeerStates during migration
-    auto it = mapPeerStates.find(peer);
-    if (it == mapPeerStates.end()) {
-        return true;  // New peer, give it a chance
-    }
-
-    const PeerDownloadState& state = it->second;
-
-    // BUG #61 FIX: Check if stall timeout has passed (Bitcoin Core-aligned)
-    // Never permanently exclude peers - allow retry after timeout
-    auto now = std::chrono::steady_clock::now();
-    auto stallAge = std::chrono::duration_cast<std::chrono::minutes>(
-        now - state.lastStallTime);
-
-    // Forgive stalls after PEER_STALL_TIMEOUT (5 minutes)
-    if (stallAge >= PEER_STALL_TIMEOUT) {
-        return true;  // Give peer another chance
-    }
-
-    // During timeout period, check threshold (raised to 10)
-    if (state.nStalls >= PEER_STALL_THRESHOLD) {
-        return false;  // Temporarily unsuitable
-    }
-
-    return true;
-}
+// Phase 1: GetAvailableSlotsForPeer, MarkPeerStalled, IsPeerSuitable removed
+// All peer management is now delegated to CPeerManager
 
 void CBlockFetcher::UpdateDownloadSpeed()
 {
