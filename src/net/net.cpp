@@ -10,6 +10,7 @@
 #include <net/banman.h>  // For MisbehaviorType
 #include <net/features.h>  // Feature flags system
 #include <core/node_context.h>  // Phase 1.2: NodeContext for global state
+#include <net/connman.h>  // Phase 5: For CConnman::PushMessage
 #include <util/strencodings.h>
 #include <util/time.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
