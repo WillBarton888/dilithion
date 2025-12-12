@@ -36,8 +36,8 @@ typedef int NodeId;
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
 static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks assigned per peer at a time
-static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 2;    ///< Stall detection timeout
-static constexpr int MAX_CHUNK_STALL_COUNT = 10;         ///< Max stalls before peer avoided
+static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 30;   ///< Stall detection timeout (increased from 2s for slow connections)
+static constexpr int MAX_CHUNK_STALL_COUNT = 50;         ///< Max stalls before peer avoided (increased from 10 for IBD)
 
 /**
  * @struct PeerChunk
