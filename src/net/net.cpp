@@ -175,7 +175,7 @@ std::atomic<CUTXOSet*> g_utxo_set{nullptr};
 std::atomic<unsigned int> g_chain_height{0};
 
 // Global pointers for P2P networking (NW-005)
-std::atomic<CConnectionManager*> g_connection_manager{nullptr};
+// Phase 5: Removed g_connection_manager - use CConnman via NodeContext instead
 std::atomic<CNetMessageProcessor*> g_message_processor{nullptr};
 
 // Phase 1.2: Block fetcher now accessed via NodeContext
@@ -559,8 +559,10 @@ bool CNetMessageProcessor::ProcessGetAddrMessage(int peer_id) {
     // Create and send ADDR message
     CNetMessage addr_msg = CreateAddrMessage(addrs);
 
-    auto* conn_mgr = g_connection_manager.load();
-    if (conn_mgr && conn_mgr->SendMessage(peer_id, addr_msg)) {
+    // Phase 5: Use CConnman instead of deprecated CConnectionManager
+    extern NodeContext g_node_context;
+    if (g_node_context.connman) {
+        g_node_context.connman->PushMessage(peer_id, addr_msg);
         std::cout << "[P2P] Sent " << addrs.size() << " addresses to peer "
                   << peer_id << " in response to GETADDR" << std::endl;
     }
@@ -729,16 +731,14 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
             CNetMessage getdata_msg = CreateGetDataMessage(vToFetch);
 
             // BUG #106 FIX: Actually send the GETDATA request to the peer!
+            // Phase 5: Use CConnman instead of deprecated CConnectionManager
             extern NodeContext g_node_context;
-            if (g_node_context.connection_manager) {
-                if (g_node_context.connection_manager->SendMessage(peer_id, getdata_msg)) {
-                    std::cout << "[P2P] Sent GETDATA for " << vToFetch.size()
-                              << " item(s) to peer " << peer_id << std::endl;
-                } else {
-                    std::cout << "[P2P] Failed to send GETDATA to peer " << peer_id << std::endl;
-                }
+            if (g_node_context.connman) {
+                g_node_context.connman->PushMessage(peer_id, getdata_msg);
+                std::cout << "[P2P] Sent GETDATA for " << vToFetch.size()
+                          << " item(s) to peer " << peer_id << std::endl;
             } else {
-                std::cout << "[P2P] Cannot send GETDATA - connection manager not initialized" << std::endl;
+                std::cout << "[P2P] Cannot send GETDATA - connman not initialized" << std::endl;
             }
         }
 
@@ -831,19 +831,15 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                         CNetMessage tx_msg = CreateTxMessage(*tx);
 
                         // BUG #106 FIX: Actually send the transaction to the requesting peer!
+                        // Phase 5: Use CConnman instead of deprecated CConnectionManager
                         extern NodeContext g_node_context;
-                        if (g_node_context.connection_manager) {
-                            if (g_node_context.connection_manager->SendMessage(peer_id, tx_msg)) {
-                                std::cout << "[P2P] Sent transaction "
-                                          << inv.hash.GetHex().substr(0, 16)
-                                          << "... to peer " << peer_id << std::endl;
-                            } else {
-                                std::cout << "[P2P] Failed to send transaction "
-                                          << inv.hash.GetHex().substr(0, 16)
-                                          << "... to peer " << peer_id << std::endl;
-                            }
+                        if (g_node_context.connman) {
+                            g_node_context.connman->PushMessage(peer_id, tx_msg);
+                            std::cout << "[P2P] Sent transaction "
+                                      << inv.hash.GetHex().substr(0, 16)
+                                      << "... to peer " << peer_id << std::endl;
                         } else {
-                            std::cout << "[P2P] Cannot send transaction - connection manager not initialized" << std::endl;
+                            std::cout << "[P2P] Cannot send transaction - connman not initialized" << std::endl;
                         }
                     } else {
                         std::cout << "[P2P] Transaction "
@@ -2258,7 +2254,8 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
     // P0-5 FIX: Load atomic pointer
     auto* tx_relay = g_tx_relay_manager.load();
     extern NodeContext g_node_context;
-    if (!g_node_context.peer_manager || !g_node_context.connection_manager || !g_node_context.message_processor || !tx_relay) {
+    // Phase 5: Use CConnman instead of deprecated CConnectionManager
+    if (!g_node_context.peer_manager || !g_node_context.connman || !g_node_context.message_processor || !tx_relay) {
         std::cout << "[TX-RELAY] Cannot announce transaction " << txid.GetHex().substr(0, 16)
                   << "... (networking not initialized)" << std::endl;
         return;
@@ -2306,15 +2303,12 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
         CNetMessage inv_message = g_node_context.message_processor->CreateInvMessage(inv_vec);
 
         // Send INV message to peer
-        // Only mark as announced if send succeeds (audit recommendation)
-        if (g_node_context.connection_manager->SendMessage(peer->id, inv_message)) {
-            // Mark as announced to prevent duplicates
-            tx_relay->MarkAnnounced(peer->id, txid);
-            announced_count++;
-        } else {
-            // Send failed - don't mark as announced, will retry on next call
-            skipped_count++;
-        }
+        // Phase 5: Use CConnman instead of deprecated CConnectionManager
+        // PushMessage always succeeds (queues message), so we can mark as announced
+        g_node_context.connman->PushMessage(peer->id, inv_message);
+        // Mark as announced to prevent duplicates
+        tx_relay->MarkAnnounced(peer->id, txid);
+        announced_count++;
     }
 
     std::cout << "[TX-RELAY] Announced transaction " << txid.GetHex().substr(0, 16)

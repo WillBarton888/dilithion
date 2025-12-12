@@ -21,8 +21,8 @@
 #include <util/error_format.h>  // UX: Better error messages
 #include <amount.h>
 #include <net/peers.h>  // For CPeerManager and g_peer_manager
-#include <core/node_context.h>  // For g_node_context and connection_manager
-#include <net/net.h>  // For CConnectionManager
+#include <core/node_context.h>  // For g_node_context
+#include <net/net.h>  // For CNetMessageProcessor and other networking types
 #include <net/protocol.h>  // For NetProtocol::CAddress
 
 #include <sstream>
@@ -3621,8 +3621,8 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
         ip_str = node_str;
     }
 
-    // Check if connection_manager is available
-    if (!g_node_context.connection_manager) {
+    // Phase 5: Use CConnman instead of deprecated CConnectionManager
+    if (!g_node_context.connman) {
         throw std::runtime_error("Connection manager not initialized");
     }
 
@@ -3632,14 +3632,19 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
             throw std::runtime_error("Peer manager not initialized");
         }
 
-        // Find peer by IP address
-        auto peers = g_peer_manager->GetAllPeers();
+        // Phase 5: Use CConnman instead of deprecated CConnectionManager
+        if (!g_node_context.connman) {
+            throw std::runtime_error("Connection manager not initialized");
+        }
+
+        // Find node by IP address
+        auto nodes = g_node_context.connman->GetNodes();
         bool found = false;
-        for (const auto& peer : peers) {
+        for (CNode* node : nodes) {
             // Compare IP address
-            std::string peer_ip = peer->addr.ToStringIP();
-            if (peer_ip == ip_str) {
-                g_node_context.connection_manager->DisconnectPeer(peer->id, "addnode remove");
+            std::string node_ip = node->addr.ToStringIP();
+            if (node_ip == ip_str) {
+                g_node_context.connman->DisconnectNode(node->id, "addnode remove");
                 found = true;
                 break;
             }
@@ -3668,14 +3673,19 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
     // CID 1675249 FIX: Safe 64-to-32 bit time conversion (valid until 2106)
     addr.time = static_cast<uint32_t>(time(nullptr) & 0xFFFFFFFF);
 
-    // Connect to peer
-    int peer_id = g_node_context.connection_manager->ConnectToPeer(addr);
+    // Phase 5: Use CConnman instead of deprecated CConnectionManager
+    if (!g_node_context.connman) {
+        throw std::runtime_error("Connection manager not initialized");
+    }
 
-    if (peer_id < 0) {
+    // Connect to peer
+    CNode* pnode = g_node_context.connman->ConnectNode(addr);
+
+    if (!pnode) {
         throw std::runtime_error("Failed to connect to node: " + node_str);
     }
 
-    std::cout << "[RPC] addnode: Connected to " << node_str << " (peer_id=" << peer_id << ")" << std::endl;
+    std::cout << "[RPC] addnode: Connected to " << node_str << " (node_id=" << pnode->id << ")" << std::endl;
 
     return "null";  // Success
 }

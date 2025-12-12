@@ -233,7 +233,7 @@ extern std::atomic<unsigned int> g_chain_height;
 
 // Global P2P networking pointers (NW-005)
 // P0-5 FIX: Use std::atomic to prevent initialization race conditions
-extern std::atomic<CConnectionManager*> g_connection_manager;
+// Phase 5: Removed g_connection_manager - use CConnman via NodeContext instead
 extern std::atomic<CNetMessageProcessor*> g_message_processor;
 
 /**

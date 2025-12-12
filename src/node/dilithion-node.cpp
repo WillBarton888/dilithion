@@ -1678,6 +1678,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (g_node_context.connman) {
                     g_node_context.connman->PushMessage(peer_id, version_msg);
                     peer->state = CPeer::STATE_VERSION_SENT;
+                    // BUG #148 FIX: Also update CNode::state to prevent state drift
+                    // This ensures both CPeer and CNode states stay synchronized
+                    if (g_node_context.peer_manager) {
+                        CNode* node = g_node_context.peer_manager->GetNode(peer_id);
+                        if (node && node->state.load() < CNode::STATE_VERSION_SENT) {
+                            node->state.store(CNode::STATE_VERSION_SENT);
+                        }
+                    }
                 }
             }
 
