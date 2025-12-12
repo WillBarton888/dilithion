@@ -24,6 +24,7 @@
 #include <core/node_context.h>  // For g_node_context
 #include <net/net.h>  // For CNetMessageProcessor and other networking types
 #include <net/protocol.h>  // For NetProtocol::CAddress
+#include <net/connman.h>  // Phase 5: For CConnman methods
 
 #include <sstream>
 #include <cstring>
