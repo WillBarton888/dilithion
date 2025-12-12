@@ -1089,27 +1089,12 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
             msg.locator[i] = stream.ReadUint256();
         }
 
-        // P2-3 FIX: Validate locator hashes against our chain
-        // This prevents eclipse attacks via fake block hashes in locator array
-        // Each hash must either be zero (genesis), in our chain, or explicitly known
-        uint256 genesis_hash = Genesis::GetGenesisHash();
-        for (const uint256& hash : msg.locator) {
-            // Skip zero hash (sometimes used as placeholder)
-            if (hash.IsNull()) continue;
-
-            // Genesis block hash is always valid
-            if (hash == genesis_hash) continue;
-
-            // Validate hash exists in our block index
-            // Note: extern CChainState g_chainstate declared in consensus/chain.h
-            extern CChainState g_chainstate;
-            if (!g_chainstate.HasBlockIndex(hash)) {
-                std::cout << "[P2P] SECURITY: Unknown locator hash from peer " << peer_id
-                          << ": " << hash.GetHex().substr(0, 16) << "..." << std::endl;
-                peer_manager.Misbehaving(peer_id, 20);
-                return false;
-            }
-        }
+        // BUG #149 FIX: Removed overly strict locator validation
+        // Bitcoin Core doesn't reject GETHEADERS for unknown locator hashes - it simply
+        // iterates through them to find the first common block. The handler will skip
+        // unknown hashes and find the first one we know about. This allows peers that
+        // are ahead of us (with more headers) to still request more headers from us.
+        // The on_getheaders handler in dilithion-node.cpp correctly handles unknown hashes.
 
         // Read stop hash
         msg.hashStop = stream.ReadUint256();
