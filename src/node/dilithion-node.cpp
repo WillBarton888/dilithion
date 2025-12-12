@@ -29,7 +29,7 @@
 #include <net/tx_relay.h>
 #include <net/socket.h>
 #include <net/async_broadcaster.h>
-#include <net/message_queue.h>  // BUG #125: Async message processing
+// REMOVED: #include <net/message_queue.h> - CMessageProcessorQueue was unused (CConnman handles messages directly)
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
@@ -1570,17 +1570,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Now uses CConnman instead of CConnectionManager
         CFeelerManager feeler_manager(*g_node_context.peer_manager, g_node_context.connman.get(), &message_processor);
 
-        // BUG #125: Create and start async message processing queue
-        // This decouples network I/O from message processing to prevent blocking
-        CMessageProcessorQueue message_queue(message_processor, 2);  // 2 worker threads
-        g_message_queue.store(&message_queue);
-        g_node_context.message_queue = &message_queue;
-
-        if (!message_queue.Start()) {
-            std::cerr << "Failed to start message queue" << std::endl;
-            return 1;
-        }
-        std::cout << "  [OK] Async message processing enabled (2 workers)" << std::endl;
+        // REMOVED: CMessageProcessorQueue - CConnman::ThreadMessageHandler handles messages directly
+        // The async queue was created but never received messages (only deprecated CConnectionManager used it)
+        std::cout << "  [OK] Message processing via CConnman::ThreadMessageHandler" << std::endl;
 
         // Create and start HTTP API server for dashboard
         // Use port 18334 for testnet, 8334 for mainnet (Bitcoin convention)
@@ -3500,12 +3492,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << " ✓" << std::endl;
         }
 
-        // BUG #125: Stop message queue before P2P shutdown
-        std::cout << "[Shutdown] Stopping message queue..." << std::flush;
-        message_queue.Stop();
-        g_message_queue.store(nullptr);
-        g_node_context.message_queue = nullptr;
-        std::cout << " done" << std::endl;
+        // REMOVED: CMessageProcessorQueue shutdown (no longer used)
 
         std::cout << "[Shutdown] Stopping P2P server..." << std::flush;
         // Phase 5: Stop CConnman (handles all socket cleanup internally)

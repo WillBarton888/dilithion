@@ -2133,20 +2133,9 @@ void CConnectionManager::ReceiveMessages(int peer_id) {
             peer->last_recv = GetTime();
         }
 
-        // Process message - BUG #125: Use async queue if available
-        bool success = false;
-        CMessageProcessorQueue* queue = g_message_queue.load();
-        if (queue && queue->IsRunning()) {
-            // Async path: enqueue message for background processing
-            CMessageProcessorQueue::Priority priority =
-                CMessageProcessorQueue::GetMessagePriority(message);
-            success = queue->EnqueueMessage(peer_id, message, priority);
-            // Note: success here means queued, not processed
-            // Quality tracking happens after actual processing in worker thread
-        } else {
-            // Sync path (fallback): process immediately
-            success = message_processor.ProcessMessage(peer_id, message);
-        }
+        // Process message synchronously (CMessageProcessorQueue was removed - unused)
+        // NOTE: This code is in DEPRECATED CConnectionManager - CConnman should be used instead
+        bool success = message_processor.ProcessMessage(peer_id, message);
 
         // Network: Track connection quality and partition detection
         // Note: In async mode, this tracks queueing success, not processing
