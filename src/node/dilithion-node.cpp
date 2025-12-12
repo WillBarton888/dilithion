@@ -2311,6 +2311,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                     std::cout << "[IBD] Queued " << headers.size() << " blocks for download" << std::endl;
                 }
+
+                // BUG #147 FIX: Continue headers sync if we got a full batch (2000 headers)
+                // Bitcoin protocol sends max 2000 headers per message - if we got exactly 2000,
+                // peer likely has more to send, so request continuation
+                static constexpr size_t MAX_HEADERS_RESULTS = 2000;
+                if (headers.size() == MAX_HEADERS_RESULTS) {
+                    uint256 lastHeaderHash = headers.back().GetHash();
+                    std::cout << "[IBD] Got full batch of " << MAX_HEADERS_RESULTS
+                              << " headers, requesting more from " << lastHeaderHash.GetHex().substr(0, 16) << "..." << std::endl;
+                    g_node_context.headers_manager->RequestHeaders(peer_id, lastHeaderHash);
+                }
             } else {
                 // BUG #67: Even if ProcessHeaders failed, headers may have been partially processed
                 // The main loop will detect header height changes and handle block downloads
