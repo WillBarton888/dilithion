@@ -615,6 +615,10 @@ uint256 CHeadersManager::GetRandomXHashAtHeight(int height) const
     // Get the header(s) at this height
     auto heightIt = mapHeightIndex.find(height);
     if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
+        static int null_count = 0;
+        if (null_count++ < 5) {
+            std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): height not in index" << std::endl;
+        }
         return uint256();
     }
 
@@ -622,15 +626,31 @@ uint256 CHeadersManager::GetRandomXHashAtHeight(int height) const
     const uint256& storageHash = *heightIt->second.begin();
     auto headerIt = mapHeaders.find(storageHash);
     if (headerIt == mapHeaders.end()) {
+        static int notfound_count = 0;
+        if (notfound_count++ < 5) {
+            std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): storage hash not found" << std::endl;
+        }
         return uint256();
     }
 
     // If we have the RandomX hash (from child's hashPrevBlock), return it
     if (!headerIt->second.randomXHash.IsNull()) {
+        static int found_count = 0;
+        if (found_count++ < 5) {
+            std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): returning cached randomXHash "
+                      << headerIt->second.randomXHash.GetHex().substr(0, 16) << "..." << std::endl;
+        }
         return headerIt->second.randomXHash;
     }
 
     // Otherwise, compute it (only happens for blocks above checkpoint or last block)
+    static int compute_count = 0;
+    if (compute_count++ < 5) {
+        uint256 computed = headerIt->second.header.GetHash();
+        std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): computing RandomX hash "
+                  << computed.GetHex().substr(0, 16) << "..." << std::endl;
+        return computed;
+    }
     return headerIt->second.header.GetHash();
 }
 
