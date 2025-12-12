@@ -294,7 +294,7 @@ bool CIbdCoordinator::FetchBlocks() {
         // Send single batched GETDATA for entire chunk
         if (!getdata.empty()) {
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-            LogPrintIBD(DEBUG, "Sending GETDATA to peer %d (msg size=%zu)", peer_id, msg.data.size());
+            LogPrintIBD(DEBUG, "Sending GETDATA to peer %d", peer_id);
             m_node_context.connman->PushMessage(peer_id, msg);
             total_chunks_assigned++;
 
