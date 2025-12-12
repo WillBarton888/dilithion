@@ -299,7 +299,19 @@
       "Bash(ssh root@134.122.4.164 \"curl -s http://127.0.0.1:8332/ -X POST -H ''Content-Type: application/json'' -d ''{\"\"method\"\":\"\"getblockchaininfo\"\",\"\"params\"\":[]}''\")",
       "Bash(ssh root@188.166.255.63 \"netstat -tlnp | grep 8332; curl -s --max-time 5 http://127.0.0.1:8332/ -X POST -H ''Content-Type: application/json'' -d ''{\"\"method\"\":\"\"getblockchaininfo\"\",\"\"params\"\":[]}''  || echo ''RPC failed''\")",
       "Bash(ssh root@188.166.255.63 \"ss -tlnp | grep 8332; tail -100 /root/node.log | grep -i ''rpc\\|error\\|fail''\")",
-      "Bash(ssh root@134.122.4.164 \"ss -tlnp | grep dilithion; curl -s --max-time 10 http://127.0.0.1:18332/ -X POST -H ''Content-Type: application/json'' -d ''{\"\"method\"\":\"\"getblockchaininfo\"\",\"\"params\"\":[]}''\")"
+      "Bash(ssh root@134.122.4.164 \"ss -tlnp | grep dilithion; curl -s --max-time 10 http://127.0.0.1:18332/ -X POST -H ''Content-Type: application/json'' -d ''{\"\"method\"\":\"\"getblockchaininfo\"\",\"\"params\"\":[]}''\")",
+      "Bash(ssh root@134.122.4.164 \"pkill -9 dilithion || true; cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1 | tail -20\")",
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion || true; cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1 | tail -20\")",
+      "Bash(ssh root@134.122.4.164 \"tail -20 /root/node.log && pgrep dilithion\")",
+      "Bash(ssh root@134.122.4.164 \"pkill -9 dilithion; rm -f /root/.dilithion-testnet/blocks/LOCK /root/.dilithion-testnet/chainstate/LOCK /root/.dilithion-testnet/*.LOCK; sleep 2; cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@134.122.4.164 \"tail -30 /root/node.log; echo ''---''; date; pgrep -a dilithion\")",
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate /root/.dilithion-testnet/*.LOCK; sleep 2; cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@188.166.255.63 \"tail -100 /root/node.log | head -50; echo ''---PROCESS---''; pgrep -a dilithion || echo ''NOT RUNNING''\")",
+      "Bash(ssh root@134.122.4.164 \"tail -50 /root/node.log; echo ''---PROCESS---''; pgrep -a dilithion || echo ''NOT RUNNING''\")",
+      "Bash(ssh root@188.166.255.63 \"grep -c ''EXTRACT-DEBUG'' /root/node.log; grep ''EXTRACT-DEBUG'' /root/node.log | tail -30\")",
+      "Bash(ssh root@188.166.255.63 \"grep ''MSG-RECV.*cmd=block'' /root/node.log | tail -20; echo ''---''; grep -i ''ProcessBlockMessage\\|block.*received\\|connected\\|chain'' /root/node.log | tail -20\")",
+      "Bash(ssh root@188.166.255.63 \"grep -i ''checksum\\|error\\|failed\\|mismatch'' /root/node.log | tail -30\")",
+      "Bash(ssh root@188.166.255.63 \"grep -c ''EXTRACT-DEBUG.*block'' /root/node.log; grep -c ''MSG-RECV.*block'' /root/node.log; echo ''---chain height---''; grep ''chain='' /root/node.log | tail -5\")"
     ],
     "deny": [],
     "ask": []

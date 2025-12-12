@@ -1109,6 +1109,11 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // Check if we have the complete message
         if (buffer.size() < total_size) {
+            // DEBUG: Log partial message waiting
+            if (cmd == "block") {
+                std::cout << "[EXTRACT-PARTIAL] node=" << pnode->id << " cmd=" << cmd
+                          << " need=" << total_size << " have=" << buffer.size() << std::endl;
+            }
             break;  // Partial message, need more data
         }
 
@@ -1148,6 +1153,10 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // Create processed message and push to queue
         std::string command = header.GetCommand();
+
+        // DEBUG: Log when message is fully extracted and pushed to queue
+        std::cout << "[EXTRACT-PUSHED] node=" << pnode->id << " cmd=" << command
+                  << " payload_size=" << header.payload_size << std::endl;
 
         CProcessedMsg processed_msg(std::move(command), std::move(payload));
         pnode->PushProcessMsg(std::move(processed_msg));
