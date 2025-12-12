@@ -11,6 +11,7 @@
 #include <queue>
 #include <mutex>
 #include <vector>
+#include <sstream>
 
 /**
  * @file block_fetcher.h
@@ -74,6 +75,150 @@ struct PeerChunk {
 
     int ChunkSize() const { return height_end - height_start + 1; }
     bool IsComplete() const { return blocks_pending == 0; }
+};
+
+/**
+ * @class CBlockDownloadWindow
+ * @brief Manages the 1024-block sliding window for IBD downloads
+ *
+ * Bitcoin Core pattern: Only maintain up to 1024 blocks in the download pipeline.
+ * This prevents memory exhaustion while keeping download throughput high.
+ *
+ * Block states:
+ * - PENDING: In window but not yet requested
+ * - IN_FLIGHT: Requested from peer, awaiting response
+ * - RECEIVED: Downloaded but not yet connected to chain
+ * - CONNECTED: Successfully added to active chain
+ */
+class CBlockDownloadWindow {
+public:
+    static constexpr int WINDOW_SIZE = BLOCK_DOWNLOAD_WINDOW_SIZE;  ///< 1024 blocks max
+
+    CBlockDownloadWindow() : m_window_start(0), m_target_height(0) {}
+
+    /**
+     * @brief Initialize window with sync target
+     * @param chain_height Current chain height
+     * @param target_height Target height to sync to
+     */
+    void Initialize(int chain_height, int target_height) {
+        m_window_start = chain_height + 1;
+        m_target_height = target_height;
+        m_pending.clear();
+        m_in_flight.clear();
+        m_received.clear();
+
+        // Populate pending with initial window
+        int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
+        for (int h = m_window_start; h <= window_end; h++) {
+            m_pending.insert(h);
+        }
+    }
+
+    /**
+     * @brief Mark heights as requested (moved from pending to in_flight)
+     * @param heights Vector of heights being requested
+     */
+    void MarkAsInFlight(const std::vector<int>& heights) {
+        for (int h : heights) {
+            m_pending.erase(h);
+            m_in_flight.insert(h);
+        }
+    }
+
+    /**
+     * @brief Mark height as received (moved from in_flight to received)
+     * @param height Height of received block
+     */
+    void OnBlockReceived(int height) {
+        m_in_flight.erase(height);
+        m_received.insert(height);
+    }
+
+    /**
+     * @brief Mark height as connected to chain (removed from tracking)
+     * @param height Height of connected block
+     */
+    void OnBlockConnected(int height) {
+        m_received.erase(height);
+        m_pending.erase(height);  // In case we never received it
+        m_in_flight.erase(height);
+
+        // Advance window if this was the start
+        if (height == m_window_start) {
+            AdvanceWindow();
+        }
+    }
+
+    /**
+     * @brief Get next chunk of heights that need to be requested
+     * @param max_count Maximum heights to return
+     * @return Vector of heights from pending set
+     */
+    std::vector<int> GetNextPendingHeights(int max_count) const {
+        std::vector<int> result;
+        result.reserve(max_count);
+
+        for (int h : m_pending) {
+            if (static_cast<int>(result.size()) >= max_count) break;
+            result.push_back(h);
+        }
+
+        return result;
+    }
+
+    // State queries
+    bool IsInWindow(int height) const {
+        return height >= m_window_start && height < m_window_start + WINDOW_SIZE;
+    }
+
+    bool IsPending(int height) const { return m_pending.count(height) > 0; }
+    bool IsInFlight(int height) const { return m_in_flight.count(height) > 0; }
+    bool IsReceived(int height) const { return m_received.count(height) > 0; }
+
+    int GetWindowStart() const { return m_window_start; }
+    int GetWindowEnd() const { return std::min(m_window_start + WINDOW_SIZE - 1, m_target_height); }
+    int GetTargetHeight() const { return m_target_height; }
+
+    size_t PendingCount() const { return m_pending.size(); }
+    size_t InFlightCount() const { return m_in_flight.size(); }
+    size_t ReceivedCount() const { return m_received.size(); }
+
+    bool IsComplete() const { return m_window_start > m_target_height; }
+
+    std::string GetStatus() const {
+        std::ostringstream ss;
+        ss << "Window [" << m_window_start << "-" << GetWindowEnd() << "/" << m_target_height << "] "
+           << "pending=" << m_pending.size() << " flight=" << m_in_flight.size()
+           << " received=" << m_received.size();
+        return ss.str();
+    }
+
+private:
+    void AdvanceWindow() {
+        // Move window forward past all connected heights
+        while (m_window_start <= m_target_height &&
+               m_pending.count(m_window_start) == 0 &&
+               m_in_flight.count(m_window_start) == 0 &&
+               m_received.count(m_window_start) == 0) {
+            m_window_start++;
+        }
+
+        // Add new heights to pending
+        int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
+        for (int h = m_window_start; h <= window_end; h++) {
+            if (m_pending.count(h) == 0 && m_in_flight.count(h) == 0 && m_received.count(h) == 0) {
+                m_pending.insert(h);
+            }
+        }
+    }
+
+    int m_window_start;      ///< First height in window
+    int m_target_height;     ///< Final sync target
+
+    std::set<int> m_pending;     ///< Heights not yet requested
+    std::set<int> m_in_flight;   ///< Heights requested, awaiting response
+    std::set<int> m_received;    ///< Heights received, not yet connected
 };
 
 /**
@@ -412,6 +557,75 @@ public:
      */
     std::string GetChunkStatus() const;
 
+    // ============ Phase 3: Moving Window Public Methods ============
+
+    /**
+     * @brief Initialize the download window for IBD
+     *
+     * Called when starting IBD to set up the 1024-block sliding window.
+     *
+     * @param chain_height Current chain height
+     * @param target_height Target sync height (header height)
+     */
+    void InitializeWindow(int chain_height, int target_height);
+
+    /**
+     * @brief Get next heights from the window that need to be requested
+     *
+     * Returns heights that are in PENDING state (not yet in-flight or received).
+     * Respects the 1024-block window limit.
+     *
+     * @param max_count Maximum heights to return
+     * @return Vector of heights ready for download
+     */
+    std::vector<int> GetWindowPendingHeights(int max_count);
+
+    /**
+     * @brief Mark heights as in-flight in the window
+     *
+     * Called after requesting blocks from a peer.
+     *
+     * @param heights Heights being requested
+     */
+    void MarkWindowHeightsInFlight(const std::vector<int>& heights);
+
+    /**
+     * @brief Mark a height as received in the window
+     *
+     * @param height Height of received block
+     */
+    void OnWindowBlockReceived(int height);
+
+    /**
+     * @brief Mark a height as connected to chain
+     *
+     * Advances the window if this was the start.
+     *
+     * @param height Height of connected block
+     */
+    void OnWindowBlockConnected(int height);
+
+    /**
+     * @brief Check if the download window has been initialized
+     *
+     * @return true if InitializeWindow() has been called
+     */
+    bool IsWindowInitialized() const;
+
+    /**
+     * @brief Get current window status string
+     *
+     * @return Status string with window metrics
+     */
+    std::string GetWindowStatus() const;
+
+    /**
+     * @brief Check if all blocks in window have been synced
+     *
+     * @return true if window_start > target_height
+     */
+    bool IsWindowComplete() const;
+
 private:
     // Phase 1 State Consolidation: PeerDownloadState removed - now tracked in CPeerManager::CPeer
     // All peer statistics (nBlocksInFlight, avgResponseTime, nStalls, etc.) are in CPeer
@@ -450,6 +664,10 @@ private:
     std::map<NodeId, PeerChunk> mapActiveChunks;   ///< Peer -> Active chunk
     std::map<int, NodeId> mapHeightToPeer;         ///< Height -> Assigned peer
     int nNextChunkHeight{0};                       ///< Next height to start a chunk from
+
+    // ============ Phase 3: Moving Window ============
+    CBlockDownloadWindow m_download_window;        ///< 1024-block sliding window
+    bool m_window_initialized{false};              ///< Whether window has been initialized
 
     // Stale tip detection
     std::chrono::time_point<std::chrono::steady_clock> lastBlockReceived;  ///< Last successful download

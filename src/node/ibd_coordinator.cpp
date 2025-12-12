@@ -148,6 +148,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
     LogPrintIBD(INFO, "Headers ahead of chain - downloading blocks (header=%d chain=%d)", header_height, chain_height);
 
+    // Phase 3: Initialize the 1024-block sliding window for IBD
+    if (!m_node_context.block_fetcher->IsWindowInitialized()) {
+        m_node_context.block_fetcher->InitializeWindow(chain_height, header_height);
+        LogPrintIBD(INFO, "Initialized download window: %s", m_node_context.block_fetcher->GetWindowStatus().c_str());
+    }
+
     int blocks_to_queue = std::min(100, header_height - chain_height);
     LogPrintIBD(INFO, "Queueing %d blocks for download...", blocks_to_queue);
 
@@ -195,7 +201,7 @@ bool CIbdCoordinator::FetchBlocks() {
         return false;
     }
 
-    // Phase 2: Bitcoin Core-style chunk assignment
+    // Phase 2+3: Bitcoin Core-style chunk assignment with 1024-block window
     // Assign CONSECUTIVE heights to SAME peer → blocks arrive in order → no orphans
 
     // Get available peers for download
@@ -225,8 +231,15 @@ bool CIbdCoordinator::FetchBlocks() {
             continue;
         }
 
-        // Get next chunk of consecutive heights
-        std::vector<int> chunk_heights = m_node_context.block_fetcher->GetNextChunkHeights(MAX_BLOCKS_PER_CHUNK);
+        // Phase 3: Get next chunk from the window (respects 1024-block limit)
+        std::vector<int> chunk_heights;
+        if (m_node_context.block_fetcher->IsWindowInitialized()) {
+            chunk_heights = m_node_context.block_fetcher->GetWindowPendingHeights(MAX_BLOCKS_PER_CHUNK);
+        } else {
+            // Fallback to old method if window not initialized
+            chunk_heights = m_node_context.block_fetcher->GetNextChunkHeights(MAX_BLOCKS_PER_CHUNK);
+        }
+
         if (chunk_heights.empty()) {
             break;  // No more heights to assign
         }
@@ -255,6 +268,9 @@ bool CIbdCoordinator::FetchBlocks() {
             continue;  // Assignment failed
         }
 
+        // Phase 3: Mark these heights as in-flight in the window
+        m_node_context.block_fetcher->MarkWindowHeightsInFlight(valid_heights);
+
         // Build GETDATA message for this chunk
         std::vector<NetProtocol::CInv> getdata;
         getdata.reserve(valid_heights.size());
@@ -274,8 +290,9 @@ bool CIbdCoordinator::FetchBlocks() {
             m_node_context.connman->PushMessage(peer_id, msg);
             total_chunks_assigned++;
 
-            LogPrintIBD(INFO, "Assigned chunk %d-%d (%zu blocks) to peer %d",
-                        start, end, getdata.size(), peer_id);
+            LogPrintIBD(INFO, "Assigned chunk %d-%d (%zu blocks) to peer %d [%s]",
+                        start, end, getdata.size(), peer_id,
+                        m_node_context.block_fetcher->GetWindowStatus().c_str());
         }
     }
 

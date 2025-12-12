@@ -111,6 +111,8 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
         return false;
     }
 
+    int height = it->second.nHeight;
+
     // Calculate response time and update CPeerManager stats
     auto timeReceived = std::chrono::steady_clock::now();
     auto responseTime = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -131,6 +133,42 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
         mapPeerBlocks[requestedPeer].erase(hash);
         if (mapPeerBlocks[requestedPeer].empty()) {
             mapPeerBlocks.erase(requestedPeer);
+        }
+    }
+
+    // Phase 3: Update window state - mark as received
+    if (m_window_initialized && height > 0) {
+        m_download_window.OnBlockReceived(height);
+    }
+
+    // Phase 2: Update chunk tracking
+    // Find which peer had this height assigned and update chunk
+    auto height_it = mapHeightToPeer.find(height);
+    if (height_it != mapHeightToPeer.end()) {
+        NodeId chunk_peer = height_it->second;
+        auto chunk_it = mapActiveChunks.find(chunk_peer);
+        if (chunk_it != mapActiveChunks.end()) {
+            PeerChunk& chunk = chunk_it->second;
+            if (height >= chunk.height_start && height <= chunk.height_end) {
+                chunk.blocks_pending--;
+                chunk.blocks_received++;
+                chunk.last_activity = timeReceived;
+
+                // If chunk complete, clean up
+                if (chunk.IsComplete()) {
+                    std::cout << "[Chunk] Peer " << chunk_peer << " completed chunk "
+                              << chunk.height_start << "-" << chunk.height_end
+                              << " (" << chunk.blocks_received << " blocks)" << std::endl;
+
+                    // Clean up height mappings for this chunk
+                    for (int h = chunk.height_start; h <= chunk.height_end; h++) {
+                        mapHeightToPeer.erase(h);
+                    }
+
+                    // Remove completed chunk
+                    mapActiveChunks.erase(chunk_it);
+                }
+            }
         }
     }
 
@@ -785,4 +823,96 @@ std::string CBlockFetcher::GetChunkStatus() const
     }
 
     return ss.str();
+}
+
+// ============ Phase 3: Moving Window Implementation ============
+
+void CBlockFetcher::InitializeWindow(int chain_height, int target_height)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Skip if already initialized with same target
+    if (m_window_initialized && m_download_window.GetTargetHeight() == target_height) {
+        return;
+    }
+
+    m_download_window.Initialize(chain_height, target_height);
+    m_window_initialized = true;
+
+    // Also initialize chunk tracking to start from chain_height + 1
+    nNextChunkHeight = chain_height + 1;
+
+    std::cout << "[Window] Initialized: " << m_download_window.GetStatus() << std::endl;
+}
+
+std::vector<int> CBlockFetcher::GetWindowPendingHeights(int max_count)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return {};
+    }
+
+    return m_download_window.GetNextPendingHeights(max_count);
+}
+
+void CBlockFetcher::MarkWindowHeightsInFlight(const std::vector<int>& heights)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return;
+    }
+
+    m_download_window.MarkAsInFlight(heights);
+}
+
+void CBlockFetcher::OnWindowBlockReceived(int height)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return;
+    }
+
+    m_download_window.OnBlockReceived(height);
+}
+
+void CBlockFetcher::OnWindowBlockConnected(int height)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return;
+    }
+
+    m_download_window.OnBlockConnected(height);
+}
+
+bool CBlockFetcher::IsWindowInitialized() const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+    return m_window_initialized;
+}
+
+std::string CBlockFetcher::GetWindowStatus() const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return "Window not initialized";
+    }
+
+    return m_download_window.GetStatus();
+}
+
+bool CBlockFetcher::IsWindowComplete() const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return false;
+    }
+
+    return m_download_window.IsComplete();
 }
