@@ -68,6 +68,11 @@ public:
     uint32_t nBits;
     uint32_t nNonce;
 
+    // IBD OPTIMIZATION: Cache the RandomX hash to avoid recomputation
+    // This is mutable because GetHash() is logically const but caches the result
+    mutable uint256 cachedHash;
+    mutable bool fHashCached{false};
+
     CBlockHeader() { SetNull(); }
 
     void SetNull() {
@@ -77,10 +82,22 @@ public:
         nTime = 0;
         nBits = 0;
         nNonce = 0;
+        fHashCached = false;
+        cachedHash = uint256();
     }
 
     bool IsNull() const { return (nBits == 0); }
+
+    // GetHash() - RandomX hash for PoW validation
+    // OPTIMIZATION: Now cached - first call is slow (50-100ms), subsequent calls instant
     uint256 GetHash() const;
+
+    // GetFastHash() - SHA3-256 hash for header identification (FAST: <0.01ms)
+    // Use for map lookups when you don't need the canonical RandomX hash
+    uint256 GetFastHash() const;
+
+    // InvalidateCache() - Call after modifying header fields (e.g., mining nonce changes)
+    void InvalidateCache() { fHashCached = false; }
 };
 
 class CBlock : public CBlockHeader {

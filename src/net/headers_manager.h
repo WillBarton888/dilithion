@@ -418,8 +418,13 @@ private:
     };
 
     // Header storage
-    std::map<uint256, HeaderWithChainWork> mapHeaders;     ///< Hash -> Header mapping
-    std::map<int, std::set<uint256>> mapHeightIndex;       ///< Height -> Hashes (for fork detection)
+    std::map<uint256, HeaderWithChainWork> mapHeaders;     ///< FastHash -> Header mapping
+    std::map<int, std::set<uint256>> mapHeightIndex;       ///< Height -> FastHashes (for fork detection)
+
+    // IBD OPTIMIZATION: Map from hashPrevBlock (RandomX from network) to FastHash (our storage key)
+    // This allows O(1) parent lookups without computing expensive RandomX hashes
+    // Only populated during IBD; cleared after sync complete
+    std::map<uint256, uint256> mapRandomXToFastHash;       ///< hashPrevBlock -> FastHash mapping
 
     // Best header tracking
     uint256 hashBestHeader;                 ///< Hash of best header (most work)

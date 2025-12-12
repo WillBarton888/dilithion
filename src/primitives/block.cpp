@@ -3,6 +3,7 @@
 
 #include <primitives/block.h>
 #include <crypto/randomx_hash.h>
+#include <crypto/sha3.h>
 #include <sstream>
 #include <iomanip>
 #include <cstring>
@@ -50,6 +51,12 @@ std::ostream& operator<<(std::ostream& os, const uint256& h) {
 }
 
 uint256 CBlockHeader::GetHash() const {
+    // IBD OPTIMIZATION: Return cached hash if available
+    // This makes subsequent GetHash() calls instant instead of 50-100ms
+    if (fHashCached) {
+        return cachedHash;
+    }
+
     // Serialize header for hashing
     std::vector<uint8_t> data;
     data.reserve(80); // Standard block header size
@@ -69,6 +76,40 @@ uint256 CBlockHeader::GetHash() const {
     // RandomX hash (CPU-mining resistant, ASIC-resistant)
     uint256 result;
     randomx_hash_fast(data.data(), data.size(), result.data);
+
+    // Cache the result
+    cachedHash = result;
+    fHashCached = true;
+
+    return result;
+}
+
+uint256 CBlockHeader::GetFastHash() const {
+    // Fast SHA3-256 hash for header identification (NOT for PoW)
+    // This is ~10000x faster than RandomX, used for:
+    // - Map lookups in headers manager
+    // - Duplicate detection
+    // - Peer state tracking
+    // - Any non-PoW identification
+
+    // Serialize header (same as GetHash)
+    std::vector<uint8_t> data;
+    data.reserve(80);
+
+    const uint8_t* versionBytes = reinterpret_cast<const uint8_t*>(&nVersion);
+    data.insert(data.end(), versionBytes, versionBytes + 4);
+    data.insert(data.end(), hashPrevBlock.begin(), hashPrevBlock.end());
+    data.insert(data.end(), hashMerkleRoot.begin(), hashMerkleRoot.end());
+    const uint8_t* timeBytes = reinterpret_cast<const uint8_t*>(&nTime);
+    data.insert(data.end(), timeBytes, timeBytes + 4);
+    const uint8_t* bitsBytes = reinterpret_cast<const uint8_t*>(&nBits);
+    data.insert(data.end(), bitsBytes, bitsBytes + 4);
+    const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&nNonce);
+    data.insert(data.end(), nonceBytes, nonceBytes + 4);
+
+    // SHA3-256 (fast, quantum-resistant)
+    uint256 result;
+    SHA3_256(data.data(), data.size(), result.data);
 
     return result;
 }
