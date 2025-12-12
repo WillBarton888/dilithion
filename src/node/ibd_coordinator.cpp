@@ -388,6 +388,8 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         // If reassignment failed (e.g., all peers have active chunks), cancel the stalled chunk
         // This makes the heights available for re-request on the next FetchBlocks() call
         if (!reassigned) {
+            std::cout << "[STALL-FIX] Cancelling stalled chunk from peer " << peer_id << std::endl;
+            std::cout.flush();
             LogPrintIBD(WARN, "Could not reassign stalled chunk from peer %d - cancelling chunk", peer_id);
             m_node_context.block_fetcher->CancelStalledChunk(peer_id);
         }
