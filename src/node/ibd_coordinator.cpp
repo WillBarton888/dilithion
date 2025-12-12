@@ -190,93 +190,122 @@ void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) 
 }
 
 bool CIbdCoordinator::FetchBlocks() {
-    if (!m_node_context.block_fetcher || !m_node_context.message_processor || !m_node_context.connman) {
+    if (!m_node_context.block_fetcher || !m_node_context.message_processor ||
+        !m_node_context.connman || !m_node_context.peer_manager || !m_node_context.headers_manager) {
         return false;
     }
 
-    // BUG #147 FIX: Request more blocks per tick (128, matching Bitcoin Core)
-    auto blocks_to_fetch = m_node_context.block_fetcher->GetNextBlocksToFetch(128);
-    if (blocks_to_fetch.empty() && m_node_context.block_fetcher->GetBlocksInFlight() == 0) {
+    // Phase 2: Bitcoin Core-style chunk assignment
+    // Assign CONSECUTIVE heights to SAME peer → blocks arrive in order → no orphans
+
+    // Get available peers for download
+    std::vector<int> available_peers = m_node_context.peer_manager->GetValidPeersForDownload();
+    if (available_peers.empty()) {
         m_ibd_no_peer_cycles++;
-        LogPrintIBD(WARN, "No blocks could be fetched (no suitable peers?)");
+        LogPrintIBD(WARN, "No peers available for block download");
         return false;
     }
 
-    if (blocks_to_fetch.empty()) {
-        return true;  // Work in flight already, nothing new to request.
-    }
+    int chain_height = m_chainstate.GetHeight();
+    int header_height = m_node_context.headers_manager->GetBestHeight();
+    int total_chunks_assigned = 0;
 
-    LogPrintIBD(INFO, "Fetching %zu blocks...", blocks_to_fetch.size());
+    // For each peer with capacity, assign a full chunk
+    for (int peer_id : available_peers) {
+        auto peer = m_node_context.peer_manager->GetPeer(peer_id);
+        if (!peer) continue;
 
-    // BUG #147 FIX: Batch GETDATA messages by peer instead of one per block
-    // BUG #148 PERF: Assign sequential blocks to SAME peer to reduce orphan creation
-    // When blocks 5,6,7,8 go to the same peer, they arrive in order → no orphans
-    // Step 1: Assign blocks to peers with sequential preference
-    std::map<NodeId, std::vector<std::pair<uint256, int>>> peer_blocks;
-    std::vector<std::pair<uint256, int>> requeue_blocks;
+        // Skip if peer already has an active chunk
+        if (m_node_context.block_fetcher->GetPeerChunk(peer_id) != nullptr) {
+            continue;
+        }
 
-    NodeId lastPeer = -1;
-    int lastHeight = -1;
-    static int debug_fetch_count = 0;
-    bool should_debug = (debug_fetch_count++ < 3);
+        // Skip if peer at capacity
+        if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+            continue;
+        }
 
-    for (const auto& [hash, height] : blocks_to_fetch) {
-        NodeId preferred = m_node_context.block_fetcher->GetPreferredPeer(hash);
+        // Get next chunk of consecutive heights
+        std::vector<int> chunk_heights = m_node_context.block_fetcher->GetNextChunkHeights(MAX_BLOCKS_PER_CHUNK);
+        if (chunk_heights.empty()) {
+            break;  // No more heights to assign
+        }
 
-        // PERF: If this block is sequential (height = lastHeight + 1), prefer same peer
-        // This reduces orphan creation by keeping blocks in order from same source
-        if (lastPeer != -1 && height == lastHeight + 1 && preferred == -1) {
-            // Check if last peer still has capacity
-            auto lastPeerObj = m_node_context.peer_manager ?
-                               m_node_context.peer_manager->GetPeer(lastPeer) : nullptr;
-            if (lastPeerObj && lastPeerObj->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-                preferred = lastPeer;  // Prefer continuing with same peer
+        // Filter heights: only include those we have headers for and don't have blocks for
+        std::vector<int> valid_heights;
+        for (int h : chunk_heights) {
+            if (h > header_height) break;  // Don't request beyond headers
+            if (h <= chain_height) continue;  // Already have this block
+
+            uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+            if (hash.IsNull()) continue;  // No header
+            if (m_chainstate.HasBlockIndex(hash)) continue;  // Already have block
+
+            valid_heights.push_back(h);
+        }
+
+        if (valid_heights.empty()) {
+            continue;  // No valid heights in this chunk
+        }
+
+        // Assign chunk to peer
+        int start = valid_heights.front();
+        int end = valid_heights.back();
+        if (!m_node_context.block_fetcher->AssignChunkToPeer(peer_id, start, end)) {
+            continue;  // Assignment failed
+        }
+
+        // Build GETDATA message for this chunk
+        std::vector<NetProtocol::CInv> getdata;
+        getdata.reserve(valid_heights.size());
+
+        for (int h : valid_heights) {
+            uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+            if (!hash.IsNull()) {
+                // Also track in the old per-block system for timeout handling
+                m_node_context.block_fetcher->RequestBlock(peer_id, hash, h);
+                getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
             }
         }
 
-        NodeId peer = m_node_context.block_fetcher->SelectPeerForDownload(hash, preferred);
-        bool request_ok = (peer != -1) && m_node_context.block_fetcher->RequestBlock(peer, hash, height);
+        // Send single batched GETDATA for entire chunk
+        if (!getdata.empty()) {
+            CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+            m_node_context.connman->PushMessage(peer_id, msg);
+            total_chunks_assigned++;
 
-        if (should_debug && height <= 5) {
-            std::cout << "[DEBUG] FetchBlocks: height=" << height << " hash=" << hash.GetHex().substr(0,16)
-                      << " peer=" << peer << " request_ok=" << request_ok << std::endl;
-        }
-
-        if (request_ok) {
-            peer_blocks[peer].emplace_back(hash, height);
-            lastPeer = peer;
-            lastHeight = height;
-        } else {
-            // BUG #63 FIX: Re-queue block if no peer available
-            requeue_blocks.emplace_back(hash, height);
+            LogPrintIBD(INFO, "Assigned chunk %d-%d (%zu blocks) to peer %d",
+                        start, end, getdata.size(), peer_id);
         }
     }
 
-    if (should_debug) {
-        std::cout << "[DEBUG] FetchBlocks: peer_blocks.size()=" << peer_blocks.size()
-                  << " requeue_blocks.size()=" << requeue_blocks.size() << std::endl;
-    }
+    if (total_chunks_assigned == 0) {
+        // Fall back to old approach if chunk assignment didn't work
+        // (e.g., all peers already have active chunks)
+        auto blocks_to_fetch = m_node_context.block_fetcher->GetNextBlocksToFetch(16);
+        if (!blocks_to_fetch.empty()) {
+            std::map<NodeId, std::vector<std::pair<uint256, int>>> peer_blocks;
 
-    // Re-queue failed blocks
-    for (const auto& [hash, height] : requeue_blocks) {
-        m_node_context.block_fetcher->QueueBlockForDownload(hash, height, -1, true);
-    }
+            for (const auto& [hash, height] : blocks_to_fetch) {
+                NodeId peer = m_node_context.block_fetcher->SelectPeerForDownload(hash);
+                if (peer != -1 && m_node_context.block_fetcher->RequestBlock(peer, hash, height)) {
+                    peer_blocks[peer].emplace_back(hash, height);
+                }
+            }
 
-    // Step 2: Send ONE batched GETDATA per peer
-    int successful_requests = 0;
-    for (const auto& [peer, blocks] : peer_blocks) {
-        std::vector<NetProtocol::CInv> getdata;
-        getdata.reserve(blocks.size());
-        for (const auto& [hash, height] : blocks) {
-            getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
+            for (const auto& [peer, blocks] : peer_blocks) {
+                std::vector<NetProtocol::CInv> getdata;
+                for (const auto& [hash, height] : blocks) {
+                    getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
+                }
+                CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+                m_node_context.connman->PushMessage(peer, msg);
+                total_chunks_assigned++;
+            }
         }
-        CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-        m_node_context.connman->PushMessage(peer, msg);
-        successful_requests += blocks.size();
-        LogPrintIBD(DEBUG, "Sent batched GETDATA for %zu blocks to peer %d", blocks.size(), peer);
     }
 
-    return successful_requests > 0;
+    return total_chunks_assigned > 0;
 }
 
 void CIbdCoordinator::RetryTimeoutsAndStalls() {
@@ -284,13 +313,47 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         return;
     }
 
+    // Check for block-level timeouts (60 second)
     auto timed_out = m_node_context.block_fetcher->CheckTimeouts();
     if (!timed_out.empty()) {
         LogPrintIBD(WARN, "%zu block(s) timed out, retrying...", timed_out.size());
         m_node_context.block_fetcher->RetryTimedOutBlocks(timed_out);
     }
 
-    // Phase C: CPeerManager is now the single source of truth for stall detection
+    // Phase 2: Check for stalled chunks (2 second stall detection)
+    auto stalled_chunks = m_node_context.block_fetcher->CheckStalledChunks();
+    for (const auto& [peer_id, chunk] : stalled_chunks) {
+        // Find an alternative peer to reassign the chunk to
+        if (m_node_context.peer_manager) {
+            std::vector<int> valid_peers = m_node_context.peer_manager->GetValidPeersForDownload();
+            for (int new_peer : valid_peers) {
+                if (new_peer != peer_id) {
+                    auto new_peer_obj = m_node_context.peer_manager->GetPeer(new_peer);
+                    if (new_peer_obj && new_peer_obj->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+                        if (m_node_context.block_fetcher->ReassignChunk(peer_id, new_peer)) {
+                            LogPrintIBD(INFO, "Reassigned stalled chunk from peer %d to peer %d", peer_id, new_peer);
+
+                            // Re-send GETDATA for the reassigned chunk
+                            std::vector<NetProtocol::CInv> getdata;
+                            for (int h = chunk.height_start; h <= chunk.height_end; h++) {
+                                uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+                                if (!hash.IsNull()) {
+                                    getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
+                                }
+                            }
+                            if (!getdata.empty()) {
+                                CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+                                m_node_context.connman->PushMessage(new_peer, msg);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Legacy: Disconnect stalling peers
     std::vector<NodeId> stalling_peers;
     if (m_node_context.peer_manager) {
         stalling_peers = m_node_context.peer_manager->CheckForStallingPeers();

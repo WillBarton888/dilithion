@@ -551,3 +551,238 @@ void CBlockFetcher::UpdateDownloadSpeed()
     // Placeholder for future implementation of sliding window speed calculation
     // Currently speed is calculated on-demand in GetDownloadSpeed()
 }
+
+// ============ Phase 2: Sequential Chunk Assignment Implementation ============
+
+bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int height_end)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Validate peer can accept a chunk
+    if (!g_peer_manager) {
+        return false;
+    }
+
+    auto peer = g_peer_manager->GetPeer(peer_id);
+    if (!peer || peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        return false;
+    }
+
+    // Check if peer already has an active chunk
+    if (mapActiveChunks.count(peer_id) > 0 && !mapActiveChunks[peer_id].IsComplete()) {
+        return false;  // Peer must complete current chunk first
+    }
+
+    // Validate height range
+    if (height_end < height_start) {
+        return false;
+    }
+
+    // Check no height is already assigned to another peer
+    for (int h = height_start; h <= height_end; h++) {
+        if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] != peer_id) {
+            return false;  // Height already assigned
+        }
+    }
+
+    // Create chunk assignment
+    PeerChunk chunk(peer_id, height_start, height_end);
+    mapActiveChunks[peer_id] = chunk;
+
+    // Map heights to peer
+    for (int h = height_start; h <= height_end; h++) {
+        mapHeightToPeer[h] = peer_id;
+    }
+
+    std::cout << "[Chunk] Assigned heights " << height_start << "-" << height_end
+              << " (" << chunk.ChunkSize() << " blocks) to peer " << peer_id << std::endl;
+
+    return true;
+}
+
+std::vector<int> CBlockFetcher::GetNextChunkHeights(int max_blocks)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    std::vector<int> heights;
+    heights.reserve(max_blocks);
+
+    // Start from the next unassigned height
+    int h = nNextChunkHeight;
+    int count = 0;
+
+    while (count < max_blocks) {
+        // Skip heights already assigned
+        if (mapHeightToPeer.count(h) > 0) {
+            h++;
+            continue;
+        }
+
+        heights.push_back(h);
+        count++;
+        h++;
+    }
+
+    // Update next chunk start for subsequent calls
+    if (!heights.empty()) {
+        nNextChunkHeight = heights.back() + 1;
+    }
+
+    return heights;
+}
+
+NodeId CBlockFetcher::OnChunkBlockReceived(int height)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Find which peer had this height assigned
+    auto it = mapHeightToPeer.find(height);
+    if (it == mapHeightToPeer.end()) {
+        return -1;  // Height not tracked
+    }
+
+    NodeId peer_id = it->second;
+
+    // Update chunk tracking
+    auto chunk_it = mapActiveChunks.find(peer_id);
+    if (chunk_it != mapActiveChunks.end()) {
+        PeerChunk& chunk = chunk_it->second;
+        if (height >= chunk.height_start && height <= chunk.height_end) {
+            chunk.blocks_pending--;
+            chunk.blocks_received++;
+            chunk.last_activity = std::chrono::steady_clock::now();
+
+            // If chunk complete, clean up
+            if (chunk.IsComplete()) {
+                std::cout << "[Chunk] Peer " << peer_id << " completed chunk "
+                          << chunk.height_start << "-" << chunk.height_end
+                          << " (" << chunk.blocks_received << " blocks)" << std::endl;
+
+                // Clean up height mappings for this chunk
+                for (int h = chunk.height_start; h <= chunk.height_end; h++) {
+                    mapHeightToPeer.erase(h);
+                }
+
+                // Remove completed chunk
+                mapActiveChunks.erase(chunk_it);
+            }
+        }
+    }
+
+    return peer_id;
+}
+
+std::vector<std::pair<NodeId, PeerChunk>> CBlockFetcher::CheckStalledChunks()
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    std::vector<std::pair<NodeId, PeerChunk>> stalled;
+    auto now = std::chrono::steady_clock::now();
+
+    for (const auto& [peer_id, chunk] : mapActiveChunks) {
+        if (chunk.IsComplete()) {
+            continue;  // Completed chunks can't stall
+        }
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            now - chunk.last_activity);
+
+        if (elapsed.count() >= CHUNK_STALL_TIMEOUT_SECONDS) {
+            stalled.emplace_back(peer_id, chunk);
+            std::cout << "[Chunk] Peer " << peer_id << " stalled on chunk "
+                      << chunk.height_start << "-" << chunk.height_end
+                      << " (no activity for " << elapsed.count() << "s)" << std::endl;
+        }
+    }
+
+    return stalled;
+}
+
+bool CBlockFetcher::ReassignChunk(NodeId old_peer, NodeId new_peer)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Find old peer's chunk
+    auto old_it = mapActiveChunks.find(old_peer);
+    if (old_it == mapActiveChunks.end()) {
+        return false;
+    }
+
+    PeerChunk& old_chunk = old_it->second;
+
+    // Validate new peer
+    if (!g_peer_manager) {
+        return false;
+    }
+
+    auto new_peer_obj = g_peer_manager->GetPeer(new_peer);
+    if (!new_peer_obj || new_peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        return false;
+    }
+
+    // Check new peer doesn't already have a chunk
+    if (mapActiveChunks.count(new_peer) > 0 && !mapActiveChunks[new_peer].IsComplete()) {
+        return false;
+    }
+
+    // Create new chunk with remaining blocks
+    PeerChunk new_chunk(new_peer, old_chunk.height_start, old_chunk.height_end);
+    new_chunk.blocks_pending = old_chunk.blocks_pending;
+    new_chunk.blocks_received = old_chunk.blocks_received;
+
+    // Update height mappings
+    for (int h = old_chunk.height_start; h <= old_chunk.height_end; h++) {
+        if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] == old_peer) {
+            mapHeightToPeer[h] = new_peer;
+        }
+    }
+
+    // Remove old, add new
+    mapActiveChunks.erase(old_it);
+    mapActiveChunks[new_peer] = new_chunk;
+
+    std::cout << "[Chunk] Reassigned chunk " << new_chunk.height_start << "-" << new_chunk.height_end
+              << " from peer " << old_peer << " to peer " << new_peer << std::endl;
+
+    return true;
+}
+
+NodeId CBlockFetcher::GetPeerForHeight(int height) const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    auto it = mapHeightToPeer.find(height);
+    if (it != mapHeightToPeer.end()) {
+        return it->second;
+    }
+    return -1;
+}
+
+const PeerChunk* CBlockFetcher::GetPeerChunk(NodeId peer_id) const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    auto it = mapActiveChunks.find(peer_id);
+    if (it != mapActiveChunks.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+std::string CBlockFetcher::GetChunkStatus() const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    std::ostringstream ss;
+    ss << "Chunk Status:\n";
+    ss << "  Next chunk height: " << nNextChunkHeight << "\n";
+    ss << "  Active chunks: " << mapActiveChunks.size() << "\n";
+    ss << "  Heights assigned: " << mapHeightToPeer.size() << "\n";
+
+    for (const auto& [peer_id, chunk] : mapActiveChunks) {
+        ss << "  Peer " << peer_id << ": heights " << chunk.height_start << "-" << chunk.height_end
+           << " (" << chunk.blocks_received << "/" << chunk.ChunkSize() << " received)\n";
+    }
+
+    return ss.str();
+}

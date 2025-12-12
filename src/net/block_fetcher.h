@@ -31,6 +31,52 @@
 typedef int NodeId;
 
 /**
+ * Bitcoin Core IBD Constants
+ */
+static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
+static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks assigned per peer at a time
+static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 2;    ///< Stall detection timeout
+static constexpr int MAX_CHUNK_STALL_COUNT = 10;         ///< Max stalls before peer avoided
+
+/**
+ * @struct PeerChunk
+ * @brief Tracks a chunk of consecutive blocks assigned to a single peer
+ *
+ * Bitcoin Core's key insight: assign CONSECUTIVE blocks to SAME peer.
+ * This ensures blocks arrive in order, eliminating orphan blocks.
+ *
+ * Example: Peer 1 gets blocks 1-16, Peer 2 gets blocks 17-32, etc.
+ * When Peer 1's blocks arrive, they're all sequential and connect immediately.
+ */
+struct PeerChunk {
+    NodeId peer_id;                     ///< Peer assigned to this chunk
+    int height_start;                   ///< First block height in chunk
+    int height_end;                     ///< Last block height in chunk (inclusive)
+    int blocks_pending;                 ///< Blocks not yet received
+    int blocks_received;                ///< Blocks successfully received
+    std::chrono::steady_clock::time_point assigned_time;   ///< When chunk was assigned
+    std::chrono::steady_clock::time_point last_activity;   ///< Last block received
+
+    PeerChunk()
+        : peer_id(-1), height_start(0), height_end(0), blocks_pending(0), blocks_received(0)
+    {
+        assigned_time = std::chrono::steady_clock::now();
+        last_activity = assigned_time;
+    }
+
+    PeerChunk(NodeId peer, int start, int end)
+        : peer_id(peer), height_start(start), height_end(end),
+          blocks_pending(end - start + 1), blocks_received(0)
+    {
+        assigned_time = std::chrono::steady_clock::now();
+        last_activity = assigned_time;
+    }
+
+    int ChunkSize() const { return height_end - height_start + 1; }
+    bool IsComplete() const { return blocks_pending == 0; }
+};
+
+/**
  * @struct CBlockInFlight
  * @brief Tracks a block currently being downloaded
  */
@@ -291,6 +337,81 @@ public:
      */
     void Clear();
 
+    // ============ Phase 2: Sequential Chunk Assignment ============
+
+    /**
+     * @brief Assign a chunk of consecutive blocks to a peer
+     *
+     * Bitcoin Core-style: assign CONSECUTIVE heights to SAME peer.
+     * This ensures blocks arrive in order, eliminating orphan blocks.
+     *
+     * @param peer_id Peer to assign chunk to
+     * @param height_start First block height in chunk
+     * @param height_end Last block height in chunk (inclusive)
+     * @return true if chunk was assigned successfully
+     */
+    bool AssignChunkToPeer(NodeId peer_id, int height_start, int height_end);
+
+    /**
+     * @brief Get the next chunk of consecutive heights to download
+     *
+     * Finds up to MAX_BLOCKS_PER_CHUNK (16) consecutive heights that:
+     * - Are not already in-flight
+     * - Are not already assigned to another peer
+     * - Start from the lowest unassigned height
+     *
+     * @param max_blocks Maximum blocks in chunk (default: 16)
+     * @return Vector of heights to assign
+     */
+    std::vector<int> GetNextChunkHeights(int max_blocks = MAX_BLOCKS_PER_CHUNK);
+
+    /**
+     * @brief Mark a height as received, update chunk tracking
+     *
+     * @param height Block height received
+     * @return Peer ID that had this height assigned, or -1 if not tracked
+     */
+    NodeId OnChunkBlockReceived(int height);
+
+    /**
+     * @brief Check for stalled chunks (no activity > CHUNK_STALL_TIMEOUT_SECONDS)
+     *
+     * @return Vector of (peer_id, chunk) pairs that are stalled
+     */
+    std::vector<std::pair<NodeId, PeerChunk>> CheckStalledChunks();
+
+    /**
+     * @brief Reassign a stalled chunk to a different peer
+     *
+     * @param old_peer Original peer ID
+     * @param new_peer New peer ID to assign chunk to
+     * @return true if reassignment successful
+     */
+    bool ReassignChunk(NodeId old_peer, NodeId new_peer);
+
+    /**
+     * @brief Get the peer assigned to download a specific height
+     *
+     * @param height Block height
+     * @return Peer ID, or -1 if height not assigned
+     */
+    NodeId GetPeerForHeight(int height) const;
+
+    /**
+     * @brief Get active chunk for a peer
+     *
+     * @param peer_id Peer ID
+     * @return Pointer to chunk, or nullptr if peer has no active chunk
+     */
+    const PeerChunk* GetPeerChunk(NodeId peer_id) const;
+
+    /**
+     * @brief Get statistics on current chunk assignments
+     *
+     * @return String with chunk status
+     */
+    std::string GetChunkStatus() const;
+
 private:
     // Phase 1 State Consolidation: PeerDownloadState removed - now tracked in CPeerManager::CPeer
     // All peer statistics (nBlocksInFlight, avgResponseTime, nStalls, etc.) are in CPeer
@@ -324,6 +445,11 @@ private:
     std::map<uint256, NodeId> mapPreferredPeers;             ///< BUG #64: Block -> Announcing peer
 
     // Phase 1: Peer tracking removed - now in CPeerManager exclusively
+
+    // ============ Phase 2: Chunk Tracking State ============
+    std::map<NodeId, PeerChunk> mapActiveChunks;   ///< Peer -> Active chunk
+    std::map<int, NodeId> mapHeightToPeer;         ///< Height -> Assigned peer
+    int nNextChunkHeight{0};                       ///< Next height to start a chunk from
 
     // Stale tip detection
     std::chrono::time_point<std::chrono::steady_clock> lastBlockReceived;  ///< Last successful download
