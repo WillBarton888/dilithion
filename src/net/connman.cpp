@@ -510,6 +510,13 @@ void CConnman::ThreadMessageHandler() {
     while (!flagInterruptMsgProc.load()) {
         bool fMoreWork = false;
 
+        // DEBUG: Log each iteration to track if loop is running
+        static int iteration_count = 0;
+        if (++iteration_count % 10 == 1) {
+            std::cout << "[MSGHANDLER-LOOP] iteration=" << iteration_count << std::endl;
+            std::cout.flush();
+        }
+
         // BUG #141 FIX: Collect messages while holding lock, process outside lock
         // This prevents deadlock when message handlers acquire other locks (cs_headers)
         struct PendingMessage {
