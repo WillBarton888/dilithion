@@ -353,6 +353,8 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
     // Phase 2: Check for stalled chunks (2 second stall detection)
     auto stalled_chunks = m_node_context.block_fetcher->CheckStalledChunks();
     for (const auto& [peer_id, chunk] : stalled_chunks) {
+        bool reassigned = false;
+
         // Find an alternative peer to reassign the chunk to
         if (m_node_context.peer_manager) {
             std::vector<int> valid_peers = m_node_context.peer_manager->GetValidPeersForDownload();
@@ -375,11 +377,19 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
                                 CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
                                 m_node_context.connman->PushMessage(new_peer, msg);
                             }
+                            reassigned = true;
                             break;
                         }
                     }
                 }
             }
+        }
+
+        // If reassignment failed (e.g., all peers have active chunks), cancel the stalled chunk
+        // This makes the heights available for re-request on the next FetchBlocks() call
+        if (!reassigned) {
+            LogPrintIBD(WARN, "Could not reassign stalled chunk from peer %d - cancelling chunk", peer_id);
+            m_node_context.block_fetcher->CancelStalledChunk(peer_id);
         }
     }
 

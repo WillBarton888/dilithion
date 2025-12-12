@@ -795,6 +795,67 @@ bool CBlockFetcher::ReassignChunk(NodeId old_peer, NodeId new_peer)
     return true;
 }
 
+bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Find peer's chunk
+    auto it = mapActiveChunks.find(peer_id);
+    if (it == mapActiveChunks.end()) {
+        return false;
+    }
+
+    PeerChunk& chunk = it->second;
+
+    std::cout << "[Chunk] Cancelling stalled chunk " << chunk.height_start << "-" << chunk.height_end
+              << " from peer " << peer_id << " (received " << chunk.blocks_received << "/"
+              << chunk.ChunkSize() << " blocks)" << std::endl;
+
+    // Clear height mappings for this chunk
+    for (int h = chunk.height_start; h <= chunk.height_end; h++) {
+        mapHeightToPeer.erase(h);
+    }
+
+    // Mark heights as pending again in the window (if window is initialized)
+    if (m_window_initialized) {
+        for (int h = chunk.height_start; h <= chunk.height_end; h++) {
+            // Only mark as pending if not already received
+            if (!m_download_window.IsReceived(h)) {
+                m_download_window.MarkAsPending(h);
+            }
+        }
+    }
+
+    // Clear any blocks in-flight from this chunk
+    std::vector<uint256> to_remove;
+    for (const auto& [hash, in_flight] : mapBlocksInFlight) {
+        if (in_flight.peer == peer_id &&
+            in_flight.nHeight >= chunk.height_start &&
+            in_flight.nHeight <= chunk.height_end) {
+            to_remove.push_back(hash);
+        }
+    }
+
+    for (const uint256& hash : to_remove) {
+        mapBlocksInFlight.erase(hash);
+        // Also remove from peer tracking
+        if (mapPeerBlocks.count(peer_id) > 0) {
+            mapPeerBlocks[peer_id].erase(hash);
+        }
+        // Notify peer manager
+        if (g_peer_manager) {
+            g_peer_manager->RemoveBlockFromFlight(hash);
+        }
+    }
+
+    // Remove the chunk
+    mapActiveChunks.erase(it);
+
+    std::cout << "[Chunk] Cancelled chunk - peer " << peer_id << " now free for new assignment" << std::endl;
+
+    return true;
+}
+
 NodeId CBlockFetcher::GetPeerForHeight(int height) const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);

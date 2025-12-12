@@ -151,6 +151,17 @@ public:
     }
 
     /**
+     * @brief Mark height as pending for re-request (used when cancelling stalled chunks)
+     * @param height Height to mark as pending
+     */
+    void MarkAsPending(int height) {
+        if (IsInWindow(height)) {
+            m_in_flight.erase(height);
+            m_pending.insert(height);
+        }
+    }
+
+    /**
      * @brief Get next chunk of heights that need to be requested
      * @param max_count Maximum heights to return
      * @return Vector of heights from pending set
@@ -533,6 +544,18 @@ public:
      * @return true if reassignment successful
      */
     bool ReassignChunk(NodeId old_peer, NodeId new_peer);
+
+    /**
+     * @brief Cancel a stalled chunk, making heights available for re-request
+     *
+     * Call this when a chunk cannot be reassigned to another peer (e.g., all
+     * peers have active chunks). Removes the chunk from the peer and marks
+     * heights as pending in the window.
+     *
+     * @param peer_id Peer ID with stalled chunk
+     * @return true if chunk was cancelled
+     */
+    bool CancelStalledChunk(NodeId peer_id);
 
     /**
      * @brief Get the peer assigned to download a specific height
