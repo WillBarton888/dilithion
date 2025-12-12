@@ -99,6 +99,8 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    std::cout << "[DEBUG] MarkBlockReceived(peer=" << peer << ", hash=" << hash.GetHex().substr(0, 16) << ")" << std::endl;
+
     // Phase 1: CPeerManager is single source of truth - always notify
     if (g_peer_manager) {
         g_peer_manager->MarkBlockAsReceived(peer, hash);
@@ -108,6 +110,14 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
         // Not tracked locally, but CPeerManager was already notified above
+        std::cout << "[DEBUG]   hash NOT FOUND in mapBlocksInFlight (size=" << mapBlocksInFlight.size() << ")" << std::endl;
+        // Debug: print first few hashes in flight
+        int count = 0;
+        for (const auto& entry : mapBlocksInFlight) {
+            if (count++ < 3) {
+                std::cout << "[DEBUG]     in-flight: " << entry.first.GetHex().substr(0, 16) << "... h=" << entry.second.nHeight << std::endl;
+            }
+        }
         return false;
     }
 
