@@ -81,6 +81,12 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     CBlockInFlight inFlight(hash, peer, height);
     mapBlocksInFlight[hash] = inFlight;
 
+    // DEBUG: Log what hash we're storing for later lookup
+    std::cout << "[HASH-DEBUG] RequestBlock: storing hash=" << hash.GetHex().substr(0, 16)
+              << "... height=" << height << " peer=" << peer
+              << " (mapBlocksInFlight size=" << mapBlocksInFlight.size() << ")" << std::endl;
+    std::cout.flush();
+
     // Track peer's blocks (for disconnect handling)
     mapPeerBlocks[peer].insert(hash);
 
@@ -98,6 +104,11 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
 bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // DEBUG: Log what hash we're looking up
+    std::cout << "[HASH-DEBUG] MarkBlockReceived: looking for hash=" << hash.GetHex().substr(0, 16)
+              << "... peer=" << peer << " (mapBlocksInFlight size=" << mapBlocksInFlight.size() << ")" << std::endl;
+    std::cout.flush();
 
     std::cout << "[DEBUG] MarkBlockReceived(peer=" << peer << ", hash=" << hash.GetHex().substr(0, 16) << ")" << std::endl;
 
