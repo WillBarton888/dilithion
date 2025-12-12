@@ -1885,15 +1885,44 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // BUG #114 FIX: Check if we have the actual block DATA, not just the header
             // Headers-only entries are created by ProcessHeaders() during IBD
             // We must NOT skip blocks that only have headers - we need the full data!
+            //
+            // BUG #150 FIX: Also check if block is actually connected to main chain
+            // If block has data but is NOT connected (ActivateBestChain failed previously),
+            // we must try to activate it again instead of skipping
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
             if (pindex && pindex->HaveData()) {
-                std::cout << "[P2P] Block already in chain state (have data), skipping"
+                // Check if block is actually on main chain (BLOCK_VALID_CHAIN flag)
+                if (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN) {
+                    std::cout << "[P2P] Block already in chain and connected, skipping"
+                              << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
+                              << std::endl;
+                    // BUG #86 FIX: Mark block as received even when skipping
+                    if (g_node_context.block_fetcher) {
+                        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                    }
+                    return;
+                }
+
+                // BUG #150 FIX: Block has data but is NOT connected - try to activate it
+                // This can happen if ActivateBestChain failed previously (e.g., UTXO validation error)
+                std::cout << "[P2P] Block in chainstate but not connected, trying to activate"
                           << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
                           << std::endl;
-                // BUG #86 FIX: Mark block as received even when skipping
-                // Otherwise it stays "in-flight" forever, causing timeout/retry loops
-                if (g_node_context.block_fetcher) {
-                    g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+
+                // Try to activate the existing block index
+                bool reorgOccurred = false;
+                if (g_chainstate.ActivateBestChain(pindex, block, reorgOccurred)) {
+                    std::cout << "[P2P] Successfully activated previously stuck block at height "
+                              << pindex->nHeight << std::endl;
+                    if (g_node_context.block_fetcher) {
+                        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                        g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
+                    }
+                } else {
+                    std::cerr << "[P2P] Failed to activate stuck block at height " << pindex->nHeight << std::endl;
+                    if (g_node_context.block_fetcher) {
+                        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                    }
                 }
                 return;
             }
