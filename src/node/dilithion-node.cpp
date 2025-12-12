@@ -2316,6 +2316,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Bitcoin protocol sends max 2000 headers per message - if we got exactly 2000,
                 // peer likely has more to send, so request continuation
                 static constexpr size_t MAX_HEADERS_RESULTS = 2000;
+                std::cout << "[IBD-DEBUG] headers.size()=" << headers.size()
+                          << " MAX=" << MAX_HEADERS_RESULTS << std::endl;
                 if (headers.size() == MAX_HEADERS_RESULTS) {
                     uint256 lastHeaderHash = headers.back().GetHash();
                     std::cout << "[IBD] Got full batch of " << MAX_HEADERS_RESULTS
