@@ -173,14 +173,18 @@ void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) 
     }
 
     for (int h = chain_height + 1; h <= chain_height + blocks_to_queue; h++) {
-        std::vector<uint256> hashes_at_height = m_node_context.headers_manager->GetHeadersAtHeight(h);
-        for (const uint256& hash : hashes_at_height) {
-            if (!m_chainstate.HasBlockIndex(hash) &&
-                !m_node_context.block_fetcher->IsQueued(hash) &&
-                !m_node_context.block_fetcher->IsDownloading(hash)) {
-                m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
-                LogPrintIBD(DEBUG, "Queued block %s... at height %d", hash.GetHex().substr(0, 16).c_str(), h);
-            }
+        // IBD OPTIMIZATION: Use GetRandomXHashAtHeight to get the hash for block requests
+        // During IBD, headers are stored by FastHash, but GETDATA needs RandomX hash
+        uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+        if (hash.IsNull()) {
+            continue;  // No header at this height
+        }
+
+        if (!m_chainstate.HasBlockIndex(hash) &&
+            !m_node_context.block_fetcher->IsQueued(hash) &&
+            !m_node_context.block_fetcher->IsDownloading(hash)) {
+            m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
+            LogPrintIBD(DEBUG, "Queued block %s... at height %d", hash.GetHex().substr(0, 16).c_str(), h);
         }
     }
 }

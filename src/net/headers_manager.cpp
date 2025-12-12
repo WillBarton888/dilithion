@@ -90,6 +90,13 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             // This header's hashPrevBlock tells us the RandomX hash of prev header
             // Store this mapping so we can find prev if we need to later
             mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
+
+            // Also store the RandomX hash in the parent's HeaderWithChainWork
+            // so we can use it for block requests
+            auto parentIt = mapHeaders.find(prevFastHash);
+            if (parentIt != mapHeaders.end() && parentIt->second.randomXHash.IsNull()) {
+                parentIt->second.randomXHash = header.hashPrevBlock;
+            }
         }
 
         // Find parent - for sequential IBD, pprev should already be correct
@@ -601,6 +608,32 @@ std::vector<uint256> CHeadersManager::GetHeadersAtHeight(int height) const
     return result;
 }
 
+uint256 CHeadersManager::GetRandomXHashAtHeight(int height) const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    // Get the header(s) at this height
+    auto heightIt = mapHeightIndex.find(height);
+    if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
+        return uint256();
+    }
+
+    // Get the first header at this height (usually only one)
+    const uint256& storageHash = *heightIt->second.begin();
+    auto headerIt = mapHeaders.find(storageHash);
+    if (headerIt == mapHeaders.end()) {
+        return uint256();
+    }
+
+    // If we have the RandomX hash (from child's hashPrevBlock), return it
+    if (!headerIt->second.randomXHash.IsNull()) {
+        return headerIt->second.randomXHash;
+    }
+
+    // Otherwise, compute it (only happens for blocks above checkpoint or last block)
+    return headerIt->second.header.GetHash();
+}
+
 // ============================================================================
 // Public API: Peer Management
 // ============================================================================
@@ -1051,6 +1084,13 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             if (pprev != nullptr && !prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
                 // This header's hashPrevBlock tells us the RandomX hash of prev header
                 mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
+
+                // Also store the RandomX hash in the parent's HeaderWithChainWork
+                // so we can use it for block requests
+                auto parentIt = mapHeaders.find(prevFastHash);
+                if (parentIt != mapHeaders.end() && parentIt->second.randomXHash.IsNull()) {
+                    parentIt->second.randomXHash = header.hashPrevBlock;
+                }
             }
 
             // Find parent - for sequential IBD, pprev should already be correct

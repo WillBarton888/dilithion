@@ -291,6 +291,17 @@ public:
      */
     std::vector<uint256> GetHeadersAtHeight(int height) const;
 
+    /**
+     * @brief Get the RandomX hash for block requests at a given height
+     *
+     * During IBD, headers are stored by FastHash. This function returns
+     * the RandomX hash needed for GETDATA block requests.
+     *
+     * @param height Block height
+     * @return RandomX hash of the block (for network requests)
+     */
+    uint256 GetRandomXHashAtHeight(int height) const;
+
     // Peer management
 
     /**
@@ -407,13 +418,16 @@ private:
         uint256 chainWork;                  ///< Accumulated PoW from genesis
         int height;                         ///< Height in chain
         uint256 hashPrevBlock;              ///< Parent hash (cached from header)
+        uint256 randomXHash;                ///< IBD: RandomX hash for block requests (learned from child)
 
         HeaderWithChainWork() : height(0) {
             hashPrevBlock = uint256();
+            randomXHash = uint256();
         }
         HeaderWithChainWork(const CBlockHeader& h, int ht)
             : header(h), height(ht) {
             hashPrevBlock = h.hashPrevBlock;
+            randomXHash = uint256();  // Populated later from child's hashPrevBlock
         }
     };
 
