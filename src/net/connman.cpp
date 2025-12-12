@@ -522,12 +522,19 @@ void CConnman::ThreadMessageHandler() {
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
             for (auto& node : m_nodes) {
-                if (node->fDisconnect.load()) continue;
+                // DEBUG: Log if node is being skipped due to disconnect
+                if (node->fDisconnect.load()) {
+                    if (node->HasProcessMsgs()) {
+                        std::cout << "[MSGHANDLER-SKIP] node=" << node->id << " fDisconnect=true but has messages!" << std::endl;
+                    }
+                    continue;
+                }
 
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
                     // DEBUG: Log each message popped from queue
                     std::cout << "[MSGHANDLER-POP] node=" << node->id << " cmd=" << processed_msg.command << std::endl;
+                    std::cout.flush();
                     pending_messages.push_back({node->id, std::move(processed_msg)});
 
                     // Limit messages collected per iteration to prevent unbounded growth
