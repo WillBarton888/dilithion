@@ -1826,11 +1826,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             }
 
-            // Also request the specific blocks (may succeed if we have their parents)
+            // BUG #IBD-STALL FIX: During IBD, don't request blocks via inv handler
+            // The IBD coordinator handles block downloads with proper tracking.
+            // Requesting blocks here bypasses CBlockFetcher tracking, causing the
+            // IBD chunk system to think blocks are still pending when they've arrived.
             if (!getdata.empty() && g_node_context.connman && g_node_context.message_processor) {
-                std::cout << "[P2P] Requesting " << getdata.size() << " block(s) from peer " << peer_id << std::endl;
-                CNetMessage msg = g_node_context.message_processor->CreateGetDataMessage(getdata);
-                g_node_context.connman->PushMessage(peer_id, msg);
+                if (IsInitialBlockDownload()) {
+                    // During IBD, let the headers-first download handle block requests
+                    std::cout << "[P2P] Skipping INV-based block request during IBD (using headers-first)" << std::endl;
+                } else {
+                    // After IBD, we can request announced blocks directly
+                    std::cout << "[P2P] Requesting " << getdata.size() << " block(s) from peer " << peer_id << std::endl;
+                    CNetMessage msg = g_node_context.message_processor->CreateGetDataMessage(getdata);
+                    g_node_context.connman->PushMessage(peer_id, msg);
+                }
             }
         });
 
