@@ -2075,6 +2075,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "[P2P] Updated best block to height " << pblockIndexPtr->nHeight << std::endl;
                         g_node_state.new_block_found = true;
 
+                        // BUG #148 FIX: Advance IBD download window when blocks are connected
+                        // This allows the window to slide forward and request more blocks in parallel
+                        if (g_node_context.block_fetcher) {
+                            g_node_context.block_fetcher->OnWindowBlockConnected(pblockIndexPtr->nHeight);
+                        }
+
                         // BUG #32 FIX: Immediately update mining template when IBD block becomes new tip
                         if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                             std::cout << "[Mining] IBD block became new tip - updating template immediately..." << std::endl;
