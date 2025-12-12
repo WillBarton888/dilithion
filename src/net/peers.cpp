@@ -846,11 +846,29 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
         auto peer_it = peers.find(tracked_peer);
         if (peer_it != peers.end()) {
             CPeer* peer = peer_it->second.get();
+            int old_count = peer->nBlocksInFlight;
             peer->vBlocksInFlight.erase(list_it);
             peer->nBlocksInFlight--;
             peer->nStallingCount = 0;
             peer->nBlocksDownloaded++;
             peer->lastSuccessTime = std::chrono::steady_clock::now();
+            std::cout << "[DEBUG] Tracked block received - tracked_peer=" << tracked_peer
+                      << " nBlocksInFlight: " << old_count << " -> " << peer->nBlocksInFlight << std::endl;
+        } else {
+            // BUG #148 FIX: tracked_peer disconnected, decrement the actual sender instead
+            std::cout << "[DEBUG] Tracked peer " << tracked_peer << " disconnected, falling back to sender peer " << peer_id << std::endl;
+            auto sender_it = peers.find(peer_id);
+            if (sender_it != peers.end()) {
+                CPeer* sender = sender_it->second.get();
+                int old_count = sender->nBlocksInFlight;
+                if (sender->nBlocksInFlight > 0) {
+                    sender->nBlocksInFlight--;
+                }
+                sender->nBlocksDownloaded++;
+                sender->lastSuccessTime = std::chrono::steady_clock::now();
+                std::cout << "[DEBUG] Fallback decrement - peer " << peer_id
+                          << " nBlocksInFlight: " << old_count << " -> " << sender->nBlocksInFlight << std::endl;
+            }
         }
         mapBlocksInFlight.erase(it);
     } else {
