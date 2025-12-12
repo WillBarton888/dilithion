@@ -101,7 +101,7 @@ public:
     std::chrono::steady_clock::time_point lastSuccessTime;
     std::chrono::steady_clock::time_point lastStallTime;
 
-    static constexpr int STALL_THRESHOLD = 100;
+    static constexpr int STALL_THRESHOLD = 500;  // Increased from 100 for slow IBD connections
     static constexpr auto STALL_FORGIVENESS_TIMEOUT = std::chrono::minutes(5);
 
     std::chrono::seconds GetBlockTimeout() const {
