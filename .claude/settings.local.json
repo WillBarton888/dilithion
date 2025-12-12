@@ -311,7 +311,9 @@
       "Bash(ssh root@188.166.255.63 \"grep -c ''EXTRACT-DEBUG'' /root/node.log; grep ''EXTRACT-DEBUG'' /root/node.log | tail -30\")",
       "Bash(ssh root@188.166.255.63 \"grep ''MSG-RECV.*cmd=block'' /root/node.log | tail -20; echo ''---''; grep -i ''ProcessBlockMessage\\|block.*received\\|connected\\|chain'' /root/node.log | tail -20\")",
       "Bash(ssh root@188.166.255.63 \"grep -i ''checksum\\|error\\|failed\\|mismatch'' /root/node.log | tail -30\")",
-      "Bash(ssh root@188.166.255.63 \"grep -c ''EXTRACT-DEBUG.*block'' /root/node.log; grep -c ''MSG-RECV.*block'' /root/node.log; echo ''---chain height---''; grep ''chain='' /root/node.log | tail -5\")"
+      "Bash(ssh root@188.166.255.63 \"grep -c ''EXTRACT-DEBUG.*block'' /root/node.log; grep -c ''MSG-RECV.*block'' /root/node.log; echo ''---chain height---''; grep ''chain='' /root/node.log | tail -5\")",
+      "Bash(ssh root@134.122.4.164 \"pkill -9 dilithion; rm -f /root/.dilithion-testnet/blocks/LOCK /root/.dilithion-testnet/chainstate/LOCK; cd /root/dilithion && git pull && make dilithion-node -j4 2>&1 | tail -5\")",
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate /root/.dilithion-testnet/*.LOCK; cd /root/dilithion && git pull && make dilithion-node -j4 2>&1 | tail -5\")"
     ],
     "deny": [],
     "ask": []

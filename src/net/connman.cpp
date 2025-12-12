@@ -526,6 +526,8 @@ void CConnman::ThreadMessageHandler() {
 
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
+                    // DEBUG: Log each message popped from queue
+                    std::cout << "[MSGHANDLER-POP] node=" << node->id << " cmd=" << processed_msg.command << std::endl;
                     pending_messages.push_back({node->id, std::move(processed_msg)});
 
                     // Limit messages collected per iteration to prevent unbounded growth
@@ -539,6 +541,11 @@ void CConnman::ThreadMessageHandler() {
                     fMoreWork = true;
                 }
             }
+        }
+
+        // DEBUG: Log collected message count
+        if (!pending_messages.empty()) {
+            std::cout << "[MSGHANDLER-BATCH] Collected " << pending_messages.size() << " messages for processing" << std::endl;
         }
         // cs_vNodes is now RELEASED - safe to call handlers that acquire other locks
 
