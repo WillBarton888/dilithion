@@ -1870,34 +1870,29 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register block handler to validate and save received blocks
         message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
-            // CHECKPOINT OPTIMIZATION: Determine expected height FIRST to decide hash algorithm
-            // For blocks at/below checkpoint, use FastHash (SHA3) - ~10000x faster than RandomX
-            // For blocks above checkpoint, use RandomX hash for full PoW validation
-            int expectedHeight = 0;
-            CBlockIndex* pParentIndex = g_chainstate.GetBlockIndex(block.hashPrevBlock);
-            if (pParentIndex) {
-                expectedHeight = pParentIndex->nHeight + 1;
-            }
-
-            // Get checkpoint height
+            // CHECKPOINT OPTIMIZATION: Skip RandomX for blocks at/below checkpoint
+            // Use chain tip height as proxy - if tip < checkpoint, we're still in checkpointed zone
+            // This avoids expensive parent lookups and handles out-of-order block arrival
+            int currentChainHeight = g_chainstate.GetHeight();
             int checkpointHeight = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
-            // Choose hash algorithm based on height
+            // If current chain is below checkpoint, use FastHash (blocks arrive in ~order during IBD)
+            // Once we pass checkpoint, switch to full RandomX validation
             uint256 blockHash;
             bool skipPoWCheck = false;
-            if (expectedHeight > 0 && expectedHeight <= checkpointHeight) {
+            if (checkpointHeight > 0 && currentChainHeight < checkpointHeight) {
                 // CHECKPOINT OPTIMIZATION: Use FastHash and skip PoW for trusted blocks
                 blockHash = block.GetFastHash();
                 skipPoWCheck = true;
             } else {
-                // Above checkpoint or unknown height - use full RandomX hash
+                // Above checkpoint - use full RandomX hash and PoW validation
                 blockHash = block.GetHash();
             }
 
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
                       << blockHash.GetHex().substr(0, 16) << "..."
-                      << " (height=" << expectedHeight << ", checkpoint=" << checkpointHeight
+                      << " (chainHeight=" << currentChainHeight << ", checkpoint=" << checkpointHeight
                       << ", fastHash=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
 
             // Basic validation: Check PoW (skip for checkpointed blocks)
