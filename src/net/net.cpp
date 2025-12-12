@@ -720,8 +720,12 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
                 }
             }
             else if (inv_item.type == NetProtocol::MSG_BLOCK_INV) {
-                // Existing block handling (keep as-is)
-                vToFetch.push_back(inv_item);
+                // DISABLED: Block requests must go through headers-first IBD system
+                // The high-level SetInvHandler callback will trigger RequestHeaders(),
+                // which feeds blocks through the IBD coordinator with proper tracking.
+                // Direct GETDATA for blocks bypasses CBlockFetcher, breaking the
+                // chunk-based sliding window download system.
+                // vToFetch.push_back(inv_item);  // LEGACY - DO NOT USE
             }
             // MSG_FILTERED_BLOCK(3) and MSG_CMPCT_BLOCK(4) are valid but not processed here
         }

@@ -1990,14 +1990,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 // Add block to orphan manager (now validated)
                 if (g_node_context.orphan_manager->AddOrphanBlock(peer_id, block)) {
-                    // Request the missing parent block from the peer
-                    std::vector<NetProtocol::CInv> getdata;
-                    getdata.push_back(NetProtocol::CInv(NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock));
-
-                    std::cout << "[P2P] Requesting parent block from peer " << peer_id << std::endl;
-                    if (g_node_context.connman && g_node_context.message_processor) {
-                        CNetMessage msg = g_node_context.message_processor->CreateGetDataMessage(getdata);
-                        g_node_context.connman->PushMessage(peer_id, msg);
+                    // FIXED: Use header sync to discover parent instead of direct GETDATA
+                    // Direct GETDATA bypasses CBlockFetcher tracking. Header sync will
+                    // discover the parent and request it through the IBD coordinator.
+                    std::cout << "[P2P] Orphan block stored - triggering header sync for parent" << std::endl;
+                    if (g_node_context.headers_manager) {
+                        uint256 ourBestBlock;
+                        if (g_chainstate.GetTip()) {
+                            ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
+                        } else {
+                            ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
+                        }
+                        g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
                     }
                 } else {
                     std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;
