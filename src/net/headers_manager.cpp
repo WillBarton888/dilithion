@@ -979,6 +979,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     // Quick-validate and store headers immediately (non-blocking)
     {
         std::lock_guard<std::mutex> lock(cs_headers);
+        std::cout << "[DEBUG] QueueHeaders: Got cs_headers lock, headers.size()=" << headers.size() << std::endl;
 
         if (headers.empty()) {
             return true;
@@ -990,8 +991,13 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         }
 
         const HeaderWithChainWork* pprev = nullptr;
+        int processed_count = 0;
 
         for (const CBlockHeader& header : headers) {
+            processed_count++;
+            if (processed_count <= 5 || processed_count % 500 == 0) {
+                std::cout << "[DEBUG] QueueHeaders: Processing header " << processed_count << "/" << headers.size() << std::endl;
+            }
             uint256 hash = header.GetHash();
 
             // Skip duplicates
