@@ -1887,7 +1887,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // We must NOT skip blocks that only have headers - we need the full data!
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
             if (pindex && pindex->HaveData()) {
-                std::cout << "[P2P] Block already in chain state (have data), skipping" << std::endl;
+                std::cout << "[P2P] Block already in chain state (have data), skipping"
+                          << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
+                          << std::endl;
                 // BUG #86 FIX: Mark block as received even when skipping
                 // Otherwise it stays "in-flight" forever, causing timeout/retry loops
                 if (g_node_context.block_fetcher) {
