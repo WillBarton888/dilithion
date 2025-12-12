@@ -1870,13 +1870,38 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register block handler to validate and save received blocks
         message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
-            uint256 blockHash = block.GetHash();
+            // CHECKPOINT OPTIMIZATION: Determine expected height FIRST to decide hash algorithm
+            // For blocks at/below checkpoint, use FastHash (SHA3) - ~10000x faster than RandomX
+            // For blocks above checkpoint, use RandomX hash for full PoW validation
+            int expectedHeight = 0;
+            CBlockIndex* pParentIndex = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+            if (pParentIndex) {
+                expectedHeight = pParentIndex->nHeight + 1;
+            }
+
+            // Get checkpoint height
+            int checkpointHeight = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
+
+            // Choose hash algorithm based on height
+            uint256 blockHash;
+            bool skipPoWCheck = false;
+            if (expectedHeight > 0 && expectedHeight <= checkpointHeight) {
+                // CHECKPOINT OPTIMIZATION: Use FastHash and skip PoW for trusted blocks
+                blockHash = block.GetFastHash();
+                skipPoWCheck = true;
+            } else {
+                // Above checkpoint or unknown height - use full RandomX hash
+                blockHash = block.GetHash();
+            }
 
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
-                      << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+                      << blockHash.GetHex().substr(0, 16) << "..."
+                      << " (height=" << expectedHeight << ", checkpoint=" << checkpointHeight
+                      << ", fastHash=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
 
-            // Basic validation: Check PoW
-            if (!CheckProofOfWork(blockHash, block.nBits)) {
+            // Basic validation: Check PoW (skip for checkpointed blocks)
+            if (!skipPoWCheck && !CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[P2P] ERROR: Block from peer " << peer_id << " has invalid PoW" << std::endl;
                 std::cerr << "  Hash must be less than target" << std::endl;
                 return;
