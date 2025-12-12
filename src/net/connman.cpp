@@ -1075,6 +1075,12 @@ void CConnman::ExtractMessages(CNode* pnode) {
         std::memcpy(&header.payload_size, buffer.data() + 16, 4);
         std::memcpy(&header.checksum, buffer.data() + 20, 4);
 
+        // DEBUG: Log parsed header
+        std::string cmd = header.GetCommand();
+        std::cout << "[EXTRACT-DEBUG] node=" << pnode->id << " cmd=" << cmd
+                  << " payload_size=" << header.payload_size
+                  << " buffer=" << buffer.size() << std::endl;
+
         // Validate header
         if (!header.IsValid(NetProtocol::g_network_magic)) {
             std::cout << "[P2P] ERROR: Invalid magic from node " << pnode->id
