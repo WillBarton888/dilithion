@@ -275,7 +275,7 @@ bool CIbdCoordinator::FetchBlocks() {
         std::vector<NetProtocol::CInv> getdata;
         getdata.reserve(valid_heights.size());
 
-        LogPrintIBD(DEBUG, "Building GETDATA for chunk %d-%d, valid_heights=%zu", start, end, valid_heights.size());
+        std::cout << "[GETDATA-DEBUG] Building GETDATA for chunk " << start << "-" << end << ", valid_heights=" << valid_heights.size() << std::endl;
 
         for (int h : valid_heights) {
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
@@ -283,18 +283,21 @@ bool CIbdCoordinator::FetchBlocks() {
                 // Also track in the old per-block system for timeout handling
                 bool request_ok = m_node_context.block_fetcher->RequestBlock(peer_id, hash, h);
                 getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-                LogPrintIBD(DEBUG, "  Height %d: hash=%s request_ok=%d", h, hash.GetHex().substr(0, 16).c_str(), request_ok);
+                // Only log every 4th block to reduce spam
+                if (h % 4 == 0) {
+                    std::cout << "[GETDATA-DEBUG]   Height " << h << ": request_ok=" << request_ok << std::endl;
+                }
             } else {
-                LogPrintIBD(WARN, "  Height %d: hash is null!", h);
+                std::cout << "[GETDATA-ERROR]   Height " << h << ": hash is null!" << std::endl;
             }
         }
 
-        LogPrintIBD(DEBUG, "GETDATA built with %zu entries for peer %d", getdata.size(), peer_id);
+        std::cout << "[GETDATA-DEBUG] Built " << getdata.size() << " entries for peer " << peer_id << std::endl;
 
         // Send single batched GETDATA for entire chunk
         if (!getdata.empty()) {
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-            LogPrintIBD(DEBUG, "Sending GETDATA to peer %d", peer_id);
+            std::cout << "[GETDATA-DEBUG] Sending to peer " << peer_id << std::endl;
             m_node_context.connman->PushMessage(peer_id, msg);
             total_chunks_assigned++;
 
