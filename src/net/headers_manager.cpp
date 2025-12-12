@@ -84,8 +84,28 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             continue;
         }
 
-        // Find parent using hashPrevBlock -> FastHash mapping
-        if (pprev == nullptr || pprev->hashPrevBlock != header.hashPrevBlock) {
+        // IBD OPTIMIZATION: During sequential processing, pprev from previous iteration
+        // is the parent of current header. Store the mapping now before lookup.
+        if (pprev != nullptr && !prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
+            // This header's hashPrevBlock tells us the RandomX hash of prev header
+            // Store this mapping so we can find prev if we need to later
+            mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
+        }
+
+        // Find parent - for sequential IBD, pprev should already be correct
+        // But we need to handle gaps, restarts, and competing chains
+        bool needsParentLookup = (pprev == nullptr);
+        if (!needsParentLookup) {
+            // Verify pprev is actually the parent by checking the mapping
+            auto mappingIt = mapRandomXToFastHash.find(header.hashPrevBlock);
+            if (mappingIt != mapRandomXToFastHash.end() && mappingIt->second == prevFastHash) {
+                // pprev is correct, skip lookup
+            } else {
+                // pprev might not be the parent (gap or fork), need to look up
+                needsParentLookup = true;
+            }
+        }
+        if (needsParentLookup) {
             // First check: Is parent the genesis block?
             uint256 genesisHash = Genesis::GetGenesisHash();
             if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
@@ -106,7 +126,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                         return false;
                     }
                 }
-                // Third check: Direct lookup (for backward compatibility)
+                // Third check: Direct lookup (for backward compatibility or post-IBD)
                 else {
                     auto parentIt = mapHeaders.find(header.hashPrevBlock);
                     if (parentIt != mapHeaders.end()) {
@@ -135,11 +155,6 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         AddToHeightIndex(storageHash, height);
         UpdateChainTips(storageHash);
         UpdateBestHeader(storageHash);
-
-        // Store RandomX->storage hash mapping for parent lookups (only during IBD)
-        if (!prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
-            mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
-        }
 
         // Update for next iteration
         pprev = &mapHeaders[storageHash];
@@ -1031,8 +1046,25 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 continue;
             }
 
-            // Find parent using the hashPrevBlock -> FastHash mapping
-            if (pprev == nullptr || pprev->hashPrevBlock != header.hashPrevBlock) {
+            // IBD OPTIMIZATION: During sequential processing, pprev from previous iteration
+            // is the parent of current header. Store the mapping now before lookup.
+            if (pprev != nullptr && !prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
+                // This header's hashPrevBlock tells us the RandomX hash of prev header
+                mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
+            }
+
+            // Find parent - for sequential IBD, pprev should already be correct
+            bool needsParentLookup = (pprev == nullptr);
+            if (!needsParentLookup) {
+                // Verify pprev is actually the parent
+                auto mappingIt = mapRandomXToFastHash.find(header.hashPrevBlock);
+                if (mappingIt != mapRandomXToFastHash.end() && mappingIt->second == prevFastHash) {
+                    // pprev is correct
+                } else {
+                    needsParentLookup = true;
+                }
+            }
+            if (needsParentLookup) {
                 // First check: Is parent the genesis block?
                 uint256 genesisHash = Genesis::GetGenesisHash();
                 if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
@@ -1042,7 +1074,6 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 else {
                     auto mappingIt = mapRandomXToFastHash.find(header.hashPrevBlock);
                     if (mappingIt != mapRandomXToFastHash.end()) {
-                        // Found mapping, look up parent by FastHash
                         auto parentIt = mapHeaders.find(mappingIt->second);
                         if (parentIt != mapHeaders.end()) {
                             pprev = &parentIt->second;
@@ -1080,13 +1111,6 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             AddToHeightIndex(storageHash, height);
             UpdateChainTips(storageHash);
             UpdateBestHeader(storageHash);
-
-            // IBD OPTIMIZATION: Store mapping from RandomX hash to storage hash
-            // This enables parent lookups when hashPrevBlock contains RandomX hash
-            if (!prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
-                // This header's hashPrevBlock tells us the RandomX hash of the previous header
-                mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
-            }
 
             // Queue for background PoW validation (only for blocks above checkpoint)
             if (expectedHeight > checkpointHeight) {
