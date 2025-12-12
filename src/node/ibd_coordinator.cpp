@@ -275,24 +275,34 @@ bool CIbdCoordinator::FetchBlocks() {
         std::vector<NetProtocol::CInv> getdata;
         getdata.reserve(valid_heights.size());
 
+        LogPrintIBD(DEBUG, "Building GETDATA for chunk %d-%d, valid_heights=%zu", start, end, valid_heights.size());
+
         for (int h : valid_heights) {
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
             if (!hash.IsNull()) {
                 // Also track in the old per-block system for timeout handling
-                m_node_context.block_fetcher->RequestBlock(peer_id, hash, h);
+                bool request_ok = m_node_context.block_fetcher->RequestBlock(peer_id, hash, h);
                 getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
+                LogPrintIBD(DEBUG, "  Height %d: hash=%s request_ok=%d", h, hash.GetHex().substr(0, 16).c_str(), request_ok);
+            } else {
+                LogPrintIBD(WARN, "  Height %d: hash is null!", h);
             }
         }
+
+        LogPrintIBD(DEBUG, "GETDATA built with %zu entries for peer %d", getdata.size(), peer_id);
 
         // Send single batched GETDATA for entire chunk
         if (!getdata.empty()) {
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+            LogPrintIBD(DEBUG, "Sending GETDATA to peer %d (msg size=%zu)", peer_id, msg.data.size());
             m_node_context.connman->PushMessage(peer_id, msg);
             total_chunks_assigned++;
 
             LogPrintIBD(INFO, "Assigned chunk %d-%d (%zu blocks) to peer %d [%s]",
                         start, end, getdata.size(), peer_id,
                         m_node_context.block_fetcher->GetWindowStatus().c_str());
+        } else {
+            LogPrintIBD(WARN, "GETDATA is empty for peer %d!", peer_id);
         }
     }
 
