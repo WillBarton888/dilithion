@@ -22,7 +22,7 @@
 #include <node/genesis.h>     // P2-3: For GetGenesisHash() validation
 #include <net/block_fetcher.h>  // BUG #68 FIX: For BlockFetcher peer disconnect notification
 #include <net/node_state.h>     // BUG #69: Bitcoin Core-style per-peer state management
-#include <net/message_queue.h>  // BUG #125: Async message processing
+// REMOVED: #include <net/message_queue.h> - CMessageProcessorQueue was unused
 #include <random>
 #include <thread>   // BUG #91: For std::this_thread::sleep_for
 #include <chrono>   // BUG #91: For std::chrono::milliseconds
