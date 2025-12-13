@@ -432,6 +432,10 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         return;
     }
 
+    // IBD HANG FIX #4: Clean up cancelled chunks after grace period expires
+    // This removes height mappings for chunks where blocks never arrived
+    m_node_context.block_fetcher->CleanupCancelledChunks();
+
     // Check for block-level timeouts (60 second)
     auto timed_out = m_node_context.block_fetcher->CheckTimeouts();
     if (!timed_out.empty()) {
@@ -439,7 +443,8 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         m_node_context.block_fetcher->RetryTimedOutBlocks(timed_out);
     }
 
-    // Phase 2: Check for stalled chunks (2 second stall detection)
+    // Phase 2: Check for stalled chunks (15 second stall detection)
+    // IBD HANG FIX #1: Now checks mapBlocksInFlight before marking as stalled
     auto stalled_chunks = m_node_context.block_fetcher->CheckStalledChunks();
     for (const auto& [peer_id, chunk] : stalled_chunks) {
         bool reassigned = false;

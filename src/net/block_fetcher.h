@@ -583,13 +583,24 @@ public:
     bool ReassignChunk(NodeId old_peer, NodeId new_peer);
 
     /**
+     * @brief Clean up cancelled chunks after grace period expires
+     *
+     * IBD HANG FIX: Removes cancelled chunks and their height mappings after grace period.
+     * Called periodically to clean up chunks that were cancelled but blocks never arrived.
+     */
+    void CleanupCancelledChunks();
+
+    /**
      * @brief Cancel a stalled chunk, making heights available for re-request
      *
      * Call this when a chunk cannot be reassigned to another peer (e.g., all
-     * peers have active chunks). Removes the chunk from the peer and marks
-     * heights as pending in the window.
+     * peers have active chunks). Moves chunk to cancelled map (grace period) instead of
+     * immediately erasing, allowing blocks that arrive late to be properly tracked.
      *
-     * @param peer_id Peer ID with stalled chunk
+     * IBD HANG FIX: Keeps heights in mapHeightToPeer during grace period to handle
+     * race condition where blocks arrive after cancellation.
+     *
+     * @param peer_id Peer whose chunk should be cancelled
      * @return true if chunk was cancelled
      */
     bool CancelStalledChunk(NodeId peer_id);
@@ -734,6 +745,17 @@ private:
     std::map<NodeId, PeerChunk> mapActiveChunks;   ///< Peer -> Active chunk
     std::map<int, NodeId> mapHeightToPeer;         ///< Height -> Assigned peer
     int nNextChunkHeight{0};                       ///< Next height to start a chunk from
+    
+    // IBD HANG FIX: Track cancelled chunks during grace period
+    // Prevents race condition where blocks arrive after chunk cancellation
+    struct CancelledChunk {
+        PeerChunk chunk;
+        std::chrono::steady_clock::time_point cancelled_time;
+        CancelledChunk() : chunk(), cancelled_time(std::chrono::steady_clock::now()) {}
+        CancelledChunk(const PeerChunk& c) : chunk(c), cancelled_time(std::chrono::steady_clock::now()) {}
+    };
+    std::map<NodeId, CancelledChunk> mapCancelledChunks;  ///< Peer -> Cancelled chunk (grace period)
+    static constexpr int CANCELLED_CHUNK_GRACE_PERIOD_SECONDS = 30;  ///< Keep cancelled chunks for 30s
 
     // ============ Phase 3: Moving Window ============
     CBlockDownloadWindow m_download_window;        ///< 1024-block sliding window
