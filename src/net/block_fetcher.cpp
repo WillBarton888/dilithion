@@ -754,6 +754,29 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
                     mapHeightToPeer.erase(h);
                 }
 
+                // IBD HANG FIX #19: Remove blocks from CPeerManager tracking when chunk COMPLETES
+                // Previously, this only happened in CancelStalledChunk(), causing nBlocksInFlight
+                // to stay at 128 forever when chunks completed normally (not cancelled).
+                // This fix ensures peer is freed for new chunk assignments after completion.
+                if (g_peer_manager) {
+                    int blocks_removed = 0;
+                    for (auto block_it = mapBlocksInFlight.begin(); block_it != mapBlocksInFlight.end(); ) {
+                        if (block_it->second.peer == peer_id) {
+                            g_peer_manager->RemoveBlockFromFlight(block_it->first);
+                            block_it = mapBlocksInFlight.erase(block_it);
+                            blocks_removed++;
+                        } else {
+                            ++block_it;
+                        }
+                    }
+                    mapPeerBlocks.erase(peer_id);
+                    if (blocks_removed > 0) {
+                        std::cout << "[Chunk] IBD HANG FIX #19: Removed " << blocks_removed
+                                  << " blocks from peer " << peer_id
+                                  << " tracking on chunk completion" << std::endl;
+                    }
+                }
+
                 // Remove completed chunk
                 mapActiveChunks.erase(chunk_it);
             }
