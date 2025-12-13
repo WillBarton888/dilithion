@@ -112,7 +112,7 @@ public:
         m_window_start = chain_height + 1;
         m_target_height = target_height;
         m_pending.clear();
-        m_in_flight.clear();
+        // IBD HANG FIX #20: Removed m_in_flight tracking - CPeerManager is single source of truth
         m_received.clear();
 
         // Populate pending with initial window
@@ -123,25 +123,27 @@ public:
     }
 
     /**
-     * @brief Mark heights as requested (moved from pending to in_flight)
+     * @brief Mark heights as requested (removes from pending)
      * @param heights Vector of heights being requested
+     * IBD HANG FIX #20: No longer tracks in-flight locally - CPeerManager is single source of truth
      */
     void MarkAsInFlight(const std::vector<int>& heights) {
         for (int h : heights) {
             m_pending.erase(h);
-            m_in_flight.insert(h);
+            // IBD HANG FIX #20: Don't add to m_in_flight - CPeerManager tracks this
         }
     }
 
     /**
-     * @brief Mark height as received (moved from pending/in_flight to received)
+     * @brief Mark height as received (moved from pending to received)
      * @param height Height of received block
+     * IBD HANG FIX #20: No longer clears m_in_flight - CPeerManager is single source of truth
      */
     void OnBlockReceived(int height) {
         // IBD HANG FIX #18: Also remove from pending (block may arrive before marked in-flight)
         // Without this, heights get stuck in pending when blocks arrive quickly
         m_pending.erase(height);
-        m_in_flight.erase(height);
+        // IBD HANG FIX #20: Don't erase from m_in_flight - CPeerManager handles this
         m_received.insert(height);
     }
 
@@ -150,11 +152,12 @@ public:
      * @param height Height of connected block
      * @param is_height_queued_callback Optional callback to check if height is queued for validation
      *                                  IBD HANG FIX #2: Allows window to advance past queued blocks
+     * IBD HANG FIX #20: No longer clears m_in_flight - CPeerManager is single source of truth
      */
     void OnBlockConnected(int height, std::function<bool(int)> is_height_queued_callback = nullptr) {
         m_received.erase(height);
         m_pending.erase(height);  // In case we never received it
-        m_in_flight.erase(height);
+        // IBD HANG FIX #20: Don't erase from m_in_flight - CPeerManager handles this
 
         // IBD BOTTLENECK FIX #1: Advance window whenever ANY block in window is connected
         // Previously only advanced when height == m_window_start, causing stalls with out-of-order blocks
@@ -167,10 +170,11 @@ public:
     /**
      * @brief Mark height as pending for re-request (used when cancelling stalled chunks)
      * @param height Height to mark as pending
+     * IBD HANG FIX #20: No longer clears m_in_flight - CPeerManager is single source of truth
      */
     void MarkAsPending(int height) {
         if (IsInWindow(height)) {
-            m_in_flight.erase(height);
+            // IBD HANG FIX #20: Don't erase from m_in_flight - CPeerManager handles this
             m_received.erase(height);
             m_pending.insert(height);
         }
@@ -180,6 +184,7 @@ public:
      * @brief Add height to pending set (used when queueing new blocks)
      * IBD SLOW FIX #3: Allows external code to add heights to pending set
      * @param height Height to add to pending
+     * IBD HANG FIX #20: No longer checks m_in_flight - CPeerManager is single source of truth
      */
     void AddToPending(int height) {
         // IBD SLOW FIX #3: Expand window automatically if height is outside range
@@ -191,16 +196,16 @@ public:
             while (m_window_start < new_window_start && m_window_start <= m_target_height) {
                 // Remove old heights from tracking sets as window advances
                 m_pending.erase(m_window_start);
-                m_in_flight.erase(m_window_start);
+                // IBD HANG FIX #20: Don't erase from m_in_flight - CPeerManager handles this
                 m_received.erase(m_window_start);
                 m_window_start++;
             }
         }
-        
-        // Only add if within window range and not already tracked
+
+        // Only add if within window range and not already tracked locally
+        // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager is single source of truth
         if (IsInWindow(height) &&
             m_pending.count(height) == 0 &&
-            m_in_flight.count(height) == 0 &&
             m_received.count(height) == 0) {
             m_pending.insert(height);
         }
@@ -254,7 +259,9 @@ public:
     }
 
     bool IsPending(int height) const { return m_pending.count(height) > 0; }
-    bool IsInFlight(int height) const { return m_in_flight.count(height) > 0; }
+    // IBD HANG FIX #20: No longer track in-flight locally - CPeerManager is single source of truth
+    // This method returns false; callers should use CPeerManager::IsBlockInFlight() for accurate info
+    bool IsInFlight(int height) const { (void)height; return false; }
     bool IsReceived(int height) const { return m_received.count(height) > 0; }
 
     int GetWindowStart() const { return m_window_start; }
@@ -262,7 +269,9 @@ public:
     int GetTargetHeight() const { return m_target_height; }
 
     size_t PendingCount() const { return m_pending.size(); }
-    size_t InFlightCount() const { return m_in_flight.size(); }
+    // IBD HANG FIX #20: No longer track in-flight locally - CPeerManager is single source of truth
+    // Returns 0; callers should use CPeerManager::GetTotalBlocksInFlight() for accurate count
+    size_t InFlightCount() const { return 0; }
     size_t ReceivedCount() const { return m_received.size(); }
 
     bool IsComplete() const { return m_window_start > m_target_height; }
@@ -270,8 +279,9 @@ public:
     std::string GetStatus() const {
         std::ostringstream ss;
         ss << "Window [" << m_window_start << "-" << GetWindowEnd() << "/" << m_target_height << "] "
-           << "pending=" << m_pending.size() << " flight=" << m_in_flight.size()
+           << "pending=" << m_pending.size()
            << " received=" << m_received.size();
+        // IBD HANG FIX #20: No longer show flight count - CPeerManager is single source of truth
         return ss.str();
     }
 
@@ -284,6 +294,7 @@ public:
      *
      * @param new_target_height New target height (typically current header height)
      * @return true if target was updated, false if unchanged
+     * IBD HANG FIX #20: No longer checks m_in_flight - CPeerManager is single source of truth
      */
     bool UpdateTargetHeight(int new_target_height) {
         if (new_target_height <= m_target_height) {
@@ -298,9 +309,10 @@ public:
         if (m_window_start > old_target) {
             // Window had advanced past old target, but now there's more to download
             // Add heights from window_start to new window_end as pending
+            // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager is single source of truth
             int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
             for (int h = m_window_start; h <= window_end; h++) {
-                if (m_pending.count(h) == 0 && m_in_flight.count(h) == 0 && m_received.count(h) == 0) {
+                if (m_pending.count(h) == 0 && m_received.count(h) == 0) {
                     m_pending.insert(h);
                 }
             }
@@ -313,16 +325,15 @@ private:
     void AdvanceWindow(std::function<bool(int)> is_height_queued_callback = nullptr) {
         // IBD HANG FIX #2: Allow window advancement past queued blocks
         // IBD HANG FIX #5: Better window state tracking - distinguish "processing" vs "stuck"
-        // Previously: Only advanced past fully connected blocks (not pending/in-flight/received)
-        // Now: Also advances past blocks in "received" state IF they're queued for validation
-        // This prevents window from stalling when blocks are waiting for async validation
-        
+        // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager is single source of truth
+        // Window can advance if height is not pending or received locally
+
         while (m_window_start <= m_target_height) {
             bool can_advance = false;
-            
-            // Can advance if height is not in any tracking set (fully connected)
+
+            // Can advance if height is not in local tracking sets (pending/received)
+            // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager handles this
             if (m_pending.count(m_window_start) == 0 &&
-                m_in_flight.count(m_window_start) == 0 &&
                 m_received.count(m_window_start) == 0) {
                 can_advance = true;
             }
@@ -336,7 +347,7 @@ private:
                     m_received.erase(m_window_start);
                 }
             }
-            
+
             if (can_advance) {
                 m_window_start++;
             } else {
@@ -346,9 +357,10 @@ private:
         }
 
         // Add new heights to pending to fill window
+        // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager is single source of truth
         int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
         for (int h = m_window_start; h <= window_end; h++) {
-            if (m_pending.count(h) == 0 && m_in_flight.count(h) == 0 && m_received.count(h) == 0) {
+            if (m_pending.count(h) == 0 && m_received.count(h) == 0) {
                 m_pending.insert(h);
             }
         }
@@ -358,7 +370,7 @@ private:
     int m_target_height;     ///< Final sync target
 
     std::set<int> m_pending;     ///< Heights not yet requested
-    std::set<int> m_in_flight;   ///< Heights requested, awaiting response
+    // IBD HANG FIX #20: Removed m_in_flight - CPeerManager is single source of truth for in-flight blocks
     std::set<int> m_received;    ///< Heights received, not yet connected
 };
 
