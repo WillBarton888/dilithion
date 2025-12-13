@@ -1948,12 +1948,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                               << pindex->nHeight << std::endl;
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
                         g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
                     }
                 } else {
                     std::cerr << "[P2P] Failed to activate stuck block at height " << pindex->nHeight << std::endl;
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
                     }
                 }
                 return;
@@ -2218,8 +2220,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 // Notify BlockFetcher that block was successfully received and activated
+                // IBD FIX: Use height-based tracking (always works) in addition to hash-based
+                // Hash lookup fails when chunk was cancelled before block arrived (mapBlocksInFlight cleared)
+                // Height-based OnChunkBlockReceived() survives chunk cancellation
                 if (g_node_context.block_fetcher) {
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                    g_node_context.block_fetcher->OnChunkBlockReceived(pblockIndexPtr->nHeight);
                 }
 
                 // CRITICAL-2 FIX: Iterative orphan resolution with depth limit

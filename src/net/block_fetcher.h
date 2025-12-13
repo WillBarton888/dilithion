@@ -41,7 +41,7 @@ typedef int NodeId;
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
 static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
-static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 5;    ///< IBD BOTTLENECK FIX #6: Increased from 2s to 5s to reduce false positives on slow networks
+static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 10;   ///< IBD FIX: Increased to 10s - 5s was still too aggressive for cross-region peers
 static constexpr int MAX_CHUNKS_PER_PEER = 4;            ///< Max concurrent chunks per peer (16 * 4 = 64 blocks)
 static constexpr int MAX_CHUNK_STALL_COUNT = 50;         ///< Max stalls before peer avoided
 

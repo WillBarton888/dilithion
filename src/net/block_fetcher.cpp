@@ -81,12 +81,6 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     CBlockInFlight inFlight(hash, peer, height);
     mapBlocksInFlight[hash] = inFlight;
 
-    // DEBUG: Log what hash we're storing for later lookup
-    std::cout << "[HASH-DEBUG] RequestBlock: storing hash=" << hash.GetHex().substr(0, 16)
-              << "... height=" << height << " peer=" << peer
-              << " (mapBlocksInFlight size=" << mapBlocksInFlight.size() << ")" << std::endl;
-    std::cout.flush();
-
     // Track peer's blocks (for disconnect handling)
     mapPeerBlocks[peer].insert(hash);
 
@@ -105,13 +99,6 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // DEBUG: Log what hash we're looking up
-    std::cout << "[HASH-DEBUG] MarkBlockReceived: looking for hash=" << hash.GetHex().substr(0, 16)
-              << "... peer=" << peer << " (mapBlocksInFlight size=" << mapBlocksInFlight.size() << ")" << std::endl;
-    std::cout.flush();
-
-    std::cout << "[DEBUG] MarkBlockReceived(peer=" << peer << ", hash=" << hash.GetHex().substr(0, 16) << ")" << std::endl;
-
     // Phase 1: CPeerManager is single source of truth - always notify
     if (g_peer_manager) {
         g_peer_manager->MarkBlockAsReceived(peer, hash);
@@ -120,15 +107,8 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // Check if block was in-flight in local tracking (for timeout tracking)
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
-        // Not tracked locally, but CPeerManager was already notified above
-        std::cout << "[DEBUG]   hash NOT FOUND in mapBlocksInFlight (size=" << mapBlocksInFlight.size() << ")" << std::endl;
-        // Debug: print first few hashes in flight
-        int count = 0;
-        for (const auto& entry : mapBlocksInFlight) {
-            if (count++ < 3) {
-                std::cout << "[DEBUG]     in-flight: " << entry.first.GetHex().substr(0, 16) << "... h=" << entry.second.nHeight << std::endl;
-            }
-        }
+        // Not tracked locally (chunk may have been cancelled), but CPeerManager was notified above
+        // Height-based tracking (OnChunkBlockReceived) handles this case - called separately by caller
         return false;
     }
 

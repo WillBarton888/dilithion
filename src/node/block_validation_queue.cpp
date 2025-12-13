@@ -304,8 +304,10 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     // IBD BOTTLENECK FIX #10: Mark block as received after successful validation
     // This ensures correct sequence: receive → validate → connect → update window
     // Previously MarkBlockReceived() was called before validation, causing sequence issues
+    // IBD FIX: Also call OnChunkBlockReceived for height-based tracking (survives chunk cancellation)
     if (g_node_context.block_fetcher) {
         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
     }
 
     // IBD BOTTLENECK FIX #2: Update window state for ALL validated blocks, not just new tip
