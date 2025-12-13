@@ -1917,6 +1917,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // BUG #86 FIX: Mark block as received even when skipping
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                        // BUG #156 FIX: Also update height-based chunk tracking
+                        // Hash lookup fails when blocks arrive after chunk timeout (mapBlocksInFlight cleared)
+                        // Height-based tracking ensures chunk gets credit even for late arrivals
+                        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
                     }
                     return;
                 }
