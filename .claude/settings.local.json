@@ -355,7 +355,14 @@
       "Bash(ssh root@134.122.4.164 \"ls -la /root/dilithion/dilithion-node && echo ''Build successful''\")",
       "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion; sleep 2; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -5\")",
       "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion; sleep 2; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -5\")",
-      "Bash(ssh root@209.97.177.197 \"tail -5 /root/node.log && pgrep dilithion\")"
+      "Bash(ssh root@209.97.177.197 \"tail -5 /root/node.log && pgrep dilithion\")",
+      "Bash(where:*)",
+      "Bash(where cmake:*)",
+      "Bash(powershell -Command \"(Get-Content ''src/node/block_validation_queue.cpp'') -replace ''m_queue\\.push\\(queued_block\\);'', ''m_queue.push(queued_block);\n        m_queued_heights.insert(expected_height);  // O(1) lookup for IsHeightQueued'' | Set-Content ''src/node/block_validation_queue.cpp''\")",
+      "Bash(git commit -m \"$(cat <<''EOF''\nperf: IBD hang fixes - gradual backpressure and smart window advancement\n\n6 fixes for IBD hang/restart cycle:\n\n1. Gradual backpressure (queue 70-95% = reduced rate, 95+% = stop)\n   instead of binary stop at 80%\n2. Smart window advancement past blocks queued for validation\n3. O(1) IsHeightQueued using auxiliary std::set (was O(n) queue copy)\n4. Increased chunk stall timeout from 10s to 15s\n5. Better window state tracking in AdvanceWindow\n6. HangCause enum + logging for debugging IBD stalls\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(ssh root@134.122.4.164 \"pgrep -a dilithion; tail -5 /root/node.log; date\")",
+      "Bash(ssh root@209.97.177.197 \"pgrep -a dilithion || echo ''Not running''; ls -la /root/.dilithion-testnet/blocks/LOCK 2>/dev/null || echo ''No lock''\")",
+      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -10\")"
     ],
     "deny": [],
     "ask": []

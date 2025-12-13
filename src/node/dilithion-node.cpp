@@ -2157,12 +2157,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Queue for async validation - returns immediately, P2P thread continues
                 int expected_height = pblockIndexPtr->nHeight;
                 if (g_node_context.validation_queue->QueueBlock(peer_id, block, expected_height, pblockIndexPtr)) {
-                    std::cout << "[P2P] Block queued for async validation (height " << expected_height 
+                    std::cout << "[P2P] Block queued for async validation (height " << expected_height
                               << ", queue depth: " << g_node_context.validation_queue->GetQueueDepth() << ")" << std::endl;
-                    // IBD BOTTLENECK FIX #10: Don't mark as received until validation completes
-                    // Previously marked immediately, causing window state inconsistency
-                    // Validation queue will call MarkBlockReceived() after successful validation
-                    // This ensures correct sequence: receive → validate → connect → update window
+                    // IBD HANG FIX: Mark block as received IMMEDIATELY to decrement nBlocksInFlight
+                    // This allows new block requests to be sent while validation is in progress
+                    // Without this, peers appear "at capacity" during slow RandomX validation
+                    // Window state is still updated by OnWindowBlockConnected after validation
+                    g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                     return;  // Return immediately - validation happens in worker thread
                 } else {
                     std::cerr << "[P2P] WARNING: Failed to queue block for async validation, falling back to sync" << std::endl;
