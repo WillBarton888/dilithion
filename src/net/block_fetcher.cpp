@@ -1147,3 +1147,19 @@ bool CBlockFetcher::IsWindowComplete() const
 
     return m_download_window.IsComplete();
 }
+
+bool CBlockFetcher::UpdateWindowTarget(int new_target_height)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return false;
+    }
+
+    bool updated = m_download_window.UpdateTargetHeight(new_target_height);
+    if (updated) {
+        std::cout << "[IBD] IBD HANG FIX #15: Updated window target to " << new_target_height
+                  << " - " << m_download_window.GetStatus() << std::endl;
+    }
+    return updated;
+}

@@ -201,6 +201,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     if (!m_node_context.block_fetcher->IsWindowInitialized()) {
         m_node_context.block_fetcher->InitializeWindow(chain_height, header_height);
         LogPrintIBD(INFO, "Initialized download window: %s", m_node_context.block_fetcher->GetWindowStatus().c_str());
+    } else {
+        // IBD HANG FIX #15: Update window target as new headers arrive
+        // Without this, the window becomes "complete" when header_height grows past initial target
+        m_node_context.block_fetcher->UpdateWindowTarget(header_height);
     }
 
     // IBD HANG FIX #1: Apply gradual backpressure rate multiplier

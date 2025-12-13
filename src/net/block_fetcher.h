@@ -272,6 +272,40 @@ public:
         return ss.str();
     }
 
+    /**
+     * @brief IBD HANG FIX #15: Update target height when headers grow
+     *
+     * During IBD, new headers continue arriving while blocks are being downloaded.
+     * The window target must be updated to include these new heights, otherwise
+     * the window becomes "complete" prematurely and no new heights are requested.
+     *
+     * @param new_target_height New target height (typically current header height)
+     * @return true if target was updated, false if unchanged
+     */
+    bool UpdateTargetHeight(int new_target_height) {
+        if (new_target_height <= m_target_height) {
+            return false;  // Target unchanged or decreased
+        }
+
+        int old_target = m_target_height;
+        m_target_height = new_target_height;
+
+        // If window was "complete" (window_start > old_target), we need to add
+        // new heights to pending to resume downloading
+        if (m_window_start > old_target) {
+            // Window had advanced past old target, but now there's more to download
+            // Add heights from window_start to new window_end as pending
+            int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
+            for (int h = m_window_start; h <= window_end; h++) {
+                if (m_pending.count(h) == 0 && m_in_flight.count(h) == 0 && m_received.count(h) == 0) {
+                    m_pending.insert(h);
+                }
+            }
+        }
+
+        return true;
+    }
+
 private:
     void AdvanceWindow(std::function<bool(int)> is_height_queued_callback = nullptr) {
         // IBD HANG FIX #2: Allow window advancement past queued blocks
@@ -772,6 +806,18 @@ public:
      * @return true if window_start > target_height
      */
     bool IsWindowComplete() const;
+
+    /**
+     * @brief IBD HANG FIX #15: Update window target height when headers grow
+     *
+     * Call this periodically during IBD to update the target height as new
+     * headers are received. This prevents the window from becoming "complete"
+     * prematurely when there are more blocks to download.
+     *
+     * @param new_target_height New target height (current header height)
+     * @return true if target was updated, false if unchanged
+     */
+    bool UpdateWindowTarget(int new_target_height);
 
 private:
     // Phase 1 State Consolidation: PeerDownloadState removed - now tracked in CPeerManager::CPeer
