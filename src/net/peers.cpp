@@ -1049,6 +1049,14 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
     // This function is called every tick during IBD - logging overhead was significant
     // Debug logging can be re-enabled via compile-time flag if needed
 
+    // TEMP DEBUG: Re-enable debug logging to diagnose peer rejection
+    static int debug_counter = 0;
+    bool should_log = (debug_counter++ % 10 == 0);  // Log every 10th call
+    if (should_log) {
+        std::cout << "[DEBUG] GetValidPeersForDownload: peers.size()=" << peers.size()
+                  << ", node_refs.size()=" << node_refs.size() << std::endl;
+    }
+
     for (const auto& pair : peers) {
         int peer_id = pair.first;
         CPeer* peer = pair.second.get();
@@ -1056,6 +1064,7 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
         // BUG #148 FIX: Check if CNode still exists (prevents zombie peer access)
         auto node_it = node_refs.find(peer_id);
         if (node_it == node_refs.end() || node_it->second == nullptr) {
+            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: no CNode" << std::endl;
             continue;
         }
 
@@ -1063,22 +1072,27 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
 
         // BUG #148 FIX: Check if CNode has valid socket
         if (!node->HasValidSocket()) {
+            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: invalid socket" << std::endl;
             continue;
         }
         if (node->fDisconnect.load()) {
+            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: disconnecting" << std::endl;
             continue;
         }
 
         // BUG #148 FIX: Check CPeer::state for handshake completion
         if (!peer->IsHandshakeComplete()) {
+            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: handshake incomplete" << std::endl;
             continue;
         }
 
         // Must be suitable for download (not stalling too much)
         if (!peer->IsSuitableForDownload()) {
+            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: not suitable (stall=" << peer->nStallingCount << ")" << std::endl;
             continue;
         }
 
+        if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " VALID for download" << std::endl;
         result.push_back(pair.first);
     }
 
