@@ -1903,6 +1903,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                       << " (chainHeight=" << currentChainHeight << ", checkpoint=" << checkpointHeight
                       << ", skipPoWCheck=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
 
+            // IBD HANG FIX #8: Update chunk activity IMMEDIATELY when block arrives
+            // This prevents chunk stall detection while blocks are slowly arriving
+            // Must happen BEFORE validation, not after, to keep chunk alive during slow downloads
+            if (g_node_context.block_fetcher) {
+                g_node_context.block_fetcher->UpdateChunkActivity(peer_id);
+            }
+
             // Basic validation: Check PoW (skip for checkpointed blocks)
             if (!skipPoWCheck && !CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[P2P] ERROR: Block from peer " << peer_id << " has invalid PoW" << std::endl;
