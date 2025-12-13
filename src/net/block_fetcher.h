@@ -769,7 +769,11 @@ private:
     // BUG #147 FIX: Match Bitcoin Core's IBD parameters
     static constexpr int MAX_BLOCKS_IN_FLIGHT = 128;         ///< Max total blocks downloading (Bitcoin Core: 128)
     static constexpr int MAX_BLOCKS_PER_PEER = 16;           ///< Max blocks per peer
-    static constexpr auto BLOCK_DOWNLOAD_TIMEOUT = std::chrono::seconds(60);  ///< Timeout per block
+    // IBD HANG FIX #9: Increase block timeout to 120s for cross-region IBD
+    // Previously 60s was too short - blocks would timeout before arriving over slow links
+    // Then CheckStalledChunks() would see "no blocks in-flight" and cancel the chunk
+    // 120s allows sufficient time for cross-region block delivery
+    static constexpr auto BLOCK_DOWNLOAD_TIMEOUT = std::chrono::seconds(120);  ///< Timeout per block
     static constexpr auto STALE_TIP_TIMEOUT = std::chrono::minutes(5);        ///< Time before tip considered stale
     static constexpr int MAX_RETRIES = 3;                    ///< Max retry attempts per block
     static constexpr int PEER_STALL_THRESHOLD = 10;          ///< BUG #61: Stalls before peer avoided (raised from 5)
