@@ -137,41 +137,10 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
         }
     }
 
-    // Phase 3: Update window state - mark as received
-    if (m_window_initialized && height > 0) {
-        m_download_window.OnBlockReceived(height);
-    }
-
-    // Phase 2: Update chunk tracking
-    // Find which peer had this height assigned and update chunk
-    auto height_it = mapHeightToPeer.find(height);
-    if (height_it != mapHeightToPeer.end()) {
-        NodeId chunk_peer = height_it->second;
-        auto chunk_it = mapActiveChunks.find(chunk_peer);
-        if (chunk_it != mapActiveChunks.end()) {
-            PeerChunk& chunk = chunk_it->second;
-            if (height >= chunk.height_start && height <= chunk.height_end) {
-                chunk.blocks_pending--;
-                chunk.blocks_received++;
-                chunk.last_activity = timeReceived;
-
-                // If chunk complete, clean up
-                if (chunk.IsComplete()) {
-                    std::cout << "[Chunk] Peer " << chunk_peer << " completed chunk "
-                              << chunk.height_start << "-" << chunk.height_end
-                              << " (" << chunk.blocks_received << " blocks)" << std::endl;
-
-                    // Clean up height mappings for this chunk
-                    for (int h = chunk.height_start; h <= chunk.height_end; h++) {
-                        mapHeightToPeer.erase(h);
-                    }
-
-                    // Remove completed chunk
-                    mapActiveChunks.erase(chunk_it);
-                }
-            }
-        }
-    }
+    // NOTE: Chunk tracking is now handled by OnChunkBlockReceived() which is
+    // called explicitly by the caller alongside MarkBlockReceived().
+    // This avoids double-counting of blocks_pending decrements.
+    // Window tracking is also done in OnChunkBlockReceived().
 
     // Update global statistics
     nBlocksReceivedTotal++;
