@@ -18,6 +18,7 @@ class CHeadersManager;
 class COrphanManager;
 class CBlockFetcher;
 class CAsyncBroadcaster;
+class CBlockValidationQueue;  // Phase 2: Async block validation queue
 // REMOVED: class CMessageProcessorQueue - unused (CConnman handles messages directly)
 class CRPCServer;
 class CMiningController;
@@ -50,6 +51,7 @@ struct NodeContext {
     std::unique_ptr<CHeadersManager> headers_manager;
     std::unique_ptr<COrphanManager> orphan_manager;
     std::unique_ptr<CBlockFetcher> block_fetcher;
+    std::unique_ptr<CBlockValidationQueue> validation_queue;  // Phase 2: Async block validation
 
     // Transaction relay
     CAsyncBroadcaster* async_broadcaster{nullptr};

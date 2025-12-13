@@ -1468,6 +1468,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
         std::cout << "  [OK] NodeContext initialized" << std::endl;
 
+        // Phase 2: Initialize async block validation queue for IBD performance
+        std::cout << "Initializing async block validation queue..." << std::endl;
+        g_node_context.validation_queue = std::make_unique<CBlockValidationQueue>(g_chainstate, blockchain);
+        if (g_node_context.validation_queue->Start()) {
+            std::cout << "  [OK] Async block validation queue started" << std::endl;
+        } else {
+            std::cerr << "  [WARN] Failed to start validation queue (will use synchronous validation)" << std::endl;
+        }
+
         // Keep legacy globals for backward compatibility during migration
         // TODO: Remove after full migration
         g_peer_manager = g_node_context.peer_manager.get();
@@ -2100,6 +2109,38 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 return;
             }
 
+            // Phase 2: Use async validation queue during IBD to prevent P2P thread blocking
+            // During IBD, ActivateBestChain can take 50-500ms per block, blocking network I/O
+            // Async queue allows P2P thread to continue receiving blocks while validation happens
+            bool useAsyncValidation = false;
+            if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
+                // Use async validation during IBD (when headers are significantly ahead)
+                int header_height = g_node_context.headers_manager ? 
+                    g_node_context.headers_manager->GetBestHeight() : currentChainHeight;
+                int blocks_behind = header_height - currentChainHeight;
+                
+                // Use async validation if we're more than 10 blocks behind (active IBD)
+                useAsyncValidation = (blocks_behind > 10);
+            }
+
+            if (useAsyncValidation) {
+                // Queue for async validation - returns immediately, P2P thread continues
+                int expected_height = pblockIndexPtr->nHeight;
+                if (g_node_context.validation_queue->QueueBlock(peer_id, block, expected_height, pblockIndexPtr)) {
+                    std::cout << "[P2P] Block queued for async validation (height " << expected_height 
+                              << ", queue depth: " << g_node_context.validation_queue->GetQueueDepth() << ")" << std::endl;
+                    // Mark block as received immediately (validation will happen async)
+                    if (g_node_context.block_fetcher) {
+                        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                    }
+                    return;  // Return immediately - validation happens in worker thread
+                } else {
+                    std::cerr << "[P2P] WARNING: Failed to queue block for async validation, falling back to sync" << std::endl;
+                    // Fall through to synchronous validation
+                }
+            }
+
+            // Synchronous validation (fallback or non-IBD mode)
             // Activate best chain (handles reorg if needed)
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {

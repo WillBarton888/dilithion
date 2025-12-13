@@ -1,0 +1,185 @@
+// Copyright (c) 2025 The Dilithion Core developers
+// Distributed under the MIT software license
+
+#ifndef DILITHION_NODE_BLOCK_VALIDATION_QUEUE_H
+#define DILITHION_NODE_BLOCK_VALIDATION_QUEUE_H
+
+#include <cstdint>
+#include <chrono>
+#include <condition_variable>
+#include <map>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <atomic>
+#include <future>
+#include <string>
+
+// Forward declarations
+class CChainState;
+class CBlockchainDB;
+class CBlock;
+class CBlockIndex;
+class uint256;
+
+/**
+ * @brief Async block validation queue for IBD performance optimization
+ *
+ * Phase 2: Implements asynchronous block validation to prevent P2P thread
+ * blocking during ActivateBestChain() calls (50-500ms per block).
+ *
+ * Architecture:
+ * - P2P thread: Receives block → PoW check → Save to DB → Queue for validation → Return immediately
+ * - Validation worker: Processes queue in height order → ActivateBestChain() → UTXO validation
+ *
+ * Benefits:
+ * - P2P thread can continue receiving blocks while validation happens
+ * - Blocks arrive faster during IBD (no blocking on slow validation)
+ * - Better parallelization of network I/O and CPU validation
+ *
+ * Reference: Bitcoin Core PR #16175 (Async ProcessNewBlock)
+ */
+class CBlockValidationQueue {
+public:
+    /**
+     * @brief Block queued for async validation
+     */
+    struct QueuedBlock {
+        CBlock block;
+        int peer_id;
+        uint256 hash;
+        int expected_height;
+        int64_t queued_time;
+        CBlockIndex* pindex;  // Block index (if already created)
+
+        // Priority queue comparator: process lower heights first (min-heap)
+        bool operator<(const QueuedBlock& other) const {
+            return expected_height > other.expected_height;  // Min-heap by height
+        }
+    };
+
+    /**
+     * @brief Statistics for monitoring queue performance
+     */
+    struct Stats {
+        size_t queue_depth{0};
+        size_t total_queued{0};
+        size_t total_validated{0};
+        size_t total_rejected{0};
+        double avg_validation_time_ms{0.0};
+        int last_validated_height{-1};
+        int64_t last_validation_time{0};
+    };
+
+    /**
+     * @brief Constructor
+     * @param chainstate Chain state for ActivateBestChain
+     * @param db Blockchain database for block storage
+     */
+    explicit CBlockValidationQueue(CChainState& chainstate, CBlockchainDB& db);
+
+    /**
+     * @brief Destructor - stops worker thread
+     */
+    ~CBlockValidationQueue();
+
+    /**
+     * @brief Start the validation worker thread
+     * @return true on success, false if already running
+     */
+    bool Start();
+
+    /**
+     * @brief Stop the validation worker thread
+     */
+    void Stop();
+
+    /**
+     * @brief Check if worker thread is running
+     */
+    bool IsRunning() const { return m_running.load(); }
+
+    /**
+     * @brief Queue block for async validation (returns immediately)
+     *
+     * Performs cheap checks (PoW, duplicate, parent exists) then queues
+     * for full validation in worker thread.
+     *
+     * @param peer_id Peer that sent the block
+     * @param block Block to validate
+     * @param expected_height Expected height (from headers)
+     * @param pindex Block index (if already created)
+     * @return true if queued successfully, false if queue is full or invalid
+     */
+    bool QueueBlock(int peer_id, const CBlock& block, int expected_height, CBlockIndex* pindex = nullptr);
+
+    /**
+     * @brief Wait for specific block to be validated
+     * @param hash Block hash to wait for
+     * @param timeout Maximum time to wait
+     * @return true if validated successfully, false on timeout or rejection
+     */
+    bool WaitForBlock(const uint256& hash, std::chrono::milliseconds timeout);
+
+    /**
+     * @brief Get the last validated block height
+     */
+    int GetLastValidatedHeight() const { return m_last_validated_height.load(); }
+
+    /**
+     * @brief Get queue statistics
+     */
+    Stats GetStats() const;
+
+    /**
+     * @brief Get current queue depth (for backpressure)
+     */
+    size_t GetQueueDepth() const;
+
+private:
+    /**
+     * @brief Validation worker thread main loop
+     */
+    void ValidationWorker();
+
+    /**
+     * @brief Process a single block from the queue
+     * @param queued_block Block to process
+     * @return true if validated successfully, false if rejected
+     */
+    bool ProcessBlock(const QueuedBlock& queued_block);
+
+    /**
+     * @brief Notify waiting threads that block validation completed
+     * @param hash Block hash
+     * @param success Whether validation succeeded
+     */
+    void NotifyBlockValidated(const uint256& hash, bool success);
+
+    CChainState& m_chainstate;
+    CBlockchainDB& m_db;
+
+    // Priority queue for blocks (min-heap by height)
+    std::priority_queue<QueuedBlock> m_queue;
+    mutable std::mutex m_queue_mutex;
+    std::condition_variable m_queue_cv;
+
+    // Worker thread
+    std::thread m_worker;
+    std::atomic<bool> m_running{false};
+    std::atomic<int> m_last_validated_height{-1};
+
+    // Blocking notifications for WaitForBlock()
+    std::map<uint256, std::promise<bool>> m_pending_notifications;
+    mutable std::mutex m_notify_mutex;
+
+    // Statistics
+    mutable Stats m_stats{};
+    mutable std::mutex m_stats_mutex;
+
+    // Maximum queue depth (backpressure limit)
+    static constexpr size_t MAX_QUEUE_DEPTH = 100;
+};
+
+#endif // DILITHION_NODE_BLOCK_VALIDATION_QUEUE_H
+

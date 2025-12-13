@@ -87,6 +87,12 @@ void NodeContext::Shutdown() {
         message_processor = nullptr;
     }
 
+    // Phase 2: Stop validation queue before IBD managers
+    if (validation_queue) {
+        validation_queue->Stop();
+        validation_queue.reset();
+    }
+
     // Reset IBD managers (unique_ptr will handle cleanup)
     block_fetcher.reset();
     orphan_manager.reset();
@@ -120,6 +126,7 @@ void NodeContext::Reset() {
     headers_manager.reset();
     orphan_manager.reset();
     block_fetcher.reset();
+    validation_queue.reset();  // Phase 2: Reset validation queue
     async_broadcaster = nullptr;
     rpc_server = nullptr;
     miner = nullptr;

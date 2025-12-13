@@ -114,6 +114,17 @@ bool CIbdCoordinator::ShouldAttemptDownload() const {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_ibd_attempt);
 
+    // Phase 2: Backpressure check - slow down if validation queue is full
+    // Prevents queue from growing unbounded and consuming memory
+    if (m_node_context.validation_queue && m_node_context.validation_queue->IsRunning()) {
+        size_t queue_depth = m_node_context.validation_queue->GetQueueDepth();
+        if (queue_depth > 50) {
+            // Queue is getting full - slow down downloads to let validation catch up
+            LogPrintIBD(DEBUG, "Validation queue depth %zu - slowing down downloads", queue_depth);
+            return false;  // Skip this attempt
+        }
+    }
+
     // BUG #147 FIX: During active IBD (blocks download), be aggressive - minimal backoff
     // Only use exponential backoff when truly stuck (no work available, no peers)
     int backoff_seconds;
