@@ -104,17 +104,21 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Phase 1: CPeerManager is single source of truth - always notify
-    if (g_peer_manager) {
-        g_peer_manager->MarkBlockAsReceived(peer, hash);
-    }
-
     // Check if block was in-flight in local tracking (for timeout tracking)
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
-        // Not tracked locally (chunk may have been cancelled), but CPeerManager was notified above
-        // Height-based tracking (OnChunkBlockReceived) handles this case - called separately by caller
+        // Not tracked locally (chunk may have been cancelled)
+        // IBD HANG FIX #10: Don't notify CPeerManager if block wasn't tracked
+        // This prevents double-decrement of nBlocksInFlight when MarkBlockReceived
+        // is called multiple times (e.g., from both handler and validation queue)
+        // Height-based tracking (OnChunkBlockReceived) handles late arrivals - called separately by caller
         return false;
+    }
+
+    // IBD HANG FIX #10: Only notify CPeerManager for blocks we actually tracked
+    // Previously called unconditionally, causing nBlocksInFlight to go negative
+    if (g_peer_manager) {
+        g_peer_manager->MarkBlockAsReceived(peer, hash);
     }
 
     int height = it->second.nHeight;
