@@ -599,15 +599,18 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
 
     int new_blocks = height_end - height_start + 1;
 
-    // Phase 1 FIX: Allow multiple chunks per peer (up to MAX_CHUNKS_PER_PEER * MAX_BLOCKS_PER_CHUNK)
+    // Phase 1 FIX: Allow multiple chunks per peer
     // Instead of blocking, EXTEND existing chunk with new heights
     auto it = mapActiveChunks.find(peer_id);
     if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
         PeerChunk& existing = it->second;
         int current_pending = existing.blocks_pending;
-        int max_blocks_per_peer = MAX_CHUNKS_PER_PEER * MAX_BLOCKS_PER_CHUNK;  // 4 * 16 = 64
 
-        if (current_pending + new_blocks > max_blocks_per_peer) {
+        // IBD HANG FIX #11: Match per-peer chunk limit to MAX_BLOCKS_IN_FLIGHT_PER_PEER
+        // Previously: max_blocks_per_peer = 4 * 16 = 64 (mismatch with 128 capacity)
+        // This caused "no suitable peers" when chunks hit 64 despite 128 capacity
+        int max_per_peer = CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER;  // 128
+        if (current_pending + new_blocks > max_per_peer) {
             // Peer already has maximum blocks in-flight
             return false;
         }
