@@ -107,16 +107,17 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // Check if block was in-flight in local tracking (for timeout tracking)
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
-        // Not tracked locally (chunk may have been cancelled)
-        // IBD HANG FIX #10: Don't notify CPeerManager if block wasn't tracked
-        // This prevents double-decrement of nBlocksInFlight when MarkBlockReceived
-        // is called multiple times (e.g., from both handler and validation queue)
-        // Height-based tracking (OnChunkBlockReceived) handles late arrivals - called separately by caller
-        return false;
+        // Not tracked locally (chunk may have been cancelled/timed out)
+        // IBD HANG FIX #13: ALWAYS notify CPeerManager to decrement nBlocksInFlight
+        // CPeerManager::MarkBlockAsReceived handles untracked blocks gracefully
+        // by decrementing the receiving peer's counter (prevents "all peers at capacity" stall)
+        if (g_peer_manager) {
+            g_peer_manager->MarkBlockAsReceived(peer, hash);
+        }
+        return false;  // Still return false so caller knows it wasn't in local tracking
     }
 
-    // IBD HANG FIX #10: Only notify CPeerManager for blocks we actually tracked
-    // Previously called unconditionally, causing nBlocksInFlight to go negative
+    // Block was in local tracking - notify CPeerManager and continue with stats update
     if (g_peer_manager) {
         g_peer_manager->MarkBlockAsReceived(peer, hash);
     }
