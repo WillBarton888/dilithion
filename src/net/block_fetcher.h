@@ -33,11 +33,17 @@ typedef int NodeId;
 
 /**
  * Bitcoin Core IBD Constants
+ *
+ * These values match Bitcoin Core defaults for proven performance:
+ * - 16 blocks/chunk: Small enough for fast stall detection, large enough for efficiency
+ * - 2 second timeout: Aggressive stall detection (Bitcoin Core default)
+ * - 4 chunks per peer: Allows 64 blocks in-flight per peer (16 * 4)
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
-static constexpr int MAX_BLOCKS_PER_CHUNK = 64;          ///< Blocks assigned per peer at a time (increased from 16 for faster IBD)
-static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 10;   ///< Stall detection timeout (10s provides fast recovery while allowing network latency)
-static constexpr int MAX_CHUNK_STALL_COUNT = 50;         ///< Max stalls before peer avoided (increased from 10 for IBD)
+static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
+static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 2;    ///< Stall timeout in seconds (Bitcoin Core: 2s default)
+static constexpr int MAX_CHUNKS_PER_PEER = 4;            ///< Max concurrent chunks per peer (16 * 4 = 64 blocks)
+static constexpr int MAX_CHUNK_STALL_COUNT = 50;         ///< Max stalls before peer avoided
 
 /**
  * @struct PeerChunk

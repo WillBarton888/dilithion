@@ -627,11 +627,6 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         return false;
     }
 
-    // Check if peer already has an active chunk
-    if (mapActiveChunks.count(peer_id) > 0 && !mapActiveChunks[peer_id].IsComplete()) {
-        return false;  // Peer must complete current chunk first
-    }
-
     // Validate height range
     if (height_end < height_start) {
         return false;
@@ -644,7 +639,39 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         }
     }
 
-    // Create chunk assignment
+    int new_blocks = height_end - height_start + 1;
+
+    // Phase 1 FIX: Allow multiple chunks per peer (up to MAX_CHUNKS_PER_PEER * MAX_BLOCKS_PER_CHUNK)
+    // Instead of blocking, EXTEND existing chunk with new heights
+    auto it = mapActiveChunks.find(peer_id);
+    if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
+        PeerChunk& existing = it->second;
+        int current_pending = existing.blocks_pending;
+        int max_blocks_per_peer = MAX_CHUNKS_PER_PEER * MAX_BLOCKS_PER_CHUNK;  // 4 * 16 = 64
+
+        if (current_pending + new_blocks > max_blocks_per_peer) {
+            // Peer already has maximum blocks in-flight
+            return false;
+        }
+
+        // EXTEND existing chunk: expand range and add pending blocks
+        existing.height_end = std::max(existing.height_end, height_end);
+        existing.height_start = std::min(existing.height_start, height_start);
+        existing.blocks_pending += new_blocks;
+        existing.last_activity = std::chrono::steady_clock::now();
+
+        // Map new heights to peer
+        for (int h = height_start; h <= height_end; h++) {
+            mapHeightToPeer[h] = peer_id;
+        }
+
+        std::cout << "[Chunk] EXTENDED peer " << peer_id << " chunk to "
+                  << existing.height_start << "-" << existing.height_end
+                  << " (+" << new_blocks << " blocks, total pending=" << existing.blocks_pending << ")" << std::endl;
+        return true;
+    }
+
+    // Create NEW chunk assignment (no existing chunk or existing is complete)
     PeerChunk chunk(peer_id, height_start, height_end);
     mapActiveChunks[peer_id] = chunk;
 

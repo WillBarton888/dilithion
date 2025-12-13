@@ -154,7 +154,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         LogPrintIBD(INFO, "Initialized download window: %s", m_node_context.block_fetcher->GetWindowStatus().c_str());
     }
 
-    int blocks_to_queue = std::min(100, header_height - chain_height);
+    // Phase 1 FIX: Queue more blocks per tick (was 100, now matches window capacity)
+    int blocks_to_queue = std::min(BLOCK_DOWNLOAD_WINDOW_SIZE, header_height - chain_height);
     LogPrintIBD(INFO, "Queueing %d blocks for download...", blocks_to_queue);
 
     BENCHMARK_START("ibd_queue_blocks");
@@ -216,17 +217,12 @@ bool CIbdCoordinator::FetchBlocks() {
     int header_height = m_node_context.headers_manager->GetBestHeight();
     int total_chunks_assigned = 0;
 
-    // For each peer with capacity, assign a full chunk
+    // For each peer with capacity, assign chunks (Phase 1 FIX: allow multiple chunks per peer)
     for (int peer_id : available_peers) {
         auto peer = m_node_context.peer_manager->GetPeer(peer_id);
         if (!peer) continue;
 
-        // Skip if peer already has an active chunk
-        if (m_node_context.block_fetcher->GetPeerChunk(peer_id) != nullptr) {
-            continue;
-        }
-
-        // Skip if peer at capacity
+        // Skip if peer at capacity (AssignChunkToPeer will extend existing chunks)
         if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
             continue;
         }
