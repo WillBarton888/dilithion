@@ -1870,30 +1870,28 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register block handler to validate and save received blocks
         message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
-            // CHECKPOINT OPTIMIZATION: Skip RandomX for blocks at/below checkpoint
-            // Use chain tip height as proxy - if tip < checkpoint, we're still in checkpointed zone
-            // This avoids expensive parent lookups and handles out-of-order block arrival
+            // BUG #152 FIX: ALWAYS use canonical (RandomX) hash for block identity
+            // The hashPrevBlock in received blocks is ALWAYS the RandomX hash
+            // (set by miner), so chainstate MUST be indexed by RandomX hash for
+            // parent lookups to work. FastHash optimization broke parent linkage.
+            //
+            // Checkpoint optimization: Skip PoW CHECK only, not hash computation
             int currentChainHeight = g_chainstate.GetHeight();
             int checkpointHeight = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
-            // If current chain is below checkpoint, use FastHash (blocks arrive in ~order during IBD)
-            // Once we pass checkpoint, switch to full RandomX validation
-            uint256 blockHash;
-            bool skipPoWCheck = false;
-            if (checkpointHeight > 0 && currentChainHeight < checkpointHeight) {
-                // CHECKPOINT OPTIMIZATION: Use FastHash and skip PoW for trusted blocks
-                blockHash = block.GetFastHash();
-                skipPoWCheck = true;
-            } else {
-                // Above checkpoint - use full RandomX hash and PoW validation
-                blockHash = block.GetHash();
-            }
+            // ALWAYS use canonical RandomX hash for block identity/indexing
+            // GetHash() caches result, so subsequent calls are free
+            uint256 blockHash = block.GetHash();
+
+            // Skip PoW validation (target check) for blocks below checkpoint
+            // Hash is still computed for identity, just skip the target comparison
+            bool skipPoWCheck = (checkpointHeight > 0 && currentChainHeight < checkpointHeight);
 
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
                       << blockHash.GetHex().substr(0, 16) << "..."
                       << " (chainHeight=" << currentChainHeight << ", checkpoint=" << checkpointHeight
-                      << ", fastHash=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
+                      << ", skipPoWCheck=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
 
             // Basic validation: Check PoW (skip for checkpointed blocks)
             if (!skipPoWCheck && !CheckProofOfWork(blockHash, block.nBits)) {
