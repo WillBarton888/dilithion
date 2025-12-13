@@ -141,14 +141,16 @@ public:
 
     /**
      * Push message by node ID
+     * @return true if message was queued, false if node not found
      */
-    void PushMessage(int nodeid, CSerializedNetMsg&& msg);
+    bool PushMessage(int nodeid, CSerializedNetMsg&& msg);
 
     /**
      * Push CNetMessage (converts to CSerializedNetMsg)
      * Convenience method for compatibility with existing code
+     * @return true if message was queued, false if node not found
      */
-    void PushMessage(int nodeid, const class CNetMessage& msg);
+    bool PushMessage(int nodeid, const class CNetMessage& msg);
 
     /**
      * Push CNetMessage by node pointer

@@ -461,19 +461,22 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg) {
     pnode->PushSendMsg(std::move(msg));
 }
 
-void CConnman::PushMessage(int nodeid, CSerializedNetMsg&& msg) {
+bool CConnman::PushMessage(int nodeid, CSerializedNetMsg&& msg) {
     CNode* pnode = GetNode(nodeid);
-    if (pnode) {
-        PushMessage(pnode, std::move(msg));
+    if (!pnode) {
+        LogPrintf(NET, WARN, "[CConnman] PushMessage failed: node %d not found\n", nodeid);
+        return false;
     }
+    PushMessage(pnode, std::move(msg));
+    return true;
 }
 
-void CConnman::PushMessage(int nodeid, const CNetMessage& msg) {
+bool CConnman::PushMessage(int nodeid, const CNetMessage& msg) {
     // Convert CNetMessage to CSerializedNetMsg
     std::string command = msg.header.GetCommand();
     std::vector<uint8_t> data = msg.Serialize();
     CSerializedNetMsg serialized(std::move(command), std::move(data));
-    PushMessage(nodeid, std::move(serialized));
+    return PushMessage(nodeid, std::move(serialized));
 }
 
 void CConnman::PushMessage(CNode* pnode, const CNetMessage& msg) {
@@ -1185,8 +1188,8 @@ void CConnman::ExtractMessages(CNode* pnode) {
 }
 
 void CConnman::DisconnectNodes() {
-    // BUG #148 FIX: Collect nodes to disconnect first, then notify CPeerManager
-    // This prevents zombie peers in CPeerManager that reference destroyed CNodes
+    // BUG #148 + BUG #153 FIX: Remove from CPeerManager BEFORE destroying CNode
+    // This eliminates race window where node_refs could point to freed memory
     std::vector<int> nodes_to_remove;
 
     {
@@ -1195,7 +1198,15 @@ void CConnman::DisconnectNodes() {
         auto it = m_nodes.begin();
         while (it != m_nodes.end()) {
             if ((*it)->fDisconnect.load()) {
-                nodes_to_remove.push_back((*it)->id);
+                int node_id = (*it)->id;
+                nodes_to_remove.push_back(node_id);
+
+                // BUG #153 FIX: Remove from CPeerManager BEFORE destroying CNode
+                // This ensures node_refs is cleared while CNode still exists
+                if (m_peer_manager) {
+                    m_peer_manager->RemoveNode(node_id);
+                }
+
                 (*it)->CloseSocket();
                 it = m_nodes.erase(it);
             } else {
@@ -1204,11 +1215,10 @@ void CConnman::DisconnectNodes() {
         }
     }
 
-    // Notify CPeerManager AFTER releasing cs_vNodes to avoid lock ordering issues
+    // Notify disconnection AFTER erase (safe since peer already removed)
     if (m_peer_manager) {
         for (int node_id : nodes_to_remove) {
             m_peer_manager->OnPeerDisconnected(node_id);
-            m_peer_manager->RemoveNode(node_id);
         }
     }
 }

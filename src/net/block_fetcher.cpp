@@ -867,6 +867,19 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
     return true;
 }
 
+void CBlockFetcher::UpdateChunkActivity(NodeId peer_id)
+{
+    // BUG #155 FIX: Update last_activity after sending GETDATA
+    // This prevents false stall detection when network is slow
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+    auto it = mapActiveChunks.find(peer_id);
+    if (it != mapActiveChunks.end()) {
+        it->second.last_activity = std::chrono::steady_clock::now();
+        std::cout << "[Chunk] Updated activity timer for peer " << peer_id
+                  << " chunk " << it->second.height_start << "-" << it->second.height_end << std::endl;
+    }
+}
+
 NodeId CBlockFetcher::GetPeerForHeight(int height) const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);

@@ -298,7 +298,19 @@ bool CIbdCoordinator::FetchBlocks() {
         if (!getdata.empty()) {
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
             std::cout << "[GETDATA-DEBUG] Sending to peer " << peer_id << std::endl;
-            m_node_context.connman->PushMessage(peer_id, msg);
+
+            // BUG #154 FIX: Check if message was sent successfully
+            bool sent = m_node_context.connman->PushMessage(peer_id, msg);
+            if (!sent) {
+                LogPrintIBD(WARN, "GETDATA send failed for peer %d - cancelling chunk", peer_id);
+                m_node_context.block_fetcher->CancelStalledChunk(peer_id);
+                continue;  // Try next peer
+            }
+
+            // BUG #155 FIX: Update activity timer after successful GETDATA send
+            // This prevents false stall detection when network is slow
+            m_node_context.block_fetcher->UpdateChunkActivity(peer_id);
+
             total_chunks_assigned++;
 
             LogPrintIBD(INFO, "Assigned chunk %d-%d (%zu blocks) to peer %d [%s]",
@@ -309,31 +321,7 @@ bool CIbdCoordinator::FetchBlocks() {
         }
     }
 
-    if (total_chunks_assigned == 0) {
-        // Fall back to old approach if chunk assignment didn't work
-        // (e.g., all peers already have active chunks)
-        auto blocks_to_fetch = m_node_context.block_fetcher->GetNextBlocksToFetch(16);
-        if (!blocks_to_fetch.empty()) {
-            std::map<NodeId, std::vector<std::pair<uint256, int>>> peer_blocks;
-
-            for (const auto& [hash, height] : blocks_to_fetch) {
-                NodeId peer = m_node_context.block_fetcher->SelectPeerForDownload(hash);
-                if (peer != -1 && m_node_context.block_fetcher->RequestBlock(peer, hash, height)) {
-                    peer_blocks[peer].emplace_back(hash, height);
-                }
-            }
-
-            for (const auto& [peer, blocks] : peer_blocks) {
-                std::vector<NetProtocol::CInv> getdata;
-                for (const auto& [hash, height] : blocks) {
-                    getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-                }
-                CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-                m_node_context.connman->PushMessage(peer, msg);
-                total_chunks_assigned++;
-            }
-        }
-    }
+    // Legacy per-block fallback removed - chunk system is now the only path
 
     return total_chunks_assigned > 0;
 }

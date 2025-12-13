@@ -558,6 +558,16 @@ public:
     bool CancelStalledChunk(NodeId peer_id);
 
     /**
+     * @brief Update chunk activity timestamp (call after sending GETDATA)
+     *
+     * BUG #155 FIX: Prevents false stall detection when network is slow.
+     * Call this immediately after successfully sending GETDATA for a chunk.
+     *
+     * @param peer_id Peer ID to update
+     */
+    void UpdateChunkActivity(NodeId peer_id);
+
+    /**
      * @brief Get the peer assigned to download a specific height
      *
      * @param height Block height
