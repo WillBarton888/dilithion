@@ -5,7 +5,7 @@
 
 #include <consensus/chain.h>
 #include <consensus/pow.h>
-#include <core/blockchain_storage.h>
+#include <node/blockchain_storage.h>
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <net/peers.h>
