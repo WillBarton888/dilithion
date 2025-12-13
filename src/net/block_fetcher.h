@@ -794,7 +794,8 @@ private:
     // Configuration
     // BUG #147 FIX: Match Bitcoin Core's IBD parameters
     static constexpr int MAX_BLOCKS_IN_FLIGHT = 128;         ///< Max total blocks downloading (Bitcoin Core: 128)
-    static constexpr int MAX_BLOCKS_PER_PEER = 16;           ///< Max blocks per peer
+    // IBD FIX #11: Increased from 16 to 64 for high-latency single-peer IBD
+    static constexpr int MAX_BLOCKS_PER_PEER = 64;           ///< Max blocks per peer
     // IBD HANG FIX #9: Increase block timeout to 120s for cross-region IBD
     // Previously 60s was too short - blocks would timeout before arriving over slow links
     // Then CheckStalledChunks() would see "no blocks in-flight" and cancel the chunk

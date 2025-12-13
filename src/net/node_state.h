@@ -207,10 +207,11 @@ private:
     std::map<uint256, std::pair<NodeId, std::list<QueuedBlock>::iterator>> mapBlocksInFlight;
 
     //! Maximum blocks in flight per peer
-    static constexpr int MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
+    //! IBD FIX #11: Increased from 16 to 64 for high-latency single-peer IBD
+    static constexpr int MAX_BLOCKS_IN_FLIGHT_PER_PEER = 64;
 
     //! Maximum total blocks in flight across all peers
-    static constexpr int MAX_BLOCKS_IN_FLIGHT_TOTAL = 64;
+    static constexpr int MAX_BLOCKS_IN_FLIGHT_TOTAL = 128;
 };
 
 #endif // DILITHION_NET_NODE_STATE_H

@@ -311,8 +311,11 @@ public:
     std::map<uint256, std::pair<int, std::list<QueuedBlock>::iterator>> mapBlocksInFlight;
 
     // Block flight limits
-    static constexpr int MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
-    static constexpr int MAX_BLOCKS_IN_FLIGHT_TOTAL = 64;
+    // IBD FIX #11: Increased from 16 to 64 for high-latency single-peer IBD
+    // With only 1-2 peers and 80+ second cross-region latency, 16 blocks
+    // causes 80-second stalls between bursts. 64 allows continuous download.
+    static constexpr int MAX_BLOCKS_IN_FLIGHT_PER_PEER = 64;
+    static constexpr int MAX_BLOCKS_IN_FLIGHT_TOTAL = 128;
 
     // Block tracking methods
     bool MarkBlockAsInFlight(int peer_id, const uint256& hash, const CBlockIndex* pindex);
