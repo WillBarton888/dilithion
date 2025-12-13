@@ -978,14 +978,14 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
 
     // IBD HANG FIX #2: Pass callback to check if height is queued for validation
     // This allows window to advance past blocks that are queued (processing) vs stuck
-    std::function<bool(int)> is_height_queued = nullptr;
     if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
-        is_height_queued = [](int h) {
+        auto is_height_queued = [](int h) -> bool {
             return g_node_context.validation_queue->IsHeightQueued(h);
         };
+        m_download_window.OnBlockConnected(height, is_height_queued);
+    } else {
+        m_download_window.OnBlockConnected(height);
     }
-
-    m_download_window.OnBlockConnected(height, is_height_queued);
 }
 
 bool CBlockFetcher::IsWindowInitialized() const
