@@ -2167,6 +2167,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Without this, peers appear "at capacity" during slow RandomX validation
                     // Window state is still updated by OnWindowBlockConnected after validation
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                    // IBD HANG FIX #17: Also update window tracking when block received
+                    // Without this, window's m_in_flight set never clears, causing stalls every 128 blocks
+                    g_node_context.block_fetcher->OnChunkBlockReceived(expected_height);
                     return;  // Return immediately - validation happens in worker thread
                 } else {
                     std::cerr << "[P2P] WARNING: Failed to queue block for async validation, falling back to sync" << std::endl;

@@ -362,7 +362,19 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nperf: IBD hang fixes - gradual backpressure and smart window advancement\n\n6 fixes for IBD hang/restart cycle:\n\n1. Gradual backpressure (queue 70-95% = reduced rate, 95+% = stop)\n   instead of binary stop at 80%\n2. Smart window advancement past blocks queued for validation\n3. O(1) IsHeightQueued using auxiliary std::set (was O(n) queue copy)\n4. Increased chunk stall timeout from 10s to 15s\n5. Better window state tracking in AdvanceWindow\n6. HangCause enum + logging for debugging IBD stalls\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(ssh root@134.122.4.164 \"pgrep -a dilithion; tail -5 /root/node.log; date\")",
       "Bash(ssh root@209.97.177.197 \"pgrep -a dilithion || echo ''Not running''; ls -la /root/.dilithion-testnet/blocks/LOCK 2>/dev/null || echo ''No lock''\")",
-      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -10\")"
+      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -10\")",
+      "Bash(for i in 1 2 3 4 5 6)",
+      "Bash(do ssh root@188.166.255.63 \"grep ''chain='' /root/node.log | tail -1\")",
+      "Bash(do ssh root@209.97.177.197 \"grep ''chain='' /root/node.log | tail -1\")",
+      "Bash(ssh root@134.122.4.164 \"cd /root/dilithion && git status\")",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: IBD HANG FIX #16 - Remove legacy CNodeStateManager, fix nBlocksInFlight stuck\n\nPhase 1: Remove legacy CNodeStateManager\n- Delete node_state.cpp entirely\n- Strip node_state.h to just QueuedBlock struct (still used by peers.h)\n- Remove CNodeStateManager calls from net.cpp (lines 478, 1734)\n- Remove unnecessary includes from dilithion-node.cpp and block_fetcher.cpp\n- CPeerManager is now single source of truth for peer/block tracking\n\nPhase 2: Fix nBlocksInFlight not decrementing when chunks cancelled\n- In CancelStalledChunk(), add code to remove all blocks for the cancelled\n  peer from both CBlockFetcher::mapBlocksInFlight and CPeerManager tracking\n- This properly decrements nBlocksInFlight, freeing the peer for new work\n- Without this fix, peers get stuck at \"capacity\" (128 blocks) forever\n  causing \"all peers at capacity\" hang\n\nRoot cause: When a chunk was cancelled, blocks remained in tracking and\nnBlocksInFlight was never decremented, so peers appeared permanently full.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(ssh root@134.122.4.164 \"cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1\")",
+      "Bash(ssh root@209.97.177.197 \"cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1 | tail -30\")",
+      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion; sleep 1; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; echo ''Cleared blockchain data for fresh IBD''\")",
+      "Bash(ssh root@209.97.177.197 \"cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@209.97.177.197 \"pgrep -a dilithion && echo ''---'' && tail -30 /root/node.log\")",
+      "Bash(ssh root@209.97.177.197 \"pgrep -a dilithion && echo ''---'' && tail -40 /root/node.log && echo ''---'' && date\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''(nBlocksInFlight|Chunk|capacity|blocks from peer)'' /root/node.log | tail -50\")"
     ],
     "deny": [],
     "ask": []
