@@ -14,6 +14,7 @@
 #include <net/connman.h>  // Phase 5: CConnman
 #include <net/peers.h>
 #include <net/protocol.h>
+#include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <util/logging.h>
 #include <util/bench.h>  // Performance: Benchmarking
 
