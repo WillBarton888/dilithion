@@ -5,6 +5,7 @@
 #include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer block tracking
 #include <net/peers.h>       // Phase A: Unified CPeerManager block tracking
 #include <core/node_context.h>  // IBD HANG FIX #2: For validation queue access
+#include <node/block_validation_queue.h>  // IBD HANG FIX #2: For IsHeightQueued
 #include <iostream>
 #include <algorithm>
 #include <sstream>
