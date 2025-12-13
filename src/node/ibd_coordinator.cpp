@@ -348,7 +348,12 @@ bool CIbdCoordinator::FetchBlocks() {
 
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
             if (hash.IsNull()) continue;  // No header
-            if (m_chainstate.HasBlockIndex(hash)) continue;  // Already have block
+            // IBD HANG FIX #7: Check if block is CONNECTED, not just if we have an index
+            // During async validation, BlockIndex is created before validation completes
+            CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
+            if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                continue;  // Block is actually connected to chain - skip
+            }
 
             valid_heights.push_back(h);
         }
@@ -490,4 +495,5 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         m_node_context.connman->DisconnectNode(peer, "stalling block download");
     }
 }
+
 
