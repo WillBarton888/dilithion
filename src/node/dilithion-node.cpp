@@ -2055,10 +2055,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 // Add block to orphan manager (now validated)
                 if (g_node_context.orphan_manager->AddOrphanBlock(peer_id, block)) {
-                    // FIXED: Use header sync to discover parent instead of direct GETDATA
-                    // Direct GETDATA bypasses CBlockFetcher tracking. Header sync will
-                    // discover the parent and request it through the IBD coordinator.
-                    std::cout << "[P2P] Orphan block stored - triggering header sync for parent" << std::endl;
+                    // ORPHAN BOTTLENECK FIX #9: Request parent through IBD system
+                    // Previously only triggered header sync, which doesn't guarantee parent block request
+                    // Now requests parent block through CBlockFetcher for proper tracking and prioritization
+                    std::cout << "[P2P] Orphan block stored - requesting parent through IBD system" << std::endl;
+
+                    // Request parent block through normal IBD system (high priority)
+                    if (g_node_context.block_fetcher && g_node_context.headers_manager) {
+                        // Estimate parent height (orphan height - 1)
+                        // We don't know exact height, but headers manager can help
+                        int currentHeight = g_chainstate.GetHeight();
+                        int estimatedParentHeight = currentHeight;  // Conservative estimate
+
+                        // Queue parent block for download with high priority
+                        g_node_context.block_fetcher->QueueBlockForDownload(
+                            block.hashPrevBlock,
+                            estimatedParentHeight,
+                            peer_id,  // Prefer same peer that sent orphan
+                            true      // High priority - orphan parent needed urgently
+                        );
+                        std::cout << "[Orphan] Queued parent block " << block.hashPrevBlock.GetHex().substr(0, 16)
+                                  << "... for download (high priority)" << std::endl;
+                    }
+
+                    // Also trigger header sync as fallback (discovers parent if not in headers)
                     if (g_node_context.headers_manager) {
                         uint256 ourBestBlock;
                         if (g_chainstate.GetTip()) {
@@ -2228,13 +2248,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     g_node_context.block_fetcher->OnChunkBlockReceived(pblockIndexPtr->nHeight);
                 }
 
-                // CRITICAL-2 FIX: Iterative orphan resolution with depth limit
-                // Prevents stack overflow from unbounded recursion
+                // ORPHAN BOTTLENECK FIX #1: Async orphan processing
+                // Previously processed orphans synchronously in P2P thread, blocking network I/O
+                // Now queues orphans for async validation, allowing P2P thread to continue immediately
                 // Check if any orphan blocks are now valid children of this block
 
                 static const int MAX_ORPHAN_CHAIN_DEPTH = 100;  // DoS protection
                 std::queue<uint256> orphanQueue;
-                int processedCount = 0;
+                int queuedCount = 0;
 
                 // Seed queue with direct children of this block
                 std::vector<uint256> orphanChildren = g_node_context.orphan_manager->GetOrphanChildren(blockHash);
@@ -2243,69 +2264,105 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 if (!orphanQueue.empty()) {
-                    // Iterative processing instead of recursion
-                    while (!orphanQueue.empty() && processedCount < MAX_ORPHAN_CHAIN_DEPTH) {
+                    // Queue orphans for async processing instead of processing inline
+                    // This prevents blocking the P2P thread during ActivateBestChain() calls
+                    while (!orphanQueue.empty() && queuedCount < MAX_ORPHAN_CHAIN_DEPTH) {
                         uint256 orphanHash = orphanQueue.front();
                         orphanQueue.pop();
 
                         CBlock orphanBlock;
                         if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
-                            // Remove from orphan pool
+                            // Remove from orphan pool immediately (will be processed async)
                             g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
 
-                            // Process the orphan block inline (instead of recursive call)
                             uint256 orphanBlockHash = orphanBlock.GetHash();
 
-                            // Validate PoW
+                            // Quick PoW validation (cheap check before queueing)
                             if (!CheckProofOfWork(orphanBlockHash, orphanBlock.nBits)) {
                                 std::cerr << "[Orphan] ERROR: Orphan block has invalid PoW" << std::endl;
-                                processedCount++;
+                                queuedCount++;
                                 continue;
                             }
 
-                            // Create block index
+                            // Get parent to determine height
+                            CBlockIndex* pOrphanParent = g_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
+                            if (!pOrphanParent) {
+                                std::cerr << "[Orphan] ERROR: Parent not found for orphan block" << std::endl;
+                                queuedCount++;
+                                continue;
+                            }
+
+                            int orphanHeight = pOrphanParent->nHeight + 1;
+
+                            // Create block index for async processing
                             auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock);
                             pOrphanIndex->phashBlock = orphanBlockHash;
                             pOrphanIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+                            pOrphanIndex->pprev = pOrphanParent;
+                            pOrphanIndex->nHeight = orphanHeight;
+                            pOrphanIndex->BuildChainWork();
 
-                            // Link to parent
-                            CBlockIndex* pOrphanParent = g_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
-                            if (pOrphanParent) {
-                                pOrphanIndex->pprev = pOrphanParent;
-                                pOrphanIndex->nHeight = pOrphanParent->nHeight + 1;
-                                pOrphanIndex->BuildChainWork();
+                            // ORPHAN BOTTLENECK FIX #2: Save orphan block to database before queueing
+                            // Orphan blocks need to be persisted before async processing
+                            // This ensures block data is available even if node restarts during processing
+                            if (!blockchain.WriteBlock(orphanBlockHash, orphanBlock)) {
+                                std::cerr << "[Orphan] ERROR: Failed to save orphan block to database" << std::endl;
+                                queuedCount++;
+                                continue;
+                            }
 
-                                // Add to chain state
-                                CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
-                                if (g_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
-                                    // Activate in chain
+                            // Add to chain state (needed for async processing)
+                            CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
+                            if (!g_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
+                                std::cerr << "[Orphan] ERROR: Failed to add orphan block index" << std::endl;
+                                queuedCount++;
+                                continue;
+                            }
+
+                            // Save block index to database (needed for async processing)
+                            if (!blockchain.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw)) {
+                                std::cerr << "[Orphan] ERROR: Failed to save orphan block index to database" << std::endl;
+                                queuedCount++;
+                                continue;
+                            }
+
+                            // Queue for async validation (returns immediately, P2P thread continues)
+                            // Note: Block and index are already saved, so async processing just needs to activate chain
+                            if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
+                                if (g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, pOrphanIndexRaw)) {
+                                    std::cout << "[Orphan] Queued orphan block " << orphanBlockHash.GetHex().substr(0, 16)
+                                              << "... at height " << orphanHeight << " for async validation" << std::endl;
+
+                                    // Queue this block's orphan children for processing
+                                    std::vector<uint256> nextOrphans = g_node_context.orphan_manager->GetOrphanChildren(orphanBlockHash);
+                                    for (const uint256& nextHash : nextOrphans) {
+                                        orphanQueue.push(nextHash);
+                                    }
+                                } else {
+                                    std::cerr << "[Orphan] WARNING: Failed to queue orphan for async validation, falling back to sync" << std::endl;
+                                    // Fallback: process synchronously if queue is full
+                                    // This should be rare, but prevents orphans from being lost
                                     bool reorg = false;
                                     if (g_chainstate.ActivateBestChain(pOrphanIndexRaw, orphanBlock, reorg)) {
-                                        // Save block to database
-                                        if (!blockchain.WriteBlock(orphanBlockHash, orphanBlock)) {
-                                            std::cerr << "[Orphan] ERROR: Failed to save orphan block to database" << std::endl;
-                                        }
-                                        // BUG #70 FIX: Save block INDEX to database (was missing!)
-                                        // Without this, merkle root is lost on restart because only
-                                        // the block is persisted, not the index with header fields
-                                        if (!blockchain.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw)) {
-                                            std::cerr << "[Orphan] ERROR: Failed to save orphan block index to database" << std::endl;
-                                        }
-
-                                        // Queue this block's orphan children for processing
-                                        std::vector<uint256> nextOrphans = g_node_context.orphan_manager->GetOrphanChildren(orphanBlockHash);
-                                        for (const uint256& nextHash : nextOrphans) {
-                                            orphanQueue.push(nextHash);
-                                        }
+                                        blockchain.WriteBlock(orphanBlockHash, orphanBlock);
+                                        blockchain.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw);
                                     }
+                                }
+                            } else {
+                                // Fallback: process synchronously if validation queue not available
+                                std::cerr << "[Orphan] WARNING: Validation queue not available, processing synchronously" << std::endl;
+                                bool reorg = false;
+                                if (g_chainstate.ActivateBestChain(pOrphanIndexRaw, orphanBlock, reorg)) {
+                                    blockchain.WriteBlock(orphanBlockHash, orphanBlock);
+                                    blockchain.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw);
                                 }
                             }
 
-                            processedCount++;
+                            queuedCount++;
                         }
                     }
 
-                    if (processedCount >= MAX_ORPHAN_CHAIN_DEPTH) {
+                    if (queuedCount >= MAX_ORPHAN_CHAIN_DEPTH) {
                         std::cerr << "[Orphan] WARNING: Orphan chain depth limit reached ("
                                   << MAX_ORPHAN_CHAIN_DEPTH << " blocks)" << std::endl;
                         std::cerr << "  Remaining in queue: " << orphanQueue.size() << std::endl;

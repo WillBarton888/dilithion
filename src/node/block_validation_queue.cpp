@@ -240,8 +240,12 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     std::cout << "[ValidationQueue] Processing block " << blockHash.GetHex().substr(0, 16)
               << "... at height " << expected_height << std::endl;
 
-    // Ensure block is saved to database (should already be done, but double-check)
+    // ORPHAN BOTTLENECK FIX #2: Ensure block is saved to database
+    // For orphan blocks (peer_id == -1), block should already be saved before queueing
+    // For regular blocks, block is saved in block handler before queueing
+    // This is a safety check - should already be saved, but verify
     if (!m_db.BlockExists(blockHash)) {
+        std::cerr << "[ValidationQueue] WARNING: Block not in database, saving now (should be rare)" << std::endl;
         if (!m_db.WriteBlock(blockHash, block)) {
             std::cerr << "[ValidationQueue] ERROR: Failed to save block to database" << std::endl;
             return false;
@@ -305,8 +309,14 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     // This ensures correct sequence: receive → validate → connect → update window
     // Previously MarkBlockReceived() was called before validation, causing sequence issues
     // IBD FIX: Also call OnChunkBlockReceived for height-based tracking (survives chunk cancellation)
-    if (g_node_context.block_fetcher) {
+    // Note: For orphan blocks (peer_id == -1), MarkBlockReceived may return false (not tracked), which is fine
+    if (g_node_context.block_fetcher && peer_id != -1) {
+        // Only mark as received for regular blocks (not orphan blocks)
+        // Orphan blocks weren't received through normal download flow
         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
+    } else if (g_node_context.block_fetcher && peer_id == -1) {
+        // For orphan blocks, only update window/chunk tracking (no peer stats)
         g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
     }
 

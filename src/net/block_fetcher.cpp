@@ -680,8 +680,7 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // BUG FIX: Update download window tracking FIRST (even if height not in chunk)
-    // This ensures received count is updated for window status reporting
+    // Update download window tracking (even if height not in chunk)
     if (m_window_initialized && height > 0) {
         m_download_window.OnBlockReceived(height);
     }

@@ -348,7 +348,14 @@
       "Bash(ssh root@209.97.177.197 \"grep -E ''chain='' /root/node.log | tail -5\")",
       "Bash(ssh root@209.97.177.197 \"grep ''chain='' /root/node.log | tail -1\")",
       "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion; sleep 3; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make clean && make dilithion-node -j2\")",
-      "Bash(ssh root@209.97.177.197 \"grep -E ''Listening|chain=|ERROR'' /root/node.log | tail -3 && pgrep dilithion || echo ''NOT RUNNING''\")"
+      "Bash(ssh root@209.97.177.197 \"grep -E ''Listening|chain=|ERROR'' /root/node.log | tail -3 && pgrep dilithion || echo ''NOT RUNNING''\")",
+      "Bash(ssh root@134.122.4.164 \"cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1 | tail -40\")",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: Add missing include for CBlockValidationQueue\n\nCursor forgot to include the header for CBlockValidationQueue in\nnode_context.cpp, causing compilation to fail with:\n\"invalid use of incomplete type 'class CBlockValidationQueue'\"\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(ssh root@134.122.4.164 \"cd /root/dilithion && git pull && make dilithion-node -j4 2>&1 | tail -30\")",
+      "Bash(ssh root@134.122.4.164 \"ls -la /root/dilithion/dilithion-node && echo ''Build successful''\")",
+      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion; sleep 2; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -5\")",
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion; sleep 2; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -5\")",
+      "Bash(ssh root@209.97.177.197 \"tail -5 /root/node.log && pgrep dilithion\")"
     ],
     "deny": [],
     "ask": []
