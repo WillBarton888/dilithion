@@ -179,6 +179,21 @@ public:
      * @param height Height to add to pending
      */
     void AddToPending(int height) {
+        // IBD SLOW FIX #3: Expand window automatically if height is outside range
+        // This prevents heights from being silently ignored when outside window range
+        if (height >= m_window_start + WINDOW_SIZE && height <= m_target_height) {
+            // Height is beyond current window but within target - expand window
+            int new_window_start = std::max(m_window_start, height - WINDOW_SIZE + 1);
+            // Advance window start to include this height
+            while (m_window_start < new_window_start && m_window_start <= m_target_height) {
+                // Remove old heights from tracking sets as window advances
+                m_pending.erase(m_window_start);
+                m_in_flight.erase(m_window_start);
+                m_received.erase(m_window_start);
+                m_window_start++;
+            }
+        }
+        
         // Only add if within window range and not already tracked
         if (IsInWindow(height) &&
             m_pending.count(height) == 0 &&
@@ -190,16 +205,41 @@ public:
 
     /**
      * @brief Get next chunk of heights that need to be requested
+     * IBD SLOW FIX #1: Ensure consecutive heights are returned for efficient chunk assignment
      * @param max_count Maximum heights to return
-     * @return Vector of heights from pending set
+     * @return Vector of consecutive heights from pending set
      */
     std::vector<int> GetNextPendingHeights(int max_count) const {
         std::vector<int> result;
         result.reserve(max_count);
 
-        for (int h : m_pending) {
-            if (static_cast<int>(result.size()) >= max_count) break;
-            result.push_back(h);
+        // IBD SLOW FIX #1: Return consecutive heights starting from window_start
+        // This ensures chunks are assigned efficiently without gaps
+        // Previously iterated through set (sorted but might have gaps)
+        // Now starts from window_start and finds consecutive heights
+        
+        int start_height = m_window_start;
+        int consecutive_count = 0;
+        
+        // Try to find consecutive heights starting from window_start
+        for (int h = start_height; h <= m_target_height && consecutive_count < max_count; h++) {
+            if (m_pending.count(h) > 0) {
+                result.push_back(h);
+                consecutive_count++;
+            } else if (!result.empty()) {
+                // Found a gap - stop here to maintain consecutiveness
+                // Next call will start from this height
+                break;
+            }
+            // If result is empty and h not in pending, continue searching
+        }
+        
+        // Fallback: If no consecutive heights found, return any heights (original behavior)
+        if (result.empty()) {
+            for (int h : m_pending) {
+                if (static_cast<int>(result.size()) >= max_count) break;
+                result.push_back(h);
+            }
         }
 
         return result;

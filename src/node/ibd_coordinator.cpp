@@ -334,6 +334,18 @@ bool CIbdCoordinator::FetchBlocks() {
 
     int chain_height = m_chainstate.GetHeight();
     int header_height = m_node_context.headers_manager->GetBestHeight();
+    
+    // IBD SLOW FIX #4: Check for headers sync lag
+    // If headers aren't synced ahead of chain, block downloads will be blocked
+    if (header_height <= chain_height) {
+        static int lag_warnings = 0;
+        if (lag_warnings++ < 5) {
+            LogPrintIBD(WARN, "Headers sync lag detected: header_height=%d <= chain_height=%d - block downloads may be blocked", 
+                       header_height, chain_height);
+        }
+        // Don't return false - headers might sync soon, but log the issue
+    }
+    
     int total_chunks_assigned = 0;
 
     // For each peer with capacity, assign chunks (Phase 1 FIX: allow multiple chunks per peer)
@@ -363,13 +375,23 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // Filter heights: only include those we have headers for and don't have blocks for
+        // IBD SLOW FIX #2: Change break to continue to prevent skipping valid heights
+        // Previously: break on h > header_height stopped iteration, skipping heights after first out-of-range
+        // Now: continue skips out-of-range heights but continues checking remaining heights
         std::vector<int> valid_heights;
         for (int h : chunk_heights) {
-            if (h > header_height) break;  // Don't request beyond headers
+            if (h > header_height) continue;  // IBD SLOW FIX #2: Skip out-of-range but continue checking
             if (h <= chain_height) continue;  // Already have this block
 
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-            if (hash.IsNull()) continue;  // No header
+            if (hash.IsNull()) {
+                // IBD SLOW FIX #6: Log null hash occurrences for debugging
+                static int null_hash_count = 0;
+                if (null_hash_count++ < 10) {
+                    LogPrintIBD(DEBUG, "GetRandomXHashAtHeight(%d) returned null - header may not be synced yet", h);
+                }
+                continue;  // No header
+            }
             // IBD HANG FIX #7: Check if block is CONNECTED, not just if we have an index
             // During async validation, BlockIndex is created before validation completes
             CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);

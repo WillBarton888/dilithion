@@ -633,6 +633,31 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         existing.blocks_pending += actually_new;  // Only count new heights
         existing.last_activity = std::chrono::steady_clock::now();
 
+        // IBD SLOW FIX #5: Ensure extended heights are tracked in window
+        // When chunks extend, heights are added to mapHeightToPeer but may not be in window's m_pending
+        // This ensures window state stays consistent with chunk state
+        if (m_window_initialized && actually_new > 0) {
+            std::vector<int> extended_heights;
+            extended_heights.reserve(actually_new);
+            for (int h = height_start; h <= height_end; h++) {
+                // Check if this height was just assigned to this peer (newly extended)
+                if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] == peer_id) {
+                    // Only add if not already in window tracking sets
+                    if (!m_download_window.IsPending(h) &&
+                        !m_download_window.IsInFlight(h) &&
+                        !m_download_window.IsReceived(h)) {
+                        extended_heights.push_back(h);
+                    }
+                }
+            }
+            // Add extended heights to window's pending set
+            if (!extended_heights.empty()) {
+                for (int h : extended_heights) {
+                    m_download_window.AddToPending(h);
+                }
+            }
+        }
+
         std::cout << "[Chunk] EXTENDED peer " << peer_id << " chunk to "
                   << existing.height_start << "-" << existing.height_end
                   << " (+" << new_blocks << " blocks, total pending=" << existing.blocks_pending << ")" << std::endl;
