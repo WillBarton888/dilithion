@@ -25,6 +25,7 @@ class CMiningController;
 class CWallet;
 class CSocket;
 class CHttpServer;
+class CBlockchainDB;  // IBD HANG FIX #14: Block serving needs database access
 
 /**
  * NodeContext - Bitcoin Core-style global state management
@@ -63,6 +64,9 @@ struct NodeContext {
     CWallet* wallet{nullptr};
     CSocket* p2p_socket{nullptr};
     CHttpServer* http_server{nullptr};
+
+    // IBD HANG FIX #14: Block database for serving blocks to peers
+    CBlockchainDB* blockchain_db{nullptr};
 
     // Node state flags
     std::atomic<bool> running{false};

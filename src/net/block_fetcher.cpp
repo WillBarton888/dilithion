@@ -2,7 +2,7 @@
 // Distributed under the MIT software license
 
 #include <net/block_fetcher.h>
-#include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer block tracking
+// REMOVED: #include <net/node_state.h> - CNodeStateManager replaced by CPeerManager
 #include <net/peers.h>       // Phase A: Unified CPeerManager block tracking
 #include <core/node_context.h>  // IBD HANG FIX #2: For validation queue access
 #include <node/block_validation_queue.h>  // IBD HANG FIX #2: For IsHeightQueued
@@ -930,9 +930,25 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
     // Keep them during grace period so OnChunkBlockReceived() can find them
     // Heights will be erased by CleanupCancelledChunks() after grace period expires
 
-    // IBD HANG FIX #2: DON'T remove blocks from mapBlocksInFlight immediately
-    // They might still arrive - let block-level timeout (60s) handle them
-    // This prevents premature removal when blocks are still in transit
+    // IBD HANG FIX #16: Remove all blocks for this peer from CPeerManager tracking
+    // This decrements nBlocksInFlight so the peer can accept new chunks
+    // Without this fix, peers get stuck at "capacity" (128 blocks) forever
+    if (g_peer_manager) {
+        int blocks_removed = 0;
+        for (auto block_it = mapBlocksInFlight.begin(); block_it != mapBlocksInFlight.end(); ) {
+            if (block_it->second.peer == peer_id) {
+                g_peer_manager->RemoveBlockFromFlight(block_it->first);
+                block_it = mapBlocksInFlight.erase(block_it);
+                blocks_removed++;
+            } else {
+                ++block_it;
+            }
+        }
+        // Also clean up mapPeerBlocks
+        mapPeerBlocks.erase(peer_id);
+        std::cout << "[Chunk] IBD HANG FIX #16: Removed " << blocks_removed << " blocks from peer "
+                  << peer_id << " tracking (nBlocksInFlight decremented)" << std::endl;
+    }
 
     // Remove the chunk from active chunks (moved to cancelled)
     mapActiveChunks.erase(it);

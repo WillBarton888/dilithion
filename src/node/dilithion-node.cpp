@@ -33,7 +33,7 @@
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
-#include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer state and stalling detection
+// REMOVED: #include <net/node_state.h> - CNodeStateManager replaced by CPeerManager
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation queue
 #include <net/feeler.h>  // Bitcoin Core-style feeler connections
 #include <net/connman.h>  // Phase 5: Event-driven connection manager
@@ -1477,6 +1477,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         } else {
             std::cerr << "  [WARN] Failed to start validation queue (will use synchronous validation)" << std::endl;
         }
+
+        // IBD HANG FIX #14: Register blockchain_db for block serving
+        g_node_context.blockchain_db = &blockchain;
 
         // Keep legacy globals for backward compatibility during migration
         // TODO: Remove after full migration

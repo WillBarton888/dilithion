@@ -21,7 +21,7 @@
 #include <consensus/chain.h>  // BUG #50 FIX: For g_chainstate.GetHeight()
 #include <node/genesis.h>     // P2-3: For GetGenesisHash() validation
 #include <net/block_fetcher.h>  // BUG #68 FIX: For BlockFetcher peer disconnect notification
-#include <net/node_state.h>     // BUG #69: Bitcoin Core-style per-peer state management
+// REMOVED: #include <net/node_state.h> - CNodeStateManager replaced by CPeerManager
 // REMOVED: #include <net/message_queue.h> - CMessageProcessorQueue was unused
 #include <random>
 #include <thread>   // BUG #91: For std::this_thread::sleep_for
@@ -472,17 +472,9 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
                       << "This peer will be excluded from block downloads." << std::endl;
         }
 
-        // BUG #85 FIX: Use atomic method that follows Bitcoin Core's pattern
-        // All state modifications happen while holding the lock, preventing
-        // race conditions where RemoveState() could invalidate our pointer
-        CNodeStateManager::Get().CreateStateWithHandshake(
-            peer_id,
-            peer->start_height,
-            true  // fPreferredDownload
-        );
-
-        // Phase 3.2: Also notify CPeerManager for unified peer tracking
+        // Phase 3.2: Notify CPeerManager for unified peer tracking
         // This initializes block sync state in the CPeer object
+        // NOTE: CNodeStateManager removed - CPeerManager is now single source of truth
         peer_manager.OnPeerHandshakeComplete(peer_id, peer->start_height, true);
 
         // Trigger VERACK handler (for IBD initialization)
@@ -1729,12 +1721,9 @@ void CConnectionManager::DisconnectPeer(int peer_id, const std::string& reason) 
         g_node_context.block_fetcher->OnPeerDisconnected(peer_id);
     }
 
-    // BUG #69: Remove CNodeState for this peer
-    // This cleans up in-flight block tracking and prevents stale state
-    CNodeStateManager::Get().RemoveState(peer_id);
-
     // Phase 3.2: Notify CPeerManager of disconnect
-    // This re-queues any in-flight blocks from this peer to mapBlocksInFlight
+    // This re-queues any in-flight blocks from this peer
+    // NOTE: CNodeStateManager removed - CPeerManager is now single source of truth
     peer_manager.OnPeerDisconnected(peer_id);
 
     // Remove peer from peer manager
