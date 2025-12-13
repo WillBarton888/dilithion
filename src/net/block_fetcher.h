@@ -6,6 +6,7 @@
 
 #include <primitives/block.h>
 #include <chrono>
+#include <functional>
 #include <map>
 #include <set>
 #include <queue>
