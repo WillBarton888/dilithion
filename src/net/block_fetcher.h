@@ -134,10 +134,13 @@ public:
     }
 
     /**
-     * @brief Mark height as received (moved from in_flight to received)
+     * @brief Mark height as received (moved from pending/in_flight to received)
      * @param height Height of received block
      */
     void OnBlockReceived(int height) {
+        // IBD HANG FIX #18: Also remove from pending (block may arrive before marked in-flight)
+        // Without this, heights get stuck in pending when blocks arrive quickly
+        m_pending.erase(height);
         m_in_flight.erase(height);
         m_received.insert(height);
     }
