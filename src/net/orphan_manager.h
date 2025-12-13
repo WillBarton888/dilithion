@@ -210,10 +210,13 @@ private:
     // Memory tracking
     size_t nOrphanBytes;  ///< Total bytes used by orphan blocks
 
-    // Configuration constants (Bitcoin Core standards)
-    static constexpr size_t MAX_ORPHAN_BLOCKS = 100;              ///< Maximum number of orphan blocks
+    // Configuration constants
+    // IBD HANG FIX #12: Increased limits to support chunk-based IBD
+    // Previously: 100 blocks/peer caused immediate overflow with 128-block chunks
+    // Now: 512 total, 256 per peer allows 2 full chunks before eviction starts
+    static constexpr size_t MAX_ORPHAN_BLOCKS = 512;              ///< Maximum number of orphan blocks
     static constexpr size_t MAX_ORPHAN_BYTES = 100 * 1024 * 1024; ///< Maximum bytes (100MB)
-    static constexpr size_t MAX_ORPHANS_PER_PEER = 100;           ///< Maximum orphans from single peer
+    static constexpr size_t MAX_ORPHANS_PER_PEER = 256;           ///< Maximum orphans from single peer
     static constexpr int DEFAULT_ORPHAN_EXPIRATION_SECS = 1200;   ///< 20 minutes
 
     // Thread safety
