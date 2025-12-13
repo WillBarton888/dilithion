@@ -168,6 +168,22 @@ public:
     void MarkAsPending(int height) {
         if (IsInWindow(height)) {
             m_in_flight.erase(height);
+            m_received.erase(height);
+            m_pending.insert(height);
+        }
+    }
+    
+    /**
+     * @brief Add height to pending set (used when queueing new blocks)
+     * IBD SLOW FIX #3: Allows external code to add heights to pending set
+     * @param height Height to add to pending
+     */
+    void AddToPending(int height) {
+        // Only add if within window range and not already tracked
+        if (IsInWindow(height) &&
+            m_pending.count(height) == 0 &&
+            m_in_flight.count(height) == 0 &&
+            m_received.count(height) == 0) {
             m_pending.insert(height);
         }
     }
@@ -685,6 +701,16 @@ public:
      * @param height Height of connected block
      */
     void OnWindowBlockConnected(int height);
+
+    /**
+     * @brief Add heights to window's pending set
+     *
+     * IBD SLOW FIX #3: Allows QueueMissingBlocks() to add heights to window
+     * instead of just the old priority queue. This synchronizes the two systems.
+     *
+     * @param heights Heights to add to pending set (if within window range)
+     */
+    void AddHeightsToWindowPending(const std::vector<int>& heights);
 
     /**
      * @brief Check if the download window has been initialized

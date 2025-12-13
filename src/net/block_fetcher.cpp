@@ -1076,6 +1076,21 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
     }
 }
 
+void CBlockFetcher::AddHeightsToWindowPending(const std::vector<int>& heights)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_window_initialized) {
+        return;
+    }
+
+    // IBD SLOW FIX #3: Add heights to window's pending set
+    // This synchronizes QueueMissingBlocks() with the window system
+    for (int h : heights) {
+        m_download_window.AddToPending(h);
+    }
+}
+
 bool CBlockFetcher::IsWindowInitialized() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);

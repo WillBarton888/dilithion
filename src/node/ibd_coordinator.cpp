@@ -260,6 +260,11 @@ void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) 
         return;
     }
 
+    // IBD SLOW FIX #1: Collect heights to add to window's pending set
+    // Previously only added to old priority queue, causing window/queue disconnect
+    std::vector<int> heights_to_add;
+    heights_to_add.reserve(blocks_to_queue);
+
     for (int h = chain_height + 1; h <= chain_height + blocks_to_queue; h++) {
         // IBD OPTIMIZATION: Use GetRandomXHashAtHeight to get the hash for block requests
         // During IBD, headers are stored by FastHash, but GETDATA needs RandomX hash
@@ -268,12 +273,29 @@ void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) 
             continue;  // No header at this height
         }
 
+        // IBD SLOW FIX #7: Check if block is CONNECTED, not just if we have an index
+        // During async validation, BlockIndex is created before validation completes
+        CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
+        if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+            continue;  // Block is actually connected to chain - skip
+        }
+
         if (!m_chainstate.HasBlockIndex(hash) &&
             !m_node_context.block_fetcher->IsQueued(hash) &&
             !m_node_context.block_fetcher->IsDownloading(hash)) {
+            // IBD SLOW FIX #1: Still add to old queue for backward compatibility
+            // But also add to window's pending set to synchronize systems
             m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
+            heights_to_add.push_back(h);
             LogPrintIBD(DEBUG, "Queued block %s... at height %d", hash.GetHex().substr(0, 16).c_str(), h);
         }
+    }
+
+    // IBD SLOW FIX #1: Add heights to window's pending set
+    // This ensures GetWindowPendingHeights() has heights available
+    if (!heights_to_add.empty() && m_node_context.block_fetcher->IsWindowInitialized()) {
+        m_node_context.block_fetcher->AddHeightsToWindowPending(heights_to_add);
+        LogPrintIBD(DEBUG, "Added %zu heights to window pending set", heights_to_add.size());
     }
 }
 
