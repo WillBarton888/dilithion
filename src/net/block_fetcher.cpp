@@ -654,16 +654,26 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
             return false;
         }
 
-        // EXTEND existing chunk: expand range and add pending blocks
+        // IBD BOTTLENECK FIX #9: Fix chunk extension to only count truly new heights
+        // Previously incremented blocks_pending by new_blocks, but this double-counted
+        // heights that were already assigned to this peer. Now only counts new assignments.
+        int actually_new = 0;
+        for (int h = height_start; h <= height_end; h++) {
+            if (mapHeightToPeer.count(h) == 0) {
+                mapHeightToPeer[h] = peer_id;
+                actually_new++;
+            } else if (mapHeightToPeer[h] == peer_id) {
+                // Already assigned to this peer, just update mapping
+                // (no-op, but ensures consistency)
+            }
+            // If assigned to different peer, skip (already checked above)
+        }
+
+        // EXTEND existing chunk: expand range and add only new pending blocks
         existing.height_end = std::max(existing.height_end, height_end);
         existing.height_start = std::min(existing.height_start, height_start);
-        existing.blocks_pending += new_blocks;
+        existing.blocks_pending += actually_new;  // Only count new heights
         existing.last_activity = std::chrono::steady_clock::now();
-
-        // Map new heights to peer
-        for (int h = height_start; h <= height_end; h++) {
-            mapHeightToPeer[h] = peer_id;
-        }
 
         std::cout << "[Chunk] EXTENDED peer " << peer_id << " chunk to "
                   << existing.height_start << "-" << existing.height_end

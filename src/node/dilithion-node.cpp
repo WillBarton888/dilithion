@@ -34,6 +34,7 @@
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
 #include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer state and stalling detection
+#include <node/block_validation_queue.h>  // Phase 2: Async block validation queue
 #include <net/feeler.h>  // Bitcoin Core-style feeler connections
 #include <net/connman.h>  // Phase 5: Event-driven connection manager
 #include <api/http_server.h>
@@ -2129,10 +2130,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (g_node_context.validation_queue->QueueBlock(peer_id, block, expected_height, pblockIndexPtr)) {
                     std::cout << "[P2P] Block queued for async validation (height " << expected_height 
                               << ", queue depth: " << g_node_context.validation_queue->GetQueueDepth() << ")" << std::endl;
-                    // Mark block as received immediately (validation will happen async)
-                    if (g_node_context.block_fetcher) {
-                        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                    }
+                    // IBD BOTTLENECK FIX #10: Don't mark as received until validation completes
+                    // Previously marked immediately, causing window state inconsistency
+                    // Validation queue will call MarkBlockReceived() after successful validation
+                    // This ensures correct sequence: receive → validate → connect → update window
                     return;  // Return immediately - validation happens in worker thread
                 } else {
                     std::cerr << "[P2P] WARNING: Failed to queue block for async validation, falling back to sync" << std::endl;

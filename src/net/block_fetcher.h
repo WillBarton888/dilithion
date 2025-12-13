@@ -41,7 +41,7 @@ typedef int NodeId;
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
 static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
-static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 2;    ///< Stall timeout in seconds (Bitcoin Core: 2s default)
+static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 5;    ///< IBD BOTTLENECK FIX #6: Increased from 2s to 5s to reduce false positives on slow networks
 static constexpr int MAX_CHUNKS_PER_PEER = 4;            ///< Max concurrent chunks per peer (16 * 4 = 64 blocks)
 static constexpr int MAX_CHUNK_STALL_COUNT = 50;         ///< Max stalls before peer avoided
 
@@ -150,8 +150,10 @@ public:
         m_pending.erase(height);  // In case we never received it
         m_in_flight.erase(height);
 
-        // Advance window if this was the start
-        if (height == m_window_start) {
+        // IBD BOTTLENECK FIX #1: Advance window whenever ANY block in window is connected
+        // Previously only advanced when height == m_window_start, causing stalls with out-of-order blocks
+        // Now advances past all connected blocks, allowing window to slide forward continuously
+        if (IsInWindow(height)) {
             AdvanceWindow();
         }
     }
@@ -213,15 +215,23 @@ public:
 
 private:
     void AdvanceWindow() {
-        // Move window forward past all connected heights
-        while (m_window_start <= m_target_height &&
-               m_pending.count(m_window_start) == 0 &&
-               m_in_flight.count(m_window_start) == 0 &&
-               m_received.count(m_window_start) == 0) {
-            m_window_start++;
+        // IBD BOTTLENECK FIX #8: Only advance past received blocks, not in-flight blocks
+        // Previously advanced past any height not pending/in-flight/received, which could skip
+        // blocks that are still downloading. Now only advances past blocks that are fully connected.
+        while (m_window_start <= m_target_height) {
+            // Only advance if this height is not pending, not in-flight, and not received
+            // (i.e., it's been fully connected and removed from tracking)
+            if (m_pending.count(m_window_start) == 0 &&
+                m_in_flight.count(m_window_start) == 0 &&
+                m_received.count(m_window_start) == 0) {
+                m_window_start++;
+            } else {
+                // Can't advance further - this height is still being processed
+                break;
+            }
         }
 
-        // Add new heights to pending
+        // Add new heights to pending to fill window
         int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
         for (int h = m_window_start; h <= window_end; h++) {
             if (m_pending.count(h) == 0 && m_in_flight.count(h) == 0 && m_received.count(h) == 0) {

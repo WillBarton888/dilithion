@@ -10,6 +10,8 @@
 #include <core/chainparams.h>
 #include <net/peers.h>
 #include <net/block_fetcher.h>
+#include <node/block_index.h>  // For CBlockIndex
+#include <primitives/block.h>  // For CBlock
 #include <util/logging.h>
 
 #include <iostream>
@@ -92,24 +94,26 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         std::chrono::steady_clock::now().time_since_epoch()).count();
     queued_block.pindex = pindex ? pindex : existing;
 
-    // Add to queue
+    // Add to queue and update stats
+    size_t queue_depth;
     {
         std::lock_guard<std::mutex> lock(m_queue_mutex);
         m_queue.push(queued_block);
+        queue_depth = m_queue.size();
     }
 
     // Update stats
     {
         std::lock_guard<std::mutex> lock(m_stats_mutex);
         m_stats.total_queued++;
-        m_stats.queue_depth = m_queue.size();
+        m_stats.queue_depth = queue_depth;
     }
 
     // Wake worker thread
     m_queue_cv.notify_one();
 
     std::cout << "[ValidationQueue] Queued block " << blockHash.GetHex().substr(0, 16)
-              << "... at height " << expected_height << " (queue depth: " << m_queue.size() << ")" << std::endl;
+              << "... at height " << expected_height << " (queue depth: " << queue_depth << ")" << std::endl;
 
     return true;
 }
@@ -297,11 +301,17 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         std::cout << "[ValidationQueue] ⚠️  CHAIN REORGANIZATION occurred at height " << expected_height << std::endl;
     }
 
-    // Update window state when block becomes new tip
-    // Note: MarkBlockReceived() was already called in block handler when queuing
-    // to free up peer capacity immediately
-    if (g_node_context.block_fetcher && pindex->nHeight == m_chainstate.GetHeight()) {
-        // This block became the new tip - update window state
+    // IBD BOTTLENECK FIX #10: Mark block as received after successful validation
+    // This ensures correct sequence: receive → validate → connect → update window
+    // Previously MarkBlockReceived() was called before validation, causing sequence issues
+    if (g_node_context.block_fetcher) {
+        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+    }
+
+    // IBD BOTTLENECK FIX #2: Update window state for ALL validated blocks, not just new tip
+    // Previously only updated window when block became new tip, causing window to stall
+    // Now updates window for all successfully validated blocks, allowing continuous advancement
+    if (g_node_context.block_fetcher) {
         g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
     }
 

@@ -114,11 +114,12 @@ bool CIbdCoordinator::ShouldAttemptDownload() const {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_ibd_attempt);
 
-    // Phase 2: Backpressure check - slow down if validation queue is full
-    // Prevents queue from growing unbounded and consuming memory
+    // IBD BOTTLENECK FIX #5: Increase backpressure threshold to better utilize queue capacity
+    // Previously stopped at 50 blocks (50% of MAX_QUEUE_DEPTH=100), causing unnecessary slowdowns
+    // Now stops at 80 blocks (80% capacity), allowing better throughput while still preventing overflow
     if (m_node_context.validation_queue && m_node_context.validation_queue->IsRunning()) {
         size_t queue_depth = m_node_context.validation_queue->GetQueueDepth();
-        if (queue_depth > 50) {
+        if (queue_depth > 80) {  // 80% of MAX_QUEUE_DEPTH (100)
             // Queue is getting full - slow down downloads to let validation catch up
             LogPrintIBD(DEBUG, "Validation queue depth %zu - slowing down downloads", queue_depth);
             return false;  // Skip this attempt
@@ -165,9 +166,16 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         LogPrintIBD(INFO, "Initialized download window: %s", m_node_context.block_fetcher->GetWindowStatus().c_str());
     }
 
-    // Phase 1 FIX: Queue more blocks per tick (was 100, now matches window capacity)
-    int blocks_to_queue = std::min(BLOCK_DOWNLOAD_WINDOW_SIZE, header_height - chain_height);
-    LogPrintIBD(INFO, "Queueing %d blocks for download...", blocks_to_queue);
+    // IBD BOTTLENECK FIX #4: Match queue size to request rate for better pipeline utilization
+    // Previously queued up to 1024 blocks but only requested 16 per peer per tick
+    // Now queues in smaller batches that match request capacity, keeping pipeline full
+    // Get peer count for sizing
+    size_t peer_count = m_node_context.peer_manager ? m_node_context.peer_manager->GetConnectionCount() : 1;
+    int expected_peers = static_cast<int>(peer_count);
+    int blocks_to_queue = std::min(MAX_BLOCKS_PER_CHUNK * std::max(1, expected_peers * 2), 
+                                    header_height - chain_height);
+    blocks_to_queue = std::min(blocks_to_queue, BLOCK_DOWNLOAD_WINDOW_SIZE);  // Cap at window size
+    LogPrintIBD(INFO, "Queueing %d blocks for download (peers=%d)...", blocks_to_queue, expected_peers);
 
     BENCHMARK_START("ibd_queue_blocks");
     QueueMissingBlocks(chain_height, blocks_to_queue);
