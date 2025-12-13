@@ -848,7 +848,13 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
             CPeer* peer = peer_it->second.get();
             int old_count = peer->nBlocksInFlight;
             peer->vBlocksInFlight.erase(list_it);
-            peer->nBlocksInFlight--;
+            // IBD HANG FIX #21: Guard against going negative
+            // This can happen when tracking gets out of sync (e.g., Fix #19 cleanup)
+            if (peer->nBlocksInFlight > 0) {
+                peer->nBlocksInFlight--;
+            } else {
+                std::cerr << "[WARN] nBlocksInFlight already 0 for tracked block - skipping decrement" << std::endl;
+            }
             peer->nStallingCount = 0;
             peer->nBlocksDownloaded++;
             peer->lastSuccessTime = std::chrono::steady_clock::now();
@@ -907,7 +913,12 @@ int CPeerManager::RemoveBlockFromFlight(const uint256& hash)
     if (peer_it != peers.end()) {
         CPeer* peer = peer_it->second.get();
         peer->vBlocksInFlight.erase(list_it);
-        peer->nBlocksInFlight--;
+        // IBD HANG FIX #21: Guard against going negative
+        if (peer->nBlocksInFlight > 0) {
+            peer->nBlocksInFlight--;
+        } else {
+            std::cerr << "[WARN] nBlocksInFlight already 0 in RemoveBlockFromFlight - skipping decrement" << std::endl;
+        }
     }
 
     // Remove from global map
@@ -950,6 +961,27 @@ int CPeerManager::GetBlocksInFlightForPeer(int peer_id) const
         return it->second->nBlocksInFlight;
     }
     return 0;
+}
+
+std::vector<std::pair<uint256, int>> CPeerManager::GetTimedOutBlocks(int timeout_seconds) const
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    std::vector<std::pair<uint256, int>> result;
+
+    auto now = std::chrono::steady_clock::now();
+    auto timeout_duration = std::chrono::seconds(timeout_seconds);
+
+    for (const auto& pair : peers) {
+        CPeer* peer = pair.second.get();
+        for (const auto& qb : peer->vBlocksInFlight) {
+            auto elapsed = now - qb.time;
+            if (elapsed > timeout_duration) {
+                result.push_back(std::make_pair(qb.hash, pair.first));
+            }
+        }
+    }
+
+    return result;
 }
 
 std::vector<uint256> CPeerManager::GetAndClearPeerBlocks(int peer_id)

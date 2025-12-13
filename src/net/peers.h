@@ -330,6 +330,20 @@ public:
     std::vector<int> CheckForStallingPeers();
     void UpdatePeerStats(int peer_id, bool success, std::chrono::milliseconds responseTime);
 
+    // SINGLE SOURCE OF TRUTH: New methods for centralized block tracking
+    /**
+     * @brief Get total blocks in-flight across all peers
+     * Used by CBlockDownloadWindow instead of maintaining duplicate tracking
+     */
+    int GetTotalBlocksInFlight() const { return static_cast<int>(mapBlocksInFlight.size()); }
+
+    /**
+     * @brief Get blocks that have timed out (in-flight longer than timeout)
+     * @param timeout_seconds Timeout threshold in seconds (default 120)
+     * @return Vector of (hash, peer_id) pairs for timed out blocks
+     */
+    std::vector<std::pair<uint256, int>> GetTimedOutBlocks(int timeout_seconds = 120) const;
+
     // Peer suitability for download
     std::vector<int> GetValidPeersForDownload() const;
     bool IsPeerSuitableForDownload(int peer_id) const;

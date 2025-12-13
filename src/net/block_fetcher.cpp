@@ -754,15 +754,17 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
                     mapHeightToPeer.erase(h);
                 }
 
-                // IBD HANG FIX #19: Remove blocks from CPeerManager tracking when chunk COMPLETES
-                // Previously, this only happened in CancelStalledChunk(), causing nBlocksInFlight
-                // to stay at 128 forever when chunks completed normally (not cancelled).
-                // This fix ensures peer is freed for new chunk assignments after completion.
-                if (g_peer_manager) {
+                // IBD HANG FIX #21: On chunk completion, ONLY clean up CBlockFetcher's local tracking
+                // Do NOT call RemoveBlockFromFlight() - that causes double-decrement because:
+                // 1. Block arrives → MarkBlockReceived() → CPeerManager::MarkBlockAsReceived() → decrement
+                // 2. Chunk completes → Fix #19 → RemoveBlockFromFlight() → decrement AGAIN!
+                // Instead, let CPeerManager naturally handle block arrivals via MarkBlockAsReceived().
+                // Only clean up local timeout tracking to prevent stale entries.
+                {
                     int blocks_removed = 0;
                     for (auto block_it = mapBlocksInFlight.begin(); block_it != mapBlocksInFlight.end(); ) {
                         if (block_it->second.peer == peer_id) {
-                            g_peer_manager->RemoveBlockFromFlight(block_it->first);
+                            // Only remove from CBlockFetcher's map, NOT from CPeerManager
                             block_it = mapBlocksInFlight.erase(block_it);
                             blocks_removed++;
                         } else {
@@ -771,9 +773,8 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
                     }
                     mapPeerBlocks.erase(peer_id);
                     if (blocks_removed > 0) {
-                        std::cout << "[Chunk] IBD HANG FIX #19: Removed " << blocks_removed
-                                  << " blocks from peer " << peer_id
-                                  << " tracking on chunk completion" << std::endl;
+                        std::cout << "[Chunk] Cleaned up " << blocks_removed
+                                  << " local tracking entries for peer " << peer_id << std::endl;
                     }
                 }
 
