@@ -10,6 +10,7 @@
 #include <map>
 #include <mutex>
 #include <queue>
+#include <set>
 #include <thread>
 #include <atomic>
 #include <future>
@@ -137,6 +138,17 @@ public:
      */
     size_t GetQueueDepth() const;
 
+    /**
+     * @brief Check if a specific height is queued for validation
+     * 
+     * IBD HANG FIX #3: Track validation queue status per height
+     * Used to determine if blocks in "received" state are queued (processing) vs stuck
+     * 
+     * @param height Block height to check
+     * @return true if height is queued for validation
+     */
+    bool IsHeightQueued(int height) const;
+
 private:
     /**
      * @brief Validation worker thread main loop
@@ -162,6 +174,7 @@ private:
 
     // Priority queue for blocks (min-heap by height)
     std::priority_queue<QueuedBlock> m_queue;
+    std::set<int> m_queued_heights;  // O(1) lookup for IsHeightQueued - tracks heights in queue
     mutable std::mutex m_queue_mutex;
     std::condition_variable m_queue_cv;
 

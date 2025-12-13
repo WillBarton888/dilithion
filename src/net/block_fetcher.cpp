@@ -4,9 +4,13 @@
 #include <net/block_fetcher.h>
 #include <net/node_state.h>  // BUG #69: Bitcoin Core-style per-peer block tracking
 #include <net/peers.h>       // Phase A: Unified CPeerManager block tracking
+#include <core/node_context.h>  // IBD HANG FIX #2: For validation queue access
 #include <iostream>
 #include <algorithm>
 #include <sstream>
+
+// Forward declaration
+extern NodeContext g_node_context;
 
 /**
  * @file block_fetcher.cpp
@@ -972,7 +976,16 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
         return;
     }
 
-    m_download_window.OnBlockConnected(height);
+    // IBD HANG FIX #2: Pass callback to check if height is queued for validation
+    // This allows window to advance past blocks that are queued (processing) vs stuck
+    std::function<bool(int)> is_height_queued = nullptr;
+    if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
+        is_height_queued = [](int h) {
+            return g_node_context.validation_queue->IsHeightQueued(h);
+        };
+    }
+
+    m_download_window.OnBlockConnected(height, is_height_queued);
 }
 
 bool CBlockFetcher::IsWindowInitialized() const

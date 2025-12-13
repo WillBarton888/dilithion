@@ -99,6 +99,7 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
     {
         std::lock_guard<std::mutex> lock(m_queue_mutex);
         m_queue.push(queued_block);
+        m_queued_heights.insert(expected_height);  // O(1) lookup for IsHeightQueued
         queue_depth = m_queue.size();
     }
 
@@ -157,6 +158,12 @@ size_t CBlockValidationQueue::GetQueueDepth() const {
     return m_queue.size();
 }
 
+bool CBlockValidationQueue::IsHeightQueued(int height) const {
+    std::lock_guard<std::mutex> lock(m_queue_mutex);
+    // O(1) lookup using auxiliary set instead of O(n) queue copy
+    return m_queued_heights.count(height) > 0;
+}
+
 void CBlockValidationQueue::ValidationWorker() {
     std::cout << "[ValidationQueue] Worker thread started" << std::endl;
 
@@ -178,6 +185,7 @@ void CBlockValidationQueue::ValidationWorker() {
             if (!m_queue.empty()) {
                 queued_block = m_queue.top();
                 m_queue.pop();
+                m_queued_heights.erase(queued_block.expected_height);  // O(1) removal for IsHeightQueued
                 has_block = true;
 
                 // Update queue depth in stats

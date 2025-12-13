@@ -41,7 +41,7 @@ typedef int NodeId;
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
 static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
-static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 10;   ///< IBD FIX: Increased to 10s - 5s was still too aggressive for cross-region peers
+static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 15;   ///< IBD HANG FIX #4: Increased to 15s for better tolerance of cross-region peers and slow networks
 static constexpr int MAX_CHUNKS_PER_PEER = 4;            ///< Max concurrent chunks per peer (16 * 4 = 64 blocks)
 static constexpr int MAX_CHUNK_STALL_COUNT = 50;         ///< Max stalls before peer avoided
 
@@ -144,8 +144,10 @@ public:
     /**
      * @brief Mark height as connected to chain (removed from tracking)
      * @param height Height of connected block
+     * @param is_height_queued_callback Optional callback to check if height is queued for validation
+     *                                  IBD HANG FIX #2: Allows window to advance past queued blocks
      */
-    void OnBlockConnected(int height) {
+    void OnBlockConnected(int height, std::function<bool(int)> is_height_queued_callback = nullptr) {
         m_received.erase(height);
         m_pending.erase(height);  // In case we never received it
         m_in_flight.erase(height);
@@ -154,7 +156,7 @@ public:
         // Previously only advanced when height == m_window_start, causing stalls with out-of-order blocks
         // Now advances past all connected blocks, allowing window to slide forward continuously
         if (IsInWindow(height)) {
-            AdvanceWindow();
+            AdvanceWindow(is_height_queued_callback);
         }
     }
 
@@ -214,19 +216,37 @@ public:
     }
 
 private:
-    void AdvanceWindow() {
-        // IBD BOTTLENECK FIX #8: Only advance past received blocks, not in-flight blocks
-        // Previously advanced past any height not pending/in-flight/received, which could skip
-        // blocks that are still downloading. Now only advances past blocks that are fully connected.
+    void AdvanceWindow(std::function<bool(int)> is_height_queued_callback = nullptr) {
+        // IBD HANG FIX #2: Allow window advancement past queued blocks
+        // IBD HANG FIX #5: Better window state tracking - distinguish "processing" vs "stuck"
+        // Previously: Only advanced past fully connected blocks (not pending/in-flight/received)
+        // Now: Also advances past blocks in "received" state IF they're queued for validation
+        // This prevents window from stalling when blocks are waiting for async validation
+        
         while (m_window_start <= m_target_height) {
-            // Only advance if this height is not pending, not in-flight, and not received
-            // (i.e., it's been fully connected and removed from tracking)
+            bool can_advance = false;
+            
+            // Can advance if height is not in any tracking set (fully connected)
             if (m_pending.count(m_window_start) == 0 &&
                 m_in_flight.count(m_window_start) == 0 &&
                 m_received.count(m_window_start) == 0) {
+                can_advance = true;
+            }
+            // IBD HANG FIX #2: Also advance if height is in "received" but queued for validation
+            // This means it's being processed (not stuck), so window can advance
+            else if (m_received.count(m_window_start) > 0 && is_height_queued_callback) {
+                if (is_height_queued_callback(m_window_start)) {
+                    // Block is queued for validation - it's being processed, allow advancement
+                    can_advance = true;
+                    // Remove from received since we're advancing past it
+                    m_received.erase(m_window_start);
+                }
+            }
+            
+            if (can_advance) {
                 m_window_start++;
             } else {
-                // Can't advance further - this height is still being processed
+                // Can't advance further - this height is still being processed or stuck
                 break;
             }
         }

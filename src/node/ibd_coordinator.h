@@ -77,11 +77,22 @@ private:
     void UpdateState();
     void ResetBackoffOnNewHeaders(int header_height);
     bool ShouldAttemptDownload() const;
+    double GetDownloadRateMultiplier() const;  // IBD HANG FIX #1: Gradual backpressure (0.0-1.0)
     void HandleNoPeers(std::chrono::steady_clock::time_point now);
     void DownloadBlocks(int header_height, int chain_height, std::chrono::steady_clock::time_point now);
     void QueueMissingBlocks(int chain_height, int blocks_to_queue);
     bool FetchBlocks();
     void RetryTimeoutsAndStalls();
+    
+    // IBD HANG FIX #6: Hang cause tracking
+    enum class HangCause {
+        NONE,
+        VALIDATION_QUEUE_FULL,
+        NO_PEERS_AVAILABLE,
+        WINDOW_EMPTY,
+        PEERS_AT_CAPACITY
+    };
+    HangCause GetLastHangCause() const { return m_last_hang_cause; }
 
     CChainState& m_chainstate;
     NodeContext& m_node_context;
@@ -93,6 +104,9 @@ private:
     int m_last_header_height{0};
     int m_ibd_no_peer_cycles{0};
     std::chrono::steady_clock::time_point m_last_ibd_attempt;
+    
+    // IBD HANG FIX #6: Hang cause tracking
+    mutable HangCause m_last_hang_cause{HangCause::NONE};
 };
 
 #endif // DILITHION_NODE_IBD_COORDINATOR_H

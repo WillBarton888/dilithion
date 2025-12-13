@@ -115,16 +115,24 @@ bool CIbdCoordinator::ShouldAttemptDownload() const {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_ibd_attempt);
 
-    // IBD BOTTLENECK FIX #5: Increase backpressure threshold to better utilize queue capacity
-    // Previously stopped at 50 blocks (50% of MAX_QUEUE_DEPTH=100), causing unnecessary slowdowns
-    // Now stops at 80 blocks (80% capacity), allowing better throughput while still preventing overflow
+    // IBD HANG FIX #1: Gradual backpressure instead of binary stop
+    // Previously: queue > 80 = complete stop (binary)
+    // Now: gradual rate reduction based on queue depth
+    // - Queue 0-70: Full speed (1.0x)
+    // - Queue 70-80: Reduced speed (0.5x)
+    // - Queue 80-90: Further reduced (0.25x)
+    // - Queue 90-95: Minimal speed (0.1x)
+    // - Queue 95+: Complete stop
     if (m_node_context.validation_queue && m_node_context.validation_queue->IsRunning()) {
         size_t queue_depth = m_node_context.validation_queue->GetQueueDepth();
-        if (queue_depth > 80) {  // 80% of MAX_QUEUE_DEPTH (100)
-            // Queue is getting full - slow down downloads to let validation catch up
-            LogPrintIBD(DEBUG, "Validation queue depth %zu - slowing down downloads", queue_depth);
-            return false;  // Skip this attempt
+        if (queue_depth >= 95) {
+            // Queue nearly full - complete stop
+            m_last_hang_cause = HangCause::VALIDATION_QUEUE_FULL;
+            LogPrintIBD(DEBUG, "Validation queue depth %zu - stopping downloads (queue nearly full)", queue_depth);
+            return false;
         }
+        // For queue 70-95, we'll use rate multiplier in DownloadBlocks()
+        // Still return true here, but rate will be reduced
     }
 
     // BUG #147 FIX: During active IBD (blocks download), be aggressive - minimal backoff
@@ -138,7 +146,35 @@ bool CIbdCoordinator::ShouldAttemptDownload() const {
         backoff_seconds = std::min(30, (1 << std::min(m_ibd_no_peer_cycles, 5)));
     }
 
-    return elapsed.count() >= backoff_seconds;
+    bool should_attempt = elapsed.count() >= backoff_seconds;
+    if (!should_attempt) {
+        m_last_hang_cause = HangCause::NONE;  // Just waiting for backoff
+    }
+    return should_attempt;
+}
+
+double CIbdCoordinator::GetDownloadRateMultiplier() const {
+    // IBD HANG FIX #1: Gradual backpressure - returns multiplier (0.0-1.0)
+    // Used to reduce request rate gradually instead of binary stop
+    
+    if (!m_node_context.validation_queue || !m_node_context.validation_queue->IsRunning()) {
+        return 1.0;  // No validation queue - full speed
+    }
+    
+    size_t queue_depth = m_node_context.validation_queue->GetQueueDepth();
+    
+    // Gradual backpressure zones
+    if (queue_depth < 70) {
+        return 1.0;  // Full speed
+    } else if (queue_depth < 80) {
+        return 0.5;  // Half speed
+    } else if (queue_depth < 90) {
+        return 0.25;  // Quarter speed
+    } else if (queue_depth < 95) {
+        return 0.1;  // Minimal speed
+    } else {
+        return 0.0;  // Should have been caught by ShouldAttemptDownload(), but return 0 for safety
+    }
 }
 
 void CIbdCoordinator::HandleNoPeers(std::chrono::steady_clock::time_point now) {
@@ -167,16 +203,30 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         LogPrintIBD(INFO, "Initialized download window: %s", m_node_context.block_fetcher->GetWindowStatus().c_str());
     }
 
+    // IBD HANG FIX #1: Apply gradual backpressure rate multiplier
+    // Reduces request rate gradually as validation queue fills, preventing binary stop/resume cycle
+    double rate_multiplier = GetDownloadRateMultiplier();
+    
     // IBD BOTTLENECK FIX #4: Match queue size to request rate for better pipeline utilization
     // Previously queued up to 1024 blocks but only requested 16 per peer per tick
     // Now queues in smaller batches that match request capacity, keeping pipeline full
     // Get peer count for sizing
     size_t peer_count = m_node_context.peer_manager ? m_node_context.peer_manager->GetConnectionCount() : 1;
     int expected_peers = static_cast<int>(peer_count);
-    int blocks_to_queue = std::min(MAX_BLOCKS_PER_CHUNK * std::max(1, expected_peers * 2), 
-                                    header_height - chain_height);
-    blocks_to_queue = std::min(blocks_to_queue, BLOCK_DOWNLOAD_WINDOW_SIZE);  // Cap at window size
-    LogPrintIBD(INFO, "Queueing %d blocks for download (peers=%d)...", blocks_to_queue, expected_peers);
+    int base_blocks_to_queue = std::min(MAX_BLOCKS_PER_CHUNK * std::max(1, expected_peers * 2), 
+                                        header_height - chain_height);
+    base_blocks_to_queue = std::min(base_blocks_to_queue, BLOCK_DOWNLOAD_WINDOW_SIZE);  // Cap at window size
+    
+    // Apply rate multiplier for gradual backpressure
+    int blocks_to_queue = static_cast<int>(base_blocks_to_queue * rate_multiplier);
+    blocks_to_queue = std::max(1, blocks_to_queue);  // Always queue at least 1 block
+    
+    if (rate_multiplier < 1.0) {
+        LogPrintIBD(INFO, "Queueing %d blocks for download (peers=%d, rate=%.0f%%)...", 
+                    blocks_to_queue, expected_peers, rate_multiplier * 100.0);
+    } else {
+        LogPrintIBD(INFO, "Queueing %d blocks for download (peers=%d)...", blocks_to_queue, expected_peers);
+    }
 
     BENCHMARK_START("ibd_queue_blocks");
     QueueMissingBlocks(chain_height, blocks_to_queue);
@@ -187,7 +237,18 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     BENCHMARK_END("ibd_fetch_blocks");
     if (!any_requested) {
         m_ibd_no_peer_cycles++;
-        LogPrintIBD(WARN, "Could not send any block requests (no suitable peers)");
+        // IBD HANG FIX #6: Log specific hang cause
+        std::string cause_str = "unknown";
+        switch (m_last_hang_cause) {
+            case HangCause::VALIDATION_QUEUE_FULL: cause_str = "validation queue full"; break;
+            case HangCause::NO_PEERS_AVAILABLE: cause_str = "no peers available"; break;
+            case HangCause::WINDOW_EMPTY: cause_str = "window empty (no pending heights)"; break;
+            case HangCause::PEERS_AT_CAPACITY: cause_str = "all peers at capacity"; break;
+            case HangCause::NONE: cause_str = "no suitable peers"; break;
+        }
+        LogPrintIBD(WARN, "Could not send any block requests - %s", cause_str.c_str());
+    } else {
+        m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
     }
 
     RetryTimeoutsAndStalls();
@@ -229,8 +290,24 @@ bool CIbdCoordinator::FetchBlocks() {
     std::vector<int> available_peers = m_node_context.peer_manager->GetValidPeersForDownload();
     if (available_peers.empty()) {
         m_ibd_no_peer_cycles++;
+        m_last_hang_cause = HangCause::NO_PEERS_AVAILABLE;  // IBD HANG FIX #6
         LogPrintIBD(WARN, "No peers available for block download");
         return false;
+    }
+    
+    // IBD HANG FIX #6: Check if all peers are at capacity
+    bool all_peers_at_capacity = true;
+    for (int peer_id : available_peers) {
+        auto peer = m_node_context.peer_manager->GetPeer(peer_id);
+        if (peer && peer->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+            all_peers_at_capacity = false;
+            break;
+        }
+    }
+    if (all_peers_at_capacity && !available_peers.empty()) {
+        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;  // IBD HANG FIX #6
+        LogPrintIBD(DEBUG, "All peers at capacity (%d peers, all have %d blocks in-flight)", 
+                    available_peers.size(), CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER);
     }
 
     int chain_height = m_chainstate.GetHeight();
@@ -257,6 +334,9 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         if (chunk_heights.empty()) {
+            // IBD HANG FIX #6: Track hang cause
+            m_last_hang_cause = HangCause::WINDOW_EMPTY;
+            LogPrintIBD(DEBUG, "No pending heights in window - window may be stalled");
             break;  // No more heights to assign
         }
 
