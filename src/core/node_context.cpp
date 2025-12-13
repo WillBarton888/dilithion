@@ -7,6 +7,7 @@
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
+#include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <util/logging.h>
 #include <iostream>
 
