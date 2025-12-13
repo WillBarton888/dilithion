@@ -16,7 +16,7 @@
 #include <string>
 
 #include <primitives/block.h>  // CBlock (needed as complete type in QueuedBlock)
-#include <util/uint256.h>      // uint256 (needed as complete type in QueuedBlock)
+#include <uint256.h>           // uint256 (needed as complete type in QueuedBlock)
 
 // Forward declarations
 class CChainState;
