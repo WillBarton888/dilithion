@@ -420,12 +420,6 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             if (peer->state < CPeer::STATE_VERSION_SENT) {
                 peer->state = CPeer::STATE_VERSION_SENT;
             }
-
-            // Also update CNode::state to prevent state drift
-            CNode* node = peer_manager.GetNode(peer_id);
-            if (node && node->state.load() < CNode::STATE_VERSION_SENT) {
-                node->state.store(CNode::STATE_VERSION_SENT);
-            }
         }
 
         return true;
@@ -1463,13 +1457,8 @@ std::vector<uint8_t> CNetMessageProcessor::SerializeInvMessage(
     return stream.GetData();
 }
 
-// CConnectionManager implementation
-
-CConnectionManager::CConnectionManager(CPeerManager& peer_mgr,
-                                       CNetMessageProcessor& msg_proc)
-    : peer_manager(peer_mgr), message_processor(msg_proc)
-{
-}
+// REMOVED: CConnectionManager implementation - replaced by CConnman
+// All methods removed - see CConnman class for equivalent functionality
 
 int CConnectionManager::ConnectToPeer(const NetProtocol::CAddress& addr) {
     // Network: Record connection attempt

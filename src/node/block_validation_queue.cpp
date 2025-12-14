@@ -102,7 +102,7 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         m_queue.push(queued_block);
         m_queued_heights.insert(expected_height);  // O(1) lookup for IsHeightQueued
     }
-    size_t queue_depth = GetQueueDepth();  // SSOT FIX #3: Use GetQueueDepth() instead of m_queue.size()
+    queue_depth = GetQueueDepth();  // SSOT FIX #3: Reuse variable, don't redeclare
 
     // Update stats
     {

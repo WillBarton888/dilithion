@@ -781,8 +781,16 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
 
     CPeer* peer = it->second.get();
 
-    // Check per-peer limit
-    if (peer->nBlocksInFlight >= MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+    // IBD STUCK FIX #8: Count from mapBlocksInFlight instead of peer->nBlocksInFlight counter
+    // The counter can become stale/desync during chunk cancellation, but mapBlocksInFlight is
+    // the actual tracking state. This ensures we don't reject valid block requests.
+    int peer_blocks_in_flight = 0;
+    for (const auto& entry : mapBlocksInFlight) {
+        if (entry.second.first == peer_id) {
+            peer_blocks_in_flight++;
+        }
+    }
+    if (peer_blocks_in_flight >= MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
 
@@ -1167,11 +1175,7 @@ bool CPeerManager::IsPeerSuitableForDownload(int peer_id) const
 
     // SSOT FIX #1: Check CNode::state (single source of truth) instead of CPeer::state
     // CNode::state is authoritative - CPeer::state is deprecated
-    CNode* node = GetNode(peer_id);
-    if (!node) {
-        // Fallback: If CNode not available, use deprecated CPeer::state
-        return peer->IsHandshakeComplete() && peer->IsSuitableForDownload();
-    }
+    // Note: 'node' is already obtained from node_refs above
     return node->IsHandshakeComplete() &&  // Query CNode::state (SSOT)
            peer->IsSuitableForDownload();
 }
