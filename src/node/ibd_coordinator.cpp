@@ -274,10 +274,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             int no_parent_count = 0;
             int parent_not_connected_count = 0;
 
-            // Debug: log scan start
-            if (!all_orphans.empty()) {
-                LogPrintIBD(DEBUG, "IBD STUCK FIX #3: Scanning %zu orphans...", all_orphans.size());
-            }
+            // Debug: log scan start (always log to diagnose issue)
+            std::cout << "[IBD STUCK FIX #3] Orphan scan triggered - found " << all_orphans.size() << " orphans in pool" << std::endl;
 
             for (const uint256& orphanHash : all_orphans) {
                 CBlock orphanBlock;
@@ -292,8 +290,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         parent_not_connected_count++;
                         // Debug: log first few cases
                         if (parent_not_connected_count <= 3) {
-                            LogPrintIBD(DEBUG, "IBD STUCK FIX #3: Orphan parent at height %d has status 0x%x (not BLOCK_VALID_CHAIN=0x%x)",
-                                       parent->nHeight, parent->nStatus, CBlockIndex::BLOCK_VALID_CHAIN);
+                            std::cout << "[IBD STUCK FIX #3] Orphan parent at height " << parent->nHeight
+                                      << " has status 0x" << std::hex << parent->nStatus
+                                      << " (needs BLOCK_VALID_CHAIN=0x" << CBlockIndex::BLOCK_VALID_CHAIN << ")" << std::dec << std::endl;
                         }
                         continue;
                     }
@@ -340,11 +339,11 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 }
             }
             
-            // Log summary
-            if (!all_orphans.empty()) {
-                LogPrintIBD(DEBUG, "IBD STUCK FIX #3: Scan complete - processed=%d, no_parent=%d, parent_not_connected=%d, total=%zu",
-                           processed_count, no_parent_count, parent_not_connected_count, all_orphans.size());
-            }
+            // Log summary (always log)
+            std::cout << "[IBD STUCK FIX #3] Scan complete - processed=" << processed_count
+                      << ", no_parent=" << no_parent_count
+                      << ", parent_not_connected=" << parent_not_connected_count
+                      << ", total=" << all_orphans.size() << std::endl;
             if (processed_count > 0) {
                 LogPrintIBD(INFO, "IBD STUCK FIX #3: Processed %d orphan(s) whose parents are now available", processed_count);
             }
