@@ -491,23 +491,32 @@ bool CIbdCoordinator::FetchBlocks() {
         // Previously: break on h > header_height stopped iteration, skipping heights after first out-of-range
         // Now: continue skips out-of-range heights but continues checking remaining heights
         std::vector<int> valid_heights;
+        int filter_out_of_range = 0, filter_already_have = 0, filter_null_hash = 0, filter_connected = 0;
+
+        // IBD DEBUG: Log actual heights returned by window
+        if (!chunk_heights.empty()) {
+            std::cout << "[IBD-DEBUG] chunk_heights for peer " << peer_id << ": [";
+            for (size_t i = 0; i < chunk_heights.size() && i < 5; ++i) {
+                std::cout << chunk_heights[i];
+                if (i < chunk_heights.size() - 1 && i < 4) std::cout << ", ";
+            }
+            if (chunk_heights.size() > 5) std::cout << ", ..." << chunk_heights.back();
+            std::cout << "]" << std::endl;
+        }
         for (int h : chunk_heights) {
-            if (h > header_height) continue;  // IBD SLOW FIX #2: Skip out-of-range but continue checking
-            if (h <= chain_height) continue;  // Already have this block
+            if (h > header_height) { filter_out_of_range++; continue; }
+            if (h <= chain_height) { filter_already_have++; continue; }
 
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
             if (hash.IsNull()) {
-                // IBD SLOW FIX #6: Log null hash occurrences for debugging
-                static int null_hash_count = 0;
-                if (null_hash_count++ < 10) {
-                    LogPrintIBD(DEBUG, "GetRandomXHashAtHeight(%d) returned null - header may not be synced yet", h);
-                }
+                filter_null_hash++;
                 continue;  // No header
             }
             // IBD HANG FIX #7: Check if block is CONNECTED, not just if we have an index
             // During async validation, BlockIndex is created before validation completes
             CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
             if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                filter_connected++;
                 continue;  // Block is actually connected to chain - skip
             }
 
@@ -517,6 +526,10 @@ bool CIbdCoordinator::FetchBlocks() {
         if (valid_heights.empty()) {
             std::cout << "[IBD-DEBUG] valid_heights empty for peer " << peer_id
                       << " chunk_heights.size=" << chunk_heights.size()
+                      << " filter_out_of_range=" << filter_out_of_range
+                      << " filter_already_have=" << filter_already_have
+                      << " filter_null_hash=" << filter_null_hash
+                      << " filter_connected=" << filter_connected
                       << " header_height=" << header_height
                       << " chain_height=" << chain_height << std::endl;
             continue;  // No valid heights in this chunk
