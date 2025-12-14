@@ -15,8 +15,12 @@
 #include <net/peers.h>
 #include <net/protocol.h>
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
+#include <net/orphan_manager.h>  // IBD STUCK FIX #3: Periodic orphan scan
 #include <util/logging.h>
 #include <util/bench.h>  // Performance: Benchmarking
+
+// IBD STUCK FIX #3: Access to global NodeContext for orphan manager
+extern NodeContext g_node_context;
 
 CIbdCoordinator::CIbdCoordinator(CChainState& chainstate, NodeContext& node_context)
     : m_chainstate(chainstate),
@@ -255,6 +259,73 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
     }
 
+    // IBD STUCK FIX #3: Periodic orphan scan to process orphans whose parents are now in chain
+    // This handles cases where orphans were stored after their parent validated, or orphan chains
+    // where only direct children are processed initially
+    static auto last_orphan_scan = std::chrono::steady_clock::now();
+    auto now_orphan_scan = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::seconds>(now_orphan_scan - last_orphan_scan).count() >= 10) {
+        last_orphan_scan = now_orphan_scan;
+        
+        if (g_node_context.orphan_manager) {
+            // Get all orphans
+            std::vector<uint256> all_orphans = g_node_context.orphan_manager->GetAllOrphans();
+            int processed_count = 0;
+            
+            for (const uint256& orphanHash : all_orphans) {
+                CBlock orphanBlock;
+                if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
+                    // Check if parent is now in chain and connected
+                    CBlockIndex* parent = m_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
+                    if (parent && (parent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                        // Parent is connected - trigger orphan processing
+                        // Use the same logic as in block_validation_queue.cpp orphan resolution
+                        uint256 orphanBlockHash = orphanBlock.GetHash();
+                        int orphanHeight = parent->nHeight + 1;
+                        
+                        // Check if already processed
+                        CBlockIndex* existing = m_chainstate.GetBlockIndex(orphanBlockHash);
+                        if (existing && existing->HaveData() && (existing->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                            // Already processed - remove from orphan pool
+                            g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                            continue;
+                        }
+                        
+                        // Create block index for orphan
+                        auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock);
+                        pOrphanIndex->phashBlock = orphanBlockHash;
+                        pOrphanIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+                        pOrphanIndex->pprev = parent;
+                        pOrphanIndex->nHeight = orphanHeight;
+                        pOrphanIndex->BuildChainWork();
+                        
+                        // Add to chain state (orphan block already saved to DB when stored)
+                        CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
+                        if (m_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
+                            // Queue for async validation
+                            if (g_node_context.validation_queue && 
+                                g_node_context.validation_queue->IsRunning() &&
+                                g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, pOrphanIndexRaw)) {
+                                LogPrintIBD(DEBUG, "IBD STUCK FIX #3: Queued orphan %s... at height %d (parent now available)", 
+                                           orphanBlockHash.GetHex().substr(0, 16).c_str(), orphanHeight);
+                                // Successfully queued - remove from orphan pool
+                                g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                                processed_count++;
+                            } else {
+                                // Queue failed - keep orphan for retry
+                                // Note: Block index remains in chainstate - will be cleaned up later if needed
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (processed_count > 0) {
+                LogPrintIBD(INFO, "IBD STUCK FIX #3: Processed %d orphan(s) whose parents are now available", processed_count);
+            }
+        }
+    }
+
     RetryTimeoutsAndStalls();
     BENCHMARK_END("ibd_download_blocks");
 }
@@ -322,12 +393,19 @@ bool CIbdCoordinator::FetchBlocks() {
     }
     
     // IBD HANG FIX #6: Check if all peers are at capacity
+    // IBD STUCK FIX #2: Use GetBlocksInFlightForPeer() instead of peer->nBlocksInFlight
+    // This fixes capacity check using stale counter data - CPeerManager is single source of truth
     bool all_peers_at_capacity = true;
     for (int peer_id : available_peers) {
         auto peer = m_node_context.peer_manager->GetPeer(peer_id);
-        if (peer && peer->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-            all_peers_at_capacity = false;
-            break;
+        if (peer) {
+            // Use CPeerManager's tracking method instead of peer's counter
+            // This ensures we check the actual tracking state, not a potentially stale counter
+            int blocks_in_flight = m_node_context.peer_manager->GetBlocksInFlightForPeer(peer_id);
+            if (blocks_in_flight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+                all_peers_at_capacity = false;
+                break;
+            }
         }
     }
     if (all_peers_at_capacity && !available_peers.empty()) {

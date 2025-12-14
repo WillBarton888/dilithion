@@ -972,8 +972,12 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
     // IBD HANG FIX #16: Remove all blocks for this peer from CPeerManager tracking
     // This decrements nBlocksInFlight so the peer can accept new chunks
     // Without this fix, peers get stuck at "capacity" (128 blocks) forever
+    // IBD STUCK FIX #1: Also remove from CPeerManager::mapBlocksInFlight to fix tracking desync
     if (g_peer_manager) {
         int blocks_removed = 0;
+        int cpmanager_blocks_removed = 0;
+        
+        // Remove from CBlockFetcher::mapBlocksInFlight
         for (auto block_it = mapBlocksInFlight.begin(); block_it != mapBlocksInFlight.end(); ) {
             if (block_it->second.peer == peer_id) {
                 g_peer_manager->RemoveBlockFromFlight(block_it->first);
@@ -983,10 +987,24 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
                 ++block_it;
             }
         }
+        
+        // IBD STUCK FIX #1: Also remove from CPeerManager::mapBlocksInFlight
+        // This fixes tracking desync where blocks remain in CPeerManager after chunk cancellation
+        // Use GetBlocksInFlight() to get all blocks, then remove ones for this peer
+        std::vector<std::pair<uint256, int>> all_blocks = g_peer_manager->GetBlocksInFlight();
+        for (const auto& block_entry : all_blocks) {
+            if (block_entry.second == peer_id) {
+                g_peer_manager->RemoveBlockFromFlight(block_entry.first);
+                cpmanager_blocks_removed++;
+            }
+        }
+        
         // Also clean up mapPeerBlocks
         mapPeerBlocks.erase(peer_id);
-        std::cout << "[Chunk] IBD HANG FIX #16: Removed " << blocks_removed << " blocks from peer "
-                  << peer_id << " tracking (nBlocksInFlight decremented)" << std::endl;
+        std::cout << "[Chunk] IBD STUCK FIX #1: Removed " << blocks_removed 
+                  << " blocks from CBlockFetcher and " << cpmanager_blocks_removed
+                  << " blocks from CPeerManager for peer " << peer_id 
+                  << " (nBlocksInFlight decremented)" << std::endl;
     }
 
     // Remove the chunk from active chunks (moved to cancelled)
