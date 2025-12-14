@@ -567,14 +567,24 @@ void CConnman::ThreadMessageHandler() {
         // cs_vNodes is now RELEASED - safe to call handlers that acquire other locks
 
         // Phase 2: Process collected messages WITHOUT holding cs_vNodes
+        int msg_index = 0;
         for (const auto& pending : pending_messages) {
+            msg_index++;
+            std::cout << "[MSGHANDLER-LOOP] START " << msg_index << "/" << pending_messages.size()
+                      << " cmd=" << pending.msg.command << " node=" << pending.node_id << std::endl;
+            std::cout.flush();
+
             // Convert CProcessedMsg to CNetMessage
             CNetMessage message(pending.msg.command, pending.msg.data);
 
             // Process the message using CNetMessageProcessor
             bool success = false;
             if (m_msg_processor) {
+                std::cout << "[MSGHANDLER-LOOP] Calling ProcessMessage..." << std::endl;
+                std::cout.flush();
                 success = m_msg_processor->ProcessMessage(pending.node_id, message);
+                std::cout << "[MSGHANDLER-LOOP] ProcessMessage returned: " << (success ? "true" : "false") << std::endl;
+                std::cout.flush();
             } else if (m_msg_handler) {
                 // Fallback to callback if processor not set
                 // Need to get node pointer - acquire lock briefly
@@ -609,7 +619,14 @@ void CConnman::ThreadMessageHandler() {
                     }
                 }
             }
+
+            std::cout << "[MSGHANDLER-LOOP] END " << msg_index << "/" << pending_messages.size()
+                      << " success=" << (success ? "true" : "false") << std::endl;
+            std::cout.flush();
         }
+
+        std::cout << "[MSGHANDLER-LOOP] Finished processing all " << pending_messages.size() << " messages" << std::endl;
+        std::cout.flush();
 
         // Wait for more work
         if (!fMoreWork && !flagInterruptMsgProc.load()) {

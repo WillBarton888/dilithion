@@ -897,7 +897,11 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
             stream.read(block.vtx.data(), vtx_size);
         }
 
+        std::cout << "[BLOCK-PROCESS] Deserialized block, calling on_block handler..." << std::endl;
+        std::cout.flush();
         on_block(peer_id, block);
+        std::cout << "[BLOCK-PROCESS] on_block handler returned" << std::endl;
+        std::cout.flush();
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages

@@ -1880,6 +1880,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register block handler to validate and save received blocks
         message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
+            // DEBUG: Trace block handler entry
+            std::cout << "[BLOCK-HANDLER] ENTRY peer=" << peer_id << std::endl;
+            std::cout.flush();
+            auto handler_start = std::chrono::steady_clock::now();
+
             // BUG #152 FIX: ALWAYS use canonical (RandomX) hash for block identity
             // The hashPrevBlock in received blocks is ALWAYS the RandomX hash
             // (set by miner), so chainstate MUST be indexed by RandomX hash for
@@ -1892,7 +1897,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // ALWAYS use canonical RandomX hash for block identity/indexing
             // GetHash() caches result, so subsequent calls are free
+            std::cout << "[BLOCK-HANDLER] Computing block hash (RandomX)..." << std::endl;
+            std::cout.flush();
+            auto hash_start = std::chrono::steady_clock::now();
             uint256 blockHash = block.GetHash();
+            auto hash_end = std::chrono::steady_clock::now();
+            auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
+            std::cout << "[BLOCK-HANDLER] Hash computed in " << hash_ms << "ms: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout.flush();
 
             // Skip PoW validation (target check) for blocks below checkpoint
             // Hash is still computed for identity, just skip the target comparison
@@ -2167,6 +2179,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // IBD HANG FIX #17: Also update window tracking when block received
                     // Without this, window's m_in_flight set never clears, causing stalls every 128 blocks
                     g_node_context.block_fetcher->OnChunkBlockReceived(expected_height);
+                    auto handler_end = std::chrono::steady_clock::now();
+                    auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
+                    std::cout << "[BLOCK-HANDLER] EXIT (async) total=" << handler_ms << "ms" << std::endl;
+                    std::cout.flush();
                     return;  // Return immediately - validation happens in worker thread
                 } else {
                     std::cerr << "[P2P] WARNING: Failed to queue block for async validation, falling back to sync" << std::endl;
@@ -2176,8 +2192,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // Synchronous validation (fallback or non-IBD mode)
             // Activate best chain (handles reorg if needed)
+            std::cout << "[BLOCK-HANDLER] Calling ActivateBestChain synchronously..." << std::endl;
+            std::cout.flush();
+            auto activate_start = std::chrono::steady_clock::now();
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
+                auto activate_end = std::chrono::steady_clock::now();
+                auto activate_ms = std::chrono::duration_cast<std::chrono::milliseconds>(activate_end - activate_start).count();
+                std::cout << "[BLOCK-HANDLER] ActivateBestChain succeeded in " << activate_ms << "ms" << std::endl;
+                std::cout.flush();
                 if (reorgOccurred) {
                     std::cout << "[P2P] ⚠️  CHAIN REORGANIZATION occurred!" << std::endl;
                     std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
