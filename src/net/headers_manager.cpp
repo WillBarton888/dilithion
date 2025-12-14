@@ -52,97 +52,50 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
     // Process each header sequentially
     const HeaderWithChainWork* pprev = nullptr;
-    uint256 prevFastHash;  // Track previous header's FastHash for mapping
+    uint256 prevHash;  // Track previous header's hash for sequential iteration
     int heightStart = -1;
 
     for (size_t i = 0; i < headers.size(); i++) {
         const CBlockHeader& header = headers[i];
 
-        // Calculate expected height to determine if below checkpoint
+        // Calculate expected height
         int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
-        // Get checkpoint height for optimization decision
-        int checkpointHeight = Dilithion::g_chainParams ?
-            Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
-
-        // IBD OPTIMIZATION: Use FastHash for blocks AT or BELOW checkpoint height
-        uint256 storageHash;
-        if (expectedHeight <= checkpointHeight) {
-            storageHash = header.GetFastHash();
-        } else {
-            storageHash = header.GetHash();
-        }
+        // SIMPLIFICATION: Always use RandomX hash for storage
+        // This eliminates hash type mismatch issues between header storage and block requests
+        uint256 storageHash = header.GetHash();
 
         // Skip if we already have this header
         if (mapHeaders.find(storageHash) != mapHeaders.end()) {
             auto it = mapHeaders.find(storageHash);
             pprev = &it->second;
-            prevFastHash = storageHash;
+            prevHash = storageHash;
             heightStart = it->second.height;
             // BUG #33 FIX: Update best header even for existing headers
             UpdateBestHeader(storageHash);
             continue;
         }
 
-        // IBD OPTIMIZATION: During sequential processing, pprev from previous iteration
-        // is the parent of current header. Store the mapping now before lookup.
-        if (pprev != nullptr && !prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
-            // This header's hashPrevBlock tells us the RandomX hash of prev header
-            // Store this mapping so we can find prev if we need to later
-            mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
+        // SIMPLIFIED PARENT LOOKUP: With RandomX-only storage, hashPrevBlock directly
+        // references the parent's storage hash (no mapping needed)
 
-            // Also store the RandomX hash in the parent's HeaderWithChainWork
-            // so we can use it for block requests
-            auto parentIt = mapHeaders.find(prevFastHash);
-            if (parentIt != mapHeaders.end() && parentIt->second.randomXHash.IsNull()) {
-                parentIt->second.randomXHash = header.hashPrevBlock;
+        // Check if parent is genesis block
+        uint256 genesisHash = Genesis::GetGenesisHash();
+        if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
+            if (i == 0) {
+                std::cout << "[HeadersManager] Parent is genesis block" << std::endl;
             }
+            pprev = nullptr;
         }
-
-        // Find parent - for sequential IBD, pprev should already be correct
-        // But we need to handle gaps, restarts, and competing chains
-        bool needsParentLookup = (pprev == nullptr);
-        if (!needsParentLookup) {
-            // Verify pprev is actually the parent by checking the mapping
-            auto mappingIt = mapRandomXToFastHash.find(header.hashPrevBlock);
-            if (mappingIt != mapRandomXToFastHash.end() && mappingIt->second == prevFastHash) {
-                // pprev is correct, skip lookup
+        // Direct parent lookup (hashPrevBlock = parent's RandomX hash = parent's storage hash)
+        else {
+            auto parentIt = mapHeaders.find(header.hashPrevBlock);
+            if (parentIt != mapHeaders.end()) {
+                pprev = &parentIt->second;
             } else {
-                // pprev might not be the parent (gap or fork), need to look up
-                needsParentLookup = true;
-            }
-        }
-        if (needsParentLookup) {
-            // First check: Is parent the genesis block?
-            uint256 genesisHash = Genesis::GetGenesisHash();
-            if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
-                if (i == 0) {
-                    std::cout << "[HeadersManager] Parent is genesis block" << std::endl;
-                }
-                pprev = nullptr;
-            }
-            // Second check: Look up parent via RandomX->FastHash mapping
-            else {
-                auto mappingIt = mapRandomXToFastHash.find(header.hashPrevBlock);
-                if (mappingIt != mapRandomXToFastHash.end()) {
-                    auto parentIt = mapHeaders.find(mappingIt->second);
-                    if (parentIt != mapHeaders.end()) {
-                        pprev = &parentIt->second;
-                    } else {
-                        std::cerr << "[HeadersManager] Parent in mapping but not in headers" << std::endl;
-                        return false;
-                    }
-                }
-                // Third check: Direct lookup (for backward compatibility or post-IBD)
-                else {
-                    auto parentIt = mapHeaders.find(header.hashPrevBlock);
-                    if (parentIt != mapHeaders.end()) {
-                        pprev = &parentIt->second;
-                    } else {
-                        std::cerr << "[HeadersManager] ORPHAN: Parent not found" << std::endl;
-                        return false;
-                    }
-                }
+                std::cerr << "[HeadersManager] ORPHAN: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
+                          << " not found for height " << expectedHeight << std::endl;
+                return false;
             }
         }
 
@@ -165,7 +118,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
         // Update for next iteration
         pprev = &mapHeaders[storageHash];
-        prevFastHash = storageHash;
+        prevHash = storageHash;
 
         if (heightStart < 0) {
             heightStart = height;
@@ -173,10 +126,10 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
     }
 
     // Update peer state
-    if (!headers.empty() && !prevFastHash.IsNull()) {
-        auto it = mapHeaders.find(prevFastHash);
+    if (!headers.empty() && !prevHash.IsNull()) {
+        auto it = mapHeaders.find(prevHash);
         if (it != mapHeaders.end()) {
-            UpdatePeerState(peer, prevFastHash, it->second.height);
+            UpdatePeerState(peer, prevHash, it->second.height);
         }
     }
 
@@ -619,46 +572,16 @@ uint256 CHeadersManager::GetRandomXHashAtHeight(int height) const
 {
     std::lock_guard<std::mutex> lock(cs_headers);
 
-    // Get the header(s) at this height
+    // SIMPLIFICATION: With RandomX-only storage, the storage hash IS the RandomX hash
+    // Just return the storage hash directly - no need for mapping or computation
+
     auto heightIt = mapHeightIndex.find(height);
     if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
-        static int null_count = 0;
-        if (null_count++ < 5) {
-            std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): height not in index" << std::endl;
-        }
-        return uint256();
+        return uint256();  // Height not in index
     }
 
-    // Get the first header at this height (usually only one)
-    const uint256& storageHash = *heightIt->second.begin();
-    auto headerIt = mapHeaders.find(storageHash);
-    if (headerIt == mapHeaders.end()) {
-        static int notfound_count = 0;
-        if (notfound_count++ < 5) {
-            std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): storage hash not found" << std::endl;
-        }
-        return uint256();
-    }
-
-    // If we have the RandomX hash (from child's hashPrevBlock), return it
-    if (!headerIt->second.randomXHash.IsNull()) {
-        static int found_count = 0;
-        if (found_count++ < 5) {
-            std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): returning cached randomXHash "
-                      << headerIt->second.randomXHash.GetHex().substr(0, 16) << "..." << std::endl;
-        }
-        return headerIt->second.randomXHash;
-    }
-
-    // Otherwise, compute it (only happens for blocks above checkpoint or last block)
-    static int compute_count = 0;
-    if (compute_count++ < 5) {
-        uint256 computed = headerIt->second.header.GetHash();
-        std::cout << "[DEBUG] GetRandomXHashAtHeight(" << height << "): computing RandomX hash "
-                  << computed.GetHex().substr(0, 16) << "..." << std::endl;
-        return computed;
-    }
-    return headerIt->second.header.GetHash();
+    // Storage hash = RandomX hash (they're the same now)
+    return *heightIt->second.begin();
 }
 
 // ============================================================================
@@ -1090,7 +1013,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         }
 
         const HeaderWithChainWork* pprev = nullptr;
-        uint256 prevFastHash;  // Track previous header's FastHash for mapping
+        uint256 prevHash;  // Track previous header's hash for sequential iteration
         int processed_count = 0;
 
         for (const CBlockHeader& header : headers) {
@@ -1099,106 +1022,46 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 std::cout << "[IBD] Processing header " << processed_count << "/" << headers.size() << std::endl;
             }
 
-            // Get checkpoint height for optimization decision
+            // Get checkpoint height for validation queueing decision
             int checkpointHeight = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
-            // IBD HEADER FIX #2: Do parent lookup FIRST to get correct expectedHeight
-            // Previously, expectedHeight was calculated before parent lookup, defaulting to 1
-            // when pprev was null. This caused post-checkpoint headers to be stored with FastHash.
+            // SIMPLIFIED PARENT LOOKUP: With RandomX-only storage, hashPrevBlock directly
+            // references the parent's storage hash (no mapping needed)
 
-            // Find parent - for sequential IBD, pprev should already be correct from previous iteration
-            // IBD HEADER FIX #2 continued: Trust pprev from previous iteration during sequential processing
-            // The mapRandomXToFastHash verification was causing failures because the mapping is created
-            // AFTER parent lookup, not before. For sequential batch processing, pprev is always correct.
-            bool needsParentLookup = (pprev == nullptr);
-
-            // Only verify if we have an existing pprev that might be stale (e.g., out-of-order headers)
-            // For sequential processing, pprev from previous iteration IS the correct parent
-            if (!needsParentLookup && !prevFastHash.IsNull()) {
-                // Trust pprev from previous iteration - skip expensive verification
-                // The parent was just stored in the previous iteration
-            } else if (!needsParentLookup) {
-                // prevFastHash is null but pprev isn't - something is wrong, do lookup
-                needsParentLookup = true;
-            }
-            if (needsParentLookup) {
-                // First check: Is parent the genesis block?
-                uint256 genesisHash = Genesis::GetGenesisHash();
-
-                // IBD DEBUG: Log genesis hash comparison
+            // Check if parent is genesis block
+            uint256 genesisHash = Genesis::GetGenesisHash();
+            if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
                 static int genesis_log_count = 0;
                 if (genesis_log_count++ < 3) {
-                    std::cout << "[HeadersManager] Genesis check: hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16)
-                              << "... genesisHash=" << genesisHash.GetHex().substr(0, 16) << "..."
-                              << " match=" << (header.hashPrevBlock == genesisHash) << std::endl;
+                    std::cout << "[HeadersManager] Parent is genesis block" << std::endl;
                 }
-
-                if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
-                    pprev = nullptr;
-                }
-                // Second check: Look up parent via RandomX->FastHash mapping
-                else {
-                    auto mappingIt = mapRandomXToFastHash.find(header.hashPrevBlock);
-                    if (mappingIt != mapRandomXToFastHash.end()) {
-                        auto parentIt = mapHeaders.find(mappingIt->second);
-                        if (parentIt != mapHeaders.end()) {
-                            pprev = &parentIt->second;
-                        } else {
-                            std::cerr << "[HeadersManager] Parent in mapping but not in headers" << std::endl;
-                            return false;
-                        }
-                    }
-                    // Third check: Direct lookup (for post-checkpoint headers)
-                    else {
-                        auto parentIt = mapHeaders.find(header.hashPrevBlock);
-                        if (parentIt != mapHeaders.end()) {
-                            pprev = &parentIt->second;
-                        } else {
-                            // IBD DEBUG: Log details about orphan header
-                            std::cerr << "[HeadersManager] Orphan header - parent not found" << std::endl;
-                            std::cerr << "[HeadersManager] hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                                      << " mapHeaders.size=" << mapHeaders.size()
-                                      << " mapRandomXToFastHash.size=" << mapRandomXToFastHash.size() << std::endl;
-                            return false;
-                        }
-                    }
+                pprev = nullptr;
+            }
+            // Direct parent lookup (hashPrevBlock = parent's RandomX hash = parent's storage hash)
+            else if (pprev == nullptr || prevHash.IsNull()) {
+                auto parentIt = mapHeaders.find(header.hashPrevBlock);
+                if (parentIt != mapHeaders.end()) {
+                    pprev = &parentIt->second;
+                } else {
+                    std::cerr << "[HeadersManager] ORPHAN: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
+                              << " not found, mapHeaders.size=" << mapHeaders.size() << std::endl;
+                    return false;
                 }
             }
+            // Sequential processing - pprev from previous iteration is correct
 
-            // NOW calculate expected height using the found parent
+            // Calculate expected height
             int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
-            // IBD OPTIMIZATION: Use FastHash for blocks AT or BELOW checkpoint height
-            // (SHA3-256 is ~10000x faster than RandomX)
-            // For blocks ABOVE checkpoint, use RandomX hash (needed for PoW validation + network protocol)
-            uint256 storageHash;
-            if (expectedHeight <= checkpointHeight) {
-                storageHash = header.GetFastHash();
-            } else {
-                // Above checkpoint - must use RandomX for full PoW validation
-                storageHash = header.GetHash();
-            }
+            // SIMPLIFICATION: Always use RandomX hash for storage
+            uint256 storageHash = header.GetHash();
 
             // Skip duplicates
             if (mapHeaders.find(storageHash) != mapHeaders.end()) {
                 pprev = &mapHeaders[storageHash];
-                prevFastHash = storageHash;
+                prevHash = storageHash;
                 continue;
-            }
-
-            // IBD OPTIMIZATION: During sequential processing, pprev from previous iteration
-            // is the parent of current header. Store the mapping now before lookup.
-            if (pprev != nullptr && !prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
-                // This header's hashPrevBlock tells us the RandomX hash of prev header
-                mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
-
-                // Also store the RandomX hash in the parent's HeaderWithChainWork
-                // so we can use it for block requests
-                auto parentIt = mapHeaders.find(prevFastHash);
-                if (parentIt != mapHeaders.end() && parentIt->second.randomXHash.IsNull()) {
-                    parentIt->second.randomXHash = header.hashPrevBlock;
-                }
             }
 
             // Quick validate (structure only - fast)
@@ -1226,14 +1089,14 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
             // Update for next iteration
             pprev = &mapHeaders[storageHash];
-            prevFastHash = storageHash;
+            prevHash = storageHash;
         }
 
         // Update peer state
-        if (!headers.empty() && !prevFastHash.IsNull()) {
-            auto it = mapHeaders.find(prevFastHash);
+        if (!headers.empty() && !prevHash.IsNull()) {
+            auto it = mapHeaders.find(prevHash);
             if (it != mapHeaders.end()) {
-                UpdatePeerState(peer, prevFastHash, it->second.height);
+                UpdatePeerState(peer, prevHash, it->second.height);
             }
         }
     }

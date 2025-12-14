@@ -1860,34 +1860,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             for (const auto& item : requested_items) {
                 if (item.type == NetProtocol::MSG_BLOCK_INV) {
-                    // Look up block in database
+                    // Look up block in database by RandomX hash
+                    // SIMPLIFICATION: We now use RandomX hash everywhere, so direct lookup should work
                     CBlock block;
                     bool found = blockchain.ReadBlock(item.hash, block);
-
-                    // IBD BLOCK FIX #3: If not found by requested hash, try chainstate fallback
-                    // This handles case where old blocks are stored with single hash but peer requests with different hash
-                    if (!found) {
-                        // Try to find block in chainstate by hash
-                        CBlockIndex* pindex = g_chainstate.GetBlockIndex(item.hash);
-                        if (pindex) {
-                            // Block exists in chainstate - try reading by stored hash
-                            if (pindex->phashBlock != item.hash) {
-                                found = blockchain.ReadBlock(pindex->phashBlock, block);
-                                if (found) {
-                                    std::cout << "[BLOCK-SERVE] Found block via chainstate phashBlock fallback" << std::endl;
-                                }
-                            }
-                            // If still not found, try reading the block by computing its FastHash
-                            if (!found) {
-                                // We have the block index, try computing FastHash from the header in index
-                                uint256 fastHash = pindex->header.GetFastHash();
-                                found = blockchain.ReadBlock(fastHash, block);
-                                if (found) {
-                                    std::cout << "[BLOCK-SERVE] Found block via FastHash fallback" << std::endl;
-                                }
-                            }
-                        }
-                    }
 
                     if (found) {
                         // Send block to requesting peer
