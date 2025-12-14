@@ -1173,7 +1173,22 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                         if (parentIt != mapHeaders.end()) {
                             pprev = &parentIt->second;
                         } else {
+                            // IBD DEBUG: Log details about orphan header
                             std::cerr << "[HeadersManager] Orphan header - parent not found" << std::endl;
+                            std::cerr << "[HeadersManager] expected_height=" << expectedHeight
+                                      << " checkpoint=" << checkpointHeight
+                                      << " hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                                      << " mapHeaders.size=" << mapHeaders.size()
+                                      << " mapRandomXToFastHash.size=" << mapRandomXToFastHash.size() << std::endl;
+
+                            // Try to find parent by height-1 in the height index
+                            auto heightIt = mapHeightIndex.find(expectedHeight - 1);
+                            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+                                std::cerr << "[HeadersManager] Parent at height " << (expectedHeight - 1)
+                                          << " exists with hash: " << heightIt->second.begin()->GetHex().substr(0, 16) << "..." << std::endl;
+                            } else {
+                                std::cerr << "[HeadersManager] No parent at height " << (expectedHeight - 1) << " in index" << std::endl;
+                            }
                             return false;
                         }
                     }
