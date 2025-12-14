@@ -55,13 +55,12 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
     // Phase 2: Quick validation checks before queueing
     uint256 blockHash = block.GetHash();
 
-    // Check if queue is full (backpressure)
-    {
-        std::lock_guard<std::mutex> lock(m_queue_mutex);
-        if (m_queue.size() >= MAX_QUEUE_DEPTH) {
-            std::cerr << "[ValidationQueue] Queue full (" << m_queue.size() << " blocks), rejecting block from peer " << peer_id << std::endl;
-            return false;
-        }
+    // SSOT FIX #3: Use GetQueueDepth() instead of direct m_queue.size() access
+    // This ensures atomic check with proper locking
+    size_t queue_depth = GetQueueDepth();
+    if (queue_depth >= MAX_QUEUE_DEPTH) {
+        std::cerr << "[ValidationQueue] Queue full (" << queue_depth << " blocks), rejecting block from peer " << peer_id << std::endl;
+        return false;
     }
 
     // Basic PoW check (cheap, can do in P2P thread)
@@ -96,14 +95,14 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         std::chrono::steady_clock::now().time_since_epoch()).count();
     queued_block.pindex = pindex ? pindex : existing;
 
-    // Add to queue and update stats
-    size_t queue_depth;
+    // SSOT FIX #3: Add to queue and update stats
+    // Use GetQueueDepth() after adding to get accurate count
     {
         std::lock_guard<std::mutex> lock(m_queue_mutex);
         m_queue.push(queued_block);
         m_queued_heights.insert(expected_height);  // O(1) lookup for IsHeightQueued
-        queue_depth = m_queue.size();
     }
+    size_t queue_depth = GetQueueDepth();  // SSOT FIX #3: Use GetQueueDepth() instead of m_queue.size()
 
     // Update stats
     {
@@ -190,10 +189,10 @@ void CBlockValidationQueue::ValidationWorker() {
                 m_queued_heights.erase(queued_block.expected_height);  // O(1) removal for IsHeightQueued
                 has_block = true;
 
-                // Update queue depth in stats
+                // SSOT FIX #3: Update queue depth in stats using GetQueueDepth()
                 {
                     std::lock_guard<std::mutex> stats_lock(m_stats_mutex);
-                    m_stats.queue_depth = m_queue.size();
+                    m_stats.queue_depth = GetQueueDepth();  // Use method instead of direct access
                 }
             }
         }

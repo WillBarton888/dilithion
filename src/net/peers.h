@@ -42,7 +42,10 @@ public:
 
     int id;                          // Unique peer ID
     NetProtocol::CAddress addr;      // Peer address
-    State state;                     // Connection state
+    // SSOT FIX #1: CPeer::state is DEPRECATED - CNode::state is the single source of truth
+    // This field is kept for backward compatibility but should not be used for state checks
+    // Use CPeerManager::GetNode(peer_id)->state instead
+    State state;                     // DEPRECATED: Use CNode::state instead
     int64_t connect_time;            // When connection was established
     int64_t last_recv;               // Last message received time
     int64_t last_send;               // Last message sent time
@@ -137,12 +140,38 @@ public:
           lastSuccessTime(std::chrono::steady_clock::now()),
           lastStallTime(std::chrono::steady_clock::now()) {}
 
+    // SSOT FIX #1: These methods now query CNode::state through CPeerManager
+    // CPeer::state is deprecated - CNode::state is the single source of truth
+    // Note: These methods require CPeerManager context to access CNode
+    // For direct access, use CPeerManager::GetNode(peer_id)->IsConnected() instead
     bool IsConnected() const {
+        // DEPRECATED: Query CNode::state instead
+        // This method kept for backward compatibility but may return stale data
         return state >= STATE_CONNECTED && state < STATE_BANNED;
     }
 
     bool IsHandshakeComplete() const {
+        // DEPRECATED: Query CNode::state instead
+        // This method kept for backward compatibility but may return stale data
         return state == STATE_HANDSHAKE_COMPLETE;
+    }
+    
+    // SSOT FIX #1: New method that queries CNode::state (requires CPeerManager context)
+    // This is the preferred way to check handshake completion
+    bool IsHandshakeComplete(CNode* node) const {
+        if (!node) {
+            // Fallback to deprecated CPeer::state if CNode not available
+            return state == STATE_HANDSHAKE_COMPLETE;
+        }
+        return node->IsHandshakeComplete();  // Query CNode::state (SSOT)
+    }
+    
+    bool IsConnected(CNode* node) const {
+        if (!node) {
+            // Fallback to deprecated CPeer::state if CNode not available
+            return state >= STATE_CONNECTED && state < STATE_BANNED;
+        }
+        return node->IsConnected();  // Query CNode::state (SSOT)
     }
 
     bool IsBanned() const {

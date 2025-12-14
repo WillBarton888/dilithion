@@ -90,9 +90,13 @@ public:
     //
     // Connection state
     //
+    // SSOT FIX #2: CNode::state is the single source of truth for peer connection state
+    // CPeer::state is deprecated - all code should check CNode::state
     std::atomic<State> state{STATE_DISCONNECTED};
     std::atomic<bool> fDisconnect{false};   // Set to trigger disconnect
-    std::atomic<bool> fSuccessfullyConnected{false};  // Handshake complete
+    // SSOT FIX #2: fSuccessfullyConnected is redundant with state == STATE_HANDSHAKE_COMPLETE
+    // Kept for backward compatibility but state is authoritative
+    std::atomic<bool> fSuccessfullyConnected{false};  // DEPRECATED: Use state == STATE_HANDSHAKE_COMPLETE
     std::atomic<bool> fVersionSent{false};  // VERSION message sent (BUG #139)
 
     //

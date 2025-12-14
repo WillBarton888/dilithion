@@ -874,8 +874,11 @@ void CConnman::SocketHandler() {
                                 node->state.store(CNode::STATE_VERSION_SENT);
                                 LogPrintf(NET, INFO, "[CConnman] Sent VERSION to node %d after connect\n", node->id);
 
-                                // BUG #142 FIX: Update CPeer state to VERSION_SENT
-                                // ProcessVerackMessage checks peer->state, not node->fVersionSent
+                                // SSOT FIX #1: Update CNode::state (single source of truth) first
+                                // CNode::state is authoritative - CPeer::state is deprecated
+                                node->state.store(CNode::STATE_VERSION_SENT);
+                                node->fVersionSent.store(true);
+                                // Update deprecated CPeer::state for backward compatibility
                                 if (m_peer_manager) {
                                     auto peer = m_peer_manager->GetPeer(node->id);
                                     if (peer) {

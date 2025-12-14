@@ -1108,9 +1108,10 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
 
         CNode* node = node_it->second;
 
-        // BUG #148 FIX: Check if CNode has valid socket
+        // SSOT FIX #4: Check CNode socket (single source of truth)
+        // CNode owns the socket - CPeer socket is deprecated
         if (!node->HasValidSocket()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: invalid socket" << std::endl;
+            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: invalid socket (CNode check)" << std::endl;
             continue;
         }
         if (node->fDisconnect.load()) {
@@ -1118,9 +1119,10 @@ std::vector<int> CPeerManager::GetValidPeersForDownload() const
             continue;
         }
 
-        // BUG #148 FIX: Check CPeer::state for handshake completion
-        if (!peer->IsHandshakeComplete()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: handshake incomplete" << std::endl;
+        // SSOT FIX #1: Check CNode::state (single source of truth) instead of CPeer::state
+        // CNode::state is authoritative - CPeer::state is deprecated
+        if (!node->IsHandshakeComplete()) {
+            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: handshake incomplete (CNode::state check)" << std::endl;
             continue;
         }
 
@@ -1163,9 +1165,14 @@ bool CPeerManager::IsPeerSuitableForDownload(int peer_id) const
         return false;
     }
 
-    // BUG #148 FIX: Check CPeer state (authoritative), not CNode state
-    // CNode::state might not be updated if GetNode() returned nullptr in ProcessVerackMessage
-    return peer->IsHandshakeComplete() &&
+    // SSOT FIX #1: Check CNode::state (single source of truth) instead of CPeer::state
+    // CNode::state is authoritative - CPeer::state is deprecated
+    CNode* node = GetNode(peer_id);
+    if (!node) {
+        // Fallback: If CNode not available, use deprecated CPeer::state
+        return peer->IsHandshakeComplete() && peer->IsSuitableForDownload();
+    }
+    return node->IsHandshakeComplete() &&  // Query CNode::state (SSOT)
            peer->IsSuitableForDownload();
 }
 

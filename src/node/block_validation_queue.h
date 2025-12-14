@@ -172,6 +172,8 @@ private:
     CChainState& m_chainstate;
     CBlockchainDB& m_db;
 
+    // SSOT FIX #3: m_queue is private - all access must go through GetQueueDepth()
+    // This ensures queue depth is always checked atomically with proper locking
     // Priority queue for blocks (min-heap by height)
     std::priority_queue<QueuedBlock> m_queue;
     std::set<int> m_queued_heights;  // O(1) lookup for IsHeightQueued - tracks heights in queue

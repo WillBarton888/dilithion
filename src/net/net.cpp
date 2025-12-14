@@ -410,6 +410,13 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         // This fixes the bug where inbound peers never got our VERSION because
         // we bumped state before the handler could check it
         if (peer) {
+            // SSOT FIX #1: Update CNode::state (single source of truth) first
+            CNode* node = peer_manager.GetNode(peer_id);
+            if (node && node->state.load() < CNode::STATE_VERSION_SENT) {
+                node->state.store(CNode::STATE_VERSION_SENT);
+                node->fVersionSent.store(true);
+            }
+            // Update deprecated CPeer::state for backward compatibility
             if (peer->state < CPeer::STATE_VERSION_SENT) {
                 peer->state = CPeer::STATE_VERSION_SENT;
             }
