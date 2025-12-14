@@ -180,6 +180,13 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         }
     }
 
+    // IBD DEBUG: Log summary after processing headers
+    std::cout << "[HeadersManager] ProcessHeaders complete: peer=" << peer
+              << " processed=" << headers.size()
+              << " nBestHeight=" << nBestHeight
+              << " mapHeaders.size=" << mapHeaders.size()
+              << " mapHeightIndex.size=" << mapHeightIndex.size() << std::endl;
+
     return true;
 }
 
@@ -884,33 +891,51 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
 {
     auto it = mapHeaders.find(hash);
     if (it == mapHeaders.end()) {
+        static int notfound_count = 0;
+        if (notfound_count++ < 5) {
+            std::cout << "[UpdateBestHeader] Header not found: " << hash.GetHex().substr(0, 16) << "..." << std::endl;
+        }
         return false;
     }
+
+    int newHeight = it->second.height;
 
     // Bug #46 Fix: Compare cumulative work, not height!
     // This is critical for chain reorganization
 
     // Check if this header has more work than current best
     if (hashBestHeader.IsNull()) {
+        std::cout << "[UpdateBestHeader] First header: height=" << newHeight << std::endl;
         hashBestHeader = hash;
-        nBestHeight = it->second.height;
+        nBestHeight = newHeight;
         return true;
     }
 
     auto bestIt = mapHeaders.find(hashBestHeader);
     if (bestIt == mapHeaders.end()) {
+        std::cout << "[UpdateBestHeader] Best header missing, updating: height=" << newHeight << std::endl;
         hashBestHeader = hash;
-        nBestHeight = it->second.height;
+        nBestHeight = newHeight;
         return true;
     }
 
     // Bug #46 Fix: Use ChainWorkGreaterThan() for proper cumulative work comparison
     // This enables reorganization to chains with more work but fewer blocks
-    if (ChainWorkGreaterThan(it->second.chainWork, bestIt->second.chainWork)) {
+    bool hasMoreWork = ChainWorkGreaterThan(it->second.chainWork, bestIt->second.chainWork);
 
+    // IBD DEBUG: Log every 100th comparison or when update happens
+    static int compare_count = 0;
+    if (hasMoreWork || (compare_count++ % 100 == 0)) {
+        std::cout << "[UpdateBestHeader] height=" << nBestHeight << " vs new=" << newHeight
+                  << " hasMoreWork=" << hasMoreWork
+                  << " current_work=" << bestIt->second.chainWork.GetHex().substr(0, 16)
+                  << " new_work=" << it->second.chainWork.GetHex().substr(0, 16) << std::endl;
+    }
+
+    if (hasMoreWork) {
+        std::cout << "[UpdateBestHeader] UPDATING: " << nBestHeight << " -> " << newHeight << std::endl;
         hashBestHeader = hash;
-        nBestHeight = it->second.height;
-
+        nBestHeight = newHeight;
         return true;
     }
 
