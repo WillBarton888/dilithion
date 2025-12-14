@@ -1879,6 +1879,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     } else {
                         std::cout << "[P2P] Peer " << peer_id << " requested unknown block: "
                                   << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
+                        // DEBUG: Check if block exists in chainstate under this hash
+                        CBlockIndex* pindex = g_chainstate.GetBlockIndex(item.hash);
+                        if (pindex) {
+                            std::cout << "[DEBUG] Block IS in chainstate at height " << pindex->nHeight
+                                      << " but NOT in block database!" << std::endl;
+                        } else {
+                            std::cout << "[DEBUG] Block NOT in chainstate either - hash doesn't exist" << std::endl;
+                        }
                     }
                 }
                 // Phase 5: Transaction relay - implement MSG_TX_INV handling after testnet stabilizes
