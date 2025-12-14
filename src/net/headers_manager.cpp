@@ -1121,6 +1121,15 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             if (needsParentLookup) {
                 // First check: Is parent the genesis block?
                 uint256 genesisHash = Genesis::GetGenesisHash();
+
+                // IBD DEBUG: Log genesis hash comparison
+                static int genesis_log_count = 0;
+                if (genesis_log_count++ < 3) {
+                    std::cout << "[HeadersManager] Genesis check: hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16)
+                              << "... genesisHash=" << genesisHash.GetHex().substr(0, 16) << "..."
+                              << " match=" << (header.hashPrevBlock == genesisHash) << std::endl;
+                }
+
                 if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
                     pprev = nullptr;
                 }
