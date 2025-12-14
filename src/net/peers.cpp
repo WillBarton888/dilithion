@@ -974,6 +974,9 @@ int CPeerManager::GetBlocksInFlightForPeer(int peer_id) const
             count++;
         }
     }
+    // DEBUG: Log capacity check
+    std::cout << "[DEBUG] GetBlocksInFlightForPeer(" << peer_id << ") = " << count
+              << " (mapBlocksInFlight.size=" << mapBlocksInFlight.size() << ", limit=" << MAX_BLOCKS_IN_FLIGHT_PER_PEER << ")" << std::endl;
     return count;
 }
 
