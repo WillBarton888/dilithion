@@ -1099,44 +1099,13 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 std::cout << "[IBD] Processing header " << processed_count << "/" << headers.size() << std::endl;
             }
 
-            // Calculate expected height to determine if below checkpoint
-            int expectedHeight = pprev ? (pprev->height + 1) : 1;
-
             // Get checkpoint height for optimization decision
             int checkpointHeight = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
-            // IBD OPTIMIZATION: Use FastHash for blocks AT or BELOW checkpoint height
-            // (SHA3-256 is ~10000x faster than RandomX)
-            // For blocks ABOVE checkpoint, use RandomX hash (needed for PoW validation + network protocol)
-            uint256 storageHash;
-            if (expectedHeight <= checkpointHeight) {
-                storageHash = header.GetFastHash();
-            } else {
-                // Above checkpoint - must use RandomX for full PoW validation
-                storageHash = header.GetHash();
-            }
-
-            // Skip duplicates
-            if (mapHeaders.find(storageHash) != mapHeaders.end()) {
-                pprev = &mapHeaders[storageHash];
-                prevFastHash = storageHash;
-                continue;
-            }
-
-            // IBD OPTIMIZATION: During sequential processing, pprev from previous iteration
-            // is the parent of current header. Store the mapping now before lookup.
-            if (pprev != nullptr && !prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
-                // This header's hashPrevBlock tells us the RandomX hash of prev header
-                mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
-
-                // Also store the RandomX hash in the parent's HeaderWithChainWork
-                // so we can use it for block requests
-                auto parentIt = mapHeaders.find(prevFastHash);
-                if (parentIt != mapHeaders.end() && parentIt->second.randomXHash.IsNull()) {
-                    parentIt->second.randomXHash = header.hashPrevBlock;
-                }
-            }
+            // IBD HEADER FIX #2: Do parent lookup FIRST to get correct expectedHeight
+            // Previously, expectedHeight was calculated before parent lookup, defaulting to 1
+            // when pprev was null. This caused post-checkpoint headers to be stored with FastHash.
 
             // Find parent - for sequential IBD, pprev should already be correct
             bool needsParentLookup = (pprev == nullptr);
@@ -1167,7 +1136,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                             return false;
                         }
                     }
-                    // Third check: Direct lookup (for backward compatibility)
+                    // Third check: Direct lookup (for post-checkpoint headers)
                     else {
                         auto parentIt = mapHeaders.find(header.hashPrevBlock);
                         if (parentIt != mapHeaders.end()) {
@@ -1175,23 +1144,47 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                         } else {
                             // IBD DEBUG: Log details about orphan header
                             std::cerr << "[HeadersManager] Orphan header - parent not found" << std::endl;
-                            std::cerr << "[HeadersManager] expected_height=" << expectedHeight
-                                      << " checkpoint=" << checkpointHeight
-                                      << " hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                            std::cerr << "[HeadersManager] hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
                                       << " mapHeaders.size=" << mapHeaders.size()
                                       << " mapRandomXToFastHash.size=" << mapRandomXToFastHash.size() << std::endl;
-
-                            // Try to find parent by height-1 in the height index
-                            auto heightIt = mapHeightIndex.find(expectedHeight - 1);
-                            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-                                std::cerr << "[HeadersManager] Parent at height " << (expectedHeight - 1)
-                                          << " exists with hash: " << heightIt->second.begin()->GetHex().substr(0, 16) << "..." << std::endl;
-                            } else {
-                                std::cerr << "[HeadersManager] No parent at height " << (expectedHeight - 1) << " in index" << std::endl;
-                            }
                             return false;
                         }
                     }
+                }
+            }
+
+            // NOW calculate expected height using the found parent
+            int expectedHeight = pprev ? (pprev->height + 1) : 1;
+
+            // IBD OPTIMIZATION: Use FastHash for blocks AT or BELOW checkpoint height
+            // (SHA3-256 is ~10000x faster than RandomX)
+            // For blocks ABOVE checkpoint, use RandomX hash (needed for PoW validation + network protocol)
+            uint256 storageHash;
+            if (expectedHeight <= checkpointHeight) {
+                storageHash = header.GetFastHash();
+            } else {
+                // Above checkpoint - must use RandomX for full PoW validation
+                storageHash = header.GetHash();
+            }
+
+            // Skip duplicates
+            if (mapHeaders.find(storageHash) != mapHeaders.end()) {
+                pprev = &mapHeaders[storageHash];
+                prevFastHash = storageHash;
+                continue;
+            }
+
+            // IBD OPTIMIZATION: During sequential processing, pprev from previous iteration
+            // is the parent of current header. Store the mapping now before lookup.
+            if (pprev != nullptr && !prevFastHash.IsNull() && expectedHeight <= checkpointHeight) {
+                // This header's hashPrevBlock tells us the RandomX hash of prev header
+                mapRandomXToFastHash[header.hashPrevBlock] = prevFastHash;
+
+                // Also store the RandomX hash in the parent's HeaderWithChainWork
+                // so we can use it for block requests
+                auto parentIt = mapHeaders.find(prevFastHash);
+                if (parentIt != mapHeaders.end() && parentIt->second.randomXHash.IsNull()) {
+                    parentIt->second.randomXHash = header.hashPrevBlock;
                 }
             }
 
