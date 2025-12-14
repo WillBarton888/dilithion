@@ -582,6 +582,20 @@ public:
     int GetBlocksInFlightForPeer(NodeId peer) const;
 
     /**
+     * @brief BUG #158: Get number of blocks in download queue (pending)
+     *
+     * @return Count of blocks waiting to be requested
+     */
+    size_t GetPendingCount() const;
+
+    /**
+     * @brief BUG #158: Get number of blocks currently in-flight (for fork detection)
+     *
+     * @return Count of blocks being downloaded
+     */
+    size_t GetInFlightCount() const;
+
+    /**
      * @brief Get list of all blocks waiting to be downloaded
      *
      * @return Vector of block hashes in download queue

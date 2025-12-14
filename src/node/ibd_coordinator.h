@@ -83,7 +83,11 @@ private:
     void QueueMissingBlocks(int chain_height, int blocks_to_queue);
     bool FetchBlocks();
     void RetryTimeoutsAndStalls();
-    
+
+    // BUG #158 FIX: Fork detection and recovery
+    int FindForkPoint(int chain_height);
+    void HandleForkScenario(int fork_point, int chain_height);
+
     // IBD HANG FIX #6: Hang cause tracking
     enum class HangCause {
         NONE,
@@ -107,6 +111,11 @@ private:
     
     // IBD HANG FIX #6: Hang cause tracking
     mutable HangCause m_last_hang_cause{HangCause::NONE};
+
+    // BUG #158 FIX: Fork detection state
+    int m_fork_stall_cycles{0};           // Cycles where blocks aren't connecting
+    bool m_fork_detected{false};          // Whether we've detected a fork
+    int m_fork_point{-1};                 // Height of common ancestor
 };
 
 #endif // DILITHION_NODE_IBD_COORDINATOR_H

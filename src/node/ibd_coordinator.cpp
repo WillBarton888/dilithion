@@ -201,6 +201,54 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
     LogPrintIBD(INFO, "Headers ahead of chain - downloading blocks (header=%d chain=%d)", header_height, chain_height);
 
+    // BUG #158 FIX: Fork detection - check if chain height isn't advancing
+    // Track stall cycles: if chain height doesn't advance despite IBD activity, we may be on a fork
+    static int s_last_chain_height = -1;
+    static int s_stall_cycles = 0;
+    const int FORK_DETECTION_THRESHOLD = 5;  // Cycles before triggering fork detection
+
+    if (s_last_chain_height == chain_height && !m_fork_detected) {
+        // Chain height hasn't advanced since last tick
+        s_stall_cycles++;
+
+        // Check if there's IBD activity (blocks pending or in-flight)
+        bool has_ibd_activity = false;
+        if (m_node_context.block_fetcher) {
+            has_ibd_activity = m_node_context.block_fetcher->GetPendingCount() > 0 ||
+                              m_node_context.block_fetcher->GetInFlightCount() > 0;
+        }
+
+        if (has_ibd_activity && s_stall_cycles >= FORK_DETECTION_THRESHOLD) {
+            std::cout << "[FORK-DETECT] Chain stalled at height " << chain_height
+                      << " for " << s_stall_cycles << " cycles - checking for fork..." << std::endl;
+
+            int fork_point = FindForkPoint(chain_height);
+            if (fork_point > 0 && fork_point < chain_height) {
+                std::cout << "[FORK-DETECT] Fork detected! Local chain diverged at height " << fork_point
+                          << " (chain=" << chain_height << ", fork_depth=" << (chain_height - fork_point) << ")" << std::endl;
+                HandleForkScenario(fork_point, chain_height);
+                s_stall_cycles = 0;
+                s_last_chain_height = -1;  // Reset to allow fresh tracking
+                // Continue with normal IBD - window has been reset to fork point
+            } else if (fork_point == chain_height) {
+                // Not a fork - just slow downloads, reset counter
+                std::cout << "[FORK-DETECT] No fork detected (tip matches header chain)" << std::endl;
+                s_stall_cycles = 0;
+            }
+        }
+    } else {
+        // Chain is advancing - reset stall detection
+        s_stall_cycles = 0;
+        if (m_fork_detected && chain_height > m_fork_point) {
+            // We've advanced past the fork point - clear fork state
+            std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << m_fork_point
+                      << " to " << chain_height << " - fork recovery complete" << std::endl;
+            m_fork_detected = false;
+            m_fork_point = -1;
+        }
+    }
+    s_last_chain_height = chain_height;
+
     // Phase 3: Initialize the 1024-block sliding window for IBD
     if (!m_node_context.block_fetcher->IsWindowInitialized()) {
         m_node_context.block_fetcher->InitializeWindow(chain_height, header_height);
@@ -672,6 +720,108 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         LogPrintIBD(WARN, "Disconnecting stalling peer %d", peer);
         m_node_context.connman->DisconnectNode(peer, "stalling block download");
     }
+}
+
+/**
+ * BUG #158 FIX: Find the fork point between local chain and header chain
+ *
+ * Walks back from chain tip comparing local block hashes to header hashes.
+ * Returns the height where they match (common ancestor), or 0 if no match found.
+ */
+int CIbdCoordinator::FindForkPoint(int chain_height) {
+    if (!m_node_context.headers_manager) {
+        return 0;
+    }
+
+    std::cout << "[FORK-DETECT] Searching for fork point from height " << chain_height << std::endl;
+
+    // Walk back from current chain tip using pprev pointers
+    CBlockIndex* pindex = m_chainstate.GetTip();
+    int checks = 0;
+    const int MAX_CHECKS = 1000;  // Don't walk back more than 1000 blocks
+
+    while (pindex && pindex->nHeight > 0 && checks < MAX_CHECKS) {
+        int h = pindex->nHeight;
+
+        // Get header hash at this height (this is the network's chain)
+        uint256 header_hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+        if (header_hash.IsNull()) {
+            pindex = pindex->pprev;
+            checks++;
+            continue;  // No header at this height, keep searching
+        }
+
+        // Get our local block hash
+        uint256 local_hash = pindex->GetBlockHash();
+
+        // Compare: if they match, we found the fork point
+        if (local_hash == header_hash) {
+            std::cout << "[FORK-DETECT] Found common ancestor at height " << h
+                      << " hash=" << local_hash.GetHex().substr(0, 16) << "..." << std::endl;
+            return h;
+        }
+
+        // Log divergence for debugging (first few mismatches only)
+        if (checks < 6) {
+            std::cout << "[FORK-DETECT] Height " << h << " diverges:"
+                      << " local=" << local_hash.GetHex().substr(0, 16) << "..."
+                      << " header=" << header_hash.GetHex().substr(0, 16) << "..." << std::endl;
+        }
+
+        pindex = pindex->pprev;
+        checks++;
+    }
+
+    // No common ancestor found - something is very wrong
+    std::cerr << "[FORK-DETECT] ERROR: No common ancestor found after " << checks << " blocks!" << std::endl;
+    return 0;
+}
+
+/**
+ * BUG #158 FIX: Handle a fork scenario by resetting IBD to start from fork point
+ */
+void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
+    if (!m_node_context.block_fetcher || fork_point <= 0) {
+        return;
+    }
+
+    std::cout << "[FORK-RECOVERY] Resetting IBD to fork point " << fork_point
+              << " (chain was at " << chain_height << ")" << std::endl;
+
+    // Reset the IBD window to start from fork_point + 1
+    // This will cause blocks to be downloaded starting from the divergence point
+    int header_height = m_node_context.headers_manager ?
+                        m_node_context.headers_manager->GetBestHeight() : chain_height;
+
+    // Reinitialize the window starting from fork point
+    m_node_context.block_fetcher->InitializeWindow(fork_point + 1, header_height);
+
+    // Queue blocks for download starting from fork point + 1
+    int blocks_to_queue = std::min(header_height - fork_point, 1024);
+
+    std::vector<int> heights_to_add;
+    heights_to_add.reserve(blocks_to_queue);
+
+    for (int h = fork_point + 1; h <= fork_point + blocks_to_queue && h <= header_height; h++) {
+        uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+        if (!hash.IsNull()) {
+            // Queue block for download
+            m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
+            heights_to_add.push_back(h);
+        }
+    }
+
+    // Add heights to window's pending set
+    if (!heights_to_add.empty()) {
+        m_node_context.block_fetcher->AddHeightsToWindowPending(heights_to_add);
+        std::cout << "[FORK-RECOVERY] Queued " << heights_to_add.size()
+                  << " blocks for download starting at height " << (fork_point + 1) << std::endl;
+    }
+
+    // Reset fork detection state
+    m_fork_detected = true;
+    m_fork_point = fork_point;
+    m_fork_stall_cycles = 0;
 }
 
 

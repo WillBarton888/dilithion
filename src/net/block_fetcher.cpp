@@ -408,6 +408,23 @@ int CBlockFetcher::GetBlocksInFlightForPeer(NodeId peer) const
     return 0;
 }
 
+size_t CBlockFetcher::GetPendingCount() const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+    // BUG #158: Return pending count from window or queue
+    if (m_window_initialized) {
+        return m_download_window.PendingCount();
+    }
+    return setQueuedHashes.size();
+}
+
+size_t CBlockFetcher::GetInFlightCount() const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+    // BUG #158: Return in-flight count from mapBlocksInFlight
+    return mapBlocksInFlight.size();
+}
+
 std::vector<uint256> CBlockFetcher::GetQueuedBlocks() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
