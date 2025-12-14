@@ -956,11 +956,17 @@ std::vector<std::pair<uint256, int>> CPeerManager::GetBlocksInFlight() const
 int CPeerManager::GetBlocksInFlightForPeer(int peer_id) const
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
-    auto it = peers.find(peer_id);
-    if (it != peers.end()) {
-        return it->second->nBlocksInFlight;
+
+    // IBD STUCK FIX #7: Count from mapBlocksInFlight instead of peer->nBlocksInFlight counter
+    // The counter can become stale/desync during chunk cancellation, but mapBlocksInFlight is
+    // the actual tracking state. This ensures capacity checks use accurate data.
+    int count = 0;
+    for (const auto& entry : mapBlocksInFlight) {
+        if (entry.second.first == peer_id) {
+            count++;
+        }
     }
-    return 0;
+    return count;
 }
 
 std::vector<std::pair<uint256, int>> CPeerManager::GetTimedOutBlocks(int timeout_seconds) const
