@@ -763,19 +763,26 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
+    std::cout << "[MarkBlockAsInFlight] ENTER peer=" << peer_id
+              << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+
     // Check if already in flight
     if (mapBlocksInFlight.count(hash)) {
+        std::cout << "[MarkBlockAsInFlight] REJECT: already in mapBlocksInFlight" << std::endl;
         return false;
     }
 
     // Check global limit
     if (mapBlocksInFlight.size() >= static_cast<size_t>(MAX_BLOCKS_IN_FLIGHT_TOTAL)) {
+        std::cout << "[MarkBlockAsInFlight] REJECT: global limit " << mapBlocksInFlight.size()
+                  << " >= " << MAX_BLOCKS_IN_FLIGHT_TOTAL << std::endl;
         return false;
     }
 
     // Get peer
     auto it = peers.find(peer_id);
     if (it == peers.end()) {
+        std::cout << "[MarkBlockAsInFlight] REJECT: peer not found" << std::endl;
         return false;
     }
 
@@ -790,7 +797,10 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
             peer_blocks_in_flight++;
         }
     }
+    std::cout << "[MarkBlockAsInFlight] peer_blocks_in_flight=" << peer_blocks_in_flight
+              << " MAX=" << MAX_BLOCKS_IN_FLIGHT_PER_PEER << std::endl;
     if (peer_blocks_in_flight >= MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        std::cout << "[MarkBlockAsInFlight] REJECT: peer at capacity" << std::endl;
         return false;
     }
 
@@ -803,6 +813,7 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
     auto list_it = std::prev(peer->vBlocksInFlight.end());
     mapBlocksInFlight[hash] = std::make_pair(peer_id, list_it);
 
+    std::cout << "[MarkBlockAsInFlight] SUCCESS: mapBlocksInFlight.size=" << mapBlocksInFlight.size() << std::endl;
     return true;
 }
 

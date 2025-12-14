@@ -67,23 +67,32 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    std::cout << "[RequestBlock] ENTER peer=" << peer << " height=" << height
+              << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+
     // Phase 1: CPeerManager is single source of truth for peer capacity
     if (!m_peer_manager) {
+        std::cout << "[RequestBlock] EARLY EXIT: no peer_manager" << std::endl;
         return false;  // Cannot operate without peer manager
     }
 
     auto peer_obj = m_peer_manager->GetPeer(peer);
     if (!peer_obj) {
+        std::cout << "[RequestBlock] EARLY EXIT: peer not found" << std::endl;
         return false;
     }
     // IBD STUCK FIX #9: Use GetBlocksInFlightForPeer() instead of stale counter
     int blocks_in_flight = m_peer_manager->GetBlocksInFlightForPeer(peer);
+    std::cout << "[RequestBlock] blocks_in_flight=" << blocks_in_flight
+              << " MAX=" << CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER << std::endl;
     if (blocks_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        std::cout << "[RequestBlock] EARLY EXIT: peer at capacity" << std::endl;
         return false;
     }
 
     // Check if already in-flight
     if (mapBlocksInFlight.count(hash) > 0) {
+        std::cout << "[RequestBlock] EARLY EXIT: already in mapBlocksInFlight" << std::endl;
         return false;
     }
 
@@ -95,13 +104,16 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     mapPeerBlocks[peer].insert(hash);
 
     // Phase 1: CPeerManager is single source of truth for block tracking
+    std::cout << "[RequestBlock] CALLING MarkBlockAsInFlight peer=" << peer << std::endl;
     m_peer_manager->MarkBlockAsInFlight(peer, hash, nullptr);
+    std::cout << "[RequestBlock] MarkBlockAsInFlight RETURNED" << std::endl;
 
     // Remove from queue if present
     setQueuedHashes.erase(hash);
 
     // NOTE: Actual GETDATA message sending is handled by caller
     // This function just tracks the request state
+    std::cout << "[RequestBlock] SUCCESS height=" << height << std::endl;
     return true;
 }
 
