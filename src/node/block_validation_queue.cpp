@@ -189,10 +189,12 @@ void CBlockValidationQueue::ValidationWorker() {
                 m_queued_heights.erase(queued_block.expected_height);  // O(1) removal for IsHeightQueued
                 has_block = true;
 
-                // SSOT FIX #3: Update queue depth in stats using GetQueueDepth()
+                // SSOT FIX #3: Update queue depth in stats
+                // IBD DEADLOCK FIX #11: Use m_queue.size() directly since we already hold m_queue_mutex
+                // Calling GetQueueDepth() here would cause self-deadlock (tries to relock m_queue_mutex)
                 {
                     std::lock_guard<std::mutex> stats_lock(m_stats_mutex);
-                    m_stats.queue_depth = GetQueueDepth();  // Use method instead of direct access
+                    m_stats.queue_depth = m_queue.size();  // Direct access - we already hold m_queue_mutex
                 }
             }
         }
