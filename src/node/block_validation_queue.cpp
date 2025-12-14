@@ -10,12 +10,14 @@
 #include <core/chainparams.h>
 #include <net/peers.h>
 #include <net/block_fetcher.h>
+#include <net/orphan_manager.h>  // IBD HANG FIX #23b: For orphan resolution
 #include <node/block_index.h>  // For CBlockIndex
 #include <primitives/block.h>  // For CBlock
 #include <util/logging.h>
 
 #include <iostream>
 #include <chrono>
+#include <queue>  // IBD HANG FIX #23b: For orphan queue
 
 extern NodeContext g_node_context;
 
@@ -326,6 +328,74 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     // Now updates window for all successfully validated blocks, allowing continuous advancement
     if (g_node_context.block_fetcher) {
         g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
+    }
+
+    // IBD HANG FIX #23b: Process orphan children after async validation completes
+    // When a block validates successfully, check if any orphans were waiting for it as their parent
+    // This was previously only done in the synchronous block handler path
+    if (g_node_context.orphan_manager) {
+        std::vector<uint256> orphanChildren = g_node_context.orphan_manager->GetOrphanChildren(blockHash);
+        if (!orphanChildren.empty()) {
+            std::cout << "[ValidationQueue] Found " << orphanChildren.size()
+                      << " orphan children waiting for block " << blockHash.GetHex().substr(0, 16)
+                      << "... at height " << expected_height << std::endl;
+
+            // Process orphan children (queue them for validation)
+            for (const uint256& orphanHash : orphanChildren) {
+                CBlock orphanBlock;
+                if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
+                    uint256 orphanBlockHash = orphanBlock.GetHash();
+
+                    // Verify parent is now available
+                    CBlockIndex* pOrphanParent = m_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
+                    if (!pOrphanParent) {
+                        // Parent still not available - keep orphan for later
+                        std::cout << "[ValidationQueue] Orphan " << orphanBlockHash.GetHex().substr(0, 16)
+                                  << "... parent still not available, keeping in pool" << std::endl;
+                        continue;
+                    }
+
+                    int orphanHeight = pOrphanParent->nHeight + 1;
+
+                    // Create block index for orphan
+                    auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock);
+                    pOrphanIndex->phashBlock = orphanBlockHash;
+                    pOrphanIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+                    pOrphanIndex->pprev = pOrphanParent;
+                    pOrphanIndex->nHeight = orphanHeight;
+                    pOrphanIndex->BuildChainWork();
+
+                    // Save block to database
+                    if (!m_db.WriteBlock(orphanBlockHash, orphanBlock)) {
+                        std::cerr << "[ValidationQueue] Failed to save orphan block to database" << std::endl;
+                        continue;
+                    }
+
+                    // Add to chain state
+                    CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
+                    if (!m_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
+                        std::cerr << "[ValidationQueue] Failed to add orphan block index" << std::endl;
+                        continue;
+                    }
+
+                    // Save block index to database
+                    if (!m_db.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw)) {
+                        std::cerr << "[ValidationQueue] Failed to save orphan block index" << std::endl;
+                        continue;
+                    }
+
+                    // Queue orphan for async validation
+                    if (QueueBlock(-1, orphanBlock, orphanHeight, pOrphanIndexRaw)) {
+                        std::cout << "[ValidationQueue] Queued orphan " << orphanBlockHash.GetHex().substr(0, 16)
+                                  << "... at height " << orphanHeight << " for validation" << std::endl;
+                        // Successfully queued - now safe to remove from orphan pool
+                        g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                    } else {
+                        std::cerr << "[ValidationQueue] Failed to queue orphan for validation, keeping in pool" << std::endl;
+                    }
+                }
+            }
+        }
     }
 
     std::cout << "[ValidationQueue] Successfully validated block at height " << expected_height << std::endl;

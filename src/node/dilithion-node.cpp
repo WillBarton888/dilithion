@@ -2286,14 +2286,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                         CBlock orphanBlock;
                         if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
-                            // Remove from orphan pool immediately (will be processed async)
-                            g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                            // IBD HANG FIX #23a: DON'T erase orphan until successfully processed!
+                            // Previous bug: EraseOrphanBlock() was called here, causing orphans to be lost
+                            // if any subsequent step failed (PoW check, parent lookup, DB write, etc.)
+                            // Now we only erase after successful queueing/processing.
 
                             uint256 orphanBlockHash = orphanBlock.GetHash();
+                            std::cout << "[Orphan] Processing orphan " << orphanBlockHash.GetHex().substr(0, 16)
+                                      << "... (parent: " << orphanBlock.hashPrevBlock.GetHex().substr(0, 16) << "...)" << std::endl;
 
                             // Quick PoW validation (cheap check before queueing)
                             if (!CheckProofOfWork(orphanBlockHash, orphanBlock.nBits)) {
-                                std::cerr << "[Orphan] ERROR: Orphan block has invalid PoW" << std::endl;
+                                std::cerr << "[Orphan] ERROR: Orphan block has invalid PoW - removing from pool" << std::endl;
+                                // Invalid PoW = invalid block, safe to remove
+                                g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
                                 queuedCount++;
                                 continue;
                             }
@@ -2301,7 +2307,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             // Get parent to determine height
                             CBlockIndex* pOrphanParent = g_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
                             if (!pOrphanParent) {
-                                std::cerr << "[Orphan] ERROR: Parent not found for orphan block" << std::endl;
+                                // IBD HANG FIX #23a: Keep orphan in pool if parent not found
+                                // Parent might not be in chainstate yet during async IBD
+                                // Will be retried when parent connects via async validation callback
+                                std::cout << "[Orphan] Parent not in chainstate yet, keeping in pool for retry" << std::endl;
                                 queuedCount++;
                                 continue;
                             }
@@ -2342,10 +2351,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                             // Queue for async validation (returns immediately, P2P thread continues)
                             // Note: Block and index are already saved, so async processing just needs to activate chain
+                            bool orphanProcessed = false;
                             if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
                                 if (g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, pOrphanIndexRaw)) {
                                     std::cout << "[Orphan] Queued orphan block " << orphanBlockHash.GetHex().substr(0, 16)
                                               << "... at height " << orphanHeight << " for async validation" << std::endl;
+                                    orphanProcessed = true;
 
                                     // Queue this block's orphan children for processing
                                     std::vector<uint256> nextOrphans = g_node_context.orphan_manager->GetOrphanChildren(orphanBlockHash);
@@ -2355,11 +2366,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 } else {
                                     std::cerr << "[Orphan] WARNING: Failed to queue orphan for async validation, falling back to sync" << std::endl;
                                     // Fallback: process synchronously if queue is full
-                                    // This should be rare, but prevents orphans from being lost
                                     bool reorg = false;
                                     if (g_chainstate.ActivateBestChain(pOrphanIndexRaw, orphanBlock, reorg)) {
                                         blockchain.WriteBlock(orphanBlockHash, orphanBlock);
                                         blockchain.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw);
+                                        orphanProcessed = true;
                                     }
                                 }
                             } else {
@@ -2369,7 +2380,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 if (g_chainstate.ActivateBestChain(pOrphanIndexRaw, orphanBlock, reorg)) {
                                     blockchain.WriteBlock(orphanBlockHash, orphanBlock);
                                     blockchain.WriteBlockIndex(orphanBlockHash, *pOrphanIndexRaw);
+                                    orphanProcessed = true;
                                 }
+                            }
+
+                            // IBD HANG FIX #23a: Only erase orphan AFTER successful processing
+                            if (orphanProcessed) {
+                                g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                            } else {
+                                std::cerr << "[Orphan] WARNING: Failed to process orphan, keeping in pool for retry" << std::endl;
                             }
 
                             queuedCount++;
