@@ -73,7 +73,12 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     }
 
     auto peer_obj = m_peer_manager->GetPeer(peer);
-    if (!peer_obj || peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+    if (!peer_obj) {
+        return false;
+    }
+    // IBD STUCK FIX #9: Use GetBlocksInFlightForPeer() instead of stale counter
+    int blocks_in_flight = m_peer_manager->GetBlocksInFlightForPeer(peer);
+    if (blocks_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
 
@@ -284,8 +289,9 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
 
     // Try the preferred peer first (the one that announced the block)
     if (preferred_peer != -1 && m_peer_manager->IsPeerSuitableForDownload(preferred_peer)) {
-        auto peer = m_peer_manager->GetPeer(preferred_peer);
-        if (peer && peer->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        // IBD STUCK FIX #9: Use GetBlocksInFlightForPeer() instead of stale counter
+        int peer_in_flight = m_peer_manager->GetBlocksInFlightForPeer(preferred_peer);
+        if (peer_in_flight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
             return preferred_peer;
         }
     }
@@ -303,8 +309,9 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
             continue;
         }
 
-        // Must have capacity
-        if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        // IBD STUCK FIX #9: Must have capacity (use SSOT not stale counter)
+        int in_flight = m_peer_manager->GetBlocksInFlightForPeer(peer_id);
+        if (in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
             continue;
         }
 
@@ -582,7 +589,15 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
     }
 
     auto peer = m_peer_manager->GetPeer(peer_id);
-    if (!peer || peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+    if (!peer) {
+        return false;
+    }
+
+    // IBD STUCK FIX #9: Use GetBlocksInFlightForPeer() instead of peer->nBlocksInFlight counter
+    // The counter can become stale/desync during chunk cancellation, but CPeerManager's
+    // mapBlocksInFlight is the single source of truth for tracking state.
+    int blocks_in_flight = m_peer_manager->GetBlocksInFlightForPeer(peer_id);
+    if (blocks_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
 
@@ -902,7 +917,12 @@ bool CBlockFetcher::ReassignChunk(NodeId old_peer, NodeId new_peer)
     }
 
     auto new_peer_obj = m_peer_manager->GetPeer(new_peer);
-    if (!new_peer_obj || new_peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+    if (!new_peer_obj) {
+        return false;
+    }
+    // IBD STUCK FIX #9: Use GetBlocksInFlightForPeer() instead of stale counter
+    int new_peer_in_flight = m_peer_manager->GetBlocksInFlightForPeer(new_peer);
+    if (new_peer_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
 
