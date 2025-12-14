@@ -773,6 +773,11 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
             chunk.blocks_received++;
             chunk.last_activity = std::chrono::steady_clock::now();
 
+            // IBD STUCK FIX #12: Erase individual height from mapHeightToPeer immediately
+            // Previously only erased when whole chunk completed, causing window to stall
+            // because is_height_in_flight_callback returned true for already-received heights
+            mapHeightToPeer.erase(height);
+
             // If chunk complete, clean up
             if (chunk.IsComplete()) {
                 std::cout << "[Chunk] Peer " << peer_id << " completed chunk "
