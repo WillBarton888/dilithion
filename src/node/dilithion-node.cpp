@@ -950,6 +950,15 @@ int main(int argc, char* argv[]) {
         LogPrintf(ALL, INFO, "Blockchain database opened successfully");
         std::cout << "  [OK] Blockchain database opened" << std::endl;
 
+        // IBD BLOCK FIX #3: Migrate existing blocks to dual-hash storage
+        // This ensures blocks can be looked up by either FastHash or RandomX hash
+        std::cout << "  Migrating blocks to dual-hash storage..." << std::endl;
+        if (!blockchain.MigrateToDualHashStorage()) {
+            std::cerr << "  [WARN] Block migration had errors (non-fatal)" << std::endl;
+        } else {
+            std::cout << "  [OK] Block migration complete" << std::endl;
+        }
+
         std::cout << "Initializing mempool..." << std::endl;
         CTxMemPool mempool;
         g_mempool.store(&mempool);  // BUG #108 FIX: Set global pointer for TX relay

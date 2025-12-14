@@ -69,10 +69,20 @@ public:
      * @return true on success, false on failure
      */
     bool RebuildBlockIndex();
-    
+
+    /**
+     * IBD BLOCK FIX #3: Migrate existing blocks to dual-hash storage
+     *
+     * Reads all blocks and re-writes them with both FastHash and RandomX hash keys.
+     * This ensures blocks can be looked up by either hash type during IBD.
+     *
+     * @return true on success, false on failure
+     */
+    bool MigrateToDualHashStorage();
+
     /**
      * Get all block hashes in the database
-     * 
+     *
      * @param block_hashes Output vector to store block hashes
      * @return true on success, false on failure
      */

@@ -999,6 +999,65 @@ bool CBlockchainDB::RebuildBlockIndex() {
     return true;
 }
 
+// IBD BLOCK FIX #3: Migrate existing blocks to dual-hash storage
+// This function reads all blocks and re-writes them with both FastHash and RandomX hash keys
+// Called once on startup to ensure all blocks are accessible by either hash type
+bool CBlockchainDB::MigrateToDualHashStorage() {
+    if (!IsOpen()) return false;
+
+    std::cout << "[DB-MIGRATE] Starting dual-hash migration..." << std::endl;
+
+    // Get all block hashes
+    std::vector<uint256> block_hashes;
+    if (!GetAllBlockHashes(block_hashes)) {
+        std::cerr << "[DB-MIGRATE] Failed to enumerate blocks" << std::endl;
+        return false;
+    }
+
+    std::cout << "[DB-MIGRATE] Processing " << block_hashes.size() << " blocks..." << std::endl;
+
+    int migrated = 0;
+    int already_migrated = 0;
+    int errors = 0;
+
+    for (const auto& hash : block_hashes) {
+        // Read the block
+        CBlock block;
+        if (!ReadBlock(hash, block)) {
+            errors++;
+            continue;
+        }
+
+        // Compute both hashes
+        uint256 fastHash = block.GetFastHash();
+        uint256 randomXHash = block.GetHash();
+
+        // Check if already migrated (block exists under both hashes)
+        if (BlockExists(fastHash) && BlockExists(randomXHash)) {
+            already_migrated++;
+            continue;
+        }
+
+        // Re-write with dual hashes (WriteBlock now stores under both)
+        if (!WriteBlock(hash, block)) {
+            errors++;
+            continue;
+        }
+
+        migrated++;
+
+        // Progress update every 100 blocks
+        if (migrated % 100 == 0) {
+            std::cout << "[DB-MIGRATE] Progress: " << migrated << " blocks migrated..." << std::endl;
+        }
+    }
+
+    std::cout << "[DB-MIGRATE] Migration complete: " << migrated << " migrated, "
+              << already_migrated << " already done, " << errors << " errors" << std::endl;
+
+    return errors == 0;
+}
+
 // Phase 4.2: Fsync verification implementation
 bool CBlockchainDB::VerifyWrite(const std::string& key, const std::string& expected_value) const {
     if (!IsOpen()) return false;
