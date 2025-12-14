@@ -14,6 +14,9 @@
 #include <vector>
 #include <sstream>
 
+// Forward declaration for dependency injection
+class CPeerManager;
+
 /**
  * @file block_fetcher.h
  * @brief Block download manager for parallel block fetching during IBD
