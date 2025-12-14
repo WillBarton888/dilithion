@@ -950,14 +950,9 @@ int main(int argc, char* argv[]) {
         LogPrintf(ALL, INFO, "Blockchain database opened successfully");
         std::cout << "  [OK] Blockchain database opened" << std::endl;
 
-        // IBD BLOCK FIX #3: Migrate existing blocks to dual-hash storage
-        // This ensures blocks can be looked up by either FastHash or RandomX hash
-        std::cout << "  Migrating blocks to dual-hash storage..." << std::endl;
-        if (!blockchain.MigrateToDualHashStorage()) {
-            std::cerr << "  [WARN] Block migration had errors (non-fatal)" << std::endl;
-        } else {
-            std::cout << "  [OK] Block migration complete" << std::endl;
-        }
+        // IBD BLOCK FIX #3: New blocks are stored with dual hashes (FastHash + RandomX)
+        // Existing nodes should clear their DB and re-sync to get dual-hash storage
+        // The migration function exists but is not called automatically due to LevelDB issues
 
         std::cout << "Initializing mempool..." << std::endl;
         CTxMemPool mempool;
@@ -1867,7 +1862,34 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (item.type == NetProtocol::MSG_BLOCK_INV) {
                     // Look up block in database
                     CBlock block;
-                    if (blockchain.ReadBlock(item.hash, block)) {
+                    bool found = blockchain.ReadBlock(item.hash, block);
+
+                    // IBD BLOCK FIX #3: If not found by requested hash, try chainstate fallback
+                    // This handles case where old blocks are stored with single hash but peer requests with different hash
+                    if (!found) {
+                        // Try to find block in chainstate by hash
+                        CBlockIndex* pindex = g_chainstate.GetBlockIndex(item.hash);
+                        if (pindex) {
+                            // Block exists in chainstate - try reading by stored hash
+                            if (pindex->phashBlock != item.hash) {
+                                found = blockchain.ReadBlock(pindex->phashBlock, block);
+                                if (found) {
+                                    std::cout << "[BLOCK-SERVE] Found block via chainstate phashBlock fallback" << std::endl;
+                                }
+                            }
+                            // If still not found, try reading the block by computing its FastHash
+                            if (!found) {
+                                // We have the block index, try computing FastHash from the header in index
+                                uint256 fastHash = pindex->header.GetFastHash();
+                                found = blockchain.ReadBlock(fastHash, block);
+                                if (found) {
+                                    std::cout << "[BLOCK-SERVE] Found block via FastHash fallback" << std::endl;
+                                }
+                            }
+                        }
+                    }
+
+                    if (found) {
                         // Send block to requesting peer
                         if (g_node_context.connman && g_node_context.message_processor) {
                             CNetMessage blockMsg = g_node_context.message_processor->CreateBlockMessage(block);
