@@ -459,8 +459,11 @@ bool CIbdCoordinator::FetchBlocks() {
         auto peer = m_node_context.peer_manager->GetPeer(peer_id);
         if (!peer) continue;
 
-        // Skip if peer at capacity (AssignChunkToPeer will extend existing chunks)
-        if (peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
+        // IBD STUCK FIX #5: Skip if peer at capacity (use GetBlocksInFlightForPeer for consistency)
+        // Previously used peer->nBlocksInFlight counter which could be stale
+        // Now uses GetBlocksInFlightForPeer() which queries CPeerManager's tracking map (same as Fix #2)
+        int peer_blocks_in_flight = m_node_context.peer_manager->GetBlocksInFlightForPeer(peer_id);
+        if (peer_blocks_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
             continue;
         }
 

@@ -152,9 +152,13 @@ public:
      * @param height Height of connected block
      * @param is_height_queued_callback Optional callback to check if height is queued for validation
      *                                  IBD HANG FIX #2: Allows window to advance past queued blocks
+     * @param is_height_in_flight_callback Optional callback to check if height is in-flight
+     *                                     IBD STUCK FIX #6: Prevents window from advancing past in-flight heights
      * IBD HANG FIX #20: No longer clears m_in_flight - CPeerManager is single source of truth
      */
-    void OnBlockConnected(int height, std::function<bool(int)> is_height_queued_callback = nullptr) {
+    void OnBlockConnected(int height,
+                          std::function<bool(int)> is_height_queued_callback = nullptr,
+                          std::function<bool(int)> is_height_in_flight_callback = nullptr) {
         m_received.erase(height);
         m_pending.erase(height);  // In case we never received it
         // IBD HANG FIX #20: Don't erase from m_in_flight - CPeerManager handles this
@@ -163,7 +167,7 @@ public:
         // Previously only advanced when height == m_window_start, causing stalls with out-of-order blocks
         // Now advances past all connected blocks, allowing window to slide forward continuously
         if (IsInWindow(height)) {
-            AdvanceWindow(is_height_queued_callback);
+            AdvanceWindow(is_height_queued_callback, is_height_in_flight_callback);
         }
     }
 
@@ -322,19 +326,30 @@ public:
     }
 
 private:
-    void AdvanceWindow(std::function<bool(int)> is_height_queued_callback = nullptr) {
+    void AdvanceWindow(std::function<bool(int)> is_height_queued_callback = nullptr,
+                       std::function<bool(int)> is_height_in_flight_callback = nullptr) {
         // IBD HANG FIX #2: Allow window advancement past queued blocks
         // IBD HANG FIX #5: Better window state tracking - distinguish "processing" vs "stuck"
         // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager is single source of truth
-        // Window can advance if height is not pending or received locally
+        // IBD STUCK FIX #6: Check CPeerManager for in-flight status before advancing
+        // Window can advance if height is not pending, received, or in-flight
 
         while (m_window_start <= m_target_height) {
             bool can_advance = false;
 
-            // Can advance if height is not in local tracking sets (pending/received)
-            // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager handles this
+            // IBD STUCK FIX #6: Check if height is in-flight via callback (CPeerManager)
+            // Without this check, window advances past heights that are still being fetched
+            // This causes gaps where heights 17-256 are skipped when chunks timeout
+            bool is_in_flight = false;
+            if (is_height_in_flight_callback) {
+                is_in_flight = is_height_in_flight_callback(m_window_start);
+            }
+
+            // Can advance if height is not in local tracking sets AND not in-flight
+            // IBD STUCK FIX #6: Added is_in_flight check to prevent advancing past fetching heights
             if (m_pending.count(m_window_start) == 0 &&
-                m_received.count(m_window_start) == 0) {
+                m_received.count(m_window_start) == 0 &&
+                !is_in_flight) {
                 can_advance = true;
             }
             // IBD HANG FIX #2: Also advance if height is in "received" but queued for validation
@@ -351,7 +366,7 @@ private:
             if (can_advance) {
                 m_window_start++;
             } else {
-                // Can't advance further - this height is still being processed or stuck
+                // Can't advance further - this height is still being processed, in-flight, or stuck
                 break;
             }
         }

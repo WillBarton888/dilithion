@@ -1168,14 +1168,23 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
 
     // IBD HANG FIX #2: Pass callback to check if height is queued for validation
     // This allows window to advance past blocks that are queued (processing) vs stuck
-    if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
-        auto is_height_queued = [](int h) -> bool {
+    // IBD STUCK FIX #6: Pass callback to check if height is in-flight via chunk tracking
+    // This prevents window from advancing past heights that are still being fetched
+    auto is_height_queued = [](int h) -> bool {
+        if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
             return g_node_context.validation_queue->IsHeightQueued(h);
-        };
-        m_download_window.OnBlockConnected(height, is_height_queued);
-    } else {
-        m_download_window.OnBlockConnected(height);
-    }
+        }
+        return false;
+    };
+
+    // IBD STUCK FIX #6: Check if height is assigned to a peer (in-flight via chunk system)
+    // This uses mapHeightToPeer to determine if a height is currently being fetched
+    auto is_height_in_flight = [this](int h) -> bool {
+        // Note: cs_fetcher already held by caller
+        return mapHeightToPeer.count(h) > 0;
+    };
+
+    m_download_window.OnBlockConnected(height, is_height_queued, is_height_in_flight);
 }
 
 void CBlockFetcher::AddHeightsToWindowPending(const std::vector<int>& heights)
