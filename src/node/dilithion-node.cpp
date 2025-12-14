@@ -210,17 +210,30 @@ bool IsInitialBlockDownload() {
             // Connections exist but NO peer has completed handshake - wait
             return true;
         }
+
+        // BUG #156 FIX: Require peers before allowing IBD exit
+        // Without peers, we can't know if we're actually synced - stay in IBD
+        // This prevents premature IBD exit when starting with existing chainstate
+        if (peerCount == 0) {
+            return true;  // No peers = can't verify sync status = stay in IBD
+        }
+
+        // BUG #156 FIX: Must have synced to peer's reported height
+        // Don't exit IBD until our chain matches what peers report
+        if (bestPeerHeight > 0 && ourHeight < bestPeerHeight - 1) {
+            return true;  // Haven't reached peer height yet
+        }
     }
 
     // TERTIARY CRITERION: Is tip timestamp recent?
-    // Only check this AFTER verifying we're not actively syncing (headers/peers checks).
-    // If our chain tip is less than 24 hours old AND we passed the checks above, we're caught up.
+    // Only check this AFTER verifying we're synced to peers.
     int64_t tipTime = tip->nTime;
     int64_t now = GetTime();
     const int64_t MAX_TIP_AGE = 24 * 60 * 60;  // 24 hours (same as Bitcoin Core)
 
     if (now - tipTime < MAX_TIP_AGE) {
-        // Tip is recent AND we're synced - exit IBD permanently
+        // Tip is recent AND we're synced to peers - exit IBD permanently
+        std::cout << "[IBD] Exiting IBD - synced to height " << ourHeight << std::endl;
         s_initial_download_complete.store(true, std::memory_order_relaxed);
         return false;
     }
@@ -228,8 +241,9 @@ bool IsInitialBlockDownload() {
     // If we get here:
     // - Tip exists but is stale (> 24 hours old)
     // - No headers ahead (not actively downloading)
-    // - Either no peers, or peers completed handshake and are at similar height
+    // - Have peers and synced to their height
     // This is likely a bootstrap scenario or stale network - allow mining
+    std::cout << "[IBD] Exiting IBD (stale tip but synced) - height " << ourHeight << std::endl;
     s_initial_download_complete.store(true, std::memory_order_relaxed);
     return false;
 }
@@ -2951,6 +2965,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             std::cout << "[Wallet]          " << std::fixed << std::setprecision(8)
                                       << totalDIL << " DIL (total)" << std::endl;
                         }
+                    }
+
+                    // BUG #157 FIX: Advance IBD window when locally mined blocks are connected
+                    // Without this, the window gets out of sync if mining occurs during IBD
+                    if (g_node_context.block_fetcher) {
+                        g_node_context.block_fetcher->OnWindowBlockConnected(pblockIndexPtr->nHeight);
                     }
 
                     // BUG #32 FIX: Immediately update mining template for locally mined blocks
