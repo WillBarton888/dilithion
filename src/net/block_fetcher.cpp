@@ -1182,7 +1182,10 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    std::cout << "[OnWindowBlockConnected] height=" << height << " window_initialized=" << m_window_initialized << std::endl;
+
     if (!m_window_initialized) {
+        std::cout << "[OnWindowBlockConnected] Window not initialized, skipping" << std::endl;
         return;
     }
 

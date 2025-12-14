@@ -328,7 +328,10 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     // Previously only updated window when block became new tip, causing window to stall
     // Now updates window for all successfully validated blocks, allowing continuous advancement
     if (g_node_context.block_fetcher) {
+        std::cout << "[ValidationQueue-DEBUG] Calling OnWindowBlockConnected(" << pindex->nHeight << ")" << std::endl;
         g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
+    } else {
+        std::cout << "[ValidationQueue-DEBUG] block_fetcher is NULL!" << std::endl;
     }
 
     // IBD HANG FIX #23b: Process orphan children after async validation completes
