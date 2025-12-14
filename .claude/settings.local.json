@@ -442,7 +442,10 @@
       "Bash(ssh root@134.122.4.164 \"curl -s http://localhost:18334/api/stats | grep blockHeight\")",
       "Bash(ssh root@209.97.177.197 \"sleep 10 && curl -s http://localhost:18334/api/stats | grep blockHeight\")",
       "Bash(ssh root@209.97.177.197 \"grep -E ''suitable|capacity|peer.*=.*0'' /root/node.log | tail -20\")",
-      "Bash(ssh root@209.97.177.197 \"grep -E ''GetValidPeers|suitable|peer'' /root/node.log | tail -20\")"
+      "Bash(ssh root@209.97.177.197 \"grep -E ''GetValidPeers|suitable|peer'' /root/node.log | tail -20\")",
+      "Bash(ssh root@209.97.177.197 \"pkill dilithion || true && cd /root/dilithion && git pull origin main && make dilithion-node -j4 2>&1 | tail -5\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''IBD-DEBUG|no suitable|chunk_heights'' /root/node.log | tail -30\")",
+      "Bash(ssh root@209.97.177.197 \"pgrep dilithion && curl -s http://localhost:18334/api/stats | grep blockHeight\")"
     ],
     "deny": [],
     "ask": []

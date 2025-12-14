@@ -2535,10 +2535,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 static constexpr size_t MAX_HEADERS_RESULTS = 2000;
                 std::cout << "[IBD-DEBUG] headers.size()=" << headers.size()
                           << " MAX=" << MAX_HEADERS_RESULTS << std::endl;
-                if (headers.size() == MAX_HEADERS_RESULTS) {
+
+                // Get our current header height and peer's announced height
+                int ourHeaderHeight = g_node_context.headers_manager->GetBestHeight();
+                int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
+
+                // IBD HEADER FIX #1: Request more headers if:
+                // 1. We got a full batch (2000 headers), OR
+                // 2. Our header height is still behind peer's announced height
+                bool needMoreHeaders = (headers.size() == MAX_HEADERS_RESULTS) ||
+                                       (peerHeight > ourHeaderHeight);
+
+                if (needMoreHeaders && !headers.empty()) {
                     uint256 lastHeaderHash = headers.back().GetHash();
-                    std::cout << "[IBD] Got full batch of " << MAX_HEADERS_RESULTS
-                              << " headers, requesting more from " << lastHeaderHash.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cout << "[IBD] Requesting more headers from " << lastHeaderHash.GetHex().substr(0, 16)
+                              << "... (ourHeaderHeight=" << ourHeaderHeight
+                              << ", peerHeight=" << peerHeight << ")" << std::endl;
                     g_node_context.headers_manager->RequestHeaders(peer_id, lastHeaderHash);
                 }
             } else {
