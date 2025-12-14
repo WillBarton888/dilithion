@@ -479,6 +479,9 @@ bool CIbdCoordinator::FetchBlocks() {
         if (chunk_heights.empty()) {
             // IBD HANG FIX #6: Track hang cause
             m_last_hang_cause = HangCause::WINDOW_EMPTY;
+            std::cout << "[IBD-DEBUG] chunk_heights EMPTY for peer " << peer_id
+                      << " - window initialized=" << m_node_context.block_fetcher->IsWindowInitialized()
+                      << " window_status=" << m_node_context.block_fetcher->GetWindowStatus() << std::endl;
             LogPrintIBD(DEBUG, "No pending heights in window - window may be stalled");
             break;  // No more heights to assign
         }
@@ -512,6 +515,10 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         if (valid_heights.empty()) {
+            std::cout << "[IBD-DEBUG] valid_heights empty for peer " << peer_id
+                      << " chunk_heights.size=" << chunk_heights.size()
+                      << " header_height=" << header_height
+                      << " chain_height=" << chain_height << std::endl;
             continue;  // No valid heights in this chunk
         }
 

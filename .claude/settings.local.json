@@ -432,7 +432,17 @@
       "Bash(ssh root@209.97.177.197 \"sed -n ''986,1050p'' /root/node.log\")",
       "Bash(ssh root@209.97.177.197 \"grep -c ''MSG-RECV'' /root/node.log && grep -c ''MSGHANDLER-POP'' /root/node.log && grep -c ''EXTRACT-PUSHED.*block'' /root/node.log\")",
       "Bash(ssh root@209.97.177.197 \"tail -30 /root/node.log && echo ''---CURRENT---'' && date\")",
-      "Bash(git commit -m \"$(cat <<''EOF''\nfix: IBD DEADLOCK FIX #10 - Prevent RandomX computation in GetBlockHash\n\nROOT CAUSE: CBlockIndex::GetBlockHash() was auto-computing RandomX hash\nwhen phashBlock was null. RandomX takes ~700ms and holds g_validation_mutex.\nWhen called from ActivateBestChain (which holds cs_main), this caused\nsevere mutex contention with the message handler thread, effectively\nserializing block processing and causing IBD to freeze.\n\nFIX:\n- GetBlockHash() now logs error and returns null instead of computing\n- All CBlockIndex creation sites (especially DB loading) now set phashBlock\n- This prevents the mutex contention that was causing apparent deadlocks\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: IBD DEADLOCK FIX #10 - Prevent RandomX computation in GetBlockHash\n\nROOT CAUSE: CBlockIndex::GetBlockHash() was auto-computing RandomX hash\nwhen phashBlock was null. RandomX takes ~700ms and holds g_validation_mutex.\nWhen called from ActivateBestChain (which holds cs_main), this caused\nsevere mutex contention with the message handler thread, effectively\nserializing block processing and causing IBD to freeze.\n\nFIX:\n- GetBlockHash() now logs error and returns null instead of computing\n- All CBlockIndex creation sites (especially DB loading) now set phashBlock\n- This prevents the mutex contention that was causing apparent deadlocks\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''EXTRACT-PUSHED|MSGHANDLER-POP|cmd='' /root/node.log | tail -30\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''MSGHANDLER-POP.*cmd=block|MSGHANDLER-LOOP.*cmd=block'' /root/node.log | tail -20\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''BLOCK-PROCESS|BLOCK-HANDLER'' /root/node.log | tail -20\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''MarkBlockAsReceived|mapBlocksInFlight.erase'' /root/node.log | tail -30\")",
+      "Bash(ssh root@209.97.177.197 \"tail -5 /root/node.log && curl -s http://localhost:18334/api/stats | grep -E ''blockHeight|status''\")",
+      "Bash(ssh root@209.97.177.197 \"curl -s http://localhost:18334/api/stats\")",
+      "Bash(ssh root@134.122.4.164 \"curl -s http://localhost:18334/api/stats | grep blockHeight\")",
+      "Bash(ssh root@209.97.177.197 \"sleep 10 && curl -s http://localhost:18334/api/stats | grep blockHeight\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''suitable|capacity|peer.*=.*0'' /root/node.log | tail -20\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''GetValidPeers|suitable|peer'' /root/node.log | tail -20\")"
     ],
     "deny": [],
     "ask": []
