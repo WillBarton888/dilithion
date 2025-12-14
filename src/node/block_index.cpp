@@ -72,8 +72,19 @@ CBlockIndex::CBlockIndex(const CBlockIndex& other) {
 }
 
 uint256 CBlockIndex::GetBlockHash() const {
+    // IBD DEADLOCK FIX #10: Don't auto-compute RandomX hash
+    // Computing header.GetHash() here acquires g_validation_mutex for ~700ms
+    // If called from ActivateBestChain (which holds cs_main), this can cause
+    // severe contention with the message handler thread, effectively serializing
+    // all block processing and causing apparent freezes.
+    //
+    // Instead, require all CBlockIndex creation sites to set phashBlock explicitly.
+    // If phashBlock is null, log an error and return null hash (don't block).
     if (phashBlock.IsNull()) {
-        phashBlock = header.GetHash();
+        std::cerr << "[DEADLOCK-FIX] ERROR: GetBlockHash() called with null phashBlock!" << std::endl;
+        std::cerr << "  nHeight: " << nHeight << ", nTime: " << nTime << std::endl;
+        // Return null hash instead of computing (prevents blocking)
+        return uint256();
     }
     return phashBlock;
 }

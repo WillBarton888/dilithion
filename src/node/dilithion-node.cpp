@@ -1189,6 +1189,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (blockchain.ReadBlockIndex(genesisHash, genesisIndexFromDB)) {
                 // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
                 auto pgenesisIndex = std::make_unique<CBlockIndex>(genesisIndexFromDB);
+                // IBD DEADLOCK FIX #10: Set phashBlock to prevent GetBlockHash from computing RandomX
+                pgenesisIndex->phashBlock = genesisHash;
                 pgenesisIndex->pprev = nullptr;
                 g_chainstate.AddBlockIndex(genesisHash, std::move(pgenesisIndex));
                 std::cout << " ✓" << std::endl;
@@ -1265,6 +1267,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                     // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
                     auto pblockIndex = std::make_unique<CBlockIndex>(blockIndexFromDB);
+                    // IBD DEADLOCK FIX #10: Set phashBlock to prevent GetBlockHash from computing RandomX
+                    pblockIndex->phashBlock = blockHash;
                     pblockIndex->pprev = g_chainstate.GetBlockIndex(pblockIndex->header.hashPrevBlock);
 
                     if (pblockIndex->pprev == nullptr && !(blockHash == genesisHash)) {
