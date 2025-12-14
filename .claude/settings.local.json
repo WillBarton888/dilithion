@@ -445,7 +445,18 @@
       "Bash(ssh root@209.97.177.197 \"grep -E ''GetValidPeers|suitable|peer'' /root/node.log | tail -20\")",
       "Bash(ssh root@209.97.177.197 \"pkill dilithion || true && cd /root/dilithion && git pull origin main && make dilithion-node -j4 2>&1 | tail -5\")",
       "Bash(ssh root@209.97.177.197 \"grep -E ''IBD-DEBUG|no suitable|chunk_heights'' /root/node.log | tail -30\")",
-      "Bash(ssh root@209.97.177.197 \"pgrep dilithion && curl -s http://localhost:18334/api/stats | grep blockHeight\")"
+      "Bash(ssh root@209.97.177.197 \"pgrep dilithion && curl -s http://localhost:18334/api/stats | grep blockHeight\")",
+      "Bash(ssh root@188.166.255.63 \"grep -E ''Genesis|genesis|parent not found'' /root/node.log | tail -10\")",
+      "Bash(ssh root@188.166.255.63 \"grep -E ''hashPrevBlock=|mapHeaders.size'' /root/node.log | tail -5\")",
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion || true && cd /root/dilithion && git pull origin main && make dilithion-node -j4 2>&1 | tail -3 && rm -f /root/node.log && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@188.166.255.63 \"pgrep dilithion && grep -E ''Genesis check|genesis'' /root/node.log | tail -10\")",
+      "Bash(ssh root@188.166.255.63 \"pgrep dilithion && curl -s http://localhost:18334/api/stats | grep blockHeight\")",
+      "Bash(ssh root@188.166.255.63 \"grep -E ''IBD|Processing header|Orphan'' /root/node.log | tail -15\")",
+      "Bash(ssh root@188.166.255.63 \"tail -30 /root/node.log | grep -E ''IBD|header|Header''\")",
+      "Bash(ssh root@209.97.177.197 \"curl -s http://localhost:18334/api/stats | grep -E ''blockHeight|peerCount'' && pgrep dilithion\")",
+      "Bash(ssh root@209.97.177.197 \"curl -s http://localhost:18334/api/stats | head -5\")",
+      "Bash(ssh root@209.97.177.197 \"grep -c ''requested unknown block'' /root/node.log 2>/dev/null || echo ''0''; grep ''requested unknown block'' /root/node.log 2>/dev/null | tail -5\")",
+      "Bash(ssh root@134.122.4.164 \"grep -c ''requested unknown block'' /root/node.log 2>/dev/null || echo ''0''; grep ''requested unknown block'' /root/node.log 2>/dev/null | tail -5\")"
     ],
     "deny": [],
     "ask": []

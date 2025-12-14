@@ -217,7 +217,19 @@ bool CBlockchainDB::WriteBlock(const uint256& hash, const CBlock& block) {
 
     std::lock_guard<std::mutex> lock(cs_db);
 
-    std::string key = "b" + hash.GetHex();
+    // IBD BLOCK FIX #3: Dual-hash block storage for IBD compatibility
+    // Problem: During IBD, blocks are requested using RandomX hash from GetRandomXHashAtHeight(),
+    // but responding nodes may have blocks stored with FastHash (pre-checkpoint optimization).
+    // This causes block lookups to fail and IBD stalls at 128-block boundaries.
+    //
+    // Solution: Store each block under BOTH its FastHash AND RandomX hash keys.
+    // This ensures any lookup (regardless of hash type) will succeed.
+    uint256 fastHash = block.GetFastHash();   // SHA3-256 hash (fast)
+    uint256 randomXHash = block.GetHash();    // RandomX hash (slow but canonical)
+
+    std::string primaryKey = "b" + hash.GetHex();  // Use the hash passed to us
+    std::string fastHashKey = "b" + fastHash.GetHex();
+    std::string randomXKey = "b" + randomXHash.GetHex();
 
     // Serialize block - binary format with versioning and integrity checks
     // Format: [VERSION][DATA_LENGTH][DATA][CHECKSUM]
@@ -294,7 +306,24 @@ bool CBlockchainDB::WriteBlock(const uint256& hash, const CBlock& block) {
     leveldb::WriteOptions options;
     options.sync = true;  // Force fsync to disk
 
-    leveldb::Status status = db->Put(options, key, value);
+    // IBD BLOCK FIX #3: Write block under all hash keys atomically
+    // Use WriteBatch to ensure all keys are written together
+    leveldb::WriteBatch batch;
+
+    // Always write under the primary key (the hash passed to us)
+    batch.Put(primaryKey, value);
+
+    // Also write under FastHash key if different from primary
+    if (fastHashKey != primaryKey) {
+        batch.Put(fastHashKey, value);
+    }
+
+    // Also write under RandomX hash key if different from both
+    if (randomXKey != primaryKey && randomXKey != fastHashKey) {
+        batch.Put(randomXKey, value);
+    }
+
+    leveldb::Status status = db->Write(options, &batch);
 
     if (!status.ok()) {
         // Phase 4.2: Enhanced error classification
