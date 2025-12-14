@@ -586,6 +586,21 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         return false;
     }
 
+    // IBD HANG FIX #22: Check if peer can serve blocks at requested heights
+    // Don't request blocks from peers that haven't reached that height yet
+    // This prevents requesting blocks from peers like SGP (height=2000) when we need blocks 2225+
+    if (peer->start_height < height_end) {
+        // Log only occasionally to avoid spam
+        static std::map<int, int> skip_count;
+        if (++skip_count[peer_id] % 100 == 1) {
+            std::cout << "[IBD FIX #22] Skipping peer " << peer_id
+                      << " (height=" << peer->start_height
+                      << ") for chunk " << height_start << "-" << height_end
+                      << " (peer doesn't have these blocks)" << std::endl;
+        }
+        return false;  // Peer doesn't have blocks at requested heights
+    }
+
     // Validate height range
     if (height_end < height_start) {
         return false;
