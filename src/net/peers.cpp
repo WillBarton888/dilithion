@@ -10,7 +10,7 @@
 #include <set>
 
 // Global peer manager instance (raw pointer - ownership in g_node_context)
-CPeerManager* g_peer_manager = nullptr;
+// REMOVED: g_peer_manager global - use NodeContext::peer_manager instead
 
 // CPeer implementation
 

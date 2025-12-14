@@ -429,7 +429,7 @@ struct CBlockInFlight {
  */
 class CBlockFetcher {
 public:
-    CBlockFetcher();
+    explicit CBlockFetcher(CPeerManager* peer_manager);
     ~CBlockFetcher() = default;
 
     // Disable copying
@@ -850,6 +850,8 @@ public:
     bool UpdateWindowTarget(int new_target_height);
 
 private:
+    CPeerManager* m_peer_manager;  // Single source of truth - no global dependency
+
     // Phase 1 State Consolidation: PeerDownloadState removed - now tracked in CPeerManager::CPeer
     // All peer statistics (nBlocksInFlight, avgResponseTime, nStalls, etc.) are in CPeer
 

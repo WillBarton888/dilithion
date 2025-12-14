@@ -21,8 +21,8 @@ extern NodeContext g_node_context;
  * peer selection, timeout handling, and priority-based fetching.
  */
 
-CBlockFetcher::CBlockFetcher()
-    : nBlocksReceivedTotal(0)
+CBlockFetcher::CBlockFetcher(CPeerManager* peer_manager)
+    : m_peer_manager(peer_manager), nBlocksReceivedTotal(0)
 {
     lastBlockReceived = std::chrono::steady_clock::now();
 }
@@ -68,11 +68,11 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
     // Phase 1: CPeerManager is single source of truth for peer capacity
-    if (!g_peer_manager) {
+    if (!m_peer_manager) {
         return false;  // Cannot operate without peer manager
     }
 
-    auto peer_obj = g_peer_manager->GetPeer(peer);
+    auto peer_obj = m_peer_manager->GetPeer(peer);
     if (!peer_obj || peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
@@ -90,7 +90,7 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     mapPeerBlocks[peer].insert(hash);
 
     // Phase 1: CPeerManager is single source of truth for block tracking
-    g_peer_manager->MarkBlockAsInFlight(peer, hash, nullptr);
+    m_peer_manager->MarkBlockAsInFlight(peer, hash, nullptr);
 
     // Remove from queue if present
     setQueuedHashes.erase(hash);
@@ -111,15 +111,15 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
         // IBD HANG FIX #13: ALWAYS notify CPeerManager to decrement nBlocksInFlight
         // CPeerManager::MarkBlockAsReceived handles untracked blocks gracefully
         // by decrementing the receiving peer's counter (prevents "all peers at capacity" stall)
-        if (g_peer_manager) {
-            g_peer_manager->MarkBlockAsReceived(peer, hash);
+        if (m_peer_manager) {
+            m_peer_manager->MarkBlockAsReceived(peer, hash);
         }
         return false;  // Still return false so caller knows it wasn't in local tracking
     }
 
     // Block was in local tracking - notify CPeerManager and continue with stats update
-    if (g_peer_manager) {
-        g_peer_manager->MarkBlockAsReceived(peer, hash);
+    if (m_peer_manager) {
+        m_peer_manager->MarkBlockAsReceived(peer, hash);
     }
 
     int height = it->second.nHeight;
@@ -131,8 +131,8 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     );
 
     // Phase 1: Delegate peer stats update to CPeerManager
-    if (g_peer_manager) {
-        g_peer_manager->UpdatePeerStats(peer, true, responseTime);
+    if (m_peer_manager) {
+        m_peer_manager->UpdatePeerStats(peer, true, responseTime);
     }
 
     // Remove from local in-flight tracking
@@ -241,8 +241,8 @@ void CBlockFetcher::RetryTimedOutBlocks(const std::vector<uint256>& timedOutHash
         int retries = inFlight.nRetries;
 
         // Phase 1: Mark peer as stalled via CPeerManager
-        if (g_peer_manager) {
-            g_peer_manager->UpdatePeerStats(stalledPeer, false, std::chrono::milliseconds(0));
+        if (m_peer_manager) {
+            m_peer_manager->UpdatePeerStats(stalledPeer, false, std::chrono::milliseconds(0));
         }
 
         // Remove from local in-flight tracking
@@ -257,8 +257,8 @@ void CBlockFetcher::RetryTimedOutBlocks(const std::vector<uint256>& timedOutHash
         }
 
         // Phase 1: Notify CPeerManager of block removal
-        if (g_peer_manager) {
-            g_peer_manager->RemoveBlockFromFlight(hash);
+        if (m_peer_manager) {
+            m_peer_manager->RemoveBlockFromFlight(hash);
         }
 
         // Re-queue if not exceeded max retries
@@ -278,27 +278,27 @@ NodeId CBlockFetcher::SelectPeerForDownload(const uint256& hash, NodeId preferre
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
     // Phase 1: CPeerManager is single source of truth for peer selection
-    if (!g_peer_manager) {
+    if (!m_peer_manager) {
         return -1;  // Cannot operate without peer manager
     }
 
     // Try the preferred peer first (the one that announced the block)
-    if (preferred_peer != -1 && g_peer_manager->IsPeerSuitableForDownload(preferred_peer)) {
-        auto peer = g_peer_manager->GetPeer(preferred_peer);
+    if (preferred_peer != -1 && m_peer_manager->IsPeerSuitableForDownload(preferred_peer)) {
+        auto peer = m_peer_manager->GetPeer(preferred_peer);
         if (peer && peer->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
             return preferred_peer;
         }
     }
 
     // Get all valid peers from CPeerManager
-    std::vector<int> valid_peers = g_peer_manager->GetValidPeersForDownload();
+    std::vector<int> valid_peers = m_peer_manager->GetValidPeersForDownload();
 
     NodeId bestPeer = -1;
     NodeId fallbackPeer = -1;
     int bestScore = -1;
 
     for (int peer_id : valid_peers) {
-        auto peer = g_peer_manager->GetPeer(peer_id);
+        auto peer = m_peer_manager->GetPeer(peer_id);
         if (!peer) {
             continue;
         }
@@ -357,8 +357,8 @@ void CBlockFetcher::UpdatePeerStats(NodeId peer, bool success, std::chrono::mill
 {
     // Note: Caller should hold lock
     // Phase 1: Delegate entirely to CPeerManager (single source of truth)
-    if (g_peer_manager) {
-        g_peer_manager->UpdatePeerStats(peer, success, responseTime);
+    if (m_peer_manager) {
+        m_peer_manager->UpdatePeerStats(peer, success, responseTime);
     }
 }
 
@@ -383,8 +383,8 @@ int CBlockFetcher::GetBlocksInFlight() const
 int CBlockFetcher::GetBlocksInFlightForPeer(NodeId peer) const
 {
     // Phase 1: Delegate to CPeerManager (single source of truth)
-    if (g_peer_manager) {
-        return g_peer_manager->GetBlocksInFlightForPeer(peer);
+    if (m_peer_manager) {
+        return m_peer_manager->GetBlocksInFlightForPeer(peer);
     }
     return 0;
 }
@@ -438,9 +438,9 @@ void CBlockFetcher::OnPeerDisconnected(NodeId peer)
                 mapBlocksInFlight.erase(it);
 
                 // Phase 1: Notify CPeerManager
-                if (g_peer_manager) {
-                    g_peer_manager->RemoveBlockFromFlight(hash);
-                }
+        if (m_peer_manager) {
+            m_peer_manager->RemoveBlockFromFlight(hash);
+        }
 
                 // Re-queue with high priority
                 if (retries < MAX_RETRIES) {
@@ -494,12 +494,12 @@ std::string CBlockFetcher::GetDownloadStatus() const
     ss << "  Total blocks received: " << nBlocksReceivedTotal << "\n";
 
     // Phase 1: Peer breakdown from CPeerManager
-    if (g_peer_manager) {
-        auto peers = g_peer_manager->GetValidPeersForDownload();
+    if (m_peer_manager) {
+        auto peers = m_peer_manager->GetValidPeersForDownload();
         ss << "  Active peers: " << peers.size() << "\n";
         ss << "  Per-peer status:\n";
         for (int peer_id : peers) {
-            auto peer = g_peer_manager->GetPeer(peer_id);
+            auto peer = m_peer_manager->GetPeer(peer_id);
             if (peer) {
                 ss << "    Peer " << peer_id << ": "
                    << peer->nBlocksInFlight << " in-flight, "
@@ -577,11 +577,11 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
     // Validate peer can accept a chunk
-    if (!g_peer_manager) {
+    if (!m_peer_manager) {
         return false;
     }
 
-    auto peer = g_peer_manager->GetPeer(peer_id);
+    auto peer = m_peer_manager->GetPeer(peer_id);
     if (!peer || peer->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
@@ -897,11 +897,11 @@ bool CBlockFetcher::ReassignChunk(NodeId old_peer, NodeId new_peer)
     PeerChunk& old_chunk = old_it->second;
 
     // Validate new peer
-    if (!g_peer_manager) {
+    if (!m_peer_manager) {
         return false;
     }
 
-    auto new_peer_obj = g_peer_manager->GetPeer(new_peer);
+    auto new_peer_obj = m_peer_manager->GetPeer(new_peer);
     if (!new_peer_obj || new_peer_obj->nBlocksInFlight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
@@ -973,14 +973,14 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
     // This decrements nBlocksInFlight so the peer can accept new chunks
     // Without this fix, peers get stuck at "capacity" (128 blocks) forever
     // IBD STUCK FIX #1: Also remove from CPeerManager::mapBlocksInFlight to fix tracking desync
-    if (g_peer_manager) {
+    if (m_peer_manager) {
         int blocks_removed = 0;
         int cpmanager_blocks_removed = 0;
         
         // Remove from CBlockFetcher::mapBlocksInFlight
         for (auto block_it = mapBlocksInFlight.begin(); block_it != mapBlocksInFlight.end(); ) {
             if (block_it->second.peer == peer_id) {
-                g_peer_manager->RemoveBlockFromFlight(block_it->first);
+                m_peer_manager->RemoveBlockFromFlight(block_it->first);
                 block_it = mapBlocksInFlight.erase(block_it);
                 blocks_removed++;
             } else {
@@ -991,10 +991,10 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
         // IBD STUCK FIX #1: Also remove from CPeerManager::mapBlocksInFlight
         // This fixes tracking desync where blocks remain in CPeerManager after chunk cancellation
         // Use GetBlocksInFlight() to get all blocks, then remove ones for this peer
-        std::vector<std::pair<uint256, int>> all_blocks = g_peer_manager->GetBlocksInFlight();
+        std::vector<std::pair<uint256, int>> all_blocks = m_peer_manager->GetBlocksInFlight();
         for (const auto& block_entry : all_blocks) {
             if (block_entry.second == peer_id) {
-                g_peer_manager->RemoveBlockFromFlight(block_entry.first);
+                m_peer_manager->RemoveBlockFromFlight(block_entry.first);
                 cpmanager_blocks_removed++;
             }
         }

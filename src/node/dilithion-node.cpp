@@ -1482,11 +1482,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_node_context.blockchain_db = &blockchain;
 
         // Keep legacy globals for backward compatibility during migration
-        // TODO: Remove after full migration
-        g_peer_manager = g_node_context.peer_manager.get();
-        g_headers_manager = g_node_context.headers_manager.get();
-        g_orphan_manager = g_node_context.orphan_manager.get();
-        g_block_fetcher = g_node_context.block_fetcher.get();
+        // REMOVED: g_peer_manager assignment - CBlockFetcher now uses dependency injection
+        // REMOVED: Legacy global assignments - use NodeContext directly
 
         // Initialize transaction relay manager (global)
         // P0-5 FIX: Use .store() for atomic pointer
@@ -1558,10 +1555,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_node_context.connman = std::move(connman);
         g_node_context.message_processor = &message_processor;
         
-        // Legacy: Keep connection_manager pointer for backward compatibility during migration
-        // TODO Phase 5: Remove after full migration
-        g_node_context.connection_manager = nullptr;
-
         // Phase 5: Create and start async broadcaster for non-blocking message broadcasting
         // Now uses CConnman instead of CConnectionManager
         CAsyncBroadcaster async_broadcaster(g_node_context.connman.get());
@@ -3740,7 +3733,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_tx_relay_manager.store(nullptr);
 
         // Clear peer manager pointer (ownership in g_node_context)
-        g_peer_manager = nullptr;
+        // REMOVED: g_peer_manager cleanup - no longer used
 
         std::cout << "[Shutdown] Stopping RPC server..." << std::flush;
         rpc_server.Stop();

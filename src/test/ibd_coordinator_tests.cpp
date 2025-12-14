@@ -41,7 +41,7 @@ BOOST_AUTO_TEST_CASE(test_coordinator_construction) {
     node_context.peer_manager = std::make_unique<CPeerManager>("");
     node_context.headers_manager = std::make_unique<CHeadersManager>();
     node_context.orphan_manager = std::make_unique<COrphanManager>();
-    node_context.block_fetcher = std::make_unique<CBlockFetcher>();
+    node_context.block_fetcher = std::make_unique<CBlockFetcher>(node_context.peer_manager.get());
 
     // Should construct without errors
     CIbdCoordinator coordinator(chainstate, node_context);
@@ -59,7 +59,7 @@ BOOST_AUTO_TEST_CASE(test_tick_when_synced) {
     node_context.peer_manager = std::make_unique<CPeerManager>("");
     node_context.headers_manager = std::make_unique<CHeadersManager>();
     node_context.orphan_manager = std::make_unique<COrphanManager>();
-    node_context.block_fetcher = std::make_unique<CBlockFetcher>();
+    node_context.block_fetcher = std::make_unique<CBlockFetcher>(node_context.peer_manager.get());
 
     CIbdCoordinator coordinator(chainstate, node_context);
 
@@ -84,7 +84,7 @@ BOOST_AUTO_TEST_CASE(test_backoff_reset_mechanism) {
     node_context.peer_manager = std::make_unique<CPeerManager>("");
     node_context.headers_manager = std::make_unique<CHeadersManager>();
     node_context.orphan_manager = std::make_unique<COrphanManager>();
-    node_context.block_fetcher = std::make_unique<CBlockFetcher>();
+    node_context.block_fetcher = std::make_unique<CBlockFetcher>(node_context.peer_manager.get());
 
     CIbdCoordinator coordinator(chainstate, node_context);
 
@@ -111,7 +111,7 @@ BOOST_AUTO_TEST_CASE(test_exponential_backoff_timing) {
     node_context.peer_manager = std::make_unique<CPeerManager>("");
     node_context.headers_manager = std::make_unique<CHeadersManager>();
     node_context.orphan_manager = std::make_unique<COrphanManager>();
-    node_context.block_fetcher = std::make_unique<CBlockFetcher>();
+    node_context.block_fetcher = std::make_unique<CBlockFetcher>(node_context.peer_manager.get());
 
     CIbdCoordinator coordinator(chainstate, node_context);
 

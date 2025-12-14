@@ -384,11 +384,21 @@ bool TestFullNodeStack() {
         CTxMemPool mempool;
         cout << "  ✓ Mempool initialized" << endl;
 
-        // Phase 2: P2P components (not fully tested yet)
+        // Phase 2: P2P components (using CConnman instead of deprecated CConnectionManager)
         CPeerManager peer_manager;
         CNetMessageProcessor message_processor(peer_manager);
-        CConnectionManager connection_manager(peer_manager, message_processor);
-        cout << "  ✓ P2P components initialized" << endl;
+        CConnman connman;
+        CConnmanOptions options;
+        options.fListen = false;  // Don't listen in tests
+        options.nMaxOutbound = 8;
+        options.nMaxInbound = 117;
+        options.nMaxTotal = 125;
+        if (!connman.Start(peer_manager, message_processor, options)) {
+            cout << "  ✗ Failed to start CConnman" << endl;
+        } else {
+            cout << "  ✓ P2P components initialized (CConnman)" << endl;
+            connman.Stop();  // Clean shutdown
+        }
 
         // Phase 3: Mining
         CMiningController miner(2);

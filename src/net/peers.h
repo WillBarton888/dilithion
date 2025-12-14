@@ -386,6 +386,6 @@ public:
  * Global peer manager instance (raw pointer for backward compatibility)
  * Note: Ownership is now managed by g_node_context.peer_manager
  */
-extern CPeerManager* g_peer_manager;
+// REMOVED: g_peer_manager extern - use NodeContext::peer_manager instead
 
 #endif // DILITHION_NET_PEERS_H

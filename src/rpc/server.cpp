@@ -20,7 +20,7 @@
 #include <util/strencodings.h>
 #include <util/error_format.h>  // UX: Better error messages
 #include <amount.h>
-#include <net/peers.h>  // For CPeerManager and g_peer_manager
+#include <net/peers.h>  // For CPeerManager
 #include <core/node_context.h>  // For g_node_context
 #include <net/net.h>  // For CNetMessageProcessor and other networking types
 #include <net/protocol.h>  // For NetProtocol::CAddress
@@ -3290,12 +3290,13 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
     // Following Bitcoin Core's getpeerinfo format for compatibility
 
     // Check if peer manager is available
-    if (!g_peer_manager) {
+    extern NodeContext g_node_context;
+    if (!g_node_context.peer_manager) {
         return "[]";  // Return empty array if peer manager not initialized
     }
 
     // Get all connected peers
-    auto peers = g_peer_manager->GetConnectedPeers();
+    auto peers = g_node_context.peer_manager->GetConnectedPeers();
 
     std::ostringstream oss;
     oss << "[";
@@ -3330,11 +3331,12 @@ std::string CRPCServer::RPC_GetConnectionCount(const std::string& params) {
     // Following Bitcoin Core's getconnectioncount format
 
     // Check if peer manager is available
-    if (!g_peer_manager) {
+    extern NodeContext g_node_context;
+    if (!g_node_context.peer_manager) {
         return "0";  // Return 0 if peer manager not initialized
     }
 
-    size_t count = g_peer_manager->GetConnectionCount();
+    size_t count = g_node_context.peer_manager->GetConnectionCount();
     return std::to_string(count);
 }
 
@@ -3629,7 +3631,8 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
 
     if (command == "remove") {
         // Find and disconnect peer by IP
-        if (!g_peer_manager) {
+        extern NodeContext g_node_context;
+        if (!g_node_context.peer_manager) {
             throw std::runtime_error("Peer manager not initialized");
         }
 

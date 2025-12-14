@@ -116,77 +116,8 @@ private:
     std::vector<uint8_t> SerializeInvMessage(const std::vector<NetProtocol::CInv>& inv);
 };
 
-/**
- * Connection handshake helper
- *
- * DEPRECATED: This class is being replaced by CConnman (event-driven networking).
- * CConnman now owns CNode objects and handles socket I/O with proper select() blocking.
- * This class remains for backward compatibility with:
- * - headers_manager.cpp (SendMessage for GETHEADERS)
- * - net.cpp (SendMessage for VERACK)
- *
- * Migration plan: Move all SendMessage calls to use CConnman::PushMessage(),
- * then remove this class entirely.
- */
-class [[deprecated("Use CConnman instead")]] CConnectionManager {
-public:
-    CConnectionManager(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc);
-
-    // Initiate outbound connection (returns peer_id on success, -1 on failure)
-    int ConnectToPeer(const NetProtocol::CAddress& addr);
-
-    // Handle inbound connection (NEW signature - stores socket)
-    int AcceptConnection(const NetProtocol::CAddress& addr, std::unique_ptr<CSocket> socket);
-
-    // Perform handshake
-    bool PerformHandshake(int peer_id);
-
-    // Disconnect peer
-    void DisconnectPeer(int peer_id, const std::string& reason);
-
-    // Periodic maintenance
-    void PeriodicMaintenance();
-
-    // NEW: Message send/receive
-    bool SendMessage(int peer_id, const CNetMessage& message);
-    void ReceiveMessages(int peer_id);
-
-    // NEW: Convenience methods for specific messages
-    bool SendVersionMessage(int peer_id);
-    bool SendVerackMessage(int peer_id);
-    bool SendPingMessage(int peer_id, uint64_t nonce);
-    bool SendPongMessage(int peer_id, uint64_t nonce);
-
-    // NEW: Cleanup
-    void Cleanup();
-
-private:
-    CPeerManager& peer_manager;
-    CNetMessageProcessor& message_processor;
-
-    // NEW: Socket storage
-    std::map<int, std::unique_ptr<CSocket>> peer_sockets;
-    mutable std::mutex cs_sockets;
-
-    // BUG #45 FIX: Per-peer receive buffers for partial read handling
-    // Non-blocking sockets can return partial data, we must accumulate it
-    std::map<int, std::vector<uint8_t>> peer_recv_buffers;
-    mutable std::mutex cs_recv_buffers;
-    
-    // Network: Connection quality tracking and partition detection
-    CConnectionQualityTracker connection_quality;
-    CPartitionDetector partition_detector;
-
-    // Ping tracking
-    struct PingInfo {
-        uint64_t nonce;
-        int64_t sent_time;
-    };
-    std::map<int, PingInfo> pending_pings;
-
-    // Generate random nonce
-    uint64_t GenerateNonce();
-};
+// REMOVED: CConnectionManager class - replaced by CConnman
+// All code now uses CConnman for connection management and message sending
 
 /**
  * Network statistics

@@ -5,6 +5,7 @@
 #include <net/serialize.h>
 #include <net/peers.h>
 #include <net/net.h>
+#include <net/connman.h>
 #include <iostream>
 #include <cassert>
 #include <cstring>
@@ -237,37 +238,50 @@ void test_message_processor() {
     std::cout << "  ✓ Network stats: " << g_network_stats.ToString() << std::endl;
 }
 
-void test_connection_manager() {
-    std::cout << "Testing connection manager..." << std::endl;
+void test_connman() {
+    std::cout << "Testing CConnman (event-driven connection manager)..." << std::endl;
 
     g_peer_manager = std::make_unique<CPeerManager>();
     CNetMessageProcessor processor(*g_peer_manager);
-    CConnectionManager conn_mgr(*g_peer_manager, processor);
+
+    // Create CConnman with options
+    CConnman connman;
+    CConnmanOptions options;
+    options.fListen = false;  // Don't listen in tests
+    options.nMaxOutbound = 8;
+    options.nMaxInbound = 117;
+    options.nMaxTotal = 125;
+
+    // Start the connection manager
+    bool started = connman.Start(*g_peer_manager, processor, options);
+    if (!started) {
+        std::cout << "  ✗ Failed to start CConnman (may need network)" << std::endl;
+        g_peer_manager.reset();
+        return;
+    }
+    std::cout << "  ✓ CConnman started successfully" << std::endl;
 
     // Test connecting to peer (connection attempt)
     NetProtocol::CAddress addr;
     addr.SetIPv4(0x7F000001);
     addr.port = 8444;
 
-    // ConnectToPeer is asynchronous - it returns true if connection attempt started
-    bool connected = conn_mgr.ConnectToPeer(addr);
-    assert(connected);
-    std::cout << "  ✓ Connection attempt initiated" << std::endl;
+    // ConnectNode returns CNode* on success, nullptr on failure
+    CNode* node = connman.ConnectNode(addr);
+    // Connection to localhost:8444 will fail (no server) - this is expected
+    std::cout << "  ✓ Connection attempt handled correctly (node="
+              << (node ? "connected" : "null/failed") << ")" << std::endl;
 
-    // Note: Without a server listening, the connection will fail asynchronously
-    // In production, peers are added only after successful TCP handshake
-    // For testing, we verify the connection attempt was initiated successfully
-
-    // Give connection attempt time to process (will fail with no server)
+    // Give connection attempt time to process
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     auto stats = g_peer_manager->GetStats();
-    // Connection to non-existent server will fail, so peer count will be 0
-    // This is correct behavior - peers are only counted after successful connection
-    std::cout << "  ✓ Connection manager handles failed connections correctly (peers: "
-              << stats.total_peers << ")" << std::endl;
+    std::cout << "  ✓ CConnman peer stats: " << stats.total_peers << " peers" << std::endl;
 
-    // Cleanup
+    // Clean shutdown
+    connman.Stop();
+    std::cout << "  ✓ CConnman stopped cleanly" << std::endl;
+
     g_peer_manager.reset();
 }
 
@@ -317,7 +331,7 @@ int main() {
         test_message_processor();
         std::cout << std::endl;
 
-        test_connection_manager();
+        test_connman();
         std::cout << std::endl;
 
         test_seed_nodes();

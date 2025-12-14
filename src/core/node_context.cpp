@@ -40,7 +40,7 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
     try {
         headers_manager = std::make_unique<CHeadersManager>();
         orphan_manager = std::make_unique<COrphanManager>();
-        block_fetcher = std::make_unique<CBlockFetcher>();
+        block_fetcher = std::make_unique<CBlockFetcher>(peer_manager.get());
         LogPrintf(IBD, INFO, "Initialized IBD managers (headers, orphan, block_fetcher)");
 
         // BUG #125: Start async header validation thread
@@ -74,9 +74,6 @@ void NodeContext::Shutdown() {
         async_broadcaster = nullptr;
     }
 
-    if (connection_manager) {
-        connection_manager = nullptr;
-    }
 
     // Phase 2: Stop CConnman
     if (connman) {
@@ -121,7 +118,6 @@ void NodeContext::Shutdown() {
 void NodeContext::Reset() {
     chainstate = nullptr;
     peer_manager.reset();
-    connection_manager = nullptr;
     connman.reset();  // Phase 2: Reset CConnman
     message_processor = nullptr;
     headers_manager.reset();

@@ -374,7 +374,19 @@
       "Bash(ssh root@209.97.177.197 \"cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
       "Bash(ssh root@209.97.177.197 \"pgrep -a dilithion && echo ''---'' && tail -30 /root/node.log\")",
       "Bash(ssh root@209.97.177.197 \"pgrep -a dilithion && echo ''---'' && tail -40 /root/node.log && echo ''---'' && date\")",
-      "Bash(ssh root@209.97.177.197 \"grep -E ''(nBlocksInFlight|Chunk|capacity|blocks from peer)'' /root/node.log | tail -50\")"
+      "Bash(ssh root@209.97.177.197 \"grep -E ''(nBlocksInFlight|Chunk|capacity|blocks from peer)'' /root/node.log | tail -50\")",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: IBD STUCK FIX #1-4 - Fix tracking desync, capacity check, orphan processing\n\n## Fix #1: Tracking Desynchronization (CRITICAL)\nFile: src/net/block_fetcher.cpp:972-1009\n- CancelStalledChunk() now removes blocks from BOTH tracking systems\n- Previously only removed from CBlockFetcher::mapBlocksInFlight\n- Now also removes from CPeerManager::mapBlocksInFlight\n- Fixes false \"all peers at capacity\" when nBlocksInFlight=0\n\n## Fix #2: Capacity Check Logic (CRITICAL)\nFile: src/node/ibd_coordinator.cpp:396-413\n- Changed capacity check to use GetBlocksInFlightForPeer()\n- Previously used peer->nBlocksInFlight (stale counter)\n- Now uses CPeerManager as single source of truth\n- Fixes capacity check using inaccurate data\n\n## Fix #3: Periodic Orphan Scan (HIGH)\nFile: src/node/ibd_coordinator.cpp:262-327\n- Added periodic orphan scan every 10 seconds\n- Checks ALL orphans to see if parents now in chain\n- Processes orphans whose parents became available\n- Handles orphan chains (300→299→...→257→256)\n\n## Fix #4: Window State Verification (VERIFIED)\nFile: src/net/block_fetcher.h:175-181\n- Already implemented in IBD SLOW FIX #4\n- MarkAsPending() correctly removes from m_received\n- Heights properly moved back to m_pending on chunk cancel\n\nRoot cause: Tracking desync between CBlockFetcher and CPeerManager\nafter chunk cancellation caused false \"at capacity\" detection.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push)",
+      "Bash(ssh root@134.122.4.164 \"pkill -9 dilithion; sleep 1; cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1 | tail -20\")",
+      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion 2>/dev/null; sleep 1; cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1 | tail -10\")",
+      "Bash(ssh root@188.166.255.63 \"pkill -9 dilithion 2>/dev/null; sleep 1; cd /root/dilithion && git pull && make clean && make dilithion-node -j4 2>&1 | tail -10\")",
+      "Bash(ssh root@134.122.4.164 \"cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@134.122.4.164 \"pgrep -a dilithion && tail -3 /root/node.log\")",
+      "Bash(ssh root@209.97.177.197 \"rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate && echo ''Cleared LDN blockchain''\")",
+      "Bash(ssh root@188.166.255.63 \"rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate && echo ''Cleared SGP blockchain''\")",
+      "Bash(ssh root@134.122.4.164 \"pkill -9 dilithion; sleep 2; rm -f /root/.dilithion-testnet/blocks/LOCK /root/.dilithion-testnet/chainstate/LOCK; cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@134.122.4.164 \"pgrep -a dilithion && tail -5 /root/node.log\")",
+      "Bash(ssh root@134.122.4.164 \"pgrep -a dilithion && tail -10 /root/node.log && echo ''---'' && date\")"
     ],
     "deny": [],
     "ask": []
