@@ -895,7 +895,9 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
                           << " nBlocksInFlight: " << old_count << " -> " << sender->nBlocksInFlight << std::endl;
             }
         }
+        size_t size_before = mapBlocksInFlight.size();
         mapBlocksInFlight.erase(it);
+        std::cout << "[DEBUG] mapBlocksInFlight.erase: " << size_before << " -> " << mapBlocksInFlight.size() << std::endl;
     } else {
         // BUG #148 FIX: Block wasn't tracked, but still decrement the receiving peer's counter
         // This handles unsolicited blocks and tracking desync issues
