@@ -836,8 +836,9 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
     int header_height = m_node_context.headers_manager ?
                         m_node_context.headers_manager->GetBestHeight() : chain_height;
 
-    // Reinitialize the window starting from fork point
-    m_node_context.block_fetcher->InitializeWindow(fork_point + 1, header_height);
+    // BUG #159 FIX: Force reinitialize the window starting from fork point
+    // Pass fork_point as chain_height so nNextChunkHeight = fork_point + 1
+    m_node_context.block_fetcher->InitializeWindow(fork_point, header_height, true);
 
     // Queue blocks for download starting from fork point + 1
     int blocks_to_queue = std::min(header_height - fork_point, 1024);

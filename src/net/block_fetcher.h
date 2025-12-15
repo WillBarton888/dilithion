@@ -784,8 +784,9 @@ public:
      *
      * @param chain_height Current chain height
      * @param target_height Target sync height (header height)
+     * @param force Force reinitialization even if target same (BUG #159 fork recovery)
      */
-    void InitializeWindow(int chain_height, int target_height);
+    void InitializeWindow(int chain_height, int target_height, bool force = false);
 
     /**
      * @brief Get next heights from the window that need to be requested

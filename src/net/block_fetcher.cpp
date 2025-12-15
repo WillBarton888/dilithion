@@ -1161,13 +1161,22 @@ std::string CBlockFetcher::GetChunkStatus() const
 
 // ============ Phase 3: Moving Window Implementation ============
 
-void CBlockFetcher::InitializeWindow(int chain_height, int target_height)
+void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool force)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Skip if already initialized with same target
-    if (m_window_initialized && m_download_window.GetTargetHeight() == target_height) {
+    // Skip if already initialized with same target (unless forced for fork recovery)
+    if (!force && m_window_initialized && m_download_window.GetTargetHeight() == target_height) {
         return;
+    }
+
+    // BUG #159 FIX: Clear existing state when force reinitializing for fork recovery
+    if (force) {
+        std::cout << "[Window] Force reinitializing for fork recovery (chain_height=" << chain_height << ")" << std::endl;
+        // Clear all in-flight blocks to start fresh from fork point
+        mapBlocksInFlight.clear();
+        // Clear chunk assignments
+        mapActiveChunks.clear();
     }
 
     m_download_window.Initialize(chain_height, target_height);
