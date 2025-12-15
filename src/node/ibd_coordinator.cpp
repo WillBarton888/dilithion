@@ -809,7 +809,7 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
             CBlockIndex* pprev = pindex->pprev;
 
             // Disconnect this block from the chain
-            if (!m_chainstate.DisconnectTip(pindex)) {
+            if (!m_chainstate.DisconnectTip(pindex, true)) {
                 std::cerr << "[FORK-RECOVERY] ERROR: Failed to disconnect block at height "
                           << pindex->nHeight << std::endl;
                 // Continue anyway - the block may have already been disconnected

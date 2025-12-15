@@ -174,7 +174,7 @@ public:
      * @param pindex Block index to disconnect
      * @return true on success, false on failure
      */
-    bool DisconnectTip(CBlockIndex* pindex);
+    bool DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo = false);
 
     /**
      * Get blockchain height (height of current tip)

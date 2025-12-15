@@ -689,7 +689,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     return true;
 }
 
-bool CChainState::DisconnectTip(CBlockIndex* pindex) {
+bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
     if (pindex == nullptr) {
         return false;
     }
@@ -700,24 +700,39 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex) {
 
     // Step 1: Load block data from database (needed for UTXO undo)
     CBlock block;
+    bool block_loaded = false;
     if (pdb != nullptr) {
-        if (!pdb->ReadBlock(pindex->GetBlockHash(), block)) {
+        if (pdb->ReadBlock(pindex->GetBlockHash(), block)) {
+            block_loaded = true;
+        } else if (!force_skip_utxo) {
             std::cerr << "[Chain] ERROR: Failed to load block from database for disconnect at height "
                       << pindex->nHeight << std::endl;
             return false;
+        } else {
+            std::cout << "[Chain] WARNING: Block data missing for disconnect at height "
+                      << pindex->nHeight << " (force_skip_utxo=true)" << std::endl;
         }
-    } else {
+    } else if (!force_skip_utxo) {
         std::cerr << "[Chain] ERROR: Cannot disconnect block without database access" << std::endl;
         return false;
     }
 
     // Step 2: Undo UTXO set changes (CS-004)
-    if (pUTXOSet != nullptr) {
+    // BUG #159 FIX: Allow skipping UTXO undo during IBD fork recovery when undo data is missing
+    if (pUTXOSet != nullptr && block_loaded) {
         if (!pUTXOSet->UndoBlock(block)) {
-            std::cerr << "[Chain] ERROR: Failed to undo block from UTXO set at height "
-                      << pindex->nHeight << std::endl;
-            return false;
+            if (!force_skip_utxo) {
+                std::cerr << "[Chain] ERROR: Failed to undo block from UTXO set at height "
+                          << pindex->nHeight << std::endl;
+                return false;
+            } else {
+                std::cout << "[Chain] WARNING: Failed to undo UTXO at height "
+                          << pindex->nHeight << " (force_skip_utxo=true, continuing anyway)" << std::endl;
+            }
         }
+    } else if (force_skip_utxo) {
+        std::cout << "[Chain] Skipping UTXO undo for height " << pindex->nHeight
+                  << " (force_skip_utxo=true)" << std::endl;
     }
 
     // Step 3: Clear pnext pointer on parent
