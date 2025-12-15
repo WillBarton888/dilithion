@@ -4,9 +4,11 @@
 #include <node/ibd_coordinator.h>
 
 #include <iostream>
+#include <set>
 #include <vector>
 
 #include <consensus/chain.h>
+#include <node/blockchain_storage.h>  // BUG #159: Orphan block deletion
 #include <core/node_context.h>
 #include <net/block_fetcher.h>
 #include <net/headers_manager.h>
@@ -829,6 +831,70 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
         }
 
         std::cout << "[FORK-RECOVERY] Disconnected " << disconnected << " forked block(s)" << std::endl;
+
+        // BUG #159 FIX: Delete orphan blocks from DB that were built on the forked chain
+        // These blocks have their prevBlockHash pointing to disconnected blocks
+        if (m_node_context.blockchain_db && disconnected > 0) {
+            // Get all blocks from DB and find orphans (blocks above fork_point not on main chain)
+            std::vector<uint256> all_block_hashes;
+            if (m_node_context.blockchain_db->GetAllBlockHashes(all_block_hashes)) {
+                int total_deleted = 0;
+                bool found_orphan = true;
+
+                // Iterate until no more orphans found (handles chains of orphans)
+                while (found_orphan && total_deleted < 1000) {  // Safety limit
+                    found_orphan = false;
+
+                    for (const auto& hash : all_block_hashes) {
+                        CBlock block;
+                        if (m_node_context.blockchain_db->ReadBlock(hash, block)) {
+                            // Check if this block's parent is one of the forked blocks
+                            // or is a block at height > fork_point that's not on main chain
+                            CBlockIndex* pBlockIndex = m_chainstate.GetBlockIndex(hash);
+                            if (pBlockIndex) {
+                                // Block is in our index
+                                if (pBlockIndex->nHeight > fork_point &&
+                                    !(pBlockIndex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                                    // This is an orphan - not on main chain and above fork point
+                                    std::cout << "[FORK-RECOVERY] Deleting orphan block at height "
+                                              << pBlockIndex->nHeight << " hash="
+                                              << hash.GetHex().substr(0, 16) << "..." << std::endl;
+
+                                    if (m_node_context.blockchain_db->EraseBlock(hash)) {
+                                        total_deleted++;
+                                        found_orphan = true;
+                                    }
+                                }
+                            } else {
+                                // Block not in index but in DB - could be orphan from failed sync
+                                // Check if its prevBlockHash points to a disconnected/unknown block
+                                CBlockIndex* pPrevIndex = m_chainstate.GetBlockIndex(block.hashPrevBlock);
+                                if (!pPrevIndex || pPrevIndex->nHeight >= fork_point) {
+                                    std::cout << "[FORK-RECOVERY] Deleting unindexed orphan block hash="
+                                              << hash.GetHex().substr(0, 16) << "..." << std::endl;
+
+                                    if (m_node_context.blockchain_db->EraseBlock(hash)) {
+                                        total_deleted++;
+                                        found_orphan = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Refresh block list for next iteration
+                    if (found_orphan) {
+                        all_block_hashes.clear();
+                        m_node_context.blockchain_db->GetAllBlockHashes(all_block_hashes);
+                    }
+                }
+
+                if (total_deleted > 0) {
+                    std::cout << "[FORK-RECOVERY] Deleted " << total_deleted
+                              << " orphan block(s) from database" << std::endl;
+                }
+            }
+        }
     }
 
     // Reset the IBD window to start from fork_point + 1
