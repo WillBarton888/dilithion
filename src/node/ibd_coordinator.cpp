@@ -779,6 +779,7 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
 
 /**
  * BUG #158 FIX: Handle a fork scenario by resetting IBD to start from fork point
+ * BUG #159 FIX: Disconnect forked blocks via chain reorg before downloading correct chain
  */
 void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
     if (!m_node_context.block_fetcher || fork_point <= 0) {
@@ -787,6 +788,48 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
 
     std::cout << "[FORK-RECOVERY] Resetting IBD to fork point " << fork_point
               << " (chain was at " << chain_height << ")" << std::endl;
+
+    // BUG #159 FIX: Disconnect forked blocks before downloading correct chain
+    // We need to remove blocks from fork_point+1 to chain_height so new blocks can connect
+    int blocks_to_disconnect = chain_height - fork_point;
+    if (blocks_to_disconnect > 0) {
+        std::cout << "[FORK-RECOVERY] Disconnecting " << blocks_to_disconnect
+                  << " forked block(s) from height " << chain_height
+                  << " down to " << (fork_point + 1) << std::endl;
+
+        // Walk backwards from tip, disconnecting each forked block
+        int disconnected = 0;
+        CBlockIndex* pindex = m_chainstate.GetTip();
+
+        while (pindex && pindex->nHeight > fork_point && disconnected < blocks_to_disconnect) {
+            std::cout << "[FORK-RECOVERY] Disconnecting block at height " << pindex->nHeight
+                      << " hash=" << pindex->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+
+            // Get parent before disconnecting (we'll need it for next iteration)
+            CBlockIndex* pprev = pindex->pprev;
+
+            // Disconnect this block from the chain
+            if (!m_chainstate.DisconnectTip(pindex)) {
+                std::cerr << "[FORK-RECOVERY] ERROR: Failed to disconnect block at height "
+                          << pindex->nHeight << std::endl;
+                // Continue anyway - the block may have already been disconnected
+            } else {
+                disconnected++;
+            }
+
+            // Move to parent block
+            pindex = pprev;
+        }
+
+        // Update chain tip to fork point
+        if (pindex && pindex->nHeight == fork_point) {
+            m_chainstate.SetTip(pindex);
+            std::cout << "[FORK-RECOVERY] Chain tip reset to height " << fork_point
+                      << " hash=" << pindex->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+        }
+
+        std::cout << "[FORK-RECOVERY] Disconnected " << disconnected << " forked block(s)" << std::endl;
+    }
 
     // Reset the IBD window to start from fork_point + 1
     // This will cause blocks to be downloaded starting from the divergence point
