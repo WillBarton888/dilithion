@@ -1244,6 +1244,32 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
 
     std::cout << "[OnWindowBlockConnected] height=" << height << " window_initialized=" << m_window_initialized << std::endl;
 
+    // BUG #163 FIX: Clean up mapBlocksInFlight by HEIGHT when block is connected
+    // This fixes the 128-block stall where blocks arrive with different hashes than requested
+    // (due to FastHash vs RandomX hash mismatch). The blocks connect to the chain but
+    // mapBlocksInFlight entries are never removed because MarkBlockReceived() can't find them.
+    // By cleaning up by height, we prevent mapBlocksInFlight from filling up with stale entries.
+    for (auto it = mapBlocksInFlight.begin(); it != mapBlocksInFlight.end(); ) {
+        if (it->second.nHeight == height) {
+            std::cout << "[BUG #163 FIX] Cleaning up in-flight entry for connected height " << height
+                      << " hash=" << it->first.GetHex().substr(0, 16) << "..." << std::endl;
+            // Also clean up peer tracking
+            if (mapPeerBlocks.count(it->second.peer) > 0) {
+                mapPeerBlocks[it->second.peer].erase(it->first);
+                if (mapPeerBlocks[it->second.peer].empty()) {
+                    mapPeerBlocks.erase(it->second.peer);
+                }
+            }
+            // Notify CPeerManager
+            if (m_peer_manager) {
+                m_peer_manager->RemoveBlockFromFlight(it->first);
+            }
+            it = mapBlocksInFlight.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     if (!m_window_initialized) {
         std::cout << "[OnWindowBlockConnected] Window not initialized, skipping" << std::endl;
         return;
