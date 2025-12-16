@@ -161,7 +161,8 @@ public:
      */
     void OnBlockConnected(int height,
                           std::function<bool(int)> is_height_queued_callback = nullptr,
-                          std::function<bool(int)> is_height_in_flight_callback = nullptr) {
+                          std::function<bool(int)> is_height_in_flight_callback = nullptr,
+                          std::function<bool(int)> is_height_connected_callback = nullptr) {
         m_received.erase(height);
         m_pending.erase(height);  // In case we never received it
         // IBD HANG FIX #20: Don't erase from m_in_flight - CPeerManager handles this
@@ -170,7 +171,7 @@ public:
         // Previously only advanced when height == m_window_start, causing stalls with out-of-order blocks
         // Now advances past all connected blocks, allowing window to slide forward continuously
         if (IsInWindow(height)) {
-            AdvanceWindow(is_height_queued_callback, is_height_in_flight_callback);
+            AdvanceWindow(is_height_queued_callback, is_height_in_flight_callback, is_height_connected_callback);
         }
     }
 
@@ -330,7 +331,8 @@ public:
 
 private:
     void AdvanceWindow(std::function<bool(int)> is_height_queued_callback = nullptr,
-                       std::function<bool(int)> is_height_in_flight_callback = nullptr) {
+                       std::function<bool(int)> is_height_in_flight_callback = nullptr,
+                       std::function<bool(int)> is_height_connected_callback = nullptr) {
         // IBD HANG FIX #2: Allow window advancement past queued blocks
         // IBD HANG FIX #5: Better window state tracking - distinguish "processing" vs "stuck"
         // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager is single source of truth
@@ -348,11 +350,17 @@ private:
                 is_in_flight = is_height_in_flight_callback(m_window_start);
             }
 
-            // Can advance if height is not in local tracking sets AND not in-flight
-            // IBD STUCK FIX #6: Added is_in_flight check to prevent advancing past fetching heights
-            if (m_pending.count(m_window_start) == 0 &&
-                m_received.count(m_window_start) == 0 &&
-                !is_in_flight) {
+            // BUG #162 FIX: Check if height is connected to the chain
+            // This is the AUTHORITATIVE check - if a height is connected, we can advance past it
+            bool is_connected = false;
+            if (is_height_connected_callback) {
+                is_connected = is_height_connected_callback(m_window_start);
+            }
+
+            // BUG #162 FIX: Only advance if height is CONNECTED to the chain
+            // Previously assumed heights not in tracking sets were complete, but this was wrong
+            // Heights could fall out of tracking due to chunk cancellation without being connected
+            if (is_connected) {
                 can_advance = true;
             }
             // IBD HANG FIX #2: Also advance if height is in "received" but queued for validation
@@ -364,6 +372,16 @@ private:
                     // Remove from received since we're advancing past it
                     m_received.erase(m_window_start);
                 }
+            }
+            // BUG #162 FIX: If height is not connected and not tracked anywhere, re-add to pending
+            else if (m_pending.count(m_window_start) == 0 &&
+                     m_received.count(m_window_start) == 0 &&
+                     !is_in_flight) {
+                // Height fell out of tracking without being connected - re-add to pending
+                std::cout << "[BUG #162 FIX] Height " << m_window_start
+                          << " not tracked and NOT connected - re-adding to pending" << std::endl;
+                m_pending.insert(m_window_start);
+                // Don't advance - wait for this height
             }
 
             if (can_advance) {

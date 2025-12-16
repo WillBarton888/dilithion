@@ -1269,8 +1269,8 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
     // BUG #162 FIX: Check if height is connected to the chain
     // This is the authoritative check - a height is complete only if it's at or below chain tip
     auto is_height_connected = [](int h) -> bool {
-        if (g_node_context.chain_state) {
-            int chain_height = g_node_context.chain_state->GetHeight();
+        if (g_node_context.chainstate) {
+            int chain_height = g_node_context.chainstate->GetHeight();
             return h <= chain_height;
         }
         return false;
