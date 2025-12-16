@@ -13,6 +13,7 @@
 #include <mutex>
 #include <vector>
 #include <sstream>
+#include <iostream>  // BUG #162: For std::cout debug logging
 
 // Forward declaration for dependency injection
 class CPeerManager;
