@@ -429,14 +429,23 @@ void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) 
             continue;  // Block is actually connected to chain - skip
         }
 
-        if (!m_chainstate.HasBlockIndex(hash) &&
-            !m_node_context.block_fetcher->IsQueued(hash) &&
-            !m_node_context.block_fetcher->IsDownloading(hash)) {
-            // IBD SLOW FIX #1: Still add to old queue for backward compatibility
-            // But also add to window's pending set to synchronize systems
+        // BUG #160 FIX: Check BLOCK_HAVE_DATA instead of HasBlockIndex
+        // Headers-first sync creates index WITHOUT data, so HasBlockIndex returns true
+        // but block still needs to be downloaded. Only skip download if we have actual data.
+        // Without this fix, blocks with header-only index were skipped, causing IBD stall.
+        bool has_data = pindex && (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA);
+
+        if (has_data) {
+            // Block data exists but not connected (pending validation or orphan)
+            // Add to window tracking but don't re-download
+            heights_to_add.push_back(h);
+            LogPrintIBD(DEBUG, "Block %s... at height %d has data, adding to window", hash.GetHex().substr(0, 16).c_str(), h);
+        } else if (!m_node_context.block_fetcher->IsQueued(hash) &&
+                   !m_node_context.block_fetcher->IsDownloading(hash)) {
+            // No data (header-only or no index) - queue for download
             m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
             heights_to_add.push_back(h);
-            LogPrintIBD(DEBUG, "Queued block %s... at height %d", hash.GetHex().substr(0, 16).c_str(), h);
+            LogPrintIBD(DEBUG, "Queued block %s... at height %d for download", hash.GetHex().substr(0, 16).c_str(), h);
         }
     }
 
