@@ -6,6 +6,7 @@
 #include <net/peers.h>       // Phase A: Unified CPeerManager block tracking
 #include <core/node_context.h>  // IBD HANG FIX #2: For validation queue access
 #include <node/block_validation_queue.h>  // IBD HANG FIX #2: For IsHeightQueued
+#include <consensus/chain.h>  // BUG #162: For CChainState::GetHeight()
 #include <iostream>
 #include <algorithm>
 #include <sstream>
