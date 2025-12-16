@@ -436,10 +436,11 @@ void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) 
         bool has_data = pindex && (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA);
 
         if (has_data) {
-            // Block data exists but not connected (pending validation or orphan)
-            // Add to window tracking but don't re-download
-            heights_to_add.push_back(h);
-            LogPrintIBD(DEBUG, "Block %s... at height %d has data, adding to window", hash.GetHex().substr(0, 16).c_str(), h);
+            // BUG #160 FIX (COMPLETE): Block data exists but not connected (pending validation or orphan)
+            // Mark as RECEIVED in window, NOT pending - these blocks don't need re-download
+            // Previously incorrectly added to heights_to_add which went to pending set, causing IBD stall
+            m_node_context.block_fetcher->OnWindowBlockReceived(h);
+            LogPrintIBD(DEBUG, "Block %s... at height %d has data, marked as received", hash.GetHex().substr(0, 16).c_str(), h);
         } else if (!m_node_context.block_fetcher->IsQueued(hash) &&
                    !m_node_context.block_fetcher->IsDownloading(hash)) {
             // No data (header-only or no index) - queue for download
