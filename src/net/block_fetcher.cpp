@@ -121,9 +121,23 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    // BUG #161 DEBUG: Log hash lookup for debugging hash mismatch
+    std::cout << "[MarkBlockReceived] ENTRY peer=" << peer
+              << " hash=" << hash.GetHex().substr(0, 16) << "..."
+              << " mapSize=" << mapBlocksInFlight.size() << std::endl;
+
     // Check if block was in-flight in local tracking (for timeout tracking)
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
+        // BUG #161 DEBUG: Log first few hashes in mapBlocksInFlight
+        std::cout << "[MarkBlockReceived] NOT FOUND - dumping first 3 in-flight hashes:" << std::endl;
+        int count = 0;
+        for (const auto& entry : mapBlocksInFlight) {
+            if (count++ < 3) {
+                std::cout << "  [" << entry.second.nHeight << "] "
+                          << entry.first.GetHex().substr(0, 16) << "..." << std::endl;
+            }
+        }
         // Not tracked locally (chunk may have been cancelled/timed out)
         // IBD HANG FIX #13: ALWAYS notify CPeerManager to decrement nBlocksInFlight
         // CPeerManager::MarkBlockAsReceived handles untracked blocks gracefully
@@ -133,6 +147,8 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
         }
         return false;  // Still return false so caller knows it wasn't in local tracking
     }
+
+    std::cout << "[MarkBlockReceived] FOUND height=" << it->second.nHeight << std::endl;
 
     // Block was in local tracking - notify CPeerManager and continue with stats update
     if (m_peer_manager) {
