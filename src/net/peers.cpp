@@ -1100,6 +1100,48 @@ void CPeerManager::UpdatePeerStats(int peer_id, bool success, std::chrono::milli
     }
 }
 
+void CPeerManager::ClearPeerInFlightState(int peer_id)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return;
+    }
+
+    CPeer* peer = it->second.get();
+    int vblocks_cleared = 0;
+    int map_cleared = 0;
+
+    // BUG #166 FIX: Clear vBlocksInFlight FIRST (this is the key fix!)
+    // When there's desync between mapBlocksInFlight and vBlocksInFlight,
+    // clearing vBlocksInFlight stops CheckForStallingPeers from timing out stale entries
+    for (const auto& qb : peer->vBlocksInFlight) {
+        // Also remove from mapBlocksInFlight if present
+        auto map_it = mapBlocksInFlight.find(qb.hash);
+        if (map_it != mapBlocksInFlight.end() && map_it->second.first == peer_id) {
+            mapBlocksInFlight.erase(map_it);
+            map_cleared++;
+        }
+        vblocks_cleared++;
+    }
+
+    // Clear the peer's vBlocksInFlight completely
+    peer->vBlocksInFlight.clear();
+    peer->nBlocksInFlight = 0;
+
+    // BUG #166 FIX: Reset stall count so peer can become suitable again
+    // Without this, the peer stays unsuitable forever because nStallingCount > threshold
+    peer->nStallingCount = 0;
+    peer->lastStallTime = std::chrono::steady_clock::now();  // Reset timer
+
+    if (vblocks_cleared > 0 || map_cleared > 0) {
+        std::cout << "[BUG #166 FIX] ClearPeerInFlightState: peer " << peer_id
+                  << " cleared " << vblocks_cleared << " vBlocksInFlight, "
+                  << map_cleared << " mapBlocksInFlight, reset stall count" << std::endl;
+    }
+}
+
 std::vector<int> CPeerManager::GetValidPeersForDownload() const
 {
     // BUG #148 FIX: Lock both mutexes to check node validity

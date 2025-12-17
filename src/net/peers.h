@@ -359,6 +359,20 @@ public:
     std::vector<int> CheckForStallingPeers();
     void UpdatePeerStats(int peer_id, bool success, std::chrono::milliseconds responseTime);
 
+    /**
+     * @brief BUG #166 FIX: Completely clear a peer's in-flight state
+     *
+     * When a peer becomes unsuitable, we need to clear ALL tracking state:
+     * - vBlocksInFlight (prevents CheckForStallingPeers from incrementing stall count)
+     * - mapBlocksInFlight entries for this peer
+     * - nBlocksInFlight counter
+     * - Reset stall count to allow peer to become suitable again
+     *
+     * This is different from RemoveBlockFromFlight which only works if hash is found.
+     * This method clears by peer_id, handling any desync between tracking structures.
+     */
+    void ClearPeerInFlightState(int peer_id);
+
     // SINGLE SOURCE OF TRUTH: New methods for centralized block tracking
     /**
      * @brief Get total blocks in-flight across all peers

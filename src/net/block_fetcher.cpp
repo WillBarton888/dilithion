@@ -1184,6 +1184,13 @@ void CBlockFetcher::CleanupUnsuitablePeers()
                       << std::endl;
         }
 
+        // BUG #166 FIX: Clear the peer's vBlocksInFlight and reset stall count
+        // This is critical! Even if mapBlocksInFlight cleanup worked, vBlocksInFlight may have
+        // orphaned entries due to desync. Clearing vBlocksInFlight stops CheckForStallingPeers
+        // from timing out stale entries and incrementing stall count forever.
+        // Resetting stall count allows the peer to become suitable again.
+        m_peer_manager->ClearPeerInFlightState(peer_id);
+
         // Also cancel their active chunk if they have one
         auto chunk_it = mapActiveChunks.find(peer_id);
         if (chunk_it != mapActiveChunks.end()) {
