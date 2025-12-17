@@ -529,8 +529,17 @@ void CConnman::ThreadMessageHandler() {
         std::vector<PendingMessage> pending_messages;
 
         // Phase 1: Collect messages while holding cs_vNodes (short lock duration)
+        // BUG #167 FIX: Per-node message limit to prevent starvation
+        // Instead of a global 100-message limit that causes starvation,
+        // use a per-node limit to ensure fairness
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
+
+            // BUG #167 FIX: Max messages per node per batch (ensures fairness)
+            constexpr int MAX_MSGS_PER_NODE_PER_BATCH = 20;
+            // Global batch limit (prevents unbounded growth)
+            constexpr int MAX_MSGS_TOTAL_PER_BATCH = 200;
+
             for (auto& node : m_nodes) {
                 // DEBUG: Log if node is being skipped due to disconnect
                 if (node->fDisconnect.load()) {
@@ -540,15 +549,24 @@ void CConnman::ThreadMessageHandler() {
                     continue;
                 }
 
+                // BUG #167 FIX: Per-node message count
+                int msgs_from_this_node = 0;
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
                     // DEBUG: Log each message popped from queue
                     std::cout << "[MSGHANDLER-POP] node=" << node->id << " cmd=" << processed_msg.command << std::endl;
                     std::cout.flush();
                     pending_messages.push_back({node->id, std::move(processed_msg)});
+                    msgs_from_this_node++;
 
-                    // Limit messages collected per iteration to prevent unbounded growth
-                    if (pending_messages.size() >= 100) {
+                    // BUG #167 FIX: Per-node limit - stop collecting from this node
+                    // Move to next node to ensure fairness
+                    if (msgs_from_this_node >= MAX_MSGS_PER_NODE_PER_BATCH) {
+                        break;
+                    }
+
+                    // Global limit - stop collecting entirely
+                    if (pending_messages.size() >= static_cast<size_t>(MAX_MSGS_TOTAL_PER_BATCH)) {
                         fMoreWork = true;
                         break;
                     }
@@ -556,6 +574,11 @@ void CConnman::ThreadMessageHandler() {
 
                 if (node->HasProcessMsgs()) {
                     fMoreWork = true;
+                }
+
+                // Global limit check after each node
+                if (pending_messages.size() >= static_cast<size_t>(MAX_MSGS_TOTAL_PER_BATCH)) {
+                    break;
                 }
             }
         }
