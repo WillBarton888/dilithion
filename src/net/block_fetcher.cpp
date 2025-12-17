@@ -10,6 +10,7 @@
 #include <iostream>
 #include <algorithm>
 #include <sstream>
+#include <set>  // BUG #165 FIX: For std::set in CleanupUnsuitablePeers
 
 // Forward declaration
 extern NodeContext g_node_context;
@@ -1120,6 +1121,92 @@ void CBlockFetcher::CleanupCancelledChunks()
     // Remove expired cancelled chunks
     for (NodeId peer_id : to_remove) {
         mapCancelledChunks.erase(peer_id);
+    }
+}
+
+void CBlockFetcher::CleanupUnsuitablePeers()
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    if (!m_peer_manager) {
+        return;
+    }
+
+    // BUG #165 FIX: Clean up mapBlocksInFlight entries from unsuitable peers
+    // When a peer becomes unsuitable (stall count too high), their in-flight entries
+    // become zombie entries that block the system. Clean them up proactively.
+
+    // Find all unsuitable peers that have entries in mapBlocksInFlight
+    std::set<NodeId> unsuitable_peers_with_entries;
+    for (const auto& entry : mapBlocksInFlight) {
+        NodeId peer_id = entry.second.peer;
+        if (!m_peer_manager->IsPeerSuitableForDownload(peer_id)) {
+            unsuitable_peers_with_entries.insert(peer_id);
+        }
+    }
+
+    if (unsuitable_peers_with_entries.empty()) {
+        return;
+    }
+
+    // Clean up entries for each unsuitable peer
+    for (NodeId peer_id : unsuitable_peers_with_entries) {
+        int local_removed = 0;
+        int cpmanager_removed = 0;
+
+        // Remove from CBlockFetcher::mapBlocksInFlight
+        for (auto it = mapBlocksInFlight.begin(); it != mapBlocksInFlight.end(); ) {
+            if (it->second.peer == peer_id) {
+                // Also remove from CPeerManager
+                m_peer_manager->RemoveBlockFromFlight(it->first);
+                it = mapBlocksInFlight.erase(it);
+                local_removed++;
+            } else {
+                ++it;
+            }
+        }
+
+        // Clean up mapPeerBlocks
+        mapPeerBlocks.erase(peer_id);
+
+        // Also clean up any remaining entries in CPeerManager (may have entries we don't track locally)
+        std::vector<std::pair<uint256, int>> all_blocks = m_peer_manager->GetBlocksInFlight();
+        for (const auto& block_entry : all_blocks) {
+            if (block_entry.second == peer_id) {
+                m_peer_manager->RemoveBlockFromFlight(block_entry.first);
+                cpmanager_removed++;
+            }
+        }
+
+        if (local_removed > 0 || cpmanager_removed > 0) {
+            std::cout << "[BUG #165 FIX] Cleaned up " << local_removed << " local + "
+                      << cpmanager_removed << " CPeerManager entries for unsuitable peer " << peer_id
+                      << std::endl;
+        }
+
+        // Also cancel their active chunk if they have one
+        auto chunk_it = mapActiveChunks.find(peer_id);
+        if (chunk_it != mapActiveChunks.end()) {
+            std::cout << "[BUG #165 FIX] Cancelling chunk " << chunk_it->second.height_start
+                      << "-" << chunk_it->second.height_end << " from unsuitable peer " << peer_id
+                      << std::endl;
+
+            // Mark heights as pending for re-request
+            if (m_window_initialized) {
+                for (int h = chunk_it->second.height_start; h <= chunk_it->second.height_end; h++) {
+                    if (!m_download_window.IsReceived(h)) {
+                        m_download_window.MarkAsPending(h);
+                    }
+                }
+            }
+
+            // Erase height mappings
+            for (int h = chunk_it->second.height_start; h <= chunk_it->second.height_end; h++) {
+                mapHeightToPeer.erase(h);
+            }
+
+            mapActiveChunks.erase(chunk_it);
+        }
     }
 }
 

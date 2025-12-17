@@ -747,6 +747,15 @@ public:
     void CleanupCancelledChunks();
 
     /**
+     * @brief Clean up mapBlocksInFlight entries from unsuitable peers
+     *
+     * BUG #165 FIX: When a peer becomes unsuitable (stall count too high), their
+     * in-flight entries become zombie entries that block the system. This method
+     * proactively cleans them up.
+     */
+    void CleanupUnsuitablePeers();
+
+    /**
      * @brief Cancel a stalled chunk, making heights available for re-request
      *
      * Call this when a chunk cannot be reassigned to another peer (e.g., all

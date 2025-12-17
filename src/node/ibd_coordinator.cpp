@@ -669,6 +669,11 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
     // This removes height mappings for chunks where blocks never arrived
     m_node_context.block_fetcher->CleanupCancelledChunks();
 
+    // BUG #165 FIX: Clean up mapBlocksInFlight entries from unsuitable peers
+    // When a peer becomes unsuitable (stall count >= 500), their in-flight entries
+    // become zombie entries that block new requests. Clean them up proactively.
+    m_node_context.block_fetcher->CleanupUnsuitablePeers();
+
     // Check for block-level timeouts (60 second)
     auto timed_out = m_node_context.block_fetcher->CheckTimeouts();
     if (!timed_out.empty()) {
