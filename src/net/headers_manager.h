@@ -488,10 +488,14 @@ private:
     //! Condition variable for validation queue
     std::condition_variable m_validation_cv;
 
-    //! Validation worker thread
-    std::thread m_validation_thread;
+    //! IBD Redesign Phase 2: Hash worker thread pool (N = CPU cores)
+    //! Multiple threads compute RandomX hashes in parallel
+    std::vector<std::thread> m_hash_workers;
 
-    //! Flag indicating validation thread should run
+    //! Number of hash worker threads (detected from CPU cores)
+    size_t m_hash_worker_count{0};
+
+    //! Flag indicating validation threads should run
     std::atomic<bool> m_validation_running{false};
 
     //! Count of successfully validated headers (for stats)

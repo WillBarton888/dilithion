@@ -1144,21 +1144,43 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 bool CHeadersManager::StartValidationThread()
 {
     if (m_validation_running.load()) {
-        std::cerr << "[HeadersManager] Validation thread already running" << std::endl;
+        std::cerr << "[HeadersManager] Validation thread pool already running" << std::endl;
         return false;
     }
 
-    std::cout << "[HeadersManager] Starting validation worker thread..." << std::endl;
+    // IBD Redesign Phase 2: Spawn N worker threads where N = CPU cores
+    // This parallelizes RandomX hash computation for massive speedup
+    m_hash_worker_count = std::thread::hardware_concurrency();
+    if (m_hash_worker_count == 0) {
+        m_hash_worker_count = 4;  // Fallback if detection fails
+    }
+    // Cap at 8 threads to avoid memory contention with RandomX VMs
+    if (m_hash_worker_count > 8) {
+        m_hash_worker_count = 8;
+    }
+
+    std::cout << "[HeadersManager] Starting " << m_hash_worker_count
+              << " hash worker threads (Phase 2 parallel validation)..." << std::endl;
 
     m_validation_running.store(true);
 
     try {
-        m_validation_thread = std::thread(&CHeadersManager::ValidationWorkerThread, this);
-        std::cout << "[HeadersManager] Validation thread started" << std::endl;
+        m_hash_workers.reserve(m_hash_worker_count);
+        for (size_t i = 0; i < m_hash_worker_count; ++i) {
+            m_hash_workers.emplace_back(&CHeadersManager::ValidationWorkerThread, this);
+        }
+        std::cout << "[HeadersManager] " << m_hash_worker_count << " hash workers started" << std::endl;
         return true;
     } catch (const std::exception& e) {
         m_validation_running.store(false);
-        std::cerr << "[HeadersManager] Failed to start validation thread: " << e.what() << std::endl;
+        // Join any threads that were started
+        for (auto& thread : m_hash_workers) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        m_hash_workers.clear();
+        std::cerr << "[HeadersManager] Failed to start hash workers: " << e.what() << std::endl;
         return false;
     }
 }
@@ -1169,14 +1191,19 @@ void CHeadersManager::StopValidationThread()
         return;
     }
 
-    std::cout << "[HeadersManager] Stopping validation thread..." << std::endl;
+    std::cout << "[HeadersManager] Stopping " << m_hash_workers.size()
+              << " hash worker threads..." << std::endl;
 
     m_validation_running.store(false);
-    m_validation_cv.notify_all();
+    m_validation_cv.notify_all();  // Wake all waiting threads
 
-    if (m_validation_thread.joinable()) {
-        m_validation_thread.join();
+    // Join all worker threads
+    for (auto& thread : m_hash_workers) {
+        if (thread.joinable()) {
+            thread.join();
+        }
     }
+    m_hash_workers.clear();
 
     // Clear remaining queue
     {
@@ -1186,7 +1213,7 @@ void CHeadersManager::StopValidationThread()
         }
     }
 
-    std::cout << "[HeadersManager] Validation thread stopped. Validated: "
+    std::cout << "[HeadersManager] Hash workers stopped. Validated: "
               << m_validated_count.load() << ", Failures: "
               << m_validation_failures.load() << std::endl;
 }
@@ -1199,7 +1226,8 @@ size_t CHeadersManager::GetValidationQueueDepth() const
 
 void CHeadersManager::ValidationWorkerThread()
 {
-    std::cout << "[HeadersManager] Validation worker thread started" << std::endl;
+    // IBD Redesign Phase 2: This runs in N parallel threads
+    // Each thread has its own RandomX VM via thread-local storage in randomx_hash_thread()
 
     while (m_validation_running.load()) {
         PendingValidation pending;
