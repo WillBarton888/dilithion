@@ -61,11 +61,29 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // Calculate expected height
         int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
+        // BUG #164 FIX: Check if we already have a header at this height BEFORE
+        // computing the expensive RandomX hash. This avoids wasting 50-100ms per
+        // duplicate header. For 2000 duplicate headers, this saves 100-200 seconds!
+        auto heightIt = mapHeightIndex.find(expectedHeight);
+        if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+            // We already have a header at this height - skip the expensive hash
+            uint256 existingHash = *heightIt->second.begin();
+            auto existingIt = mapHeaders.find(existingHash);
+            if (existingIt != mapHeaders.end()) {
+                pprev = &existingIt->second;
+                prevHash = existingHash;
+                heightStart = existingIt->second.height;
+                // BUG #33 FIX: Update best header even for existing headers
+                UpdateBestHeader(existingHash);
+                continue;
+            }
+        }
+
         // SIMPLIFICATION: Always use RandomX hash for storage
         // This eliminates hash type mismatch issues between header storage and block requests
         uint256 storageHash = header.GetHash();
 
-        // Skip if we already have this header
+        // Skip if we already have this header (double-check with actual hash)
         if (mapHeaders.find(storageHash) != mapHeaders.end()) {
             auto it = mapHeaders.find(storageHash);
             pprev = &it->second;
@@ -1054,10 +1072,25 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             // Calculate expected height
             int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
+            // BUG #164 FIX: Check if we already have a header at this height BEFORE
+            // computing the expensive RandomX hash. This avoids wasting 50-100ms per
+            // duplicate header. For 2000 duplicate headers, this saves 100-200 seconds!
+            auto heightIt = mapHeightIndex.find(expectedHeight);
+            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+                // We already have a header at this height - skip the expensive hash
+                uint256 existingHash = *heightIt->second.begin();
+                auto existingIt = mapHeaders.find(existingHash);
+                if (existingIt != mapHeaders.end()) {
+                    pprev = &existingIt->second;
+                    prevHash = existingHash;
+                    continue;
+                }
+            }
+
             // SIMPLIFICATION: Always use RandomX hash for storage
             uint256 storageHash = header.GetHash();
 
-            // Skip duplicates
+            // Skip duplicates (double-check with actual hash)
             if (mapHeaders.find(storageHash) != mapHeaders.end()) {
                 pprev = &mapHeaders[storageHash];
                 prevHash = storageHash;
