@@ -17,6 +17,7 @@
 #include <util/strencodings.h>  // For strprintf
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <iostream>  // For std::cout
 #include <thread>  // For std::this_thread
@@ -187,7 +188,32 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
         return false;
     }
 
-    LogPrintf(NET, INFO, "[CConnman] Started successfully\n");
+    // IBD Redesign Phase 1: Start async message worker threads
+    // Headers and blocks are processed in dedicated threads to avoid blocking message handler
+    try {
+        m_headers_worker_thread = std::thread(&CConnman::HeadersWorkerThread, this);
+    } catch (const std::exception& e) {
+        LogPrintf(NET, ERROR, "[CConnman] Failed to start HeadersWorkerThread: %s\n", e.what());
+        Interrupt();
+        if (threadSocketHandler.joinable()) threadSocketHandler.join();
+        if (threadMessageHandler.joinable()) threadMessageHandler.join();
+        if (threadOpenConnections.joinable()) threadOpenConnections.join();
+        return false;
+    }
+
+    try {
+        m_blocks_worker_thread = std::thread(&CConnman::BlocksWorkerThread, this);
+    } catch (const std::exception& e) {
+        LogPrintf(NET, ERROR, "[CConnman] Failed to start BlocksWorkerThread: %s\n", e.what());
+        Interrupt();
+        if (threadSocketHandler.joinable()) threadSocketHandler.join();
+        if (threadMessageHandler.joinable()) threadMessageHandler.join();
+        if (threadOpenConnections.joinable()) threadOpenConnections.join();
+        if (m_headers_worker_thread.joinable()) m_headers_worker_thread.join();
+        return false;
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] Started successfully (with async headers/blocks workers)\n");
     return true;
 }
 
@@ -204,6 +230,14 @@ void CConnman::Stop() {
     }
     if (threadOpenConnections.joinable()) {
         threadOpenConnections.join();
+    }
+
+    // IBD Redesign Phase 1: Join async worker threads
+    if (m_headers_worker_thread.joinable()) {
+        m_headers_worker_thread.join();
+    }
+    if (m_blocks_worker_thread.joinable()) {
+        m_blocks_worker_thread.join();
     }
 
     // Close listen socket
@@ -234,6 +268,10 @@ void CConnman::Interrupt() {
 
     // Wake message handler
     WakeMessageHandler();
+
+    // IBD Redesign Phase 1: Wake async worker threads so they can exit
+    m_headers_cv.notify_all();
+    m_blocks_cv.notify_all();
 }
 
 CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
@@ -508,81 +546,44 @@ void CConnman::ThreadSocketHandler() {
 }
 
 void CConnman::ThreadMessageHandler() {
-    LogPrintf(NET, INFO, "[CConnman] ThreadMessageHandler started\n");
+    LogPrintf(NET, INFO, "[CConnman] ThreadMessageHandler started (async dispatch mode)\n");
 
     while (!flagInterruptMsgProc.load()) {
         bool fMoreWork = false;
 
-        // DEBUG: Log each iteration to track if loop is running
-        static int iteration_count = 0;
-        if (++iteration_count % 10 == 1) {
-            std::cout << "[MSGHANDLER-LOOP] iteration=" << iteration_count << std::endl;
-            std::cout.flush();
-        }
+        // IBD Redesign Phase 1: Collect messages and route by type
+        // Headers and blocks go to async queues (never block this thread)
+        // Control messages (version, verack, ping, pong, etc.) process inline (fast)
 
-        // BUG #141 FIX: Collect messages while holding lock, process outside lock
-        // This prevents deadlock when message handlers acquire other locks (cs_headers)
         struct PendingMessage {
             int node_id;
             CProcessedMsg msg;
         };
         std::vector<PendingMessage> pending_messages;
 
-        // Phase 1: Collect messages while holding cs_vNodes (short lock duration)
-        // BUG #167 FIX: Per-node message limit to prevent starvation
-        // Instead of a global 100-message limit that causes starvation,
-        // use a per-node limit to ensure fairness
+        // Collect messages while holding cs_vNodes (short lock duration)
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
 
-            // BUG #167 FIX: Max messages per node per batch (ensures fairness)
-            constexpr int MAX_MSGS_PER_NODE_PER_BATCH = 20;
-            // Global batch limit (prevents unbounded growth)
-            constexpr int MAX_MSGS_TOTAL_PER_BATCH = 200;
-            // BUG #167 FIX: Limit headers per batch (headers processing blocks for 100+ seconds)
-            int total_headers_in_batch = 0;
-            constexpr int MAX_HEADERS_PER_BATCH = 1;
+            // Fairness: Max messages per node per batch
+            constexpr int MAX_MSGS_PER_NODE_PER_BATCH = 50;
+            // Global batch limit
+            constexpr int MAX_MSGS_TOTAL_PER_BATCH = 500;
 
             for (auto& node : m_nodes) {
-                // DEBUG: Log if node is being skipped due to disconnect
                 if (node->fDisconnect.load()) {
-                    if (node->HasProcessMsgs()) {
-                        std::cout << "[MSGHANDLER-SKIP] node=" << node->id << " fDisconnect=true but has messages!" << std::endl;
-                    }
                     continue;
                 }
 
-                // BUG #167 FIX: Per-node message count
                 int msgs_from_this_node = 0;
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
-                    // BUG #167 FIX: Limit headers messages across entire batch
-                    // Headers processing is expensive (50-100ms per header x 2000 = 100+ seconds)
-                    // and blocks the message handler. Limiting to 1 headers per batch ensures
-                    // block messages get processed in between headers batches.
-                    if (processed_msg.command == "headers") {
-                        if (total_headers_in_batch >= MAX_HEADERS_PER_BATCH) {
-                            // Push back to queue for next iteration
-                            node->PushProcessMsg(std::move(processed_msg));
-                            fMoreWork = true;
-                            continue;  // Skip this message, continue with other messages
-                        }
-                        total_headers_in_batch++;
-                    }
-
-                    // DEBUG: Log each message popped from queue
-                    std::cout << "[MSGHANDLER-POP] node=" << node->id << " cmd=" << processed_msg.command << std::endl;
-                    std::cout.flush();
                     pending_messages.push_back({node->id, std::move(processed_msg)});
                     msgs_from_this_node++;
 
-                    // BUG #167 FIX: Per-node limit - stop collecting from this node
-                    // Move to next node to ensure fairness
                     if (msgs_from_this_node >= MAX_MSGS_PER_NODE_PER_BATCH) {
                         break;
                     }
-
-                    // Global limit - stop collecting entirely
                     if (pending_messages.size() >= static_cast<size_t>(MAX_MSGS_TOTAL_PER_BATCH)) {
                         fMoreWork = true;
                         break;
@@ -593,80 +594,56 @@ void CConnman::ThreadMessageHandler() {
                     fMoreWork = true;
                 }
 
-                // Global limit check after each node
                 if (pending_messages.size() >= static_cast<size_t>(MAX_MSGS_TOTAL_PER_BATCH)) {
                     break;
                 }
             }
         }
+        // cs_vNodes released
 
-        // DEBUG: Log collected message count
-        if (!pending_messages.empty()) {
-            std::cout << "[MSGHANDLER-BATCH] Collected " << pending_messages.size() << " messages for processing" << std::endl;
-        }
-        // cs_vNodes is now RELEASED - safe to call handlers that acquire other locks
+        // Route messages by type
+        int headers_queued = 0;
+        int blocks_queued = 0;
+        int control_processed = 0;
 
-        // Phase 2: Process collected messages WITHOUT holding cs_vNodes
-        int msg_index = 0;
         for (const auto& pending : pending_messages) {
-            msg_index++;
-            std::cout << "[MSGHANDLER-LOOP] START " << msg_index << "/" << pending_messages.size()
-                      << " cmd=" << pending.msg.command << " node=" << pending.node_id << std::endl;
-            std::cout.flush();
+            const std::string& cmd = pending.msg.command;
 
-            // Convert CProcessedMsg to CNetMessage
-            CNetMessage message(pending.msg.command, pending.msg.data);
-
-            // Process the message using CNetMessageProcessor
-            bool success = false;
-            if (m_msg_processor) {
-                std::cout << "[MSGHANDLER-LOOP] Calling ProcessMessage..." << std::endl;
-                std::cout.flush();
-                success = m_msg_processor->ProcessMessage(pending.node_id, message);
-                std::cout << "[MSGHANDLER-LOOP] ProcessMessage returned: " << (success ? "true" : "false") << std::endl;
-                std::cout.flush();
-            } else if (m_msg_handler) {
-                // Fallback to callback if processor not set
-                // Need to get node pointer - acquire lock briefly
-                std::lock_guard<std::mutex> lock(cs_vNodes);
-                for (auto& node : m_nodes) {
-                    if (node->id == pending.node_id && !node->fDisconnect.load()) {
-                        success = m_msg_handler(node.get(), pending.msg.command, pending.msg.data);
-                        break;
-                    }
+            // IBD Redesign: Route headers and blocks to async queues
+            if (cmd == "headers") {
+                // Queue for async processing - NEVER BLOCK HERE
+                {
+                    std::lock_guard<std::mutex> lock(m_headers_queue_mutex);
+                    m_headers_queue.push({pending.node_id, pending.msg.command, pending.msg.data});
                 }
+                m_headers_cv.notify_one();
+                headers_queued++;
             }
-
-            // Handle processing failure
-            if (!success) {
-                LogPrintf(NET, WARN, "[CConnman] Failed to process message '%s' from node %d\n",
-                          pending.msg.command.c_str(), pending.node_id);
-                // ProcessMessage handles misbehavior tracking internally
-                // Check if node should be disconnected due to accumulated misbehavior
-                if (m_peer_manager) {
-                    auto peer = m_peer_manager->GetPeer(pending.node_id);
-                    if (peer && peer->misbehavior_score > 100) {
-                        LogPrintf(NET, INFO, "[CConnman] Disconnecting node %d due to misbehavior (score: %d)\n",
-                                  pending.node_id, peer->misbehavior_score);
-                        // Mark for disconnect - need to find node
-                        std::lock_guard<std::mutex> lock(cs_vNodes);
-                        for (auto& node : m_nodes) {
-                            if (node->id == pending.node_id) {
-                                node->MarkDisconnect();
-                                break;
-                            }
-                        }
-                    }
+            else if (cmd == "block") {
+                // Queue for async processing - NEVER BLOCK HERE
+                {
+                    std::lock_guard<std::mutex> lock(m_blocks_queue_mutex);
+                    m_blocks_queue.push({pending.node_id, pending.msg.command, pending.msg.data});
                 }
+                m_blocks_cv.notify_one();
+                blocks_queued++;
             }
-
-            std::cout << "[MSGHANDLER-LOOP] END " << msg_index << "/" << pending_messages.size()
-                      << " success=" << (success ? "true" : "false") << std::endl;
-            std::cout.flush();
+            else {
+                // Control messages: process inline (fast - version, verack, ping, pong, inv, getdata, etc.)
+                bool success = ProcessQueuedMessage({pending.node_id, pending.msg.command, pending.msg.data});
+                if (!success) {
+                    LogPrintf(NET, WARN, "[CConnman] Failed to process control message '%s' from node %d\n",
+                              cmd.c_str(), pending.node_id);
+                }
+                control_processed++;
+            }
         }
 
-        std::cout << "[MSGHANDLER-LOOP] Finished processing all " << pending_messages.size() << " messages" << std::endl;
-        std::cout.flush();
+        // Log routing summary (reduced logging)
+        if (headers_queued > 0 || blocks_queued > 0) {
+            LogPrintf(NET, DEBUG, "[CConnman] Routed: %d headers, %d blocks to async; %d control inline\n",
+                      headers_queued, blocks_queued, control_processed);
+        }
 
         // Wait for more work
         if (!fMoreWork && !flagInterruptMsgProc.load()) {
@@ -679,6 +656,131 @@ void CConnman::ThreadMessageHandler() {
     }
 
     LogPrintf(NET, INFO, "[CConnman] ThreadMessageHandler stopped\n");
+}
+
+// IBD Redesign Phase 1: Helper to process a queued message
+bool CConnman::ProcessQueuedMessage(const QueuedMessage& msg) {
+    // Convert to CNetMessage
+    CNetMessage message(msg.command, msg.data);
+
+    // Process using message processor or fallback handler
+    bool success = false;
+    if (m_msg_processor) {
+        success = m_msg_processor->ProcessMessage(msg.node_id, message);
+    } else if (m_msg_handler) {
+        // Fallback to callback if processor not set
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        for (auto& node : m_nodes) {
+            if (node->id == msg.node_id && !node->fDisconnect.load()) {
+                success = m_msg_handler(node.get(), msg.command, msg.data);
+                break;
+            }
+        }
+    }
+
+    // Handle misbehavior tracking on failure
+    if (!success && m_peer_manager) {
+        auto peer = m_peer_manager->GetPeer(msg.node_id);
+        if (peer && peer->misbehavior_score > 100) {
+            LogPrintf(NET, INFO, "[CConnman] Disconnecting node %d due to misbehavior (score: %d)\n",
+                      msg.node_id, peer->misbehavior_score);
+            std::lock_guard<std::mutex> lock(cs_vNodes);
+            for (auto& node : m_nodes) {
+                if (node->id == msg.node_id) {
+                    node->MarkDisconnect();
+                    break;
+                }
+            }
+        }
+    }
+
+    return success;
+}
+
+// IBD Redesign Phase 1: Headers worker thread
+// Processes headers messages asynchronously - headers processing can take 100+ seconds
+// for 2000 headers with RandomX, so this MUST NOT block the message handler
+void CConnman::HeadersWorkerThread() {
+    LogPrintf(NET, INFO, "[CConnman] HeadersWorkerThread started\n");
+
+    while (!flagInterruptMsgProc.load()) {
+        QueuedMessage msg;
+
+        // Wait for work
+        {
+            std::unique_lock<std::mutex> lock(m_headers_queue_mutex);
+            m_headers_cv.wait(lock, [this] {
+                return !m_headers_queue.empty() || flagInterruptMsgProc.load();
+            });
+
+            if (flagInterruptMsgProc.load()) {
+                break;
+            }
+
+            if (m_headers_queue.empty()) {
+                continue;
+            }
+
+            msg = std::move(m_headers_queue.front());
+            m_headers_queue.pop();
+        }
+
+        // Process headers message (expensive - RandomX hash computation)
+        LogPrintf(NET, DEBUG, "[HeadersWorker] Processing headers from node %d\n", msg.node_id);
+        auto start = std::chrono::steady_clock::now();
+
+        bool success = ProcessQueuedMessage(msg);
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        LogPrintf(NET, DEBUG, "[HeadersWorker] Processed headers from node %d in %lld ms (success=%d)\n",
+                  msg.node_id, elapsed, success);
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] HeadersWorkerThread stopped\n");
+}
+
+// IBD Redesign Phase 1: Blocks worker thread
+// Processes block messages asynchronously - block validation can take time
+// and we don't want to block the message handler
+void CConnman::BlocksWorkerThread() {
+    LogPrintf(NET, INFO, "[CConnman] BlocksWorkerThread started\n");
+
+    while (!flagInterruptMsgProc.load()) {
+        QueuedMessage msg;
+
+        // Wait for work
+        {
+            std::unique_lock<std::mutex> lock(m_blocks_queue_mutex);
+            m_blocks_cv.wait(lock, [this] {
+                return !m_blocks_queue.empty() || flagInterruptMsgProc.load();
+            });
+
+            if (flagInterruptMsgProc.load()) {
+                break;
+            }
+
+            if (m_blocks_queue.empty()) {
+                continue;
+            }
+
+            msg = std::move(m_blocks_queue.front());
+            m_blocks_queue.pop();
+        }
+
+        // Process block message
+        LogPrintf(NET, DEBUG, "[BlocksWorker] Processing block from node %d\n", msg.node_id);
+        auto start = std::chrono::steady_clock::now();
+
+        bool success = ProcessQueuedMessage(msg);
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        LogPrintf(NET, DEBUG, "[BlocksWorker] Processed block from node %d in %lld ms (success=%d)\n",
+                  msg.node_id, elapsed, success);
+    }
+
+    LogPrintf(NET, INFO, "[CConnman] BlocksWorkerThread stopped\n");
 }
 
 void CConnman::ThreadOpenConnections() {

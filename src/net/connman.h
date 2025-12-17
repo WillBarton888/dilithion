@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <set>
 #include <thread>
 #include <vector>
@@ -284,6 +285,37 @@ private:
     std::thread threadSocketHandler;
     std::thread threadMessageHandler;
     std::thread threadOpenConnections;
+
+    //
+    // Async message dispatch (Phase 1 IBD redesign)
+    // Headers and blocks are routed to async queues instead of processing inline
+    //
+
+    // Queued message for async processing
+    struct QueuedMessage {
+        int node_id;
+        std::string command;
+        std::vector<uint8_t> data;
+    };
+
+    // Headers queue and worker
+    std::queue<QueuedMessage> m_headers_queue;
+    std::mutex m_headers_queue_mutex;
+    std::condition_variable m_headers_cv;
+    std::thread m_headers_worker_thread;
+
+    // Blocks queue and worker
+    std::queue<QueuedMessage> m_blocks_queue;
+    std::mutex m_blocks_queue_mutex;
+    std::condition_variable m_blocks_cv;
+    std::thread m_blocks_worker_thread;
+
+    // Worker thread functions
+    void HeadersWorkerThread();
+    void BlocksWorkerThread();
+
+    // Helper to process a message (used by workers)
+    bool ProcessQueuedMessage(const QueuedMessage& msg);
 
     //
     // Configuration
