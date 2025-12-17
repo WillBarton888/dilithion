@@ -327,6 +327,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             // Debug: log scan start (always log to diagnose issue)
             std::cout << "[IBD STUCK FIX #3] Orphan scan triggered - found " << all_orphans.size() << " orphans in pool" << std::endl;
 
+            // BUG #167 DEBUG: Log chain tip hash for comparison
+            if (m_chainstate.GetTip()) {
+                std::cout << "[BUG #167 DEBUG] Chain tip height=" << m_chainstate.GetHeight()
+                          << " hash=" << m_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+            }
+
             for (const uint256& orphanHash : all_orphans) {
                 CBlock orphanBlock;
                 if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
@@ -334,6 +340,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     CBlockIndex* parent = m_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
                     if (!parent) {
                         no_parent_count++;
+                        // BUG #167 DEBUG: Log the hashPrevBlock we're looking for
+                        if (no_parent_count <= 3) {
+                            std::cout << "[BUG #167 DEBUG] Orphan " << orphanHash.GetHex().substr(0, 16)
+                                      << " looking for parent " << orphanBlock.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                                      << " - NOT FOUND in chainstate" << std::endl;
+                        }
                         continue;
                     }
                     if (!(parent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
