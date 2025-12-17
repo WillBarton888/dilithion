@@ -539,6 +539,9 @@ void CConnman::ThreadMessageHandler() {
             constexpr int MAX_MSGS_PER_NODE_PER_BATCH = 20;
             // Global batch limit (prevents unbounded growth)
             constexpr int MAX_MSGS_TOTAL_PER_BATCH = 200;
+            // BUG #167 FIX: Limit headers per batch (headers processing blocks for 100+ seconds)
+            int total_headers_in_batch = 0;
+            constexpr int MAX_HEADERS_PER_BATCH = 1;
 
             for (auto& node : m_nodes) {
                 // DEBUG: Log if node is being skipped due to disconnect
@@ -553,6 +556,20 @@ void CConnman::ThreadMessageHandler() {
                 int msgs_from_this_node = 0;
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
+                    // BUG #167 FIX: Limit headers messages across entire batch
+                    // Headers processing is expensive (50-100ms per header x 2000 = 100+ seconds)
+                    // and blocks the message handler. Limiting to 1 headers per batch ensures
+                    // block messages get processed in between headers batches.
+                    if (processed_msg.command == "headers") {
+                        if (total_headers_in_batch >= MAX_HEADERS_PER_BATCH) {
+                            // Push back to queue for next iteration
+                            node->PushProcessMsg(std::move(processed_msg));
+                            fMoreWork = true;
+                            continue;  // Skip this message, continue with other messages
+                        }
+                        total_headers_in_batch++;
+                    }
+
                     // DEBUG: Log each message popped from queue
                     std::cout << "[MSGHANDLER-POP] node=" << node->id << " cmd=" << processed_msg.command << std::endl;
                     std::cout.flush();
