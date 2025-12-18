@@ -395,9 +395,17 @@ private:
 
         // Add new heights to pending to fill window
         // IBD HANG FIX #20: No longer check m_in_flight - CPeerManager is single source of truth
+        // IBD FIX: Also check is_height_in_flight_callback to avoid re-adding heights
+        // that are already assigned to peers (in mapHeightToPeer)
         int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
         for (int h = m_window_start; h <= window_end; h++) {
-            if (m_pending.count(h) == 0 && m_received.count(h) == 0) {
+            // Check if height is already in-flight via chunk assignment (mapHeightToPeer)
+            bool is_in_flight = false;
+            if (is_height_in_flight_callback) {
+                is_in_flight = is_height_in_flight_callback(h);
+            }
+
+            if (m_pending.count(h) == 0 && m_received.count(h) == 0 && !is_in_flight) {
                 m_pending.insert(h);
             }
         }
