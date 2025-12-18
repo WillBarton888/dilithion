@@ -668,30 +668,33 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         return false;
     }
 
-    // Check no height is already assigned to another peer (unless that peer's chunk was cancelled)
+    // Check no height is already assigned to another peer (unless that height is in a cancelled chunk)
     // IBD FIX: When a chunk is cancelled, heights remain in mapHeightToPeer during grace period
     // to handle late-arriving blocks. But this blocks reassignment. Allow reassignment if the
-    // assigned peer's chunk has been cancelled.
+    // HEIGHT is within the cancelled chunk's range (not just if the peer has any cancelled chunk).
     for (int h = height_start; h <= height_end; h++) {
         if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] != peer_id) {
             NodeId assigned_peer = mapHeightToPeer[h];
-            // Check if the assigned peer's chunk has been cancelled
-            bool cancelled = mapCancelledChunks.count(assigned_peer) > 0;
+            // Check if the height is within the peer's CANCELLED chunk (not just any cancelled chunk)
+            bool height_in_cancelled = false;
+            auto cancelled_it = mapCancelledChunks.find(assigned_peer);
+            if (cancelled_it != mapCancelledChunks.end()) {
+                const CancelledChunk& cancelled = cancelled_it->second;
+                if (h >= cancelled.chunk.height_start && h <= cancelled.chunk.height_end) {
+                    height_in_cancelled = true;
+                }
+            }
             bool active = mapActiveChunks.count(assigned_peer) > 0;
-            std::cout << "[AssignChunk-DEBUG] Height " << h << " assigned to peer " << assigned_peer
-                      << " (cancelled=" << cancelled << ", active=" << active << ")" << std::endl;
-            if (cancelled) {
-                // The assigned peer's chunk was cancelled - allow reassignment
-                // Update mapHeightToPeer to the new peer
+
+            if (height_in_cancelled) {
+                // Height is in a cancelled chunk - allow reassignment
                 mapHeightToPeer[h] = peer_id;
-                std::cout << "[AssignChunk-DEBUG] Reassigning height " << h << " from peer " << assigned_peer
-                          << " to peer " << peer_id << " (cancelled chunk)" << std::endl;
                 continue;  // Height can be reassigned
             }
-            // Height is assigned to an active peer - cannot reassign
-            std::cout << "[AssignChunk-DEBUG] FAIL: Height " << h << " already assigned to peer "
-                      << assigned_peer << " (not " << peer_id << ") - active peer, cannot reassign" << std::endl;
-            return false;  // Height already assigned to active peer
+            // Height is assigned to an active chunk - cannot reassign
+            std::cout << "[AssignChunk-DEBUG] FAIL: Height " << h << " assigned to peer " << assigned_peer
+                      << " in ACTIVE chunk (not cancelled) - cannot reassign" << std::endl;
+            return false;
         }
     }
 

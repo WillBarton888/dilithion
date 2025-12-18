@@ -616,8 +616,18 @@ bool CIbdCoordinator::FetchBlocks() {
             continue;  // Assignment failed
         }
 
-        // Phase 3: Mark these heights as in-flight in the window
-        m_node_context.block_fetcher->MarkWindowHeightsInFlight(valid_heights);
+        // Phase 3: Mark the FULL RANGE as in-flight (not just valid_heights)
+        // IBD FIX: AssignChunkToPeer assigns ALL heights from start to end to mapHeightToPeer.
+        // We must remove the full range from m_pending, otherwise filtered-out heights
+        // (gaps in valid_heights) remain in both m_pending AND mapHeightToPeer, causing
+        // "no suitable peers" errors when GetWindowPendingHeights returns these heights
+        // and AssignChunkToPeer fails because they're already assigned.
+        std::vector<int> full_range;
+        full_range.reserve(end - start + 1);
+        for (int h = start; h <= end; h++) {
+            full_range.push_back(h);
+        }
+        m_node_context.block_fetcher->MarkWindowHeightsInFlight(full_range);
 
         // Build GETDATA message for this chunk
         std::vector<NetProtocol::CInv> getdata;
