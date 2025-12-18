@@ -668,12 +668,24 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         return false;
     }
 
-    // Check no height is already assigned to another peer
+    // Check no height is already assigned to another peer (unless that peer's chunk was cancelled)
+    // IBD FIX: When a chunk is cancelled, heights remain in mapHeightToPeer during grace period
+    // to handle late-arriving blocks. But this blocks reassignment. Allow reassignment if the
+    // assigned peer's chunk has been cancelled.
     for (int h = height_start; h <= height_end; h++) {
         if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] != peer_id) {
+            NodeId assigned_peer = mapHeightToPeer[h];
+            // Check if the assigned peer's chunk has been cancelled
+            if (mapCancelledChunks.count(assigned_peer) > 0) {
+                // The assigned peer's chunk was cancelled - allow reassignment
+                // Update mapHeightToPeer to the new peer
+                mapHeightToPeer[h] = peer_id;
+                continue;  // Height can be reassigned
+            }
+            // Height is assigned to an active peer - cannot reassign
             std::cout << "[AssignChunk-DEBUG] FAIL: Height " << h << " already assigned to peer "
                       << mapHeightToPeer[h] << " (not " << peer_id << ")" << std::endl;
-            return false;  // Height already assigned
+            return false;  // Height already assigned to active peer
         }
     }
 
