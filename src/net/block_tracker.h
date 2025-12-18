@@ -171,11 +171,12 @@ public:
     /**
      * @brief Mark block as received (IN_FLIGHT or PENDING -> RECEIVED)
      * @param height Block height
-     * @param peer Peer that sent the block (for logging)
+     * @param peer Peer that sent the block (optional, for logging)
      *
      * Idempotent: safe to call multiple times or for already-received blocks.
      */
-    void OnBlockReceived(int height, NodeId peer) {
+    void OnBlockReceived(int height, NodeId peer = -1) {
+        (void)peer;  // Used for future logging
         std::lock_guard<std::mutex> lock(m_mutex);
 
         auto it = m_heights.find(height);
