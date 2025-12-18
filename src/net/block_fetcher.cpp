@@ -4,6 +4,7 @@
 #include <net/block_fetcher.h>
 // REMOVED: #include <net/node_state.h> - CNodeStateManager replaced by CPeerManager
 #include <net/peers.h>       // Phase A: Unified CPeerManager block tracking
+#include <net/block_tracker.h>  // IBD Redesign: Shadow tracking for Phase 3 verification
 #include <core/node_context.h>  // IBD HANG FIX #2: For validation queue access
 #include <node/block_validation_queue.h>  // IBD HANG FIX #2: For IsHeightQueued
 #include <consensus/chain.h>  // BUG #162: For CChainState::GetHeight()
@@ -507,6 +508,11 @@ void CBlockFetcher::OnPeerDisconnected(NodeId peer)
         mapPeerBlocks.erase(peer);
     }
 
+    // IBD Redesign Phase 3: Shadow-track with CBlockTracker
+    if (g_node_context.block_tracker) {
+        g_node_context.block_tracker->OnPeerDisconnected(peer);
+    }
+
     // Phase 1: CPeerManager handles peer state cleanup - we don't track locally
 }
 
@@ -738,6 +744,13 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         std::cout << "[Chunk] EXTENDED peer " << peer_id << " chunk to "
                   << existing.height_start << "-" << existing.height_end
                   << " (+" << new_blocks << " blocks, total pending=" << existing.blocks_pending << ")" << std::endl;
+
+        // IBD Redesign Phase 3: Shadow-track with CBlockTracker
+        if (g_node_context.block_tracker) {
+            for (int h = height_start; h <= height_end; h++) {
+                g_node_context.block_tracker->AssignToPeer(h, peer_id);
+            }
+        }
         return true;
     }
 
@@ -748,6 +761,13 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
     // Map heights to peer
     for (int h = height_start; h <= height_end; h++) {
         mapHeightToPeer[h] = peer_id;
+    }
+
+    // IBD Redesign Phase 3: Shadow-track with CBlockTracker
+    if (g_node_context.block_tracker) {
+        for (int h = height_start; h <= height_end; h++) {
+            g_node_context.block_tracker->AssignToPeer(h, peer_id);
+        }
     }
 
     std::cout << "[Chunk] Assigned heights " << height_start << "-" << height_end
@@ -794,6 +814,11 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
     // Update download window tracking (even if height not in chunk)
     if (m_window_initialized && height > 0) {
         m_download_window.OnBlockReceived(height);
+    }
+
+    // IBD Redesign Phase 3: Shadow-track with CBlockTracker
+    if (g_node_context.block_tracker) {
+        g_node_context.block_tracker->OnBlockReceived(height);
     }
 
     // Find which peer had this height assigned
@@ -1301,6 +1326,12 @@ void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool f
     // Also initialize chunk tracking to start from chain_height + 1
     nNextChunkHeight = chain_height + 1;
 
+    // IBD Redesign Phase 3: Shadow-track with CBlockTracker for verification
+    if (g_node_context.block_tracker) {
+        g_node_context.block_tracker->Initialize(chain_height, target_height);
+        std::cout << "[SHADOW] CBlockTracker initialized: " << g_node_context.block_tracker->GetStatus() << std::endl;
+    }
+
     std::cout << "[Window] Initialized: " << m_download_window.GetStatus() << std::endl;
 }
 
@@ -1403,6 +1434,11 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
         }
         return false;
     };
+
+    // IBD Redesign Phase 3: Shadow-track with CBlockTracker
+    if (g_node_context.block_tracker) {
+        g_node_context.block_tracker->OnBlockConnected(height);
+    }
 
     m_download_window.OnBlockConnected(height, is_height_queued, is_height_in_flight, is_height_connected);
 }
