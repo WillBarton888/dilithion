@@ -7,6 +7,7 @@
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
+#include <net/block_tracker.h>  // IBD Redesign: Single source of truth
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <util/logging.h>
 #include <iostream>
@@ -41,7 +42,8 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
         headers_manager = std::make_unique<CHeadersManager>();
         orphan_manager = std::make_unique<COrphanManager>();
         block_fetcher = std::make_unique<CBlockFetcher>(peer_manager.get());
-        LogPrintf(IBD, INFO, "Initialized IBD managers (headers, orphan, block_fetcher)");
+        block_tracker = std::make_unique<CBlockTracker>();  // IBD Redesign: Single source of truth
+        LogPrintf(IBD, INFO, "Initialized IBD managers (headers, orphan, block_fetcher, block_tracker)");
 
         // BUG #125: Start async header validation thread
         if (headers_manager && !headers_manager->StartValidationThread()) {
@@ -92,6 +94,7 @@ void NodeContext::Shutdown() {
     }
 
     // Reset IBD managers (unique_ptr will handle cleanup)
+    block_tracker.reset();  // IBD Redesign
     block_fetcher.reset();
     orphan_manager.reset();
 
@@ -123,6 +126,7 @@ void NodeContext::Reset() {
     headers_manager.reset();
     orphan_manager.reset();
     block_fetcher.reset();
+    block_tracker.reset();  // IBD Redesign
     validation_queue.reset();  // Phase 2: Reset validation queue
     async_broadcaster = nullptr;
     rpc_server = nullptr;

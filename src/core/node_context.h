@@ -25,6 +25,7 @@ class CWallet;
 class CSocket;
 class CHttpServer;
 class CBlockchainDB;  // IBD HANG FIX #14: Block serving needs database access
+class CBlockTracker;  // IBD Redesign: Single source of truth for block download state
 
 /**
  * NodeContext - Bitcoin Core-style global state management
@@ -51,6 +52,7 @@ struct NodeContext {
     std::unique_ptr<COrphanManager> orphan_manager;
     std::unique_ptr<CBlockFetcher> block_fetcher;
     std::unique_ptr<CBlockValidationQueue> validation_queue;  // Phase 2: Async block validation
+    std::unique_ptr<CBlockTracker> block_tracker;  // IBD Redesign: Single source of truth for block state
 
     // Transaction relay
     CAsyncBroadcaster* async_broadcaster{nullptr};
