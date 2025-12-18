@@ -525,7 +525,19 @@
       "Bash(do sleep 20)",
       "Bash(git revert:*)",
       "Bash(ssh root@134.122.4.164 \"cd /root/dilithion && git log --oneline -1\")",
-      "Bash(git commit -m \"$(cat <<''EOF''\nfix: IBD stall bug - remove blind UpdateChunkActivity call\n\nThe UpdateChunkActivity() call at line 1951 was updating chunk timers\nfor ANY block received from a peer, regardless of whether the block\nwas in the peer''s assigned chunk range. This prevented stall detection\nfrom triggering when peers sent old/stale blocks.\n\nThe timer is already correctly updated in OnChunkBlockReceived() which\nvalidates the block height is within the assigned chunk range.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: IBD stall bug - remove blind UpdateChunkActivity call\n\nThe UpdateChunkActivity() call at line 1951 was updating chunk timers\nfor ANY block received from a peer, regardless of whether the block\nwas in the peer''s assigned chunk range. This prevented stall detection\nfrom triggering when peers sent old/stale blocks.\n\nThe timer is already correctly updated in OnChunkBlockReceived() which\nvalidates the block height is within the assigned chunk range.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(ssh root@209.97.177.197 \"cd /root/dilithion && git log:*)",
+      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion-node; sleep 2; cd /root/dilithion && git pull && make clean && make dilithion-node -j2\")",
+      "Bash(ssh root@209.97.177.197 \"pgrep dilithion && grep ''hash worker'' /root/node.log\")",
+      "Bash(ssh root@209.97.177.197 \"pgrep dilithion\")",
+      "Bash(ssh root@134.122.4.164 \"pkill -9 dilithion-node; sleep 2; rm -rf /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate && cd /root/dilithion && nohup ./dilithion-node --testnet > /root/node.log 2>&1 &\")",
+      "Bash(ssh root@134.122.4.164 \"pgrep dilithion && grep ''hash worker'' /root/node.log\")",
+      "Bash(ssh root@134.122.4.164 \"pgrep dilithion && head -30 /root/node.log\")",
+      "Bash(ssh root@134.122.4.164 \"grep ''OnWindowBlockConnected'' /root/node.log | tail -1; grep ''chain='' /root/node.log | tail -1\")",
+      "Bash(ssh root@134.122.4.164 \"grep -E ''hash worker|WARN|stall|suitable'' /root/node.log | tail -20\")",
+      "Bash(ssh root@134.122.4.164 \"grep -E ''Handshake|peer|connection'' /root/node.log | tail -20\")",
+      "Bash(gh release list:*)",
+      "Bash(ssh root@134.122.4.164 \"grep -E ''IBD FIX #22|valid_heights empty|chain='' /root/node.log | tail -30\")"
     ],
     "deny": [],
     "ask": []

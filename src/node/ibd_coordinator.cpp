@@ -611,6 +611,8 @@ bool CIbdCoordinator::FetchBlocks() {
         int start = valid_heights.front();
         int end = valid_heights.back();
         if (!m_node_context.block_fetcher->AssignChunkToPeer(peer_id, start, end)) {
+            std::cout << "[IBD-DEBUG] AssignChunkToPeer FAILED for peer " << peer_id
+                      << " chunk " << start << "-" << end << std::endl;
             continue;  // Assignment failed
         }
 

@@ -671,6 +671,8 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
     // Check no height is already assigned to another peer
     for (int h = height_start; h <= height_end; h++) {
         if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] != peer_id) {
+            std::cout << "[AssignChunk-DEBUG] FAIL: Height " << h << " already assigned to peer "
+                      << mapHeightToPeer[h] << " (not " << peer_id << ")" << std::endl;
             return false;  // Height already assigned
         }
     }
