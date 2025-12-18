@@ -676,15 +676,21 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] != peer_id) {
             NodeId assigned_peer = mapHeightToPeer[h];
             // Check if the assigned peer's chunk has been cancelled
-            if (mapCancelledChunks.count(assigned_peer) > 0) {
+            bool cancelled = mapCancelledChunks.count(assigned_peer) > 0;
+            bool active = mapActiveChunks.count(assigned_peer) > 0;
+            std::cout << "[AssignChunk-DEBUG] Height " << h << " assigned to peer " << assigned_peer
+                      << " (cancelled=" << cancelled << ", active=" << active << ")" << std::endl;
+            if (cancelled) {
                 // The assigned peer's chunk was cancelled - allow reassignment
                 // Update mapHeightToPeer to the new peer
                 mapHeightToPeer[h] = peer_id;
+                std::cout << "[AssignChunk-DEBUG] Reassigning height " << h << " from peer " << assigned_peer
+                          << " to peer " << peer_id << " (cancelled chunk)" << std::endl;
                 continue;  // Height can be reassigned
             }
             // Height is assigned to an active peer - cannot reassign
             std::cout << "[AssignChunk-DEBUG] FAIL: Height " << h << " already assigned to peer "
-                      << mapHeightToPeer[h] << " (not " << peer_id << ")" << std::endl;
+                      << assigned_peer << " (not " << peer_id << ") - active peer, cannot reassign" << std::endl;
             return false;  // Height already assigned to active peer
         }
     }
