@@ -799,6 +799,10 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
     // Find which peer had this height assigned
     auto it = mapHeightToPeer.find(height);
     if (it == mapHeightToPeer.end()) {
+        // Only log if height is low (first 500 blocks) to avoid spam
+        if (height <= 500) {
+            std::cout << "[OnChunkBlockReceived] Height " << height << " not in mapHeightToPeer" << std::endl;
+        }
         return -1;  // Height not tracked
     }
 
@@ -815,6 +819,11 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
             chunk.blocks_pending--;
             chunk.blocks_received++;
             chunk.last_activity = std::chrono::steady_clock::now();
+            // Debug log for first 200 blocks
+            if (height <= 200) {
+                std::cout << "[OnChunkBlockReceived] Height " << height << " from peer " << peer_id
+                          << " - chunk now has pending=" << chunk.blocks_pending << std::endl;
+            }
 
             // IBD STUCK FIX #12: Erase individual height from mapHeightToPeer immediately
             // Previously only erased when whole chunk completed, causing window to stall
