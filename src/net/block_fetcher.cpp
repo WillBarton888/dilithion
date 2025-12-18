@@ -1408,7 +1408,13 @@ void CBlockFetcher::AddHeightsToWindowPending(const std::vector<int>& heights)
 
     // IBD SLOW FIX #3: Add heights to window's pending set
     // This synchronizes QueueMissingBlocks() with the window system
+    // IBD FIX: Skip heights that are already assigned to peers (in mapHeightToPeer)
+    // These heights are in-flight and should not be added back to m_pending
     for (int h : heights) {
+        if (mapHeightToPeer.count(h) > 0) {
+            // Height is assigned to a peer - don't add to pending
+            continue;
+        }
         m_download_window.AddToPending(h);
     }
 }
