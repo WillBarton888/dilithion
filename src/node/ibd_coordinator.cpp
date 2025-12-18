@@ -623,6 +623,9 @@ bool CIbdCoordinator::FetchBlocks() {
         // (e.g., chunk_heights[1-16] filtered to valid_heights[5-8]) remain in m_pending.
         // We must mark the ENTIRE chunk_heights as in-flight to prevent them from being
         // returned by GetWindowPendingHeights while their range overlaps with assigned chunks.
+        std::cout << "[IBD-DEBUG] MarkWindowHeightsInFlight: marking " << chunk_heights.size()
+                  << " heights [" << chunk_heights.front() << "-" << chunk_heights.back()
+                  << "] as in-flight for peer " << peer_id << std::endl;
         m_node_context.block_fetcher->MarkWindowHeightsInFlight(chunk_heights);
 
         // Build GETDATA message for this chunk

@@ -1320,9 +1320,11 @@ void CBlockFetcher::MarkWindowHeightsInFlight(const std::vector<int>& heights)
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
     if (!m_window_initialized) {
+        std::cout << "[MarkWindowHeightsInFlight] Window not initialized, skipping" << std::endl;
         return;
     }
 
+    std::cout << "[MarkWindowHeightsInFlight] Removing " << heights.size() << " heights from m_pending" << std::endl;
     m_download_window.MarkAsInFlight(heights);
 }
 
