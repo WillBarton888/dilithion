@@ -734,30 +734,12 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         existing.blocks_pending += actually_new;  // Only count new heights
         existing.last_activity = std::chrono::steady_clock::now();
 
-        // IBD SLOW FIX #5: Ensure extended heights are tracked in window
-        // When chunks extend, heights are added to mapHeightToPeer but may not be in window's m_pending
-        // This ensures window state stays consistent with chunk state
-        if (m_window_initialized && actually_new > 0) {
-            std::vector<int> extended_heights;
-            extended_heights.reserve(actually_new);
-            for (int h = height_start; h <= height_end; h++) {
-                // Check if this height was just assigned to this peer (newly extended)
-                if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] == peer_id) {
-                    // Only add if not already in window tracking sets
-                    if (!m_download_window.IsPending(h) &&
-                        !m_download_window.IsInFlight(h) &&
-                        !m_download_window.IsReceived(h)) {
-                        extended_heights.push_back(h);
-                    }
-                }
-            }
-            // Add extended heights to window's pending set
-            if (!extended_heights.empty()) {
-                for (int h : extended_heights) {
-                    m_download_window.AddToPending(h);
-                }
-            }
-        }
+        // IBD FIX: Removed buggy "SLOW FIX #5" code that added extended heights to m_pending.
+        // Extended heights are already assigned (in mapHeightToPeer) and should NOT be in m_pending.
+        // Adding them to m_pending caused GetWindowPendingHeights to return heights that were
+        // already assigned to active chunks, leading to "no suitable peers" errors.
+        // The coordinator's MarkWindowHeightsInFlight() handles marking heights as in-flight
+        // after AssignChunkToPeer returns successfully.
 
         std::cout << "[Chunk] EXTENDED peer " << peer_id << " chunk to "
                   << existing.height_start << "-" << existing.height_end
