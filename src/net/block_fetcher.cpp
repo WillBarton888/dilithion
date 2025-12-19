@@ -1481,6 +1481,12 @@ void CBlockFetcher::AddHeightsToWindowPending(const std::vector<int>& heights)
             continue;
         }
         m_download_window.AddToPending(h);
+
+        // Phase 5: Also add to CBlockTracker if height is beyond current window
+        // This handles heights added by QueueMissingBlocks that weren't in initial window
+        if (g_node_context.block_tracker) {
+            g_node_context.block_tracker->AddPendingHeight(h);
+        }
     }
 }
 
