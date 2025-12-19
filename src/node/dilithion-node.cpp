@@ -3689,6 +3689,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // This encapsulates all IBD logic (backoff, queueing, fetching, retries)
             ibd_coordinator.Tick();
 
+            // IBD DEBUG: Log that Tick() returned and main loop continues
+            static int main_loop_count = 0;
+            if (++main_loop_count <= 5 || main_loop_count % 60 == 0) {
+                std::cerr << "[MAIN-LOOP-DEBUG] Tick() returned, loop iteration #" << main_loop_count << std::endl;
+            }
+
             // Print mining stats every 10 seconds if mining
             // BUG #49: Add isolation detection when mining
             static int counter = 0;

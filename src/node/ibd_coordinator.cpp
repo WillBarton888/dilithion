@@ -220,6 +220,9 @@ void CIbdCoordinator::HandleNoPeers(std::chrono::steady_clock::time_point now) {
 
 void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                                      std::chrono::steady_clock::time_point now) {
+    // IBD DEBUG: Track entry into DownloadBlocks
+    std::cerr << "[IBD-DEBUG] DownloadBlocks entered: header=" << header_height << " chain=" << chain_height << std::endl;
+
     BENCHMARK_START("ibd_download_blocks");
     m_last_ibd_attempt = now;
 
@@ -273,11 +276,17 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     }
     s_last_chain_height = chain_height;
 
+    // IBD DEBUG: Before window check
+    std::cerr << "[IBD-DEBUG] DownloadBlocks: checking window initialization..." << std::endl;
+
     // Phase 3: Initialize the 1024-block sliding window for IBD
     if (!m_node_context.block_fetcher->IsWindowInitialized()) {
+        std::cerr << "[IBD-DEBUG] DownloadBlocks: calling InitializeWindow..." << std::endl;
         m_node_context.block_fetcher->InitializeWindow(chain_height, header_height);
+        std::cerr << "[IBD-DEBUG] DownloadBlocks: InitializeWindow returned" << std::endl;
         LogPrintIBD(INFO, "Initialized download window: %s", m_node_context.block_fetcher->GetWindowStatus().c_str());
     } else {
+        std::cerr << "[IBD-DEBUG] DownloadBlocks: window already initialized, updating target..." << std::endl;
         // IBD HANG FIX #15: Update window target as new headers arrive
         // Without this, the window becomes "complete" when header_height grows past initial target
         m_node_context.block_fetcher->UpdateWindowTarget(header_height);
@@ -436,6 +445,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
     RetryTimeoutsAndStalls();
     BENCHMARK_END("ibd_download_blocks");
+
+    // IBD DEBUG: DownloadBlocks complete
+    std::cerr << "[IBD-DEBUG] DownloadBlocks complete" << std::endl;
 }
 
 void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) {
