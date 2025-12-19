@@ -10,6 +10,7 @@
 #include <core/chainparams.h>
 #include <net/peers.h>
 #include <net/block_fetcher.h>
+#include <net/block_tracker.h>  // IBD BOTTLENECK FIX: For CBlockTracker updates
 #include <net/orphan_manager.h>  // IBD HANG FIX #23b: For orphan resolution
 #include <node/block_index.h>  // For CBlockIndex
 #include <primitives/block.h>  // For CBlock
@@ -332,6 +333,10 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
     } else {
         std::cout << "[ValidationQueue-DEBUG] block_fetcher is NULL!" << std::endl;
+    }
+    // IBD BOTTLENECK FIX: Update CBlockTracker when blocks connect after async validation
+    if (g_node_context.block_tracker) {
+        g_node_context.block_tracker->OnBlockConnected(pindex->nHeight);
     }
 
     // IBD HANG FIX #23b: Process orphan children after async validation completes

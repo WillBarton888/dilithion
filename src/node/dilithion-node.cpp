@@ -1973,6 +1973,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         // Height-based tracking ensures chunk gets credit even for late arrivals
                         g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
                     }
+                    // IBD BOTTLENECK FIX: Update CBlockTracker - block already connected
+                    if (g_node_context.block_tracker) {
+                        g_node_context.block_tracker->OnBlockReceived(pindex->nHeight);
+                        g_node_context.block_tracker->OnBlockConnected(pindex->nHeight);
+                    }
                     return;
                 }
 
@@ -1992,11 +1997,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
                         g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
                     }
+                    // IBD BOTTLENECK FIX: Update CBlockTracker
+                    if (g_node_context.block_tracker) {
+                        g_node_context.block_tracker->OnBlockReceived(pindex->nHeight);
+                        g_node_context.block_tracker->OnBlockConnected(pindex->nHeight);
+                    }
                 } else {
                     std::cerr << "[P2P] Failed to activate stuck block at height " << pindex->nHeight << std::endl;
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                         g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
+                    }
+                    // IBD BOTTLENECK FIX: Update CBlockTracker (received but not connected)
+                    if (g_node_context.block_tracker) {
+                        g_node_context.block_tracker->OnBlockReceived(pindex->nHeight);
                     }
                 }
                 return;
@@ -2201,6 +2215,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // IBD HANG FIX #17: Also update window tracking when block received
                     // Without this, window's m_in_flight set never clears, causing stalls every 128 blocks
                     g_node_context.block_fetcher->OnChunkBlockReceived(expected_height);
+                    // IBD BOTTLENECK FIX: Update CBlockTracker - the single source of truth
+                    if (g_node_context.block_tracker) {
+                        g_node_context.block_tracker->OnBlockReceived(expected_height);
+                    }
                     auto handler_end = std::chrono::steady_clock::now();
                     auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
                     std::cout << "[BLOCK-HANDLER] EXIT (async) total=" << handler_ms << "ms" << std::endl;
@@ -2253,6 +2271,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (g_node_context.block_fetcher) {
                             g_node_context.block_fetcher->OnWindowBlockConnected(pblockIndexPtr->nHeight);
                         }
+                        // IBD BOTTLENECK FIX: Update CBlockTracker - the single source of truth
+                        if (g_node_context.block_tracker) {
+                            g_node_context.block_tracker->OnBlockConnected(pblockIndexPtr->nHeight);
+                        }
 
                         // BUG #32 FIX: Immediately update mining template when IBD block becomes new tip
                         if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
@@ -2302,6 +2324,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (g_node_context.block_fetcher) {
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                     g_node_context.block_fetcher->OnChunkBlockReceived(pblockIndexPtr->nHeight);
+                }
+                // IBD BOTTLENECK FIX: Update CBlockTracker
+                if (g_node_context.block_tracker) {
+                    g_node_context.block_tracker->OnBlockReceived(pblockIndexPtr->nHeight);
+                    // OnBlockConnected is called separately when block becomes tip
                 }
 
                 // ORPHAN BOTTLENECK FIX #1: Async orphan processing
@@ -2964,6 +2991,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Without this, the window gets out of sync if mining occurs during IBD
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->OnWindowBlockConnected(pblockIndexPtr->nHeight);
+                    }
+                    // IBD BOTTLENECK FIX: Update CBlockTracker for locally mined blocks
+                    if (g_node_context.block_tracker) {
+                        g_node_context.block_tracker->OnBlockConnected(pblockIndexPtr->nHeight);
                     }
 
                     // BUG #32 FIX: Immediately update mining template for locally mined blocks
