@@ -573,6 +573,14 @@ bool CIbdCoordinator::FetchBlocks() {
             continue;
         }
 
+        // IBD STALL FIX: Skip peers that don't have blocks we need
+        // Peers advertise their height in VERSION message. Don't request blocks beyond that.
+        int peer_height = peer->nStartingHeight;
+        if (peer_height <= chain_height) {
+            // This peer is behind us - skip
+            continue;
+        }
+
         // Phase 3: Get next chunk from the window (respects 1024-block limit)
         std::vector<int> chunk_heights;
         if (m_node_context.block_fetcher->IsWindowInitialized()) {
@@ -609,9 +617,12 @@ bool CIbdCoordinator::FetchBlocks() {
             if (chunk_heights.size() > 5) std::cout << ", ..." << chunk_heights.back();
             std::cout << "]" << std::endl;
         }
+        int filter_beyond_peer = 0;
         for (int h : chunk_heights) {
             if (h > header_height) { filter_out_of_range++; continue; }
             if (h <= chain_height) { filter_already_have++; continue; }
+            // IBD STALL FIX: Don't request blocks beyond what peer has
+            if (h > peer_height) { filter_beyond_peer++; continue; }
 
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
             if (hash.IsNull()) {
@@ -636,6 +647,8 @@ bool CIbdCoordinator::FetchBlocks() {
                       << " filter_already_have=" << filter_already_have
                       << " filter_null_hash=" << filter_null_hash
                       << " filter_connected=" << filter_connected
+                      << " filter_beyond_peer=" << filter_beyond_peer
+                      << " peer_height=" << peer_height
                       << " header_height=" << header_height
                       << " chain_height=" << chain_height << std::endl;
             continue;  // No valid heights in this chunk
