@@ -705,19 +705,26 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
 
     int new_blocks = height_end - height_start + 1;
 
-    // Phase 1 FIX: Allow multiple chunks per peer
-    // Instead of blocking, EXTEND existing chunk with new heights
+    // IBD STALL FIX: DON'T extend existing chunks - let other peers take new work
+    // Previously: extended one peer's chunk from 1-571, starving other peers
+    // Now: each peer gets a fixed-size chunk, parallel download from multiple peers
+    auto it = mapActiveChunks.find(peer_id);
+    if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
+        // Peer already has an active chunk - let other peers take this work
+        return false;
+    }
+
+    // DISABLED: Old chunk extension logic that caused single-peer bottleneck
+    // Keeping the code commented for reference
+    /*
     auto it = mapActiveChunks.find(peer_id);
     if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
         PeerChunk& existing = it->second;
         int current_pending = existing.blocks_pending;
 
         // IBD HANG FIX #11: Match per-peer chunk limit to MAX_BLOCKS_IN_FLIGHT_PER_PEER
-        // Previously: max_blocks_per_peer = 4 * 16 = 64 (mismatch with 128 capacity)
-        // This caused "no suitable peers" when chunks hit 64 despite 128 capacity
         int max_per_peer = CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER;  // 128
         if (current_pending + new_blocks > max_per_peer) {
-            // Peer already has maximum blocks in-flight
             return false;
         }
 
@@ -951,10 +958,17 @@ std::vector<std::pair<NodeId, PeerChunk>> CBlockFetcher::CheckStalledChunks()
     std::vector<std::pair<NodeId, PeerChunk>> stalled;
     auto now = std::chrono::steady_clock::now();
 
+    // IBD STALL FIX: Maximum time a chunk can have blocks in-flight without progress
+    // This catches peers that have blocks in-flight but send wrong blocks
+    static constexpr int MAX_IN_FLIGHT_SECONDS = 60;
+
     for (const auto& [peer_id, chunk] : mapActiveChunks) {
         if (chunk.IsComplete()) {
             continue;  // Completed chunks can't stall
         }
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            now - chunk.last_activity);
 
         // IBD HANG FIX #1: Check if blocks are still in-flight before marking as stalled
         // Prevents premature cancellation when blocks are still in transit (network delay)
@@ -968,16 +982,22 @@ std::vector<std::pair<NodeId, PeerChunk>> CBlockFetcher::CheckStalledChunks()
             }
         }
 
-        if (has_in_flight) {
-            // Blocks are still in-flight - don't mark as stalled
-            // This handles network delay where blocks take longer than 15s to arrive
+        // IBD STALL FIX: Even if blocks are in-flight, cancel if no progress for too long
+        // This catches peers that have in-flight entries but send wrong blocks
+        if (has_in_flight && elapsed.count() >= MAX_IN_FLIGHT_SECONDS) {
+            stalled.emplace_back(peer_id, chunk);
+            std::cout << "[Chunk] Peer " << peer_id << " stalled on chunk "
+                      << chunk.height_start << "-" << chunk.height_end
+                      << " (no progress for " << elapsed.count() << "s despite in-flight blocks)" << std::endl;
             continue;
         }
 
-        // Only check timeout if no blocks are in-flight
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - chunk.last_activity);
+        if (has_in_flight) {
+            // Blocks are still in-flight and under max time - don't mark as stalled
+            continue;
+        }
 
+        // No blocks in-flight - check normal timeout
         if (elapsed.count() >= CHUNK_STALL_TIMEOUT_SECONDS) {
             stalled.emplace_back(peer_id, chunk);
             std::cout << "[Chunk] Peer " << peer_id << " stalled on chunk "
