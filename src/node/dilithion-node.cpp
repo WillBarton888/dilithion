@@ -33,6 +33,7 @@
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
+#include <net/block_tracker.h>  // IBD BOTTLENECK FIX: For CBlockTracker state updates
 // REMOVED: #include <net/node_state.h> - CNodeStateManager replaced by CPeerManager
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation queue
 #include <net/feeler.h>  // Bitcoin Core-style feeler connections
