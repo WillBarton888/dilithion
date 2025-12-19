@@ -703,8 +703,6 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
         }
     }
 
-    int new_blocks = height_end - height_start + 1;
-
     // IBD STALL FIX: DON'T extend existing chunks - let other peers take new work
     // Previously: extended one peer's chunk from 1-571, starving other peers
     // Now: each peer gets a fixed-size chunk, parallel download from multiple peers
@@ -712,61 +710,6 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
     if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
         // Peer already has an active chunk - let other peers take this work
         return false;
-    }
-
-    // DISABLED: Old chunk extension logic that caused single-peer bottleneck
-    // Keeping the code commented for reference
-    /*
-    auto it = mapActiveChunks.find(peer_id);
-    if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
-        PeerChunk& existing = it->second;
-        int current_pending = existing.blocks_pending;
-
-        // IBD HANG FIX #11: Match per-peer chunk limit to MAX_BLOCKS_IN_FLIGHT_PER_PEER
-        int max_per_peer = CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER;  // 128
-        if (current_pending + new_blocks > max_per_peer) {
-            return false;
-        }
-
-        // IBD BOTTLENECK FIX #9: Fix chunk extension to only count truly new heights
-        // Previously incremented blocks_pending by new_blocks, but this double-counted
-        // heights that were already assigned to this peer. Now only counts new assignments.
-        int actually_new = 0;
-        for (int h = height_start; h <= height_end; h++) {
-            if (mapHeightToPeer.count(h) == 0) {
-                mapHeightToPeer[h] = peer_id;
-                actually_new++;
-            } else if (mapHeightToPeer[h] == peer_id) {
-                // Already assigned to this peer, just update mapping
-                // (no-op, but ensures consistency)
-            }
-            // If assigned to different peer, skip (already checked above)
-        }
-
-        // EXTEND existing chunk: expand range and add only new pending blocks
-        existing.height_end = std::max(existing.height_end, height_end);
-        existing.height_start = std::min(existing.height_start, height_start);
-        existing.blocks_pending += actually_new;  // Only count new heights
-        existing.last_activity = std::chrono::steady_clock::now();
-
-        // IBD FIX: Removed buggy "SLOW FIX #5" code that added extended heights to m_pending.
-        // Extended heights are already assigned (in mapHeightToPeer) and should NOT be in m_pending.
-        // Adding them to m_pending caused GetWindowPendingHeights to return heights that were
-        // already assigned to active chunks, leading to "no suitable peers" errors.
-        // The coordinator's MarkWindowHeightsInFlight() handles marking heights as in-flight
-        // after AssignChunkToPeer returns successfully.
-
-        std::cout << "[Chunk] EXTENDED peer " << peer_id << " chunk to "
-                  << existing.height_start << "-" << existing.height_end
-                  << " (+" << new_blocks << " blocks, total pending=" << existing.blocks_pending << ")" << std::endl;
-
-        // IBD Redesign Phase 3: Shadow-track with CBlockTracker
-        if (g_node_context.block_tracker) {
-            for (int h = height_start; h <= height_end; h++) {
-                g_node_context.block_tracker->AssignToPeer(h, peer_id);
-            }
-        }
-        return true;
     }
 
     // Create NEW chunk assignment (no existing chunk or existing is complete)
