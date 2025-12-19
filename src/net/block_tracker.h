@@ -182,10 +182,12 @@ public:
         auto it = m_heights.find(height);
         if (it == m_heights.end()) {
             // Height not in window - could be late arrival after window advanced
+            std::cout << "[BlockTracker] OnBlockReceived(" << height << ") - not in window" << std::endl;
             return;
         }
 
         BlockState current = it->second.state;
+        std::cout << "[BlockTracker] OnBlockReceived(" << height << ") state=" << BlockStateToString(current) << std::endl;
 
         // Accept from IN_FLIGHT or PENDING (late arrival after timeout)
         if (current == BlockState::IN_FLIGHT || current == BlockState::PENDING) {
@@ -221,11 +223,14 @@ public:
         auto it = m_heights.find(height);
         if (it == m_heights.end()) {
             // Height not tracked - might be before window start
+            std::cout << "[BlockTracker] OnBlockConnected(" << height << ") - not tracked, updating connected_height" << std::endl;
             if (height > m_connected_height) {
                 m_connected_height = height;
             }
             return;
         }
+
+        std::cout << "[BlockTracker] OnBlockConnected(" << height << ") state=" << BlockStateToString(it->second.state) << std::endl;
 
         if (it->second.state == BlockState::RECEIVED) {
             it->second.state = BlockState::CONNECTED;
