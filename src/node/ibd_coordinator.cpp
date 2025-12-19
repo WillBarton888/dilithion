@@ -30,6 +30,12 @@ CIbdCoordinator::CIbdCoordinator(CChainState& chainstate, NodeContext& node_cont
       m_last_ibd_attempt(std::chrono::steady_clock::time_point()) {}
 
 void CIbdCoordinator::Tick() {
+    // IBD DEBUG: Confirm Tick() is being called
+    static int tick_count = 0;
+    if (++tick_count <= 5 || tick_count % 60 == 0) {
+        std::cerr << "[IBD-DEBUG] Tick() called #" << tick_count << std::endl;
+    }
+
     // Phase 5.1: Update state machine
     UpdateState();
 
