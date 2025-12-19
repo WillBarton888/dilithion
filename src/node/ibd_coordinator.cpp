@@ -38,7 +38,7 @@ void CIbdCoordinator::Tick() {
         // IBD DEBUG: Log why we're returning early
         static int no_components_count = 0;
         if (++no_components_count <= 5) {
-            std::cout << "[IBD-DEBUG] Tick() returning: no headers_manager or block_fetcher" << std::endl;
+            std::cerr << "[IBD-DEBUG] Tick() returning: no headers_manager or block_fetcher" << std::endl;
         }
         return;
     }
@@ -51,7 +51,7 @@ void CIbdCoordinator::Tick() {
         // IBD DEBUG: Log why we're returning early
         static int synced_count = 0;
         if (++synced_count <= 5 || synced_count % 60 == 0) {
-            std::cout << "[IBD-DEBUG] Tick() returning: synced (header=" << header_height
+            std::cerr << "[IBD-DEBUG] Tick() returning: synced (header=" << header_height
                       << " <= chain=" << chain_height << ")" << std::endl;
         }
         if (m_state != IBDState::IDLE && m_state != IBDState::COMPLETE) {
@@ -67,7 +67,7 @@ void CIbdCoordinator::Tick() {
         // IBD DEBUG: Log why we're returning early
         static int backoff_count = 0;
         if (++backoff_count <= 5 || backoff_count % 60 == 0) {
-            std::cout << "[IBD-DEBUG] Tick() returning: ShouldAttemptDownload=false (backoff)" << std::endl;
+            std::cerr << "[IBD-DEBUG] Tick() returning: ShouldAttemptDownload=false (backoff)" << std::endl;
         }
         return;
     }
