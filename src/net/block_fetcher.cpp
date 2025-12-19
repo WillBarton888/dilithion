@@ -1306,9 +1306,15 @@ void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool f
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    // IBD Redesign Phase 4: CBlockTracker is now PRIMARY source of truth
     // Skip if already initialized with same target (unless forced for fork recovery)
-    if (!force && m_window_initialized && m_download_window.GetTargetHeight() == target_height) {
-        return;
+    if (g_node_context.block_tracker) {
+        if (!force && g_node_context.block_tracker->IsInitialized() &&
+            g_node_context.block_tracker->GetTargetHeight() == target_height) {
+            return;
+        }
+    } else if (!force && m_window_initialized && m_download_window.GetTargetHeight() == target_height) {
+        return;  // Fallback to old check if block_tracker not available
     }
 
     // BUG #159 FIX: Clear existing state when force reinitializing for fork recovery
@@ -1318,19 +1324,20 @@ void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool f
         mapBlocksInFlight.clear();
         // Clear chunk assignments
         mapActiveChunks.clear();
+        mapHeightToPeer.clear();
+        mapCancelledChunks.clear();
     }
 
-    m_download_window.Initialize(chain_height, target_height);
-    m_window_initialized = true;
-
-    // Also initialize chunk tracking to start from chain_height + 1
-    nNextChunkHeight = chain_height + 1;
-
-    // IBD Redesign Phase 3: Shadow-track with CBlockTracker for verification
+    // IBD Redesign Phase 4: Initialize CBlockTracker as PRIMARY
     if (g_node_context.block_tracker) {
         g_node_context.block_tracker->Initialize(chain_height, target_height);
-        std::cout << "[SHADOW] CBlockTracker initialized: " << g_node_context.block_tracker->GetStatus() << std::endl;
+        std::cout << "[IBD] CBlockTracker initialized: " << g_node_context.block_tracker->GetStatus() << std::endl;
     }
+
+    // Legacy: Keep old systems in sync for now (will be removed in Phase 5)
+    m_download_window.Initialize(chain_height, target_height);
+    m_window_initialized = true;
+    nNextChunkHeight = chain_height + 1;
 
     std::cout << "[Window] Initialized: " << m_download_window.GetStatus() << std::endl;
 }
@@ -1339,10 +1346,15 @@ std::vector<int> CBlockFetcher::GetWindowPendingHeights(int max_count)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        return g_node_context.block_tracker->GetPendingHeights(max_count);
+    }
+
+    // Fallback to legacy window
     if (!m_window_initialized) {
         return {};
     }
-
     return m_download_window.GetNextPendingHeights(max_count);
 }
 
@@ -1467,6 +1479,11 @@ void CBlockFetcher::AddHeightsToWindowPending(const std::vector<int>& heights)
 bool CBlockFetcher::IsWindowInitialized() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
+    if (g_node_context.block_tracker) {
+        return g_node_context.block_tracker->IsInitialized();
+    }
     return m_window_initialized;
 }
 
@@ -1474,10 +1491,14 @@ std::string CBlockFetcher::GetWindowStatus() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        return g_node_context.block_tracker->GetStatus();
+    }
+
     if (!m_window_initialized) {
         return "Window not initialized";
     }
-
     return m_download_window.GetStatus();
 }
 
@@ -1485,16 +1506,25 @@ bool CBlockFetcher::IsWindowComplete() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        return g_node_context.block_tracker->IsComplete();
+    }
+
     if (!m_window_initialized) {
         return false;
     }
-
     return m_download_window.IsComplete();
 }
 
 bool CBlockFetcher::UpdateWindowTarget(int new_target_height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
+    if (g_node_context.block_tracker) {
+        g_node_context.block_tracker->UpdateTarget(new_target_height);
+    }
 
     if (!m_window_initialized) {
         return false;
