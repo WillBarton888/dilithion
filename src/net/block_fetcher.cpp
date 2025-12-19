@@ -93,11 +93,19 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
         return false;
     }
 
-    // Check if already in-flight
-    if (mapBlocksInFlight.count(hash) > 0) {
-        std::cout << "[RequestBlock] EARLY EXIT: already in mapBlocksInFlight" << std::endl;
-        return false;
+    // IBD BOTTLENECK FIX: Skip hash-based duplicate check for mapBlocksInFlight
+    // The hash-based check fails when header hash doesn't match received block hash.
+    // CBlockTracker handles deduplication by HEIGHT through AssignChunkToPeer.
+    // We only check if height is already CONNECTED (block already in chain).
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        BlockState state = g_node_context.block_tracker->GetState(height);
+        if (state == BlockState::CONNECTED) {
+            // Block already connected to chain - no need to request
+            return false;
+        }
+        // PENDING and IN_FLIGHT are OK - AssignChunkToPeer manages those transitions
     }
+    // Note: Removed mapBlocksInFlight.count(hash) check - hash mismatch causes stale entries
 
     // Create in-flight entry (for timeout tracking only)
     CBlockInFlight inFlight(hash, peer, height);

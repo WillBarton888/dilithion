@@ -497,7 +497,6 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         return m_connected_height >= m_target_height && m_target_height > 0;
     }
-
 private:
     mutable std::mutex m_mutex;
 
