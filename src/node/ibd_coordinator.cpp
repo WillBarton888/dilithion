@@ -575,7 +575,7 @@ bool CIbdCoordinator::FetchBlocks() {
 
         // IBD STALL FIX: Skip peers that don't have blocks we need
         // Peers advertise their height in VERSION message. Don't request blocks beyond that.
-        int peer_height = peer->nStartingHeight;
+        int peer_height = peer->start_height;
         if (peer_height <= chain_height) {
             // This peer is behind us - skip
             continue;
