@@ -782,11 +782,34 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
     // Find which peer had this height assigned
     auto it = mapHeightToPeer.find(height);
     if (it == mapHeightToPeer.end()) {
-        // Only log if height is low (first 500 blocks) to avoid spam
-        if (height <= 500) {
-            std::cout << "[OnChunkBlockReceived] Height " << height << " not in mapHeightToPeer" << std::endl;
+        // STALL FIX: Height not in active tracking - search cancelled chunks
+        // After CancelStalledChunk clears heights, late-arriving blocks need this path
+        for (auto cancelled_iter = mapCancelledChunks.begin(); cancelled_iter != mapCancelledChunks.end(); ) {
+            CancelledChunk& cancelled = cancelled_iter->second;
+            if (height >= cancelled.chunk.height_start && height <= cancelled.chunk.height_end) {
+                // Found in cancelled chunk - credit the block
+                cancelled.chunk.blocks_pending--;
+                cancelled.chunk.blocks_received++;
+                NodeId found_peer_id = cancelled_iter->first;
+
+                std::cout << "[Chunk] STALL FIX: Late block at height " << height
+                          << " found in cancelled chunk " << cancelled.chunk.height_start
+                          << "-" << cancelled.chunk.height_end << " from peer " << found_peer_id << std::endl;
+
+                if (cancelled.chunk.IsComplete()) {
+                    std::cout << "[Chunk] Cancelled chunk now complete - removing" << std::endl;
+                    cancelled_iter = mapCancelledChunks.erase(cancelled_iter);
+                }
+                return found_peer_id;
+            }
+            ++cancelled_iter;
         }
-        return -1;  // Height not tracked
+
+        // Height not in any active or cancelled chunk
+        if (height <= 500) {
+            std::cout << "[OnChunkBlockReceived] Height " << height << " not in any tracking" << std::endl;
+        }
+        return -1;
     }
 
     NodeId peer_id = it->second;
@@ -1024,8 +1047,18 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
 
     // IBD HANG FIX #2: Move chunk to cancelled map instead of erasing immediately
     // This allows blocks that arrive after cancellation (network delay) to be properly tracked
-    // Heights remain in mapHeightToPeer during grace period
     mapCancelledChunks[peer_id] = CancelledChunk(chunk);
+
+    // STALL FIX: Clear heights from mapHeightToPeer IMMEDIATELY
+    // This allows other peers to take over these heights right away
+    // Late-arriving blocks are handled via cancelled chunk search in OnChunkBlockReceived()
+    int heights_cleared = 0;
+    for (int h = chunk.height_start; h <= chunk.height_end; h++) {
+        if (mapHeightToPeer.erase(h) > 0) {
+            heights_cleared++;
+        }
+    }
+    std::cout << "[Chunk] STALL FIX: Cleared " << heights_cleared << " heights from mapHeightToPeer for immediate reassignment" << std::endl;
 
     // Mark heights as pending again in the window (if window is initialized)
     // This allows them to be re-requested if blocks don't arrive during grace period
@@ -1037,10 +1070,6 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
             }
         }
     }
-
-    // IBD HANG FIX #2: DON'T erase heights from mapHeightToPeer immediately
-    // Keep them during grace period so OnChunkBlockReceived() can find them
-    // Heights will be erased by CleanupCancelledChunks() after grace period expires
 
     // IBD HANG FIX #16: Remove all blocks for this peer from CPeerManager tracking
     // This decrements nBlocksInFlight so the peer can accept new chunks
@@ -1085,8 +1114,7 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
 
     std::cout << "[Chunk] Cancelled chunk - peer " << peer_id << " now free for new assignment" << std::endl;
     std::cout << "[Chunk] Heights " << chunk.height_start << "-" << chunk.height_end
-              << " will remain tracked for " << CANCELLED_CHUNK_GRACE_PERIOD_SECONDS
-              << "s grace period to handle late-arriving blocks" << std::endl;
+              << " cleared and available for immediate reassignment" << std::endl;
 
     return true;
 }
@@ -1103,17 +1131,13 @@ void CBlockFetcher::CleanupCancelledChunks()
             now - cancelled.cancelled_time);
 
         if (elapsed.count() >= CANCELLED_CHUNK_GRACE_PERIOD_SECONDS) {
-            // Grace period expired - remove cancelled chunk and its height mappings
+            // Grace period expired - remove cancelled chunk entry
+            // STALL FIX: Heights already cleared in CancelStalledChunk, just log and remove
             std::cout << "[Chunk] Grace period expired for cancelled chunk "
                       << cancelled.chunk.height_start << "-" << cancelled.chunk.height_end
                       << " from peer " << peer_id
                       << " (received " << cancelled.chunk.blocks_received << "/"
                       << cancelled.chunk.ChunkSize() << " blocks during grace period)" << std::endl;
-
-            // Erase height mappings for this cancelled chunk
-            for (int h = cancelled.chunk.height_start; h <= cancelled.chunk.height_end; h++) {
-                mapHeightToPeer.erase(h);
-            }
 
             to_remove.push_back(peer_id);
         }
