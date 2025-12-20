@@ -1067,6 +1067,14 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
     }
     std::cout << "[Chunk] STALL FIX: Cleared " << heights_cleared << " heights from mapHeightToPeer for immediate reassignment" << std::endl;
 
+    // IBD WINDOW FIX: Reset nNextChunkHeight if cancelled chunk is below current position
+    // This prevents the window from advancing past undelivered blocks
+    if (chunk.height_start < nNextChunkHeight) {
+        std::cout << "[Chunk] WINDOW FIX: Resetting nNextChunkHeight from " << nNextChunkHeight
+                  << " to " << chunk.height_start << " (cancelled chunk start)" << std::endl;
+        nNextChunkHeight = chunk.height_start;
+    }
+
     // Mark heights as pending again in the window (if window is initialized)
     // This allows them to be re-requested if blocks don't arrive during grace period
     if (m_window_initialized) {
