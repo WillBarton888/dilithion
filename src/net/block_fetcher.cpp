@@ -1758,8 +1758,8 @@ void CBlockFetcher::RequeueBlock(int height)
 
         // Notify CPeerManager
         if (m_peer_manager) {
-            m_peer_manager->RemoveBlockFromFlight(peer, hash);
-            m_peer_manager->UpdatePeerStats(peer, false);  // Mark as stall
+            m_peer_manager->RemoveBlockFromFlight(hash);
+            m_peer_manager->UpdatePeerStats(peer, false, std::chrono::milliseconds(0));  // Mark as stall
         }
 
         std::cout << "[PerBlock] Requeued height " << height << " (was assigned to peer " << peer << ")" << std::endl;

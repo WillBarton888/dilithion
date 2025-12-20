@@ -634,7 +634,7 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
 
             // Update peer stats (mark as stall)
             if (m_node_context.peer_manager) {
-                m_node_context.peer_manager->UpdatePeerStats(peer_id, false);
+                m_node_context.peer_manager->UpdatePeerStats(peer_id, false, std::chrono::milliseconds(0));
             }
 
             LogPrintIBD(WARN, "Requeued stalled block at height %d from peer %d", height, peer_id);
