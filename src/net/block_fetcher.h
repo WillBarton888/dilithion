@@ -953,7 +953,7 @@ private:
         CancelledChunk(const PeerChunk& c) : chunk(c), cancelled_time(std::chrono::steady_clock::now()) {}
     };
     std::map<NodeId, CancelledChunk> mapCancelledChunks;  ///< Peer -> Cancelled chunk (grace period)
-    static constexpr int CANCELLED_CHUNK_GRACE_PERIOD_SECONDS = 30;  ///< Keep cancelled chunks for 30s
+    static constexpr int CANCELLED_CHUNK_GRACE_PERIOD_SECONDS = 120;  ///< Keep cancelled chunks for 120s (increased from 30s to handle slow block delivery)
 
     // ============ Phase 3: Moving Window ============
     CBlockDownloadWindow m_download_window;        ///< 1024-block sliding window
