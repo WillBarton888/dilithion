@@ -775,6 +775,45 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
+    // ============ Per-Block Tracking (Bitcoin Core Style) ============
+    // Check if this block was tracked in the per-block system
+    auto perblock_it = mapBlocksInFlightByHeight.find(height);
+    if (perblock_it != mapBlocksInFlightByHeight.end()) {
+        NodeId peer = perblock_it->second.peer;
+        uint256 hash = perblock_it->second.hash;
+
+        // Remove from per-block tracking
+        mapBlocksInFlightByHeight.erase(perblock_it);
+
+        // Remove from peer's set
+        auto peer_it = mapPeerBlocksInFlightByHeight.find(peer);
+        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+            peer_it->second.erase(height);
+            if (peer_it->second.empty()) {
+                mapPeerBlocksInFlightByHeight.erase(peer_it);
+            }
+        }
+
+        // Notify CPeerManager
+        if (m_peer_manager) {
+            m_peer_manager->MarkBlockAsReceived(peer, hash);
+        }
+
+        // Update stats
+        nBlocksReceivedTotal++;
+        lastBlockReceived = std::chrono::steady_clock::now();
+
+        // Update window
+        if (m_window_initialized && height > 0) {
+            m_download_window.OnBlockReceived(height);
+        }
+
+        std::cout << "[PerBlock] Height " << height << " received from peer " << peer << std::endl;
+        return peer;
+    }
+
+    // ============ Legacy Chunk Tracking (fallback) ============
+
     // Update download window tracking (even if height not in chunk)
     if (m_window_initialized && height > 0) {
         m_download_window.OnBlockReceived(height);
@@ -1554,4 +1593,206 @@ bool CBlockFetcher::UpdateWindowTarget(int new_target_height)
                   << " - " << m_download_window.GetStatus() << std::endl;
     }
     return updated;
+}
+
+// ============ Per-Block Download API (Bitcoin Core Style) ============
+
+std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    std::vector<int> result;
+    result.reserve(max_blocks);
+
+    // Get pending heights from window
+    if (!m_window_initialized) {
+        return result;
+    }
+
+    // Get all pending heights (not just consecutive)
+    auto pending = m_download_window.GetNextPendingHeights(max_blocks * 2);  // Get more to filter
+
+    for (int h : pending) {
+        if (static_cast<int>(result.size()) >= max_blocks) break;
+
+        // Skip if already in-flight (per-block tracking)
+        if (mapBlocksInFlightByHeight.count(h) > 0) {
+            continue;
+        }
+
+        // Skip if already in-flight (legacy chunk tracking)
+        if (mapHeightToPeer.count(h) > 0) {
+            continue;
+        }
+
+        result.push_back(h);
+    }
+
+    return result;
+}
+
+bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint256& hash)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Check peer capacity using per-block tracking
+    auto peer_it = mapPeerBlocksInFlightByHeight.find(peer_id);
+    if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+        if (static_cast<int>(peer_it->second.size()) >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+            std::cout << "[PerBlock] Peer " << peer_id << " at capacity ("
+                      << peer_it->second.size() << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << ")" << std::endl;
+            return false;
+        }
+    }
+
+    // Check if height already in-flight
+    if (mapBlocksInFlightByHeight.count(height) > 0) {
+        std::cout << "[PerBlock] Height " << height << " already in-flight" << std::endl;
+        return false;
+    }
+
+    // Add to per-block tracking
+    mapBlocksInFlightByHeight[height] = BlockInFlightByHeight(height, hash, peer_id);
+    mapPeerBlocksInFlightByHeight[peer_id].insert(height);
+
+    // Update window state
+    m_download_window.MarkAsInFlight({height});
+
+    // Notify CPeerManager
+    if (m_peer_manager) {
+        m_peer_manager->MarkBlockAsInFlight(peer_id, hash);
+    }
+
+    std::cout << "[PerBlock] Requested height " << height << " from peer " << peer_id
+              << " (peer now has " << mapPeerBlocksInFlightByHeight[peer_id].size() << " in-flight)" << std::endl;
+
+    return true;
+}
+
+bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Find in per-block tracking
+    auto it = mapBlocksInFlightByHeight.find(height);
+    if (it == mapBlocksInFlightByHeight.end()) {
+        // Not in per-block tracking - try legacy chunk system
+        return false;
+    }
+
+    uint256 hash = it->second.hash;
+    NodeId assigned_peer = it->second.peer;
+
+    // Remove from per-block tracking
+    mapBlocksInFlightByHeight.erase(it);
+
+    // Remove from peer's set
+    auto peer_it = mapPeerBlocksInFlightByHeight.find(assigned_peer);
+    if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+        peer_it->second.erase(height);
+        if (peer_it->second.empty()) {
+            mapPeerBlocksInFlightByHeight.erase(peer_it);
+        }
+    }
+
+    // Update window state
+    m_download_window.OnBlockReceived(height);
+
+    // Notify CPeerManager
+    if (m_peer_manager) {
+        m_peer_manager->MarkBlockAsReceived(assigned_peer, hash);
+    }
+
+    // Update stats
+    nBlocksReceivedTotal++;
+    lastBlockReceived = std::chrono::steady_clock::now();
+
+    std::cout << "[PerBlock] Received height " << height << " from peer " << peer_id
+              << " (expected from peer " << assigned_peer << ")" << std::endl;
+
+    return true;
+}
+
+std::vector<std::pair<int, NodeId>> CBlockFetcher::GetStalledBlocks(std::chrono::seconds timeout)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    std::vector<std::pair<int, NodeId>> stalled;
+    auto now = std::chrono::steady_clock::now();
+
+    for (const auto& [height, info] : mapBlocksInFlightByHeight) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - info.requested_time);
+        if (elapsed >= timeout) {
+            stalled.push_back({height, info.peer});
+        }
+    }
+
+    if (!stalled.empty()) {
+        std::cout << "[PerBlock] Found " << stalled.size() << " stalled blocks (timeout=" << timeout.count() << "s)" << std::endl;
+    }
+
+    return stalled;
+}
+
+void CBlockFetcher::RequeueBlock(int height)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Remove from per-block tracking if present
+    auto it = mapBlocksInFlightByHeight.find(height);
+    if (it != mapBlocksInFlightByHeight.end()) {
+        NodeId peer = it->second.peer;
+        uint256 hash = it->second.hash;
+
+        // Remove from peer's set
+        auto peer_it = mapPeerBlocksInFlightByHeight.find(peer);
+        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+            peer_it->second.erase(height);
+            if (peer_it->second.empty()) {
+                mapPeerBlocksInFlightByHeight.erase(peer_it);
+            }
+        }
+
+        // Remove from in-flight map
+        mapBlocksInFlightByHeight.erase(it);
+
+        // Notify CPeerManager
+        if (m_peer_manager) {
+            m_peer_manager->RemoveBlockFromFlight(peer, hash);
+            m_peer_manager->UpdatePeerStats(peer, false);  // Mark as stall
+        }
+
+        std::cout << "[PerBlock] Requeued height " << height << " (was assigned to peer " << peer << ")" << std::endl;
+    }
+
+    // Add back to pending
+    m_download_window.MarkAsPending(height);
+}
+
+int CBlockFetcher::GetPeerBlocksInFlight(NodeId peer_id) const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    auto it = mapPeerBlocksInFlightByHeight.find(peer_id);
+    if (it != mapPeerBlocksInFlightByHeight.end()) {
+        return static_cast<int>(it->second.size());
+    }
+    return 0;
+}
+
+bool CBlockFetcher::IsHeightInFlight(int height) const
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // Check per-block tracking
+    if (mapBlocksInFlightByHeight.count(height) > 0) {
+        return true;
+    }
+
+    // Check legacy chunk tracking
+    if (mapHeightToPeer.count(height) > 0) {
+        return true;
+    }
+
+    return false;
 }

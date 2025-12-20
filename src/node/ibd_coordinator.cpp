@@ -510,224 +510,108 @@ bool CIbdCoordinator::FetchBlocks() {
         return false;
     }
 
-    // Phase 2+3: Bitcoin Core-style chunk assignment with 1024-block window
-    // Assign CONSECUTIVE heights to SAME peer → blocks arrive in order → no orphans
+    // ============ Bitcoin Core Per-Block Download Model ============
+    // Up to 16 individual blocks per peer (not chunks)
+    // 3-second stall timeout per block
+    // Blocks assigned individually, not as consecutive chunks
 
     // Get available peers for download
     std::vector<int> available_peers = m_node_context.peer_manager->GetValidPeersForDownload();
     if (available_peers.empty()) {
         m_ibd_no_peer_cycles++;
-        m_last_hang_cause = HangCause::NO_PEERS_AVAILABLE;  // IBD HANG FIX #6
+        m_last_hang_cause = HangCause::NO_PEERS_AVAILABLE;
         LogPrintIBD(WARN, "No peers available for block download");
         return false;
-    }
-    
-    // IBD HANG FIX #6: Check if all peers are at capacity
-    // IBD STUCK FIX #2: Use GetBlocksInFlightForPeer() instead of peer->nBlocksInFlight
-    // This fixes capacity check using stale counter data - CPeerManager is single source of truth
-    bool all_peers_at_capacity = true;
-    for (int peer_id : available_peers) {
-        auto peer = m_node_context.peer_manager->GetPeer(peer_id);
-        if (peer) {
-            // Use CPeerManager's tracking method instead of peer's counter
-            // This ensures we check the actual tracking state, not a potentially stale counter
-            int blocks_in_flight = m_node_context.peer_manager->GetBlocksInFlightForPeer(peer_id);
-            if (blocks_in_flight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-                all_peers_at_capacity = false;
-                break;
-            }
-        }
-    }
-    if (all_peers_at_capacity && !available_peers.empty()) {
-        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;  // IBD HANG FIX #6
-        LogPrintIBD(DEBUG, "All peers at capacity (%d peers, all have %d blocks in-flight)", 
-                    available_peers.size(), CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER);
     }
 
     int chain_height = m_chainstate.GetHeight();
     int header_height = m_node_context.headers_manager->GetBestHeight();
-    
-    // IBD SLOW FIX #4: Check for headers sync lag
-    // If headers aren't synced ahead of chain, block downloads will be blocked
+
+    // Check for headers sync lag
     if (header_height <= chain_height) {
         static int lag_warnings = 0;
         if (lag_warnings++ < 5) {
-            LogPrintIBD(WARN, "Headers sync lag detected: header_height=%d <= chain_height=%d - block downloads may be blocked", 
-                       header_height, chain_height);
+            LogPrintIBD(WARN, "Headers sync lag: header=%d <= chain=%d", header_height, chain_height);
         }
-        // Don't return false - headers might sync soon, but log the issue
     }
-    
-    int total_chunks_assigned = 0;
 
-    // For each peer with capacity, assign chunks (Phase 1 FIX: allow multiple chunks per peer)
+    int total_blocks_requested = 0;
+
+    // For each peer with capacity, assign individual blocks
     for (int peer_id : available_peers) {
         auto peer = m_node_context.peer_manager->GetPeer(peer_id);
         if (!peer) continue;
 
-        // IBD STUCK FIX #5: Skip if peer at capacity (use GetBlocksInFlightForPeer for consistency)
-        // Previously used peer->nBlocksInFlight counter which could be stale
-        // Now uses GetBlocksInFlightForPeer() which queries CPeerManager's tracking map (same as Fix #2)
-        int peer_blocks_in_flight = m_node_context.peer_manager->GetBlocksInFlightForPeer(peer_id);
-        if (peer_blocks_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-            continue;
+        // Check peer capacity using per-block tracking
+        int peer_blocks_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id);
+        int peer_capacity = MAX_BLOCKS_IN_TRANSIT_PER_PEER - peer_blocks_in_flight;
+        if (peer_capacity <= 0) {
+            continue;  // Peer at capacity
         }
 
-        // IBD STALL FIX: Skip peers that don't have blocks we need
-        // Peers advertise their height in VERSION message. Don't request blocks beyond that.
+        // Skip peers that are behind us
         int peer_height = peer->start_height;
         if (peer_height <= chain_height) {
-            // This peer is behind us - skip
             continue;
         }
 
-        // Phase 3: Get next chunk from the window (respects 1024-block limit)
-        std::vector<int> chunk_heights;
-        if (m_node_context.block_fetcher->IsWindowInitialized()) {
-            chunk_heights = m_node_context.block_fetcher->GetWindowPendingHeights(MAX_BLOCKS_PER_CHUNK);
-        } else {
-            // Fallback to old method if window not initialized
-            chunk_heights = m_node_context.block_fetcher->GetNextChunkHeights(MAX_BLOCKS_PER_CHUNK);
-        }
-
-        if (chunk_heights.empty()) {
-            // IBD HANG FIX #6: Track hang cause
+        // Get next blocks to request (up to peer's remaining capacity)
+        std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(peer_capacity);
+        if (blocks_to_request.empty()) {
             m_last_hang_cause = HangCause::WINDOW_EMPTY;
-            std::cout << "[IBD-DEBUG] chunk_heights EMPTY for peer " << peer_id
-                      << " - window initialized=" << m_node_context.block_fetcher->IsWindowInitialized()
-                      << " window_status=" << m_node_context.block_fetcher->GetWindowStatus() << std::endl;
-            LogPrintIBD(DEBUG, "No pending heights in window - window may be stalled");
-            break;  // No more heights to assign
+            break;  // No more blocks to request
         }
 
-        // Filter heights: only include those we have headers for and don't have blocks for
-        // IBD SLOW FIX #2: Change break to continue to prevent skipping valid heights
-        // Previously: break on h > header_height stopped iteration, skipping heights after first out-of-range
-        // Now: continue skips out-of-range heights but continues checking remaining heights
-        std::vector<int> valid_heights;
-        int filter_out_of_range = 0, filter_already_have = 0, filter_null_hash = 0, filter_connected = 0;
+        // Filter and build GETDATA
+        std::vector<NetProtocol::CInv> getdata;
+        getdata.reserve(blocks_to_request.size());
 
-        // IBD DEBUG: Log actual heights returned by window
-        if (!chunk_heights.empty()) {
-            std::cout << "[IBD-DEBUG] chunk_heights for peer " << peer_id << ": [";
-            for (size_t i = 0; i < chunk_heights.size() && i < 5; ++i) {
-                std::cout << chunk_heights[i];
-                if (i < chunk_heights.size() - 1 && i < 4) std::cout << ", ";
-            }
-            if (chunk_heights.size() > 5) std::cout << ", ..." << chunk_heights.back();
-            std::cout << "]" << std::endl;
-        }
-        int filter_beyond_peer = 0;
-        for (int h : chunk_heights) {
-            if (h > header_height) { filter_out_of_range++; continue; }
-            if (h <= chain_height) { filter_already_have++; continue; }
-            // IBD STALL FIX: Don't request blocks beyond what peer has
-            if (h > peer_height) { filter_beyond_peer++; continue; }
+        for (int h : blocks_to_request) {
+            // Filter: within header range, not already have, peer has it
+            if (h > header_height) continue;
+            if (h <= chain_height) continue;
+            if (h > peer_height) continue;
 
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-            if (hash.IsNull()) {
-                filter_null_hash++;
-                continue;  // No header
-            }
-            // IBD HANG FIX #7: Check if block is CONNECTED, not just if we have an index
-            // During async validation, BlockIndex is created before validation completes
+            if (hash.IsNull()) continue;
+
+            // Check if already connected
             CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
             if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                filter_connected++;
-                continue;  // Block is actually connected to chain - skip
+                continue;
             }
 
-            valid_heights.push_back(h);
-        }
-
-        if (valid_heights.empty()) {
-            std::cout << "[IBD-DEBUG] valid_heights empty for peer " << peer_id
-                      << " chunk_heights.size=" << chunk_heights.size()
-                      << " filter_out_of_range=" << filter_out_of_range
-                      << " filter_already_have=" << filter_already_have
-                      << " filter_null_hash=" << filter_null_hash
-                      << " filter_connected=" << filter_connected
-                      << " filter_beyond_peer=" << filter_beyond_peer
-                      << " peer_height=" << peer_height
-                      << " header_height=" << header_height
-                      << " chain_height=" << chain_height << std::endl;
-            continue;  // No valid heights in this chunk
-        }
-
-        // Assign chunk to peer
-        int start = valid_heights.front();
-        int end = valid_heights.back();
-        if (!m_node_context.block_fetcher->AssignChunkToPeer(peer_id, start, end)) {
-            std::cout << "[IBD-DEBUG] AssignChunkToPeer FAILED for peer " << peer_id
-                      << " chunk " << start << "-" << end << std::endl;
-            continue;  // Assignment failed
-        }
-
-        // Phase 3: Mark ALL chunk_heights as in-flight (the entire original range)
-        // IBD FIX: AssignChunkToPeer assigns ALL heights from start to end to mapHeightToPeer.
-        // However, valid_heights may have heights filtered out at the START, END, or MIDDLE.
-        // If we only mark the valid_heights range (start-end), heights filtered at the beginning
-        // (e.g., chunk_heights[1-16] filtered to valid_heights[5-8]) remain in m_pending.
-        // We must mark the ENTIRE chunk_heights as in-flight to prevent them from being
-        // returned by GetWindowPendingHeights while their range overlaps with assigned chunks.
-        std::cout << "[IBD-DEBUG] MarkWindowHeightsInFlight: marking " << chunk_heights.size()
-                  << " heights [" << chunk_heights.front() << "-" << chunk_heights.back()
-                  << "] as in-flight for peer " << peer_id << std::endl;
-        m_node_context.block_fetcher->MarkWindowHeightsInFlight(chunk_heights);
-
-        // Build GETDATA message for this chunk
-        std::vector<NetProtocol::CInv> getdata;
-        getdata.reserve(valid_heights.size());
-
-        std::cout << "[GETDATA-DEBUG] Building GETDATA for chunk " << start << "-" << end << ", valid_heights=" << valid_heights.size() << std::endl;
-
-        for (int h : valid_heights) {
-            uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-            if (!hash.IsNull()) {
-                // Also track in the old per-block system for timeout handling
-                bool request_ok = m_node_context.block_fetcher->RequestBlock(peer_id, hash, h);
+            // Request this block from peer using per-block API
+            if (m_node_context.block_fetcher->RequestBlockFromPeer(peer_id, h, hash)) {
                 getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-                // Only log every 4th block to reduce spam
-                if (h % 4 == 0) {
-                    std::cout << "[GETDATA-DEBUG]   Height " << h << ": request_ok=" << request_ok << std::endl;
-                }
-            } else {
-                std::cout << "[GETDATA-ERROR]   Height " << h << ": hash is null!" << std::endl;
+                total_blocks_requested++;
             }
         }
 
-        std::cout << "[GETDATA-DEBUG] Built " << getdata.size() << " entries for peer " << peer_id << std::endl;
-
-        // Send single batched GETDATA for entire chunk
+        // Send batched GETDATA for all blocks assigned to this peer
         if (!getdata.empty()) {
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-            std::cout << "[GETDATA-DEBUG] Sending to peer " << peer_id << std::endl;
-
-            // BUG #154 FIX: Check if message was sent successfully
             bool sent = m_node_context.connman->PushMessage(peer_id, msg);
             if (!sent) {
-                LogPrintIBD(WARN, "GETDATA send failed for peer %d - cancelling chunk", peer_id);
-                m_node_context.block_fetcher->CancelStalledChunk(peer_id);
-                continue;  // Try next peer
+                // Requeue all blocks on send failure
+                for (int h : blocks_to_request) {
+                    m_node_context.block_fetcher->RequeueBlock(h);
+                }
+                LogPrintIBD(WARN, "GETDATA send failed for peer %d", peer_id);
+                continue;
             }
 
-            // BUG #155 FIX: Update activity timer after successful GETDATA send
-            // This prevents false stall detection when network is slow
-            m_node_context.block_fetcher->UpdateChunkActivity(peer_id);
+            std::cout << "[PerBlock] Requested " << getdata.size() << " blocks from peer " << peer_id
+                      << " (peer now has " << m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id)
+                      << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << " in-flight)" << std::endl;
 
-            total_chunks_assigned++;
-
-            LogPrintIBD(INFO, "Assigned chunk %d-%d (%zu blocks) to peer %d [%s]",
-                        start, end, getdata.size(), peer_id,
+            LogPrintIBD(INFO, "Requested %zu blocks from peer %d [%s]",
+                        getdata.size(), peer_id,
                         m_node_context.block_fetcher->GetWindowStatus().c_str());
-        } else {
-            LogPrintIBD(WARN, "GETDATA is empty for peer %d!", peer_id);
         }
     }
 
-    // Legacy per-block fallback removed - chunk system is now the only path
-
-    return total_chunks_assigned > 0;
+    return total_blocks_requested > 0;
 }
 
 void CIbdCoordinator::RetryTimeoutsAndStalls() {
@@ -735,67 +619,31 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         return;
     }
 
-    // IBD HANG FIX #4: Clean up cancelled chunks after grace period expires
-    // This removes height mappings for chunks where blocks never arrived
-    m_node_context.block_fetcher->CleanupCancelledChunks();
+    // ============ Per-Block Stall Detection (Bitcoin Core Style) ============
+    // Check for stalled blocks (3 second timeout)
+    auto stalled_blocks = m_node_context.block_fetcher->GetStalledBlocks(
+        std::chrono::seconds(BLOCK_STALL_TIMEOUT_SECONDS));
 
-    // BUG #165 FIX: Clean up mapBlocksInFlight entries from unsuitable peers
-    // When a peer becomes unsuitable (stall count >= 500), their in-flight entries
-    // become zombie entries that block new requests. Clean them up proactively.
-    m_node_context.block_fetcher->CleanupUnsuitablePeers();
+    if (!stalled_blocks.empty()) {
+        std::cout << "[PerBlock] Detected " << stalled_blocks.size() << " stalled blocks (>"
+                  << BLOCK_STALL_TIMEOUT_SECONDS << "s)" << std::endl;
 
-    // Check for block-level timeouts (60 second)
-    auto timed_out = m_node_context.block_fetcher->CheckTimeouts();
-    if (!timed_out.empty()) {
-        LogPrintIBD(WARN, "%zu block(s) timed out, retrying...", timed_out.size());
-        m_node_context.block_fetcher->RetryTimedOutBlocks(timed_out);
-    }
+        for (const auto& [height, peer_id] : stalled_blocks) {
+            // Requeue the stalled block
+            m_node_context.block_fetcher->RequeueBlock(height);
 
-    // Phase 2: Check for stalled chunks (15 second stall detection)
-    // IBD HANG FIX #1: Now checks mapBlocksInFlight before marking as stalled
-    auto stalled_chunks = m_node_context.block_fetcher->CheckStalledChunks();
-    for (const auto& [peer_id, chunk] : stalled_chunks) {
-        bool reassigned = false;
-
-        // Find an alternative peer to reassign the chunk to
-        if (m_node_context.peer_manager) {
-            std::vector<int> valid_peers = m_node_context.peer_manager->GetValidPeersForDownload();
-            for (int new_peer : valid_peers) {
-                if (new_peer != peer_id) {
-                    auto new_peer_obj = m_node_context.peer_manager->GetPeer(new_peer);
-                    if (new_peer_obj && new_peer_obj->nBlocksInFlight < CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-                        if (m_node_context.block_fetcher->ReassignChunk(peer_id, new_peer)) {
-                            LogPrintIBD(INFO, "Reassigned stalled chunk from peer %d to peer %d", peer_id, new_peer);
-
-                            // Re-send GETDATA for the reassigned chunk
-                            std::vector<NetProtocol::CInv> getdata;
-                            for (int h = chunk.height_start; h <= chunk.height_end; h++) {
-                                uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-                                if (!hash.IsNull()) {
-                                    getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-                                }
-                            }
-                            if (!getdata.empty()) {
-                                CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-                                m_node_context.connman->PushMessage(new_peer, msg);
-                            }
-                            reassigned = true;
-                            break;
-                        }
-                    }
-                }
+            // Update peer stats (mark as stall)
+            if (m_node_context.peer_manager) {
+                m_node_context.peer_manager->UpdatePeerStats(peer_id, false);
             }
-        }
 
-        // If reassignment failed (e.g., all peers have active chunks), cancel the stalled chunk
-        // This makes the heights available for re-request on the next FetchBlocks() call
-        if (!reassigned) {
-            std::cout << "[STALL-FIX] Cancelling stalled chunk from peer " << peer_id << std::endl;
-            std::cout.flush();
-            LogPrintIBD(WARN, "Could not reassign stalled chunk from peer %d - cancelling chunk", peer_id);
-            m_node_context.block_fetcher->CancelStalledChunk(peer_id);
+            LogPrintIBD(WARN, "Requeued stalled block at height %d from peer %d", height, peer_id);
         }
     }
+
+    // Legacy cleanup (still needed for transition period)
+    m_node_context.block_fetcher->CleanupCancelledChunks();
+    m_node_context.block_fetcher->CleanupUnsuitablePeers();
 
     // Legacy: Disconnect stalling peers
     std::vector<NodeId> stalling_peers;

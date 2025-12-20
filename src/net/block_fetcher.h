@@ -39,12 +39,16 @@ typedef int NodeId;
 /**
  * Bitcoin Core IBD Constants
  *
- * These values match Bitcoin Core defaults for proven performance:
- * - 16 blocks/chunk: Small enough for fast stall detection, large enough for efficiency
- * - 2 second timeout: Aggressive stall detection (Bitcoin Core default)
- * - 4 chunks per peer: Allows 64 blocks in-flight per peer (16 * 4)
+ * Per-Block Download Model (ported from Bitcoin Core):
+ * - Up to 16 individual blocks per peer (not chunks)
+ * - 3 second stall timeout per block
+ * - Blocks can be reassigned individually
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
+static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16; ///< Bitcoin Core: max individual blocks per peer
+static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 3;     ///< Per-block stall timeout (Bitcoin Core: 2s, we use 3s for cross-region)
+
+// Legacy chunk constants (to be removed after migration)
 static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
 static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 15;   ///< IBD HANG FIX #4: Increased to 15s for better tolerance of cross-region peers and slow networks
 static constexpr int MAX_CHUNKS_PER_PEER = 4;            ///< Max concurrent chunks per peer (16 * 4 = 64 blocks)
@@ -811,6 +815,73 @@ public:
      */
     std::string GetChunkStatus() const;
 
+    // ============ Per-Block Download API (Bitcoin Core Style) ============
+
+    /**
+     * @brief Get next blocks that need to be requested (per-block model)
+     *
+     * Returns heights from the pending set that are not already in-flight.
+     * Unlike GetNextChunkHeights(), this returns ANY pending heights, not just consecutive.
+     *
+     * @param max_blocks Maximum blocks to return
+     * @return Vector of heights ready for download
+     */
+    std::vector<int> GetNextBlocksToRequest(int max_blocks);
+
+    /**
+     * @brief Request a block from a specific peer (per-block model)
+     *
+     * Tracks the block as in-flight for this peer. Respects MAX_BLOCKS_IN_TRANSIT_PER_PEER limit.
+     *
+     * @param peer_id Peer to request from
+     * @param height Block height
+     * @param hash Block hash
+     * @return true if request was accepted (peer has capacity)
+     */
+    bool RequestBlockFromPeer(NodeId peer_id, int height, const uint256& hash);
+
+    /**
+     * @brief Called when a block is received (per-block model)
+     *
+     * Removes from per-peer tracking and updates window state.
+     *
+     * @param peer_id Peer that sent the block
+     * @param height Block height
+     * @return true if block was being tracked
+     */
+    bool OnBlockReceived(NodeId peer_id, int height);
+
+    /**
+     * @brief Get blocks that have stalled (no response within timeout)
+     *
+     * @param timeout Stall timeout duration
+     * @return Vector of (height, peer_id) pairs for stalled blocks
+     */
+    std::vector<std::pair<int, NodeId>> GetStalledBlocks(std::chrono::seconds timeout);
+
+    /**
+     * @brief Re-queue a block for download from a different peer
+     *
+     * @param height Block height to re-queue
+     */
+    void RequeueBlock(int height);
+
+    /**
+     * @brief Get number of blocks in-flight for a peer (per-block model)
+     *
+     * @param peer_id Peer ID
+     * @return Number of individual blocks in-flight
+     */
+    int GetPeerBlocksInFlight(NodeId peer_id) const;
+
+    /**
+     * @brief Check if a height is currently in-flight
+     *
+     * @param height Block height
+     * @return true if block is being downloaded
+     */
+    bool IsHeightInFlight(int height) const;
+
     // ============ Phase 3: Moving Window Public Methods ============
 
     /**
@@ -939,7 +1010,27 @@ private:
 
     // Phase 1: Peer tracking removed - now in CPeerManager exclusively
 
-    // ============ Phase 2: Chunk Tracking State ============
+    // ============ Per-Block Tracking (Bitcoin Core Style) ============
+
+    /**
+     * @struct BlockInFlightByHeight
+     * @brief Tracks a block in-flight by its height (per-block model)
+     */
+    struct BlockInFlightByHeight {
+        int height;
+        uint256 hash;
+        NodeId peer;
+        std::chrono::steady_clock::time_point requested_time;
+
+        BlockInFlightByHeight() : height(0), peer(-1), requested_time(std::chrono::steady_clock::now()) {}
+        BlockInFlightByHeight(int h, const uint256& hsh, NodeId p)
+            : height(h), hash(hsh), peer(p), requested_time(std::chrono::steady_clock::now()) {}
+    };
+
+    std::map<int, BlockInFlightByHeight> mapBlocksInFlightByHeight;  ///< Height -> In-flight info (per-block model)
+    std::map<NodeId, std::set<int>> mapPeerBlocksInFlightByHeight;   ///< Peer -> Set of heights in-flight
+
+    // ============ Phase 2: Chunk Tracking State (Legacy - to be removed) ============
     std::map<NodeId, PeerChunk> mapActiveChunks;   ///< Peer -> Active chunk
     std::map<int, NodeId> mapHeightToPeer;         ///< Height -> Assigned peer
     int nNextChunkHeight{0};                       ///< Next height to start a chunk from
