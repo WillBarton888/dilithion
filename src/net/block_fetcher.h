@@ -46,51 +46,7 @@ typedef int NodeId;
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
 static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16; ///< Bitcoin Core: max individual blocks per peer
-static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 2;     ///< Bitcoin Core: 2s stall triggers parallel download (not cancel)
-
-// Legacy chunk constants (to be removed after migration)
-static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
-static constexpr int CHUNK_STALL_TIMEOUT_SECONDS = 15;   ///< IBD HANG FIX #4: Increased to 15s for better tolerance of cross-region peers and slow networks
-static constexpr int MAX_CHUNKS_PER_PEER = 4;            ///< Max concurrent chunks per peer (16 * 4 = 64 blocks)
-static constexpr int MAX_CHUNK_STALL_COUNT = 50;         ///< Max stalls before peer avoided
-
-/**
- * @struct PeerChunk
- * @brief Tracks a chunk of consecutive blocks assigned to a single peer
- *
- * Bitcoin Core's key insight: assign CONSECUTIVE blocks to SAME peer.
- * This ensures blocks arrive in order, eliminating orphan blocks.
- *
- * Example: Peer 1 gets blocks 1-16, Peer 2 gets blocks 17-32, etc.
- * When Peer 1's blocks arrive, they're all sequential and connect immediately.
- */
-struct PeerChunk {
-    NodeId peer_id;                     ///< Peer assigned to this chunk
-    int height_start;                   ///< First block height in chunk
-    int height_end;                     ///< Last block height in chunk (inclusive)
-    int blocks_pending;                 ///< Blocks not yet received
-    int blocks_received;                ///< Blocks successfully received
-    std::chrono::steady_clock::time_point assigned_time;   ///< When chunk was assigned
-    std::chrono::steady_clock::time_point last_activity;   ///< Last block received
-
-    PeerChunk()
-        : peer_id(-1), height_start(0), height_end(0), blocks_pending(0), blocks_received(0)
-    {
-        assigned_time = std::chrono::steady_clock::now();
-        last_activity = assigned_time;
-    }
-
-    PeerChunk(NodeId peer, int start, int end)
-        : peer_id(peer), height_start(start), height_end(end),
-          blocks_pending(end - start + 1), blocks_received(0)
-    {
-        assigned_time = std::chrono::steady_clock::now();
-        last_activity = assigned_time;
-    }
-
-    int ChunkSize() const { return height_end - height_start + 1; }
-    bool IsComplete() const { return blocks_pending == 0; }
-};
+static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 3;     ///< Stall timeout per block (triggers parallel download)
 
 /**
  * @class CBlockDownloadWindow
@@ -698,124 +654,15 @@ public:
      */
     void Clear();
 
-    // ============ Phase 2: Sequential Chunk Assignment ============
+    // ============ Per-Block Download API (Bitcoin Core Style) ============
 
     /**
-     * @brief Assign a chunk of consecutive blocks to a peer
-     *
-     * Bitcoin Core-style: assign CONSECUTIVE heights to SAME peer.
-     * This ensures blocks arrive in order, eliminating orphan blocks.
-     *
-     * @param peer_id Peer to assign chunk to
-     * @param height_start First block height in chunk
-     * @param height_end Last block height in chunk (inclusive)
-     * @return true if chunk was assigned successfully
-     */
-    bool AssignChunkToPeer(NodeId peer_id, int height_start, int height_end);
-
-    /**
-     * @brief Get the next chunk of consecutive heights to download
-     *
-     * Finds up to MAX_BLOCKS_PER_CHUNK (16) consecutive heights that:
-     * - Are not already in-flight
-     * - Are not already assigned to another peer
-     * - Start from the lowest unassigned height
-     *
-     * @param max_blocks Maximum blocks in chunk (default: 16)
-     * @return Vector of heights to assign
-     */
-    std::vector<int> GetNextChunkHeights(int max_blocks = MAX_BLOCKS_PER_CHUNK);
-
-    /**
-     * @brief Mark a height as received, update chunk tracking
+     * @brief Mark a height as received (legacy interface, calls per-block tracking)
      *
      * @param height Block height received
      * @return Peer ID that had this height assigned, or -1 if not tracked
      */
     NodeId OnChunkBlockReceived(int height);
-
-    /**
-     * @brief Check for stalled chunks (no activity > CHUNK_STALL_TIMEOUT_SECONDS)
-     *
-     * @return Vector of (peer_id, chunk) pairs that are stalled
-     */
-    std::vector<std::pair<NodeId, PeerChunk>> CheckStalledChunks();
-
-    /**
-     * @brief Reassign a stalled chunk to a different peer
-     *
-     * @param old_peer Original peer ID
-     * @param new_peer New peer ID to assign chunk to
-     * @return true if reassignment successful
-     */
-    bool ReassignChunk(NodeId old_peer, NodeId new_peer);
-
-    /**
-     * @brief Clean up cancelled chunks after grace period expires
-     *
-     * IBD HANG FIX: Removes cancelled chunks and their height mappings after grace period.
-     * Called periodically to clean up chunks that were cancelled but blocks never arrived.
-     */
-    void CleanupCancelledChunks();
-
-    /**
-     * @brief Clean up mapBlocksInFlight entries from unsuitable peers
-     *
-     * BUG #165 FIX: When a peer becomes unsuitable (stall count too high), their
-     * in-flight entries become zombie entries that block the system. This method
-     * proactively cleans them up.
-     */
-    void CleanupUnsuitablePeers();
-
-    /**
-     * @brief Cancel a stalled chunk, making heights available for re-request
-     *
-     * Call this when a chunk cannot be reassigned to another peer (e.g., all
-     * peers have active chunks). Moves chunk to cancelled map (grace period) instead of
-     * immediately erasing, allowing blocks that arrive late to be properly tracked.
-     *
-     * IBD HANG FIX: Keeps heights in mapHeightToPeer during grace period to handle
-     * race condition where blocks arrive after cancellation.
-     *
-     * @param peer_id Peer whose chunk should be cancelled
-     * @return true if chunk was cancelled
-     */
-    bool CancelStalledChunk(NodeId peer_id);
-
-    /**
-     * @brief Update chunk activity timestamp (call after sending GETDATA)
-     *
-     * BUG #155 FIX: Prevents false stall detection when network is slow.
-     * Call this immediately after successfully sending GETDATA for a chunk.
-     *
-     * @param peer_id Peer ID to update
-     */
-    void UpdateChunkActivity(NodeId peer_id);
-
-    /**
-     * @brief Get the peer assigned to download a specific height
-     *
-     * @param height Block height
-     * @return Peer ID, or -1 if height not assigned
-     */
-    NodeId GetPeerForHeight(int height) const;
-
-    /**
-     * @brief Get active chunk for a peer
-     *
-     * @param peer_id Peer ID
-     * @return Pointer to chunk, or nullptr if peer has no active chunk
-     */
-    const PeerChunk* GetPeerChunk(NodeId peer_id) const;
-
-    /**
-     * @brief Get statistics on current chunk assignments
-     *
-     * @return String with chunk status
-     */
-    std::string GetChunkStatus() const;
-
-    // ============ Per-Block Download API (Bitcoin Core Style) ============
 
     /**
      * @brief Get next blocks that need to be requested (pure per-block model)
@@ -1041,23 +888,7 @@ private:
     std::map<int, BlockInFlightByHeight> mapBlocksInFlightByHeight;  ///< Height -> In-flight info (supports parallel)
     std::map<NodeId, std::set<int>> mapPeerBlocksInFlightByHeight;   ///< Peer -> Set of heights in-flight
 
-    // ============ Phase 2: Chunk Tracking State (Legacy - to be removed) ============
-    std::map<NodeId, PeerChunk> mapActiveChunks;   ///< Peer -> Active chunk
-    std::map<int, NodeId> mapHeightToPeer;         ///< Height -> Assigned peer
-    int nNextChunkHeight{0};                       ///< Next height to start a chunk from
-    
-    // IBD HANG FIX: Track cancelled chunks during grace period
-    // Prevents race condition where blocks arrive after chunk cancellation
-    struct CancelledChunk {
-        PeerChunk chunk;
-        std::chrono::steady_clock::time_point cancelled_time;
-        CancelledChunk() : chunk(), cancelled_time(std::chrono::steady_clock::now()) {}
-        CancelledChunk(const PeerChunk& c) : chunk(c), cancelled_time(std::chrono::steady_clock::now()) {}
-    };
-    std::map<NodeId, CancelledChunk> mapCancelledChunks;  ///< Peer -> Cancelled chunk (grace period)
-    static constexpr int CANCELLED_CHUNK_GRACE_PERIOD_SECONDS = 120;  ///< Keep cancelled chunks for 120s (increased from 30s to handle slow block delivery)
-
-    // ============ Phase 3: Moving Window ============
+    // ============ Window (for backpressure only) ============
     CBlockDownloadWindow m_download_window;        ///< 1024-block sliding window
     bool m_window_initialized{false};              ///< Whether window has been initialized
 

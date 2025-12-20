@@ -638,715 +638,51 @@ void CBlockFetcher::UpdateDownloadSpeed()
     // Currently speed is calculated on-demand in GetDownloadSpeed()
 }
 
-// ============ Phase 2: Sequential Chunk Assignment Implementation ============
-
-bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int height_end)
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    // Validate peer can accept a chunk
-    if (!m_peer_manager) {
-        return false;
-    }
-
-    auto peer = m_peer_manager->GetPeer(peer_id);
-    if (!peer) {
-        return false;
-    }
-
-    // IBD STUCK FIX #9: Use GetBlocksInFlightForPeer() instead of peer->nBlocksInFlight counter
-    // The counter can become stale/desync during chunk cancellation, but CPeerManager's
-    // mapBlocksInFlight is the single source of truth for tracking state.
-    int blocks_in_flight = m_peer_manager->GetBlocksInFlightForPeer(peer_id);
-    if (blocks_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-        return false;
-    }
-
-    // IBD FIX: Removed IBD HANG FIX #22 check (peer->start_height < height_end).
-    // The check was WRONG - start_height is the chain height when the peer CONNECTED,
-    // not the peer's current sync height. Peers serving the blockchain have ALL blocks
-    // from genesis, so this check blocked all assignments during IBD when peers connected
-    // at a low chain height but we needed higher blocks.
-
-    // Validate height range
-    if (height_end < height_start) {
-        return false;
-    }
-
-    // Check no height is already assigned to another peer (unless that height is in a cancelled chunk)
-    // IBD FIX: When a chunk is cancelled, heights remain in mapHeightToPeer during grace period
-    // to handle late-arriving blocks. But this blocks reassignment. Allow reassignment if the
-    // HEIGHT is within the cancelled chunk's range (not just if the peer has any cancelled chunk).
-    for (int h = height_start; h <= height_end; h++) {
-        if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] != peer_id) {
-            NodeId assigned_peer = mapHeightToPeer[h];
-            // Check if the height is within the peer's CANCELLED chunk (not just any cancelled chunk)
-            bool height_in_cancelled = false;
-            auto cancelled_it = mapCancelledChunks.find(assigned_peer);
-            if (cancelled_it != mapCancelledChunks.end()) {
-                const CancelledChunk& cancelled = cancelled_it->second;
-                if (h >= cancelled.chunk.height_start && h <= cancelled.chunk.height_end) {
-                    height_in_cancelled = true;
-                }
-            }
-            bool active = mapActiveChunks.count(assigned_peer) > 0;
-
-            if (height_in_cancelled) {
-                // Height is in a cancelled chunk - allow reassignment
-                mapHeightToPeer[h] = peer_id;
-                continue;  // Height can be reassigned
-            }
-            // Height is assigned to an active chunk - cannot reassign
-            std::cout << "[AssignChunk-DEBUG] FAIL: Height " << h << " assigned to peer " << assigned_peer
-                      << " in ACTIVE chunk (not cancelled) - cannot reassign" << std::endl;
-            return false;
-        }
-    }
-
-    // IBD STALL FIX: DON'T extend existing chunks - let other peers take new work
-    // Previously: extended one peer's chunk from 1-571, starving other peers
-    // Now: each peer gets a fixed-size chunk, parallel download from multiple peers
-    auto it = mapActiveChunks.find(peer_id);
-    if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
-        // Peer already has an active chunk - let other peers take this work
-        // DEBUG: Log why we're rejecting this assignment
-        std::cout << "[AssignChunk-DEBUG] FAIL: Peer " << peer_id
-                  << " has INCOMPLETE active chunk " << it->second.height_start
-                  << "-" << it->second.height_end
-                  << " (pending=" << it->second.blocks_pending
-                  << ", received=" << it->second.blocks_received << ")" << std::endl;
-        return false;
-    }
-
-    // Create NEW chunk assignment (no existing chunk or existing is complete)
-    PeerChunk chunk(peer_id, height_start, height_end);
-    mapActiveChunks[peer_id] = chunk;
-
-    // Map heights to peer
-    for (int h = height_start; h <= height_end; h++) {
-        mapHeightToPeer[h] = peer_id;
-    }
-
-    // IBD Redesign Phase 3: Shadow-track with CBlockTracker
-    if (g_node_context.block_tracker) {
-        for (int h = height_start; h <= height_end; h++) {
-            g_node_context.block_tracker->AssignToPeer(h, peer_id);
-        }
-    }
-
-    std::cout << "[Chunk] Assigned heights " << height_start << "-" << height_end
-              << " (" << chunk.ChunkSize() << " blocks) to peer " << peer_id << std::endl;
-
-    return true;
-}
-
-std::vector<int> CBlockFetcher::GetNextChunkHeights(int max_blocks)
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    std::vector<int> heights;
-    heights.reserve(max_blocks);
-
-    // Start from the next unassigned height
-    int h = nNextChunkHeight;
-    int count = 0;
-
-    while (count < max_blocks) {
-        // Skip heights already assigned
-        if (mapHeightToPeer.count(h) > 0) {
-            h++;
-            continue;
-        }
-
-        heights.push_back(h);
-        count++;
-        h++;
-    }
-
-    // Update next chunk start for subsequent calls
-    if (!heights.empty()) {
-        nNextChunkHeight = heights.back() + 1;
-    }
-
-    return heights;
-}
+// ============ Per-Block Block Tracking ============
 
 NodeId CBlockFetcher::OnChunkBlockReceived(int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // ============ Per-Block Tracking (Bitcoin Core Style) ============
-    // Check if this block was tracked in the per-block system
-    auto perblock_it = mapBlocksInFlightByHeight.find(height);
-    if (perblock_it != mapBlocksInFlightByHeight.end()) {
-        uint256 hash = perblock_it->second.hash;
-        const std::set<NodeId>& all_peers = perblock_it->second.peers;
-        NodeId first_peer = all_peers.empty() ? -1 : *all_peers.begin();
-
-        // PARALLEL DOWNLOAD: Remove from ALL peers' tracking
-        for (NodeId p : all_peers) {
-            auto peer_it = mapPeerBlocksInFlightByHeight.find(p);
-            if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-                peer_it->second.erase(height);
-                if (peer_it->second.empty()) {
-                    mapPeerBlocksInFlightByHeight.erase(peer_it);
-                }
-            }
-        }
-
-        // Remove from per-block tracking
-        mapBlocksInFlightByHeight.erase(perblock_it);
-
-        // Notify CPeerManager
-        if (m_peer_manager && first_peer >= 0) {
-            m_peer_manager->MarkBlockAsReceived(first_peer, hash);
-        }
-
-        // Update stats
-        nBlocksReceivedTotal++;
-        lastBlockReceived = std::chrono::steady_clock::now();
-
-        // No window tracking needed - pure per-block model
-        std::cout << "[PerBlock] Height " << height << " received" << std::endl;
-        return first_peer;
-    }
-
-    // ============ Legacy Chunk Tracking (fallback) ============
-    // This path is for blocks not tracked in per-block system
-
-    // IBD Redesign Phase 3: Shadow-track with CBlockTracker
-    if (g_node_context.block_tracker) {
-        g_node_context.block_tracker->OnBlockReceived(height);
-    }
-
-    // Find which peer had this height assigned
-    auto it = mapHeightToPeer.find(height);
-    if (it == mapHeightToPeer.end()) {
-        // STALL FIX: Height not in active tracking - search cancelled chunks
-        // After CancelStalledChunk clears heights, late-arriving blocks need this path
-        for (auto cancelled_iter = mapCancelledChunks.begin(); cancelled_iter != mapCancelledChunks.end(); ) {
-            CancelledChunk& cancelled = cancelled_iter->second;
-            if (height >= cancelled.chunk.height_start && height <= cancelled.chunk.height_end) {
-                // Found in cancelled chunk - credit the block
-                cancelled.chunk.blocks_pending--;
-                cancelled.chunk.blocks_received++;
-                NodeId found_peer_id = cancelled_iter->first;
-
-                std::cout << "[Chunk] STALL FIX: Late block at height " << height
-                          << " found in cancelled chunk " << cancelled.chunk.height_start
-                          << "-" << cancelled.chunk.height_end << " from peer " << found_peer_id << std::endl;
-
-                if (cancelled.chunk.IsComplete()) {
-                    std::cout << "[Chunk] Cancelled chunk now complete - removing" << std::endl;
-                    cancelled_iter = mapCancelledChunks.erase(cancelled_iter);
-                }
-                return found_peer_id;
-            }
-            ++cancelled_iter;
-        }
-
-        // Height not in any active or cancelled chunk
-        if (height <= 500) {
-            std::cout << "[OnChunkBlockReceived] Height " << height << " not in any tracking" << std::endl;
-        }
+    // Pure per-block tracking (Bitcoin Core style)
+    auto it = mapBlocksInFlightByHeight.find(height);
+    if (it == mapBlocksInFlightByHeight.end()) {
+        // Block not in tracking - already received or never requested
         return -1;
     }
 
-    NodeId peer_id = it->second;
+    uint256 hash = it->second.hash;
+    const std::set<NodeId>& all_peers = it->second.peers;
+    NodeId first_peer = all_peers.empty() ? -1 : *all_peers.begin();
 
-    // IBD HANG FIX #3: Check both active and cancelled chunks
-    // Blocks can arrive after chunk cancellation (network delay), so we need to handle both cases
-
-    // First, try active chunk
-    auto chunk_it = mapActiveChunks.find(peer_id);
-    if (chunk_it != mapActiveChunks.end()) {
-        PeerChunk& chunk = chunk_it->second;
-        if (height >= chunk.height_start && height <= chunk.height_end) {
-            chunk.blocks_pending--;
-            chunk.blocks_received++;
-            chunk.last_activity = std::chrono::steady_clock::now();
-            // Debug log for first 200 blocks
-            if (height <= 200) {
-                std::cout << "[OnChunkBlockReceived] Height " << height << " from peer " << peer_id
-                          << " - chunk now has pending=" << chunk.blocks_pending << std::endl;
+    // Remove from ALL peers' tracking (handles parallel downloads)
+    for (NodeId p : all_peers) {
+        auto peer_it = mapPeerBlocksInFlightByHeight.find(p);
+        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+            peer_it->second.erase(height);
+            if (peer_it->second.empty()) {
+                mapPeerBlocksInFlightByHeight.erase(peer_it);
             }
-
-            // IBD STUCK FIX #12: Erase individual height from mapHeightToPeer immediately
-            // Previously only erased when whole chunk completed, causing window to stall
-            // because is_height_in_flight_callback returned true for already-received heights
-            mapHeightToPeer.erase(height);
-
-            // If chunk complete, clean up
-            if (chunk.IsComplete()) {
-                std::cout << "[Chunk] Peer " << peer_id << " completed chunk "
-                          << chunk.height_start << "-" << chunk.height_end
-                          << " (" << chunk.blocks_received << " blocks)" << std::endl;
-
-                // Clean up height mappings for this chunk
-                for (int h = chunk.height_start; h <= chunk.height_end; h++) {
-                    mapHeightToPeer.erase(h);
-                }
-
-                // IBD HANG FIX #21: On chunk completion, ONLY clean up CBlockFetcher's local tracking
-                // Do NOT call RemoveBlockFromFlight() - that causes double-decrement because:
-                // 1. Block arrives → MarkBlockReceived() → CPeerManager::MarkBlockAsReceived() → decrement
-                // 2. Chunk completes → Fix #19 → RemoveBlockFromFlight() → decrement AGAIN!
-                // Instead, let CPeerManager naturally handle block arrivals via MarkBlockAsReceived().
-                // Only clean up local timeout tracking to prevent stale entries.
-                {
-                    int blocks_removed = 0;
-                    for (auto block_it = mapBlocksInFlight.begin(); block_it != mapBlocksInFlight.end(); ) {
-                        if (block_it->second.peer == peer_id) {
-                            // Only remove from CBlockFetcher's map, NOT from CPeerManager
-                            block_it = mapBlocksInFlight.erase(block_it);
-                            blocks_removed++;
-                        } else {
-                            ++block_it;
-                        }
-                    }
-                    mapPeerBlocks.erase(peer_id);
-                    if (blocks_removed > 0) {
-                        std::cout << "[Chunk] Cleaned up " << blocks_removed
-                                  << " local tracking entries for peer " << peer_id << std::endl;
-                    }
-                }
-
-                // Remove completed chunk
-                mapActiveChunks.erase(chunk_it);
-            }
-            return peer_id;
         }
     }
 
-    // IBD HANG FIX #3: Check cancelled chunks (grace period)
-    // Block arrived after chunk cancellation - still credit it to the cancelled chunk
-    auto cancelled_it = mapCancelledChunks.find(peer_id);
-    if (cancelled_it != mapCancelledChunks.end()) {
-        CancelledChunk& cancelled = cancelled_it->second;
-        if (height >= cancelled.chunk.height_start && height <= cancelled.chunk.height_end) {
-            // Update cancelled chunk stats (for logging/debugging)
-            cancelled.chunk.blocks_pending--;
-            cancelled.chunk.blocks_received++;
-            
-            std::cout << "[Chunk] Late-arriving block at height " << height
-                      << " credited to cancelled chunk " << cancelled.chunk.height_start
-                      << "-" << cancelled.chunk.height_end << " from peer " << peer_id
-                      << " (received " << cancelled.chunk.blocks_received << "/"
-                      << cancelled.chunk.ChunkSize() << " blocks)" << std::endl;
+    // Remove from per-block tracking
+    mapBlocksInFlightByHeight.erase(it);
 
-            // Remove height from mapHeightToPeer (block arrived, no longer need tracking)
-            mapHeightToPeer.erase(height);
-
-            // If cancelled chunk is now complete, remove it immediately
-            if (cancelled.chunk.IsComplete()) {
-                std::cout << "[Chunk] Cancelled chunk " << cancelled.chunk.height_start
-                          << "-" << cancelled.chunk.height_end << " from peer " << peer_id
-                          << " is now complete - removing from cancelled map" << std::endl;
-                
-                // Erase remaining heights for this cancelled chunk
-                for (int h = cancelled.chunk.height_start; h <= cancelled.chunk.height_end; h++) {
-                    mapHeightToPeer.erase(h);
-                }
-                
-                mapCancelledChunks.erase(cancelled_it);
-            }
-            return peer_id;
-        }
+    // Notify CPeerManager
+    if (m_peer_manager && first_peer >= 0) {
+        m_peer_manager->MarkBlockAsReceived(first_peer, hash);
     }
 
-    return peer_id;
+    // Update stats
+    nBlocksReceivedTotal++;
+    lastBlockReceived = std::chrono::steady_clock::now();
+
+    std::cout << "[PerBlock] Height " << height << " received" << std::endl;
+    return first_peer;
 }
 
-std::vector<std::pair<NodeId, PeerChunk>> CBlockFetcher::CheckStalledChunks()
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    std::vector<std::pair<NodeId, PeerChunk>> stalled;
-    auto now = std::chrono::steady_clock::now();
-
-    // IBD STALL FIX: Maximum time a chunk can have blocks in-flight without progress
-    // This catches peers that have blocks in-flight but send wrong blocks
-    // Reduced from 60s to 20s for faster recovery from non-delivering peers
-    static constexpr int MAX_IN_FLIGHT_SECONDS = 20;
-
-    for (const auto& [peer_id, chunk] : mapActiveChunks) {
-        if (chunk.IsComplete()) {
-            continue;  // Completed chunks can't stall
-        }
-
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - chunk.last_activity);
-
-        // IBD HANG FIX #1: Check if blocks are still in-flight before marking as stalled
-        // Prevents premature cancellation when blocks are still in transit (network delay)
-        bool has_in_flight = false;
-        for (const auto& [hash, in_flight] : mapBlocksInFlight) {
-            if (in_flight.peer == peer_id &&
-                in_flight.nHeight >= chunk.height_start &&
-                in_flight.nHeight <= chunk.height_end) {
-                has_in_flight = true;
-                break;
-            }
-        }
-
-        // IBD STALL FIX: Even if blocks are in-flight, cancel if no progress for too long
-        // This catches peers that have in-flight entries but send wrong blocks
-        if (has_in_flight && elapsed.count() >= MAX_IN_FLIGHT_SECONDS) {
-            stalled.emplace_back(peer_id, chunk);
-            std::cout << "[Chunk] Peer " << peer_id << " stalled on chunk "
-                      << chunk.height_start << "-" << chunk.height_end
-                      << " (no progress for " << elapsed.count() << "s despite in-flight blocks)" << std::endl;
-            continue;
-        }
-
-        if (has_in_flight) {
-            // Blocks are still in-flight and under max time - don't mark as stalled
-            continue;
-        }
-
-        // No blocks in-flight - check normal timeout
-        if (elapsed.count() >= CHUNK_STALL_TIMEOUT_SECONDS) {
-            stalled.emplace_back(peer_id, chunk);
-            std::cout << "[Chunk] Peer " << peer_id << " stalled on chunk "
-                      << chunk.height_start << "-" << chunk.height_end
-                      << " (no activity for " << elapsed.count() << "s, no blocks in-flight)" << std::endl;
-        }
-    }
-
-    return stalled;
-}
-
-bool CBlockFetcher::ReassignChunk(NodeId old_peer, NodeId new_peer)
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    // Find old peer's chunk
-    auto old_it = mapActiveChunks.find(old_peer);
-    if (old_it == mapActiveChunks.end()) {
-        return false;
-    }
-
-    PeerChunk& old_chunk = old_it->second;
-
-    // Validate new peer
-    if (!m_peer_manager) {
-        return false;
-    }
-
-    auto new_peer_obj = m_peer_manager->GetPeer(new_peer);
-    if (!new_peer_obj) {
-        return false;
-    }
-    // IBD STUCK FIX #9: Use GetBlocksInFlightForPeer() instead of stale counter
-    int new_peer_in_flight = m_peer_manager->GetBlocksInFlightForPeer(new_peer);
-    if (new_peer_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-        return false;
-    }
-
-    // Check new peer doesn't already have a chunk
-    if (mapActiveChunks.count(new_peer) > 0 && !mapActiveChunks[new_peer].IsComplete()) {
-        return false;
-    }
-
-    // Create new chunk with remaining blocks
-    PeerChunk new_chunk(new_peer, old_chunk.height_start, old_chunk.height_end);
-    new_chunk.blocks_pending = old_chunk.blocks_pending;
-    new_chunk.blocks_received = old_chunk.blocks_received;
-
-    // Update height mappings
-    for (int h = old_chunk.height_start; h <= old_chunk.height_end; h++) {
-        if (mapHeightToPeer.count(h) > 0 && mapHeightToPeer[h] == old_peer) {
-            mapHeightToPeer[h] = new_peer;
-        }
-    }
-
-    // Remove old, add new
-    mapActiveChunks.erase(old_it);
-    mapActiveChunks[new_peer] = new_chunk;
-
-    std::cout << "[Chunk] Reassigned chunk " << new_chunk.height_start << "-" << new_chunk.height_end
-              << " from peer " << old_peer << " to peer " << new_peer << std::endl;
-
-    return true;
-}
-
-bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    // Find peer's chunk
-    auto it = mapActiveChunks.find(peer_id);
-    if (it == mapActiveChunks.end()) {
-        return false;
-    }
-
-    PeerChunk& chunk = it->second;
-
-    std::cout << "[Chunk] Cancelling stalled chunk " << chunk.height_start << "-" << chunk.height_end
-              << " from peer " << peer_id << " (received " << chunk.blocks_received << "/"
-              << chunk.ChunkSize() << " blocks)" << std::endl;
-
-    // IBD HANG FIX #2: Move chunk to cancelled map instead of erasing immediately
-    // This allows blocks that arrive after cancellation (network delay) to be properly tracked
-    mapCancelledChunks[peer_id] = CancelledChunk(chunk);
-
-    // STALL FIX: Clear heights from mapHeightToPeer IMMEDIATELY
-    // This allows other peers to take over these heights right away
-    // Late-arriving blocks are handled via cancelled chunk search in OnChunkBlockReceived()
-    int heights_cleared = 0;
-    for (int h = chunk.height_start; h <= chunk.height_end; h++) {
-        if (mapHeightToPeer.erase(h) > 0) {
-            heights_cleared++;
-        }
-    }
-    std::cout << "[Chunk] STALL FIX: Cleared " << heights_cleared << " heights from mapHeightToPeer for immediate reassignment" << std::endl;
-
-    // IBD WINDOW FIX: Reset nNextChunkHeight if cancelled chunk is below current position
-    // This prevents the window from advancing past undelivered blocks
-    std::cout << "[Chunk] WINDOW CHECK: chunk.height_start=" << chunk.height_start
-              << " nNextChunkHeight=" << nNextChunkHeight << std::endl;
-    if (chunk.height_start < nNextChunkHeight) {
-        std::cout << "[Chunk] WINDOW FIX: Resetting nNextChunkHeight from " << nNextChunkHeight
-                  << " to " << chunk.height_start << " (cancelled chunk start)" << std::endl;
-        nNextChunkHeight = chunk.height_start;
-    }
-
-    // Mark heights as pending again in the window (if window is initialized)
-    // This allows them to be re-requested if blocks don't arrive during grace period
-    if (m_window_initialized) {
-        for (int h = chunk.height_start; h <= chunk.height_end; h++) {
-            // Only mark as pending if not already received
-            if (!m_download_window.IsReceived(h)) {
-                m_download_window.MarkAsPending(h);
-            }
-        }
-    }
-
-    // IBD HANG FIX #16: Remove all blocks for this peer from CPeerManager tracking
-    // This decrements nBlocksInFlight so the peer can accept new chunks
-    // Without this fix, peers get stuck at "capacity" (128 blocks) forever
-    // IBD STUCK FIX #1: Also remove from CPeerManager::mapBlocksInFlight to fix tracking desync
-    if (m_peer_manager) {
-        int blocks_removed = 0;
-        int cpmanager_blocks_removed = 0;
-        
-        // Remove from CBlockFetcher::mapBlocksInFlight
-        for (auto block_it = mapBlocksInFlight.begin(); block_it != mapBlocksInFlight.end(); ) {
-            if (block_it->second.peer == peer_id) {
-                m_peer_manager->RemoveBlockFromFlight(block_it->first);
-                block_it = mapBlocksInFlight.erase(block_it);
-                blocks_removed++;
-            } else {
-                ++block_it;
-            }
-        }
-        
-        // IBD STUCK FIX #1: Also remove from CPeerManager::mapBlocksInFlight
-        // This fixes tracking desync where blocks remain in CPeerManager after chunk cancellation
-        // Use GetBlocksInFlight() to get all blocks, then remove ones for this peer
-        std::vector<std::pair<uint256, int>> all_blocks = m_peer_manager->GetBlocksInFlight();
-        for (const auto& block_entry : all_blocks) {
-            if (block_entry.second == peer_id) {
-                m_peer_manager->RemoveBlockFromFlight(block_entry.first);
-                cpmanager_blocks_removed++;
-            }
-        }
-        
-        // Also clean up mapPeerBlocks
-        mapPeerBlocks.erase(peer_id);
-        std::cout << "[Chunk] IBD STUCK FIX #1: Removed " << blocks_removed 
-                  << " blocks from CBlockFetcher and " << cpmanager_blocks_removed
-                  << " blocks from CPeerManager for peer " << peer_id 
-                  << " (nBlocksInFlight decremented)" << std::endl;
-    }
-
-    // Remove the chunk from active chunks (moved to cancelled)
-    mapActiveChunks.erase(it);
-
-    std::cout << "[Chunk] Cancelled chunk - peer " << peer_id << " now free for new assignment" << std::endl;
-    std::cout << "[Chunk] Heights " << chunk.height_start << "-" << chunk.height_end
-              << " cleared and available for immediate reassignment" << std::endl;
-
-    return true;
-}
-
-void CBlockFetcher::CleanupCancelledChunks()
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    auto now = std::chrono::steady_clock::now();
-    std::vector<NodeId> to_remove;
-
-    for (const auto& [peer_id, cancelled] : mapCancelledChunks) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - cancelled.cancelled_time);
-
-        if (elapsed.count() >= CANCELLED_CHUNK_GRACE_PERIOD_SECONDS) {
-            // Grace period expired - remove cancelled chunk entry
-            // STALL FIX: Heights already cleared in CancelStalledChunk, just log and remove
-            std::cout << "[Chunk] Grace period expired for cancelled chunk "
-                      << cancelled.chunk.height_start << "-" << cancelled.chunk.height_end
-                      << " from peer " << peer_id
-                      << " (received " << cancelled.chunk.blocks_received << "/"
-                      << cancelled.chunk.ChunkSize() << " blocks during grace period)" << std::endl;
-
-            to_remove.push_back(peer_id);
-        }
-    }
-
-    // Remove expired cancelled chunks
-    for (NodeId peer_id : to_remove) {
-        mapCancelledChunks.erase(peer_id);
-    }
-}
-
-void CBlockFetcher::CleanupUnsuitablePeers()
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    if (!m_peer_manager) {
-        return;
-    }
-
-    // BUG #165 FIX: Clean up mapBlocksInFlight entries from unsuitable peers
-    // When a peer becomes unsuitable (stall count too high), their in-flight entries
-    // become zombie entries that block the system. Clean them up proactively.
-
-    // Find all unsuitable peers that have entries in mapBlocksInFlight
-    std::set<NodeId> unsuitable_peers_with_entries;
-    for (const auto& entry : mapBlocksInFlight) {
-        NodeId peer_id = entry.second.peer;
-        if (!m_peer_manager->IsPeerSuitableForDownload(peer_id)) {
-            unsuitable_peers_with_entries.insert(peer_id);
-        }
-    }
-
-    if (unsuitable_peers_with_entries.empty()) {
-        return;
-    }
-
-    // Clean up entries for each unsuitable peer
-    for (NodeId peer_id : unsuitable_peers_with_entries) {
-        int local_removed = 0;
-        int cpmanager_removed = 0;
-
-        // Remove from CBlockFetcher::mapBlocksInFlight
-        for (auto it = mapBlocksInFlight.begin(); it != mapBlocksInFlight.end(); ) {
-            if (it->second.peer == peer_id) {
-                // Also remove from CPeerManager
-                m_peer_manager->RemoveBlockFromFlight(it->first);
-                it = mapBlocksInFlight.erase(it);
-                local_removed++;
-            } else {
-                ++it;
-            }
-        }
-
-        // Clean up mapPeerBlocks
-        mapPeerBlocks.erase(peer_id);
-
-        // Also clean up any remaining entries in CPeerManager (may have entries we don't track locally)
-        std::vector<std::pair<uint256, int>> all_blocks = m_peer_manager->GetBlocksInFlight();
-        for (const auto& block_entry : all_blocks) {
-            if (block_entry.second == peer_id) {
-                m_peer_manager->RemoveBlockFromFlight(block_entry.first);
-                cpmanager_removed++;
-            }
-        }
-
-        if (local_removed > 0 || cpmanager_removed > 0) {
-            std::cout << "[BUG #165 FIX] Cleaned up " << local_removed << " local + "
-                      << cpmanager_removed << " CPeerManager entries for unsuitable peer " << peer_id
-                      << std::endl;
-        }
-
-        // BUG #166 FIX: Clear the peer's vBlocksInFlight and reset stall count
-        // This is critical! Even if mapBlocksInFlight cleanup worked, vBlocksInFlight may have
-        // orphaned entries due to desync. Clearing vBlocksInFlight stops CheckForStallingPeers
-        // from timing out stale entries and incrementing stall count forever.
-        // Resetting stall count allows the peer to become suitable again.
-        m_peer_manager->ClearPeerInFlightState(peer_id);
-
-        // Also cancel their active chunk if they have one
-        auto chunk_it = mapActiveChunks.find(peer_id);
-        if (chunk_it != mapActiveChunks.end()) {
-            std::cout << "[BUG #165 FIX] Cancelling chunk " << chunk_it->second.height_start
-                      << "-" << chunk_it->second.height_end << " from unsuitable peer " << peer_id
-                      << std::endl;
-
-            // Mark heights as pending for re-request
-            if (m_window_initialized) {
-                for (int h = chunk_it->second.height_start; h <= chunk_it->second.height_end; h++) {
-                    if (!m_download_window.IsReceived(h)) {
-                        m_download_window.MarkAsPending(h);
-                    }
-                }
-            }
-
-            // Erase height mappings
-            for (int h = chunk_it->second.height_start; h <= chunk_it->second.height_end; h++) {
-                mapHeightToPeer.erase(h);
-            }
-
-            mapActiveChunks.erase(chunk_it);
-        }
-    }
-}
-
-void CBlockFetcher::UpdateChunkActivity(NodeId peer_id)
-{
-    // BUG #155 FIX: Update last_activity after sending GETDATA
-    // This prevents false stall detection when network is slow
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-    auto it = mapActiveChunks.find(peer_id);
-    if (it != mapActiveChunks.end()) {
-        it->second.last_activity = std::chrono::steady_clock::now();
-        std::cout << "[Chunk] Updated activity timer for peer " << peer_id
-                  << " chunk " << it->second.height_start << "-" << it->second.height_end << std::endl;
-    }
-}
-
-NodeId CBlockFetcher::GetPeerForHeight(int height) const
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    auto it = mapHeightToPeer.find(height);
-    if (it != mapHeightToPeer.end()) {
-        return it->second;
-    }
-    return -1;
-}
-
-const PeerChunk* CBlockFetcher::GetPeerChunk(NodeId peer_id) const
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    auto it = mapActiveChunks.find(peer_id);
-    if (it != mapActiveChunks.end()) {
-        return &it->second;
-    }
-    return nullptr;
-}
-
-std::string CBlockFetcher::GetChunkStatus() const
-{
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    std::ostringstream ss;
-    ss << "Chunk Status:\n";
-    ss << "  Next chunk height: " << nNextChunkHeight << "\n";
-    ss << "  Active chunks: " << mapActiveChunks.size() << "\n";
-    ss << "  Heights assigned: " << mapHeightToPeer.size() << "\n";
-
-    for (const auto& [peer_id, chunk] : mapActiveChunks) {
-        ss << "  Peer " << peer_id << ": heights " << chunk.height_start << "-" << chunk.height_end
-           << " (" << chunk.blocks_received << "/" << chunk.ChunkSize() << " received)\n";
-    }
-
-    return ss.str();
-}
-
-// ============ Phase 3: Moving Window Implementation ============
+// ============ Window Implementation (for backpressure only) ============
 
 void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool force)
 {
@@ -1368,10 +704,8 @@ void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool f
         std::cout << "[Window] Force reinitializing for fork recovery (chain_height=" << chain_height << ")" << std::endl;
         // Clear all in-flight blocks to start fresh from fork point
         mapBlocksInFlight.clear();
-        // Clear chunk assignments
-        mapActiveChunks.clear();
-        mapHeightToPeer.clear();
-        mapCancelledChunks.clear();
+        mapBlocksInFlightByHeight.clear();
+        mapPeerBlocksInFlightByHeight.clear();
     }
 
     // IBD Redesign Phase 4: Initialize CBlockTracker as PRIMARY
@@ -1380,10 +714,9 @@ void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool f
         std::cout << "[IBD] CBlockTracker initialized: " << g_node_context.block_tracker->GetStatus() << std::endl;
     }
 
-    // Legacy: Keep old systems in sync for now (will be removed in Phase 5)
+    // Initialize window for backpressure
     m_download_window.Initialize(chain_height, target_height);
     m_window_initialized = true;
-    nNextChunkHeight = chain_height + 1;
 
     std::cout << "[Window] Initialized: " << m_download_window.GetStatus() << std::endl;
 }
@@ -1476,11 +809,10 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
         return false;
     };
 
-    // IBD STUCK FIX #6: Check if height is assigned to a peer (in-flight via chunk system)
-    // This uses mapHeightToPeer to determine if a height is currently being fetched
+    // Check if height is in-flight (per-block tracking)
     auto is_height_in_flight = [this](int h) -> bool {
         // Note: cs_fetcher already held by caller
-        return mapHeightToPeer.count(h) > 0;
+        return mapBlocksInFlightByHeight.count(h) > 0;
     };
 
     // BUG #162 FIX: Check if height is connected to the chain
@@ -1509,13 +841,10 @@ void CBlockFetcher::AddHeightsToWindowPending(const std::vector<int>& heights)
         return;
     }
 
-    // IBD SLOW FIX #3: Add heights to window's pending set
-    // This synchronizes QueueMissingBlocks() with the window system
-    // IBD FIX: Skip heights that are already assigned to peers (in mapHeightToPeer)
-    // These heights are in-flight and should not be added back to m_pending
+    // Add heights to window's pending set (skip those already in-flight)
     for (int h : heights) {
-        if (mapHeightToPeer.count(h) > 0) {
-            // Height is assigned to a peer - don't add to pending
+        if (mapBlocksInFlightByHeight.count(h) > 0) {
+            // Height is already in-flight - don't add to pending
             continue;
         }
         m_download_window.AddToPending(h);
@@ -1796,16 +1125,5 @@ int CBlockFetcher::GetPeerBlocksInFlight(NodeId peer_id) const
 bool CBlockFetcher::IsHeightInFlight(int height) const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    // Check per-block tracking
-    if (mapBlocksInFlightByHeight.count(height) > 0) {
-        return true;
-    }
-
-    // Check legacy chunk tracking
-    if (mapHeightToPeer.count(height) > 0) {
-        return true;
-    }
-
-    return false;
+    return mapBlocksInFlightByHeight.count(height) > 0;
 }
