@@ -571,6 +571,16 @@ bool CHeadersManager::HaveHeader(const uint256& hash) const
     return mapHeaders.find(hash) != mapHeaders.end();
 }
 
+int CHeadersManager::GetHeightForHash(const uint256& hash) const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    auto it = mapHeaders.find(hash);
+    if (it != mapHeaders.end()) {
+        return it->second.height;
+    }
+    return -1;  // Not found
+}
+
 std::vector<uint256> CHeadersManager::GetHeadersAtHeight(int height) const
 {
     std::lock_guard<std::mutex> lock(cs_headers);

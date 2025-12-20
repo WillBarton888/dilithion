@@ -1931,11 +1931,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             uint256 blockHash;
             if (skipPoWCheck && g_node_context.headers_manager) {
                 // IBD OPTIMIZATION: Look up hash from headers instead of computing
-                // 1. Find parent to get our height
+                // Try chainstate first, then headers manager for parent lookup
+                int expectedHeight = -1;
+
+                // 1a. Try chainstate for parent
                 CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
                 if (pParent) {
-                    int expectedHeight = pParent->nHeight + 1;
-                    // 2. Look up our hash from headers manager
+                    expectedHeight = pParent->nHeight + 1;
+                } else {
+                    // 1b. Try headers manager for parent height
+                    expectedHeight = g_node_context.headers_manager->GetHeightForHash(block.hashPrevBlock);
+                    if (expectedHeight >= 0) {
+                        expectedHeight += 1;  // Our height is parent + 1
+                    }
+                }
+
+                // 2. Look up our hash from headers manager
+                if (expectedHeight > 0) {
                     blockHash = g_node_context.headers_manager->GetRandomXHashAtHeight(expectedHeight);
                     if (!blockHash.IsNull()) {
                         std::cout << "[BLOCK-HANDLER] Hash from headers (height " << expectedHeight << "): "

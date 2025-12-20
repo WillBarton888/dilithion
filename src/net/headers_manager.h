@@ -284,6 +284,17 @@ public:
     bool HaveHeader(const uint256& hash) const;
 
     /**
+     * @brief Get height for a given block hash (IBD optimization)
+     *
+     * Reverse lookup: given a RandomX hash, return the block height.
+     * Used to identify incoming blocks by looking up their parent's height.
+     *
+     * @param hash RandomX hash of the block
+     * @return Height of block, or -1 if not found
+     */
+    int GetHeightForHash(const uint256& hash) const;
+
+    /**
      * @brief Get all headers at a specific height (for fork detection)
      *
      * @param height Block height
