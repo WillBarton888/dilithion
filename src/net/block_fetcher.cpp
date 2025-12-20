@@ -1069,6 +1069,8 @@ bool CBlockFetcher::CancelStalledChunk(NodeId peer_id)
 
     // IBD WINDOW FIX: Reset nNextChunkHeight if cancelled chunk is below current position
     // This prevents the window from advancing past undelivered blocks
+    std::cout << "[Chunk] WINDOW CHECK: chunk.height_start=" << chunk.height_start
+              << " nNextChunkHeight=" << nNextChunkHeight << std::endl;
     if (chunk.height_start < nNextChunkHeight) {
         std::cout << "[Chunk] WINDOW FIX: Resetting nNextChunkHeight from " << nNextChunkHeight
                   << " to " << chunk.height_start << " (cancelled chunk start)" << std::endl;
