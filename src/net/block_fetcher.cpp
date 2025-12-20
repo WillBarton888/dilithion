@@ -932,7 +932,8 @@ std::vector<std::pair<NodeId, PeerChunk>> CBlockFetcher::CheckStalledChunks()
 
     // IBD STALL FIX: Maximum time a chunk can have blocks in-flight without progress
     // This catches peers that have blocks in-flight but send wrong blocks
-    static constexpr int MAX_IN_FLIGHT_SECONDS = 60;
+    // Reduced from 60s to 20s for faster recovery from non-delivering peers
+    static constexpr int MAX_IN_FLIGHT_SECONDS = 20;
 
     for (const auto& [peer_id, chunk] : mapActiveChunks) {
         if (chunk.IsComplete()) {
