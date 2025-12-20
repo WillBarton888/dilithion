@@ -46,7 +46,7 @@ typedef int NodeId;
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
 static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16; ///< Bitcoin Core: max individual blocks per peer
-static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 3;     ///< Per-block stall timeout (Bitcoin Core: 2s, we use 3s for cross-region)
+static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 15;    ///< Per-block stall timeout (increased for cross-region latency)
 
 // Legacy chunk constants (to be removed after migration)
 static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
