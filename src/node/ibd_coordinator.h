@@ -80,7 +80,6 @@ private:
     double GetDownloadRateMultiplier() const;  // IBD HANG FIX #1: Gradual backpressure (0.0-1.0)
     void HandleNoPeers(std::chrono::steady_clock::time_point now);
     void DownloadBlocks(int header_height, int chain_height, std::chrono::steady_clock::time_point now);
-    void QueueMissingBlocks(int chain_height, int blocks_to_queue);
     bool FetchBlocks();
     void RetryTimeoutsAndStalls();
 
@@ -93,7 +92,6 @@ private:
         NONE,
         VALIDATION_QUEUE_FULL,
         NO_PEERS_AVAILABLE,
-        WINDOW_EMPTY,
         PEERS_AT_CAPACITY
     };
     HangCause GetLastHangCause() const { return m_last_hang_cause; }

@@ -806,21 +806,13 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
         nBlocksReceivedTotal++;
         lastBlockReceived = std::chrono::steady_clock::now();
 
-        // Update window
-        if (m_window_initialized && height > 0) {
-            m_download_window.OnBlockReceived(height);
-        }
-
+        // No window tracking needed - pure per-block model
         std::cout << "[PerBlock] Height " << height << " received" << std::endl;
         return first_peer;
     }
 
     // ============ Legacy Chunk Tracking (fallback) ============
-
-    // Update download window tracking (even if height not in chunk)
-    if (m_window_initialized && height > 0) {
-        m_download_window.OnBlockReceived(height);
-    }
+    // This path is for blocks not tracked in per-block system
 
     // IBD Redesign Phase 3: Shadow-track with CBlockTracker
     if (g_node_context.block_tracker) {
@@ -1600,34 +1592,30 @@ bool CBlockFetcher::UpdateWindowTarget(int new_target_height)
 
 // ============ Per-Block Download API (Bitcoin Core Style) ============
 
-std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks)
+std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks, int chain_height, int header_height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
     std::vector<int> result;
     result.reserve(max_blocks);
 
-    // Get pending heights from window
-    if (!m_window_initialized) {
-        return result;
+    // Pure per-block: no window, just iterate from chain_height+1 to header_height
+    // Limit total in-flight to prevent requesting too far ahead
+    static constexpr int MAX_TOTAL_IN_FLIGHT = 128;
+    int total_in_flight = static_cast<int>(mapBlocksInFlightByHeight.size());
+
+    if (total_in_flight >= MAX_TOTAL_IN_FLIGHT) {
+        return result;  // Already have enough in-flight
     }
 
-    // Get all pending heights (not just consecutive)
-    auto pending = m_download_window.GetNextPendingHeights(max_blocks * 2);  // Get more to filter
+    int available_slots = MAX_TOTAL_IN_FLIGHT - total_in_flight;
+    int blocks_to_get = std::min(max_blocks, available_slots);
 
-    for (int h : pending) {
-        if (static_cast<int>(result.size()) >= max_blocks) break;
-
-        // Skip if already in-flight (per-block tracking)
+    for (int h = chain_height + 1; h <= header_height && static_cast<int>(result.size()) < blocks_to_get; h++) {
+        // Skip if already in-flight
         if (mapBlocksInFlightByHeight.count(h) > 0) {
             continue;
         }
-
-        // Skip if already in-flight (legacy chunk tracking)
-        if (mapHeightToPeer.count(h) > 0) {
-            continue;
-        }
-
         result.push_back(h);
     }
 
@@ -1672,10 +1660,7 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
     mapBlocksInFlightByHeight[height] = BlockInFlightByHeight(height, hash, peer_id);
     mapPeerBlocksInFlightByHeight[peer_id].insert(height);
 
-    // Update window state
-    m_download_window.MarkAsInFlight({height});
-
-    // Notify CPeerManager
+    // Notify CPeerManager (no window tracking needed - pure per-block)
     if (m_peer_manager) {
         m_peer_manager->MarkBlockAsInFlight(peer_id, hash, nullptr);
     }
@@ -1718,10 +1703,7 @@ bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
     // Remove from per-block tracking
     mapBlocksInFlightByHeight.erase(it);
 
-    // Update window state
-    m_download_window.OnBlockReceived(height);
-
-    // Notify CPeerManager - mark received from delivering peer
+    // Notify CPeerManager - mark received from delivering peer (no window needed)
     if (m_peer_manager) {
         m_peer_manager->MarkBlockAsReceived(peer_id, hash);
     }

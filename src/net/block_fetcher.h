@@ -818,15 +818,17 @@ public:
     // ============ Per-Block Download API (Bitcoin Core Style) ============
 
     /**
-     * @brief Get next blocks that need to be requested (per-block model)
+     * @brief Get next blocks that need to be requested (pure per-block model)
      *
-     * Returns heights from the pending set that are not already in-flight.
-     * Unlike GetNextChunkHeights(), this returns ANY pending heights, not just consecutive.
+     * Returns heights from chain_height+1 to header_height that are not already in-flight.
+     * No window abstraction - directly iterates through heights we need.
      *
      * @param max_blocks Maximum blocks to return
+     * @param chain_height Current chain tip height
+     * @param header_height Best known header height
      * @return Vector of heights ready for download
      */
-    std::vector<int> GetNextBlocksToRequest(int max_blocks);
+    std::vector<int> GetNextBlocksToRequest(int max_blocks, int chain_height, int header_height);
 
     /**
      * @brief Request a block from a specific peer (per-block model)

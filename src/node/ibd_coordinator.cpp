@@ -276,50 +276,14 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     }
     s_last_chain_height = chain_height;
 
-    // IBD DEBUG: Before window check
-    std::cerr << "[IBD-DEBUG] DownloadBlocks: checking window initialization..." << std::endl;
-
-    // Phase 3: Initialize the 1024-block sliding window for IBD
-    if (!m_node_context.block_fetcher->IsWindowInitialized()) {
-        std::cerr << "[IBD-DEBUG] DownloadBlocks: calling InitializeWindow..." << std::endl;
-        m_node_context.block_fetcher->InitializeWindow(chain_height, header_height);
-        std::cerr << "[IBD-DEBUG] DownloadBlocks: InitializeWindow returned" << std::endl;
-        LogPrintIBD(INFO, "Initialized download window: %s", m_node_context.block_fetcher->GetWindowStatus().c_str());
-    } else {
-        std::cerr << "[IBD-DEBUG] DownloadBlocks: window already initialized, updating target..." << std::endl;
-        // IBD HANG FIX #15: Update window target as new headers arrive
-        // Without this, the window becomes "complete" when header_height grows past initial target
-        m_node_context.block_fetcher->UpdateWindowTarget(header_height);
-    }
-
     // IBD HANG FIX #1: Apply gradual backpressure rate multiplier
     // Reduces request rate gradually as validation queue fills, preventing binary stop/resume cycle
     double rate_multiplier = GetDownloadRateMultiplier();
-    
-    // IBD BOTTLENECK FIX #4: Match queue size to request rate for better pipeline utilization
-    // Previously queued up to 1024 blocks but only requested 16 per peer per tick
-    // Now queues in smaller batches that match request capacity, keeping pipeline full
-    // Get peer count for sizing
-    size_t peer_count = m_node_context.peer_manager ? m_node_context.peer_manager->GetConnectionCount() : 1;
-    int expected_peers = static_cast<int>(peer_count);
-    int base_blocks_to_queue = std::min(MAX_BLOCKS_PER_CHUNK * std::max(1, expected_peers * 2), 
-                                        header_height - chain_height);
-    base_blocks_to_queue = std::min(base_blocks_to_queue, BLOCK_DOWNLOAD_WINDOW_SIZE);  // Cap at window size
-    
-    // Apply rate multiplier for gradual backpressure
-    int blocks_to_queue = static_cast<int>(base_blocks_to_queue * rate_multiplier);
-    blocks_to_queue = std::max(1, blocks_to_queue);  // Always queue at least 1 block
-    
-    if (rate_multiplier < 1.0) {
-        LogPrintIBD(INFO, "Queueing %d blocks for download (peers=%d, rate=%.0f%%)...", 
-                    blocks_to_queue, expected_peers, rate_multiplier * 100.0);
-    } else {
-        LogPrintIBD(INFO, "Queueing %d blocks for download (peers=%d)...", blocks_to_queue, expected_peers);
-    }
 
-    BENCHMARK_START("ibd_queue_blocks");
-    QueueMissingBlocks(chain_height, blocks_to_queue);
-    BENCHMARK_END("ibd_queue_blocks");
+    // PURE PER-BLOCK: No more window or queue population needed
+    // GetNextBlocksToRequest() directly iterates from chain_height+1 to header_height
+    LogPrintIBD(INFO, "Downloading blocks (chain=%d, header=%d, rate=%.0f%%)...",
+                chain_height, header_height, rate_multiplier * 100.0);
 
     BENCHMARK_START("ibd_fetch_blocks");
     bool any_requested = FetchBlocks();
@@ -331,7 +295,6 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         switch (m_last_hang_cause) {
             case HangCause::VALIDATION_QUEUE_FULL: cause_str = "validation queue full"; break;
             case HangCause::NO_PEERS_AVAILABLE: cause_str = "no peers available"; break;
-            case HangCause::WINDOW_EMPTY: cause_str = "window empty (no pending heights)"; break;
             case HangCause::PEERS_AT_CAPACITY: cause_str = "all peers at capacity"; break;
             case HangCause::NONE: cause_str = "no suitable peers"; break;
         }
@@ -450,59 +413,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     std::cerr << "[IBD-DEBUG] DownloadBlocks complete" << std::endl;
 }
 
-void CIbdCoordinator::QueueMissingBlocks(int chain_height, int blocks_to_queue) {
-    if (!m_node_context.headers_manager || !m_node_context.block_fetcher) {
-        return;
-    }
-
-    // IBD SLOW FIX #1: Collect heights to add to window's pending set
-    // Previously only added to old priority queue, causing window/queue disconnect
-    std::vector<int> heights_to_add;
-    heights_to_add.reserve(blocks_to_queue);
-
-    for (int h = chain_height + 1; h <= chain_height + blocks_to_queue; h++) {
-        // IBD OPTIMIZATION: Use GetRandomXHashAtHeight to get the hash for block requests
-        // During IBD, headers are stored by FastHash, but GETDATA needs RandomX hash
-        uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-        if (hash.IsNull()) {
-            continue;  // No header at this height
-        }
-
-        // IBD SLOW FIX #7: Check if block is CONNECTED, not just if we have an index
-        // During async validation, BlockIndex is created before validation completes
-        CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
-        if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-            continue;  // Block is actually connected to chain - skip
-        }
-
-        // BUG #160 FIX: Check BLOCK_HAVE_DATA instead of HasBlockIndex
-        // Headers-first sync creates index WITHOUT data, so HasBlockIndex returns true
-        // but block still needs to be downloaded. Only skip download if we have actual data.
-        // Without this fix, blocks with header-only index were skipped, causing IBD stall.
-        bool has_data = pindex && (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA);
-
-        if (has_data) {
-            // BUG #160 FIX (COMPLETE): Block data exists but not connected (pending validation or orphan)
-            // Mark as RECEIVED in window, NOT pending - these blocks don't need re-download
-            // Previously incorrectly added to heights_to_add which went to pending set, causing IBD stall
-            m_node_context.block_fetcher->OnWindowBlockReceived(h);
-            LogPrintIBD(DEBUG, "Block %s... at height %d has data, marked as received", hash.GetHex().substr(0, 16).c_str(), h);
-        } else if (!m_node_context.block_fetcher->IsQueued(hash) &&
-                   !m_node_context.block_fetcher->IsDownloading(hash)) {
-            // No data (header-only or no index) - queue for download
-            m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
-            heights_to_add.push_back(h);
-            LogPrintIBD(DEBUG, "Queued block %s... at height %d for download", hash.GetHex().substr(0, 16).c_str(), h);
-        }
-    }
-
-    // IBD SLOW FIX #1: Add heights to window's pending set
-    // This ensures GetWindowPendingHeights() has heights available
-    if (!heights_to_add.empty() && m_node_context.block_fetcher->IsWindowInitialized()) {
-        m_node_context.block_fetcher->AddHeightsToWindowPending(heights_to_add);
-        LogPrintIBD(DEBUG, "Added %zu heights to window pending set", heights_to_add.size());
-    }
-}
+// QueueMissingBlocks REMOVED - pure per-block model uses GetNextBlocksToRequest() directly
 
 bool CIbdCoordinator::FetchBlocks() {
     if (!m_node_context.block_fetcher || !m_node_context.message_processor ||
@@ -556,10 +467,10 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // Get next blocks to request (up to peer's remaining capacity)
-        std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(peer_capacity);
+        // Pure per-block: pass chain and header heights directly
+        std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(peer_capacity, chain_height, header_height);
         if (blocks_to_request.empty()) {
-            m_last_hang_cause = HangCause::WINDOW_EMPTY;
-            break;  // No more blocks to request
+            break;  // All blocks either connected or in-flight
         }
 
         // Filter and build GETDATA
@@ -605,9 +516,10 @@ bool CIbdCoordinator::FetchBlocks() {
                       << " (peer now has " << m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id)
                       << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << " in-flight)" << std::endl;
 
-            LogPrintIBD(INFO, "Requested %zu blocks from peer %d [%s]",
+            LogPrintIBD(INFO, "Requested %zu blocks from peer %d (in-flight=%d/%d)",
                         getdata.size(), peer_id,
-                        m_node_context.block_fetcher->GetWindowStatus().c_str());
+                        m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id),
+                        MAX_BLOCKS_IN_TRANSIT_PER_PEER);
         }
     }
 
@@ -849,36 +761,11 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
         }
     }
 
-    // Reset the IBD window to start from fork_point + 1
-    // This will cause blocks to be downloaded starting from the divergence point
-    int header_height = m_node_context.headers_manager ?
-                        m_node_context.headers_manager->GetBestHeight() : chain_height;
-
-    // BUG #159 FIX: Force reinitialize the window starting from fork point
-    // Pass fork_point as chain_height so nNextChunkHeight = fork_point + 1
-    m_node_context.block_fetcher->InitializeWindow(fork_point, header_height, true);
-
-    // Queue blocks for download starting from fork point + 1
-    int blocks_to_queue = std::min(header_height - fork_point, 1024);
-
-    std::vector<int> heights_to_add;
-    heights_to_add.reserve(blocks_to_queue);
-
-    for (int h = fork_point + 1; h <= fork_point + blocks_to_queue && h <= header_height; h++) {
-        uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-        if (!hash.IsNull()) {
-            // Queue block for download
-            m_node_context.block_fetcher->QueueBlockForDownload(hash, h, false);
-            heights_to_add.push_back(h);
-        }
-    }
-
-    // Add heights to window's pending set
-    if (!heights_to_add.empty()) {
-        m_node_context.block_fetcher->AddHeightsToWindowPending(heights_to_add);
-        std::cout << "[FORK-RECOVERY] Queued " << heights_to_add.size()
-                  << " blocks for download starting at height " << (fork_point + 1) << std::endl;
-    }
+    // PURE PER-BLOCK: Just clear in-flight tracking above fork point
+    // Next FetchBlocks() call will automatically start downloading from fork_point + 1
+    // (GetNextBlocksToRequest iterates from chain_height+1 which is now fork_point+1)
+    std::cout << "[FORK-RECOVERY] Cleared state, downloads will resume from height "
+              << (fork_point + 1) << std::endl;
 
     // Reset fork detection state
     m_fork_detected = true;
