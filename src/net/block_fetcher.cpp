@@ -779,24 +779,27 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
     // Check if this block was tracked in the per-block system
     auto perblock_it = mapBlocksInFlightByHeight.find(height);
     if (perblock_it != mapBlocksInFlightByHeight.end()) {
-        NodeId peer = perblock_it->second.peer;
         uint256 hash = perblock_it->second.hash;
+        const std::set<NodeId>& all_peers = perblock_it->second.peers;
+        NodeId first_peer = all_peers.empty() ? -1 : *all_peers.begin();
+
+        // PARALLEL DOWNLOAD: Remove from ALL peers' tracking
+        for (NodeId p : all_peers) {
+            auto peer_it = mapPeerBlocksInFlightByHeight.find(p);
+            if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+                peer_it->second.erase(height);
+                if (peer_it->second.empty()) {
+                    mapPeerBlocksInFlightByHeight.erase(peer_it);
+                }
+            }
+        }
 
         // Remove from per-block tracking
         mapBlocksInFlightByHeight.erase(perblock_it);
 
-        // Remove from peer's set
-        auto peer_it = mapPeerBlocksInFlightByHeight.find(peer);
-        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-            peer_it->second.erase(height);
-            if (peer_it->second.empty()) {
-                mapPeerBlocksInFlightByHeight.erase(peer_it);
-            }
-        }
-
         // Notify CPeerManager
-        if (m_peer_manager) {
-            m_peer_manager->MarkBlockAsReceived(peer, hash);
+        if (m_peer_manager && first_peer >= 0) {
+            m_peer_manager->MarkBlockAsReceived(first_peer, hash);
         }
 
         // Update stats
@@ -808,8 +811,8 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
             m_download_window.OnBlockReceived(height);
         }
 
-        std::cout << "[PerBlock] Height " << height << " received from peer " << peer << std::endl;
-        return peer;
+        std::cout << "[PerBlock] Height " << height << " received (" << all_peers.size() << " peers tracking)" << std::endl;
+        return first_peer;
     }
 
     // ============ Legacy Chunk Tracking (fallback) ============
