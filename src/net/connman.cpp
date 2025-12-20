@@ -36,8 +36,18 @@
 #include <ifaddrs.h>
 #endif
 
+#include <atomic>
+
 // Socket timeout for select() in milliseconds
 static constexpr int SELECT_TIMEOUT_MS = 50;
+
+// BLOCK PIPELINE COUNTERS - Track exactly where blocks are lost
+static std::atomic<int> g_blocks_extracted{0};        // Step 1: Extracted from TCP
+static std::atomic<int> g_blocks_pushed_to_node{0};   // Step 2: Pushed to node's vProcessMsg
+static std::atomic<int> g_blocks_popped_from_node{0}; // Step 3: Popped from vProcessMsg
+static std::atomic<int> g_blocks_routed_to_queue{0};  // Step 4: Pushed to m_blocks_queue
+static std::atomic<int> g_blocks_worker_received{0};  // Step 5: Popped by BlocksWorkerThread
+static std::atomic<int> g_blocks_processed{0};        // Step 6: ProcessQueuedMessage returned
 
 CConnman::CConnman() = default;
 
@@ -578,6 +588,10 @@ void CConnman::ThreadMessageHandler() {
                 int msgs_from_this_node = 0;
                 CProcessedMsg processed_msg;
                 while (node->PopProcessMsg(processed_msg)) {
+                    // PIPELINE COUNTER: Step 3 - Block popped from node's vProcessMsg
+                    if (processed_msg.command == "block") {
+                        g_blocks_popped_from_node++;
+                    }
                     pending_messages.push_back({node->id, std::move(processed_msg)});
                     msgs_from_this_node++;
 
@@ -627,6 +641,8 @@ void CConnman::ThreadMessageHandler() {
                 }
                 m_blocks_cv.notify_one();
                 blocks_queued++;
+                // PIPELINE COUNTER: Step 4 - Block pushed to m_blocks_queue
+                g_blocks_routed_to_queue++;
             }
             else {
                 // Control messages: process inline (fast - version, verack, ping, pong, inv, getdata, etc.)
@@ -768,16 +784,28 @@ void CConnman::BlocksWorkerThread() {
             m_blocks_queue.pop();
         }
 
+        // PIPELINE COUNTER: Step 5 - Block popped by BlocksWorkerThread
+        g_blocks_worker_received++;
+
         // Process block message
         LogPrintf(NET, DEBUG, "[BlocksWorker] Processing block from node %d\n", msg.node_id);
         auto start = std::chrono::steady_clock::now();
 
         bool success = ProcessQueuedMessage(msg);
 
+        // PIPELINE COUNTER: Step 6 - Block processed
+        g_blocks_processed++;
+
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count();
         LogPrintf(NET, DEBUG, "[BlocksWorker] Processed block from node %d in %lld ms (success=%d)\n",
                   msg.node_id, elapsed, success);
+
+        // PIPELINE COUNTER SUMMARY - Log every block to find where they drop
+        LogPrintf(NET, INFO, "[PIPELINE] extracted=%d pushed=%d popped=%d routed=%d worker=%d processed=%d\n",
+                  g_blocks_extracted.load(), g_blocks_pushed_to_node.load(),
+                  g_blocks_popped_from_node.load(), g_blocks_routed_to_queue.load(),
+                  g_blocks_worker_received.load(), g_blocks_processed.load());
     }
 
     LogPrintf(NET, INFO, "[CConnman] BlocksWorkerThread stopped\n");
@@ -1344,8 +1372,18 @@ void CConnman::ExtractMessages(CNode* pnode) {
         std::cout << "[EXTRACT-PUSHED] node=" << pnode->id << " cmd=" << command
                   << " payload_size=" << header.payload_size << std::endl;
 
+        // PIPELINE COUNTER: Step 1 - Block extracted from TCP
+        if (command == "block") {
+            g_blocks_extracted++;
+        }
+
         CProcessedMsg processed_msg(std::move(command), std::move(payload));
         pnode->PushProcessMsg(std::move(processed_msg));
+
+        // PIPELINE COUNTER: Step 2 - Block pushed to node's vProcessMsg
+        if (command == "block") {
+            g_blocks_pushed_to_node++;
+        }
     }
 }
 
