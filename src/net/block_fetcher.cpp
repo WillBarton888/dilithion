@@ -1660,7 +1660,7 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
 
     // Notify CPeerManager
     if (m_peer_manager) {
-        m_peer_manager->MarkBlockAsInFlight(peer_id, hash);
+        m_peer_manager->MarkBlockAsInFlight(peer_id, hash, nullptr);
     }
 
     std::cout << "[PerBlock] Requested height " << height << " from peer " << peer_id
