@@ -811,7 +811,7 @@ NodeId CBlockFetcher::OnChunkBlockReceived(int height)
             m_download_window.OnBlockReceived(height);
         }
 
-        std::cout << "[PerBlock] Height " << height << " received (" << all_peers.size() << " peers tracking)" << std::endl;
+        std::cout << "[PerBlock] Height " << height << " received" << std::endl;
         return first_peer;
     }
 
@@ -1743,6 +1743,11 @@ std::vector<std::pair<int, NodeId>> CBlockFetcher::GetStalledBlocks(std::chrono:
     auto now = std::chrono::steady_clock::now();
 
     for (const auto& [height, info] : mapBlocksInFlightByHeight) {
+        // Only flag blocks with 1 peer - blocks with 2+ peers already have parallel downloads
+        if (info.peers.size() >= 2) {
+            continue;  // Already has parallel download, skip
+        }
+
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - info.first_request_time);
         if (elapsed >= timeout) {
             // Return first peer for logging, but caller should add parallel peer, not requeue
@@ -1752,7 +1757,7 @@ std::vector<std::pair<int, NodeId>> CBlockFetcher::GetStalledBlocks(std::chrono:
     }
 
     if (!stalled.empty()) {
-        std::cout << "[PerBlock] Found " << stalled.size() << " blocks needing parallel download (timeout=" << timeout.count() << "s)" << std::endl;
+        std::cout << "[PerBlock] " << stalled.size() << " blocks need parallel download" << std::endl;
     }
 
     return stalled;
