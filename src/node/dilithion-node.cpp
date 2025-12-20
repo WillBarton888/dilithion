@@ -1925,20 +1925,36 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             int checkpointHeight = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
-            // ALWAYS use canonical RandomX hash for block identity/indexing
-            // GetHash() caches result, so subsequent calls are free
-            std::cout << "[BLOCK-HANDLER] Computing block hash (RandomX)..." << std::endl;
-            std::cout.flush();
-            auto hash_start = std::chrono::steady_clock::now();
-            uint256 blockHash = block.GetHash();
-            auto hash_end = std::chrono::steady_clock::now();
-            auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
-            std::cout << "[BLOCK-HANDLER] Hash computed in " << hash_ms << "ms: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
-            std::cout.flush();
-
             // Skip PoW validation (target check) for blocks below checkpoint
-            // Hash is still computed for identity, just skip the target comparison
             bool skipPoWCheck = (checkpointHeight > 0 && currentChainHeight < checkpointHeight);
+
+            uint256 blockHash;
+            if (skipPoWCheck && g_node_context.headers_manager) {
+                // IBD OPTIMIZATION: Look up hash from headers instead of computing
+                // 1. Find parent to get our height
+                CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+                if (pParent) {
+                    int expectedHeight = pParent->nHeight + 1;
+                    // 2. Look up our hash from headers manager
+                    blockHash = g_node_context.headers_manager->GetRandomXHashAtHeight(expectedHeight);
+                    if (!blockHash.IsNull()) {
+                        std::cout << "[BLOCK-HANDLER] Hash from headers (height " << expectedHeight << "): "
+                                  << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+                    }
+                }
+            }
+
+            // Fallback: compute hash if not found in headers
+            if (blockHash.IsNull()) {
+                std::cout << "[BLOCK-HANDLER] Computing block hash (RandomX)..." << std::endl;
+                std::cout.flush();
+                auto hash_start = std::chrono::steady_clock::now();
+                blockHash = block.GetHash();
+                auto hash_end = std::chrono::steady_clock::now();
+                auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
+                std::cout << "[BLOCK-HANDLER] Hash computed in " << hash_ms << "ms: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cout.flush();
+            }
 
             std::cout << "[P2P] Received block from peer " << peer_id << ": "
                       << blockHash.GetHex().substr(0, 16) << "..."
