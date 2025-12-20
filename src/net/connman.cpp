@@ -1372,18 +1372,16 @@ void CConnman::ExtractMessages(CNode* pnode) {
         std::cout << "[EXTRACT-PUSHED] node=" << pnode->id << " cmd=" << command
                   << " payload_size=" << header.payload_size << std::endl;
 
-        // PIPELINE COUNTER: Step 1 - Block extracted from TCP
-        if (command == "block") {
+        // PIPELINE COUNTER: Step 1 & 2 - Block extracted from TCP and pushed to vProcessMsg
+        // Note: Steps 1 & 2 are atomic (PushProcessMsg is just a vector push)
+        bool is_block = (command == "block");
+        if (is_block) {
             g_blocks_extracted++;
+            g_blocks_pushed_to_node++;
         }
 
         CProcessedMsg processed_msg(std::move(command), std::move(payload));
         pnode->PushProcessMsg(std::move(processed_msg));
-
-        // PIPELINE COUNTER: Step 2 - Block pushed to node's vProcessMsg
-        if (command == "block") {
-            g_blocks_pushed_to_node++;
-        }
     }
 }
 
