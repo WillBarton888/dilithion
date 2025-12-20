@@ -709,6 +709,12 @@ bool CBlockFetcher::AssignChunkToPeer(NodeId peer_id, int height_start, int heig
     auto it = mapActiveChunks.find(peer_id);
     if (it != mapActiveChunks.end() && !it->second.IsComplete()) {
         // Peer already has an active chunk - let other peers take this work
+        // DEBUG: Log why we're rejecting this assignment
+        std::cout << "[AssignChunk-DEBUG] FAIL: Peer " << peer_id
+                  << " has INCOMPLETE active chunk " << it->second.height_start
+                  << "-" << it->second.height_end
+                  << " (pending=" << it->second.blocks_pending
+                  << ", received=" << it->second.blocks_received << ")" << std::endl;
         return false;
     }
 
