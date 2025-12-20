@@ -644,7 +644,7 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
                 // RequestBlockFromPeer will reject if this peer already has it
                 if (m_node_context.block_fetcher->RequestBlockFromPeer(new_peer, height, hash)) {
                     // Send GETDATA to new peer
-                    std::vector<std::pair<NetProtocol::InvType, uint256>> getdata;
+                    std::vector<NetProtocol::CInv> getdata;
                     getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
                     CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
                     m_node_context.connman->PushMessage(new_peer, msg);
