@@ -615,29 +615,47 @@ bool CIbdCoordinator::FetchBlocks() {
 }
 
 void CIbdCoordinator::RetryTimeoutsAndStalls() {
-    if (!m_node_context.block_fetcher || !m_node_context.connman) {
+    if (!m_node_context.block_fetcher || !m_node_context.connman || !m_node_context.headers_manager) {
         return;
     }
 
-    // ============ Per-Block Stall Detection (Bitcoin Core Style) ============
-    // Check for stalled blocks (3 second timeout)
+    // ============ Per-Block PARALLEL DOWNLOAD (Bitcoin Core Style) ============
+    // On stall: request from ANOTHER peer in parallel, don't cancel original
     auto stalled_blocks = m_node_context.block_fetcher->GetStalledBlocks(
         std::chrono::seconds(BLOCK_STALL_TIMEOUT_SECONDS));
 
     if (!stalled_blocks.empty()) {
-        std::cout << "[PerBlock] Detected " << stalled_blocks.size() << " stalled blocks (>"
-                  << BLOCK_STALL_TIMEOUT_SECONDS << "s)" << std::endl;
+        // Get available peers for parallel download
+        std::vector<int> available_peers;
+        if (m_node_context.peer_manager) {
+            available_peers = m_node_context.peer_manager->GetAvailablePeersForIBD();
+        }
 
-        for (const auto& [height, peer_id] : stalled_blocks) {
-            // Requeue the stalled block
-            m_node_context.block_fetcher->RequeueBlock(height);
+        int parallel_started = 0;
+        for (const auto& [height, original_peer] : stalled_blocks) {
+            // Get block hash
+            uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(height);
+            if (hash.IsNull()) continue;
 
-            // Update peer stats (mark as stall)
-            if (m_node_context.peer_manager) {
-                m_node_context.peer_manager->UpdatePeerStats(peer_id, false, std::chrono::milliseconds(0));
+            // Try to add parallel download from a different peer
+            for (int new_peer : available_peers) {
+                if (new_peer == original_peer) continue;  // Skip original peer
+
+                // RequestBlockFromPeer will reject if this peer already has it
+                if (m_node_context.block_fetcher->RequestBlockFromPeer(new_peer, height, hash)) {
+                    // Send GETDATA to new peer
+                    std::vector<std::pair<NetProtocol::InvType, uint256>> getdata;
+                    getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
+                    m_node_context.connman->SendGetData(new_peer, getdata);
+                    parallel_started++;
+                    break;  // One parallel peer is enough
+                }
             }
+        }
 
-            LogPrintIBD(WARN, "Requeued stalled block at height %d from peer %d", height, peer_id);
+        if (parallel_started > 0) {
+            std::cout << "[PerBlock] Started " << parallel_started << " parallel downloads for "
+                      << stalled_blocks.size() << " stalled blocks" << std::endl;
         }
     }
 

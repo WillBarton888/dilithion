@@ -46,7 +46,7 @@ typedef int NodeId;
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
 static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16; ///< Bitcoin Core: max individual blocks per peer
-static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 15;    ///< Per-block stall timeout (increased for cross-region latency)
+static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 2;     ///< Bitcoin Core: 2s stall triggers parallel download (not cancel)
 
 // Legacy chunk constants (to be removed after migration)
 static constexpr int MAX_BLOCKS_PER_CHUNK = 16;          ///< Blocks per chunk (Bitcoin Core: 16)
@@ -1015,19 +1015,28 @@ private:
     /**
      * @struct BlockInFlightByHeight
      * @brief Tracks a block in-flight by its height (per-block model)
+     *
+     * PARALLEL DOWNLOAD: Supports multiple peers per block (Bitcoin Core behavior).
+     * On stall, we request from a SECOND peer while keeping original tracking.
+     * Whichever peer delivers first wins.
      */
     struct BlockInFlightByHeight {
         int height;
         uint256 hash;
-        NodeId peer;
-        std::chrono::steady_clock::time_point requested_time;
+        std::chrono::steady_clock::time_point first_request_time;  ///< When first requested (for stall detection)
+        std::set<NodeId> peers;  ///< All peers we've requested this block from (parallel download)
 
-        BlockInFlightByHeight() : height(0), peer(-1), requested_time(std::chrono::steady_clock::now()) {}
-        BlockInFlightByHeight(int h, const uint256& hsh, NodeId p)
-            : height(h), hash(hsh), peer(p), requested_time(std::chrono::steady_clock::now()) {}
+        BlockInFlightByHeight() : height(0), first_request_time(std::chrono::steady_clock::now()) {}
+        BlockInFlightByHeight(int h, const uint256& hsh, NodeId first_peer)
+            : height(h), hash(hsh), first_request_time(std::chrono::steady_clock::now()) {
+            peers.insert(first_peer);
+        }
+
+        void AddPeer(NodeId peer) { peers.insert(peer); }
+        bool HasPeer(NodeId peer) const { return peers.count(peer) > 0; }
     };
 
-    std::map<int, BlockInFlightByHeight> mapBlocksInFlightByHeight;  ///< Height -> In-flight info (per-block model)
+    std::map<int, BlockInFlightByHeight> mapBlocksInFlightByHeight;  ///< Height -> In-flight info (supports parallel)
     std::map<NodeId, std::set<int>> mapPeerBlocksInFlightByHeight;   ///< Peer -> Set of heights in-flight
 
     // ============ Phase 2: Chunk Tracking State (Legacy - to be removed) ============

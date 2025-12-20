@@ -1639,19 +1639,33 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
     auto peer_it = mapPeerBlocksInFlightByHeight.find(peer_id);
     if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
         if (static_cast<int>(peer_it->second.size()) >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
-            std::cout << "[PerBlock] Peer " << peer_id << " at capacity ("
-                      << peer_it->second.size() << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << ")" << std::endl;
-            return false;
+            return false;  // Peer at capacity
         }
     }
 
     // Check if height already in-flight
-    if (mapBlocksInFlightByHeight.count(height) > 0) {
-        std::cout << "[PerBlock] Height " << height << " already in-flight" << std::endl;
-        return false;
+    auto block_it = mapBlocksInFlightByHeight.find(height);
+    if (block_it != mapBlocksInFlightByHeight.end()) {
+        // PARALLEL DOWNLOAD: Height already in-flight
+        // Check if THIS peer already has it (reject duplicate)
+        if (block_it->second.HasPeer(peer_id)) {
+            return false;  // This peer already downloading this block
+        }
+        // Add this peer as parallel downloader
+        block_it->second.AddPeer(peer_id);
+        mapPeerBlocksInFlightByHeight[peer_id].insert(height);
+
+        // Notify CPeerManager
+        if (m_peer_manager) {
+            m_peer_manager->MarkBlockAsInFlight(peer_id, hash, nullptr);
+        }
+
+        std::cout << "[PerBlock] PARALLEL: Added peer " << peer_id << " for height " << height
+                  << " (now " << block_it->second.peers.size() << " peers)" << std::endl;
+        return true;
     }
 
-    // Add to per-block tracking
+    // First request for this height
     mapBlocksInFlightByHeight[height] = BlockInFlightByHeight(height, hash, peer_id);
     mapPeerBlocksInFlightByHeight[peer_id].insert(height);
 
@@ -1681,34 +1695,39 @@ bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
     }
 
     uint256 hash = it->second.hash;
-    NodeId assigned_peer = it->second.peer;
+    const std::set<NodeId>& all_peers = it->second.peers;
+
+    // PARALLEL DOWNLOAD: Remove from ALL peers' tracking (they were all racing)
+    for (NodeId p : all_peers) {
+        auto peer_it = mapPeerBlocksInFlightByHeight.find(p);
+        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+            peer_it->second.erase(height);
+            if (peer_it->second.empty()) {
+                mapPeerBlocksInFlightByHeight.erase(peer_it);
+            }
+        }
+        // Notify CPeerManager for each peer
+        if (m_peer_manager && p != peer_id) {
+            m_peer_manager->RemoveBlockFromFlight(hash);  // Clean up other peers
+        }
+    }
 
     // Remove from per-block tracking
     mapBlocksInFlightByHeight.erase(it);
 
-    // Remove from peer's set
-    auto peer_it = mapPeerBlocksInFlightByHeight.find(assigned_peer);
-    if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-        peer_it->second.erase(height);
-        if (peer_it->second.empty()) {
-            mapPeerBlocksInFlightByHeight.erase(peer_it);
-        }
-    }
-
     // Update window state
     m_download_window.OnBlockReceived(height);
 
-    // Notify CPeerManager
+    // Notify CPeerManager - mark received from delivering peer
     if (m_peer_manager) {
-        m_peer_manager->MarkBlockAsReceived(assigned_peer, hash);
+        m_peer_manager->MarkBlockAsReceived(peer_id, hash);
     }
 
     // Update stats
     nBlocksReceivedTotal++;
     lastBlockReceived = std::chrono::steady_clock::now();
 
-    std::cout << "[PerBlock] Received height " << height << " from peer " << peer_id
-              << " (expected from peer " << assigned_peer << ")" << std::endl;
+    std::cout << "[PerBlock] Received height " << height << " from peer " << peer_id << std::endl;
 
     return true;
 }
@@ -1721,14 +1740,16 @@ std::vector<std::pair<int, NodeId>> CBlockFetcher::GetStalledBlocks(std::chrono:
     auto now = std::chrono::steady_clock::now();
 
     for (const auto& [height, info] : mapBlocksInFlightByHeight) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - info.requested_time);
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - info.first_request_time);
         if (elapsed >= timeout) {
-            stalled.push_back({height, info.peer});
+            // Return first peer for logging, but caller should add parallel peer, not requeue
+            NodeId first_peer = info.peers.empty() ? -1 : *info.peers.begin();
+            stalled.push_back({height, first_peer});
         }
     }
 
     if (!stalled.empty()) {
-        std::cout << "[PerBlock] Found " << stalled.size() << " stalled blocks (timeout=" << timeout.count() << "s)" << std::endl;
+        std::cout << "[PerBlock] Found " << stalled.size() << " blocks needing parallel download (timeout=" << timeout.count() << "s)" << std::endl;
     }
 
     return stalled;
@@ -1741,15 +1762,17 @@ void CBlockFetcher::RequeueBlock(int height)
     // Remove from per-block tracking if present
     auto it = mapBlocksInFlightByHeight.find(height);
     if (it != mapBlocksInFlightByHeight.end()) {
-        NodeId peer = it->second.peer;
         uint256 hash = it->second.hash;
+        const std::set<NodeId>& peers = it->second.peers;
 
-        // Remove from peer's set
-        auto peer_it = mapPeerBlocksInFlightByHeight.find(peer);
-        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-            peer_it->second.erase(height);
-            if (peer_it->second.empty()) {
-                mapPeerBlocksInFlightByHeight.erase(peer_it);
+        // Remove from ALL peers' tracking (parallel download support)
+        for (NodeId peer : peers) {
+            auto peer_it = mapPeerBlocksInFlightByHeight.find(peer);
+            if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+                peer_it->second.erase(height);
+                if (peer_it->second.empty()) {
+                    mapPeerBlocksInFlightByHeight.erase(peer_it);
+                }
             }
         }
 
@@ -1759,10 +1782,9 @@ void CBlockFetcher::RequeueBlock(int height)
         // Notify CPeerManager
         if (m_peer_manager) {
             m_peer_manager->RemoveBlockFromFlight(hash);
-            m_peer_manager->UpdatePeerStats(peer, false, std::chrono::milliseconds(0));  // Mark as stall
         }
 
-        std::cout << "[PerBlock] Requeued height " << height << " (was assigned to peer " << peer << ")" << std::endl;
+        std::cout << "[PerBlock] Requeued height " << height << " (was assigned to " << peers.size() << " peers)" << std::endl;
     }
 
     // Add back to pending
