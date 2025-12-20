@@ -572,11 +572,7 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         }
     }
 
-    // Legacy cleanup (still needed for transition period)
-    m_node_context.block_fetcher->CleanupCancelledChunks();
-    m_node_context.block_fetcher->CleanupUnsuitablePeers();
-
-    // Legacy: Disconnect stalling peers
+    // Disconnect stalling peers
     std::vector<NodeId> stalling_peers;
     if (m_node_context.peer_manager) {
         stalling_peers = m_node_context.peer_manager->CheckForStallingPeers();
