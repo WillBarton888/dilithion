@@ -1626,23 +1626,16 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Check peer capacity using per-block tracking
-    auto peer_it = mapPeerBlocksInFlightByHeight.find(peer_id);
-    if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-        if (static_cast<int>(peer_it->second.size()) >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
-            return false;  // Peer at capacity
-        }
-    }
-
-    // Check if height already in-flight
+    // Check if height already in-flight (PARALLEL DOWNLOAD path)
+    // This check comes BEFORE capacity check - parallel downloads bypass capacity limits
     auto block_it = mapBlocksInFlightByHeight.find(height);
     if (block_it != mapBlocksInFlightByHeight.end()) {
-        // PARALLEL DOWNLOAD: Height already in-flight
+        // PARALLEL DOWNLOAD: Height already in-flight from another peer
         // Check if THIS peer already has it (reject duplicate)
         if (block_it->second.HasPeer(peer_id)) {
             return false;  // This peer already downloading this block
         }
-        // Add this peer as parallel downloader
+        // Add this peer as parallel downloader (bypasses capacity limit)
         block_it->second.AddPeer(peer_id);
         mapPeerBlocksInFlightByHeight[peer_id].insert(height);
 
@@ -1654,6 +1647,14 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
         std::cout << "[PerBlock] PARALLEL: Added peer " << peer_id << " for height " << height
                   << " (now " << block_it->second.peers.size() << " peers)" << std::endl;
         return true;
+    }
+
+    // NEW request for this height - check peer capacity
+    auto peer_it = mapPeerBlocksInFlightByHeight.find(peer_id);
+    if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+        if (static_cast<int>(peer_it->second.size()) >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+            return false;  // Peer at capacity for new blocks
+        }
     }
 
     // First request for this height
