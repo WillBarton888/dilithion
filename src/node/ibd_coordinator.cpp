@@ -628,7 +628,7 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         // Get available peers for parallel download
         std::vector<int> available_peers;
         if (m_node_context.peer_manager) {
-            available_peers = m_node_context.peer_manager->GetAvailablePeersForIBD();
+            available_peers = m_node_context.peer_manager->GetValidPeersForDownload();
         }
 
         int parallel_started = 0;
@@ -646,7 +646,8 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
                     // Send GETDATA to new peer
                     std::vector<std::pair<NetProtocol::InvType, uint256>> getdata;
                     getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-                    m_node_context.connman->SendGetData(new_peer, getdata);
+                    CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+                    m_node_context.connman->PushMessage(new_peer, msg);
                     parallel_started++;
                     break;  // One parallel peer is enough
                 }
