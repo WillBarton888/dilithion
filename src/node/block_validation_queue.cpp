@@ -52,9 +52,9 @@ void CBlockValidationQueue::Stop() {
     }
 }
 
-bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int expected_height, CBlockIndex* pindex) {
+bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int expected_height, const uint256& blockHash, CBlockIndex* pindex) {
     // Phase 2: Quick validation checks before queueing
-    uint256 blockHash = block.GetHash();
+    // IBD OPTIMIZATION: Use passed hash instead of computing RandomX
 
     // SSOT FIX #3: Use GetQueueDepth() instead of direct m_queue.size() access
     // This ensures atomic check with proper locking
@@ -394,7 +394,8 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
                     }
 
                     // Queue orphan for async validation
-                    if (QueueBlock(-1, orphanBlock, orphanHeight, pOrphanIndexRaw)) {
+                    // IBD OPTIMIZATION: Pass orphanBlockHash to avoid RandomX recomputation
+                    if (QueueBlock(-1, orphanBlock, orphanHeight, orphanBlockHash, pOrphanIndexRaw)) {
                         std::cout << "[ValidationQueue] Queued orphan " << orphanBlockHash.GetHex().substr(0, 16)
                                   << "... at height " << orphanHeight << " for validation" << std::endl;
                         // Successfully queued - now safe to remove from orphan pool

@@ -378,9 +378,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
                         if (m_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
                             // Queue for async validation
-                            if (g_node_context.validation_queue && 
+                            // IBD OPTIMIZATION: Pass orphanBlockHash to avoid RandomX recomputation
+                            if (g_node_context.validation_queue &&
                                 g_node_context.validation_queue->IsRunning() &&
-                                g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, pOrphanIndexRaw)) {
+                                g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, orphanBlockHash, pOrphanIndexRaw)) {
                                 LogPrintIBD(DEBUG, "IBD STUCK FIX #3: Queued orphan %s... at height %d (parent now available)", 
                                            orphanBlockHash.GetHex().substr(0, 16).c_str(), orphanHeight);
                                 // Successfully queued - remove from orphan pool

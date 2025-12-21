@@ -2233,7 +2233,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (useAsyncValidation) {
                 // Queue for async validation - returns immediately, P2P thread continues
                 int expected_height = pblockIndexPtr->nHeight;
-                if (g_node_context.validation_queue->QueueBlock(peer_id, block, expected_height, pblockIndexPtr)) {
+                // IBD OPTIMIZATION: Pass blockHash to avoid RandomX recomputation in QueueBlock
+                if (g_node_context.validation_queue->QueueBlock(peer_id, block, expected_height, blockHash, pblockIndexPtr)) {
                     std::cout << "[P2P] Block queued for async validation (height " << expected_height
                               << ", queue depth: " << g_node_context.validation_queue->GetQueueDepth() << ")" << std::endl;
                     // IBD HANG FIX: Mark block as received IMMEDIATELY to decrement nBlocksInFlight
@@ -2451,7 +2452,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             // Note: Block and index are already saved, so async processing just needs to activate chain
                             bool orphanProcessed = false;
                             if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
-                                if (g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, pOrphanIndexRaw)) {
+                                // IBD OPTIMIZATION: Pass orphanBlockHash to avoid RandomX recomputation
+                                if (g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, orphanBlockHash, pOrphanIndexRaw)) {
                                     std::cout << "[Orphan] Queued orphan block " << orphanBlockHash.GetHex().substr(0, 16)
                                               << "... at height " << orphanHeight << " for async validation" << std::endl;
                                     orphanProcessed = true;

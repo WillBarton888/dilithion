@@ -110,10 +110,11 @@ public:
      * @param peer_id Peer that sent the block
      * @param block Block to validate
      * @param expected_height Expected height (from headers)
+     * @param blockHash Block hash (passed to avoid RandomX recomputation)
      * @param pindex Block index (if already created)
      * @return true if queued successfully, false if queue is full or invalid
      */
-    bool QueueBlock(int peer_id, const CBlock& block, int expected_height, CBlockIndex* pindex = nullptr);
+    bool QueueBlock(int peer_id, const CBlock& block, int expected_height, const uint256& blockHash, CBlockIndex* pindex = nullptr);
 
     /**
      * @brief Wait for specific block to be validated
