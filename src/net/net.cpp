@@ -6,11 +6,13 @@
 #include <net/connection_quality.h>  // Network: Connection quality metrics
 #include <net/partition_detector.h>  // Network: Partition detection
 #include <consensus/params.h>
+#include <consensus/chain.h>  // For CChainState
 #include <net/tx_relay.h>
 #include <net/banman.h>  // For MisbehaviorType
 #include <net/features.h>  // Feature flags system
 #include <core/node_context.h>  // Phase 1.2: NodeContext for global state
 #include <net/connman.h>  // Phase 5: For CConnman::PushMessage
+#include <net/headers_manager.h>  // For CHeadersManager (IBD check)
 #include <util/strencodings.h>
 #include <util/time.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
@@ -1118,9 +1120,19 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
 
 bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& stream) {
     try {
-        // P3-N2 FIX: Rate limiting for HEADERS messages
-        // Prevents DoS via rapid HEADERS flooding (each can have 2000 headers)
-        {
+        // P3-N2 FIX: Rate limiting for HEADERS messages (disabled during IBD)
+        // During IBD, we actively request headers and need them rapidly
+        // Rate limiting only applies post-IBD to prevent unsolicited flooding
+        extern NodeContext g_node_context;
+        bool is_ibd = false;
+        if (g_node_context.headers_manager) {
+            int header_height = g_node_context.headers_manager->GetBestHeight();
+            extern CChainState g_chainstate;
+            int chain_height = g_chainstate.GetHeight();
+            is_ibd = (header_height > chain_height + 10);  // IBD if >10 blocks behind
+        }
+
+        if (!is_ibd) {
             std::lock_guard<std::mutex> lock(cs_headers_rate);
             int64_t now = GetTime();
             auto& timestamps = g_peer_headers_timestamps[peer_id];
