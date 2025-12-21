@@ -789,9 +789,9 @@ bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
 
 std::vector<std::pair<int, NodeId>> CBlockFetcher::GetStalledBlocks(std::chrono::seconds timeout)
 {
-    // SSOT: Delegate to CBlockTracker
+    // SSOT: Delegate to CBlockTracker with caller's timeout
     if (g_node_context.block_tracker) {
-        return g_node_context.block_tracker->CheckTimeouts();
+        return g_node_context.block_tracker->CheckTimeouts(static_cast<int>(timeout.count()));
     }
     return {};
 }

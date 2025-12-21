@@ -248,13 +248,14 @@ public:
 
     /**
      * @brief Get heights that have timed out
+     * @param timeout_seconds Custom timeout (default: TIMEOUT_SECONDS)
      */
-    std::vector<std::pair<int, NodeId>> CheckTimeouts() const {
+    std::vector<std::pair<int, NodeId>> CheckTimeouts(int timeout_seconds = TIMEOUT_SECONDS) const {
         std::lock_guard<std::mutex> lock(m_mutex);
 
         std::vector<std::pair<int, NodeId>> timed_out;
         auto now = std::chrono::steady_clock::now();
-        auto timeout = std::chrono::seconds(TIMEOUT_SECONDS);
+        auto timeout = std::chrono::seconds(timeout_seconds);
 
         for (const auto& [height, info] : m_heights) {
             if (now - info.request_time > timeout) {
