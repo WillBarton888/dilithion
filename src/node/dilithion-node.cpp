@@ -2242,12 +2242,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Without this, peers appear "at capacity" during slow RandomX validation
                     // Window state is still updated by OnWindowBlockConnected after validation
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                    // BUG #167 FIX: Update per-block tracking (mapBlocksInFlightByHeight)
+                    // SSOT: OnBlockReceived handles CBlockTracker internally
                     g_node_context.block_fetcher->OnBlockReceived(peer_id, expected_height);
-                    // IBD BOTTLENECK FIX: Update CBlockTracker - the single source of truth
-                    if (g_node_context.block_tracker) {
-                        g_node_context.block_tracker->OnBlockReceived(expected_height);
-                    }
                     auto handler_end = std::chrono::steady_clock::now();
                     auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
                     std::cout << "[BLOCK-HANDLER] EXIT (async) total=" << handler_ms << "ms" << std::endl;
@@ -2296,13 +2292,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         g_node_state.new_block_found = true;
 
                         // BUG #148 FIX: Advance IBD download window when blocks are connected
-                        // This allows the window to slide forward and request more blocks in parallel
+                        // SSOT: OnWindowBlockConnected handles CBlockTracker internally
                         if (g_node_context.block_fetcher) {
                             g_node_context.block_fetcher->OnWindowBlockConnected(pblockIndexPtr->nHeight);
-                        }
-                        // IBD BOTTLENECK FIX: Update CBlockTracker - the single source of truth
-                        if (g_node_context.block_tracker) {
-                            g_node_context.block_tracker->OnBlockConnected(pblockIndexPtr->nHeight);
                         }
 
                         // BUG #32 FIX: Immediately update mining template when IBD block becomes new tip
@@ -2347,16 +2339,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 // Notify BlockFetcher that block was successfully received and activated
-                // BUG #167 FIX: Use per-block tracking (mapBlocksInFlightByHeight) in addition to hash-based
-                // MarkBlockReceived uses mapBlocksInFlight which is empty when using per-block requests
+                // SSOT: OnBlockReceived handles CBlockTracker internally
                 if (g_node_context.block_fetcher) {
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                     g_node_context.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
-                }
-                // IBD BOTTLENECK FIX: Update CBlockTracker
-                if (g_node_context.block_tracker) {
-                    g_node_context.block_tracker->OnBlockReceived(pblockIndexPtr->nHeight);
-                    // OnBlockConnected is called separately when block becomes tip
                 }
 
                 // ORPHAN BOTTLENECK FIX #1: Async orphan processing

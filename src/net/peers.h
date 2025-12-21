@@ -87,8 +87,11 @@ public:
     }
 
     // === Phase 3: Block Sync State ===
-    std::list<QueuedBlock> vBlocksInFlight;
-    int nBlocksInFlight = 0;
+    // DEPRECATED: CBlockTracker is now the single source of truth for block tracking.
+    // These fields are kept for backward compatibility with orphan block handling only.
+    // All new code should use CBlockTracker via g_node_context.block_tracker.
+    std::list<QueuedBlock> vBlocksInFlight;  // DEPRECATED: Use CBlockTracker
+    int nBlocksInFlight = 0;                  // DEPRECATED: Use CBlockTracker::GetPeerInFlightCount()
     const CBlockIndex* pindexBestKnownBlock = nullptr;
     const CBlockIndex* pindexLastCommonBlock = nullptr;
     bool fSyncStarted = false;
@@ -336,8 +339,10 @@ public:
     void PeriodicMaintenance();
 
     // === Phase 3.2: Block tracking (Bitcoin Core CNode pattern) ===
-    // Global block-to-peer mapping for quick lookup
-    std::map<uint256, std::pair<int, std::list<QueuedBlock>::iterator>> mapBlocksInFlight;
+    // DEPRECATED: CBlockTracker is now the single source of truth for block tracking.
+    // This map is kept for backward compatibility with orphan block handling only.
+    // All new code should use CBlockTracker via g_node_context.block_tracker.
+    std::map<uint256, std::pair<int, std::list<QueuedBlock>::iterator>> mapBlocksInFlight;  // DEPRECATED
 
     // Block flight limits
     // IBD FIX #12: Increased from 64 to 128 for faster single-peer IBD
