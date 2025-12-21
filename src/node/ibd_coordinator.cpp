@@ -565,44 +565,22 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         return;
     }
 
-    // ============ Per-Block PARALLEL DOWNLOAD (Bitcoin Core Style) ============
-    // On stall: request from ANOTHER peer in parallel, don't cancel original
-    auto stalled_blocks = m_node_context.block_fetcher->GetStalledBlocks(
-        std::chrono::seconds(BLOCK_STALL_TIMEOUT_SECONDS));
+    // ============ HARD TIMEOUT: Remove blocks stuck too long ============
+    // After 30 seconds, remove from tracker so they can be re-requested from different peer
+    // This fixes the bug where blocks remain in CBlockTracker forever if peer doesn't respond
+    static constexpr int HARD_TIMEOUT_SECONDS = 30;
+    auto very_stalled = m_node_context.block_fetcher->GetStalledBlocks(
+        std::chrono::seconds(HARD_TIMEOUT_SECONDS));
 
-    if (!stalled_blocks.empty()) {
-        // Get available peers for parallel download
-        std::vector<int> available_peers;
-        if (m_node_context.peer_manager) {
-            available_peers = m_node_context.peer_manager->GetValidPeersForDownload();
+    if (!very_stalled.empty()) {
+        int removed = 0;
+        for (const auto& [height, peer] : very_stalled) {
+            m_node_context.block_fetcher->RequeueBlock(height);
+            removed++;
         }
-
-        int parallel_started = 0;
-        for (const auto& [height, original_peer] : stalled_blocks) {
-            // Get block hash
-            uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(height);
-            if (hash.IsNull()) continue;
-
-            // Try to add parallel download from a different peer
-            for (int new_peer : available_peers) {
-                if (new_peer == original_peer) continue;  // Skip original peer
-
-                // RequestBlockFromPeer will reject if this peer already has it
-                if (m_node_context.block_fetcher->RequestBlockFromPeer(new_peer, height, hash)) {
-                    // Send GETDATA to new peer
-                    std::vector<NetProtocol::CInv> getdata;
-                    getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-                    CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-                    m_node_context.connman->PushMessage(new_peer, msg);
-                    parallel_started++;
-                    break;  // One parallel peer is enough
-                }
-            }
-        }
-
-        if (parallel_started > 0) {
-            std::cout << "[PerBlock] Started " << parallel_started << " parallel downloads for "
-                      << stalled_blocks.size() << " stalled blocks" << std::endl;
+        if (removed > 0) {
+            std::cout << "[PerBlock] Removed " << removed << " blocks stuck >" << HARD_TIMEOUT_SECONDS
+                      << "s from tracker (will re-request)" << std::endl;
         }
     }
 
