@@ -124,12 +124,17 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     // Check if block was in-flight in local tracking
     auto it = mapBlocksInFlight.find(hash);
     if (it == mapBlocksInFlight.end()) {
-        // Not in hash-based tracking - check height-based tracking (per-block API)
-        // BUG #167 FIX: Blocks from RequestBlockFromPeer are in mapBlocksInFlightByHeight, not mapBlocksInFlight
-        for (auto height_it = mapBlocksInFlightByHeight.begin(); height_it != mapBlocksInFlightByHeight.end(); ++height_it) {
-            if (height_it->second.hash == hash) {
-                // Found in height-based tracking - clean it up
-                int height = height_it->first;
+        // Not in hash-based tracking - use CBlockTracker's O(1) reverse lookup
+        // BUG #167 FIX: Blocks from RequestBlockFromPeer are tracked by height, not hash
+        int height = -1;
+        if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+            height = g_node_context.block_tracker->GetHeightForHash(hash);
+        }
+
+        if (height > 0) {
+            // Found via CBlockTracker - clean up height-based tracking
+            auto height_it = mapBlocksInFlightByHeight.find(height);
+            if (height_it != mapBlocksInFlightByHeight.end()) {
                 const std::set<NodeId>& all_peers = height_it->second.peers;
 
                 // Remove from all peers' tracking
@@ -145,24 +150,22 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 
                 // Remove from height tracking
                 mapBlocksInFlightByHeight.erase(height_it);
-
-                // SSOT: Notify CBlockTracker
-                if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-                    g_node_context.block_tracker->OnBlockReceived(height, peer);
-                }
-
-                // Notify CPeerManager
-                if (m_peer_manager) {
-                    m_peer_manager->MarkBlockAsReceived(peer, hash);
-                }
-
-                nBlocksReceivedTotal++;
-                lastBlockReceived = std::chrono::steady_clock::now();
-                return true;
             }
+
+            // SSOT: Notify CBlockTracker
+            g_node_context.block_tracker->OnBlockReceived(height, peer);
+
+            // Notify CPeerManager
+            if (m_peer_manager) {
+                m_peer_manager->MarkBlockAsReceived(peer, hash);
+            }
+
+            nBlocksReceivedTotal++;
+            lastBlockReceived = std::chrono::steady_clock::now();
+            return true;
         }
 
-        // Not tracked in either map - notify CPeerManager anyway
+        // Not tracked in either system - notify CPeerManager anyway
         if (m_peer_manager) {
             m_peer_manager->MarkBlockAsReceived(peer, hash);
         }
