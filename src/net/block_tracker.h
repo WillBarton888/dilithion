@@ -98,6 +98,7 @@ public:
         m_pending.clear();
         m_peer_heights.clear();
         m_received.clear();
+        m_hash_to_height.clear();
 
         // Populate initial window with PENDING heights
         int window_end = std::min(m_window_start + WINDOW_SIZE - 1, m_target_height);
@@ -127,7 +128,25 @@ public:
         auto it = m_heights.find(height);
         if (it != m_heights.end()) {
             it->second.hash = hash;
+            // SSOT: Maintain reverse lookup for hash->height
+            if (!hash.IsNull()) {
+                m_hash_to_height[hash] = height;
+            }
         }
+    }
+
+    /**
+     * @brief Get height for a hash (reverse lookup)
+     * @param hash Block hash
+     * @return Block height, or -1 if not found
+     *
+     * Used when blocks arrive by hash and we need to find the height
+     * for CBlockTracker state updates.
+     */
+    int GetHeightForHash(const uint256& hash) const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_hash_to_height.find(hash);
+        return (it != m_hash_to_height.end()) ? it->second : -1;
     }
 
     // =========================================================================
@@ -555,6 +574,7 @@ private:
     std::set<int> m_pending;                       ///< Heights in PENDING state
     std::map<NodeId, std::set<int>> m_peer_heights; ///< Peer -> IN_FLIGHT heights
     std::set<int> m_received;                      ///< Heights in RECEIVED state
+    std::map<uint256, int> m_hash_to_height;       ///< SSOT: Reverse lookup hash->height
 
     // =========================================================================
     // Internal helpers (must be called with lock held)
@@ -596,6 +616,10 @@ private:
                     if (peer_it != m_peer_heights.end()) {
                         peer_it->second.erase(m_window_start);
                     }
+                }
+                // SSOT: Clean up hash-to-height reverse lookup
+                if (!it->second.hash.IsNull()) {
+                    m_hash_to_height.erase(it->second.hash);
                 }
                 m_heights.erase(it);
             }
