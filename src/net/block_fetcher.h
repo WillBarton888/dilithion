@@ -40,12 +40,12 @@ typedef int NodeId;
  * Bitcoin Core IBD Constants
  *
  * Per-Block Download Model (ported from Bitcoin Core):
- * - Up to 128 individual blocks per peer (not chunks)
+ * - Up to 16 individual blocks per peer (not chunks)
  * - 3 second stall timeout per block
  * - Blocks can be reassigned individually
  */
 static constexpr int BLOCK_DOWNLOAD_WINDOW_SIZE = 1024;  ///< Max blocks in download queue
-static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 128; ///< Bitcoin Core: max individual blocks per peer
+static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16; ///< Bitcoin Core: max individual blocks per peer
 static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 3;     ///< Stall timeout per block (triggers parallel download)
 
 /**

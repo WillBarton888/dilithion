@@ -100,7 +100,7 @@ static const int MAX_REORG_DEPTH = 100;
 static const unsigned int MAX_HEADERS_RESULTS = 2000;
 
 /** Maximum number of blocks to keep in flight per peer */
-static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 128;
+static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
 
 //==============================================================================
 // P2P Network Parameters
