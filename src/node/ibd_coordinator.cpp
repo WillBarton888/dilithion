@@ -68,6 +68,39 @@ void CIbdCoordinator::Tick() {
 
     ResetBackoffOnNewHeaders(header_height);
 
+    // PIPELINED HEADER PREFETCH: Request next batch of headers 1000 blocks early
+    // This prevents stalls at 2000-header batch boundaries by staying ahead
+    // Trigger at chain heights: 1000, 3000, 5000, etc. (1000 blocks into each batch)
+    static int last_prefetch_trigger = -1;
+    int prefetch_trigger_height = ((chain_height / 2000) * 2000) + 1000;  // 1000, 3000, 5000...
+
+    if (chain_height >= prefetch_trigger_height && prefetch_trigger_height > last_prefetch_trigger) {
+        // Calculate what headers we'd need for the next batch
+        int next_batch_start = ((chain_height / 2000) + 1) * 2000;  // 2000, 4000, 6000...
+
+        // Check if any peer has more blocks than our current header height
+        auto peers = m_node_context.peer_manager->GetConnectedPeers();
+        for (const auto& peer : peers) {
+            if (!peer) continue;
+            int peer_height = m_node_context.headers_manager->GetPeerStartHeight(peer->id);
+
+            // Only request if peer has blocks beyond our current headers
+            // AND beyond the next batch start (so we actually get new headers)
+            if (peer_height > header_height && peer_height >= next_batch_start) {
+                uint256 bestHeaderHash = m_node_context.headers_manager->GetBestHeaderHash();
+                if (!bestHeaderHash.IsNull()) {
+                    m_node_context.headers_manager->RequestHeaders(peer->id, bestHeaderHash);
+                    std::cerr << "[IBD-PREFETCH] Chain at " << chain_height
+                              << ", prefetching headers from peer " << peer->id
+                              << " (peer_height=" << peer_height
+                              << ", next_batch=" << next_batch_start << ")" << std::endl;
+                    last_prefetch_trigger = prefetch_trigger_height;
+                    break;  // Only request from one peer
+                }
+            }
+        }
+    }
+
     auto now = std::chrono::steady_clock::now();
     if (!ShouldAttemptDownload()) {
         // IBD DEBUG: Log why we're returning early
