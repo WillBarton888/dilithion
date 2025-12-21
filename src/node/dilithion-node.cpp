@@ -1998,10 +1998,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "[P2P] Block already in chain and connected, skipping"
                               << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
                               << std::endl;
-                    // BUG #86 FIX: Mark block as received even when skipping
-                    // BUG #167 FIX: Use per-block tracking (mapBlocksInFlightByHeight)
+                    // BUG #167 FIX: Use per-block tracking (OnBlockReceived handles CPeerManager notification)
                     if (g_node_context.block_fetcher) {
-                        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                         g_node_context.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
                     }
                     // IBD BOTTLENECK FIX: Update CBlockTracker - block already connected

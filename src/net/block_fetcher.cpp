@@ -114,10 +114,12 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
     // Track peer's blocks (for disconnect handling)
     mapPeerBlocks[peer].insert(hash);
 
-    // Phase 1: CPeerManager is single source of truth for block tracking
-    std::cout << "[RequestBlock] CALLING MarkBlockAsInFlight peer=" << peer << std::endl;
-    m_peer_manager->MarkBlockAsInFlight(peer, hash, nullptr);
-    std::cout << "[RequestBlock] MarkBlockAsInFlight RETURNED" << std::endl;
+    // SSOT Phase 3: Use CBlockTracker for assignment
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        g_node_context.block_tracker->SetHash(height, hash);
+        g_node_context.block_tracker->AssignToPeer(height, peer);
+        std::cout << "[SSOT] RequestBlock: Assigned height " << height << " to peer " << peer << std::endl;
+    }
 
     // Remove from queue if present
     setQueuedHashes.erase(hash);
@@ -968,9 +970,11 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
         block_it->second.AddPeer(peer_id);
         mapPeerBlocksInFlightByHeight[peer_id].insert(height);
 
-        // Notify CPeerManager
-        if (m_peer_manager) {
-            m_peer_manager->MarkBlockAsInFlight(peer_id, hash, nullptr);
+        // SSOT Phase 3: Use CBlockTracker for parallel assignment
+        if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+            // Note: CBlockTracker doesn't natively support parallel downloads yet
+            // For now, just track that this peer is also working on this height
+            std::cout << "[SSOT] PARALLEL: Peer " << peer_id << " added for height " << height << std::endl;
         }
 
         std::cout << "[PerBlock] PARALLEL: Added peer " << peer_id << " for height " << height
@@ -978,22 +982,34 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
         return true;
     }
 
-    // NEW request for this height - check peer capacity
-    auto peer_it = mapPeerBlocksInFlightByHeight.find(peer_id);
-    if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-        if (static_cast<int>(peer_it->second.size()) >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
-            return false;  // Peer at capacity for new blocks
+    // SSOT Phase 3: Check peer capacity using CBlockTracker
+    int peer_in_flight = 0;
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        peer_in_flight = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
+    } else {
+        // Legacy fallback
+        auto peer_it = mapPeerBlocksInFlightByHeight.find(peer_id);
+        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+            peer_in_flight = static_cast<int>(peer_it->second.size());
+        }
+    }
+    if (peer_in_flight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+        return false;  // Peer at capacity for new blocks
+    }
+
+    // SSOT Phase 3: Use CBlockTracker for assignment
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        g_node_context.block_tracker->SetHash(height, hash);
+        if (!g_node_context.block_tracker->AssignToPeer(height, peer_id)) {
+            // Height not in PENDING state or already assigned
+            std::cout << "[SSOT] CBlockTracker::AssignToPeer failed for height " << height << std::endl;
+            // Fall through to legacy tracking
         }
     }
 
-    // First request for this height
+    // Shadow tracking (keep for Phase 3, remove in Phase 4)
     mapBlocksInFlightByHeight[height] = BlockInFlightByHeight(height, hash, peer_id);
     mapPeerBlocksInFlightByHeight[peer_id].insert(height);
-
-    // Notify CPeerManager (no window tracking needed - pure per-block)
-    if (m_peer_manager) {
-        m_peer_manager->MarkBlockAsInFlight(peer_id, hash, nullptr);
-    }
 
     std::cout << "[PerBlock] Requested height " << height << " from peer " << peer_id
               << " (peer now has " << mapPeerBlocksInFlightByHeight[peer_id].size() << " in-flight)" << std::endl;
@@ -1033,9 +1049,12 @@ bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
     // Remove from per-block tracking
     mapBlocksInFlightByHeight.erase(it);
 
-    // Notify CPeerManager - mark received from delivering peer (no window needed)
-    if (m_peer_manager) {
-        m_peer_manager->MarkBlockAsReceived(peer_id, hash);
+    // SSOT Phase 3: Notify CBlockTracker ONLY (it's the single source of truth)
+    // DO NOT call m_peer_manager->MarkBlockAsReceived() as it would also update CBlockTracker
+    // causing a double-update. CBlockTracker handles peer stats internally.
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        g_node_context.block_tracker->OnBlockReceived(height, peer_id);
+        std::cout << "[SSOT] Block height " << height << " received - CBlockTracker updated" << std::endl;
     }
 
     // Update stats
