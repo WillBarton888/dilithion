@@ -9,7 +9,6 @@
 #include <util/strencodings.h>
 #include <util/logging.h>
 #include <algorithm>
-#include <iostream>
 #include <set>
 
 // SSOT: Access to global node context for CBlockTracker
@@ -68,9 +67,9 @@ bool CPeerManager::SavePeers() {
     bool result = addrman.SaveToFile(path);
 
     if (result) {
-        std::cout << "[PeerManager] Saved " << addrman.Size() << " peer addresses to " << path << std::endl;
+        LogPrintf(NET, INFO, "Saved %zu peer addresses to %s", addrman.Size(), path.c_str());
     } else {
-        std::cerr << "[PeerManager] ERROR: Failed to save peers to " << path << std::endl;
+        LogPrintf(NET, ERR, "Failed to save peers to %s", path.c_str());
     }
 
     return result;
@@ -85,10 +84,9 @@ bool CPeerManager::LoadPeers() {
     bool result = addrman.LoadFromFile(path);
 
     if (result) {
-        std::cout << "[PeerManager] Loaded " << addrman.Size() << " peer addresses from " << path << std::endl;
-    } else {
-        std::cerr << "[PeerManager] WARNING: Could not load peers from " << path << " (starting fresh)" << std::endl;
+        LogPrintf(NET, INFO, "Loaded %zu peer addresses from %s", addrman.Size(), path.c_str());
     }
+    // Silent if no existing peers.dat - normal for new node
 
     return result;
 }
@@ -100,12 +98,10 @@ std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) 
     std::string ip = addr.ToStringIP();
 
     if (banman.IsBanned(ip)) {
-        std::cout << "[PeerManager] AddPeer rejected: IP " << ip << " is banned" << std::endl;
         return nullptr;
     }
 
     // BUG #105 FIX: Check connection limit using CONNECTED peer count, not map size
-    // Previously used peers.size() which included disconnected/zombie peers
     size_t connected = 0;
     for (const auto& pair : peers) {
         if (pair.second->IsConnected()) {
@@ -113,8 +109,6 @@ std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) 
         }
     }
     if (connected >= MAX_TOTAL_CONNECTIONS) {
-        std::cout << "[PeerManager] AddPeer rejected: at connection limit ("
-                  << connected << "/" << MAX_TOTAL_CONNECTIONS << ")" << std::endl;
         return nullptr;
     }
 
@@ -147,8 +141,6 @@ std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
         }
     }
     if (connected >= MAX_TOTAL_CONNECTIONS) {
-        std::cout << "[PeerManager] AddPeerWithId rejected: at connection limit ("
-                  << connected << "/" << MAX_TOTAL_CONNECTIONS << ")" << std::endl;
         return nullptr;
     }
 
@@ -299,44 +291,31 @@ void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
 std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
     std::vector<NetProtocol::CAddress> result;
 
-    // NW-002: Query DNS seeds for peer discovery
-    std::cout << "[PeerManager] Querying DNS seeds for peer discovery..." << std::endl;
-
     for (const auto& seed_hostname : dns_seeds) {
-        std::cout << "[PeerManager] Querying seed: " << seed_hostname << std::endl;
-
         try {
-            // Query the DNS seed
             std::vector<NetProtocol::CAddress> addresses =
                 CDNSResolver::QuerySeed(seed_hostname, NetProtocol::DEFAULT_PORT);
 
             if (addresses.empty()) {
-                std::cout << "[PeerManager] No addresses returned from seed: " << seed_hostname << std::endl;
                 continue;
             }
 
-            // Add addresses to result
-            std::cout << "[PeerManager] Found " << addresses.size()
-                      << " peer(s) from seed: " << seed_hostname << std::endl;
-
             for (const auto& addr : addresses) {
                 result.push_back(addr);
-                // Also add to peer address database
                 AddPeerAddress(addr);
             }
 
         } catch (const std::exception& e) {
-            std::cerr << "[PeerManager] ERROR: Failed to query seed " << seed_hostname
-                      << ": " << e.what() << std::endl;
+            LogPrintf(NET, WARN, "Failed to query DNS seed %s: %s", seed_hostname.c_str(), e.what());
             continue;
         } catch (...) {
-            std::cerr << "[PeerManager] ERROR: Unknown error querying seed " << seed_hostname << std::endl;
             continue;
         }
     }
 
-    std::cout << "[PeerManager] DNS seed query complete: Found " << result.size()
-              << " total peer address(es)" << std::endl;
+    if (!result.empty()) {
+        LogPrintf(NET, INFO, "DNS seeds: found %zu peer addresses", result.size());
+    }
 
     return result;
 }
@@ -408,14 +387,7 @@ void CPeerManager::DecayMisbehaviorScores() {
     // Called every 30 seconds, decay by 0.5 points (1 point per minute)
     for (auto& pair : peers) {
         if (pair.second->misbehavior_score > 0) {
-            // Reduce by 0.5 points, but don't go below 0
             pair.second->misbehavior_score = std::max(0, pair.second->misbehavior_score - 1);
-
-            // Log significant changes
-            if (pair.second->misbehavior_score % 10 == 0) {
-                std::cout << "[PeerManager] Peer " << pair.first
-                          << " misbehavior score decayed to " << pair.second->misbehavior_score << std::endl;
-            }
         }
     }
 
@@ -733,8 +705,6 @@ void CPeerManager::PeriodicMaintenance() {
                 // Peer is in handshake state
                 int64_t age = now - peer->connect_time;
                 if (age > HANDSHAKE_TIMEOUT) {
-                    std::cout << "[PeerManager] P3-N8: Disconnecting peer " << peer->id
-                              << " - handshake timeout (" << age << "s)" << std::endl;
                     peers_to_disconnect.push_back(peer->id);
                 }
             }
@@ -772,41 +742,27 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    std::cout << "[MarkBlockAsInFlight] ENTER peer=" << peer_id
-              << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
-
     // SSOT Phase 2: Try CBlockTracker first for blocks with known height
     if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized() && pindex) {
         int height = pindex->nHeight;
-        // Set the hash mapping in CBlockTracker
         g_node_context.block_tracker->SetHash(height, hash);
-        // Try to assign to peer via CBlockTracker
         if (g_node_context.block_tracker->AssignToPeer(height, peer_id)) {
-            std::cout << "[SSOT] MarkBlockAsInFlight delegated to CBlockTracker (height=" << height << ")" << std::endl;
             return true;
         }
-        // AssignToPeer failed (height not PENDING or peer at capacity) - fall through to legacy
-        std::cout << "[SSOT] CBlockTracker::AssignToPeer failed, using legacy" << std::endl;
+        // AssignToPeer failed - fall through to legacy
     }
 
     // Legacy handling for orphans/unknown heights
-    // Check if already in flight
     if (mapBlocksInFlight.count(hash)) {
-        std::cout << "[MarkBlockAsInFlight] REJECT: already in mapBlocksInFlight" << std::endl;
         return false;
     }
 
-    // Check global limit
     if (mapBlocksInFlight.size() >= static_cast<size_t>(MAX_BLOCKS_IN_FLIGHT_TOTAL)) {
-        std::cout << "[MarkBlockAsInFlight] REJECT: global limit " << mapBlocksInFlight.size()
-                  << " >= " << MAX_BLOCKS_IN_FLIGHT_TOTAL << std::endl;
         return false;
     }
 
-    // Get peer
     auto it = peers.find(peer_id);
     if (it == peers.end()) {
-        std::cout << "[MarkBlockAsInFlight] REJECT: peer not found" << std::endl;
         return false;
     }
 
@@ -817,17 +773,13 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
     if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
         peer_blocks_in_flight = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
     } else {
-        // Legacy fallback: Count from mapBlocksInFlight
         for (const auto& entry : mapBlocksInFlight) {
             if (entry.second.first == peer_id) {
                 peer_blocks_in_flight++;
             }
         }
     }
-    std::cout << "[MarkBlockAsInFlight] peer_blocks_in_flight=" << peer_blocks_in_flight
-              << " MAX=" << MAX_BLOCKS_IN_FLIGHT_PER_PEER << std::endl;
     if (peer_blocks_in_flight >= MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
-        std::cout << "[MarkBlockAsInFlight] REJECT: peer at capacity" << std::endl;
         return false;
     }
 
@@ -840,7 +792,6 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
     auto list_it = std::prev(peer->vBlocksInFlight.end());
     mapBlocksInFlight[hash] = std::make_pair(peer_id, list_it);
 
-    std::cout << "[MarkBlockAsInFlight] SUCCESS: mapBlocksInFlight.size=" << mapBlocksInFlight.size() << std::endl;
     return true;
 }
 
@@ -879,89 +830,62 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // BUG #148 DEBUG: Log entry
-    std::cout << "[DEBUG] MarkBlockAsReceived(peer=" << peer_id << ", hash=" << hash.GetHex().substr(0, 16) << ")" << std::endl;
-
     // SSOT Phase 2: Try CBlockTracker first (it's the single source of truth)
     if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
         int height = g_node_context.block_tracker->GetHeightForHash(hash);
         if (height > 0) {
-            // CBlockTracker handles this block - it will update its internal state
             g_node_context.block_tracker->OnBlockReceived(height, peer_id);
-            std::cout << "[SSOT] Block at height " << height << " handled by CBlockTracker" << std::endl;
-            // Still update peer stats (downloads, success time) but DON'T decrement nBlocksInFlight
-            // CBlockTracker is now the source of truth for in-flight counts
+            // Update peer stats but DON'T decrement nBlocksInFlight - CBlockTracker handles it
             auto peer_it = peers.find(peer_id);
             if (peer_it != peers.end()) {
                 peer_it->second->nBlocksDownloaded++;
                 peer_it->second->lastSuccessTime = std::chrono::steady_clock::now();
                 peer_it->second->nStallingCount = 0;
             }
-            return;  // Don't fall through to legacy tracking
+            return;
         }
-        // Height not found in CBlockTracker - fall through to legacy handling
-        std::cout << "[SSOT] Block hash not in CBlockTracker, using legacy tracking" << std::endl;
+        // Height not found - fall through to legacy
     }
 
-    // Legacy handling for orphans/unsolicited blocks not tracked by CBlockTracker
-    // BUG #148 FIX: Try to remove from tracking first (handles tracked blocks)
+    // Legacy handling for orphans/unsolicited blocks
     auto it = mapBlocksInFlight.find(hash);
     if (it != mapBlocksInFlight.end()) {
         int tracked_peer = it->second.first;
         auto list_it = it->second.second;
 
-        // Remove from tracked peer's list
         auto peer_it = peers.find(tracked_peer);
         if (peer_it != peers.end()) {
             CPeer* peer = peer_it->second.get();
-            int old_count = peer->nBlocksInFlight;
             peer->vBlocksInFlight.erase(list_it);
-            // IBD HANG FIX #21: Guard against going negative
-            // This can happen when tracking gets out of sync (e.g., Fix #19 cleanup)
             if (peer->nBlocksInFlight > 0) {
                 peer->nBlocksInFlight--;
-            } else {
-                std::cerr << "[WARN] nBlocksInFlight already 0 for tracked block - skipping decrement" << std::endl;
             }
             peer->nStallingCount = 0;
             peer->nBlocksDownloaded++;
             peer->lastSuccessTime = std::chrono::steady_clock::now();
-            std::cout << "[DEBUG] Tracked block received - tracked_peer=" << tracked_peer
-                      << " nBlocksInFlight: " << old_count << " -> " << peer->nBlocksInFlight << std::endl;
         } else {
-            // BUG #148 FIX: tracked_peer disconnected, decrement the actual sender instead
-            std::cout << "[DEBUG] Tracked peer " << tracked_peer << " disconnected, falling back to sender peer " << peer_id << std::endl;
+            // Tracked peer disconnected - update sender instead
             auto sender_it = peers.find(peer_id);
             if (sender_it != peers.end()) {
                 CPeer* sender = sender_it->second.get();
-                int old_count = sender->nBlocksInFlight;
                 if (sender->nBlocksInFlight > 0) {
                     sender->nBlocksInFlight--;
                 }
                 sender->nBlocksDownloaded++;
                 sender->lastSuccessTime = std::chrono::steady_clock::now();
-                std::cout << "[DEBUG] Fallback decrement - peer " << peer_id
-                          << " nBlocksInFlight: " << old_count << " -> " << sender->nBlocksInFlight << std::endl;
             }
         }
-        size_t size_before = mapBlocksInFlight.size();
         mapBlocksInFlight.erase(it);
-        std::cout << "[DEBUG] mapBlocksInFlight.erase: " << size_before << " -> " << mapBlocksInFlight.size() << std::endl;
     } else {
-        // BUG #148 FIX: Block wasn't tracked, but still decrement the receiving peer's counter
-        // This handles unsolicited blocks and tracking desync issues
+        // Untracked block - just update stats
         auto peer_it = peers.find(peer_id);
         if (peer_it != peers.end()) {
             CPeer* peer = peer_it->second.get();
-            int old_count = peer->nBlocksInFlight;
             if (peer->nBlocksInFlight > 0) {
                 peer->nBlocksInFlight--;
             }
             peer->nBlocksDownloaded++;
             peer->lastSuccessTime = std::chrono::steady_clock::now();
-            std::cout << "[DEBUG] Untracked block from peer " << peer_id << " - nBlocksInFlight: " << old_count << " -> " << peer->nBlocksInFlight << std::endl;
-        } else {
-            std::cout << "[DEBUG] Peer " << peer_id << " not found in peers map!" << std::endl;
         }
     }
 }
@@ -986,8 +910,6 @@ int CPeerManager::RemoveBlockFromFlight(const uint256& hash)
         // IBD HANG FIX #21: Guard against going negative
         if (peer->nBlocksInFlight > 0) {
             peer->nBlocksInFlight--;
-        } else {
-            std::cerr << "[WARN] nBlocksInFlight already 0 in RemoveBlockFromFlight - skipping decrement" << std::endl;
         }
     }
 
@@ -1029,21 +951,16 @@ int CPeerManager::GetBlocksInFlightForPeer(int peer_id) const
 
     // SSOT Phase 2: CBlockTracker is the single source of truth for in-flight counts
     if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        int ssot_count = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
-        std::cout << "[SSOT] GetBlocksInFlightForPeer(" << peer_id << ") = " << ssot_count
-                  << " (CBlockTracker)" << std::endl;
-        return ssot_count;
+        return g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
     }
 
-    // Legacy fallback: Count from mapBlocksInFlight instead of peer->nBlocksInFlight counter
+    // Legacy fallback: Count from mapBlocksInFlight
     int count = 0;
     for (const auto& entry : mapBlocksInFlight) {
         if (entry.second.first == peer_id) {
             count++;
         }
     }
-    std::cout << "[DEBUG] GetBlocksInFlightForPeer(" << peer_id << ") = " << count
-              << " (legacy mapBlocksInFlight)" << std::endl;
     return count;
 }
 
@@ -1164,96 +1081,52 @@ void CPeerManager::ClearPeerInFlightState(int peer_id)
     }
 
     CPeer* peer = it->second.get();
-    int vblocks_cleared = 0;
-    int map_cleared = 0;
 
-    // BUG #166 FIX: Clear vBlocksInFlight FIRST (this is the key fix!)
-    // When there's desync between mapBlocksInFlight and vBlocksInFlight,
-    // clearing vBlocksInFlight stops CheckForStallingPeers from timing out stale entries
+    // BUG #166 FIX: Clear vBlocksInFlight and corresponding map entries
     for (const auto& qb : peer->vBlocksInFlight) {
-        // Also remove from mapBlocksInFlight if present
         auto map_it = mapBlocksInFlight.find(qb.hash);
         if (map_it != mapBlocksInFlight.end() && map_it->second.first == peer_id) {
             mapBlocksInFlight.erase(map_it);
-            map_cleared++;
         }
-        vblocks_cleared++;
     }
 
-    // Clear the peer's vBlocksInFlight completely
     peer->vBlocksInFlight.clear();
     peer->nBlocksInFlight = 0;
 
     // BUG #166 FIX: Reset stall count so peer can become suitable again
-    // Without this, the peer stays unsuitable forever because nStallingCount > threshold
     peer->nStallingCount = 0;
-    peer->lastStallTime = std::chrono::steady_clock::now();  // Reset timer
-
-    if (vblocks_cleared > 0 || map_cleared > 0) {
-        std::cout << "[BUG #166 FIX] ClearPeerInFlightState: peer " << peer_id
-                  << " cleared " << vblocks_cleared << " vBlocksInFlight, "
-                  << map_cleared << " mapBlocksInFlight, reset stall count" << std::endl;
-    }
+    peer->lastStallTime = std::chrono::steady_clock::now();
 }
 
 std::vector<int> CPeerManager::GetValidPeersForDownload() const
 {
-    // BUG #148 FIX: Lock both mutexes to check node validity
     std::lock_guard<std::recursive_mutex> lock_peers(cs_peers);
     std::lock_guard<std::recursive_mutex> lock_nodes(cs_nodes);
     std::vector<int> result;
-
-    // IBD BOTTLENECK FIX #7: Removed excessive debug logging from hot path
-    // This function is called every tick during IBD - logging overhead was significant
-    // Debug logging can be re-enabled via compile-time flag if needed
-
-    // TEMP DEBUG: Re-enable debug logging to diagnose peer rejection
-    static int debug_counter = 0;
-    bool should_log = (debug_counter++ % 10 == 0);  // Log every 10th call
-    if (should_log) {
-        std::cout << "[DEBUG] GetValidPeersForDownload: peers.size()=" << peers.size()
-                  << ", node_refs.size()=" << node_refs.size() << std::endl;
-    }
 
     for (const auto& pair : peers) {
         int peer_id = pair.first;
         CPeer* peer = pair.second.get();
 
-        // BUG #148 FIX: Check if CNode still exists (prevents zombie peer access)
+        // Check if CNode still exists
         auto node_it = node_refs.find(peer_id);
         if (node_it == node_refs.end() || node_it->second == nullptr) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: no CNode" << std::endl;
             continue;
         }
 
         CNode* node = node_it->second;
 
-        // SSOT FIX #4: Check CNode socket (single source of truth)
-        // CNode owns the socket - CPeer socket is deprecated
-        if (!node->HasValidSocket()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: invalid socket (CNode check)" << std::endl;
-            continue;
-        }
-        if (node->fDisconnect.load()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: disconnecting" << std::endl;
-            continue;
-        }
-
-        // SSOT FIX #1: Check CNode::state (single source of truth) instead of CPeer::state
-        // CNode::state is authoritative - CPeer::state is deprecated
-        if (!node->IsHandshakeComplete()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: handshake incomplete (CNode::state check)" << std::endl;
+        // SSOT: Check CNode state (socket, disconnect flag, handshake)
+        if (!node->HasValidSocket() || node->fDisconnect.load() || !node->IsHandshakeComplete()) {
             continue;
         }
 
         // Must be suitable for download (not stalling too much)
         if (!peer->IsSuitableForDownload()) {
-            if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " SKIP: not suitable (stall=" << peer->nStallingCount << ")" << std::endl;
             continue;
         }
 
-        if (should_log) std::cout << "[DEBUG] Peer " << peer_id << " VALID for download" << std::endl;
-        result.push_back(pair.first);
+        result.push_back(peer_id);
     }
 
     return result;
@@ -1298,13 +1171,12 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
 
     auto it = peers.find(peer_id);
     if (it == peers.end()) {
-        // Phase C fix: Create peer entry if not exists (CConnectionManager doesn't call AddPeer)
+        // Create peer entry if not exists
         auto new_peer = std::make_shared<CPeer>();
         new_peer->id = peer_id;
         new_peer->state = CPeer::STATE_CONNECTED;
         peers[peer_id] = new_peer;
         it = peers.find(peer_id);
-        std::cout << "[PeerManager] Created peer " << peer_id << " on-the-fly" << std::endl;
     }
 
     CPeer* peer = it->second.get();
@@ -1328,13 +1200,7 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
 void CPeerManager::OnPeerDisconnected(int peer_id)
 {
     // Re-queue any in-flight blocks from this peer
-    std::vector<uint256> orphaned_blocks = GetAndClearPeerBlocks(peer_id);
-
-    if (!orphaned_blocks.empty()) {
-        std::cout << "[PeerManager] Peer " << peer_id << " disconnected with "
-                  << orphaned_blocks.size() << " blocks in flight" << std::endl;
-    }
-
+    GetAndClearPeerBlocks(peer_id);
     // The actual peer removal is handled by RemovePeer()
 }
 
@@ -1342,39 +1208,24 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
 // These methods replace CPeer methods for new event-driven architecture
 
 CNode* CPeerManager::AddNode(const NetProtocol::CAddress& addr, bool inbound) {
-    // DEPRECATED: CConnman now owns CNode objects directly.
-    // This function creates a CNode but doesn't add it to CConnman.
-    // Use CConnman::ConnectNode() or CConnman::AcceptConnection() instead.
-    //
-    // This function is kept for backward compatibility but should not be used.
-    // It will be removed in a future cleanup.
-
+    // DEPRECATED: Use CConnman::ConnectNode() or CConnman::AcceptConnection() instead.
     std::string ip = addr.ToStringIP();
     if (banman.IsBanned(ip)) {
-        std::cout << "[PeerManager] AddNode rejected: IP " << ip << " is banned" << std::endl;
         return nullptr;
     }
 
-    // Check connection limits
     if (!CanAcceptConnection()) {
-        std::cout << "[PeerManager] AddNode rejected: connection limit reached" << std::endl;
         return nullptr;
     }
 
-    // Generate new node ID
     int node_id = next_peer_id++;
-
-    // Create CNode (caller is responsible for managing this memory!)
-    // WARNING: This is a memory leak if caller doesn't delete the returned CNode.
     CNode* node_ptr = new CNode(node_id, addr, inbound);
 
-    // Store reference (not ownership)
     {
         std::lock_guard<std::recursive_mutex> lock(cs_nodes);
         node_refs[node_id] = node_ptr;
     }
 
-    // Create CPeer for legacy compatibility
     {
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
         if (peers.find(node_id) == peers.end()) {
@@ -1383,33 +1234,23 @@ CNode* CPeerManager::AddNode(const NetProtocol::CAddress& addr, bool inbound) {
             peers[node_id] = peer;
         }
     }
-
-    std::cout << "[PeerManager] AddNode (DEPRECATED): created CNode " << node_id << " (" << ip << ":" << addr.port
-              << ", inbound=" << (inbound ? "true" : "false") << ")" << std::endl;
 
     return node_ptr;
 }
 
 void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAddress& addr, bool inbound) {
-    // FIX Issue 1: Store reference to CConnman's CNode (non-owning)
-    // CConnman owns CNode objects. CPeerManager stores raw pointers for state sync.
-
+    // Store reference to CConnman's CNode (non-owning)
     std::string ip = addr.ToStringIP();
 
-    // Check if IP is banned
     if (banman.IsBanned(ip)) {
-        std::cout << "[PeerManager] RegisterNode rejected: IP " << ip << " is banned" << std::endl;
         return;
     }
 
-    // Store reference to CNode (owned by CConnman)
     {
         std::lock_guard<std::recursive_mutex> lock(cs_nodes);
         node_refs[node_id] = node;
     }
 
-    // Create CPeer for legacy compatibility (handshake state tracking)
-    // This will be used by ProcessVersionMessage/ProcessVerackMessage
     {
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
         if (peers.find(node_id) == peers.end()) {
@@ -1419,29 +1260,21 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
         }
     }
 
-    // Update next_peer_id if needed
     if (node_id >= next_peer_id) {
         next_peer_id = node_id + 1;
     }
-
-    std::cout << "[PeerManager] Registered node " << node_id << " (" << ip << ":" << addr.port
-              << ", inbound=" << (inbound ? "true" : "false") << ")" << std::endl;
 }
 
 void CPeerManager::RemoveNode(int node_id) {
-    // Remove node reference (don't delete - CConnman owns it)
     {
         std::lock_guard<std::recursive_mutex> lock(cs_nodes);
         node_refs.erase(node_id);
     }
 
-    // Also remove CPeer
     {
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
         peers.erase(node_id);
     }
-
-    std::cout << "[PeerManager] Removed node " << node_id << std::endl;
 }
 
 CNode* CPeerManager::GetNode(int node_id) {
