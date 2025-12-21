@@ -2125,6 +2125,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 // Add block to orphan manager (now validated)
                 if (g_node_context.orphan_manager->AddOrphanBlock(peer_id, block)) {
+                    // SSOT FIX: Mark block as received to free up CBlockTracker entry
+                    // Even though it's an orphan, we received it - free up capacity for more requests
+                    if (g_node_context.block_fetcher) {
+                        g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                    }
+
                     // ORPHAN BOTTLENECK FIX #9: Request parent through IBD system
                     // Previously only triggered header sync, which doesn't guarantee parent block request
                     // Now requests parent block through CBlockFetcher for proper tracking and prioritization
