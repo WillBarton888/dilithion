@@ -628,9 +628,12 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // CS-005: Chain Reorganization Rollback - ConnectTip Implementation
     // ============================================================================
 
+    // IBD OPTIMIZATION: Get cached hash once and reuse throughout
+    const uint256& blockHash = pindex->GetBlockHash();
+
     // Step 1: Update UTXO set (CS-004)
     if (pUTXOSet != nullptr) {
-        if (!pUTXOSet->ApplyBlock(block, pindex->nHeight)) {
+        if (!pUTXOSet->ApplyBlock(block, pindex->nHeight, blockHash)) {
             std::cerr << "[Chain] ERROR: Failed to apply block to UTXO set at height "
                       << pindex->nHeight << std::endl;
             return false;
@@ -649,7 +652,6 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // NOTE: We don't hold cs_main during callbacks to prevent deadlock
     // The wallet has its own lock (cs_wallet)
     // IBD OPTIMIZATION: Pass cached hash to avoid RandomX recomputation
-    const uint256& blockHash = pindex->GetBlockHash();
     for (size_t i = 0; i < m_blockConnectCallbacks.size(); ++i) {
         try {
             m_blockConnectCallbacks[i](block, pindex->nHeight, blockHash);

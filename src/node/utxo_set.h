@@ -153,9 +153,10 @@ public:
      * This adds all outputs and spends all inputs (except coinbase)
      * @param block The block to apply
      * @param height The height of this block
+     * @param blockHash Block hash (passed to avoid RandomX recomputation)
      * @return true if successful
      */
-    bool ApplyBlock(const CBlock& block, uint32_t height);
+    bool ApplyBlock(const CBlock& block, uint32_t height, const uint256& blockHash);
 
     /**
      * Undo all transactions from a block (for chain reorganization)

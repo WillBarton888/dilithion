@@ -388,7 +388,7 @@ bool CUTXOSet::SpendUTXO(const COutPoint& outpoint) {
     return true;
 }
 
-bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
+bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height, const uint256& blockHash) {
     if (!IsOpen()) {
         std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Database not open" << std::endl;
         return false;
@@ -549,7 +549,7 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height) {
     undoData.insert(undoData.end(), checksum, checksum + 32);
 
     // Step 5: Store undo data with key "undo_<blockhash>"
-    uint256 blockHash = block.GetHash();
+    // IBD OPTIMIZATION: Use passed blockHash instead of computing RandomX
     std::string undoKey = "undo_";
     undoKey.append(reinterpret_cast<const char*>(blockHash.data), 32);
     batch.Put(undoKey, leveldb::Slice(reinterpret_cast<const char*>(undoData.data()), undoData.size()));
