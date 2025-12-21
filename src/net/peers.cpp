@@ -558,6 +558,9 @@ void CPeerManager::MarkAddressGood(const NetProtocol::CAddress& addr) {
         netaddr.SetIPv6(addr.ip);
     }
 
+    // NOTE: Since we only call MarkAddressGood for OUTBOUND connections,
+    // addr.port is already the correct P2P port (18444 testnet / 8444 mainnet).
+    // Inbound connections are excluded at the call site (dilithion-node.cpp).
     CService service(netaddr, addr.port);
 
     // Mark as good in AddrMan (moves to tried table)

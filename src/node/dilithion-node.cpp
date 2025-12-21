@@ -1741,9 +1741,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // Phase 5: Mark peer's address as "good" on successful handshake
             // This moves the address from "new" to "tried" table in AddrMan
+            // CRITICAL: Only for OUTBOUND connections! Inbound peers have ephemeral
+            // source ports (e.g., 46420) not their listening port (18444).
+            // Bitcoin Core never adds inbound addresses to AddrMan for this reason.
             if (g_node_context.peer_manager) {
                 auto peer = g_node_context.peer_manager->GetPeer(peer_id);
-                if (peer && peer->addr.IsRoutable()) {
+                auto node = g_node_context.peer_manager->GetNode(peer_id);
+                if (peer && node && !node->fInbound && peer->addr.IsRoutable()) {
                     g_node_context.peer_manager->MarkAddressGood(peer->addr);
                 }
             }
