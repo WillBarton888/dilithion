@@ -742,22 +742,10 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // SSOT Phase 2: Try CBlockTracker first for blocks with known height
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized() && pindex) {
-        int height = pindex->nHeight;
-        g_node_context.block_tracker->SetHash(height, hash);
-        if (g_node_context.block_tracker->AssignToPeer(height, peer_id)) {
-            return true;
-        }
-        // AssignToPeer failed - fall through to legacy
-    }
+    // SSOT: CBlockTracker handles tracking via CBlockFetcher::RequestBlockFromPeer
+    // This method is now only for legacy orphan block tracking
 
-    // Legacy handling for orphans/unknown heights
     if (mapBlocksInFlight.count(hash)) {
-        return false;
-    }
-
-    if (mapBlocksInFlight.size() >= static_cast<size_t>(MAX_BLOCKS_IN_FLIGHT_TOTAL)) {
         return false;
     }
 
@@ -768,27 +756,20 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
 
     CPeer* peer = it->second.get();
 
-    // SSOT Phase 2: Use CBlockTracker for capacity check if available
+    // Use CBlockTracker for capacity check
     int peer_blocks_in_flight = 0;
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+    if (g_node_context.block_tracker) {
         peer_blocks_in_flight = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
-    } else {
-        for (const auto& entry : mapBlocksInFlight) {
-            if (entry.second.first == peer_id) {
-                peer_blocks_in_flight++;
-            }
-        }
     }
     if (peer_blocks_in_flight >= MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
 
-    // Add to peer's in-flight list (legacy)
+    // Legacy tracking for orphan blocks (no known height)
     QueuedBlock qb(hash, pindex);
     peer->vBlocksInFlight.push_back(qb);
     peer->nBlocksInFlight++;
 
-    // Add to global map (legacy)
     auto list_it = std::prev(peer->vBlocksInFlight.end());
     mapBlocksInFlight[hash] = std::make_pair(peer_id, list_it);
 
@@ -830,63 +811,32 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // SSOT Phase 2: Try CBlockTracker first (it's the single source of truth)
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        int height = g_node_context.block_tracker->GetHeightForHash(hash);
-        if (height > 0) {
-            g_node_context.block_tracker->OnBlockReceived(height, peer_id);
-            // Update peer stats but DON'T decrement nBlocksInFlight - CBlockTracker handles it
-            auto peer_it = peers.find(peer_id);
-            if (peer_it != peers.end()) {
-                peer_it->second->nBlocksDownloaded++;
-                peer_it->second->lastSuccessTime = std::chrono::steady_clock::now();
-                peer_it->second->nStallingCount = 0;
-            }
-            return;
-        }
-        // Height not found - fall through to legacy
+    // SSOT: CBlockTracker handles tracking via OnBlockReceived
+    // This method just updates peer stats
+
+    // Update peer stats
+    auto peer_it = peers.find(peer_id);
+    if (peer_it != peers.end()) {
+        peer_it->second->nBlocksDownloaded++;
+        peer_it->second->lastSuccessTime = std::chrono::steady_clock::now();
+        peer_it->second->nStallingCount = 0;
     }
 
-    // Legacy handling for orphans/unsolicited blocks
+    // Legacy: clean up mapBlocksInFlight if present (for orphan blocks)
     auto it = mapBlocksInFlight.find(hash);
     if (it != mapBlocksInFlight.end()) {
         int tracked_peer = it->second.first;
         auto list_it = it->second.second;
 
-        auto peer_it = peers.find(tracked_peer);
-        if (peer_it != peers.end()) {
-            CPeer* peer = peer_it->second.get();
+        auto tracked_peer_it = peers.find(tracked_peer);
+        if (tracked_peer_it != peers.end()) {
+            CPeer* peer = tracked_peer_it->second.get();
             peer->vBlocksInFlight.erase(list_it);
             if (peer->nBlocksInFlight > 0) {
                 peer->nBlocksInFlight--;
             }
-            peer->nStallingCount = 0;
-            peer->nBlocksDownloaded++;
-            peer->lastSuccessTime = std::chrono::steady_clock::now();
-        } else {
-            // Tracked peer disconnected - update sender instead
-            auto sender_it = peers.find(peer_id);
-            if (sender_it != peers.end()) {
-                CPeer* sender = sender_it->second.get();
-                if (sender->nBlocksInFlight > 0) {
-                    sender->nBlocksInFlight--;
-                }
-                sender->nBlocksDownloaded++;
-                sender->lastSuccessTime = std::chrono::steady_clock::now();
-            }
         }
         mapBlocksInFlight.erase(it);
-    } else {
-        // Untracked block - just update stats
-        auto peer_it = peers.find(peer_id);
-        if (peer_it != peers.end()) {
-            CPeer* peer = peer_it->second.get();
-            if (peer->nBlocksInFlight > 0) {
-                peer->nBlocksInFlight--;
-            }
-            peer->nBlocksDownloaded++;
-            peer->lastSuccessTime = std::chrono::steady_clock::now();
-        }
     }
 }
 
@@ -949,8 +899,8 @@ int CPeerManager::GetBlocksInFlightForPeer(int peer_id) const
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // SSOT Phase 2: CBlockTracker is the single source of truth for in-flight counts
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+    // SSOT: CBlockTracker is the single source of truth for in-flight counts
+    if (g_node_context.block_tracker) {
         return g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
     }
 

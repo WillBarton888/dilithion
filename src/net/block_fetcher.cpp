@@ -68,7 +68,18 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Check peer manager and peer validity
+    // SSOT: Delegate to CBlockTracker via RequestBlockFromPeer
+    // This method is legacy - new code should use RequestBlockFromPeer directly
+    if (g_node_context.block_tracker) {
+        // Check if already tracked
+        if (g_node_context.block_tracker->IsTracked(height)) {
+            return false;
+        }
+        // AddBlock handles capacity checks
+        return g_node_context.block_tracker->AddBlock(height, hash, peer);
+    }
+
+    // Fallback for when block_tracker not available
     if (!m_peer_manager) {
         return false;
     }
@@ -78,41 +89,10 @@ bool CBlockFetcher::RequestBlock(NodeId peer, const uint256& hash, int height)
         return false;
     }
 
-    // Check peer capacity
     int blocks_in_flight = m_peer_manager->GetBlocksInFlightForPeer(peer);
     if (blocks_in_flight >= CPeerManager::MAX_BLOCKS_IN_FLIGHT_PER_PEER) {
         return false;
     }
-
-    // IBD BOTTLENECK FIX: Skip hash-based duplicate check for mapBlocksInFlight
-    // The hash-based check fails when header hash doesn't match received block hash.
-    // CBlockTracker handles deduplication by HEIGHT through AssignChunkToPeer.
-    // We only check if height is already CONNECTED (block already in chain).
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        BlockState state = g_node_context.block_tracker->GetState(height);
-        if (state == BlockState::CONNECTED) {
-            // Block already connected to chain - no need to request
-            return false;
-        }
-        // PENDING and IN_FLIGHT are OK - AssignChunkToPeer manages those transitions
-    }
-    // Note: Removed mapBlocksInFlight.count(hash) check - hash mismatch causes stale entries
-
-    // Create in-flight entry (for timeout tracking only)
-    CBlockInFlight inFlight(hash, peer, height);
-    mapBlocksInFlight[hash] = inFlight;
-
-    // Track peer's blocks (for disconnect handling)
-    mapPeerBlocks[peer].insert(hash);
-
-    // SSOT Phase 3: Use CBlockTracker for assignment
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        g_node_context.block_tracker->SetHash(height, hash);
-        g_node_context.block_tracker->AssignToPeer(height, peer);
-    }
-
-    // Remove from queue if present
-    setQueuedHashes.erase(hash);
 
     return true;
 }
@@ -121,119 +101,22 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Check if block was in-flight in local tracking
-    auto it = mapBlocksInFlight.find(hash);
-    if (it == mapBlocksInFlight.end()) {
-        // Not in hash-based tracking - use CBlockTracker's O(1) reverse lookup
-        // BUG #167 FIX: Blocks from RequestBlockFromPeer are tracked by height, not hash
-        int height = -1;
-        if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-            height = g_node_context.block_tracker->GetHeightForHash(hash);
-        }
-
-        if (height > 0) {
-            // Found via CBlockTracker - clean up height-based tracking
-            auto height_it = mapBlocksInFlightByHeight.find(height);
-            if (height_it != mapBlocksInFlightByHeight.end()) {
-                const std::set<NodeId>& all_peers = height_it->second.peers;
-
-                // Remove from all peers' tracking
-                for (NodeId p : all_peers) {
-                    auto peer_it = mapPeerBlocksInFlightByHeight.find(p);
-                    if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-                        peer_it->second.erase(height);
-                        if (peer_it->second.empty()) {
-                            mapPeerBlocksInFlightByHeight.erase(peer_it);
-                        }
-                    }
-                }
-
-                // Remove from height tracking
-                mapBlocksInFlightByHeight.erase(height_it);
-            }
-
-            // SSOT: Notify CBlockTracker
-            g_node_context.block_tracker->OnBlockReceived(height, peer);
-
-            // Notify CPeerManager
-            if (m_peer_manager) {
-                m_peer_manager->MarkBlockAsReceived(peer, hash);
-            }
-
-            nBlocksReceivedTotal++;
-            lastBlockReceived = std::chrono::steady_clock::now();
-            return true;
-        }
-
-        // Not tracked in either system - notify CPeerManager anyway
-        if (m_peer_manager) {
-            m_peer_manager->MarkBlockAsReceived(peer, hash);
-        }
-        return false;
+    // SSOT: CBlockTracker handles all tracking - just delegate to it
+    int height = -1;
+    if (g_node_context.block_tracker) {
+        height = g_node_context.block_tracker->OnBlockReceived(hash);
     }
 
-    // Block was in local tracking - notify CPeerManager
+    // Update stats
+    nBlocksReceivedTotal++;
+    lastBlockReceived = std::chrono::steady_clock::now();
+
+    // Notify CPeerManager for peer stats (downloads count, etc.)
     if (m_peer_manager) {
         m_peer_manager->MarkBlockAsReceived(peer, hash);
     }
 
-    int height = it->second.nHeight;
-
-    // Calculate response time and update CPeerManager stats
-    auto timeReceived = std::chrono::steady_clock::now();
-    auto responseTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-        timeReceived - it->second.timeRequested
-    );
-
-    // Phase 1: Delegate peer stats update to CPeerManager
-    if (m_peer_manager) {
-        m_peer_manager->UpdatePeerStats(peer, true, responseTime);
-    }
-
-    // Remove from local in-flight tracking
-    NodeId requestedPeer = it->second.peer;
-    mapBlocksInFlight.erase(it);
-
-    // BUG #167 FIX: Also clean up height-based tracking (mapBlocksInFlightByHeight)
-    // Without this, orphan blocks never decrement the height-based in-flight count,
-    // causing GetNextBlocksToRequest() to return empty when 128 heights are in-flight.
-    if (height > 0) {
-        mapBlocksInFlightByHeight.erase(height);
-        // Also clean up per-peer height tracking
-        auto peer_it = mapPeerBlocksInFlightByHeight.find(requestedPeer);
-        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-            peer_it->second.erase(height);
-            if (peer_it->second.empty()) {
-                mapPeerBlocksInFlightByHeight.erase(peer_it);
-            }
-        }
-        // SSOT: Also notify CBlockTracker
-        if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-            g_node_context.block_tracker->OnBlockReceived(height, requestedPeer);
-        }
-    }
-
-    // Update peer's block set (for disconnect handling)
-    if (mapPeerBlocks.count(requestedPeer) > 0) {
-        mapPeerBlocks[requestedPeer].erase(hash);
-        if (mapPeerBlocks[requestedPeer].empty()) {
-            mapPeerBlocks.erase(requestedPeer);
-        }
-    }
-
-    // NOTE: Chunk tracking is now handled by OnChunkBlockReceived() which is
-    // called explicitly by the caller alongside MarkBlockReceived().
-    // This avoids double-counting of blocks_pending decrements.
-    // Window tracking is also done in OnChunkBlockReceived().
-
-    // Update global statistics
-    nBlocksReceivedTotal++;
-    lastBlockReceived = timeReceived;
-
-    // BUG #64: Clean up preferred peer tracking
-    mapPreferredPeers.erase(hash);
-
-    return true;
+    return (height > 0);
 }
 
 std::vector<std::pair<uint256, int>> CBlockFetcher::GetNextBlocksToFetch(int maxBlocks)
@@ -672,43 +555,10 @@ void CBlockFetcher::UpdateDownloadSpeed()
 
 NodeId CBlockFetcher::OnChunkBlockReceived(int height)
 {
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    // Pure per-block tracking (Bitcoin Core style)
-    auto it = mapBlocksInFlightByHeight.find(height);
-    if (it == mapBlocksInFlightByHeight.end()) {
-        // Block not in tracking - already received or never requested
-        return -1;
-    }
-
-    uint256 hash = it->second.hash;
-    const std::set<NodeId>& all_peers = it->second.peers;
-    NodeId first_peer = all_peers.empty() ? -1 : *all_peers.begin();
-
-    // Remove from ALL peers' tracking (handles parallel downloads)
-    for (NodeId p : all_peers) {
-        auto peer_it = mapPeerBlocksInFlightByHeight.find(p);
-        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-            peer_it->second.erase(height);
-            if (peer_it->second.empty()) {
-                mapPeerBlocksInFlightByHeight.erase(peer_it);
-            }
-        }
-    }
-
-    // Remove from per-block tracking
-    mapBlocksInFlightByHeight.erase(it);
-
-    // Notify CPeerManager
-    if (m_peer_manager && first_peer >= 0) {
-        m_peer_manager->MarkBlockAsReceived(first_peer, hash);
-    }
-
-    // Update stats
-    nBlocksReceivedTotal++;
-    lastBlockReceived = std::chrono::steady_clock::now();
-
-    return first_peer;
+    // SSOT: Delegate to OnBlockReceived (legacy interface)
+    // Return -1 since we don't track which peer sent it (CBlockTracker knows)
+    OnBlockReceived(-1, height);
+    return -1;
 }
 
 // ============ Window Implementation (for backpressure only) ============
@@ -717,30 +567,16 @@ void CBlockFetcher::InitializeWindow(int chain_height, int target_height, bool f
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // IBD Redesign Phase 4: CBlockTracker is now PRIMARY source of truth
-    // Skip if already initialized with same target (unless forced for fork recovery)
-    if (g_node_context.block_tracker) {
-        if (!force && g_node_context.block_tracker->IsInitialized() &&
-            g_node_context.block_tracker->GetTargetHeight() == target_height) {
-            return;
-        }
-    } else if (!force && m_window_initialized && m_download_window.GetTargetHeight() == target_height) {
-        return;  // Fallback to old check if block_tracker not available
+    // SSOT: CBlockTracker handles all tracking - no window needed
+    if (force && g_node_context.block_tracker) {
+        g_node_context.block_tracker->Clear();
     }
 
-    // Clear existing state when force reinitializing for fork recovery
-    if (force) {
-        mapBlocksInFlight.clear();
-        mapBlocksInFlightByHeight.clear();
-        mapPeerBlocksInFlightByHeight.clear();
+    // Keep window for legacy backpressure (will be removed later)
+    if (!force && m_window_initialized && m_download_window.GetTargetHeight() == target_height) {
+        return;
     }
 
-    // Initialize CBlockTracker as PRIMARY
-    if (g_node_context.block_tracker) {
-        g_node_context.block_tracker->Initialize(chain_height, target_height);
-    }
-
-    // Initialize window for backpressure
     m_download_window.Initialize(chain_height, target_height);
     m_window_initialized = true;
 }
@@ -749,12 +585,7 @@ std::vector<int> CBlockFetcher::GetWindowPendingHeights(int max_count)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        return g_node_context.block_tracker->GetPendingHeights(max_count);
-    }
-
-    // Fallback to legacy window
+    // Legacy window for backpressure - SSOT uses GetNextBlocksToRequest instead
     if (!m_window_initialized) {
         return {};
     }
@@ -787,34 +618,14 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Clean up mapBlocksInFlight by HEIGHT when block is connected
-    for (auto it = mapBlocksInFlight.begin(); it != mapBlocksInFlight.end(); ) {
-        if (it->second.nHeight == height) {
-            // Clean up peer tracking
-            if (mapPeerBlocks.count(it->second.peer) > 0) {
-                mapPeerBlocks[it->second.peer].erase(it->first);
-                if (mapPeerBlocks[it->second.peer].empty()) {
-                    mapPeerBlocks.erase(it->second.peer);
-                }
-            }
-            // Notify CPeerManager
-            if (m_peer_manager) {
-                m_peer_manager->RemoveBlockFromFlight(it->first);
-            }
-            it = mapBlocksInFlight.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    // SSOT: CBlockTracker handles tracking cleanup via OnBlockReceivedByHeight
+    // When a block is connected, it should already have been marked as received
 
     if (!m_window_initialized) {
         return;
     }
 
-    // IBD HANG FIX #2: Pass callback to check if height is queued for validation
-    // This allows window to advance past blocks that are queued (processing) vs stuck
-    // IBD STUCK FIX #6: Pass callback to check if height is in-flight via chunk tracking
-    // This prevents window from advancing past heights that are still being fetched
+    // Callbacks for legacy window advancement
     auto is_height_queued = [](int h) -> bool {
         if (g_node_context.validation_queue && g_node_context.validation_queue->IsRunning()) {
             return g_node_context.validation_queue->IsHeightQueued(h);
@@ -822,14 +633,14 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
         return false;
     };
 
-    // Check if height is in-flight (per-block tracking)
-    auto is_height_in_flight = [this](int h) -> bool {
-        // Note: cs_fetcher already held by caller
-        return mapBlocksInFlightByHeight.count(h) > 0;
+    // Check if height is in-flight via CBlockTracker (SSOT)
+    auto is_height_in_flight = [](int h) -> bool {
+        if (g_node_context.block_tracker) {
+            return g_node_context.block_tracker->IsTracked(h);
+        }
+        return false;
     };
 
-    // BUG #162 FIX: Check if height is connected to the chain
-    // This is the authoritative check - a height is complete only if it's at or below chain tip
     auto is_height_connected = [](int h) -> bool {
         if (g_node_context.chainstate) {
             int chain_height = g_node_context.chainstate->GetHeight();
@@ -837,11 +648,6 @@ void CBlockFetcher::OnWindowBlockConnected(int height)
         }
         return false;
     };
-
-    // IBD Redesign Phase 3: Shadow-track with CBlockTracker
-    if (g_node_context.block_tracker) {
-        g_node_context.block_tracker->OnBlockConnected(height);
-    }
 
     m_download_window.OnBlockConnected(height, is_height_queued, is_height_in_flight, is_height_connected);
 }
@@ -854,19 +660,12 @@ void CBlockFetcher::AddHeightsToWindowPending(const std::vector<int>& heights)
         return;
     }
 
-    // Add heights to window's pending set (skip those already in-flight)
+    // Add heights to legacy window's pending set (skip those already in-flight via SSOT)
     for (int h : heights) {
-        if (mapBlocksInFlightByHeight.count(h) > 0) {
-            // Height is already in-flight - don't add to pending
-            continue;
+        if (g_node_context.block_tracker && g_node_context.block_tracker->IsTracked(h)) {
+            continue;  // Already in-flight
         }
         m_download_window.AddToPending(h);
-
-        // Phase 5: Also add to CBlockTracker if height is beyond current window
-        // This handles heights added by QueueMissingBlocks that weren't in initial window
-        if (g_node_context.block_tracker) {
-            g_node_context.block_tracker->AddPendingHeight(h);
-        }
     }
 }
 
@@ -874,9 +673,9 @@ bool CBlockFetcher::IsWindowInitialized() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
+    // SSOT: CBlockTracker is always "initialized" - just return true if it exists
     if (g_node_context.block_tracker) {
-        return g_node_context.block_tracker->IsInitialized();
+        return true;
     }
     return m_window_initialized;
 }
@@ -885,8 +684,8 @@ std::string CBlockFetcher::GetWindowStatus() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+    // SSOT: Get status from CBlockTracker
+    if (g_node_context.block_tracker) {
         return g_node_context.block_tracker->GetStatus();
     }
 
@@ -900,9 +699,10 @@ bool CBlockFetcher::IsWindowComplete() const
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        return g_node_context.block_tracker->IsComplete();
+    // SSOT: Window is "complete" when no blocks in-flight and chain matches target
+    // For now, return false (caller will check chain height vs header height)
+    if (g_node_context.block_tracker) {
+        return g_node_context.block_tracker->GetTotalInFlight() == 0;
     }
 
     if (!m_window_initialized) {
@@ -915,11 +715,8 @@ bool CBlockFetcher::UpdateWindowTarget(int new_target_height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // IBD Redesign Phase 4: Use CBlockTracker as PRIMARY
-    if (g_node_context.block_tracker) {
-        g_node_context.block_tracker->UpdateTarget(new_target_height);
-    }
-
+    // SSOT: CBlockTracker doesn't need target updates - no window constraint
+    // Just update legacy window for backward compatibility
     if (!m_window_initialized) {
         return false;
     }
@@ -931,29 +728,27 @@ bool CBlockFetcher::UpdateWindowTarget(int new_target_height)
 
 std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks, int chain_height, int header_height)
 {
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
     std::vector<int> result;
     result.reserve(max_blocks);
 
-    // Pure per-block: no window, just iterate from chain_height+1 to header_height
-    // Limit total in-flight to prevent requesting too far ahead
-    static constexpr int MAX_TOTAL_IN_FLIGHT = 128;
-    int total_in_flight = static_cast<int>(mapBlocksInFlightByHeight.size());
-
-    if (total_in_flight >= MAX_TOTAL_IN_FLIGHT) {
-        return result;  // Already have enough in-flight
+    // SSOT: Use CBlockTracker for all tracking
+    if (!g_node_context.block_tracker) {
+        return result;
     }
 
-    int available_slots = MAX_TOTAL_IN_FLIGHT - total_in_flight;
+    int total_in_flight = g_node_context.block_tracker->GetTotalInFlight();
+    if (total_in_flight >= CBlockTracker::MAX_TOTAL) {
+        return result;  // Already at capacity
+    }
+
+    int available_slots = CBlockTracker::MAX_TOTAL - total_in_flight;
     int blocks_to_get = std::min(max_blocks, available_slots);
 
+    // Pure per-block: iterate from chain_height+1, skip tracked heights
     for (int h = chain_height + 1; h <= header_height && static_cast<int>(result.size()) < blocks_to_get; h++) {
-        // Skip if already in-flight
-        if (mapBlocksInFlightByHeight.count(h) > 0) {
-            continue;
+        if (!g_node_context.block_tracker->IsTracked(h)) {
+            result.push_back(h);
         }
-        result.push_back(h);
     }
 
     return result;
@@ -963,165 +758,69 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Check if height already in-flight (PARALLEL DOWNLOAD path)
-    // This check comes BEFORE capacity check - parallel downloads bypass capacity limits
-    auto block_it = mapBlocksInFlightByHeight.find(height);
-    if (block_it != mapBlocksInFlightByHeight.end()) {
-        // PARALLEL DOWNLOAD: Height already in-flight from another peer
-        // Check if THIS peer already has it (reject duplicate)
-        if (block_it->second.HasPeer(peer_id)) {
-            return false;  // This peer already downloading this block
-        }
-        // Add this peer as parallel downloader (bypasses capacity limit)
-        block_it->second.AddPeer(peer_id);
-        mapPeerBlocksInFlightByHeight[peer_id].insert(height);
-
-        return true;
+    // SSOT: CBlockTracker handles all tracking - just delegate to it
+    if (!g_node_context.block_tracker) {
+        return false;
     }
 
-    // SSOT Phase 3: Check peer capacity using CBlockTracker
-    int peer_in_flight = 0;
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        peer_in_flight = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
-    } else {
-        // Legacy fallback
-        auto peer_it = mapPeerBlocksInFlightByHeight.find(peer_id);
-        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-            peer_in_flight = static_cast<int>(peer_it->second.size());
-        }
-    }
-    if (peer_in_flight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
-        return false;  // Peer at capacity for new blocks
-    }
-
-    // SSOT Phase 3: Use CBlockTracker for assignment
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        g_node_context.block_tracker->SetHash(height, hash);
-        g_node_context.block_tracker->AssignToPeer(height, peer_id);
-    }
-
-    // Shadow tracking
-    mapBlocksInFlightByHeight[height] = BlockInFlightByHeight(height, hash, peer_id);
-    mapPeerBlocksInFlightByHeight[peer_id].insert(height);
-
-    return true;
+    // AddBlock handles capacity checks and duplicate detection
+    return g_node_context.block_tracker->AddBlock(height, hash, peer_id);
 }
 
 bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Find in per-block tracking
-    auto it = mapBlocksInFlightByHeight.find(height);
-    if (it == mapBlocksInFlightByHeight.end()) {
-        // Not in per-block tracking - try legacy chunk system
+    // SSOT: CBlockTracker handles all tracking - just delegate to it
+    if (!g_node_context.block_tracker) {
         return false;
     }
 
-    uint256 hash = it->second.hash;
-    const std::set<NodeId>& all_peers = it->second.peers;
+    bool found = g_node_context.block_tracker->OnBlockReceivedByHeight(height);
 
-    // PARALLEL DOWNLOAD: Remove from ALL peers' tracking (they were all racing)
-    for (NodeId p : all_peers) {
-        auto peer_it = mapPeerBlocksInFlightByHeight.find(p);
-        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-            peer_it->second.erase(height);
-            if (peer_it->second.empty()) {
-                mapPeerBlocksInFlightByHeight.erase(peer_it);
-            }
-        }
-        // Notify CPeerManager for each peer
-        if (m_peer_manager && p != peer_id) {
-            m_peer_manager->RemoveBlockFromFlight(hash);  // Clean up other peers
-        }
+    if (found) {
+        // Update stats
+        nBlocksReceivedTotal++;
+        lastBlockReceived = std::chrono::steady_clock::now();
     }
 
-    // Remove from per-block tracking
-    mapBlocksInFlightByHeight.erase(it);
-
-    // SSOT: Notify CBlockTracker (single source of truth)
-    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
-        g_node_context.block_tracker->OnBlockReceived(height, peer_id);
-    }
-
-    // Update stats
-    nBlocksReceivedTotal++;
-    lastBlockReceived = std::chrono::steady_clock::now();
-
-    return true;
+    return found;
 }
 
 std::vector<std::pair<int, NodeId>> CBlockFetcher::GetStalledBlocks(std::chrono::seconds timeout)
 {
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    std::vector<std::pair<int, NodeId>> stalled;
-    auto now = std::chrono::steady_clock::now();
-
-    for (const auto& [height, info] : mapBlocksInFlightByHeight) {
-        // Only flag blocks with 1 peer - blocks with 2+ peers already have parallel downloads
-        if (info.peers.size() >= 2) {
-            continue;  // Already has parallel download, skip
-        }
-
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - info.first_request_time);
-        if (elapsed >= timeout) {
-            // Return first peer for logging, but caller should add parallel peer, not requeue
-            NodeId first_peer = info.peers.empty() ? -1 : *info.peers.begin();
-            stalled.push_back({height, first_peer});
-        }
+    // SSOT: Delegate to CBlockTracker
+    if (g_node_context.block_tracker) {
+        return g_node_context.block_tracker->CheckTimeouts();
     }
-
-    return stalled;
+    return {};
 }
 
 void CBlockFetcher::RequeueBlock(int height)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
-    // Remove from per-block tracking if present
-    auto it = mapBlocksInFlightByHeight.find(height);
-    if (it != mapBlocksInFlightByHeight.end()) {
-        uint256 hash = it->second.hash;
-        const std::set<NodeId>& peers = it->second.peers;
-
-        // Remove from ALL peers' tracking (parallel download support)
-        for (NodeId peer : peers) {
-            auto peer_it = mapPeerBlocksInFlightByHeight.find(peer);
-            if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
-                peer_it->second.erase(height);
-                if (peer_it->second.empty()) {
-                    mapPeerBlocksInFlightByHeight.erase(peer_it);
-                }
-            }
-        }
-
-        // Remove from in-flight map
-        mapBlocksInFlightByHeight.erase(it);
-
-        // Notify CPeerManager
-        if (m_peer_manager) {
-            m_peer_manager->RemoveBlockFromFlight(hash);
-        }
+    // SSOT: CBlockTracker handles all tracking
+    if (g_node_context.block_tracker) {
+        g_node_context.block_tracker->RemoveTimedOut(height);
     }
-
-    // Add back to pending
-    m_download_window.MarkAsPending(height);
+    // Block will be re-requested on next iteration of download loop
 }
 
 int CBlockFetcher::GetPeerBlocksInFlight(NodeId peer_id) const
 {
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-
-    auto it = mapPeerBlocksInFlightByHeight.find(peer_id);
-    if (it != mapPeerBlocksInFlightByHeight.end()) {
-        return static_cast<int>(it->second.size());
+    // SSOT: Delegate to CBlockTracker
+    if (g_node_context.block_tracker) {
+        return g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
     }
     return 0;
 }
 
 bool CBlockFetcher::IsHeightInFlight(int height) const
 {
-    std::lock_guard<std::mutex> lock(cs_fetcher);
-    return mapBlocksInFlightByHeight.count(height) > 0;
+    // SSOT: Delegate to CBlockTracker
+    if (g_node_context.block_tracker) {
+        return g_node_context.block_tracker->IsTracked(height);
+    }
+    return false;
 }

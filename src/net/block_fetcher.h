@@ -859,34 +859,8 @@ private:
 
     // Phase 1: Peer tracking removed - now in CPeerManager exclusively
 
-    // ============ Per-Block Tracking (Bitcoin Core Style) ============
-
-    /**
-     * @struct BlockInFlightByHeight
-     * @brief Tracks a block in-flight by its height (per-block model)
-     *
-     * PARALLEL DOWNLOAD: Supports multiple peers per block (Bitcoin Core behavior).
-     * On stall, we request from a SECOND peer while keeping original tracking.
-     * Whichever peer delivers first wins.
-     */
-    struct BlockInFlightByHeight {
-        int height;
-        uint256 hash;
-        std::chrono::steady_clock::time_point first_request_time;  ///< When first requested (for stall detection)
-        std::set<NodeId> peers;  ///< All peers we've requested this block from (parallel download)
-
-        BlockInFlightByHeight() : height(0), first_request_time(std::chrono::steady_clock::now()) {}
-        BlockInFlightByHeight(int h, const uint256& hsh, NodeId first_peer)
-            : height(h), hash(hsh), first_request_time(std::chrono::steady_clock::now()) {
-            peers.insert(first_peer);
-        }
-
-        void AddPeer(NodeId peer) { peers.insert(peer); }
-        bool HasPeer(NodeId peer) const { return peers.count(peer) > 0; }
-    };
-
-    std::map<int, BlockInFlightByHeight> mapBlocksInFlightByHeight;  ///< Height -> In-flight info (supports parallel)
-    std::map<NodeId, std::set<int>> mapPeerBlocksInFlightByHeight;   ///< Peer -> Set of heights in-flight
+    // Per-Block Tracking is now handled by CBlockTracker (SSOT)
+    // See src/net/block_tracker.h for the single source of truth
 
     // ============ Window (for backpressure only) ============
     CBlockDownloadWindow m_download_window;        ///< 1024-block sliding window
