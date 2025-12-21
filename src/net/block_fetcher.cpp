@@ -153,6 +153,25 @@ bool CBlockFetcher::MarkBlockReceived(NodeId peer, const uint256& hash)
     NodeId requestedPeer = it->second.peer;
     mapBlocksInFlight.erase(it);
 
+    // BUG #167 FIX: Also clean up height-based tracking (mapBlocksInFlightByHeight)
+    // Without this, orphan blocks never decrement the height-based in-flight count,
+    // causing GetNextBlocksToRequest() to return empty when 128 heights are in-flight.
+    if (height > 0) {
+        mapBlocksInFlightByHeight.erase(height);
+        // Also clean up per-peer height tracking
+        auto peer_it = mapPeerBlocksInFlightByHeight.find(requestedPeer);
+        if (peer_it != mapPeerBlocksInFlightByHeight.end()) {
+            peer_it->second.erase(height);
+            if (peer_it->second.empty()) {
+                mapPeerBlocksInFlightByHeight.erase(peer_it);
+            }
+        }
+        // SSOT: Also notify CBlockTracker
+        if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+            g_node_context.block_tracker->OnBlockReceived(height, requestedPeer);
+        }
+    }
+
     // Update peer's block set (for disconnect handling)
     if (mapPeerBlocks.count(requestedPeer) > 0) {
         mapPeerBlocks[requestedPeer].erase(hash);
