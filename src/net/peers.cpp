@@ -69,7 +69,7 @@ bool CPeerManager::SavePeers() {
     if (result) {
         LogPrintf(NET, INFO, "Saved %zu peer addresses to %s", addrman.Size(), path.c_str());
     } else {
-        LogPrintf(NET, ERR, "Failed to save peers to %s", path.c_str());
+        LogPrintf(NET, ERROR, "Failed to save peers to %s", path.c_str());
     }
 
     return result;
