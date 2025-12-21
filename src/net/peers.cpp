@@ -3,11 +3,17 @@
 
 #include <net/peers.h>
 #include <net/dns.h>
+#include <net/block_tracker.h>
+#include <core/node_context.h>
+#include <node/block_index.h>
 #include <util/strencodings.h>
 #include <util/logging.h>
 #include <algorithm>
 #include <iostream>
 #include <set>
+
+// SSOT: Access to global node context for CBlockTracker
+extern NodeContext g_node_context;
 
 // Global peer manager instance (raw pointer - ownership in g_node_context)
 // REMOVED: g_peer_manager global - use NodeContext::peer_manager instead
@@ -769,6 +775,21 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
     std::cout << "[MarkBlockAsInFlight] ENTER peer=" << peer_id
               << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
 
+    // SSOT Phase 2: Try CBlockTracker first for blocks with known height
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized() && pindex) {
+        int height = pindex->nHeight;
+        // Set the hash mapping in CBlockTracker
+        g_node_context.block_tracker->SetHash(height, hash);
+        // Try to assign to peer via CBlockTracker
+        if (g_node_context.block_tracker->AssignToPeer(height, peer_id)) {
+            std::cout << "[SSOT] MarkBlockAsInFlight delegated to CBlockTracker (height=" << height << ")" << std::endl;
+            return true;
+        }
+        // AssignToPeer failed (height not PENDING or peer at capacity) - fall through to legacy
+        std::cout << "[SSOT] CBlockTracker::AssignToPeer failed, using legacy" << std::endl;
+    }
+
+    // Legacy handling for orphans/unknown heights
     // Check if already in flight
     if (mapBlocksInFlight.count(hash)) {
         std::cout << "[MarkBlockAsInFlight] REJECT: already in mapBlocksInFlight" << std::endl;
@@ -791,13 +812,16 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
 
     CPeer* peer = it->second.get();
 
-    // IBD STUCK FIX #8: Count from mapBlocksInFlight instead of peer->nBlocksInFlight counter
-    // The counter can become stale/desync during chunk cancellation, but mapBlocksInFlight is
-    // the actual tracking state. This ensures we don't reject valid block requests.
+    // SSOT Phase 2: Use CBlockTracker for capacity check if available
     int peer_blocks_in_flight = 0;
-    for (const auto& entry : mapBlocksInFlight) {
-        if (entry.second.first == peer_id) {
-            peer_blocks_in_flight++;
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        peer_blocks_in_flight = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
+    } else {
+        // Legacy fallback: Count from mapBlocksInFlight
+        for (const auto& entry : mapBlocksInFlight) {
+            if (entry.second.first == peer_id) {
+                peer_blocks_in_flight++;
+            }
         }
     }
     std::cout << "[MarkBlockAsInFlight] peer_blocks_in_flight=" << peer_blocks_in_flight
@@ -807,12 +831,12 @@ bool CPeerManager::MarkBlockAsInFlight(int peer_id, const uint256& hash, const C
         return false;
     }
 
-    // Add to peer's in-flight list
+    // Add to peer's in-flight list (legacy)
     QueuedBlock qb(hash, pindex);
     peer->vBlocksInFlight.push_back(qb);
     peer->nBlocksInFlight++;
 
-    // Add to global map
+    // Add to global map (legacy)
     auto list_it = std::prev(peer->vBlocksInFlight.end());
     mapBlocksInFlight[hash] = std::make_pair(peer_id, list_it);
 
@@ -858,6 +882,28 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
     // BUG #148 DEBUG: Log entry
     std::cout << "[DEBUG] MarkBlockAsReceived(peer=" << peer_id << ", hash=" << hash.GetHex().substr(0, 16) << ")" << std::endl;
 
+    // SSOT Phase 2: Try CBlockTracker first (it's the single source of truth)
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        int height = g_node_context.block_tracker->GetHeightForHash(hash);
+        if (height > 0) {
+            // CBlockTracker handles this block - it will update its internal state
+            g_node_context.block_tracker->OnBlockReceived(height, peer_id);
+            std::cout << "[SSOT] Block at height " << height << " handled by CBlockTracker" << std::endl;
+            // Still update peer stats (downloads, success time) but DON'T decrement nBlocksInFlight
+            // CBlockTracker is now the source of truth for in-flight counts
+            auto peer_it = peers.find(peer_id);
+            if (peer_it != peers.end()) {
+                peer_it->second->nBlocksDownloaded++;
+                peer_it->second->lastSuccessTime = std::chrono::steady_clock::now();
+                peer_it->second->nStallingCount = 0;
+            }
+            return;  // Don't fall through to legacy tracking
+        }
+        // Height not found in CBlockTracker - fall through to legacy handling
+        std::cout << "[SSOT] Block hash not in CBlockTracker, using legacy tracking" << std::endl;
+    }
+
+    // Legacy handling for orphans/unsolicited blocks not tracked by CBlockTracker
     // BUG #148 FIX: Try to remove from tracking first (handles tracked blocks)
     auto it = mapBlocksInFlight.find(hash);
     if (it != mapBlocksInFlight.end()) {
@@ -981,18 +1027,23 @@ int CPeerManager::GetBlocksInFlightForPeer(int peer_id) const
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // IBD STUCK FIX #7: Count from mapBlocksInFlight instead of peer->nBlocksInFlight counter
-    // The counter can become stale/desync during chunk cancellation, but mapBlocksInFlight is
-    // the actual tracking state. This ensures capacity checks use accurate data.
+    // SSOT Phase 2: CBlockTracker is the single source of truth for in-flight counts
+    if (g_node_context.block_tracker && g_node_context.block_tracker->IsInitialized()) {
+        int ssot_count = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
+        std::cout << "[SSOT] GetBlocksInFlightForPeer(" << peer_id << ") = " << ssot_count
+                  << " (CBlockTracker)" << std::endl;
+        return ssot_count;
+    }
+
+    // Legacy fallback: Count from mapBlocksInFlight instead of peer->nBlocksInFlight counter
     int count = 0;
     for (const auto& entry : mapBlocksInFlight) {
         if (entry.second.first == peer_id) {
             count++;
         }
     }
-    // DEBUG: Log capacity check
     std::cout << "[DEBUG] GetBlocksInFlightForPeer(" << peer_id << ") = " << count
-              << " (mapBlocksInFlight.size=" << mapBlocksInFlight.size() << ", limit=" << MAX_BLOCKS_IN_FLIGHT_PER_PEER << ")" << std::endl;
+              << " (legacy mapBlocksInFlight)" << std::endl;
     return count;
 }
 
