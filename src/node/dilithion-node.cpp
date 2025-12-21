@@ -1999,12 +1999,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                               << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
                               << std::endl;
                     // BUG #86 FIX: Mark block as received even when skipping
+                    // BUG #167 FIX: Use per-block tracking (mapBlocksInFlightByHeight)
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                        // BUG #156 FIX: Also update height-based chunk tracking
-                        // Hash lookup fails when blocks arrive after chunk timeout (mapBlocksInFlight cleared)
-                        // Height-based tracking ensures chunk gets credit even for late arrivals
-                        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
+                        g_node_context.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
                     }
                     // IBD BOTTLENECK FIX: Update CBlockTracker - block already connected
                     if (g_node_context.block_tracker) {
@@ -2027,7 +2025,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                               << pindex->nHeight << std::endl;
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
+                        g_node_context.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
                         g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
                     }
                     // IBD BOTTLENECK FIX: Update CBlockTracker
@@ -2039,7 +2037,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "[P2P] Failed to activate stuck block at height " << pindex->nHeight << std::endl;
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
+                        g_node_context.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
                     }
                     // IBD BOTTLENECK FIX: Update CBlockTracker (received but not connected)
                     if (g_node_context.block_tracker) {
@@ -2246,9 +2244,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Without this, peers appear "at capacity" during slow RandomX validation
                     // Window state is still updated by OnWindowBlockConnected after validation
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                    // IBD HANG FIX #17: Also update window tracking when block received
-                    // Without this, window's m_in_flight set never clears, causing stalls every 128 blocks
-                    g_node_context.block_fetcher->OnChunkBlockReceived(expected_height);
+                    // BUG #167 FIX: Update per-block tracking (mapBlocksInFlightByHeight)
+                    g_node_context.block_fetcher->OnBlockReceived(peer_id, expected_height);
                     // IBD BOTTLENECK FIX: Update CBlockTracker - the single source of truth
                     if (g_node_context.block_tracker) {
                         g_node_context.block_tracker->OnBlockReceived(expected_height);
@@ -2352,12 +2349,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 // Notify BlockFetcher that block was successfully received and activated
-                // IBD FIX: Use height-based tracking (always works) in addition to hash-based
-                // Hash lookup fails when chunk was cancelled before block arrived (mapBlocksInFlight cleared)
-                // Height-based OnChunkBlockReceived() survives chunk cancellation
+                // BUG #167 FIX: Use per-block tracking (mapBlocksInFlightByHeight) in addition to hash-based
+                // MarkBlockReceived uses mapBlocksInFlight which is empty when using per-block requests
                 if (g_node_context.block_fetcher) {
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                    g_node_context.block_fetcher->OnChunkBlockReceived(pblockIndexPtr->nHeight);
+                    g_node_context.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
                 }
                 // IBD BOTTLENECK FIX: Update CBlockTracker
                 if (g_node_context.block_tracker) {
