@@ -2134,28 +2134,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
                     }
 
-                    // ORPHAN BOTTLENECK FIX #9: Request parent through IBD system
-                    // Previously only triggered header sync, which doesn't guarantee parent block request
-                    // Now requests parent block through CBlockFetcher for proper tracking and prioritization
-                    std::cout << "[P2P] Orphan block stored - requesting parent through IBD system" << std::endl;
+                    // Parent block will be requested by normal IBD (sequential download)
+                    std::cout << "[P2P] Orphan block stored - parent will arrive via IBD" << std::endl;
 
-                    // Request parent block through normal IBD system (high priority)
-                    if (g_node_context.block_fetcher && g_node_context.headers_manager) {
-                        // Estimate parent height (orphan height - 1)
-                        // We don't know exact height, but headers manager can help
-                        int currentHeight = g_chainstate.GetHeight();
-                        int estimatedParentHeight = currentHeight;  // Conservative estimate
-
-                        // Queue parent block for download with high priority
-                        g_node_context.block_fetcher->QueueBlockForDownload(
-                            block.hashPrevBlock,
-                            estimatedParentHeight,
-                            peer_id,  // Prefer same peer that sent orphan
-                            true      // High priority - orphan parent needed urgently
-                        );
-                        std::cout << "[Orphan] Queued parent block " << block.hashPrevBlock.GetHex().substr(0, 16)
-                                  << "... for download (high priority)" << std::endl;
-                    }
 
                     // Also trigger header sync as fallback (discovers parent if not in headers)
                     if (g_node_context.headers_manager) {
@@ -2576,17 +2557,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (success) {
                 int bestHeight = g_node_context.headers_manager->GetBestHeight();
                 std::cout << "[IBD] Headers processed. Best height: " << bestHeight << std::endl;
-
-                // Queue blocks for download from this peer
-                if (g_node_context.block_fetcher) {
-                    int startHeight = bestHeight - static_cast<int>(headers.size()) + 1;
-                    for (size_t i = 0; i < headers.size(); i++) {
-                        uint256 hash = headers[i].GetHash();
-                        int height = startHeight + static_cast<int>(i);
-                        g_node_context.block_fetcher->QueueBlockForDownload(hash, height, peer_id);
-                    }
-                    std::cout << "[IBD] Queued " << headers.size() << " blocks for download" << std::endl;
-                }
 
                 // BUG #147 FIX: Continue headers sync if we got a full batch (2000 headers)
                 // Bitcoin protocol sends max 2000 headers per message - if we got exactly 2000,
