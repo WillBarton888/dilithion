@@ -317,20 +317,8 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         std::cout << "[ValidationQueue] ⚠️  CHAIN REORGANIZATION occurred at height " << expected_height << std::endl;
     }
 
-    // IBD HANG FIX: MarkBlockReceived is now called IMMEDIATELY when block is received
-    // (in dilithion-node.cpp) to decrement nBlocksInFlight and allow more requests.
-    // Here we only update chunk/window tracking after validation completes.
-    // This fixes the "all peers at capacity" stall during slow RandomX validation.
-    if (g_node_context.block_fetcher) {
-        g_node_context.block_fetcher->OnChunkBlockReceived(pindex->nHeight);
-    }
-
-    // IBD BOTTLENECK FIX #2: Update window state for ALL validated blocks, not just new tip
-    // Previously only updated window when block became new tip, causing window to stall
-    // Update window for all successfully validated blocks, allowing continuous advancement
-    if (g_node_context.block_fetcher) {
-        g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
-    }
+    // DEAD CODE REMOVED: OnChunkBlockReceived and OnWindowBlockConnected
+    // CBlockTracker is now the SSOT - tracking already updated via OnBlockReceived
 
     // IBD HANG FIX #23b: Process orphan children after async validation completes
     // When a block validates successfully, check if any orphans were waiting for it as their parent

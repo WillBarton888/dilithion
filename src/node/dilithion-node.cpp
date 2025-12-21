@@ -2019,7 +2019,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (g_node_context.block_fetcher) {
                         g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                         g_node_context.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
-                        g_node_context.block_fetcher->OnWindowBlockConnected(pindex->nHeight);
                     }
                 } else {
                     std::cerr << "[P2P] Failed to activate stuck block at height " << pindex->nHeight << std::endl;
@@ -2216,7 +2215,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // IBD HANG FIX: Mark block as received IMMEDIATELY to decrement nBlocksInFlight
                     // This allows new block requests to be sent while validation is in progress
                     // Without this, peers appear "at capacity" during slow RandomX validation
-                    // Window state is still updated by OnWindowBlockConnected after validation
                     g_node_context.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                     // SSOT: OnBlockReceived handles CBlockTracker internally
                     g_node_context.block_fetcher->OnBlockReceived(peer_id, expected_height);
@@ -2266,12 +2264,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (g_chainstate.GetTip() == pblockIndexPtr) {
                         std::cout << "[P2P] Updated best block to height " << pblockIndexPtr->nHeight << std::endl;
                         g_node_state.new_block_found = true;
-
-                        // BUG #148 FIX: Advance IBD download window when blocks are connected
-                        // SSOT: OnWindowBlockConnected handles CBlockTracker internally
-                        if (g_node_context.block_fetcher) {
-                            g_node_context.block_fetcher->OnWindowBlockConnected(pblockIndexPtr->nHeight);
-                        }
 
                         // BUG #32 FIX: Immediately update mining template when IBD block becomes new tip
                         if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
@@ -2966,12 +2958,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             std::cout << "[Wallet]          " << std::fixed << std::setprecision(8)
                                       << totalDIL << " DIL (total)" << std::endl;
                         }
-                    }
-
-                    // BUG #157 FIX: Advance IBD window when locally mined blocks are connected
-                    // Without this, the window gets out of sync if mining occurs during IBD
-                    if (g_node_context.block_fetcher) {
-                        g_node_context.block_fetcher->OnWindowBlockConnected(pblockIndexPtr->nHeight);
                     }
 
                     // BUG #32 FIX: Immediately update mining template for locally mined blocks
