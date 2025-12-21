@@ -2784,11 +2784,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // BUG #56 FIX: Register wallet callbacks with chain state (Bitcoin Core pattern)
         // Wallet will receive blockConnected/blockDisconnected notifications automatically
-        g_chainstate.RegisterBlockConnectCallback([&wallet](const CBlock& block, int height) {
-            wallet.blockConnected(block, height);
+        // IBD OPTIMIZATION: Pass hash to avoid RandomX recomputation in wallet
+        g_chainstate.RegisterBlockConnectCallback([&wallet](const CBlock& block, int height, const uint256& hash) {
+            wallet.blockConnected(block, height, hash);
         });
-        g_chainstate.RegisterBlockDisconnectCallback([&wallet](const CBlock& block, int height) {
-            wallet.blockDisconnected(block, height);
+        g_chainstate.RegisterBlockDisconnectCallback([&wallet](const CBlock& block, int height, const uint256& hash) {
+            wallet.blockDisconnected(block, height, hash);
         });
         std::cout << "  [OK] Registered chain notification callbacks" << std::endl;
         std::cout.flush();

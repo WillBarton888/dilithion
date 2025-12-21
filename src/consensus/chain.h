@@ -67,8 +67,9 @@ private:
 
     // BUG #56 FIX: Block connect/disconnect callbacks (Bitcoin Core pattern)
     // Allows wallet to be notified when blocks are connected/disconnected
-    using BlockConnectCallback = std::function<void(const CBlock&, int height)>;
-    using BlockDisconnectCallback = std::function<void(const CBlock&, int height)>;
+    // IBD OPTIMIZATION: Pass hash to avoid RandomX recomputation in callbacks
+    using BlockConnectCallback = std::function<void(const CBlock&, int height, const uint256& hash)>;
+    using BlockDisconnectCallback = std::function<void(const CBlock&, int height, const uint256& hash)>;
     std::vector<BlockConnectCallback> m_blockConnectCallbacks;
     std::vector<BlockDisconnectCallback> m_blockDisconnectCallbacks;
 

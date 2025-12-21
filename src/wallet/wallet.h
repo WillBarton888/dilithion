@@ -487,9 +487,10 @@ public:
      *
      * @param block The connected block
      * @param height Block height
+     * @param hash Block hash (passed to avoid RandomX recomputation)
      * Thread-safe: Acquires cs_wallet lock
      */
-    void blockConnected(const class CBlock& block, int height);
+    void blockConnected(const class CBlock& block, int height, const uint256& hash);
 
     /**
      * Called when a block is disconnected from the main chain (reorg)
@@ -501,9 +502,10 @@ public:
      *
      * @param block The disconnected block
      * @param height Block height being disconnected
+     * @param hash Block hash (passed to avoid RandomX recomputation)
      * Thread-safe: Acquires cs_wallet lock
      */
-    void blockDisconnected(const class CBlock& block, int height);
+    void blockDisconnected(const class CBlock& block, int height, const uint256& hash);
 
     /**
      * Get the best block hash the wallet is synced to

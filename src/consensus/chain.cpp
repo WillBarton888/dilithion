@@ -648,9 +648,11 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // BUG #56 FIX: Notify block connect callbacks (wallet update)
     // NOTE: We don't hold cs_main during callbacks to prevent deadlock
     // The wallet has its own lock (cs_wallet)
+    // IBD OPTIMIZATION: Pass cached hash to avoid RandomX recomputation
+    const uint256& blockHash = pindex->GetBlockHash();
     for (size_t i = 0; i < m_blockConnectCallbacks.size(); ++i) {
         try {
-            m_blockConnectCallbacks[i](block, pindex->nHeight);
+            m_blockConnectCallbacks[i](block, pindex->nHeight, blockHash);
         } catch (const std::exception& e) {
             std::cerr << "[Chain] ERROR: Block connect callback " << i << " threw exception: " << e.what() << std::endl;
         } catch (...) {
@@ -749,9 +751,11 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
     // BUG #56 FIX: Notify block disconnect callbacks (wallet update)
     // NOTE: We don't hold cs_main during callbacks to prevent deadlock
     // The wallet has its own lock (cs_wallet)
+    // IBD OPTIMIZATION: Pass cached hash to avoid RandomX recomputation
+    const uint256& disconnectHash = pindex->GetBlockHash();
     for (size_t i = 0; i < m_blockDisconnectCallbacks.size(); ++i) {
         try {
-            m_blockDisconnectCallbacks[i](block, pindex->nHeight);
+            m_blockDisconnectCallbacks[i](block, pindex->nHeight, disconnectHash);
         } catch (const std::exception& e) {
             std::cerr << "[Chain] ERROR: Block disconnect callback " << i << " threw exception: " << e.what() << std::endl;
         } catch (...) {

@@ -501,14 +501,15 @@ size_t CWallet::CleanupStaleUTXOsUnlocked(CUTXOSet& utxo_set) {
 // BUG #56 FIX: Chain Notifications Implementation (Bitcoin Core Pattern)
 // ============================================================================
 
-void CWallet::blockConnected(const CBlock& block, int height) {
+void CWallet::blockConnected(const CBlock& block, int height, const uint256& hash) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     // Process all transactions in the block
     ProcessBlockTransactionsUnlocked(block, height, true /* connecting */);
 
     // Update best block pointer and persist to disk
-    SetLastBlockProcessedUnlocked(block.GetHash(), height);
+    // IBD OPTIMIZATION: Use passed hash instead of computing RandomX hash
+    SetLastBlockProcessedUnlocked(hash, height);
 
     // Periodic persistence (Bitcoin Core: every 144 blocks = ~1 day)
     // This ensures progress is saved even if no wallet transactions found
@@ -518,7 +519,7 @@ void CWallet::blockConnected(const CBlock& block, int height) {
     }
 }
 
-void CWallet::blockDisconnected(const CBlock& block, int height) {
+void CWallet::blockDisconnected(const CBlock& block, int height, const uint256& hash) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     // Process transactions in REVERSE to undo the effects
