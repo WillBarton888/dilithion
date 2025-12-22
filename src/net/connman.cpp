@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>  // For std::cout
+#include <map>       // For std::map in InactivityCheck
 #include <thread>  // For std::this_thread
 
 #ifdef _WIN32
@@ -547,9 +548,21 @@ void CConnman::WakeMessageHandler() {
 void CConnman::ThreadSocketHandler() {
     LogPrintf(NET, INFO, "[CConnman] ThreadSocketHandler started\n");
 
+    // Track when we last ran inactivity check (don't run every iteration)
+    auto last_inactivity_check = std::chrono::steady_clock::now();
+    static constexpr int INACTIVITY_CHECK_INTERVAL_SECONDS = 10;
+
     while (!interruptNet.load()) {
         DisconnectNodes();
         SocketHandler();
+
+        // Run inactivity check periodically (every 10 seconds)
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_inactivity_check).count()
+                >= INACTIVITY_CHECK_INTERVAL_SECONDS) {
+            InactivityCheck();
+            last_inactivity_check = now;
+        }
     }
 
     LogPrintf(NET, INFO, "[CConnman] ThreadSocketHandler stopped\n");
@@ -1417,6 +1430,96 @@ void CConnman::DisconnectNodes() {
     if (m_peer_manager) {
         for (int node_id : nodes_to_remove) {
             m_peer_manager->OnPeerDisconnected(node_id);
+        }
+    }
+}
+
+void CConnman::InactivityCheck() {
+    // Constants for keepalive
+    static constexpr int64_t PING_INTERVAL_SECONDS = 60;      // Send ping after 60s of inactivity
+    static constexpr int64_t TIMEOUT_SECONDS = 120;           // Disconnect after 120s of no response
+
+    // Track last ping sent time per node (static to persist across calls)
+    static std::map<int, int64_t> last_ping_sent;
+
+    int64_t now = GetTime();
+    std::vector<int> nodes_to_disconnect;
+
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+
+        for (auto& node : m_nodes) {
+            if (node->fDisconnect.load()) continue;
+
+            // Skip nodes that haven't completed handshake
+            if (node->state.load() != CNode::STATE_CONNECTED) continue;
+
+            int64_t last_recv = node->nLastRecv.load();
+            int node_id = node->id;
+
+            // If we've never received anything, use connect time
+            if (last_recv == 0) {
+                // Node just connected, give it time
+                continue;
+            }
+
+            int64_t idle_time = now - last_recv;
+
+            // Check if node is completely unresponsive (no data for TIMEOUT_SECONDS)
+            if (idle_time > TIMEOUT_SECONDS) {
+                // Check if we already sent a ping and got no response
+                auto it = last_ping_sent.find(node_id);
+                if (it != last_ping_sent.end() && (now - it->second) > PING_INTERVAL_SECONDS) {
+                    // Ping was sent but no response - disconnect
+                    LogPrintf(NET, WARN, "[CConnman] Node %d unresponsive for %llds, disconnecting\n",
+                              node_id, idle_time);
+                    nodes_to_disconnect.push_back(node_id);
+                    last_ping_sent.erase(it);
+                    continue;
+                }
+            }
+
+            // Send ping if idle for PING_INTERVAL_SECONDS and we haven't pinged recently
+            if (idle_time > PING_INTERVAL_SECONDS) {
+                auto it = last_ping_sent.find(node_id);
+                bool should_ping = (it == last_ping_sent.end()) ||
+                                   (now - it->second > PING_INTERVAL_SECONDS);
+
+                if (should_ping && m_msg_processor) {
+                    // Generate random nonce for ping
+                    uint64_t nonce = ((uint64_t)rand() << 32) | rand();
+                    CNetMessage ping_msg = m_msg_processor->CreatePingMessage(nonce);
+                    PushMessage(node.get(), ping_msg);
+                    last_ping_sent[node_id] = now;
+
+                    LogPrintf(NET, DEBUG, "[CConnman] Sent keepalive ping to node %d (idle %llds)\n",
+                              node_id, idle_time);
+                }
+            }
+        }
+    }
+
+    // Disconnect unresponsive nodes
+    for (int node_id : nodes_to_disconnect) {
+        DisconnectNode(node_id, "inactivity timeout");
+    }
+
+    // Clean up stale entries from last_ping_sent for disconnected nodes
+    for (auto it = last_ping_sent.begin(); it != last_ping_sent.end(); ) {
+        bool found = false;
+        {
+            std::lock_guard<std::mutex> lock(cs_vNodes);
+            for (const auto& node : m_nodes) {
+                if (node->id == it->first) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            it = last_ping_sent.erase(it);
+        } else {
+            ++it;
         }
     }
 }

@@ -252,6 +252,13 @@ private:
     void DisconnectNodes();
 
     /**
+     * Check for inactive nodes and send keepalive pings
+     * - Sends ping to nodes idle for >60 seconds
+     * - Disconnects nodes unresponsive for >120 seconds
+     */
+    void InactivityCheck();
+
+    /**
      * Check if an address is our own (for self-connection prevention)
      * @param addr Address to check
      * @return true if this is our own address
