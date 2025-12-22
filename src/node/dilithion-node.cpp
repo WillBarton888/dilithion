@@ -2133,19 +2133,34 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
                     }
 
-                    // Parent block will be requested by normal IBD (sequential download)
-                    std::cout << "[P2P] Orphan block stored - parent will arrive via IBD" << std::endl;
-
-
-                    // Also trigger header sync as fallback (discovers parent if not in headers)
-                    if (g_node_context.headers_manager) {
-                        uint256 ourBestBlock;
-                        if (g_chainstate.GetTip()) {
-                            ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
-                        } else {
-                            ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
+                    // IBD OPTIMIZATION: Check if parent is already in-flight before requesting
+                    // During parallel IBD, blocks arrive out of order. If parent is already being
+                    // fetched (tracked in CBlockTracker), don't request headers - just wait.
+                    bool parent_in_flight = false;
+                    int parent_height = -1;
+                    if (g_node_context.headers_manager && g_node_context.block_tracker) {
+                        parent_height = g_node_context.headers_manager->GetHeightForHash(block.hashPrevBlock);
+                        if (parent_height > 0) {
+                            parent_in_flight = g_node_context.block_tracker->IsTracked(parent_height);
                         }
-                        g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
+                    }
+
+                    if (parent_in_flight) {
+                        // Parent already in-flight - just wait, no extra requests needed
+                        std::cout << "[P2P] Orphan block stored - parent height " << parent_height
+                                  << " already in-flight" << std::endl;
+                    } else {
+                        // Parent not in-flight - trigger header sync as fallback
+                        std::cout << "[P2P] Orphan block stored - requesting headers for parent" << std::endl;
+                        if (g_node_context.headers_manager) {
+                            uint256 ourBestBlock;
+                            if (g_chainstate.GetTip()) {
+                                ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
+                            } else {
+                                ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
+                            }
+                            g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
+                        }
                     }
                 } else {
                     std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;
