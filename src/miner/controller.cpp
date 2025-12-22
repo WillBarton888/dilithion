@@ -28,13 +28,18 @@
 #endif
 
 // BUG #28 FIX: RAII wrapper for RandomX VM (prevents leaks)
+// BUG #XXX FIX: Support auto-upgrade from LIGHT to FULL mode
 namespace {
     class RandomXVMGuard {
     private:
         void* m_vm;
+        bool m_isFullMode;
 
     public:
-        RandomXVMGuard() : m_vm(randomx_create_thread_vm()) {
+        RandomXVMGuard() : m_vm(nullptr), m_isFullMode(false) {
+            // Check if FULL mode is ready before creating VM
+            m_isFullMode = randomx_is_mining_mode_ready() != 0;
+            m_vm = randomx_create_thread_vm();
             if (!m_vm) {
                 throw std::runtime_error("Failed to create RandomX VM for mining thread");
             }
@@ -51,6 +56,45 @@ namespace {
         RandomXVMGuard& operator=(const RandomXVMGuard&) = delete;
 
         void* get() const { return m_vm; }
+
+        bool isFullMode() const { return m_isFullMode; }
+
+        // Try to upgrade from LIGHT to FULL mode
+        // Returns true if upgrade occurred
+        bool TryUpgrade() {
+            // Already in FULL mode - no upgrade needed
+            if (m_isFullMode) {
+                return false;
+            }
+
+            // Check if FULL mode is now available
+            if (!randomx_is_mining_mode_ready()) {
+                return false;
+            }
+
+            // FULL mode is ready - upgrade!
+            // Destroy old LIGHT mode VM
+            if (m_vm) {
+                randomx_destroy_thread_vm(m_vm);
+                m_vm = nullptr;
+            }
+
+            // Create new FULL mode VM
+            m_isFullMode = true;
+            m_vm = randomx_create_thread_vm();
+            if (!m_vm) {
+                // Failed to create FULL mode VM - this shouldn't happen
+                // but handle gracefully by falling back
+                m_isFullMode = false;
+                m_vm = randomx_create_thread_vm();
+                if (!m_vm) {
+                    throw std::runtime_error("Failed to recreate RandomX VM after upgrade attempt");
+                }
+                return false;
+            }
+
+            return true;
+        }
     };
 }
 
@@ -285,7 +329,22 @@ void CMiningController::MiningWorker(uint32_t threadId) {
         uint64_t debug_serializations = 0;
         uint64_t debug_hashes = 0;
 
+        // BUG FIX: Track hashes for periodic LIGHT→FULL mode upgrade check
+        uint64_t hashesForUpgradeCheck = 0;
+        const uint64_t UPGRADE_CHECK_INTERVAL = 1000;  // Check every 1000 hashes
+
         while (m_mining) {
+        // BUG FIX: Periodically check for LIGHT→FULL mode upgrade
+        // Only thread 0 logs to avoid spam
+        if (!vm.isFullMode() && ++hashesForUpgradeCheck >= UPGRADE_CHECK_INTERVAL) {
+            hashesForUpgradeCheck = 0;
+            if (vm.TryUpgrade()) {
+                if (threadId == 0) {
+                    std::cout << "[Mining] Upgraded to FULL mode (~1800 H/s)" << std::endl;
+                }
+            }
+        }
+
         // MINE-009 FIX: Check for nonce space exhaustion
         // If we've wrapped around the 32-bit space, request new template
         if (nonce64 > UINT32_MAX && (nonce64 % UINT32_MAX) < nonceStep) {
