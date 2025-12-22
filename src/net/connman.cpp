@@ -1492,7 +1492,7 @@ void CConnman::InactivityCheck() {
                     PushMessage(node.get(), ping_msg);
                     last_ping_sent[node_id] = now;
 
-                    LogPrintf(NET, DEBUG, "[CConnman] Sent keepalive ping to node %d (idle %llds)\n",
+                    LogPrintf(NET, INFO, "[CConnman] Sent keepalive ping to node %d (idle %llds)\n",
                               node_id, idle_time);
                 }
             }
