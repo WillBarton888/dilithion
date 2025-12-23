@@ -61,29 +61,16 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // Calculate expected height
         int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
-        // BUG #164 FIX: Check if we already have a header at this height BEFORE
-        // computing the expensive RandomX hash. This avoids wasting 50-100ms per
-        // duplicate header. For 2000 duplicate headers, this saves 100-200 seconds!
+        // FORK FIX: Check height first for optimization, then handle duplicates vs forks.
+        // - Fresh IBD (new heights): Hash computation unavoidable
+        // - Resuming IBD (existing heights): Still need hash to detect duplicate vs fork
         auto heightIt = mapHeightIndex.find(expectedHeight);
-        if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-            // We already have a header at this height - skip the expensive hash
-            uint256 existingHash = *heightIt->second.begin();
-            auto existingIt = mapHeaders.find(existingHash);
-            if (existingIt != mapHeaders.end()) {
-                pprev = &existingIt->second;
-                prevHash = existingHash;
-                heightStart = existingIt->second.height;
-                // BUG #33 FIX: Update best header even for existing headers
-                UpdateBestHeader(existingHash);
-                continue;
-            }
-        }
+        bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-        // SIMPLIFICATION: Always use RandomX hash for storage
-        // This eliminates hash type mismatch issues between header storage and block requests
+        // Compute hash (needed for both duplicate detection and storage)
         uint256 storageHash = header.GetHash();
 
-        // Skip if we already have this header (double-check with actual hash)
+        // Skip only TRUE duplicates (same hash already exists)
         if (mapHeaders.find(storageHash) != mapHeaders.end()) {
             auto it = mapHeaders.find(storageHash);
             pprev = &it->second;
@@ -92,6 +79,12 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             // BUG #33 FIX: Update best header even for existing headers
             UpdateBestHeader(storageHash);
             continue;
+        }
+
+        // FORK DETECTION: If height has headers but this hash is NEW, it's a fork
+        if (heightHasHeaders) {
+            std::cout << "[HeadersManager] Fork header received at height " << expectedHeight
+                      << " - processing competing chain" << std::endl;
         }
 
         // SIMPLIFIED PARENT LOOKUP: With RandomX-only storage, hashPrevBlock directly
@@ -896,6 +889,12 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
 void CHeadersManager::AddToHeightIndex(const uint256& hash, int height)
 {
     mapHeightIndex[height].insert(hash);
+
+    // FORK DETECTION: Log when multiple headers exist at same height
+    if (mapHeightIndex[height].size() > 1) {
+        std::cout << "[HeadersManager] FORK DETECTED at height " << height
+                  << " - " << mapHeightIndex[height].size() << " competing headers" << std::endl;
+    }
 }
 
 void CHeadersManager::RemoveFromHeightIndex(const uint256& hash, int height)
@@ -1082,30 +1081,26 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             // Calculate expected height
             int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
-            // BUG #164 FIX: Check if we already have a header at this height BEFORE
-            // computing the expensive RandomX hash. This avoids wasting 50-100ms per
-            // duplicate header. For 2000 duplicate headers, this saves 100-200 seconds!
+            // FORK FIX: Check height first, then handle duplicates vs forks
             auto heightIt = mapHeightIndex.find(expectedHeight);
-            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-                // We already have a header at this height - skip the expensive hash
-                uint256 existingHash = *heightIt->second.begin();
-                auto existingIt = mapHeaders.find(existingHash);
-                if (existingIt != mapHeaders.end()) {
-                    pprev = &existingIt->second;
-                    prevHash = existingHash;
-                    continue;
-                }
-            }
+            bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-            // SIMPLIFICATION: Always use RandomX hash for storage
+            // Compute hash (needed for duplicate detection and storage)
             uint256 storageHash = header.GetHash();
 
-            // Skip duplicates (double-check with actual hash)
+            // Skip only TRUE duplicates (same hash)
             if (mapHeaders.find(storageHash) != mapHeaders.end()) {
                 pprev = &mapHeaders[storageHash];
                 prevHash = storageHash;
                 continue;
             }
+
+            // FORK DETECTION: If height has headers but this hash is NEW, it's a fork
+            if (heightHasHeaders) {
+                std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
+            }
+
+            // Fork headers (different hash at existing height) proceed to validation
 
             // Quick validate (structure only - fast)
             if (!QuickValidateHeader(header, pprev ? &pprev->header : nullptr)) {
