@@ -2565,6 +2565,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 int bestHeight = g_node_context.headers_manager->GetBestHeight();
                 std::cout << "[IBD] Headers processed. Best height: " << bestHeight << std::endl;
 
+                // BUG #168 FIX: Update peer's best known height when we receive headers from them
+                // This allows FetchBlocks to request blocks from peers who have mined new blocks
+                // Previously, we only used start_height from VERSION which was never updated
+                g_node_context.peer_manager->UpdatePeerBestKnownHeight(peer_id, bestHeight);
+
                 // BUG #147 FIX: Continue headers sync if we got a full batch (2000 headers)
                 // Bitcoin protocol sends max 2000 headers per message - if we got exactly 2000,
                 // peer likely has more to send, so request continuation

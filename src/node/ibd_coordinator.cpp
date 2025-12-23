@@ -495,7 +495,12 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // Skip peers that are behind us
-        int peer_height = peer->start_height;
+        // BUG #168 FIX: Use best_known_height (updated when we receive headers from peer)
+        // instead of start_height (only set at VERSION time, never updated)
+        int peer_height = peer->best_known_height;
+        if (peer_height == 0) {
+            peer_height = peer->start_height;  // Fallback for peers we haven't received headers from
+        }
         if (peer_height <= chain_height) {
             continue;
         }

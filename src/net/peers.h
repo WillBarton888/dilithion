@@ -51,7 +51,8 @@ public:
     int64_t last_send;               // Last message sent time
     int version;                     // Protocol version
     std::string user_agent;          // Peer client version
-    int start_height;                // Peer's blockchain height
+    int start_height;                // Peer's blockchain height at VERSION time (never updated)
+    int best_known_height;           // Best block height we KNOW peer has (updated on headers)
     bool relay;                      // Whether peer relays transactions
 
     // DoS protection
@@ -125,7 +126,7 @@ public:
     CPeer()
         : id(0), state(STATE_DISCONNECTED), connect_time(0),
           last_recv(0), last_send(0), version(0), start_height(0),
-          relay(true), misbehavior_score(0), ban_time(0),
+          best_known_height(0), relay(true), misbehavior_score(0), ban_time(0),
           m_stalling_since(std::chrono::steady_clock::now()),
           m_downloading_since(std::chrono::steady_clock::now()),
           m_last_block_announcement(std::chrono::steady_clock::now()),
@@ -135,7 +136,7 @@ public:
     CPeer(int id_in, const NetProtocol::CAddress& addr_in)
         : id(id_in), addr(addr_in), state(STATE_DISCONNECTED),
           connect_time(GetTime()), last_recv(0), last_send(0),
-          version(0), start_height(0), relay(true),
+          version(0), start_height(0), best_known_height(0), relay(true),
           misbehavior_score(0), ban_time(0),
           m_stalling_since(std::chrono::steady_clock::now()),
           m_downloading_since(std::chrono::steady_clock::now()),
@@ -395,6 +396,10 @@ public:
     // Peer suitability for download
     std::vector<int> GetValidPeersForDownload() const;
     bool IsPeerSuitableForDownload(int peer_id) const;
+
+    // Update peer's best known height (called when we receive headers from them)
+    // This tracks what blocks the peer actually has, updated as we learn more
+    void UpdatePeerBestKnownHeight(int peer_id, int height);
 
     // Lifecycle callbacks
     bool OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred);

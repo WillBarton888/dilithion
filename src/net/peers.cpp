@@ -1115,6 +1115,23 @@ bool CPeerManager::IsPeerSuitableForDownload(int peer_id) const
            peer->IsSuitableForDownload();
 }
 
+void CPeerManager::UpdatePeerBestKnownHeight(int peer_id, int height)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return;  // Peer not found
+    }
+
+    CPeer* peer = it->second.get();
+
+    // Only update if new height is higher (peer can't "un-mine" blocks)
+    if (height > peer->best_known_height) {
+        peer->best_known_height = height;
+    }
+}
+
 bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred)
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
@@ -1133,6 +1150,7 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
 
     peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
     peer->start_height = starting_height;
+    peer->best_known_height = starting_height;  // Initialize to starting height
     peer->fPreferredDownload = preferred;
     peer->fSyncStarted = false;
 
