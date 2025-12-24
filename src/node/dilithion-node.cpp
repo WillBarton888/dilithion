@@ -2570,30 +2570,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Previously, we only used start_height from VERSION which was never updated
                 g_node_context.peer_manager->UpdatePeerBestKnownHeight(peer_id, bestHeight);
 
-                // BUG #147 FIX: Continue headers sync if we got a full batch (2000 headers)
-                // Bitcoin protocol sends max 2000 headers per message - if we got exactly 2000,
-                // peer likely has more to send, so request continuation
-                static constexpr size_t MAX_HEADERS_RESULTS = 2000;
-                std::cout << "[IBD-DEBUG] headers.size()=" << headers.size()
-                          << " MAX=" << MAX_HEADERS_RESULTS << std::endl;
-
-                // Get our current header height and peer's announced height
-                int ourHeaderHeight = g_node_context.headers_manager->GetBestHeight();
-                int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
-
-                // IBD HEADER FIX #1: Request more headers if:
-                // 1. We got a full batch (2000 headers), OR
-                // 2. Our header height is still behind peer's announced height
-                bool needMoreHeaders = (headers.size() == MAX_HEADERS_RESULTS) ||
-                                       (peerHeight > ourHeaderHeight);
-
-                if (needMoreHeaders && !headers.empty()) {
-                    uint256 lastHeaderHash = headers.back().GetHash();
-                    std::cout << "[IBD] Requesting more headers from " << lastHeaderHash.GetHex().substr(0, 16)
-                              << "... (ourHeaderHeight=" << ourHeaderHeight
-                              << ", peerHeight=" << peerHeight << ")" << std::endl;
-                    g_node_context.headers_manager->RequestHeaders(peer_id, lastHeaderHash);
-                }
+                // Header requests are managed by IBD coordinator's prefetch logic.
+                // Don't auto-request here - causes headers to race ahead of chain.
             } else {
                 // BUG #67: Even if ProcessHeaders failed, headers may have been partially processed
                 // The main loop will detect header height changes and handle block downloads
