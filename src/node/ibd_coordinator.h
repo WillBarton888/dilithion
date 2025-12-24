@@ -87,6 +87,12 @@ private:
     int FindForkPoint(int chain_height);
     void HandleForkScenario(int fork_point, int chain_height);
 
+    // Headers sync peer management (Bitcoin Core style)
+    void SelectHeadersSyncPeer();           // Pick a sync peer if none selected
+    bool CheckHeadersSyncProgress();        // Check if sync peer is making progress
+    void SwitchHeadersSyncPeer();           // Switch to a different peer
+    void RequestHeadersFromSyncPeer();      // Request headers from current sync peer
+
     // IBD HANG FIX #6: Hang cause tracking
     enum class HangCause {
         NONE,
@@ -101,6 +107,13 @@ private:
 
     // State machine
     IBDState m_state{IBDState::IDLE};
+
+    // Headers sync peer tracking (Bitcoin Core style single-sync-peer)
+    int m_headers_sync_peer{-1};                                    // NodeId of current sync peer (-1 = none)
+    std::chrono::steady_clock::time_point m_headers_sync_timeout;   // When to consider sync peer stalled
+    int m_headers_sync_last_height{0};                              // Header height at last progress check
+    static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 120;      // 2 min base timeout
+    static constexpr int HEADERS_SYNC_TIMEOUT_PER_HEADER_MS = 1;    // +1ms per missing header
 
     // Backoff state
     int m_last_header_height{0};

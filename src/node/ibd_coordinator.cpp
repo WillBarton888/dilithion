@@ -53,32 +53,51 @@ void CIbdCoordinator::Tick() {
     int header_height = m_node_context.headers_manager->GetBestHeight();
     int chain_height = m_chainstate.GetHeight();
 
-    // INITIAL HEADER REQUEST: If we have no headers and have peers, request headers
-    // This replaces the VERSION handler which was causing header racing
-    if (header_height == 0 && m_node_context.peer_manager) {
-        auto peers = m_node_context.peer_manager->GetConnectedPeers();
-        if (!peers.empty()) {
-            static bool initial_request_sent = false;
-            if (!initial_request_sent) {
-                // Request from first available peer
-                for (const auto& peer : peers) {
-                    if (!peer) continue;
-                    uint256 genesisHash;
-                    if (Dilithion::g_chainParams) {
-                        genesisHash.SetHex(Dilithion::g_chainParams->genesisHash);
-                    }
-                    std::cout << "[IBD] Requesting initial headers from peer " << peer->id << std::endl;
-                    m_node_context.headers_manager->RequestHeaders(peer->id, genesisHash);
-                    initial_request_sent = true;
-                    break;  // Only request from one peer
-                }
-            }
+    // =========================================================================
+    // BITCOIN CORE STYLE SINGLE-SYNC-PEER HEADERS MANAGEMENT
+    // =========================================================================
+
+    // 1. Select a headers sync peer if we don't have one
+    SelectHeadersSyncPeer();
+
+    // 2. Check if current sync peer is making progress (or stalled)
+    if (!CheckHeadersSyncProgress()) {
+        // Sync peer stalled, switch to a different one
+        SwitchHeadersSyncPeer();
+    }
+
+    // 3. Request headers if needed (peer has more than we have)
+    if (m_headers_sync_peer != -1) {
+        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+
+        // Request more headers at chain milestones: 0, 1000, 3000, 5000...
+        // This ensures we have headers 1000-2000 blocks ahead of chain
+        static int last_request_trigger = -1;
+        int request_trigger = (chain_height == 0) ? 0 :
+                              ((chain_height / 2000) * 2000) + 1000;
+
+        bool should_request = false;
+        if (chain_height == 0 && header_height == 0 && peer_height > 0) {
+            // Initial request - we have no headers
+            should_request = true;
+        } else if (request_trigger > last_request_trigger && peer_height > header_height) {
+            // Milestone reached and peer has more headers
+            should_request = true;
+            last_request_trigger = request_trigger;
+        }
+
+        if (should_request) {
+            std::cout << "[IBD] Chain at " << chain_height
+                      << ", headers at " << header_height
+                      << ", requesting from sync peer " << m_headers_sync_peer << std::endl;
+            RequestHeadersFromSyncPeer();
         }
     }
 
+    // =========================================================================
+
     // If headers are not ahead, we're synced (IDLE or COMPLETE)
     if (header_height <= chain_height) {
-        // IBD DEBUG: Log why we're returning early
         static int synced_count = 0;
         if (++synced_count <= 5 || synced_count % 60 == 0) {
             std::cerr << "[IBD-DEBUG] Tick() returning: synced (header=" << header_height
@@ -91,39 +110,6 @@ void CIbdCoordinator::Tick() {
     }
 
     ResetBackoffOnNewHeaders(header_height);
-
-    // PIPELINED HEADER PREFETCH: Request next batch of headers 1000 blocks early
-    // This prevents stalls at 2000-header batch boundaries by staying ahead
-    // Trigger at chain heights: 1000, 3000, 5000, etc. (1000 blocks into each batch)
-    static int last_prefetch_trigger = -1;
-    int prefetch_trigger_height = ((chain_height / 2000) * 2000) + 1000;  // 1000, 3000, 5000...
-
-    if (chain_height >= prefetch_trigger_height && prefetch_trigger_height > last_prefetch_trigger) {
-        // Calculate what headers we'd need for the next batch
-        int next_batch_start = ((chain_height / 2000) + 1) * 2000;  // 2000, 4000, 6000...
-
-        // Check if any peer has more blocks than our current header height
-        auto peers = m_node_context.peer_manager->GetConnectedPeers();
-        for (const auto& peer : peers) {
-            if (!peer) continue;
-            int peer_height = m_node_context.headers_manager->GetPeerStartHeight(peer->id);
-
-            // Only request if peer has blocks beyond our current headers
-            // AND beyond the next batch start (so we actually get new headers)
-            if (peer_height > header_height && peer_height >= next_batch_start) {
-                uint256 bestHeaderHash = m_node_context.headers_manager->GetBestHeaderHash();
-                if (!bestHeaderHash.IsNull()) {
-                    m_node_context.headers_manager->RequestHeaders(peer->id, bestHeaderHash);
-                    std::cerr << "[IBD-PREFETCH] Chain at " << chain_height
-                              << ", prefetching headers from peer " << peer->id
-                              << " (peer_height=" << peer_height
-                              << ", next_batch=" << next_batch_start << ")" << std::endl;
-                    last_prefetch_trigger = prefetch_trigger_height;
-                    break;  // Only request from one peer
-                }
-            }
-        }
-    }
 
     auto now = std::chrono::steady_clock::now();
     if (!ShouldAttemptDownload()) {
@@ -808,6 +794,127 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
     m_fork_detected = true;
     m_fork_point = fork_point;
     m_fork_stall_cycles = 0;
+}
+
+// ============================================================================
+// HEADERS SYNC PEER MANAGEMENT (Bitcoin Core style single-sync-peer)
+// ============================================================================
+
+void CIbdCoordinator::SelectHeadersSyncPeer() {
+    // If we already have a sync peer, check if they're still connected
+    if (m_headers_sync_peer != -1) {
+        if (m_node_context.peer_manager) {
+            auto peer = m_node_context.peer_manager->GetPeer(m_headers_sync_peer);
+            if (peer) {
+                return;  // Current sync peer still valid
+            }
+        }
+        // Sync peer disconnected, need to select a new one
+        std::cout << "[IBD] Headers sync peer " << m_headers_sync_peer << " disconnected" << std::endl;
+        m_headers_sync_peer = -1;
+    }
+
+    // Select a new sync peer - prefer peers with more blocks
+    if (!m_node_context.peer_manager || !m_node_context.headers_manager) {
+        return;
+    }
+
+    auto peers = m_node_context.peer_manager->GetConnectedPeers();
+    int best_peer = -1;
+    int best_height = 0;
+
+    for (const auto& peer : peers) {
+        if (!peer) continue;
+        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(peer->id);
+        if (peer_height > best_height) {
+            best_height = peer_height;
+            best_peer = peer->id;
+        }
+    }
+
+    if (best_peer != -1) {
+        m_headers_sync_peer = best_peer;
+        m_headers_sync_last_height = m_node_context.headers_manager->GetBestHeight();
+
+        // Calculate timeout: base + 1ms per missing header (Bitcoin Core style)
+        int headers_missing = best_height - m_headers_sync_last_height;
+        int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
+                         headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
+        m_headers_sync_timeout = std::chrono::steady_clock::now() +
+                                 std::chrono::milliseconds(timeout_ms);
+
+        std::cout << "[IBD] Selected headers sync peer " << best_peer
+                  << " (height=" << best_height << ", timeout=" << (timeout_ms/1000) << "s)" << std::endl;
+    }
+}
+
+bool CIbdCoordinator::CheckHeadersSyncProgress() {
+    if (m_headers_sync_peer == -1) {
+        return true;  // No sync peer, nothing to check
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    int current_height = m_node_context.headers_manager ?
+                         m_node_context.headers_manager->GetBestHeight() : 0;
+
+    // Check if we've made progress
+    if (current_height > m_headers_sync_last_height) {
+        // Progress made, update tracking and extend timeout
+        m_headers_sync_last_height = current_height;
+
+        // Recalculate timeout based on remaining headers
+        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+        int headers_missing = peer_height - current_height;
+        if (headers_missing > 0) {
+            int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
+                             headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
+            m_headers_sync_timeout = now + std::chrono::milliseconds(timeout_ms);
+        }
+        return true;  // Making progress
+    }
+
+    // Check for timeout
+    if (now > m_headers_sync_timeout) {
+        std::cout << "[IBD] Headers sync peer " << m_headers_sync_peer
+                  << " STALLED (no progress, timeout reached)" << std::endl;
+        return false;  // Stalled
+    }
+
+    return true;  // Not stalled yet
+}
+
+void CIbdCoordinator::SwitchHeadersSyncPeer() {
+    int old_peer = m_headers_sync_peer;
+    m_headers_sync_peer = -1;  // Force reselection
+
+    // TODO: Could ban or deprioritize the old peer here
+
+    SelectHeadersSyncPeer();
+
+    if (m_headers_sync_peer != -1 && m_headers_sync_peer != old_peer) {
+        std::cout << "[IBD] Switched headers sync peer: " << old_peer
+                  << " -> " << m_headers_sync_peer << std::endl;
+        // Immediately request headers from new peer
+        RequestHeadersFromSyncPeer();
+    }
+}
+
+void CIbdCoordinator::RequestHeadersFromSyncPeer() {
+    if (m_headers_sync_peer == -1 || !m_node_context.headers_manager) {
+        return;
+    }
+
+    // Get our best header hash for the request
+    uint256 bestHeaderHash = m_node_context.headers_manager->GetBestHeaderHash();
+    if (bestHeaderHash.IsNull()) {
+        // No headers yet, use genesis
+        if (Dilithion::g_chainParams) {
+            bestHeaderHash.SetHex(Dilithion::g_chainParams->genesisHash);
+        }
+    }
+
+    std::cout << "[IBD] Requesting headers from sync peer " << m_headers_sync_peer << std::endl;
+    m_node_context.headers_manager->RequestHeaders(m_headers_sync_peer, bestHeaderHash);
 }
 
 

@@ -1837,21 +1837,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // BUG #62 FIX: Request headers when peer announces unknown blocks
             // This ensures we get the FULL chain (all intermediate blocks), not just
-            // the announced block which may fail validation if we're missing its parent.
-            // Rate limited via ShouldFetchHeaders() - max once per 30 seconds per peer.
-            if (hasUnknownBlocks && g_node_context.headers_manager) {
-                if (g_node_context.headers_manager->ShouldFetchHeaders(peer_id)) {
-                    uint256 ourBestBlock;
-                    if (g_chainstate.GetTip()) {
-                        ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
-                    } else {
-                        ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
-                    }
-
-                    std::cout << "[P2P] Unknown blocks announced by peer " << peer_id
-                              << ", requesting headers for full chain" << std::endl;
-                    g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
-                }
+            // Header requests are managed by IBD coordinator (single sync peer).
+            // Don't request headers from INV handler - causes racing.
+            if (hasUnknownBlocks) {
+                std::cout << "[P2P] Unknown blocks announced by peer " << peer_id
+                          << " (IBD coordinator will handle headers)" << std::endl;
             }
 
             // DISABLED: Legacy inv-based block requests
@@ -2140,22 +2130,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
                     }
 
+                    // Header requests are managed by IBD coordinator (single sync peer).
+                    // Don't request headers from orphan handler - causes racing.
                     if (parent_in_flight) {
-                        // Parent already in-flight - just wait, no extra requests needed
                         std::cout << "[P2P] Orphan block stored - parent height " << parent_height
                                   << " already in-flight" << std::endl;
                     } else {
-                        // Parent not in-flight - trigger header sync as fallback
-                        std::cout << "[P2P] Orphan block stored - requesting headers for parent" << std::endl;
-                        if (g_node_context.headers_manager) {
-                            uint256 ourBestBlock;
-                            if (g_chainstate.GetTip()) {
-                                ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
-                            } else {
-                                ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
-                            }
-                            g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
-                        }
+                        std::cout << "[P2P] Orphan block stored - IBD coordinator will handle headers" << std::endl;
                     }
                 } else {
                     std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;

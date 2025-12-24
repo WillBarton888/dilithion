@@ -352,16 +352,8 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
 void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
 {
-    // HEADER THROTTLE: Don't request more headers if already far ahead of chain.
-    // This prevents CPU starvation where header processing blocks block validation.
-    // IBD coordinator's prefetch logic will request more headers at the right time.
-    int headerHeight = GetBestHeight();
-    int chainHeight = g_node_context.chainstate ? g_node_context.chainstate->GetHeight() : 0;
-    if (headerHeight > chainHeight + 2000) {
-        std::cout << "[IBD] RequestHeaders THROTTLED (header=" << headerHeight
-                  << " chain=" << chainHeight << ")" << std::endl;
-        return;
-    }
+    // Header requests are coordinated by IBD coordinator's prefetch logic
+    // which triggers at chain milestones (1000, 3000, 5000...).
 
     // Build locator (holds cs_headers briefly, DOES NOT access blockchain)
     std::vector<uint256> locator = GetLocator(hashStart);
