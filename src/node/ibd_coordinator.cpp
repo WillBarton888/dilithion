@@ -350,106 +350,17 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
     }
 
-    // IBD STUCK FIX #3: Periodic orphan scan to process orphans whose parents are now in chain
-    // This handles cases where orphans were stored after their parent validated, or orphan chains
-    // where only direct children are processed initially
+    // ORPHAN SSOT: Orphans are now processed ONLY by validation queue (block_validation_queue.cpp)
+    // This periodic scan is for DIAGNOSTICS ONLY - logging orphan pool health
     static auto last_orphan_scan = std::chrono::steady_clock::now();
     auto now_orphan_scan = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::seconds>(now_orphan_scan - last_orphan_scan).count() >= 10) {
         last_orphan_scan = now_orphan_scan;
-        
+
         if (g_node_context.orphan_manager) {
-            // Get all orphans
-            std::vector<uint256> all_orphans = g_node_context.orphan_manager->GetAllOrphans();
-            int processed_count = 0;
-            int no_parent_count = 0;
-            int parent_not_connected_count = 0;
-
-            // Debug: log scan start (always log to diagnose issue)
-            std::cout << "[IBD STUCK FIX #3] Orphan scan triggered - found " << all_orphans.size() << " orphans in pool" << std::endl;
-
-            // BUG #167 DEBUG: Log chain tip hash for comparison
-            if (m_chainstate.GetTip()) {
-                std::cout << "[BUG #167 DEBUG] Chain tip height=" << m_chainstate.GetHeight()
-                          << " hash=" << m_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
-            }
-
-            for (const uint256& orphanHash : all_orphans) {
-                CBlock orphanBlock;
-                if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
-                    // Check if parent is now in chain and connected
-                    CBlockIndex* parent = m_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
-                    if (!parent) {
-                        no_parent_count++;
-                        // BUG #167 DEBUG: Log the hashPrevBlock we're looking for
-                        if (no_parent_count <= 3) {
-                            std::cout << "[BUG #167 DEBUG] Orphan " << orphanHash.GetHex().substr(0, 16)
-                                      << " looking for parent " << orphanBlock.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                                      << " - NOT FOUND in chainstate" << std::endl;
-                        }
-                        continue;
-                    }
-                    if (!(parent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                        parent_not_connected_count++;
-                        // Debug: log first few cases
-                        if (parent_not_connected_count <= 3) {
-                            std::cout << "[IBD STUCK FIX #3] Orphan parent at height " << parent->nHeight
-                                      << " has status 0x" << std::hex << parent->nStatus
-                                      << " (needs BLOCK_VALID_CHAIN=0x" << CBlockIndex::BLOCK_VALID_CHAIN << ")" << std::dec << std::endl;
-                        }
-                        continue;
-                    }
-                    if (parent && (parent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                        // Parent is connected - trigger orphan processing
-                        // Use the same logic as in block_validation_queue.cpp orphan resolution
-                        uint256 orphanBlockHash = orphanBlock.GetHash();
-                        int orphanHeight = parent->nHeight + 1;
-                        
-                        // Check if already being processed (by validation queue or another thread)
-                        CBlockIndex* existing = m_chainstate.GetBlockIndex(orphanBlockHash);
-                        if (existing) {
-                            // Block index exists - another thread is handling it
-                            g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
-                            continue;
-                        }
-                        
-                        // Create block index for orphan
-                        auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock);
-                        pOrphanIndex->phashBlock = orphanBlockHash;
-                        pOrphanIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
-                        pOrphanIndex->pprev = parent;
-                        pOrphanIndex->nHeight = orphanHeight;
-                        pOrphanIndex->BuildChainWork();
-                        
-                        // Add to chain state (orphan block already saved to DB when stored)
-                        CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
-                        if (m_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
-                            // Queue for async validation
-                            // IBD OPTIMIZATION: Pass orphanBlockHash to avoid RandomX recomputation
-                            if (g_node_context.validation_queue &&
-                                g_node_context.validation_queue->IsRunning() &&
-                                g_node_context.validation_queue->QueueBlock(-1, orphanBlock, orphanHeight, orphanBlockHash, pOrphanIndexRaw)) {
-                                LogPrintIBD(DEBUG, "IBD STUCK FIX #3: Queued orphan %s... at height %d (parent now available)", 
-                                           orphanBlockHash.GetHex().substr(0, 16).c_str(), orphanHeight);
-                                // Successfully queued - remove from orphan pool
-                                g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
-                                processed_count++;
-                            } else {
-                                // Queue failed - keep orphan for retry
-                                // Note: Block index remains in chainstate - will be cleaned up later if needed
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Log summary (always log)
-            std::cout << "[IBD STUCK FIX #3] Scan complete - processed=" << processed_count
-                      << ", no_parent=" << no_parent_count
-                      << ", parent_not_connected=" << parent_not_connected_count
-                      << ", total=" << all_orphans.size() << std::endl;
-            if (processed_count > 0) {
-                LogPrintIBD(INFO, "IBD STUCK FIX #3: Processed %d orphan(s) whose parents are now available", processed_count);
+            size_t orphan_count = g_node_context.orphan_manager->GetOrphanCount();
+            if (orphan_count > 0) {
+                std::cout << "[IBD] Orphan pool: " << orphan_count << " blocks waiting for parents" << std::endl;
             }
         }
     }
