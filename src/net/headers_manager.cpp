@@ -61,28 +61,44 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // Calculate expected height
         int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
-        // FORK FIX: Check height first for optimization, then handle duplicates vs forks.
-        // - Fresh IBD (new heights): Hash computation unavoidable
-        // - Resuming IBD (existing heights): Still need hash to detect duplicate vs fork
+        // CHECKPOINT OPTIMIZATION: Below checkpoint, forks are impossible (checkpoint guarantees canonical chain).
+        // Skip expensive hash computation for headers at heights we already have.
+        // Above checkpoint, we need full fork detection (compute hash, check for competing chains).
+        int highestCheckpoint = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
+
         auto heightIt = mapHeightIndex.find(expectedHeight);
         bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-        // Compute hash (needed for both duplicate detection and storage)
+        // FAST PATH: Below checkpoint, if height exists, skip entirely (no hash computation)
+        // This restores the Bug #164 optimization for checkpointed blocks
+        if (expectedHeight <= highestCheckpoint && heightHasHeaders) {
+            uint256 existingHash = *heightIt->second.begin();
+            auto existingIt = mapHeaders.find(existingHash);
+            if (existingIt != mapHeaders.end()) {
+                pprev = &existingIt->second;
+                prevHash = existingHash;
+                heightStart = existingIt->second.height;
+                UpdateBestHeader(existingHash);
+                continue;  // Skip without computing hash
+            }
+        }
+
+        // SLOW PATH: Above checkpoint or new height - compute hash for duplicate/fork detection
         uint256 storageHash = header.GetHash();
 
-        // Skip only TRUE duplicates (same hash already exists)
+        // Skip TRUE duplicates (same hash already exists)
         if (mapHeaders.find(storageHash) != mapHeaders.end()) {
             auto it = mapHeaders.find(storageHash);
             pprev = &it->second;
             prevHash = storageHash;
             heightStart = it->second.height;
-            // BUG #33 FIX: Update best header even for existing headers
             UpdateBestHeader(storageHash);
             continue;
         }
 
-        // FORK DETECTION: If height has headers but this hash is NEW, it's a fork
-        if (heightHasHeaders) {
+        // FORK DETECTION: Only relevant above checkpoint
+        if (heightHasHeaders && expectedHeight > highestCheckpoint) {
             std::cout << "[HeadersManager] Fork header received at height " << expectedHeight
                       << " - processing competing chain" << std::endl;
         }
@@ -1085,7 +1101,21 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             auto heightIt = mapHeightIndex.find(expectedHeight);
             bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-            // Compute hash (needed for duplicate detection and storage)
+            // CHECKPOINT OPTIMIZATION: Below checkpoint, forks are impossible (checkpoint guarantees canonical chain).
+            // Skip expensive hash computation for headers at heights we already have.
+            // Above checkpoint, we need full fork detection (compute hash, check for competing chains).
+            if (expectedHeight <= checkpointHeight && heightHasHeaders) {
+                // FAST PATH: Below checkpoint, if height exists, skip entirely (no hash computation)
+                uint256 existingHash = *heightIt->second.begin();
+                auto existingIt = mapHeaders.find(existingHash);
+                if (existingIt != mapHeaders.end()) {
+                    pprev = &existingIt->second;
+                    prevHash = existingHash;
+                    continue;  // Skip without computing hash
+                }
+            }
+
+            // SLOW PATH: Above checkpoint or new height - compute hash for duplicate/fork detection
             uint256 storageHash = header.GetHash();
 
             // Skip only TRUE duplicates (same hash)
@@ -1095,8 +1125,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 continue;
             }
 
-            // FORK DETECTION: If height has headers but this hash is NEW, it's a fork
-            if (heightHasHeaders) {
+            // FORK DETECTION: Only relevant above checkpoint
+            if (heightHasHeaders && expectedHeight > checkpointHeight) {
                 std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
             }
 
