@@ -167,6 +167,19 @@ public:
     bool QueueHeadersForValidation(NodeId peer, const std::vector<CBlockHeader>& headers);
 
     /**
+     * @brief Queue raw headers for async processing (instant return)
+     *
+     * Queues headers for background processing without any computation.
+     * P2P thread returns immediately (<1ms). Background thread handles
+     * hash computation and validation.
+     *
+     * @param peer Peer ID that sent the headers
+     * @param headers Headers to process
+     * @return true if headers were queued
+     */
+    bool QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlockHeader> headers);
+
+    /**
      * @brief Start the background validation worker thread
      *
      * Call once during node initialization.
@@ -522,6 +535,42 @@ private:
      * Uses per-thread RandomX VM via randomx_hash_thread().
      */
     void ValidationWorkerThread();
+
+    // ========================================================================
+    // Async Raw Header Processing (P2P thread offload)
+    // ========================================================================
+
+    /**
+     * @struct PendingHeaders
+     * @brief Raw headers awaiting hash computation in background thread
+     */
+    struct PendingHeaders {
+        NodeId peer_id;                     ///< Peer that sent these headers
+        std::vector<CBlockHeader> headers;  ///< Raw headers (no hashes computed yet)
+    };
+
+    //! Queue of raw headers pending processing
+    std::queue<PendingHeaders> m_raw_header_queue;
+
+    //! Mutex protecting raw header queue
+    std::mutex m_raw_queue_mutex;
+
+    //! Condition variable for raw header queue
+    std::condition_variable m_raw_queue_cv;
+
+    //! Background thread for header processing (hash computation)
+    std::thread m_header_processor_thread;
+
+    //! Flag indicating header processor thread should run
+    std::atomic<bool> m_processor_running{false};
+
+    /**
+     * @brief Background header processor thread main loop
+     *
+     * Dequeues raw headers and processes them (hash computation + validation queue).
+     * This moves expensive hash computation off the P2P thread.
+     */
+    void HeaderProcessorThread();
 
     // Internal helpers
 

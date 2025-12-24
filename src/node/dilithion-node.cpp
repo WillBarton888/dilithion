@@ -2377,6 +2377,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Register HEADERS handler - process received headers (Bug #12 - Phase 4.2)
+        // ASYNC HEADER PROCESSING: P2P thread returns immediately (<1ms)
+        // Background thread handles hash computation and validation
         message_processor.SetHeadersHandler([](int peer_id, const std::vector<CBlockHeader>& headers) {
             if (headers.empty()) {
                 return;
@@ -2384,35 +2386,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             std::cout << "[IBD] Received " << headers.size() << " header(s) from peer " << peer_id << std::endl;
 
-            // BUG #125: Use async validation to prevent blocking network thread
-            // QueueHeadersForValidation does quick structural validation immediately,
-            // then queues expensive PoW validation for background thread
-            bool useAsync = g_node_context.headers_manager->IsValidating();
-
-            bool success = false;
-            if (useAsync) {
-                success = g_node_context.headers_manager->QueueHeadersForValidation(peer_id, headers);
-                std::cout << "[IBD] Headers queued for async validation" << std::endl;
-            } else {
-                // Fallback to sync validation if async thread not running
-                success = g_node_context.headers_manager->ProcessHeaders(peer_id, headers);
-            }
+            // FULLY ASYNC: Queue raw headers for background processing
+            // P2P thread doesn't compute any hashes - just queues and returns immediately
+            // Background HeaderProcessorThread handles hash computation + validation
+            bool success = g_node_context.headers_manager->QueueRawHeadersForProcessing(
+                peer_id, std::vector<CBlockHeader>(headers)  // Copy for async processing
+            );
 
             if (success) {
-                int bestHeight = g_node_context.headers_manager->GetBestHeight();
-                std::cout << "[IBD] Headers processed. Best height: " << bestHeight << std::endl;
+                std::cout << "[IBD] Headers queued for async processing (P2P thread released)" << std::endl;
 
-                // BUG #168 FIX: Update peer's best known height when we receive headers from them
-                // This allows FetchBlocks to request blocks from peers who have mined new blocks
-                // Previously, we only used start_height from VERSION which was never updated
-                g_node_context.peer_manager->UpdatePeerBestKnownHeight(peer_id, bestHeight);
-
-                // Header requests are managed by IBD coordinator's prefetch logic.
-                // Don't auto-request here - causes headers to race ahead of chain.
+                // Note: Best height will be updated by background thread after processing
+                // Peer height update moved to background thread completion
             } else {
-                // BUG #67: Even if ProcessHeaders failed, headers may have been partially processed
-                // The main loop will detect header height changes and handle block downloads
-                std::cerr << "[IBD] Headers processing incomplete (orphan or invalid header encountered)" << std::endl;
+                std::cerr << "[IBD] Failed to queue headers for processing" << std::endl;
             }
         });
 

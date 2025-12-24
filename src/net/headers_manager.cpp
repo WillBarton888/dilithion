@@ -5,6 +5,7 @@
 #include <net/net.h>
 #include <net/connman.h>
 #include <net/protocol.h>
+#include <net/peers.h>
 #include <consensus/params.h>
 #include <consensus/pow.h>
 #include <consensus/chain.h>
@@ -1201,16 +1202,24 @@ bool CHeadersManager::StartValidationThread()
               << " hash worker threads (Phase 2 parallel validation)..." << std::endl;
 
     m_validation_running.store(true);
+    m_processor_running.store(true);
 
     try {
+        // Start hash worker threads
         m_hash_workers.reserve(m_hash_worker_count);
         for (size_t i = 0; i < m_hash_worker_count; ++i) {
             m_hash_workers.emplace_back(&CHeadersManager::ValidationWorkerThread, this);
         }
         std::cout << "[HeadersManager] " << m_hash_worker_count << " hash workers started" << std::endl;
+
+        // Start header processor thread (offloads P2P thread)
+        m_header_processor_thread = std::thread(&CHeadersManager::HeaderProcessorThread, this);
+        std::cout << "[HeadersManager] Header processor thread started" << std::endl;
+
         return true;
     } catch (const std::exception& e) {
         m_validation_running.store(false);
+        m_processor_running.store(false);
         // Join any threads that were started
         for (auto& thread : m_hash_workers) {
             if (thread.joinable()) {
@@ -1218,24 +1227,31 @@ bool CHeadersManager::StartValidationThread()
             }
         }
         m_hash_workers.clear();
-        std::cerr << "[HeadersManager] Failed to start hash workers: " << e.what() << std::endl;
+        if (m_header_processor_thread.joinable()) {
+            m_raw_queue_cv.notify_all();
+            m_header_processor_thread.join();
+        }
+        std::cerr << "[HeadersManager] Failed to start threads: " << e.what() << std::endl;
         return false;
     }
 }
 
 void CHeadersManager::StopValidationThread()
 {
-    if (!m_validation_running.load()) {
+    if (!m_validation_running.load() && !m_processor_running.load()) {
         return;
     }
 
     std::cout << "[HeadersManager] Stopping " << m_hash_workers.size()
-              << " hash worker threads..." << std::endl;
+              << " hash worker threads and header processor..." << std::endl;
 
+    // Stop all threads
     m_validation_running.store(false);
-    m_validation_cv.notify_all();  // Wake all waiting threads
+    m_processor_running.store(false);
+    m_validation_cv.notify_all();  // Wake all validation workers
+    m_raw_queue_cv.notify_all();   // Wake header processor
 
-    // Join all worker threads
+    // Join hash worker threads
     for (auto& thread : m_hash_workers) {
         if (thread.joinable()) {
             thread.join();
@@ -1243,15 +1259,26 @@ void CHeadersManager::StopValidationThread()
     }
     m_hash_workers.clear();
 
-    // Clear remaining queue
+    // Join header processor thread
+    if (m_header_processor_thread.joinable()) {
+        m_header_processor_thread.join();
+    }
+
+    // Clear remaining queues
     {
         std::lock_guard<std::mutex> lock(m_validation_mutex);
         while (!m_validation_queue.empty()) {
             m_validation_queue.pop();
         }
     }
+    {
+        std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
+        while (!m_raw_header_queue.empty()) {
+            m_raw_header_queue.pop();
+        }
+    }
 
-    std::cout << "[HeadersManager] Hash workers stopped. Validated: "
+    std::cout << "[HeadersManager] All threads stopped. Validated: "
               << m_validated_count.load() << ", Failures: "
               << m_validation_failures.load() << std::endl;
 }
@@ -1313,4 +1340,81 @@ void CHeadersManager::ValidationWorkerThread()
     }
 
     std::cout << "[HeadersManager] Validation worker thread stopped" << std::endl;
+}
+
+// ============================================================================
+// Async Raw Header Processing (P2P Thread Offload)
+// ============================================================================
+
+bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlockHeader> headers)
+{
+    // Instant return - just queue the headers for background processing
+    // P2P thread doesn't compute any hashes here
+
+    if (headers.empty()) {
+        return true;
+    }
+
+    std::cout << "[HeadersManager] Queueing " << headers.size()
+              << " raw headers from peer " << peer << " for async processing" << std::endl;
+
+    {
+        std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
+        m_raw_header_queue.push({peer, std::move(headers)});
+    }
+
+    m_raw_queue_cv.notify_one();
+    return true;
+}
+
+void CHeadersManager::HeaderProcessorThread()
+{
+    std::cout << "[HeadersManager] Header processor thread started" << std::endl;
+
+    while (m_processor_running.load()) {
+        PendingHeaders pending;
+
+        // Wait for raw headers
+        {
+            std::unique_lock<std::mutex> lock(m_raw_queue_mutex);
+
+            m_raw_queue_cv.wait(lock, [this] {
+                return !m_processor_running.load() || !m_raw_header_queue.empty();
+            });
+
+            if (!m_processor_running.load()) {
+                break;
+            }
+
+            if (m_raw_header_queue.empty()) {
+                continue;
+            }
+
+            pending = std::move(m_raw_header_queue.front());
+            m_raw_header_queue.pop();
+        }
+
+        // Process headers - hash computation happens HERE, not in P2P thread
+        // This calls QueueHeadersForValidation which does hash computation + stores headers
+        std::cout << "[HeadersManager] Processing " << pending.headers.size()
+                  << " headers from peer " << pending.peer_id << std::endl;
+
+        bool success = QueueHeadersForValidation(pending.peer_id, pending.headers);
+
+        if (success) {
+            // Update peer's best known height (was previously in P2P handler)
+            int bestHeight = GetBestHeight();
+            std::cout << "[HeadersManager] Headers processed. Best height: " << bestHeight << std::endl;
+
+            // Update peer height tracking for FetchBlocks
+            if (g_node_context.peer_manager) {
+                g_node_context.peer_manager->UpdatePeerBestKnownHeight(pending.peer_id, bestHeight);
+            }
+        } else {
+            std::cerr << "[HeadersManager] Failed to process headers from peer "
+                      << pending.peer_id << std::endl;
+        }
+    }
+
+    std::cout << "[HeadersManager] Header processor thread stopped" << std::endl;
 }
