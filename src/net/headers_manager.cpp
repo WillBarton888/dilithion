@@ -1106,22 +1106,16 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         size_t batchEnd = std::min(batchStart + BATCH_SIZE, headers.size());
         size_t batchSize = batchEnd - batchStart;
 
-        // STEP 1: Compute hashes for this batch (lock-free)
+        // STEP 1: Compute hashes for ALL headers in this batch (lock-free)
+        // We compute ALL hashes upfront - the checkpoint optimization just skips
+        // STORING if we already have that height. Hash computation is the expensive
+        // part (~5-10ms per header for RandomX), so we do it outside the lock.
         std::vector<uint256> batchHashes(batchSize);
-        std::vector<bool> needsHash(batchSize, false);
-        size_t hashesInBatch = 0;
 
         for (size_t i = 0; i < batchSize; ++i) {
-            int height = startHeight + batchStart + i;
-
-            // Above checkpoint always needs hash computation
-            if (height > checkpointHeight) {
-                needsHash[i] = true;
-                batchHashes[i] = headers[batchStart + i].GetHash();
-                hashesInBatch++;
-            }
+            batchHashes[i] = headers[batchStart + i].GetHash();
         }
-        totalHashesComputed += hashesInBatch;
+        totalHashesComputed += batchSize;
 
         // STEP 2: Store this batch (brief lock)
         {
@@ -1164,15 +1158,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     }
                 }
 
-                // Get hash (computed above or compute now for below-checkpoint new headers)
-                uint256 storageHash;
-                if (needsHash[i]) {
-                    storageHash = batchHashes[i];
-                } else {
-                    // Below checkpoint, new height - compute hash
-                    storageHash = header.GetHash();
-                    totalHashesComputed++;
-                }
+                // Get pre-computed hash (computed outside lock in STEP 1)
+                uint256 storageHash = batchHashes[i];
 
                 // Skip TRUE duplicates (same hash already exists)
                 if (mapHeaders.find(storageHash) != mapHeaders.end()) {
