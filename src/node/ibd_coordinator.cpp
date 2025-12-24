@@ -70,21 +70,22 @@ void CIbdCoordinator::Tick() {
     if (m_headers_sync_peer != -1) {
         int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
 
-        // Request more headers at chain milestones: 0, 1000, 3000, 5000...
-        // This ensures we have headers 1000-2000 blocks ahead of chain
+        // Request headers at milestones: initial (chain=0), then 1000, 3000, 5000...
+        // After initial batch of ~2000 headers, wait until chain reaches 1000 before requesting more
         static int last_request_trigger = -1;
-        int request_trigger = (chain_height == 0) ? 0 :
-                              ((chain_height / 2000) * 2000) + 1000;
 
         bool should_request = false;
         if (chain_height == 0 && header_height == 0 && peer_height > 0) {
             // Initial request - we have no headers
             should_request = true;
-            last_request_trigger = 0;  // Prevent immediate re-trigger
-        } else if (request_trigger > last_request_trigger && peer_height > header_height) {
-            // Milestone reached and peer has more headers
-            should_request = true;
-            last_request_trigger = request_trigger;
+            last_request_trigger = 1000;  // Next trigger when chain reaches 1000
+        } else if (chain_height >= 1000 && peer_height > header_height) {
+            // Milestone-based requests: 1000, 3000, 5000...
+            int milestone = ((chain_height - 1000) / 2000) * 2000 + 1000;
+            if (milestone > last_request_trigger) {
+                should_request = true;
+                last_request_trigger = milestone;
+            }
         }
 
         if (should_request) {
