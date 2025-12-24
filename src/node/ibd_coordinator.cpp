@@ -73,12 +73,14 @@ void CIbdCoordinator::Tick() {
         // Request headers at milestones: initial (chain=0), then 1000, 3000, 5000...
         // After initial batch of ~2000 headers, wait until chain reaches 1000 before requesting more
         static int last_request_trigger = -1;
+        static bool initial_request_done = false;
 
         bool should_request = false;
-        if (chain_height == 0 && header_height == 0 && peer_height > 0) {
+        if (!initial_request_done && header_height == 0 && peer_height > 0) {
             // Initial request - we have no headers
             should_request = true;
-            last_request_trigger = 1000;  // Next trigger when chain reaches 1000
+            initial_request_done = true;
+            // last_request_trigger stays at -1, so milestone 1000 will trigger (1000 > -1)
         } else if (chain_height >= 1000 && peer_height > header_height) {
             // Milestone-based requests: 1000, 3000, 5000...
             int milestone = ((chain_height - 1000) / 2000) * 2000 + 1000;
