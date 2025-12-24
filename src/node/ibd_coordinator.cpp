@@ -80,6 +80,7 @@ void CIbdCoordinator::Tick() {
         if (chain_height == 0 && header_height == 0 && peer_height > 0) {
             // Initial request - we have no headers
             should_request = true;
+            last_request_trigger = 0;  // Prevent immediate re-trigger
         } else if (request_trigger > last_request_trigger && peer_height > header_height) {
             // Milestone reached and peer has more headers
             should_request = true;
