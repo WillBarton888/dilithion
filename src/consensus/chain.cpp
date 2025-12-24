@@ -64,10 +64,8 @@ bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex
     // Invariant: Hash must match block index hash
     Invariant(pindex->GetBlockHash() == hash);
 
-    // Check if already exists
+    // Check if already exists (normal during concurrent block processing)
     if (mapBlockIndex.count(hash) > 0) {
-        std::cerr << "[Chain] Warning: Block index " << hash.GetHex().substr(0, 16)
-                  << " already exists in map" << std::endl;
         return false;
     }
 

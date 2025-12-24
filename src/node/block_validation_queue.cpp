@@ -293,16 +293,21 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
             return false;
         }
 
-        // Add to chain state
+        // Add to chain state (may fail if another thread beat us - that's OK)
         if (!m_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
-            std::cerr << "[ValidationQueue] ERROR: Failed to add block to chain state" << std::endl;
-            return false;
-        }
-
-        pindex = m_chainstate.GetBlockIndex(blockHash);
-        if (!pindex) {
-            std::cerr << "[ValidationQueue] CRITICAL ERROR: Block index not found after adding!" << std::endl;
-            return false;
+            // Another thread already added this block - get the existing index
+            pindex = m_chainstate.GetBlockIndex(blockHash);
+            if (!pindex) {
+                std::cerr << "[ValidationQueue] ERROR: Block index not found after add failed" << std::endl;
+                return false;
+            }
+            // Continue with existing block index
+        } else {
+            pindex = m_chainstate.GetBlockIndex(blockHash);
+            if (!pindex) {
+                std::cerr << "[ValidationQueue] CRITICAL ERROR: Block index not found after adding!" << std::endl;
+                return false;
+            }
         }
     }
 
@@ -368,10 +373,11 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
                         continue;
                     }
 
-                    // Add to chain state
+                    // Add to chain state (may fail if another thread beat us - that's OK)
                     CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
                     if (!m_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
-                        std::cerr << "[ValidationQueue] Failed to add orphan block index" << std::endl;
+                        // Another thread already added this orphan - just erase from pool
+                        g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
                         continue;
                     }
 
