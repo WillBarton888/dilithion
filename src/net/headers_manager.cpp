@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <iostream>
 
 CHeadersManager::CHeadersManager()
@@ -1106,14 +1107,22 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         size_t batchEnd = std::min(batchStart + BATCH_SIZE, headers.size());
         size_t batchSize = batchEnd - batchStart;
 
-        // STEP 1: Compute hashes for ALL headers in this batch (lock-free)
-        // We compute ALL hashes upfront - the checkpoint optimization just skips
-        // STORING if we already have that height. Hash computation is the expensive
-        // part (~5-10ms per header for RandomX), so we do it outside the lock.
+        // STEP 1: Compute hashes in PARALLEL (lock-free)
+        // RandomX hash is the bottleneck (~70ms each). Use std::async for parallelism.
+        // Each thread uses its own thread-local RandomX VM via randomx_hash_thread().
         std::vector<uint256> batchHashes(batchSize);
+        std::vector<std::future<uint256>> futures;
+        futures.reserve(batchSize);
 
         for (size_t i = 0; i < batchSize; ++i) {
-            batchHashes[i] = headers[batchStart + i].GetHash();
+            futures.push_back(std::async(std::launch::async, [&headers, batchStart, i]() {
+                return headers[batchStart + i].GetHash();
+            }));
+        }
+
+        // Collect results (blocks until all hashes computed)
+        for (size_t i = 0; i < batchSize; ++i) {
+            batchHashes[i] = futures[i].get();
         }
         totalHashesComputed += batchSize;
 
