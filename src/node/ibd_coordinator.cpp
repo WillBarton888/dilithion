@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <consensus/chain.h>
+#include <core/chainparams.h>  // Initial header request needs genesis hash
 #include <node/blockchain_storage.h>  // BUG #159: Orphan block deletion
 #include <core/node_context.h>
 #include <net/block_fetcher.h>
@@ -51,6 +52,29 @@ void CIbdCoordinator::Tick() {
 
     int header_height = m_node_context.headers_manager->GetBestHeight();
     int chain_height = m_chainstate.GetHeight();
+
+    // INITIAL HEADER REQUEST: If we have no headers and have peers, request headers
+    // This replaces the VERSION handler which was causing header racing
+    if (header_height == 0 && m_node_context.peer_manager) {
+        auto peers = m_node_context.peer_manager->GetConnectedPeers();
+        if (!peers.empty()) {
+            static bool initial_request_sent = false;
+            if (!initial_request_sent) {
+                // Request from first available peer
+                for (const auto& peer : peers) {
+                    if (!peer) continue;
+                    uint256 genesisHash;
+                    if (Dilithion::g_chainParams) {
+                        genesisHash.SetHex(Dilithion::g_chainParams->genesisHash);
+                    }
+                    std::cout << "[IBD] Requesting initial headers from peer " << peer->id << std::endl;
+                    m_node_context.headers_manager->RequestHeaders(peer->id, genesisHash);
+                    initial_request_sent = true;
+                    break;  // Only request from one peer
+                }
+            }
+        }
+    }
 
     // If headers are not ahead, we're synced (IDLE or COMPLETE)
     if (header_height <= chain_height) {

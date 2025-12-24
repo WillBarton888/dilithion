@@ -1762,15 +1762,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             int peerHeight = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
 
             // Request headers if peer is ahead OR if we're at genesis
-            if (peerHeight > ourHeight || ourHeight == 0) {
-                uint256 ourBestBlock;
-                if (g_chainstate.GetTip()) {
-                    ourBestBlock = g_chainstate.GetTip()->GetBlockHash();
-                } else {
-                    ourBestBlock.SetHex(Dilithion::g_chainParams->genesisHash);
-                }
-                g_node_context.headers_manager->RequestHeaders(peer_id, ourBestBlock);
-            }
+            // Header requests are managed by IBD coordinator - don't request here.
+            // Requesting from every peer on VERSION causes header racing.
+            (void)peerHeight;  // Suppress unused warning
+            (void)ourHeight;
         });
 
         // Register ping handler to automatically respond with pong
