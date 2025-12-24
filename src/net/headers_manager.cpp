@@ -1057,185 +1057,175 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     }
 
     // =========================================================================
-    // TWO-PHASE HEADER PROCESSING (Lock-Free Hash Computation)
+    // PROGRESSIVE HEADER PROCESSING (Compute & Store Immediately)
     // =========================================================================
-    // Problem: RandomX hash computation takes 5-10ms per header. Computing 2000
-    // hashes while holding cs_headers blocks block processing for 10-20 seconds.
+    // Problem: Batch processing waits for ALL hashes before storing ANY headers.
+    // This means blocks can't download new headers until entire batch is done.
     //
-    // Solution:
-    // PHASE 1: Gather metadata (brief lock) - determine which headers need hashes
-    // PHASE 2: Compute hashes (lock-free) - expensive but doesn't block others
-    // PHASE 3: Store headers (brief lock) - fast storage using pre-computed hashes
+    // Solution: Process headers progressively in small batches.
+    // - Compute hash for batch of N headers (lock-free)
+    // - Store batch immediately (brief lock)
+    // - Repeat until all headers processed
+    //
+    // This allows block downloading to start as soon as first headers are stored,
+    // rather than waiting for all 2000 hashes to complete.
     // =========================================================================
 
-    // PHASE 1: Gather metadata to determine which headers need hash computation
-    int checkpointHeight = 0;
-    std::vector<bool> needsHashComputation(headers.size(), false);
-    std::vector<int> expectedHeights(headers.size(), 0);
-    size_t hashesNeeded = 0;
+    const size_t BATCH_SIZE = 100;  // Process 100 headers at a time
+    int checkpointHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
+    // Get initial parent info (brief lock)
+    uint256 prevHash;
+    int startHeight = 1;
     {
         std::lock_guard<std::mutex> lock(cs_headers);
-
-        checkpointHeight = Dilithion::g_chainParams ?
-            Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
-
-        // Determine starting height from first header's parent
-        int currentHeight = 1;
         uint256 genesisHash = Genesis::GetGenesisHash();
 
-        if (!headers.empty()) {
-            if (headers[0].hashPrevBlock == genesisHash || headers[0].hashPrevBlock.IsNull()) {
-                currentHeight = 1;
+        if (headers[0].hashPrevBlock == genesisHash || headers[0].hashPrevBlock.IsNull()) {
+            startHeight = 1;
+        } else {
+            auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
+            if (parentIt != mapHeaders.end()) {
+                startHeight = parentIt->second.height + 1;
+                prevHash = headers[0].hashPrevBlock;
             } else {
-                auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
-                if (parentIt != mapHeaders.end()) {
-                    currentHeight = parentIt->second.height + 1;
-                }
-            }
-        }
-
-        // Scan headers to determine which need hash computation
-        for (size_t i = 0; i < headers.size(); ++i) {
-            expectedHeights[i] = currentHeight;
-
-            // Check if height already has headers
-            auto heightIt = mapHeightIndex.find(currentHeight);
-            bool heightExists = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
-
-            // Need hash computation if:
-            // 1. Above checkpoint (always need hash for fork detection), OR
-            // 2. Height doesn't exist yet (new header)
-            if (currentHeight > checkpointHeight || !heightExists) {
-                needsHashComputation[i] = true;
-                hashesNeeded++;
-            }
-
-            currentHeight++;
-        }
-    }
-    // Lock released - block processing can now proceed
-
-    std::cout << "[HeadersManager] Need to compute " << hashesNeeded << "/" << headers.size()
-              << " hashes (checkpoint=" << checkpointHeight << ")" << std::endl;
-
-    // PHASE 2: Compute hashes OUTSIDE the lock (expensive but lock-free)
-    std::vector<uint256> precomputedHashes(headers.size());
-
-    if (hashesNeeded > 0) {
-        auto hash_start = std::chrono::steady_clock::now();
-        size_t computed = 0;
-
-        for (size_t i = 0; i < headers.size(); ++i) {
-            if (needsHashComputation[i]) {
-                precomputedHashes[i] = headers[i].GetHash();
-                computed++;
-                if (computed % 500 == 0 || computed == hashesNeeded) {
-                    std::cout << "[HeadersManager] Computed " << computed << "/" << hashesNeeded
-                              << " hashes (lock-free)" << std::endl;
-                }
-            }
-        }
-
-        auto hash_end = std::chrono::steady_clock::now();
-        auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
-        std::cout << "[HeadersManager] Hash computation complete: " << hashesNeeded
-                  << " hashes in " << hash_ms << "ms" << std::endl;
-    }
-
-    // PHASE 3: Store headers WITH the lock (fast - no hash computation)
-    {
-        std::lock_guard<std::mutex> lock(cs_headers);
-
-        const HeaderWithChainWork* pprev = nullptr;
-        uint256 prevHash;
-        int processed_count = 0;
-
-        for (size_t i = 0; i < headers.size(); ++i) {
-            const CBlockHeader& header = headers[i];
-            int expectedHeight = expectedHeights[i];
-
-            processed_count++;
-            if (processed_count <= 5 || processed_count % 500 == 0) {
-                std::cout << "[IBD] Storing header " << processed_count << "/" << headers.size() << std::endl;
-            }
-
-            // Parent lookup
-            uint256 genesisHash = Genesis::GetGenesisHash();
-            if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
-                pprev = nullptr;
-            } else if (pprev == nullptr || prevHash.IsNull()) {
-                auto parentIt = mapHeaders.find(header.hashPrevBlock);
-                if (parentIt != mapHeaders.end()) {
-                    pprev = &parentIt->second;
-                } else {
-                    std::cerr << "[HeadersManager] ORPHAN: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
-                              << " not found" << std::endl;
-                    return false;
-                }
-            }
-
-            // Check height index
-            auto heightIt = mapHeightIndex.find(expectedHeight);
-            bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
-
-            // CHECKPOINT OPTIMIZATION: Skip existing headers below checkpoint
-            if (expectedHeight <= checkpointHeight && heightHasHeaders) {
-                uint256 existingHash = *heightIt->second.begin();
-                auto existingIt = mapHeaders.find(existingHash);
-                if (existingIt != mapHeaders.end()) {
-                    pprev = &existingIt->second;
-                    prevHash = existingHash;
-                    continue;
-                }
-            }
-
-            // Get hash (pre-computed or compute now if needed due to race)
-            uint256 storageHash = needsHashComputation[i] ? precomputedHashes[i] : header.GetHash();
-
-            // Skip only TRUE duplicates (same hash)
-            if (mapHeaders.find(storageHash) != mapHeaders.end()) {
-                pprev = &mapHeaders[storageHash];
-                prevHash = storageHash;
-                continue;
-            }
-
-            // FORK DETECTION: Only relevant above checkpoint
-            if (heightHasHeaders && expectedHeight > checkpointHeight) {
-                std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
-            }
-
-            // Fork headers (different hash at existing height) proceed to validation
-
-            // Quick validate (structure only - fast)
-            if (!QuickValidateHeader(header, pprev ? &pprev->header : nullptr)) {
+                std::cerr << "[HeadersManager] ORPHAN: Parent " << headers[0].hashPrevBlock.GetHex().substr(0, 16)
+                          << " not found" << std::endl;
                 return false;
             }
+        }
+    }
 
-            // Calculate height and chain work
-            int height = pprev ? (pprev->height + 1) : 1;
-            uint256 chainWork = CalculateChainWork(header, pprev);
+    auto total_start = std::chrono::steady_clock::now();
+    size_t totalProcessed = 0;
+    size_t totalHashesComputed = 0;
 
-            // Store header
-            HeaderWithChainWork headerData(header, height);
-            headerData.chainWork = chainWork;
-            mapHeaders[storageHash] = headerData;
-            AddToHeightIndex(storageHash, height);
-            UpdateChainTips(storageHash);
-            UpdateBestHeader(storageHash);
+    // Process headers in batches
+    for (size_t batchStart = 0; batchStart < headers.size(); batchStart += BATCH_SIZE) {
+        size_t batchEnd = std::min(batchStart + BATCH_SIZE, headers.size());
+        size_t batchSize = batchEnd - batchStart;
 
-            // Queue for background PoW validation (only for blocks above checkpoint)
-            if (expectedHeight > checkpointHeight) {
-                std::lock_guard<std::mutex> vlock(m_validation_mutex);
-                m_validation_queue.emplace(peer, header, height, chainWork);
+        // STEP 1: Compute hashes for this batch (lock-free)
+        std::vector<uint256> batchHashes(batchSize);
+        std::vector<bool> needsHash(batchSize, false);
+        size_t hashesInBatch = 0;
+
+        for (size_t i = 0; i < batchSize; ++i) {
+            int height = startHeight + batchStart + i;
+
+            // Above checkpoint always needs hash computation
+            if (height > checkpointHeight) {
+                needsHash[i] = true;
+                batchHashes[i] = headers[batchStart + i].GetHash();
+                hashesInBatch++;
+            }
+        }
+        totalHashesComputed += hashesInBatch;
+
+        // STEP 2: Store this batch (brief lock)
+        {
+            std::lock_guard<std::mutex> lock(cs_headers);
+
+            const HeaderWithChainWork* pprev = nullptr;
+
+            // Find parent for first header in batch
+            if (batchStart == 0) {
+                uint256 genesisHash = Genesis::GetGenesisHash();
+                if (headers[0].hashPrevBlock != genesisHash && !headers[0].hashPrevBlock.IsNull()) {
+                    auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
+                    if (parentIt != mapHeaders.end()) {
+                        pprev = &parentIt->second;
+                    }
+                }
+            } else if (!prevHash.IsNull()) {
+                auto parentIt = mapHeaders.find(prevHash);
+                if (parentIt != mapHeaders.end()) {
+                    pprev = &parentIt->second;
+                }
             }
 
-            // Update for next iteration
-            pprev = &mapHeaders[storageHash];
-            prevHash = storageHash;
-        }
+            for (size_t i = 0; i < batchSize; ++i) {
+                const CBlockHeader& header = headers[batchStart + i];
+                int expectedHeight = startHeight + batchStart + i;
 
-        // Update peer state
+                // Check if height exists
+                auto heightIt = mapHeightIndex.find(expectedHeight);
+                bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
+
+                // CHECKPOINT OPTIMIZATION: Skip existing headers below checkpoint
+                if (expectedHeight <= checkpointHeight && heightHasHeaders) {
+                    uint256 existingHash = *heightIt->second.begin();
+                    auto existingIt = mapHeaders.find(existingHash);
+                    if (existingIt != mapHeaders.end()) {
+                        pprev = &existingIt->second;
+                        prevHash = existingHash;
+                        continue;
+                    }
+                }
+
+                // Get hash (computed above or compute now for below-checkpoint new headers)
+                uint256 storageHash;
+                if (needsHash[i]) {
+                    storageHash = batchHashes[i];
+                } else {
+                    // Below checkpoint, new height - compute hash
+                    storageHash = header.GetHash();
+                    totalHashesComputed++;
+                }
+
+                // Skip TRUE duplicates (same hash already exists)
+                if (mapHeaders.find(storageHash) != mapHeaders.end()) {
+                    pprev = &mapHeaders[storageHash];
+                    prevHash = storageHash;
+                    continue;
+                }
+
+                // FORK DETECTION: Only relevant above checkpoint
+                if (heightHasHeaders && expectedHeight > checkpointHeight) {
+                    std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
+                }
+
+                // Quick validate (structure only - fast)
+                if (!QuickValidateHeader(header, pprev ? &pprev->header : nullptr)) {
+                    return false;
+                }
+
+                // Calculate height and chain work
+                int height = pprev ? (pprev->height + 1) : 1;
+                uint256 chainWork = CalculateChainWork(header, pprev);
+
+                // Store header
+                HeaderWithChainWork headerData(header, height);
+                headerData.chainWork = chainWork;
+                mapHeaders[storageHash] = headerData;
+                AddToHeightIndex(storageHash, height);
+                UpdateChainTips(storageHash);
+                UpdateBestHeader(storageHash);
+
+                // Queue for background PoW validation (only for blocks above checkpoint)
+                if (expectedHeight > checkpointHeight) {
+                    std::lock_guard<std::mutex> vlock(m_validation_mutex);
+                    m_validation_queue.emplace(peer, header, height, chainWork);
+                }
+
+                // Update for next iteration
+                pprev = &mapHeaders[storageHash];
+                prevHash = storageHash;
+                totalProcessed++;
+            }
+        }  // Release cs_headers lock after each batch - allows block downloading to progress
+
+        // Log batch progress
+        if (batchStart > 0 && batchStart % 500 == 0) {
+            std::cout << "[HeadersManager] Batch progress: " << totalProcessed
+                      << "/" << headers.size() << " headers stored" << std::endl;
+        }
+    }  // End batch loop
+
+    // Update peer state (final update after all batches)
+    {
+        std::lock_guard<std::mutex> lock(cs_headers);
         if (!headers.empty() && !prevHash.IsNull()) {
             auto it = mapHeaders.find(prevHash);
             if (it != mapHeaders.end()) {
@@ -1247,7 +1237,12 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     // Wake up validation thread (only if we queued any for validation)
     m_validation_cv.notify_one();
 
-    std::cout << "[HeadersManager] Headers queued successfully" << std::endl;
+    auto total_end = std::chrono::steady_clock::now();
+    auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count();
+    std::cout << "[HeadersManager] Progressive processing complete: " << totalProcessed
+              << " headers stored, " << totalHashesComputed << " hashes computed in "
+              << total_ms << "ms" << std::endl;
+
     return true;
 }
 
