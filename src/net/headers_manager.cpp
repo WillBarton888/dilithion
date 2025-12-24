@@ -1100,31 +1100,55 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
     auto total_start = std::chrono::steady_clock::now();
     size_t totalProcessed = 0;
-    size_t totalHashesComputed = 0;
 
-    // Process headers in batches
+    // =========================================================================
+    // STEP 1: Compute ALL hashes in PARALLEL using N worker threads
+    // =========================================================================
+    // Use fixed number of threads (= CPU cores) to avoid thread creation overhead.
+    // Each thread processes a chunk of headers, reusing its thread-local RandomX VM.
+    // This is MUCH faster than spawning 100 threads per batch.
+
+    const size_t numWorkers = std::min(size_t(8), headers.size());  // Cap at 8 workers
+    const size_t chunkSize = (headers.size() + numWorkers - 1) / numWorkers;
+
+    std::vector<uint256> allHashes(headers.size());
+    std::vector<std::future<void>> workers;
+    workers.reserve(numWorkers);
+
+    auto hash_start = std::chrono::steady_clock::now();
+
+    for (size_t w = 0; w < numWorkers; ++w) {
+        size_t start = w * chunkSize;
+        size_t end = std::min(start + chunkSize, headers.size());
+        if (start >= end) break;
+
+        workers.push_back(std::async(std::launch::async, [&headers, &allHashes, start, end]() {
+            // Each worker processes its chunk sequentially, reusing thread-local RandomX VM
+            for (size_t i = start; i < end; ++i) {
+                allHashes[i] = headers[i].GetHash();
+            }
+        }));
+    }
+
+    // Wait for all workers to complete
+    for (auto& worker : workers) {
+        worker.get();
+    }
+
+    auto hash_end = std::chrono::steady_clock::now();
+    auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
+    std::cout << "[HeadersManager] Parallel hash computation: " << headers.size()
+              << " headers, " << numWorkers << " workers, " << hash_ms << "ms" << std::endl;
+
+    // =========================================================================
+    // STEP 2: Store ALL headers progressively in batches (for block download)
+    // =========================================================================
+    // Even though hashes are already computed, we store in batches to release
+    // cs_headers lock periodically, allowing block processing to proceed.
+
     for (size_t batchStart = 0; batchStart < headers.size(); batchStart += BATCH_SIZE) {
         size_t batchEnd = std::min(batchStart + BATCH_SIZE, headers.size());
         size_t batchSize = batchEnd - batchStart;
-
-        // STEP 1: Compute hashes in PARALLEL (lock-free)
-        // RandomX hash is the bottleneck (~70ms each). Use std::async for parallelism.
-        // Each thread uses its own thread-local RandomX VM via randomx_hash_thread().
-        std::vector<uint256> batchHashes(batchSize);
-        std::vector<std::future<uint256>> futures;
-        futures.reserve(batchSize);
-
-        for (size_t i = 0; i < batchSize; ++i) {
-            futures.push_back(std::async(std::launch::async, [&headers, batchStart, i]() {
-                return headers[batchStart + i].GetHash();
-            }));
-        }
-
-        // Collect results (blocks until all hashes computed)
-        for (size_t i = 0; i < batchSize; ++i) {
-            batchHashes[i] = futures[i].get();
-        }
-        totalHashesComputed += batchSize;
 
         // STEP 2: Store this batch (brief lock)
         {
@@ -1167,8 +1191,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     }
                 }
 
-                // Get pre-computed hash (computed outside lock in STEP 1)
-                uint256 storageHash = batchHashes[i];
+                // Get pre-computed hash (computed in parallel in STEP 1)
+                uint256 storageHash = allHashes[batchStart + i];
 
                 // Skip TRUE duplicates (same hash already exists)
                 if (mapHeaders.find(storageHash) != mapHeaders.end()) {
@@ -1236,8 +1260,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     auto total_end = std::chrono::steady_clock::now();
     auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count();
     std::cout << "[HeadersManager] Progressive processing complete: " << totalProcessed
-              << " headers stored, " << totalHashesComputed << " hashes computed in "
-              << total_ms << "ms" << std::endl;
+              << " headers stored in " << total_ms << "ms (hashes: " << hash_ms << "ms)" << std::endl;
 
     return true;
 }
