@@ -549,9 +549,6 @@ private:
         std::vector<CBlockHeader> headers;  ///< Raw headers (no hashes computed yet)
     };
 
-    //! Test member to check if class size change causes heap corruption
-    int m_test_int{0};
-
     //! Queue of raw headers pending processing
     std::queue<PendingHeaders> m_raw_header_queue;
 
