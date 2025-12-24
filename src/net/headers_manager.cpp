@@ -14,6 +14,7 @@
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <iostream>
 
@@ -1046,81 +1047,151 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     std::cout << "[HeadersManager] Queueing " << headers.size()
               << " headers for async validation from peer " << peer << std::endl;
 
-    // Quick-validate and store headers immediately (non-blocking)
+    if (headers.empty()) {
+        return true;
+    }
+
+    if (headers.size() > MAX_HEADERS_BUFFER) {
+        std::cerr << "[HeadersManager] Too many headers (" << headers.size() << ")" << std::endl;
+        return false;
+    }
+
+    // =========================================================================
+    // TWO-PHASE HEADER PROCESSING (Lock-Free Hash Computation)
+    // =========================================================================
+    // Problem: RandomX hash computation takes 5-10ms per header. Computing 2000
+    // hashes while holding cs_headers blocks block processing for 10-20 seconds.
+    //
+    // Solution:
+    // PHASE 1: Gather metadata (brief lock) - determine which headers need hashes
+    // PHASE 2: Compute hashes (lock-free) - expensive but doesn't block others
+    // PHASE 3: Store headers (brief lock) - fast storage using pre-computed hashes
+    // =========================================================================
+
+    // PHASE 1: Gather metadata to determine which headers need hash computation
+    int checkpointHeight = 0;
+    std::vector<bool> needsHashComputation(headers.size(), false);
+    std::vector<int> expectedHeights(headers.size(), 0);
+    size_t hashesNeeded = 0;
+
     {
         std::lock_guard<std::mutex> lock(cs_headers);
 
-        if (headers.empty()) {
-            return true;
+        checkpointHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
+
+        // Determine starting height from first header's parent
+        int currentHeight = 1;
+        uint256 genesisHash = Genesis::GetGenesisHash();
+
+        if (!headers.empty()) {
+            if (headers[0].hashPrevBlock == genesisHash || headers[0].hashPrevBlock.IsNull()) {
+                currentHeight = 1;
+            } else {
+                auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
+                if (parentIt != mapHeaders.end()) {
+                    currentHeight = parentIt->second.height + 1;
+                }
+            }
         }
 
-        if (headers.size() > MAX_HEADERS_BUFFER) {
-            std::cerr << "[HeadersManager] Too many headers (" << headers.size() << ")" << std::endl;
-            return false;
+        // Scan headers to determine which need hash computation
+        for (size_t i = 0; i < headers.size(); ++i) {
+            expectedHeights[i] = currentHeight;
+
+            // Check if height already has headers
+            auto heightIt = mapHeightIndex.find(currentHeight);
+            bool heightExists = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
+
+            // Need hash computation if:
+            // 1. Above checkpoint (always need hash for fork detection), OR
+            // 2. Height doesn't exist yet (new header)
+            if (currentHeight > checkpointHeight || !heightExists) {
+                needsHashComputation[i] = true;
+                hashesNeeded++;
+            }
+
+            currentHeight++;
         }
+    }
+    // Lock released - block processing can now proceed
+
+    std::cout << "[HeadersManager] Need to compute " << hashesNeeded << "/" << headers.size()
+              << " hashes (checkpoint=" << checkpointHeight << ")" << std::endl;
+
+    // PHASE 2: Compute hashes OUTSIDE the lock (expensive but lock-free)
+    std::vector<uint256> precomputedHashes(headers.size());
+
+    if (hashesNeeded > 0) {
+        auto hash_start = std::chrono::steady_clock::now();
+        size_t computed = 0;
+
+        for (size_t i = 0; i < headers.size(); ++i) {
+            if (needsHashComputation[i]) {
+                precomputedHashes[i] = headers[i].GetHash();
+                computed++;
+                if (computed % 500 == 0 || computed == hashesNeeded) {
+                    std::cout << "[HeadersManager] Computed " << computed << "/" << hashesNeeded
+                              << " hashes (lock-free)" << std::endl;
+                }
+            }
+        }
+
+        auto hash_end = std::chrono::steady_clock::now();
+        auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
+        std::cout << "[HeadersManager] Hash computation complete: " << hashesNeeded
+                  << " hashes in " << hash_ms << "ms" << std::endl;
+    }
+
+    // PHASE 3: Store headers WITH the lock (fast - no hash computation)
+    {
+        std::lock_guard<std::mutex> lock(cs_headers);
 
         const HeaderWithChainWork* pprev = nullptr;
-        uint256 prevHash;  // Track previous header's hash for sequential iteration
+        uint256 prevHash;
         int processed_count = 0;
 
-        for (const CBlockHeader& header : headers) {
+        for (size_t i = 0; i < headers.size(); ++i) {
+            const CBlockHeader& header = headers[i];
+            int expectedHeight = expectedHeights[i];
+
             processed_count++;
             if (processed_count <= 5 || processed_count % 500 == 0) {
-                std::cout << "[IBD] Processing header " << processed_count << "/" << headers.size() << std::endl;
+                std::cout << "[IBD] Storing header " << processed_count << "/" << headers.size() << std::endl;
             }
 
-            // Get checkpoint height for validation queueing decision
-            int checkpointHeight = Dilithion::g_chainParams ?
-                Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
-
-            // SIMPLIFIED PARENT LOOKUP: With RandomX-only storage, hashPrevBlock directly
-            // references the parent's storage hash (no mapping needed)
-
-            // Check if parent is genesis block
+            // Parent lookup
             uint256 genesisHash = Genesis::GetGenesisHash();
             if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
-                static int genesis_log_count = 0;
-                if (genesis_log_count++ < 3) {
-                    std::cout << "[HeadersManager] Parent is genesis block" << std::endl;
-                }
                 pprev = nullptr;
-            }
-            // Direct parent lookup (hashPrevBlock = parent's RandomX hash = parent's storage hash)
-            else if (pprev == nullptr || prevHash.IsNull()) {
+            } else if (pprev == nullptr || prevHash.IsNull()) {
                 auto parentIt = mapHeaders.find(header.hashPrevBlock);
                 if (parentIt != mapHeaders.end()) {
                     pprev = &parentIt->second;
                 } else {
                     std::cerr << "[HeadersManager] ORPHAN: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
-                              << " not found, mapHeaders.size=" << mapHeaders.size() << std::endl;
+                              << " not found" << std::endl;
                     return false;
                 }
             }
-            // Sequential processing - pprev from previous iteration is correct
 
-            // Calculate expected height
-            int expectedHeight = pprev ? (pprev->height + 1) : 1;
-
-            // FORK FIX: Check height first, then handle duplicates vs forks
+            // Check height index
             auto heightIt = mapHeightIndex.find(expectedHeight);
             bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-            // CHECKPOINT OPTIMIZATION: Below checkpoint, forks are impossible (checkpoint guarantees canonical chain).
-            // Skip expensive hash computation for headers at heights we already have.
-            // Above checkpoint, we need full fork detection (compute hash, check for competing chains).
+            // CHECKPOINT OPTIMIZATION: Skip existing headers below checkpoint
             if (expectedHeight <= checkpointHeight && heightHasHeaders) {
-                // FAST PATH: Below checkpoint, if height exists, skip entirely (no hash computation)
                 uint256 existingHash = *heightIt->second.begin();
                 auto existingIt = mapHeaders.find(existingHash);
                 if (existingIt != mapHeaders.end()) {
                     pprev = &existingIt->second;
                     prevHash = existingHash;
-                    continue;  // Skip without computing hash
+                    continue;
                 }
             }
 
-            // SLOW PATH: Above checkpoint or new height - compute hash for duplicate/fork detection
-            uint256 storageHash = header.GetHash();
+            // Get hash (pre-computed or compute now if needed due to race)
+            uint256 storageHash = needsHashComputation[i] ? precomputedHashes[i] : header.GetHash();
 
             // Skip only TRUE duplicates (same hash)
             if (mapHeaders.find(storageHash) != mapHeaders.end()) {
