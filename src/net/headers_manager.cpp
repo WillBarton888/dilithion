@@ -20,11 +20,13 @@
 CHeadersManager::CHeadersManager()
     : nBestHeight(-1)
 {
+    std::cout << "[HeadersManager] Constructor start" << std::endl;
     hashBestHeader = uint256();
 
     // Bug #46 Fix: Initialize minimum chain work to zero (accept all chains initially)
     // Production networks should set this to a reasonable threshold to prevent DoS
     nMinimumChainWork = uint256();
+    std::cout << "[HeadersManager] Constructor complete" << std::endl;
 }
 
 // ============================================================================
