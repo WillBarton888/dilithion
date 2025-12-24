@@ -347,6 +347,13 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
 
                     int orphanHeight = pOrphanParent->nHeight + 1;
 
+                    // Check if already being processed (by IBD coordinator or another thread)
+                    if (m_chainstate.GetBlockIndex(orphanBlockHash)) {
+                        // Block index exists - another thread is handling it
+                        g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                        continue;
+                    }
+
                     // Create block index for orphan
                     auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock);
                     pOrphanIndex->phashBlock = orphanBlockHash;

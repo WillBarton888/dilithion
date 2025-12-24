@@ -405,10 +405,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         uint256 orphanBlockHash = orphanBlock.GetHash();
                         int orphanHeight = parent->nHeight + 1;
                         
-                        // Check if already processed
+                        // Check if already being processed (by validation queue or another thread)
                         CBlockIndex* existing = m_chainstate.GetBlockIndex(orphanBlockHash);
-                        if (existing && existing->HaveData() && (existing->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                            // Already processed - remove from orphan pool
+                        if (existing) {
+                            // Block index exists - another thread is handling it
                             g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
                             continue;
                         }
