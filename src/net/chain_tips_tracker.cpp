@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 // ============================================================================
 // Public API
@@ -188,7 +189,7 @@ void CChainTipsTracker::Clear()
     std::lock_guard<std::mutex> lock(cs_tips);
     m_tips.clear();
     m_bestTip = uint256();
-    m_bestWork = arith_uint256();
+    m_bestWork = uint256();
 }
 
 std::string CChainTipsTracker::GetDebugInfo() const
