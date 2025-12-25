@@ -23,6 +23,7 @@
  * Provides simple HTTP server for exposing node statistics via REST API.
  * Supports:
  * - GET /api/stats - Returns JSON with current node statistics
+ * - GET /metrics - Returns Prometheus-format metrics
  * - CORS headers for cross-origin requests
  * - Non-blocking operation with background thread
  * - Graceful shutdown
@@ -30,6 +31,7 @@
  * Usage:
  *   CHttpServer server(8334);
  *   server.SetStatsHandler([]() { return GetNodeStats(); });
+ *   server.SetMetricsHandler([]() { return GetPrometheusMetrics(); });
  *   server.Start();
  */
 class CHttpServer {
@@ -39,6 +41,12 @@ public:
      * Should return JSON string with current node statistics
      */
     using StatsHandler = std::function<std::string()>;
+
+    /**
+     * Metrics handler function type
+     * Should return Prometheus-format metrics string
+     */
+    using MetricsHandler = std::function<std::string()>;
 
     /**
      * Constructor
@@ -60,6 +68,12 @@ public:
      * @param handler Function that returns JSON stats string
      */
     void SetStatsHandler(StatsHandler handler);
+
+    /**
+     * Set metrics handler function (Prometheus format)
+     * @param handler Function that returns Prometheus metrics string
+     */
+    void SetMetricsHandler(MetricsHandler handler);
 
     /**
      * Start the HTTP server
@@ -132,6 +146,7 @@ private:
     // Configuration
     int m_port;                          // Server port
     StatsHandler m_stats_handler;         // Stats handler function
+    MetricsHandler m_metrics_handler;     // Prometheus metrics handler
 
     // Server state
     std::thread m_server_thread;          // Server worker thread

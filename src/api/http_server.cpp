@@ -47,6 +47,11 @@ void CHttpServer::SetStatsHandler(StatsHandler handler) {
     m_stats_handler = handler;
 }
 
+// Set metrics handler function (Prometheus format)
+void CHttpServer::SetMetricsHandler(MetricsHandler handler) {
+    m_metrics_handler = handler;
+}
+
 // Start the HTTP server
 bool CHttpServer::Start() {
     if (m_running.load()) {
@@ -244,6 +249,23 @@ void CHttpServer::HandleRequest(SOCKET client_socket) {
             SendResponse(client_socket, 200, "application/json", json);
         } catch (const std::exception& e) {
             std::cerr << "[HttpServer] Error generating stats: " << e.what() << std::endl;
+            Send500(client_socket);
+        }
+        return;
+    }
+
+    // Handle GET /metrics (Prometheus format)
+    if (method == "GET" && path == "/metrics") {
+        if (!m_metrics_handler) {
+            Send500(client_socket);
+            return;
+        }
+
+        try {
+            std::string metrics = m_metrics_handler();
+            SendResponse(client_socket, 200, "text/plain; version=0.0.4; charset=utf-8", metrics);
+        } catch (const std::exception& e) {
+            std::cerr << "[HttpServer] Error generating metrics: " << e.what() << std::endl;
             Send500(client_socket);
         }
         return;

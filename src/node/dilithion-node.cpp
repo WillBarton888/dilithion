@@ -39,6 +39,7 @@
 #include <net/feeler.h>  // Bitcoin Core-style feeler connections
 #include <net/connman.h>  // Phase 5: Event-driven connection manager
 #include <api/http_server.h>
+#include <api/metrics.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
@@ -1659,6 +1660,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return json.str();
         });
 
+        // Set metrics handler for Prometheus scraping
+        http_server.SetMetricsHandler([]() -> std::string {
+            // Update current metrics from live state
+            CBlockIndex* tip = g_chainstate.GetTip();
+            g_metrics.block_height = tip ? tip->nHeight : 0;
+            g_metrics.last_block_time = tip ? tip->GetBlockTime() : 0;
+
+            if (g_node_context.headers_manager) {
+                g_metrics.headers_height = g_node_context.headers_manager->GetHeaderHeight();
+            }
+
+            if (g_node_context.peer_manager) {
+                g_metrics.peer_count = g_node_context.peer_manager->GetConnectedPeers().size();
+            }
+
+            // Return Prometheus-format metrics
+            return g_metrics.ToPrometheus();
+        });
+
         // BUG #140 FIX: Make HTTP server failure non-fatal
         // The stats endpoint is optional - core P2P functionality should continue
         bool http_started = http_server.Start();
@@ -1668,6 +1688,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         } else {
             std::cout << "[HttpServer] API server started on port " << api_port << std::endl;
             std::cout << "[HttpServer] Dashboard endpoint: http://localhost:" << api_port << "/api/stats" << std::endl;
+            std::cout << "[HttpServer] Prometheus metrics: http://localhost:" << api_port << "/metrics" << std::endl;
         }
 
         // Verify global pointers are properly initialized (audit recommendation)
@@ -1968,6 +1989,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (!skipPoWCheck && !CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[P2P] ERROR: Block from peer " << peer_id << " has invalid PoW" << std::endl;
                 std::cerr << "  Hash must be less than target" << std::endl;
+                g_metrics.RecordInvalidBlock();  // Track for attack detection
                 return;
             }
 
@@ -2081,6 +2103,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "  Error: " << validationError << std::endl;
                     std::cerr << "  Rejecting invalid block from peer " << peer_id << std::endl;
                     g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Ban peer sending invalid blocks
+                    g_metrics.RecordInvalidBlock();
                     return;
                 }
 
@@ -2090,6 +2113,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "  Block merkle root: " << block.hashMerkleRoot.GetHex().substr(0, 16) << "..." << std::endl;
                     std::cerr << "  Rejecting invalid block from peer " << peer_id << std::endl;
                     g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Ban peer sending invalid blocks
+                    g_metrics.RecordInvalidBlock();
                     return;
                 }
 
@@ -2098,6 +2122,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "[Orphan] ERROR: Orphan block contains duplicate transactions" << std::endl;
                     std::cerr << "  Error: " << validationError << std::endl;
                     g_node_context.peer_manager->Misbehaving(peer_id, 100);
+                    g_metrics.RecordInvalidBlock();
                     return;
                 }
 
@@ -2106,6 +2131,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "[Orphan] ERROR: Orphan block contains double-spend" << std::endl;
                     std::cerr << "  Error: " << validationError << std::endl;
                     g_node_context.peer_manager->Misbehaving(peer_id, 100);
+                    g_metrics.RecordInvalidBlock();
                     return;
                 }
 
@@ -2237,6 +2263,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "[P2P] ⚠️  CHAIN REORGANIZATION occurred!" << std::endl;
                     std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
                               << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
+                    g_metrics.RecordReorg();  // Track reorgs for monitoring
 
                     // Signal main loop to update mining template
                     g_node_state.new_block_found = true;
@@ -2252,6 +2279,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                 } else {
                     std::cout << "[P2P] Block activated successfully" << std::endl;
+                    g_metrics.blocks_accepted_total++;  // Track accepted blocks
 
                     // Check if this became the new tip
                     if (g_chainstate.GetTip() == pblockIndexPtr) {

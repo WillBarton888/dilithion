@@ -279,6 +279,53 @@ function updateDashboardFromStats(stats) {
 
         document.getElementById('last-block-time').textContent = timeAgo;
     }
+
+    // Update seed node panels
+    if (stats.nodes) {
+        updateSeedNodePanels(stats.nodes);
+    }
+}
+
+/**
+ * Update seed node status panels
+ */
+function updateSeedNodePanels(nodes) {
+    const nodeMapping = {
+        'nyc': { ip: '134.122.4.164', prefix: 'nyc' },
+        'sgp': { ip: '188.166.255.63', prefix: 'sgp' },
+        'ldn': { ip: '209.97.177.197', prefix: 'ldn' }
+    };
+
+    for (const [nodeId, config] of Object.entries(nodeMapping)) {
+        const nodeData = nodes[nodeId] || nodes[config.ip];
+        const statusEl = document.getElementById(`${config.prefix}-status`);
+        const heightEl = document.getElementById(`${config.prefix}-height`);
+        const peersEl = document.getElementById(`${config.prefix}-peers`);
+
+        if (nodeData && nodeData.online) {
+            // Node is online
+            if (statusEl) {
+                statusEl.textContent = 'Online';
+                statusEl.style.background = 'rgba(34, 197, 94, 0.2)';
+                statusEl.style.color = '#22c55e';
+            }
+            if (heightEl && nodeData.blockHeight !== undefined) {
+                heightEl.textContent = nodeData.blockHeight.toLocaleString();
+            }
+            if (peersEl && nodeData.peerCount !== undefined) {
+                peersEl.textContent = nodeData.peerCount;
+            }
+        } else {
+            // Node is offline
+            if (statusEl) {
+                statusEl.textContent = 'Offline';
+                statusEl.style.background = 'rgba(239, 68, 68, 0.2)';
+                statusEl.style.color = '#ef4444';
+            }
+            if (heightEl) heightEl.textContent = '—';
+            if (peersEl) peersEl.textContent = '—';
+        }
+    }
 }
 
 /**

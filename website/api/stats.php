@@ -1,7 +1,7 @@
 <?php
 /**
- * API Proxy for Dilithion Network Stats
- * Proxies requests to backend nodes to avoid Mixed Content blocking
+ * API for Dilithion Network Stats
+ * Fetches data from all seed nodes and returns aggregated stats
  */
 
 // CORS headers
@@ -17,22 +17,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// Backend nodes to try (in order)
-$backends = [
-    'http://188.166.255.63:8334/api/stats',
-    'http://134.122.4.164:8334/api/stats',
-    'http://209.97.177.197:8334/api/stats'
+// Seed node configuration
+// Note: Testnet uses port 18334, mainnet uses 8334
+$seedNodes = [
+    'nyc' => [
+        'name' => 'NYC (Primary)',
+        'ip' => '134.122.4.164',
+        'api_port' => 18334
+    ],
+    'sgp' => [
+        'name' => 'Singapore',
+        'ip' => '188.166.255.63',
+        'api_port' => 18334
+    ],
+    'ldn' => [
+        'name' => 'London',
+        'ip' => '209.97.177.197',
+        'api_port' => 18334
+    ]
 ];
 
-$errors = [];
+/**
+ * Fetch stats from a single node
+ */
+function fetchNodeStats($ip, $port) {
+    $url = "http://{$ip}:{$port}/api/stats";
 
-// Try each backend
-foreach ($backends as $backend) {
     $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $backend);
+    curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 2);           // Reduced to 2 seconds
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);    // Reduced to 1 second
+    curl_setopt($ch, CURLOPT_TIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
 
     $response = curl_exec($ch);
@@ -40,25 +55,67 @@ foreach ($backends as $backend) {
     $curl_error = curl_error($ch);
     curl_close($ch);
 
-    // If successful, return the response
     if ($http_code === 200 && $response) {
-        http_response_code(200);
-        echo $response;
-        exit;
+        $data = json_decode($response, true);
+        if ($data) {
+            return [
+                'online' => true,
+                'blockHeight' => $data['blockHeight'] ?? 0,
+                'peerCount' => $data['peerCount'] ?? 0,
+                'hashrate' => $data['hashRate'] ?? $data['hashrate'] ?? 0,
+                'difficulty' => $data['difficulty'] ?? 0
+            ];
+        }
     }
 
-    // Log the error
-    $errors[] = [
-        'backend' => $backend,
-        'http_code' => $http_code,
-        'error' => $curl_error ?: 'No response'
+    return [
+        'online' => false,
+        'blockHeight' => 0,
+        'peerCount' => 0,
+        'error' => $curl_error ?: 'Connection failed'
     ];
 }
 
-// All backends failed - return error details
-http_response_code(503);
-echo json_encode([
-    'error' => 'All backend nodes unavailable',
+// Fetch stats from all nodes
+$nodes = [];
+$maxBlockHeight = 0;
+$totalPeers = 0;
+$networkOnline = false;
+
+foreach ($seedNodes as $nodeId => $config) {
+    $nodeStats = fetchNodeStats($config['ip'], $config['api_port']);
+    $nodes[$nodeId] = $nodeStats;
+
+    if ($nodeStats['online']) {
+        $networkOnline = true;
+        if ($nodeStats['blockHeight'] > $maxBlockHeight) {
+            $maxBlockHeight = $nodeStats['blockHeight'];
+        }
+        $totalPeers += $nodeStats['peerCount'];
+    }
+}
+
+// Build response
+$response = [
+    'status' => $networkOnline ? 'live' : 'offline',
+    'blockHeight' => $maxBlockHeight,
+    'peerCount' => $totalPeers,
     'timestamp' => time(),
-    'details' => $errors
-]);
+    'nodes' => $nodes
+];
+
+// Also include hashrate/difficulty from the first online node
+foreach ($nodes as $nodeData) {
+    if ($nodeData['online']) {
+        if (isset($nodeData['hashrate']) && $nodeData['hashrate'] > 0) {
+            $response['hashRate'] = $nodeData['hashrate'];
+        }
+        if (isset($nodeData['difficulty']) && $nodeData['difficulty'] > 0) {
+            $response['difficulty'] = $nodeData['difficulty'];
+        }
+        break;
+    }
+}
+
+http_response_code(200);
+echo json_encode($response, JSON_PRETTY_PRINT);
