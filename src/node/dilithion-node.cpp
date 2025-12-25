@@ -1839,9 +1839,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // This ensures we get the FULL chain (all intermediate blocks), not just
             // Header requests are managed by IBD coordinator (single sync peer).
             // Don't request headers from INV handler - causes racing.
-            if (hasUnknownBlocks) {
+            if (hasUnknownBlocks && g_node_context.headers_manager) {
                 std::cout << "[P2P] Unknown blocks announced by peer " << peer_id
-                          << " (IBD coordinator will handle headers)" << std::endl;
+                          << " , requesting headers" << std::endl;
+                g_node_context.headers_manager->RequestHeaders(peer_id,
+                    g_node_context.headers_manager->GetBestHeaderHash());
             }
 
             // DISABLED: Legacy inv-based block requests
