@@ -1665,10 +1665,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Update current metrics from live state
             CBlockIndex* tip = g_chainstate.GetTip();
             g_metrics.block_height = tip ? tip->nHeight : 0;
-            g_metrics.last_block_time = tip ? tip->GetBlockTime() : 0;
+            g_metrics.last_block_time = tip ? static_cast<int64_t>(tip->nTime) : 0;
 
             if (g_node_context.headers_manager) {
-                g_metrics.headers_height = g_node_context.headers_manager->GetHeaderHeight();
+                g_metrics.headers_height = g_node_context.headers_manager->GetBestHeight();
             }
 
             if (g_node_context.peer_manager) {
