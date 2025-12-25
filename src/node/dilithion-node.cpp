@@ -73,6 +73,8 @@
 #include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
 #include <set>  // BUG #109 FIX: For tracking spent outpoints in block template
 #include <filesystem>  // BUG #56: For wallet file existence check
+#include <unordered_map>  // BUG #149: For tracking requested parent blocks
+#include <mutex>  // BUG #149: For thread-safe parent tracking
 
 #ifdef _WIN32
     #include <winsock2.h>   // For socket functions
@@ -2058,6 +2060,44 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "[BUG88-FIX] Block in DB but not chainstate, parent now available - connecting" << std::endl;
                         // Don't return - fall through to create block index and connect
                     } else {
+                        // BUG #149 FIX: Check if parent is on a competing fork
+                        // If parent is not in our header chain, we need to request it directly
+                        int parent_height = -1;
+                        if (g_node_context.headers_manager) {
+                            parent_height = g_node_context.headers_manager->GetHeightForHash(block.hashPrevBlock);
+                        }
+
+                        if (parent_height <= 0 && g_node_context.connman && g_node_context.message_processor) {
+                            // Parent is on a competing fork - request it directly
+                            // Only do this once per block by checking if we've already requested
+                            struct Uint256Hasher {
+                                size_t operator()(const uint256& h) const {
+                                    // Use first 8 bytes as hash
+                                    return *reinterpret_cast<const size_t*>(h.data);
+                                }
+                            };
+                            static std::unordered_map<uint256, std::chrono::steady_clock::time_point, Uint256Hasher> s_requested_parents;
+                            static std::mutex s_requested_mutex;
+
+                            std::lock_guard<std::mutex> lock(s_requested_mutex);
+                            auto now = std::chrono::steady_clock::now();
+                            auto it = s_requested_parents.find(block.hashPrevBlock);
+
+                            // Only request if we haven't requested this parent in the last 30 seconds
+                            if (it == s_requested_parents.end() ||
+                                std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count() > 30) {
+                                s_requested_parents[block.hashPrevBlock] = now;
+
+                                std::cout << "[P2P] Block in DB, parent on competing fork - requesting: "
+                                          << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+
+                                std::vector<NetProtocol::CInv> getdata_inv;
+                                getdata_inv.emplace_back(NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock);
+                                CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(getdata_inv);
+                                g_node_context.connman->PushMessage(peer_id, getdata_msg);
+                            }
+                        }
+
                         std::cout << "[P2P] Block in DB but parent still missing, skipping" << std::endl;
                         return;
                     }
@@ -2163,8 +2203,26 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (parent_in_flight) {
                         std::cout << "[P2P] Orphan block stored - parent height " << parent_height
                                   << " already in-flight" << std::endl;
+                    } else if (parent_height <= 0) {
+                        // BUG #149 FIX: Parent is not in our header chain (competing fork)
+                        // We MUST request the parent block directly from the peer, otherwise
+                        // the orphan chain can never be connected and sync stalls.
+                        // Use GetOrphanRoot to find the earliest missing block.
+                        uint256 orphan_root = g_node_context.orphan_manager->GetOrphanRoot(blockHash);
+                        CBlock orphan_block;
+                        if (g_node_context.orphan_manager->GetOrphanBlock(orphan_root, orphan_block)) {
+                            uint256 missing_parent = orphan_block.hashPrevBlock;
+                            std::cout << "[P2P] Orphan on competing fork - requesting parent block: "
+                                      << missing_parent.GetHex().substr(0, 16) << "..." << std::endl;
+
+                            // Send GETDATA for the missing parent block
+                            std::vector<NetProtocol::CInv> getdata_inv;
+                            getdata_inv.emplace_back(NetProtocol::MSG_BLOCK_INV, missing_parent);
+                            CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(getdata_inv);
+                            g_node_context.connman->PushMessage(peer_id, getdata_msg);
+                        }
                     } else {
-                        std::cout << "[P2P] Orphan block stored - IBD coordinator will handle headers" << std::endl;
+                        std::cout << "[P2P] Orphan block stored - IBD coordinator will handle block request" << std::endl;
                     }
                 } else {
                     std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;
