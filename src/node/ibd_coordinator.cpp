@@ -636,6 +636,12 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
     std::cout << "[FORK-RECOVERY] Resetting IBD to fork point " << fork_point
               << " (chain was at " << chain_height << ")" << std::endl;
 
+    // CRITICAL: Pause header processing before modifying chainstate
+    // This prevents async workers from accessing CBlockIndex pointers that will be invalidated
+    if (m_node_context.headers_manager) {
+        m_node_context.headers_manager->PauseHeaderProcessing();
+    }
+
     // BUG #159 FIX: Disconnect forked blocks before downloading correct chain
     // We need to remove blocks from fork_point+1 to chain_height so new blocks can connect
     int blocks_to_disconnect = chain_height - fork_point;
@@ -679,6 +685,8 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
 
         // BUG #159 FIX: Delete orphan blocks from DB that were built on the forked chain
         // These blocks have their prevBlockHash pointing to disconnected blocks
+        // NOTE: Wrapped in try-catch to prevent crash during fork recovery
+        try {
         if (m_node_context.blockchain_db && disconnected > 0) {
             // Get all blocks from DB and find orphans (blocks above fork_point not on main chain)
             std::vector<uint256> all_block_hashes;
@@ -740,6 +748,11 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
                 }
             }
         }
+        } catch (const std::exception& e) {
+            std::cerr << "[FORK-RECOVERY] Exception during orphan cleanup: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[FORK-RECOVERY] Unknown exception during orphan cleanup" << std::endl;
+        }
     }
 
     // PURE PER-BLOCK: Just clear in-flight tracking above fork point
@@ -752,6 +765,11 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
     m_fork_detected = true;
     m_fork_point = fork_point;
     m_fork_stall_cycles = 0;
+
+    // Resume header processing now that chainstate is stable
+    if (m_node_context.headers_manager) {
+        m_node_context.headers_manager->ResumeHeaderProcessing();
+    }
 }
 
 // ============================================================================

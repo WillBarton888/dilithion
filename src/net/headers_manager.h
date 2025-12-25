@@ -463,6 +463,32 @@ public:
      */
     size_t GetOrphanedHeaderCount() const;
 
+    // ========================================================================
+    // Fork Recovery Synchronization API
+    // ========================================================================
+
+    /**
+     * @brief Pause header processing for fork recovery
+     *
+     * Blocks until all in-progress header processing completes.
+     * Does NOT clear queues - work will resume when ResumeHeaderProcessing() is called.
+     * Thread-safe: can be called from main thread while worker threads run.
+     *
+     * CRITICAL: Must be called before modifying chainstate during fork recovery
+     * to prevent async workers from accessing invalidated CBlockIndex pointers.
+     */
+    void PauseHeaderProcessing();
+
+    /**
+     * @brief Resume header processing after fork recovery
+     */
+    void ResumeHeaderProcessing();
+
+    /**
+     * @brief Check if header processing is paused
+     */
+    bool IsHeaderProcessingPaused() const { return m_processing_paused.load(); }
+
 private:
     /**
      * @struct PeerSyncState
@@ -594,6 +620,12 @@ private:
 
     //! Count of failed validations (for stats)
     std::atomic<size_t> m_validation_failures{0};
+
+    // Fork recovery synchronization
+    std::atomic<bool> m_processing_paused{false};   ///< Flag to pause processing for fork recovery
+    std::atomic<int> m_active_workers{0};           ///< Count of workers currently processing
+    std::condition_variable m_pause_cv;             ///< CV to wait for workers to finish
+    std::mutex m_pause_mutex;                       ///< Mutex for pause CV
 
     /**
      * @brief Background validation worker thread main loop

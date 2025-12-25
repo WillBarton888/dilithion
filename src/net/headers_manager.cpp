@@ -1588,6 +1588,49 @@ void CHeadersManager::StopValidationThread()
               << m_validation_failures.load() << std::endl;
 }
 
+void CHeadersManager::PauseHeaderProcessing()
+{
+    if (m_processing_paused.load()) {
+        return;  // Already paused
+    }
+
+    std::cout << "[HeadersManager] Pausing header processing for fork recovery..." << std::endl;
+    std::cout.flush();
+
+    // Set paused flag - workers will check this before starting new work
+    m_processing_paused.store(true);
+
+    // Wait for any active workers to finish (with timeout to prevent deadlock)
+    {
+        std::unique_lock<std::mutex> lock(m_pause_mutex);
+        auto timeout = std::chrono::seconds(10);
+        bool finished = m_pause_cv.wait_for(lock, timeout, [this] {
+            return m_active_workers.load() == 0;
+        });
+
+        if (!finished) {
+            std::cerr << "[HeadersManager] WARNING: Timeout waiting for workers, continuing anyway ("
+                      << m_active_workers.load() << " workers still active)" << std::endl;
+        }
+    }
+
+    std::cout << "[HeadersManager] Header processing paused" << std::endl;
+}
+
+void CHeadersManager::ResumeHeaderProcessing()
+{
+    if (!m_processing_paused.load()) {
+        return;  // Not paused
+    }
+
+    std::cout << "[HeadersManager] Resuming header processing..." << std::endl;
+    m_processing_paused.store(false);
+
+    // Wake up any waiting workers
+    m_validation_cv.notify_all();
+    m_raw_queue_cv.notify_all();
+}
+
 size_t CHeadersManager::GetValidationQueueDepth() const
 {
     std::lock_guard<std::mutex> lock(m_validation_mutex);
@@ -1600,6 +1643,12 @@ void CHeadersManager::ValidationWorkerThread()
     // Each thread has its own RandomX VM via thread-local storage in randomx_hash_thread()
 
     while (m_validation_running.load()) {
+        // Check if paused for fork recovery - wait until unpaused
+        if (m_processing_paused.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
         PendingValidation pending;
 
         // Wait for work
@@ -1607,14 +1656,15 @@ void CHeadersManager::ValidationWorkerThread()
             std::unique_lock<std::mutex> lock(m_validation_mutex);
 
             m_validation_cv.wait(lock, [this] {
-                return !m_validation_running.load() || !m_validation_queue.empty();
+                return !m_validation_running.load() || !m_validation_queue.empty() || m_processing_paused.load();
             });
 
             if (!m_validation_running.load()) {
                 break;
             }
 
-            if (m_validation_queue.empty()) {
+            // Recheck pause state after waking
+            if (m_processing_paused.load() || m_validation_queue.empty()) {
                 continue;
             }
 
@@ -1622,8 +1672,17 @@ void CHeadersManager::ValidationWorkerThread()
             m_validation_queue.pop();
         }
 
+        // Track active workers for pause synchronization
+        m_active_workers++;
+
         // Validate PoW (expensive - runs outside lock, unless checkpointed)
         bool valid = FullValidateHeader(pending.header, pending.height);
+
+        // Decrement active workers and notify pause waiter if needed
+        if (--m_active_workers == 0 && m_processing_paused.load()) {
+            std::lock_guard<std::mutex> lock(m_pause_mutex);
+            m_pause_cv.notify_all();
+        }
 
         if (valid) {
             m_validated_count++;
@@ -1677,6 +1736,12 @@ void CHeadersManager::HeaderProcessorThread()
     std::cout << "[HeadersManager] Header processor thread started" << std::endl;
 
     while (m_processor_running.load()) {
+        // Check if paused for fork recovery - wait until unpaused
+        if (m_processing_paused.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
         PendingHeaders pending;
 
         // Wait for raw headers
@@ -1684,14 +1749,15 @@ void CHeadersManager::HeaderProcessorThread()
             std::unique_lock<std::mutex> lock(m_raw_queue_mutex);
 
             m_raw_queue_cv.wait(lock, [this] {
-                return !m_processor_running.load() || !m_raw_header_queue.empty();
+                return !m_processor_running.load() || !m_raw_header_queue.empty() || m_processing_paused.load();
             });
 
             if (!m_processor_running.load()) {
                 break;
             }
 
-            if (m_raw_header_queue.empty()) {
+            // Recheck pause state after waking
+            if (m_processing_paused.load() || m_raw_header_queue.empty()) {
                 continue;
             }
 
@@ -1699,12 +1765,21 @@ void CHeadersManager::HeaderProcessorThread()
             m_raw_header_queue.pop();
         }
 
+        // Track active workers for pause synchronization
+        m_active_workers++;
+
         // Process headers - hash computation happens HERE, not in P2P thread
         // This calls QueueHeadersForValidation which does hash computation + stores headers
         std::cout << "[HeadersManager] Processing " << pending.headers.size()
                   << " headers from peer " << pending.peer_id << std::endl;
 
         bool success = QueueHeadersForValidation(pending.peer_id, pending.headers);
+
+        // Decrement active workers and notify pause waiter if needed
+        if (--m_active_workers == 0 && m_processing_paused.load()) {
+            std::lock_guard<std::mutex> lock(m_pause_mutex);
+            m_pause_cv.notify_all();
+        }
 
         if (success) {
             // Update peer's best known height (was previously in P2P handler)
