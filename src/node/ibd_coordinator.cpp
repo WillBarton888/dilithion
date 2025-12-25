@@ -304,6 +304,15 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // IBD DEBUG: Track entry into DownloadBlocks
     std::cerr << "[IBD-DEBUG] DownloadBlocks entered: header=" << header_height << " chain=" << chain_height << std::endl;
 
+    // Bug #150: Log fork status periodically (every 100 calls)
+    static size_t download_call_count = 0;
+    if (++download_call_count % 100 == 0 && m_node_context.headers_manager) {
+        if (m_node_context.headers_manager->HasCompetingForks()) {
+            std::cout << "[IBD] Fork status: " << m_node_context.headers_manager->GetForkCount()
+                      << " competing chain tips detected" << std::endl;
+        }
+    }
+
     BENCHMARK_START("ibd_download_blocks");
     m_last_ibd_attempt = now;
 

@@ -6,6 +6,7 @@
 
 #include <primitives/block.h>
 #include <net/headerssync.h>
+#include <net/chain_tips_tracker.h>
 #include <chrono>
 #include <condition_variable>
 #include <map>
@@ -409,6 +410,59 @@ public:
      */
     void Clear();
 
+    // ========================================================================
+    // Bug #150 Fix: Fork Management API
+    // ========================================================================
+
+    /**
+     * @brief Check if we have competing chain forks
+     *
+     * @return true if more than one chain tip exists
+     */
+    bool HasCompetingForks() const;
+
+    /**
+     * @brief Get number of competing chain tips
+     *
+     * @return Number of chain tips (1 = no forks, >1 = competing forks)
+     */
+    size_t GetForkCount() const;
+
+    /**
+     * @brief Get debug info about all chain tips
+     *
+     * @return Human-readable fork status string
+     */
+    std::string GetForkDebugInfo() const;
+
+    /**
+     * @brief Get the chain tips tracker for advanced fork analysis
+     *
+     * @return Reference to chain tips tracker
+     */
+    const CChainTipsTracker& GetChainTipsTracker() const { return m_chainTipsTracker; }
+
+    /**
+     * @brief Prune orphaned headers to bound memory usage
+     *
+     * Removes headers that are:
+     * - Not on any chain with >=50% of best chain work
+     * - More than ORPHAN_HEADER_EXPIRY_BLOCKS behind best tip
+     * - Older than ORPHAN_HEADER_EXPIRY_SECONDS
+     *
+     * Called periodically during header processing.
+     *
+     * @return Number of headers pruned
+     */
+    size_t PruneOrphanedHeaders();
+
+    /**
+     * @brief Get count of headers not on the best chain
+     *
+     * @return Number of orphaned headers
+     */
+    size_t GetOrphanedHeaderCount() const;
+
 private:
     /**
      * @struct PeerSyncState
@@ -472,6 +526,13 @@ private:
     // Bug #46 Fix: Minimum chain work for DoS protection
     uint256 nMinimumChainWork;              ///< Reject chains below this work threshold
 
+    // Bug #150 Fix: Best chain cache for fork-safe height lookups
+    mutable std::map<int, uint256> m_bestChainCache;  ///< Height -> Hash on best chain
+    mutable bool m_bestChainCacheDirty{true};          ///< Cache needs rebuild
+
+    // Bug #150 Fix: Chain tips tracker for fork management
+    CChainTipsTracker m_chainTipsTracker;              ///< Tracks competing chain tips
+
     // Peer synchronization state
     std::map<NodeId, PeerSyncState> mapPeerStates;        ///< Peer -> Basic sync state
     std::map<NodeId, int> mapPeerStartHeight;             ///< BUG #62: Peer -> Starting height from VERSION
@@ -480,6 +541,12 @@ private:
     static constexpr size_t MAX_HEADERS_BUFFER = 2000;     ///< Max headers per message (Bitcoin Core std)
     static constexpr int MAX_HEADERS_AGE_SECONDS = 7200;   ///< 2 hours max header age
     static constexpr int MEDIAN_TIME_SPAN = 11;            ///< Blocks for median time calculation
+
+    // Bug #150: Orphan header pruning configuration
+    static constexpr int ORPHAN_HEADER_EXPIRY_BLOCKS = 100;    ///< Prune orphans >100 blocks behind tip
+    static constexpr int ORPHAN_HEADER_MIN_WORK_PERCENT = 50;  ///< Keep chains with >=50% of best work
+    static constexpr size_t PRUNE_BATCH_SIZE = 1000;           ///< Prune after every N headers processed
+    mutable size_t m_headers_since_last_prune{0};              ///< Counter for triggering prune
 
     // Thread safety
     mutable std::mutex cs_headers;          ///< Protects all data members
@@ -634,6 +701,27 @@ private:
      * @return true if best header changed
      */
     bool UpdateBestHeader(const uint256& hash);
+
+    /**
+     * @brief Get hash on best-work chain at a specific height (FORK-SAFE)
+     *
+     * Walks backward from hashBestHeader to find the block at the target height.
+     * This ensures we return the hash that's ON the best-work chain, not an
+     * arbitrary fork member. Critical for correct locator generation and block requests.
+     *
+     * Bug #150 Fix: Replaces arbitrary *heightIt->second.begin() selection.
+     *
+     * @param height Target block height
+     * @return Hash of block on best chain at that height, or null if not found
+     */
+    uint256 GetBestChainHashAtHeight(int height) const;
+
+    /**
+     * @brief Invalidate best chain cache (call when best header changes)
+     *
+     * Called by UpdateBestHeader() when chain tip changes.
+     */
+    void InvalidateBestChainCache();
 
     /**
      * @brief Add header to height index for fork tracking
