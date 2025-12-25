@@ -6,7 +6,7 @@
 
 #include <primitives/block.h>
 #include <uint256.h>
-#include <arith_uint256.h>
+#include <consensus/pow.h>  // For ChainWorkGreaterThan
 #include <mutex>
 #include <map>
 #include <set>
@@ -37,7 +37,7 @@ typedef int NodeId;
 struct ChainTip {
     uint256 hash;                ///< Block hash of this tip
     int height;                  ///< Height in chain
-    arith_uint256 chainWork;     ///< Cumulative proof-of-work from genesis
+    uint256 chainWork;           ///< Cumulative proof-of-work from genesis
     NodeId peer;                 ///< Which peer served this chain (for debugging)
     std::chrono::steady_clock::time_point lastSeen;  ///< When we last received from this chain
 
@@ -45,7 +45,7 @@ struct ChainTip {
         lastSeen = std::chrono::steady_clock::now();
     }
 
-    ChainTip(const uint256& h, int ht, const arith_uint256& work, NodeId p = -1)
+    ChainTip(const uint256& h, int ht, const uint256& work, NodeId p = -1)
         : hash(h), height(ht), chainWork(work), peer(p) {
         lastSeen = std::chrono::steady_clock::now();
     }
@@ -53,8 +53,11 @@ struct ChainTip {
     // Comparison by chain work (descending - more work is better)
     bool operator<(const ChainTip& other) const {
         // Primary: more chain work wins
-        if (chainWork != other.chainWork) {
-            return chainWork > other.chainWork;  // Reversed for descending order
+        if (ChainWorkGreaterThan(chainWork, other.chainWork)) {
+            return true;  // This has more work, so comes first
+        }
+        if (ChainWorkGreaterThan(other.chainWork, chainWork)) {
+            return false;  // Other has more work, so other comes first
         }
         // Tiebreaker: use hash (arbitrary but deterministic)
         return hash < other.hash;
@@ -92,7 +95,7 @@ public:
      * @return true if this is now the best tip
      */
     bool AddOrUpdateTip(const uint256& hash, int height,
-                        const arith_uint256& chainWork, NodeId peer = -1);
+                        const uint256& chainWork, NodeId peer = -1);
 
     /**
      * @brief Remove a chain tip (when child extends it)
@@ -115,7 +118,7 @@ public:
      *
      * @return Chain work of best tip
      */
-    arith_uint256 GetBestChainWork() const;
+    uint256 GetBestChainWork() const;
 
     /**
      * @brief Get all competing tips sorted by chain work
@@ -179,7 +182,7 @@ public:
      * @param minWork Minimum required chain work
      * @return Number of tips removed
      */
-    size_t PruneBelowWork(const arith_uint256& minWork);
+    size_t PruneBelowWork(const uint256& minWork);
 
     /**
      * @brief Clear all tips
@@ -203,7 +206,7 @@ private:
     uint256 m_bestTip;
 
     //! Best chain work (cached)
-    arith_uint256 m_bestWork;
+    uint256 m_bestWork;
 
     /**
      * @brief Recalculate best tip after modification
