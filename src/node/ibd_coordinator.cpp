@@ -100,8 +100,42 @@ void CIbdCoordinator::Tick() {
 
     // =========================================================================
 
-    // If headers are not ahead, we're synced (IDLE or COMPLETE)
+    // If headers are not ahead, check if any peer has more blocks we need
     if (header_height <= chain_height) {
+        // Check if any peer has higher height than our headers
+        // This catches the case where we're "synced" but a miner just found new blocks
+        static auto last_catchup_request = std::chrono::steady_clock::time_point();
+        auto now_catchup = std::chrono::steady_clock::now();
+
+        // Rate limit: only check for catchup every 2 seconds to prevent spam
+        if (now_catchup - last_catchup_request > std::chrono::seconds(2)) {
+            if (m_node_context.peer_manager && m_node_context.headers_manager) {
+                auto peers = m_node_context.peer_manager->GetConnectedPeers();
+                int best_peer = -1;
+                int best_height = header_height;
+
+                for (const auto& peer : peers) {
+                    if (!peer) continue;
+                    int peer_height = m_node_context.headers_manager->GetPeerStartHeight(peer->id);
+                    if (peer_height > best_height) {
+                        best_height = peer_height;
+                        best_peer = peer->id;
+                    }
+                }
+
+                // If a peer has more blocks, switch to them and request headers
+                if (best_peer != -1 && best_height > header_height) {
+                    std::cout << "[IBD] Peer " << best_peer << " has more blocks (height="
+                              << best_height << " > our headers=" << header_height
+                              << "), requesting headers" << std::endl;
+                    m_headers_sync_peer = best_peer;
+                    m_node_context.headers_manager->RequestHeaders(best_peer,
+                        m_node_context.headers_manager->GetBestHeaderHash());
+                    last_catchup_request = now_catchup;
+                }
+            }
+        }
+
         static int synced_count = 0;
         if (++synced_count <= 5 || synced_count % 60 == 0) {
             std::cerr << "[IBD-DEBUG] Tick() returning: synced (header=" << header_height
