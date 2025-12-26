@@ -4,6 +4,7 @@
 #ifndef DILITHION_NODE_IBD_COORDINATOR_H
 #define DILITHION_NODE_IBD_COORDINATOR_H
 
+#include <atomic>
 #include <chrono>
 #include <string>
 
@@ -124,9 +125,14 @@ private:
     mutable HangCause m_last_hang_cause{HangCause::NONE};
 
     // BUG #158 FIX: Fork detection state
-    int m_fork_stall_cycles{0};           // Cycles where blocks aren't connecting
-    bool m_fork_detected{false};          // Whether we've detected a fork
-    int m_fork_point{-1};                 // Height of common ancestor
+    // THREAD SAFETY FIX: Using atomic for thread-safe access
+    std::atomic<int> m_fork_stall_cycles{0};  // Cycles where blocks aren't connecting
+    std::atomic<bool> m_fork_detected{false}; // Whether we've detected a fork
+    std::atomic<int> m_fork_point{-1};        // Height of common ancestor
+
+    // Fork detection frequency control (reduce CPU overhead)
+    int m_last_checked_chain_height{-1};      // Last chain height when fork detection ran
+    static constexpr int FORK_DETECTION_THRESHOLD = 5;  // Cycles before triggering fork detection
 };
 
 #endif // DILITHION_NODE_IBD_COORDINATOR_H

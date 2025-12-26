@@ -782,6 +782,25 @@ std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {
     return result;
 }
 
+// RACE CONDITION FIX: Thread-safe chain snapshot for fork detection
+std::vector<std::pair<int, uint256>> CChainState::GetChainSnapshot(int maxBlocks, int minHeight) const {
+    std::lock_guard<std::mutex> lock(cs_main);
+
+    std::vector<std::pair<int, uint256>> result;
+    result.reserve(std::min(maxBlocks, pindexTip ? pindexTip->nHeight + 1 : 0));
+
+    CBlockIndex* pindex = pindexTip;
+    int count = 0;
+
+    while (pindex && pindex->nHeight >= minHeight && count < maxBlocks) {
+        result.push_back({pindex->nHeight, pindex->GetBlockHash()});
+        pindex = pindex->pprev;
+        count++;
+    }
+
+    return result;
+}
+
 // CRITICAL-1 FIX: Thread-safe accessor methods moved from inline to .cpp
 
 CBlockIndex* CChainState::GetTip() const {

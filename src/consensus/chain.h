@@ -225,6 +225,21 @@ public:
      */
     void RegisterBlockDisconnectCallback(BlockDisconnectCallback callback);
 
+    /**
+     * RACE CONDITION FIX: Get a thread-safe snapshot of the chain path
+     *
+     * Returns a vector of (height, hash) pairs for blocks from current tip
+     * down to minHeight, walking pprev pointers while holding cs_main.
+     *
+     * This allows callers to safely compare chainstate with other data
+     * without risking use-after-free from concurrent modifications.
+     *
+     * @param maxBlocks Maximum number of blocks to include in snapshot
+     * @param minHeight Stop when reaching this height (0 = genesis)
+     * @return Vector of (height, hash) pairs from tip downward
+     */
+    std::vector<std::pair<int, uint256>> GetChainSnapshot(int maxBlocks = 1000, int minHeight = 0) const;
+
 private:
     /**
      * Notify registered callbacks of tip update (Bug #40)
