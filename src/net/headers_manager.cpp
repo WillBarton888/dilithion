@@ -19,6 +19,9 @@
 #include <future>
 #include <iostream>
 
+// BUG #150 FIX: Access to validated chainstate for fork-safe locator building
+extern CChainState g_chainstate;
+
 CHeadersManager::CHeadersManager()
     : nBestHeight(-1)
 {
