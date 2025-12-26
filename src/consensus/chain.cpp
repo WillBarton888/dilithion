@@ -698,64 +698,76 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
 
     // ============================================================================
     // CS-005: Chain Reorganization Rollback - DisconnectTip Implementation
+    // RACE CONDITION FIX: Steps 1-5 must be done under cs_main lock
     // ============================================================================
 
-    // Step 1: Load block data from database (needed for UTXO undo)
     CBlock block;
     bool block_loaded = false;
-    if (pdb != nullptr) {
-        if (pdb->ReadBlock(pindex->GetBlockHash(), block)) {
-            block_loaded = true;
-        } else if (!force_skip_utxo) {
-            std::cerr << "[Chain] ERROR: Failed to load block from database for disconnect at height "
-                      << pindex->nHeight << std::endl;
-            return false;
-        } else {
-            std::cout << "[Chain] WARNING: Block data missing for disconnect at height "
-                      << pindex->nHeight << " (force_skip_utxo=true)" << std::endl;
-        }
-    } else if (!force_skip_utxo) {
-        std::cerr << "[Chain] ERROR: Cannot disconnect block without database access" << std::endl;
-        return false;
-    }
+    int disconnectHeight = 0;
+    uint256 disconnectHash;
 
-    // Step 2: Undo UTXO set changes (CS-004)
-    // BUG #159 FIX: Allow skipping UTXO undo during IBD fork recovery when undo data is missing
-    if (pUTXOSet != nullptr && block_loaded) {
-        if (!pUTXOSet->UndoBlock(block)) {
-            if (!force_skip_utxo) {
-                std::cerr << "[Chain] ERROR: Failed to undo block from UTXO set at height "
+    // CRITICAL: Hold cs_main during chain state modifications
+    {
+        std::lock_guard<std::mutex> lock(cs_main);
+
+        // Step 1: Load block data from database (needed for UTXO undo)
+        if (pdb != nullptr) {
+            if (pdb->ReadBlock(pindex->GetBlockHash(), block)) {
+                block_loaded = true;
+            } else if (!force_skip_utxo) {
+                std::cerr << "[Chain] ERROR: Failed to load block from database for disconnect at height "
                           << pindex->nHeight << std::endl;
                 return false;
             } else {
-                std::cout << "[Chain] WARNING: Failed to undo UTXO at height "
-                          << pindex->nHeight << " (force_skip_utxo=true, continuing anyway)" << std::endl;
+                std::cout << "[Chain] WARNING: Block data missing for disconnect at height "
+                          << pindex->nHeight << " (force_skip_utxo=true)" << std::endl;
             }
+        } else if (!force_skip_utxo) {
+            std::cerr << "[Chain] ERROR: Cannot disconnect block without database access" << std::endl;
+            return false;
         }
-    } else if (force_skip_utxo) {
-        std::cout << "[Chain] Skipping UTXO undo for height " << pindex->nHeight
-                  << " (force_skip_utxo=true)" << std::endl;
+
+        // Step 2: Undo UTXO set changes (CS-004)
+        // BUG #159 FIX: Allow skipping UTXO undo during IBD fork recovery when undo data is missing
+        if (pUTXOSet != nullptr && block_loaded) {
+            if (!pUTXOSet->UndoBlock(block)) {
+                if (!force_skip_utxo) {
+                    std::cerr << "[Chain] ERROR: Failed to undo block from UTXO set at height "
+                              << pindex->nHeight << std::endl;
+                    return false;
+                } else {
+                    std::cout << "[Chain] WARNING: Failed to undo UTXO at height "
+                              << pindex->nHeight << " (force_skip_utxo=true, continuing anyway)" << std::endl;
+                }
+            }
+        } else if (force_skip_utxo) {
+            std::cout << "[Chain] Skipping UTXO undo for height " << pindex->nHeight
+                      << " (force_skip_utxo=true)" << std::endl;
+        }
+
+        // Step 3: Clear pnext pointer on parent
+        if (pindex->pprev != nullptr) {
+            pindex->pprev->pnext = nullptr;
+        }
+
+        // Step 4: Clear own pnext pointer
+        pindex->pnext = nullptr;
+
+        // Step 5: Unmark block as on main chain
+        pindex->nStatus &= ~CBlockIndex::BLOCK_VALID_CHAIN;
+
+        // Cache values for callbacks (called outside lock)
+        disconnectHeight = pindex->nHeight;
+        disconnectHash = pindex->GetBlockHash();
     }
-
-    // Step 3: Clear pnext pointer on parent
-    if (pindex->pprev != nullptr) {
-        pindex->pprev->pnext = nullptr;
-    }
-
-    // Step 4: Clear own pnext pointer
-    pindex->pnext = nullptr;
-
-    // Step 5: Unmark block as on main chain
-    pindex->nStatus &= ~CBlockIndex::BLOCK_VALID_CHAIN;
+    // cs_main released here
 
     // BUG #56 FIX: Notify block disconnect callbacks (wallet update)
     // NOTE: We don't hold cs_main during callbacks to prevent deadlock
     // The wallet has its own lock (cs_wallet)
-    // IBD OPTIMIZATION: Pass cached hash to avoid RandomX recomputation
-    const uint256& disconnectHash = pindex->GetBlockHash();
     for (size_t i = 0; i < m_blockDisconnectCallbacks.size(); ++i) {
         try {
-            m_blockDisconnectCallbacks[i](block, pindex->nHeight, disconnectHash);
+            m_blockDisconnectCallbacks[i](block, disconnectHeight, disconnectHash);
         } catch (const std::exception& e) {
             std::cerr << "[Chain] ERROR: Block disconnect callback " << i << " threw exception: " << e.what() << std::endl;
         } catch (...) {
