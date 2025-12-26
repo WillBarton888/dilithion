@@ -2428,15 +2428,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             if (!found) {
                 // Bitcoin Core approach: empty locator means "send from genesis"
+                // FIX: Use computed genesis hash, not hardcoded chainparams string
+                // (The hardcoded string may not match the actual RandomX hash)
+                hashStart = Genesis::GetGenesisHash();
+                found = true;
+
                 if (msg.locator.empty()) {
-                    std::cout << "[IBD] Empty locator - sending from genesis" << std::endl;
-                    hashStart.SetHex(Dilithion::g_chainParams->genesisHash);
-                    found = true;
+                    std::cout << "[IBD] Empty locator - sending from genesis: "
+                              << hashStart.GetHex().substr(0,16) << "..." << std::endl;
                 } else {
-                    // BUG #59 FIX: Fall back to genesis for divergent chains
-                    std::cout << "[IBD] No common block in locator - falling back to genesis" << std::endl;
-                    hashStart.SetHex(Dilithion::g_chainParams->genesisHash);
-                    found = true;
+                    std::cout << "[IBD] No common block in locator - falling back to genesis: "
+                              << hashStart.GetHex().substr(0,16) << "..." << std::endl;
                 }
             }
 
