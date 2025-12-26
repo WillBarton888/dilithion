@@ -1293,6 +1293,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     pblockIndex->phashBlock = blockHash;
                     pblockIndex->pprev = g_chainstate.GetBlockIndex(pblockIndex->header.hashPrevBlock);
 
+                    // PNEXT FIX: Set pnext on parent to enable forward chain traversal
+                    // This is needed for GETHEADERS to serve headers from genesis
+                    if (pblockIndex->pprev != nullptr) {
+                        pblockIndex->pprev->pnext = pblockIndex.get();
+                    }
+
                     if (pblockIndex->pprev == nullptr && !(blockHash == genesisHash)) {
                         std::cerr << "ERROR: Cannot find parent block for " << blockHash.GetHex().substr(0, 16) << std::endl;
 
