@@ -2444,6 +2444,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::vector<CBlockHeader> headers;
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(hashStart);
 
+            // DEBUG: Check pnext chain
+            if (pindex) {
+                std::cout << "[IBD-DEBUG] Found start block at height " << pindex->nHeight
+                          << " pnext=" << (pindex->pnext ? "SET" : "NULL") << std::endl;
+            } else {
+                std::cout << "[IBD-DEBUG] Start block NOT FOUND: " << hashStart.GetHex().substr(0,16) << "..." << std::endl;
+            }
+
             if (pindex) {
                 pindex = pindex->pnext;  // Start from next block (may be NULL if at tip)
 
