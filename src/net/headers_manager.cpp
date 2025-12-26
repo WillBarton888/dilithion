@@ -458,21 +458,55 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
     std::vector<uint256> locator;
     locator.reserve(32);  // Pre-allocate for efficiency
 
-    // BUG #150 FIX (Part 2): Build locator from CHAINSTATE (validated blocks)
-    // Headers_manager may contain headers from forked chains that peers don't recognize.
-    // Using chainstate ensures the locator contains hashes the peer will match.
+    // BUG #150 FIX (Part 3): Build locator from MAX(chainstate, headers_manager)
+    //
+    // Problem: If we build locator ONLY from chainstate and headers_manager has
+    // more headers, we'll keep re-requesting the same headers we already have.
+    //
+    // Solution:
+    // 1. Start from MAX(chainstate height, headers_manager best header height)
+    // 2. For heights <= chainstate: use chainstate hashes (verified fork-safe)
+    // 3. For heights > chainstate: use headers_manager best chain hashes
+    //
+    // This ensures we don't re-request headers while maintaining fork safety.
+
     CBlockIndex* pTip = g_chainstate.GetTip();
-    if (pTip && pTip->nHeight > 0) {
-        int chainHeight = pTip->nHeight;
-        int height = chainHeight;
+    int chainstateHeight = (pTip && pTip->nHeight > 0) ? pTip->nHeight : 0;
+
+    // Get headers_manager's best header height
+    int headersHeight = 0;
+    if (!hashBestHeader.IsNull()) {
+        auto it = mapHeaders.find(hashBestHeader);
+        if (it != mapHeaders.end()) {
+            headersHeight = it->second.height;
+        }
+    }
+
+    // Start from the HIGHER of the two to avoid re-requesting headers
+    int startHeight = std::max(chainstateHeight, headersHeight);
+
+    if (startHeight > 0) {
+        int height = startHeight;
         int step = 1;
         int nStep = 0;
 
         while (height >= 0) {
-            // Use validated chain via GetAncestor
-            CBlockIndex* pBlock = pTip->GetAncestor(height);
-            if (pBlock) {
-                locator.push_back(pBlock->GetBlockHash());
+            uint256 hashAtHeight;
+
+            // Use chainstate for heights it covers (verified fork-safe)
+            if (pTip && height <= chainstateHeight) {
+                CBlockIndex* pBlock = pTip->GetAncestor(height);
+                if (pBlock) {
+                    hashAtHeight = pBlock->GetBlockHash();
+                }
+            } else {
+                // Above chainstate: use headers_manager's best chain
+                // (may be wrong fork, but peer will find highest match in chainstate range)
+                hashAtHeight = GetBestChainHashAtHeight(height);
+            }
+
+            if (!hashAtHeight.IsNull()) {
+                locator.push_back(hashAtHeight);
             }
 
             // Stop at genesis
@@ -493,72 +527,13 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
             }
         }
 
-        // Return chainstate-based locator
         if (!locator.empty()) {
             return locator;
         }
     }
 
-    // Fallback: use headers_manager if chainstate is empty (fresh node)
-    // Find the starting header in our headers map
-    auto it = mapHeaders.find(hashTip);
-    if (it == mapHeaders.end()) {
-        // If we don't have this hash, start from our best header
-        if (!hashBestHeader.IsNull()) {
-            it = mapHeaders.find(hashBestHeader);
-        }
-    }
-
-    if (it == mapHeaders.end()) {
-        // No headers yet - return empty locator (peer will send from genesis)
-        return locator;
-    }
-
-    // Save starting height for logging
-    int startHeight = it->second.height;
-
-    // Bitcoin Core exponential backoff algorithm
-    // Adds headers at: current, -1, -2, -4, -8, -16, -32, -64, -128, -256, -512, -1024...
-    int height = startHeight;
-    int step = 1;
-    int nStep = 0;
-
-    while (height >= 0) {
-        // Bug #150 Fix: Use fork-safe lookup that follows best-work chain
-        // Previously used *heightIt->second.begin() which selected by hash order,
-        // NOT by chain work. This caused locators to reference wrong fork.
-        uint256 hashAtHeight = GetBestChainHashAtHeight(height);
-        if (!hashAtHeight.IsNull()) {
-            locator.push_back(hashAtHeight);
-        }
-
-        // Stop at genesis
-        if (height == 0)
-            break;
-
-        // Exponential backoff after 10 entries
-        if (nStep >= 10) {
-            step *= 2;
-        }
-
-        height -= step;
-        nStep++;
-
-        // Limit total locator size (safety check)
-        if (locator.size() >= 32) {
-            break;
-        }
-    }
-
-    // Ensure genesis is always included
-    if (!locator.empty() && locator.back() != uint256()) {
-        uint256 genesisHash = GetBestChainHashAtHeight(0);
-        if (!genesisHash.IsNull() && locator.back() != genesisHash) {
-            locator.push_back(genesisHash);
-        }
-    }
-
-
+    // Fallback: fresh node with no chainstate and no headers
+    // Return empty locator - peer will send headers from genesis
     return locator;
 }
 
