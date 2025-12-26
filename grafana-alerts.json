@@ -1,0 +1,279 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "Dilithion Critical Alerts",
+      "folder": "Dilithion",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "dilithion-node-down",
+          "title": "Seed Node Down",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "model": {
+                "expr": "up{job=~\"dilithion.*\"}",
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "model": {
+                "conditions": [
+                  { "evaluator": { "params": [1], "type": "lt" }, "operator": { "type": "and" }, "query": { "params": ["A"] }, "reducer": { "params": [], "type": "last" } }
+                ],
+                "refId": "B",
+                "type": "classic_conditions"
+              }
+            }
+          ],
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "for": "2m",
+          "annotations": {
+            "summary": "Dilithion seed node is down",
+            "description": "Node {{ $labels.node }} ({{ $labels.location }}) has been unreachable for more than 2 minutes"
+          },
+          "labels": {
+            "severity": "critical"
+          }
+        },
+        {
+          "uid": "dilithion-fork-detected",
+          "title": "Chain Fork Detected",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "model": {
+                "expr": "max(dilithion_fork_detected)",
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "model": {
+                "conditions": [
+                  { "evaluator": { "params": [0], "type": "gt" }, "operator": { "type": "and" }, "query": { "params": ["A"] }, "reducer": { "params": [], "type": "last" } }
+                ],
+                "refId": "B",
+                "type": "classic_conditions"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "1m",
+          "annotations": {
+            "summary": "Chain fork detected - possible eclipse attack",
+            "description": "A chain fork has been detected across the network. This could indicate an eclipse attack or network partition."
+          },
+          "labels": {
+            "severity": "critical"
+          }
+        },
+        {
+          "uid": "dilithion-invalid-blocks",
+          "title": "Invalid Blocks Received",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "model": {
+                "expr": "increase(dilithion_invalid_blocks_total[5m])",
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "model": {
+                "conditions": [
+                  { "evaluator": { "params": [5], "type": "gt" }, "operator": { "type": "and" }, "query": { "params": ["A"] }, "reducer": { "params": [], "type": "sum" } }
+                ],
+                "refId": "B",
+                "type": "classic_conditions"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "1m",
+          "annotations": {
+            "summary": "High rate of invalid blocks",
+            "description": "More than 5 invalid blocks received in the last 5 minutes. This could indicate an active attack."
+          },
+          "labels": {
+            "severity": "warning"
+          }
+        },
+        {
+          "uid": "dilithion-peer-bans-high",
+          "title": "High Peer Ban Rate",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "model": {
+                "expr": "increase(dilithion_peer_bans_total[5m])",
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "model": {
+                "conditions": [
+                  { "evaluator": { "params": [10], "type": "gt" }, "operator": { "type": "and" }, "query": { "params": ["A"] }, "reducer": { "params": [], "type": "sum" } }
+                ],
+                "refId": "B",
+                "type": "classic_conditions"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "1m",
+          "annotations": {
+            "summary": "High peer ban rate detected",
+            "description": "More than 10 peers banned in the last 5 minutes. This indicates potential Sybil or DoS attack."
+          },
+          "labels": {
+            "severity": "warning"
+          }
+        },
+        {
+          "uid": "dilithion-node-height-lag",
+          "title": "Node Height Lag",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "model": {
+                "expr": "max(dilithion_block_height) - dilithion_block_height",
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "model": {
+                "conditions": [
+                  { "evaluator": { "params": [10], "type": "gt" }, "operator": { "type": "and" }, "query": { "params": ["A"] }, "reducer": { "params": [], "type": "max" } }
+                ],
+                "refId": "B",
+                "type": "classic_conditions"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "5m",
+          "annotations": {
+            "summary": "Node is lagging behind network",
+            "description": "Node {{ $labels.node }} is more than 10 blocks behind the network tip. Check for sync issues."
+          },
+          "labels": {
+            "severity": "warning"
+          }
+        },
+        {
+          "uid": "dilithion-reorg-detected",
+          "title": "Chain Reorganization",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 600, "to": 0 },
+              "model": {
+                "expr": "increase(dilithion_reorgs_total[10m])",
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "model": {
+                "conditions": [
+                  { "evaluator": { "params": [0], "type": "gt" }, "operator": { "type": "and" }, "query": { "params": ["A"] }, "reducer": { "params": [], "type": "sum" } }
+                ],
+                "refId": "B",
+                "type": "classic_conditions"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "Chain reorganization occurred",
+            "description": "A chain reorganization was detected. This is informational but may indicate competing miners or network issues."
+          },
+          "labels": {
+            "severity": "info"
+          }
+        },
+        {
+          "uid": "dilithion-no-peers",
+          "title": "No Connected Peers",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "model": {
+                "expr": "dilithion_peer_count",
+                "refId": "A"
+              }
+            },
+            {
+              "refId": "B",
+              "queryType": "",
+              "relativeTimeRange": { "from": 0, "to": 0 },
+              "model": {
+                "conditions": [
+                  { "evaluator": { "params": [1], "type": "lt" }, "operator": { "type": "and" }, "query": { "params": ["A"] }, "reducer": { "params": [], "type": "min" } }
+                ],
+                "refId": "B",
+                "type": "classic_conditions"
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "5m",
+          "annotations": {
+            "summary": "Node has no connected peers",
+            "description": "Node {{ $labels.node }} has been without peers for over 5 minutes. Check network connectivity."
+          },
+          "labels": {
+            "severity": "critical"
+          }
+        }
+      ]
+    }
+  ]
+}

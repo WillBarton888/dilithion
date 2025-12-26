@@ -455,6 +455,48 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
     std::vector<uint256> locator;
     locator.reserve(32);  // Pre-allocate for efficiency
 
+    // BUG #150 FIX (Part 2): Build locator from CHAINSTATE (validated blocks)
+    // Headers_manager may contain headers from forked chains that peers don't recognize.
+    // Using chainstate ensures the locator contains hashes the peer will match.
+    CBlockIndex* pTip = g_chainstate.GetTip();
+    if (pTip && pTip->nHeight > 0) {
+        int chainHeight = pTip->nHeight;
+        int height = chainHeight;
+        int step = 1;
+        int nStep = 0;
+
+        while (height >= 0) {
+            // Use validated chain via GetAncestor
+            CBlockIndex* pBlock = pTip->GetAncestor(height);
+            if (pBlock) {
+                locator.push_back(pBlock->GetBlockHash());
+            }
+
+            // Stop at genesis
+            if (height == 0)
+                break;
+
+            // Exponential backoff after 10 entries
+            if (nStep >= 10) {
+                step *= 2;
+            }
+
+            height -= step;
+            nStep++;
+
+            // Limit total locator size (safety check)
+            if (locator.size() >= 32) {
+                break;
+            }
+        }
+
+        // Return chainstate-based locator
+        if (!locator.empty()) {
+            return locator;
+        }
+    }
+
+    // Fallback: use headers_manager if chainstate is empty (fresh node)
     // Find the starting header in our headers map
     auto it = mapHeaders.find(hashTip);
     if (it == mapHeaders.end()) {
