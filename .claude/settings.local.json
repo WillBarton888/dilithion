@@ -704,7 +704,12 @@
       "Bash(ssh root@209.97.177.197 \"grep ''chain='' /root/node.log | tail -3 && grep ''headersHeight='' /root/node.log | tail -3\")",
       "Bash(ssh root@209.97.177.197 \"grep ''chain='' /root/node.log | tail -1 && pgrep dilithion || echo ''CRASHED''\")",
       "Bash(ssh root@209.97.177.197 \"grep ''height.*4000'' /root/node.log | head -5\")",
-      "Bash(ssh root@134.122.4.164 \"grep ''height.*4000'' /root/node.log | head -5\")"
+      "Bash(ssh root@134.122.4.164 \"grep ''height.*4000'' /root/node.log | head -5\")",
+      "Bash(ssh root@209.97.177.197 \"pkill -9 dilithion-node; rm -rf /root/.dilithion-testnet/headers.db /root/.dilithion-testnet/blocks /root/.dilithion-testnet/chainstate; rm -f /root/.dilithion-testnet/*.LOCK; cd /root/dilithion && git pull && make dilithion-node -j2 2>&1 | tail -5\")",
+      "Bash(ssh root@209.97.177.197 \"pgrep dilithion && grep ''chain='' /root/node.log | tail -3\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''\\(PushMessage|GETHEADERS|SendHeaders|MSG_HEADERS|locator\\)'' /root/node.log | tail -20\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''\\(UpdateBestHeader|nBestHeight|ProcessHeader\\)'' /root/node.log | tail -30\")",
+      "Bash(ssh root@209.97.177.197 \"grep -E ''\\(hashBestHeader|mapHeaders.find|GetLocator|locator|DEBUG.*height\\)'' /root/node.log | tail -30\")"
     ],
     "deny": [],
     "ask": []

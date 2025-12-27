@@ -494,6 +494,11 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
     // Start from the HIGHER of the two to avoid re-requesting headers
     int startHeight = std::max(chainstateHeight, headersHeight);
 
+    // DEBUG: Locator state
+    std::cout << "[GetLocator] chainstateHeight=" << chainstateHeight
+              << " headersHeight=" << headersHeight << " nBestHeight=" << nBestHeight
+              << " startHeight=" << startHeight << " pTip=" << (pTip ? "valid" : "null") << std::endl;
+
     if (startHeight > 0) {
         int height = startHeight;
         int step = 1;
