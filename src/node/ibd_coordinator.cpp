@@ -337,27 +337,26 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             // Issue #6 FIX: Throttle fork detection to avoid CPU overhead
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_fork_check).count();
-            if (elapsed < FORK_CHECK_MIN_INTERVAL_SECS) {
-                // Too soon since last check, skip
-                return;
-            }
-            m_last_fork_check = now;
+            if (elapsed >= FORK_CHECK_MIN_INTERVAL_SECS) {
+                // Enough time has passed since last check
+                m_last_fork_check = now;
 
-            std::cout << "[FORK-DETECT] Chain stalled at height " << chain_height
-                      << " for " << stall_cycles << " cycles - checking for fork..." << std::endl;
+                std::cout << "[FORK-DETECT] Chain stalled at height " << chain_height
+                          << " for " << stall_cycles << " cycles - checking for fork..." << std::endl;
 
-            int fork_point = FindForkPoint(chain_height);
-            if (fork_point > 0 && fork_point < chain_height) {
-                std::cout << "[FORK-DETECT] Fork detected! Local chain diverged at height " << fork_point
-                          << " (chain=" << chain_height << ", fork_depth=" << (chain_height - fork_point) << ")" << std::endl;
-                HandleForkScenario(fork_point, chain_height);
-                m_fork_stall_cycles.store(0);
-                m_last_checked_chain_height = -1;  // Reset to allow fresh tracking
-                // Continue with normal IBD - window has been reset to fork point
-            } else if (fork_point == chain_height) {
-                // Not a fork - just slow downloads, reset counter
-                std::cout << "[FORK-DETECT] No fork detected (tip matches header chain)" << std::endl;
-                m_fork_stall_cycles.store(0);
+                int fork_point = FindForkPoint(chain_height);
+                if (fork_point > 0 && fork_point < chain_height) {
+                    std::cout << "[FORK-DETECT] Fork detected! Local chain diverged at height " << fork_point
+                              << " (chain=" << chain_height << ", fork_depth=" << (chain_height - fork_point) << ")" << std::endl;
+                    HandleForkScenario(fork_point, chain_height);
+                    m_fork_stall_cycles.store(0);
+                    m_last_checked_chain_height = -1;  // Reset to allow fresh tracking
+                    // Continue with normal IBD - window has been reset to fork point
+                } else if (fork_point == chain_height) {
+                    // Not a fork - just slow downloads, reset counter
+                    std::cout << "[FORK-DETECT] No fork detected (tip matches header chain)" << std::endl;
+                    m_fork_stall_cycles.store(0);
+                }
             }
         }
     } else {
