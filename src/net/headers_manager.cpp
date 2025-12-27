@@ -1334,14 +1334,39 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
         if (headers[0].hashPrevBlock == genesisHash || headers[0].hashPrevBlock.IsNull()) {
             startHeight = 1;
+            std::cout << "[HeadersManager] Parent is genesis, startHeight=1" << std::endl;
         } else {
+            // DEBUG: Log the parent lookup attempt
+            std::cout << "[HeadersManager] Looking up parent: " << headers[0].hashPrevBlock.GetHex().substr(0, 16)
+                      << "... mapHeaders.size=" << mapHeaders.size() << std::endl;
+
             auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
             if (parentIt != mapHeaders.end()) {
                 startHeight = parentIt->second.height + 1;
                 prevHash = headers[0].hashPrevBlock;
+                std::cout << "[HeadersManager] Parent found at height " << parentIt->second.height
+                          << ", startHeight=" << startHeight << std::endl;
             } else {
+                // DEBUG: Check what heights we have and their hashes
                 std::cerr << "[HeadersManager] ORPHAN: Parent " << headers[0].hashPrevBlock.GetHex().substr(0, 16)
                           << " not found" << std::endl;
+
+                // Log some of the existing hashes near expected height for debugging
+                int expectedParentHeight = nBestHeight;  // Best guess
+                std::cerr << "[HeadersManager] DEBUG: nBestHeight=" << nBestHeight
+                          << " mapHeaders.size=" << mapHeaders.size() << std::endl;
+
+                auto heightIt = mapHeightIndex.find(expectedParentHeight);
+                if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+                    uint256 storedHash = *heightIt->second.begin();
+                    std::cerr << "[HeadersManager] DEBUG: At height " << expectedParentHeight
+                              << " stored hash=" << storedHash.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cerr << "[HeadersManager] DEBUG: hashPrevBlock=" << headers[0].hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cerr << "[HeadersManager] DEBUG: Match=" << (storedHash == headers[0].hashPrevBlock ? "YES" : "NO") << std::endl;
+                } else {
+                    std::cerr << "[HeadersManager] DEBUG: No headers at height " << expectedParentHeight << std::endl;
+                }
+
                 return false;
             }
         }
@@ -1412,12 +1437,24 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
                     if (parentIt != mapHeaders.end()) {
                         pprev = &parentIt->second;
+                        std::cout << "[HeadersManager] Batch 0: Parent found at height " << pprev->height << std::endl;
+                    } else {
+                        // BUG: This should have been caught by the initial lookup!
+                        std::cerr << "[HeadersManager] BUG: Batch 0 parent lookup failed but initial lookup succeeded!" << std::endl;
+                        std::cerr << "[HeadersManager] BUG: hashPrevBlock=" << headers[0].hashPrevBlock.GetHex().substr(0, 16)
+                                  << " mapHeaders.size=" << mapHeaders.size() << std::endl;
+                        // Don't return false here - we already validated in initial lookup
+                        // This might indicate a race condition
                     }
                 }
             } else if (!prevHash.IsNull()) {
                 auto parentIt = mapHeaders.find(prevHash);
                 if (parentIt != mapHeaders.end()) {
                     pprev = &parentIt->second;
+                } else {
+                    std::cerr << "[HeadersManager] BUG: Subsequent batch parent lookup failed!" << std::endl;
+                    std::cerr << "[HeadersManager] BUG: prevHash=" << prevHash.GetHex().substr(0, 16)
+                              << " mapHeaders.size=" << mapHeaders.size() << std::endl;
                 }
             }
 
@@ -1477,6 +1514,13 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 AddToHeightIndex(storageHash, height);
                 UpdateChainTips(storageHash);
                 UpdateBestHeader(storageHash);
+
+                // DEBUG: Log storage of headers near height 2000 (checkpoint height)
+                if (height >= 1998 && height <= 2002) {
+                    std::cout << "[HeadersManager] STORED height=" << height
+                              << " hash=" << storageHash.GetHex().substr(0, 16) << "..."
+                              << " pprev=" << (pprev ? "SET" : "NULL") << std::endl;
+                }
 
                 // Queue for background PoW validation (only for blocks above checkpoint)
                 if (expectedHeight > checkpointHeight) {
