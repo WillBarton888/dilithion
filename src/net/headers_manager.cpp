@@ -396,7 +396,9 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 
     // Build locator (holds cs_headers briefly, DOES NOT access blockchain)
+    std::cout << "[IBD] RequestHeaders: Building locator..." << std::flush;
     std::vector<uint256> locator = GetLocator(hashStart);
+    std::cout << " done (size=" << locator.size() << ")" << std::endl;
     // cs_headers is now released
 
     // Send message (no locks held - safe for network I/O)
@@ -1130,8 +1132,19 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
     uint256 current = hashBestHeader;
     int currentHeight = nBestHeight;
 
+    // DEBUG: Detect infinite loops
+    int loopCount = 0;
+    const int MAX_LOOP = nBestHeight + 10;  // Should never exceed this
+
     // Build cache as we walk (we'll likely need nearby heights too)
     while (!current.IsNull() && currentHeight >= 0) {
+        loopCount++;
+        if (loopCount > MAX_LOOP) {
+            std::cerr << "[GetBestChainHashAtHeight] INFINITE LOOP DETECTED at height " << currentHeight
+                      << " after " << loopCount << " iterations!" << std::endl;
+            break;
+        }
+
         auto it = mapHeaders.find(current);
         if (it == mapHeaders.end()) {
             // Orphaned chain - shouldn't happen but handle gracefully
