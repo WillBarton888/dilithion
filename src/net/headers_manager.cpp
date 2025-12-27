@@ -382,13 +382,20 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     // Header requests are coordinated by IBD coordinator's prefetch logic
     // which triggers at chain milestones (1000, 3000, 5000...).
 
+    // THROTTLE: Don't send more header requests if we have headers pending processing
+    // This prevents flooding with duplicate requests during async header processing.
+    {
+        std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
+        if (!m_raw_header_queue.empty()) {
+            std::cout << "[IBD] RequestHeaders: SKIPPED - " << m_raw_header_queue.size()
+                      << " batch(es) pending processing" << std::endl;
+            return;
+        }
+    }
+
     // Build locator (holds cs_headers briefly, DOES NOT access blockchain)
     std::vector<uint256> locator = GetLocator(hashStart);
     // cs_headers is now released
-
-    if (locator.empty()) {
-    } else {
-    }
 
     // Send message (no locks held - safe for network I/O)
     // BUG #143 FIX: Use g_node_context.connman instead of deprecated g_connection_manager
@@ -1334,6 +1341,19 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
         if (headers[0].hashPrevBlock == genesisHash || headers[0].hashPrevBlock.IsNull()) {
             startHeight = 1;
+
+            // OPTIMIZATION: Early duplicate detection
+            // If we're starting from genesis but already have headers, this is likely a duplicate batch.
+            // Check if we already have headers at height 1 - if so, skip expensive hash computation.
+            if (nBestHeight > 0) {
+                auto heightIt = mapHeightIndex.find(1);
+                if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+                    std::cout << "[HeadersManager] DUPLICATE BATCH DETECTED: Already have headers from genesis"
+                              << " (nBestHeight=" << nBestHeight << "), skipping" << std::endl;
+                    return true;  // Already have these headers, skip entirely
+                }
+            }
+
             std::cout << "[HeadersManager] Parent is genesis, startHeight=1" << std::endl;
         } else {
             // DEBUG: Log the parent lookup attempt
