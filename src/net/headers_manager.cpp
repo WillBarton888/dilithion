@@ -485,6 +485,10 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
     // Start from the HIGHER of the two to avoid re-requesting headers
     int startHeight = std::max(chainstateHeight, headersHeight);
 
+    // DEBUG: Log locator building
+    std::cout << "[LOCATOR-DEBUG] Building locator: chainstateHeight=" << chainstateHeight
+              << " headersHeight=" << headersHeight << " startHeight=" << startHeight << std::endl;
+
     if (startHeight > 0) {
         int height = startHeight;
         int step = 1;
@@ -498,6 +502,8 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
                 CBlockIndex* pBlock = pTip->GetAncestor(height);
                 if (pBlock) {
                     hashAtHeight = pBlock->GetBlockHash();
+                } else {
+                    std::cout << "[LOCATOR-DEBUG] GetAncestor(" << height << ") returned NULL!" << std::endl;
                 }
             } else {
                 // Above chainstate: use headers_manager's best chain
@@ -507,6 +513,12 @@ std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
 
             if (!hashAtHeight.IsNull()) {
                 locator.push_back(hashAtHeight);
+                // Log first 5 entries for debugging
+                if (nStep < 5) {
+                    std::cout << "[LOCATOR-DEBUG] Added height=" << height << " hash=" << hashAtHeight.GetHex().substr(0, 16) << "..." << std::endl;
+                }
+            } else {
+                std::cout << "[LOCATOR-DEBUG] NULL hash at height=" << height << std::endl;
             }
 
             // Stop at genesis
