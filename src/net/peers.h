@@ -105,6 +105,7 @@ public:
 
     std::chrono::milliseconds avgResponseTime{1000};
     int nBlocksDownloaded = 0;
+    int nHeadersReceived = 0;  // Track headers received for stats
     std::chrono::steady_clock::time_point lastSuccessTime;
     std::chrono::steady_clock::time_point lastStallTime;
 
@@ -364,6 +365,7 @@ public:
     std::vector<uint256> GetAndClearPeerBlocks(int peer_id);
     std::vector<int> CheckForStallingPeers();
     void UpdatePeerStats(int peer_id, bool success, std::chrono::milliseconds responseTime);
+    void MarkHeadersAsReceived(int peer_id, size_t header_count);  // Reset stall count when headers received
 
     /**
      * @brief BUG #166 FIX: Completely clear a peer's in-flight state
