@@ -131,10 +131,12 @@ private:
     std::atomic<int> m_fork_point{-1};        // Height of common ancestor
 
     // Fork detection frequency control (reduce CPU overhead)
+    // PERFORMANCE FIX: Increased thresholds to prevent triggering during normal validation lag
+    // Normal IBD has 2-10 second validation lag - don't misinterpret as fork
     int m_last_checked_chain_height{-1};      // Last chain height when fork detection ran
-    static constexpr int FORK_DETECTION_THRESHOLD = 5;  // Cycles before triggering fork detection
+    static constexpr int FORK_DETECTION_THRESHOLD = 60;  // Cycles before triggering fork detection (was 5)
     std::chrono::steady_clock::time_point m_last_fork_check;  // Issue #6: Throttle fork checks
-    static constexpr int FORK_CHECK_MIN_INTERVAL_SECS = 5;    // Min seconds between fork checks
+    static constexpr int FORK_CHECK_MIN_INTERVAL_SECS = 30;   // Min seconds between fork checks (was 5)
 
     // Issue #11 FIX: Request tracking as member variables (not static)
     int m_last_request_trigger{-1};
