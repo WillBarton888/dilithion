@@ -1072,6 +1072,12 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     // This enables reorganization to chains with more work but fewer blocks
     bool hasMoreWork = ChainWorkGreaterThan(it->second.chainWork, bestIt->second.chainWork);
 
+    // FALLBACK: If both chainWork values are zero (IBD below checkpoint), use height comparison
+    // This ensures proper header chain progression during initial sync
+    if (!hasMoreWork && it->second.chainWork.IsNull() && bestIt->second.chainWork.IsNull()) {
+        hasMoreWork = (newHeight > nBestHeight);
+    }
+
     // IBD DEBUG: Log every 100th comparison or when update happens
     static int compare_count = 0;
     if (hasMoreWork || (compare_count++ % 100 == 0)) {
