@@ -1425,6 +1425,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     uint256 existingHash = *heightIt->second.begin();
                     auto existingIt = mapHeaders.find(existingHash);
                     if (existingIt != mapHeaders.end()) {
+                        // BUG FIX: Update best header for existing checkpoint headers too
+                        UpdateBestHeader(existingHash);
                         pprev = &existingIt->second;
                         prevHash = existingHash;
                         continue;
@@ -1436,6 +1438,10 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
                 // Skip TRUE duplicates (same hash already exists)
                 if (mapHeaders.find(storageHash) != mapHeaders.end()) {
+                    // BUG FIX: Still update best header for existing headers!
+                    // After restart, nBestHeight may be stale while headers exist.
+                    // This ensures best header tracking catches up to stored headers.
+                    UpdateBestHeader(storageHash);
                     pprev = &mapHeaders[storageHash];
                     prevHash = storageHash;
                     continue;
