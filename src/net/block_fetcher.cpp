@@ -73,6 +73,12 @@ void CBlockFetcher::OnPeerConnected(NodeId peer)
 std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks, int chain_height, int header_height)
 {
     std::vector<int> result;
+
+    // Issue #18 FIX: Validate height range - nothing to request if already synced
+    if (chain_height >= header_height || max_blocks <= 0) {
+        return result;
+    }
+
     result.reserve(max_blocks);
 
     // SSOT: Use CBlockTracker for all tracking
