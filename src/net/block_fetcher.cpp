@@ -168,3 +168,14 @@ bool CBlockFetcher::IsHeightInFlight(int height) const
     }
     return false;
 }
+
+int CBlockFetcher::ClearAboveHeight(int fork_point)
+{
+    std::lock_guard<std::mutex> lock(cs_fetcher);
+
+    // SSOT: Delegate to CBlockTracker
+    if (g_node_context.block_tracker) {
+        return g_node_context.block_tracker->ClearAboveHeight(fork_point);
+    }
+    return 0;
+}

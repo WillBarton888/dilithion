@@ -511,9 +511,13 @@ bool CIbdCoordinator::FetchBlocks() {
             CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
             bool sent = m_node_context.connman->PushMessage(peer_id, msg);
             if (!sent) {
-                // Requeue all blocks on send failure
-                for (int h : blocks_to_request) {
-                    m_node_context.block_fetcher->RequeueBlock(h);
+                // FIX #25: Only requeue blocks that were actually added to tracker
+                // The getdata vector contains exactly the blocks that were tracked
+                for (const auto& inv : getdata) {
+                    int height = m_node_context.headers_manager->GetHeightForHash(inv.hash);
+                    if (height > 0) {
+                        m_node_context.block_fetcher->RequeueBlock(height);
+                    }
                 }
                 LogPrintIBD(WARN, "GETDATA send failed for peer %d", peer_id);
                 continue;
@@ -678,10 +682,17 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
         }
 
         // Update chain tip to fork point
+        // VALIDATION FIX: Ensure disconnect completed successfully before setting tip
         if (pindex && pindex->nHeight == fork_point) {
             m_chainstate.SetTip(pindex);
             std::cout << "[FORK-RECOVERY] Chain tip reset to height " << fork_point
                       << " hash=" << pindex->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+        } else {
+            // Disconnect loop did not complete as expected - log error
+            std::cerr << "[FORK-RECOVERY] ERROR: Disconnect incomplete! Expected tip at height "
+                      << fork_point << " but pindex is "
+                      << (pindex ? std::to_string(pindex->nHeight) : "nullptr") << std::endl;
+            std::cerr << "[FORK-RECOVERY] Chainstate may be inconsistent - consider reindex" << std::endl;
         }
 
         std::cout << "[FORK-RECOVERY] Disconnected " << disconnected << " forked block(s)" << std::endl;
@@ -723,10 +734,11 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
                                 }
                             } else {
                                 // Block not in index but in DB - could be orphan from failed sync
-                                // Check if its prevBlockHash points to a disconnected/unknown block
-                                // LOGIC FIX: Use > fork_point (not >=) - the fork point itself is valid
+                                // Check if its prevBlockHash points to a disconnected block
+                                // LOGIC FIX #26: Only delete if parent is FOUND and above fork_point
+                                // If parent is nullptr, we don't know if block is valid - keep it
                                 CBlockIndex* pPrevIndex = m_chainstate.GetBlockIndex(block.hashPrevBlock);
-                                if (!pPrevIndex || pPrevIndex->nHeight > fork_point) {
+                                if (pPrevIndex && pPrevIndex->nHeight > fork_point) {
                                     std::cout << "[FORK-RECOVERY] Deleting unindexed orphan block hash="
                                               << hash.GetHex().substr(0, 16) << "..." << std::endl;
 
@@ -759,11 +771,14 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
         }
     }
 
-    // PURE PER-BLOCK: Just clear in-flight tracking above fork point
-    // Next FetchBlocks() call will automatically start downloading from fork_point + 1
-    // (GetNextBlocksToRequest iterates from chain_height+1 which is now fork_point+1)
-    std::cout << "[FORK-RECOVERY] Cleared state, downloads will resume from height "
-              << (fork_point + 1) << std::endl;
+    // Clear in-flight tracking above fork point
+    // This allows blocks to be re-requested from the correct chain
+    int cleared = 0;
+    if (m_node_context.block_fetcher) {
+        cleared = m_node_context.block_fetcher->ClearAboveHeight(fork_point);
+    }
+    std::cout << "[FORK-RECOVERY] Cleared " << cleared << " in-flight blocks above fork point, "
+              << "downloads will resume from height " << (fork_point + 1) << std::endl;
 
     // Reset fork detection state
     m_fork_detected = true;

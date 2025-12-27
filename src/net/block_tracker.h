@@ -327,6 +327,48 @@ public:
         m_peer_heights.clear();
     }
 
+    /**
+     * @brief Clear all blocks above a given height (for fork recovery)
+     * @param fork_point All blocks with height > fork_point will be removed
+     * @return Number of blocks removed
+     */
+    int ClearAboveHeight(int fork_point) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        std::vector<int> heights_to_remove;
+
+        // Find all heights above fork_point
+        for (const auto& [height, info] : m_heights) {
+            if (height > fork_point) {
+                heights_to_remove.push_back(height);
+            }
+        }
+
+        // Remove each one
+        for (int height : heights_to_remove) {
+            auto height_it = m_heights.find(height);
+            if (height_it != m_heights.end()) {
+                NodeId peer = height_it->second.peer;
+                uint256 hash = height_it->second.hash;
+
+                // Clean up peer tracking
+                auto peer_it = m_peer_heights.find(peer);
+                if (peer_it != m_peer_heights.end()) {
+                    peer_it->second.erase(height);
+                    if (peer_it->second.empty()) {
+                        m_peer_heights.erase(peer_it);
+                    }
+                }
+
+                // Clean up maps
+                m_hash_to_height.erase(hash);
+                m_heights.erase(height_it);
+            }
+        }
+
+        return heights_to_remove.size();
+    }
+
 private:
     mutable std::mutex m_mutex;
 

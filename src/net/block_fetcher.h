@@ -104,6 +104,13 @@ public:
      */
     bool IsHeightInFlight(int height) const;
 
+    /**
+     * @brief Clear all blocks above fork_point from tracking (for fork recovery)
+     * Delegates to CBlockTracker::ClearAboveHeight()
+     * @return Number of blocks removed
+     */
+    int ClearAboveHeight(int fork_point);
+
 private:
     CPeerManager* m_peer_manager;
 

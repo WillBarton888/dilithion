@@ -1690,10 +1690,10 @@ void CHeadersManager::ValidationWorkerThread()
 
             pending = m_validation_queue.front();
             m_validation_queue.pop();
-        }
 
-        // Track active workers for pause synchronization
-        m_active_workers++;
+            // RACE FIX: Increment INSIDE lock scope so pause can't miss us
+            m_active_workers++;
+        }
 
         // Validate PoW (expensive - runs outside lock, unless checkpointed)
         bool valid = FullValidateHeader(pending.header, pending.height);
@@ -1783,10 +1783,10 @@ void CHeadersManager::HeaderProcessorThread()
 
             pending = std::move(m_raw_header_queue.front());
             m_raw_header_queue.pop();
-        }
 
-        // Track active workers for pause synchronization
-        m_active_workers++;
+            // RACE FIX: Increment INSIDE lock scope so pause can't miss us
+            m_active_workers++;
+        }
 
         // Process headers - hash computation happens HERE, not in P2P thread
         // This calls QueueHeadersForValidation which does hash computation + stores headers
