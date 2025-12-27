@@ -382,13 +382,15 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     // Header requests are coordinated by IBD coordinator's prefetch logic
     // which triggers at chain milestones (1000, 3000, 5000...).
 
-    // THROTTLE: Don't send more header requests if we have headers pending processing
-    // This prevents flooding with duplicate requests during async header processing.
+    // THROTTLE: Don't send header requests if we have no headers yet AND batches pending
+    // This prevents flooding with duplicate requests during initial async header processing.
+    // But once we have headers (nBestHeight > 0), allow requests for NEW headers.
     {
         std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
-        if (!m_raw_header_queue.empty()) {
+        std::lock_guard<std::mutex> hlock(cs_headers);
+        if (!m_raw_header_queue.empty() && nBestHeight <= 0) {
             std::cout << "[IBD] RequestHeaders: SKIPPED - " << m_raw_header_queue.size()
-                      << " batch(es) pending processing" << std::endl;
+                      << " batch(es) pending, no headers yet" << std::endl;
             return;
         }
     }
