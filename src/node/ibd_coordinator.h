@@ -133,6 +133,16 @@ private:
     // Fork detection frequency control (reduce CPU overhead)
     int m_last_checked_chain_height{-1};      // Last chain height when fork detection ran
     static constexpr int FORK_DETECTION_THRESHOLD = 5;  // Cycles before triggering fork detection
+    std::chrono::steady_clock::time_point m_last_fork_check;  // Issue #6: Throttle fork checks
+    static constexpr int FORK_CHECK_MIN_INTERVAL_SECS = 5;    // Min seconds between fork checks
+
+    // Issue #11 FIX: Request tracking as member variables (not static)
+    int m_last_request_trigger{-1};
+    bool m_initial_request_done{false};
+
+    // Issue #7 FIX: Orphan scan frequency control
+    std::chrono::steady_clock::time_point m_last_orphan_scan;
+    static constexpr int ORPHAN_SCAN_INTERVAL_SECS = 30;      // Scan orphans every 30 seconds (was 10)
 };
 
 #endif // DILITHION_NODE_IBD_COORDINATOR_H

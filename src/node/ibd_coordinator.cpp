@@ -72,21 +72,20 @@ void CIbdCoordinator::Tick() {
 
         // Request headers at milestones: initial (chain=0), then 1000, 3000, 5000...
         // After initial batch of ~2000 headers, wait until chain reaches 1000 before requesting more
-        static int last_request_trigger = -1;
-        static bool initial_request_done = false;
+        // Issue #11 FIX: Using member variables instead of static
 
         bool should_request = false;
-        if (!initial_request_done && header_height == 0 && peer_height > 0) {
+        if (!m_initial_request_done && header_height == 0 && peer_height > 0) {
             // Initial request - we have no headers
             should_request = true;
-            initial_request_done = true;
-            // last_request_trigger stays at -1, so milestone 1000 will trigger (1000 > -1)
+            m_initial_request_done = true;
+            // m_last_request_trigger stays at -1, so milestone 1000 will trigger (1000 > -1)
         } else if (chain_height >= 1000 && peer_height > header_height) {
             // Milestone-based requests: 1000, 3000, 5000...
             int milestone = ((chain_height - 1000) / 2000) * 2000 + 1000;
-            if (milestone > last_request_trigger) {
+            if (milestone > m_last_request_trigger) {
                 should_request = true;
-                last_request_trigger = milestone;
+                m_last_request_trigger = milestone;
             }
         }
 
@@ -335,6 +334,15 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         }
 
         if (has_ibd_activity && stall_cycles >= FORK_DETECTION_THRESHOLD) {
+            // Issue #6 FIX: Throttle fork detection to avoid CPU overhead
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_fork_check).count();
+            if (elapsed < FORK_CHECK_MIN_INTERVAL_SECS) {
+                // Too soon since last check, skip
+                return;
+            }
+            m_last_fork_check = now;
+
             std::cout << "[FORK-DETECT] Chain stalled at height " << chain_height
                       << " for " << stall_cycles << " cycles - checking for fork..." << std::endl;
 
