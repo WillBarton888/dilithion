@@ -1187,6 +1187,20 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
     // The actual peer removal is handled by RemovePeer()
 }
 
+void CPeerManager::IncrementPeerStallCount(int peer_id)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return;
+    }
+
+    CPeer* peer = it->second.get();
+    peer->nStallingCount++;
+    peer->lastStallTime = std::chrono::steady_clock::now();
+}
+
 // Phase 1: CNode management methods (event-driven networking)
 // These methods replace CPeer methods for new event-driven architecture
 

@@ -406,6 +406,13 @@ public:
     // Lifecycle callbacks
     bool OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred);
     void OnPeerDisconnected(int peer_id);
+
+    /**
+     * @brief Increment a peer's stall count when blocks timeout
+     * Used by IBD coordinator when CBlockTracker detects timeouts.
+     * This makes the peer eventually "unsuitable" for download.
+     */
+    void IncrementPeerStallCount(int peer_id);
 };
 
 /**

@@ -4,6 +4,7 @@
 #include <node/ibd_coordinator.h>
 
 #include <iostream>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -487,11 +488,26 @@ bool CIbdCoordinator::FetchBlocks() {
             break;  // All blocks either connected or in-flight
         }
 
+        // ISSUE 4 FIX: Cap blocks_to_request to remaining capacity to prevent race conditions
+        // GetNextBlocksToRequest may return more blocks than we can actually request
+        int remaining_capacity = MAX_BLOCKS_IN_TRANSIT_PER_PEER - peer_blocks_in_flight;
+        if (static_cast<int>(blocks_to_request.size()) > remaining_capacity) {
+            blocks_to_request.resize(remaining_capacity);
+        }
+
         // Filter and build GETDATA
         std::vector<NetProtocol::CInv> getdata;
         getdata.reserve(blocks_to_request.size());
 
         for (int h : blocks_to_request) {
+            // ISSUE 4 FIX: Re-check capacity before each request to prevent exceeding limit
+            // This handles race conditions where blocks arrive during iteration
+            int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id);
+            if (current_in_flight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+                // Peer reached capacity - stop requesting more blocks from this peer
+                break;
+            }
+
             // Filter: within header range, not already have, peer has it
             if (h > header_height) continue;
             if (h <= chain_height) continue;
@@ -557,18 +573,39 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         std::chrono::seconds(HARD_TIMEOUT_SECONDS));
 
     if (!very_stalled.empty()) {
-        int removed = 0;
+        // Count timeouts per peer for logging
+        std::map<NodeId, int> peer_timeout_counts;
+
         for (const auto& [height, peer] : very_stalled) {
             m_node_context.block_fetcher->RequeueBlock(height);
-            removed++;
+            peer_timeout_counts[peer]++;
+
+            // KEY FIX: Increment peer's stall count so they eventually become "unsuitable"
+            // This was missing - timed out blocks were removed but peers weren't penalized,
+            // causing blocks to be re-requested from the same slow peer repeatedly.
+            if (m_node_context.peer_manager) {
+                m_node_context.peer_manager->IncrementPeerStallCount(peer);
+            }
         }
-        if (removed > 0) {
-            std::cout << "[PerBlock] Removed " << removed << " blocks stuck >" << HARD_TIMEOUT_SECONDS
-                      << "s from tracker (will re-request)" << std::endl;
+
+        // Log summary
+        std::cout << "[PerBlock] Removed " << very_stalled.size() << " blocks stuck >"
+                  << HARD_TIMEOUT_SECONDS << "s (";
+        bool first = true;
+        for (const auto& [peer, count] : peer_timeout_counts) {
+            if (!first) std::cout << ", ";
+            std::cout << "peer " << peer << ": " << count;
+            first = false;
         }
+        std::cout << ")" << std::endl;
     }
 
-    // Disconnect stalling peers
+    // Disconnect peers that have stalled too many times (nStallingCount >= 5)
+    // NOTE: CheckForStallingPeers uses deprecated vBlocksInFlight which is empty.
+    // The stall counting now happens above via IncrementPeerStallCount, so peers
+    // with many timeouts will have high nStallingCount and IsSuitableForDownload
+    // will return false, causing them to be skipped in GetValidPeersForDownload.
+    // We still call CheckForStallingPeers for any legacy disconnection logic.
     std::vector<NodeId> stalling_peers;
     if (m_node_context.peer_manager) {
         stalling_peers = m_node_context.peer_manager->CheckForStallingPeers();
