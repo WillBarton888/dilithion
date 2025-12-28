@@ -316,7 +316,7 @@ private:
     std::mutex m_blocks_queue_mutex;
     std::condition_variable m_blocks_cv;
     std::vector<std::thread> m_blocks_worker_threads;
-    static constexpr int NUM_BLOCK_WORKERS = 4;  // Parallel block processing threads
+    static constexpr int NUM_BLOCK_WORKERS = 1;  // Single worker (validation is sequential anyway)
 
     // Worker thread functions
     void HeadersWorkerThread();

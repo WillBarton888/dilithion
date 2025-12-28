@@ -481,10 +481,12 @@ bool CIbdCoordinator::FetchBlocks() {
         auto peer = m_node_context.peer_manager->GetPeer(peer_id);
         if (!peer) continue;
 
-        // FIX 2: Skip headers sync peer if we're waiting for headers from them
-        // Headers can take time (2000+ headers), and block requests would queue behind them
-        // causing blocks to timeout. Use other peers for blocks while this one sends headers.
-        if (peer_id == m_headers_sync_peer && m_headers_in_flight) {
+        // FIX 2: ALWAYS skip headers sync peer for block requests during IBD
+        // Headers sync peer should be dedicated to headers only.
+        // Race condition: m_headers_in_flight toggles rapidly between header batches,
+        // allowing block requests to queue behind subsequent header requests.
+        // Simpler solution: Never use headers sync peer for blocks during active sync.
+        if (peer_id == m_headers_sync_peer && m_headers_sync_peer != -1) {
             continue;
         }
 
