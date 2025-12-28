@@ -1193,13 +1193,6 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
             on_headers(peer_id, headers);
         }
 
-        // KEY FIX: Reset peer's stall count after successful header receipt
-        // This prevents the header sync peer from becoming "unsuitable" for block downloads
-        // while it's busy sending headers (fixes "no suitable peers" stall after header batches)
-        if (!headers.empty()) {
-            peer_manager.MarkHeadersAsReceived(peer_id, headers.size());
-        }
-
         return true;
     } catch (const std::out_of_range& e) {
         std::cout << "[P2P] ERROR: HEADERS message truncated from peer " << peer_id << std::endl;

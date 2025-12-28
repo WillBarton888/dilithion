@@ -840,21 +840,6 @@ void CPeerManager::MarkBlockAsReceived(int peer_id, const uint256& hash)
     }
 }
 
-void CPeerManager::MarkHeadersAsReceived(int peer_id, size_t header_count)
-{
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
-
-    auto peer_it = peers.find(peer_id);
-    if (peer_it != peers.end()) {
-        peer_it->second->nHeadersReceived += header_count;
-        peer_it->second->lastSuccessTime = std::chrono::steady_clock::now();
-        // KEY FIX: Reset stall count when headers received successfully
-        // This prevents the header sync peer from becoming "unsuitable" for block downloads
-        // while it's busy sending headers
-        peer_it->second->nStallingCount = 0;
-    }
-}
-
 int CPeerManager::RemoveBlockFromFlight(const uint256& hash)
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
@@ -1185,20 +1170,6 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
     // Re-queue any in-flight blocks from this peer
     GetAndClearPeerBlocks(peer_id);
     // The actual peer removal is handled by RemovePeer()
-}
-
-void CPeerManager::IncrementPeerStallCount(int peer_id)
-{
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
-
-    auto it = peers.find(peer_id);
-    if (it == peers.end()) {
-        return;
-    }
-
-    CPeer* peer = it->second.get();
-    peer->nStallingCount++;
-    peer->lastStallTime = std::chrono::steady_clock::now();
 }
 
 // Phase 1: CNode management methods (event-driven networking)
