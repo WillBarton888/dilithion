@@ -113,6 +113,7 @@ private:
     int m_headers_sync_peer{-1};                                    // NodeId of current sync peer (-1 = none)
     std::chrono::steady_clock::time_point m_headers_sync_timeout;   // When to consider sync peer stalled
     int m_headers_sync_last_height{0};                              // Header height at last progress check
+    bool m_headers_in_flight{false};                                // True while awaiting headers from sync peer
     static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 120;      // 2 min base timeout
     static constexpr int HEADERS_SYNC_TIMEOUT_PER_HEADER_MS = 1;    // +1ms per missing header
 

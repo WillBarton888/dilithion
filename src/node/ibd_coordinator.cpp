@@ -321,7 +321,18 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // THREAD SAFETY + PERFORMANCE FIX: Use member atomics, check less frequently
     // Track stall cycles: if chain height doesn't advance despite IBD activity, we may be on a fork
 
-    if (m_last_checked_chain_height == chain_height && !m_fork_detected.load()) {
+    // FIX: Skip fork detection below highest checkpoint
+    // Below checkpoints, forks are impossible - checkpoint hashes guarantee chain integrity
+    // This eliminates lock contention from FindForkPoint() during initial IBD
+    int highest_checkpoint = 0;
+    if (Dilithion::g_chainParams) {
+        highest_checkpoint = Dilithion::g_chainParams->GetHighestCheckpointHeight();
+    }
+
+    if (chain_height < highest_checkpoint) {
+        // No fork detection needed below checkpoints - reset stall tracking
+        m_fork_stall_cycles.store(0);
+    } else if (m_last_checked_chain_height == chain_height && !m_fork_detected.load()) {
         // Chain height hasn't advanced since last tick
         m_fork_stall_cycles.fetch_add(1);
         int stall_cycles = m_fork_stall_cycles.load();
@@ -440,7 +451,15 @@ bool CIbdCoordinator::FetchBlocks() {
     if (available_peers.empty()) {
         m_ibd_no_peer_cycles++;
         m_last_hang_cause = HangCause::NO_PEERS_AVAILABLE;
-        LogPrintIBD(WARN, "No peers available for block download");
+
+        // FIX 3: More specific logging - why are no peers available?
+        size_t total_connected = m_node_context.peer_manager->GetConnectionCount();
+        if (total_connected == 0) {
+            LogPrintIBD(WARN, "No connected peers for block download");
+        } else {
+            // Have peers but none passed suitability filter (stall count, etc)
+            LogPrintIBD(WARN, "No suitable peers (%zu connected, all filtered by suitability checks)", total_connected);
+        }
         return false;
     }
 
@@ -461,6 +480,13 @@ bool CIbdCoordinator::FetchBlocks() {
     for (int peer_id : available_peers) {
         auto peer = m_node_context.peer_manager->GetPeer(peer_id);
         if (!peer) continue;
+
+        // FIX 2: Skip headers sync peer if we're waiting for headers from them
+        // Headers can take time (2000+ headers), and block requests would queue behind them
+        // causing blocks to timeout. Use other peers for blocks while this one sends headers.
+        if (peer_id == m_headers_sync_peer && m_headers_in_flight) {
+            continue;
+        }
 
         // Check peer capacity using per-block tracking
         int peer_blocks_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id);
@@ -539,6 +565,14 @@ bool CIbdCoordinator::FetchBlocks() {
                         m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id),
                         MAX_BLOCKS_IN_TRANSIT_PER_PEER);
         }
+    }
+
+    // FIX 3: Specific logging when no blocks requested
+    if (total_blocks_requested == 0 && !available_peers.empty()) {
+        // All peers were at capacity or skipped - this is normal during heavy IBD
+        LogPrintIBD(DEBUG, "All %zu peers at capacity - waiting for in-flight blocks to arrive",
+                    available_peers.size());
+        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
     }
 
     return total_blocks_requested > 0;
@@ -864,6 +898,9 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
         // Progress made, update tracking and extend timeout
         m_headers_sync_last_height = current_height;
 
+        // FIX 2: Headers received - clear in-flight flag so this peer can receive block requests
+        m_headers_in_flight = false;
+
         // Recalculate timeout based on remaining headers
         int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
         int headers_missing = peer_height - current_height;
@@ -917,6 +954,10 @@ void CIbdCoordinator::RequestHeadersFromSyncPeer() {
 
     std::cout << "[IBD] Requesting headers from sync peer " << m_headers_sync_peer << std::endl;
     m_node_context.headers_manager->RequestHeaders(m_headers_sync_peer, bestHeaderHash);
+
+    // FIX 2: Mark headers as in-flight to prevent block requests to this peer
+    // Block requests would queue behind headers and timeout
+    m_headers_in_flight = true;
 }
 
 
