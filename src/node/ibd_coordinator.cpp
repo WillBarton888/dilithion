@@ -584,9 +584,10 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
     }
 
     // ============ HARD TIMEOUT: Remove blocks stuck too long ============
-    // After 30 seconds, remove from tracker so they can be re-requested from different peer
+    // After 10 seconds, remove from tracker so they can be re-requested from different peer
     // This fixes the bug where blocks remain in CBlockTracker forever if peer doesn't respond
-    static constexpr int HARD_TIMEOUT_SECONDS = 30;
+    // Note: 10s is sufficient for 200-byte blocks even on slow international connections
+    static constexpr int HARD_TIMEOUT_SECONDS = 10;
     auto very_stalled = m_node_context.block_fetcher->GetStalledBlocks(
         std::chrono::seconds(HARD_TIMEOUT_SECONDS));
 

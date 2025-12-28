@@ -311,11 +311,12 @@ private:
     std::condition_variable m_headers_cv;
     std::thread m_headers_worker_thread;
 
-    // Blocks queue and worker
+    // Blocks queue and workers (multiple threads for parallel processing)
     std::queue<QueuedMessage> m_blocks_queue;
     std::mutex m_blocks_queue_mutex;
     std::condition_variable m_blocks_cv;
-    std::thread m_blocks_worker_thread;
+    std::vector<std::thread> m_blocks_worker_threads;
+    static constexpr int NUM_BLOCK_WORKERS = 4;  // Parallel block processing threads
 
     // Worker thread functions
     void HeadersWorkerThread();

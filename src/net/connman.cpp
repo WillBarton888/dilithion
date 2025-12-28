@@ -212,19 +212,26 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
         return false;
     }
 
+    // Start multiple block worker threads for parallel processing
+    // This prevents queue bottlenecks when multiple peers send blocks simultaneously
     try {
-        m_blocks_worker_thread = std::thread(&CConnman::BlocksWorkerThread, this);
+        for (int i = 0; i < NUM_BLOCK_WORKERS; i++) {
+            m_blocks_worker_threads.emplace_back(&CConnman::BlocksWorkerThread, this);
+        }
     } catch (const std::exception& e) {
-        LogPrintf(NET, ERROR, "[CConnman] Failed to start BlocksWorkerThread: %s\n", e.what());
+        LogPrintf(NET, ERROR, "[CConnman] Failed to start BlocksWorkerThreads: %s\n", e.what());
         Interrupt();
         if (threadSocketHandler.joinable()) threadSocketHandler.join();
         if (threadMessageHandler.joinable()) threadMessageHandler.join();
         if (threadOpenConnections.joinable()) threadOpenConnections.join();
         if (m_headers_worker_thread.joinable()) m_headers_worker_thread.join();
+        for (auto& t : m_blocks_worker_threads) {
+            if (t.joinable()) t.join();
+        }
         return false;
     }
 
-    LogPrintf(NET, INFO, "[CConnman] Started successfully (with async headers/blocks workers)\n");
+    LogPrintf(NET, INFO, "[CConnman] Started successfully (with async headers + %d parallel block workers)\n", NUM_BLOCK_WORKERS);
     return true;
 }
 
@@ -247,9 +254,13 @@ void CConnman::Stop() {
     if (m_headers_worker_thread.joinable()) {
         m_headers_worker_thread.join();
     }
-    if (m_blocks_worker_thread.joinable()) {
-        m_blocks_worker_thread.join();
+    // Join all block worker threads
+    for (auto& t : m_blocks_worker_threads) {
+        if (t.joinable()) {
+            t.join();
+        }
     }
+    m_blocks_worker_threads.clear();
 
     // Close listen socket
     if (m_listen_socket >= 0) {
