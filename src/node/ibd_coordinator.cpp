@@ -321,16 +321,17 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // THREAD SAFETY + PERFORMANCE FIX: Use member atomics, check less frequently
     // Track stall cycles: if chain height doesn't advance despite IBD activity, we may be on a fork
 
-    // FIX: Skip fork detection below highest checkpoint
-    // Below checkpoints, forks are impossible - checkpoint hashes guarantee chain integrity
-    // This eliminates lock contention from FindForkPoint() during initial IBD
-    int highest_checkpoint = 0;
-    if (Dilithion::g_chainParams) {
-        highest_checkpoint = Dilithion::g_chainParams->GetHighestCheckpointHeight();
-    }
+    // PROFESSIONAL FIX: Only enable fork detection when near chain tip
+    // During bulk IBD, rely on checkpoints + PoW validation (no lock contention)
+    // Near tip (within 100 blocks), enable full fork detection for reorg protection
+    // Security: PoW validation still happens for every block, checkpoints protect early chain
+    // This approach matches Bitcoin Core's IBD behavior
+    static constexpr int FORK_DETECTION_TIP_THRESHOLD = 100;  // Enable when within 100 blocks of tip
+    bool near_tip = (header_height - chain_height) < FORK_DETECTION_TIP_THRESHOLD;
 
-    if (chain_height < highest_checkpoint) {
-        // No fork detection needed below checkpoints - reset stall tracking
+    if (!near_tip) {
+        // Bulk IBD: checkpoints + PoW are sufficient protection
+        // Skip fork detection to avoid cs_main lock contention from FindForkPoint()
         m_fork_stall_cycles.store(0);
     } else if (m_last_checked_chain_height == chain_height && !m_fork_detected.load()) {
         // Chain height hasn't advanced since last tick
@@ -520,6 +521,13 @@ bool CIbdCoordinator::FetchBlocks() {
         getdata.reserve(blocks_to_request.size());
 
         for (int h : blocks_to_request) {
+            // CAPACITY FIX: Re-check capacity before each request to prevent exceeding limit
+            // This prevents race condition where multiple blocks are added in quick succession
+            int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id);
+            if (current_in_flight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+                break;  // Peer reached capacity - stop requesting more
+            }
+
             // Filter: within header range, not already have, peer has it
             if (h > header_height) continue;
             if (h <= chain_height) continue;
