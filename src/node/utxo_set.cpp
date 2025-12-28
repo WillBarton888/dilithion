@@ -8,9 +8,12 @@
 #include <leveldb/options.h>
 #include <cstring>
 #include <iostream>
+#include <atomic>
 
-// External function to check if we're in Initial Block Download
-extern bool IsInitialBlockDownload();
+// Global flag to track IBD state for disk sync optimization
+// Set by IBD coordinator, read by UTXO set
+// During IBD: sync=false (speed), After IBD: sync=true (durability)
+std::atomic<bool> g_utxo_sync_enabled{false};
 
 // ============================================================================
 // Constructor and Destructor
@@ -564,7 +567,7 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height, const uint256& b
     // During IBD: sync=false for speed (blocks can be re-downloaded on crash)
     // After IBD: sync=true for durability (critical for mined/received blocks)
     leveldb::WriteOptions write_options;
-    write_options.sync = !IsInitialBlockDownload();
+    write_options.sync = g_utxo_sync_enabled.load(std::memory_order_relaxed);
     leveldb::Status status = db->Write(write_options, &batch);
     if (!status.ok()) {
         std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Database write failed: " << status.ToString() << std::endl;

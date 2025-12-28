@@ -137,6 +137,10 @@ extern NodeState g_node_state;
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 extern NodeContext g_node_context;
 
+// Global flag for UTXO sync optimization (defined in utxo_set.cpp)
+// false during IBD (speed), true after IBD (durability)
+extern std::atomic<bool> g_utxo_sync_enabled;
+
 // Global async broadcaster pointer (initialized in main)
 CAsyncBroadcaster* g_async_broadcaster = nullptr;
 
@@ -239,6 +243,7 @@ bool IsInitialBlockDownload() {
         // Tip is recent AND we're synced to peers - exit IBD permanently
         std::cout << "[IBD] Exiting IBD - synced to height " << ourHeight << std::endl;
         s_initial_download_complete.store(true, std::memory_order_relaxed);
+        g_utxo_sync_enabled.store(true, std::memory_order_relaxed);  // Enable disk sync for durability
         return false;
     }
 
@@ -249,6 +254,7 @@ bool IsInitialBlockDownload() {
     // This is likely a bootstrap scenario or stale network - allow mining
     std::cout << "[IBD] Exiting IBD (stale tip but synced) - height " << ourHeight << std::endl;
     s_initial_download_complete.store(true, std::memory_order_relaxed);
+    g_utxo_sync_enabled.store(true, std::memory_order_relaxed);  // Enable disk sync for durability
     return false;
 }
 
