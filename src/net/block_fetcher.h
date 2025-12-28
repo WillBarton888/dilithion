@@ -14,7 +14,7 @@ class CPeerManager;
 typedef int NodeId;
 
 // IBD Constants (used by ibd_coordinator)
-static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;  ///< Max individual blocks per peer
+static constexpr int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 32;  ///< Max individual blocks per peer (increased from 16 for better throughput)
 static constexpr int BLOCK_STALL_TIMEOUT_SECONDS = 3;      ///< Stall timeout per block
 
 /**

@@ -99,8 +99,8 @@ static const int MAX_REORG_DEPTH = 100;
 /** Maximum number of block headers to process in one message */
 static const unsigned int MAX_HEADERS_RESULTS = 2000;
 
-/** Maximum number of blocks to keep in flight per peer */
-static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
+/** Maximum number of blocks to keep in flight per peer (increased from 16 for better IBD throughput) */
+static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 32;
 
 //==============================================================================
 // P2P Network Parameters

@@ -9,6 +9,9 @@
 #include <cstring>
 #include <iostream>
 
+// External function to check if we're in Initial Block Download
+extern bool IsInitialBlockDownload();
+
 // ============================================================================
 // Constructor and Destructor
 // ============================================================================
@@ -557,9 +560,11 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height, const uint256& b
     // Step 6: Update height
     stats.nHeight = height;
 
-    // Step 7: Write batch to database with sync for durability (P0-4 FIX)
+    // Step 7: Write batch to database
+    // During IBD: sync=false for speed (blocks can be re-downloaded on crash)
+    // After IBD: sync=true for durability (critical for mined/received blocks)
     leveldb::WriteOptions write_options;
-    write_options.sync = true;  // Critical: ensure block changes survive crash
+    write_options.sync = !IsInitialBlockDownload();
     leveldb::Status status = db->Write(write_options, &batch);
     if (!status.ok()) {
         std::cerr << "[ERROR] CUTXOSet::ApplyBlock: Database write failed: " << status.ToString() << std::endl;
