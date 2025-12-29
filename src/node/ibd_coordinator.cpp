@@ -72,7 +72,7 @@ void CIbdCoordinator::Tick() {
     if (m_headers_sync_peer != -1) {
         int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
 
-        if (!m_initial_request_done && header_height == 0 && peer_height > 0) {
+        if (!m_initial_request_done && header_height <= 0 && peer_height > 0) {
             // Initial request - kick off the pipeline via SSOT entry point
             m_initial_request_done = true;
             std::cout << "[IBD] Initial header request from sync peer " << m_headers_sync_peer
@@ -395,6 +395,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                             m_headers_sync_peer = -1;
                             m_headers_sync_last_height = 0;
                             m_headers_in_flight = false;
+                            m_initial_request_done = false;  // Allow new initial headers request
 
                             std::cout << "[RESYNC] IBD state reset - will sync from peers" << std::endl;
                             std::cout << "[RESYNC] ════════════════════════════════════════════════════\n" << std::endl;
