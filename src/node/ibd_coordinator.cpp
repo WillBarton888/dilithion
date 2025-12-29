@@ -79,13 +79,13 @@ void CIbdCoordinator::Tick() {
             // Initial request - we have no headers
             should_request = true;
             m_initial_request_done = true;
-            // m_last_request_trigger stays at -1, so milestone 1000 will trigger (1000 > -1)
-        } else if (chain_height >= 1000 && peer_height > header_height) {
-            // Milestone-based requests: 1000, 3000, 5000...
-            int milestone = ((chain_height - 1000) / 2000) * 2000 + 1000;
-            if (milestone > m_last_request_trigger) {
+        } else if (peer_height > header_height) {
+            // Request next headers when chain is within 1000 blocks of header tip
+            // This gives ~90 seconds for RandomX processing while blocks download
+            int headers_ahead = header_height - chain_height;
+            if (headers_ahead < 1000 && header_height > m_last_request_trigger) {
                 should_request = true;
-                m_last_request_trigger = milestone;
+                m_last_request_trigger = header_height;
             }
         }
 
@@ -582,10 +582,10 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
     }
 
     // ============ HARD TIMEOUT: Remove blocks stuck too long ============
-    // After 10 seconds, remove from tracker so they can be re-requested from different peer
-    // This fixes the bug where blocks remain in CBlockTracker forever if peer doesn't respond
-    // Note: 10s is sufficient for 200-byte blocks even on slow international connections
-    static constexpr int HARD_TIMEOUT_SECONDS = 10;
+    // After 60 seconds, remove from tracker so they can be re-requested from different peer
+    // Note: Increased from 10s to 60s because RandomX PoW validation above checkpoint
+    // can take 1-2 seconds per block on slower VPS hardware
+    static constexpr int HARD_TIMEOUT_SECONDS = 60;
     auto very_stalled = m_node_context.block_fetcher->GetStalledBlocks(
         std::chrono::seconds(HARD_TIMEOUT_SECONDS));
 
