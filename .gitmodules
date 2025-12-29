@@ -1,3 +1,6 @@
 [submodule "depends/randomx"]
 	path = depends/randomx
 	url = https://github.com/tevador/RandomX.git
+[submodule "depends/openssl-src"]
+	path = depends/openssl-src
+	url = https://github.com/openssl/openssl.git
