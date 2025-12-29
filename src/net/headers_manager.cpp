@@ -1878,14 +1878,12 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
 
     // PIPELINE OPTIMIZATION: Immediately request NEXT batch of headers
     // Don't wait for validation - keep the pipeline full
+    //
+    // NOTE: We do NOT update m_headers_requested_height here.
+    // TriggerHeaderPrefetch tracks what we've REQUESTED (to prevent duplicates).
+    // It updates m_headers_requested_height when it sends a request.
     int peer_height = GetPeerStartHeight(peer);
     if (peer_height > 0) {
-        // Update received height tracking (capped at peer's actual height)
-        int current_requested = m_headers_requested_height.load();
-        int new_requested = std::min(current_requested + static_cast<int>(header_count), peer_height);
-        m_headers_requested_height.store(new_requested);
-
-        // Request more if peer has more, using last received header as start point
         TriggerHeaderPrefetch(peer, peer_height, last_header_hash);
     }
 
