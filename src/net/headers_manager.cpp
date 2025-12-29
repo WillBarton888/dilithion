@@ -379,15 +379,18 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
 void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
 {
-    // THROTTLE: Don't send header requests if we have no headers yet AND batches pending
-    // This prevents flooding with duplicate requests during initial async header processing.
-    // But once we have headers (nBestHeight > 0), allow requests for NEW headers.
+    // PIPELINE: Allow requests to flow through - TriggerHeaderPrefetch handles dedup via m_headers_requested_height
+    // Only throttle the very first request if we have zero validated headers AND a batch is processing
+    // This prevents initial duplicate requests but allows pipeline requests
     {
         std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
         std::lock_guard<std::mutex> hlock(cs_headers);
-        if ((!m_raw_header_queue.empty() || m_active_workers.load() > 0) && nBestHeight <= 0) {
-            std::cout << "[IBD] RequestHeaders: SKIPPED - " << m_raw_header_queue.size()
-                      << " batch(es) pending, no headers yet" << std::endl;
+        // Only block if: we have zero validated headers AND haven't requested anything yet
+        // Once we've made any request (m_headers_requested_height > 0), allow subsequent requests
+        if (m_headers_requested_height.load() == 0 &&
+            (!m_raw_header_queue.empty() || m_active_workers.load() > 0) &&
+            nBestHeight <= 0) {
+            std::cout << "[IBD] RequestHeaders: SKIPPED (initial batch processing)" << std::endl;
             return;
         }
     }
