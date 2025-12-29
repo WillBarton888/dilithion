@@ -430,7 +430,8 @@ bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height)
     }
 
     std::cout << "[IBD-SYNC] Requesting headers (requested=" << requested
-              << " -> " << expected_new_height << ", peer_height=" << peer_height << ")" << std::endl;
+              << " -> " << expected_new_height << ", peer_height=" << peer_height
+              << ", locator=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
 
     RequestHeaders(peer, request_from);
     return true;
