@@ -388,7 +388,7 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     {
         std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
         std::lock_guard<std::mutex> hlock(cs_headers);
-        if (!m_raw_header_queue.empty() && nBestHeight <= 0) {
+        if ((!m_raw_header_queue.empty() || m_active_workers.load() > 0) && nBestHeight <= 0) {
             std::cout << "[IBD] RequestHeaders: SKIPPED - " << m_raw_header_queue.size()
                       << " batch(es) pending, no headers yet" << std::endl;
             return;
