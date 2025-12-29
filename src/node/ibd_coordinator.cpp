@@ -9,6 +9,7 @@
 
 #include <consensus/chain.h>
 #include <core/chainparams.h>  // Initial header request needs genesis hash
+#include <node/genesis.h>      // Genesis::GetGenesisHash()
 #include <node/blockchain_storage.h>  // BUG #159: Orphan block deletion
 #include <core/node_context.h>
 #include <net/block_fetcher.h>
@@ -363,8 +364,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         std::cout << "[RESYNC] Clearing forked chain data..." << std::endl;
 
                         // Clear chain state back to genesis
-                        // Get genesis hash from chain params
-                        const uint256& genesisHash = Dilithion::g_chainParams->GetConsensus().hashGenesisBlock;
+                        // Get genesis hash
+                        uint256 genesisHash = Genesis::GetGenesisHash();
                         CBlockIndex* pgenesisIndex = m_chainstate.GetBlockIndex(genesisHash);
 
                         if (pgenesisIndex) {
