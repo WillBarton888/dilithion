@@ -457,19 +457,30 @@ bool CIbdCoordinator::FetchBlocks() {
         auto peers = m_node_context.peer_manager->GetConnectedPeers();
         int best_peer = -1;
         int best_height = chain_height;
+        int headers_peer_height = 0;  // Track headers sync peer as fallback
 
         for (const auto& peer : peers) {
             if (!peer) continue;
-            // Skip headers sync peer - keep it dedicated to headers only
-            if (peer->id == m_headers_sync_peer) continue;
 
             int peer_height = peer->best_known_height;
             if (peer_height == 0) peer_height = peer->start_height;
+
+            // Prefer non-headers-sync peers
+            if (peer->id == m_headers_sync_peer) {
+                headers_peer_height = peer_height;
+                continue;
+            }
 
             if (peer_height > best_height) {
                 best_height = peer_height;
                 best_peer = peer->id;
             }
+        }
+
+        // If no other peer found, use headers sync peer for blocks too
+        if (best_peer == -1 && m_headers_sync_peer != -1 && headers_peer_height > chain_height) {
+            best_peer = m_headers_sync_peer;
+            best_height = headers_peer_height;
         }
 
         if (best_peer != -1) {
