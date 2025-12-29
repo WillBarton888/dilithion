@@ -382,7 +382,16 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     // No throttle needed - TriggerHeaderPrefetch handles dedup via m_headers_requested_height
     // Build locator and send request
 
-    std::vector<uint256> locator = GetLocator(hashStart);
+    std::vector<uint256> locator;
+    if (!hashStart.IsNull()) {
+        // PIPELINE OPTIMIZATION: If we have a specific hash (from prefetch),
+        // use it directly as a single-element locator. Peer will find it and
+        // send headers from there. Much simpler than complex GetLocator().
+        locator.push_back(hashStart);
+        std::cout << "[IBD] RequestHeaders: Using direct hash locator" << std::endl;
+    } else {
+        locator = GetLocator(hashStart);
+    }
 
     auto* connman = g_node_context.connman.get();
     auto* msg_proc = g_message_processor.load();
