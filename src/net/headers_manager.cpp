@@ -379,26 +379,11 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
 void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
 {
-    // PIPELINE: Allow requests to flow through - TriggerHeaderPrefetch handles dedup via m_headers_requested_height
-    // Only throttle the very first request if we have zero validated headers AND a batch is processing
-    // This prevents initial duplicate requests but allows pipeline requests
-    {
-        std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
-        std::lock_guard<std::mutex> hlock(cs_headers);
-        // Only block if: we have zero validated headers AND haven't requested anything yet
-        // Once we've made any request (m_headers_requested_height > 0), allow subsequent requests
-        if (m_headers_requested_height.load() == 0 &&
-            (!m_raw_header_queue.empty() || m_active_workers.load() > 0) &&
-            nBestHeight <= 0) {
-            std::cout << "[IBD] RequestHeaders: SKIPPED (initial batch processing)" << std::endl;
-            return;
-        }
-    }
+    // No throttle needed - TriggerHeaderPrefetch handles dedup via m_headers_requested_height
+    // Build locator and send request
 
-    // Build locator (holds cs_headers briefly, DOES NOT access blockchain)
     std::vector<uint256> locator = GetLocator(hashStart);
 
-    // Send message (no locks held - safe for network I/O)
     auto* connman = g_node_context.connman.get();
     auto* msg_proc = g_message_processor.load();
     if (connman && msg_proc) {
