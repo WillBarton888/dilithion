@@ -402,20 +402,22 @@ void CHeadersManager::TriggerHeaderPrefetch(NodeId peer, int peer_height)
     int requested = m_headers_requested_height.load();
     int validated = GetBestHeight();
 
-    // Only request if:
-    // 1. Peer has more headers than we've requested
-    // 2. We haven't already requested up to peer's height
+    // Only request if peer has more headers than we've requested
     if (peer_height > requested) {
-        // Update requested height BEFORE sending (prevents duplicate requests)
-        // We're requesting headers starting from our current best, peer will send up to 2000
-        int expected_new_height = std::min(peer_height, validated + 2000);
-        m_headers_requested_height.store(expected_new_height);
+        // Calculate target: don't get too far ahead of validated (keep pipeline manageable)
+        // Use requested (what we have) + 2000 (next batch), not validated + 2000
+        int expected_new_height = std::min(peer_height, requested + 2000);
 
-        std::cout << "[IBD-PREFETCH] Requesting headers (validated=" << validated
-                  << ", requested=" << requested << " -> " << expected_new_height
-                  << ", peer_height=" << peer_height << ")" << std::endl;
+        // CRITICAL: Never regress - only update if we're actually advancing
+        if (expected_new_height > requested) {
+            m_headers_requested_height.store(expected_new_height);
 
-        RequestHeaders(peer, GetBestHeaderHash());
+            std::cout << "[IBD-PREFETCH] Requesting headers (validated=" << validated
+                      << ", requested=" << requested << " -> " << expected_new_height
+                      << ", peer_height=" << peer_height << ")" << std::endl;
+
+            RequestHeaders(peer, GetBestHeaderHash());
+        }
     }
 }
 
