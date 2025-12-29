@@ -117,6 +117,9 @@ private:
     static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 120;      // 2 min base timeout
     static constexpr int HEADERS_SYNC_TIMEOUT_PER_HEADER_MS = 1;    // +1ms per missing header
 
+    // Blocks sync peer tracking (single peer for block download, different from headers peer)
+    int m_blocks_sync_peer{-1};                                     // NodeId of block sync peer (-1 = none)
+
     // Backoff state
     int m_last_header_height{0};
     int m_ibd_no_peer_cycles{0};

@@ -443,150 +443,137 @@ bool CIbdCoordinator::FetchBlocks() {
         return false;
     }
 
-    // ============ Bitcoin Core Per-Block Download Model ============
-    // Up to 16 individual blocks per peer (not chunks)
-    // 3-second stall timeout per block
-    // Blocks assigned individually, not as consecutive chunks
-
-    // Get available peers for download
-    std::vector<int> available_peers = m_node_context.peer_manager->GetValidPeersForDownload();
-    if (available_peers.empty()) {
-        m_ibd_no_peer_cycles++;
-        m_last_hang_cause = HangCause::NO_PEERS_AVAILABLE;
-
-        // FIX 3: More specific logging - why are no peers available?
-        size_t total_connected = m_node_context.peer_manager->GetConnectionCount();
-        if (total_connected == 0) {
-            LogPrintIBD(WARN, "No connected peers for block download");
-        } else {
-            // Have peers but none passed suitability filter (stall count, etc)
-            LogPrintIBD(WARN, "No suitable peers (%zu connected, all filtered by suitability checks)", total_connected);
-        }
-        return false;
-    }
+    // ============ SINGLE-PEER BLOCK DOWNLOAD ============
+    // Use ONE peer for all block downloads (different from headers peer)
+    // Max 32 blocks in-flight to this single peer
+    // Switch peer only on disconnect or stall
 
     int chain_height = m_chainstate.GetHeight();
     int header_height = m_node_context.headers_manager->GetBestHeight();
 
-    // Check for headers sync lag
+    // Check for headers sync lag - need headers ahead of chain to download blocks
     if (header_height <= chain_height) {
-        static int lag_warnings = 0;
-        if (lag_warnings++ < 5) {
-            LogPrintIBD(WARN, "Headers sync lag: header=%d <= chain=%d", header_height, chain_height);
+        return false;
+    }
+
+    // ============ SELECT BLOCK SYNC PEER ============
+    // Check if current block sync peer is still valid
+    if (m_blocks_sync_peer != -1) {
+        auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
+        if (!peer) {
+            std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer << " disconnected" << std::endl;
+            m_blocks_sync_peer = -1;
         }
     }
 
-    int total_blocks_requested = 0;
+    // Select a new block sync peer if needed
+    if (m_blocks_sync_peer == -1) {
+        auto peers = m_node_context.peer_manager->GetConnectedPeers();
+        int best_peer = -1;
+        int best_height = chain_height;
 
-    // For each peer with capacity, assign individual blocks
-    for (int peer_id : available_peers) {
-        auto peer = m_node_context.peer_manager->GetPeer(peer_id);
-        if (!peer) continue;
+        for (const auto& peer : peers) {
+            if (!peer) continue;
+            // Skip headers sync peer - keep it dedicated to headers only
+            if (peer->id == m_headers_sync_peer) continue;
 
-        // FIX 2: ALWAYS skip headers sync peer for block requests during IBD
-        // Headers sync peer should be dedicated to headers only.
-        // Race condition: m_headers_in_flight toggles rapidly between header batches,
-        // allowing block requests to queue behind subsequent header requests.
-        // Simpler solution: Never use headers sync peer for blocks during active sync.
-        if (peer_id == m_headers_sync_peer && m_headers_sync_peer != -1) {
+            int peer_height = peer->best_known_height;
+            if (peer_height == 0) peer_height = peer->start_height;
+
+            if (peer_height > best_height) {
+                best_height = peer_height;
+                best_peer = peer->id;
+            }
+        }
+
+        if (best_peer != -1) {
+            m_blocks_sync_peer = best_peer;
+            std::cout << "[IBD] Selected blocks sync peer " << m_blocks_sync_peer
+                      << " (height=" << best_height << ")" << std::endl;
+        } else {
+            m_ibd_no_peer_cycles++;
+            m_last_hang_cause = HangCause::NO_PEERS_AVAILABLE;
+            return false;
+        }
+    }
+
+    // ============ REQUEST BLOCKS FROM SINGLE PEER ============
+    auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
+    if (!peer) {
+        m_blocks_sync_peer = -1;
+        return false;
+    }
+
+    // Check peer capacity
+    int peer_blocks_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
+    int peer_capacity = MAX_BLOCKS_IN_TRANSIT_PER_PEER - peer_blocks_in_flight;
+    if (peer_capacity <= 0) {
+        return false;  // Peer at capacity - wait for blocks to arrive
+    }
+
+    // Get peer height
+    int peer_height = peer->best_known_height;
+    if (peer_height == 0) peer_height = peer->start_height;
+
+    // Get next blocks to request
+    std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(
+        peer_capacity, chain_height, header_height);
+    if (blocks_to_request.empty()) {
+        return false;  // All blocks either connected or in-flight
+    }
+
+    // Build GETDATA
+    std::vector<NetProtocol::CInv> getdata;
+    getdata.reserve(blocks_to_request.size());
+
+    for (int h : blocks_to_request) {
+        // Re-check capacity before each request
+        int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
+        if (current_in_flight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+            break;
+        }
+
+        // Validate height range
+        if (h > header_height || h <= chain_height || h > peer_height) continue;
+
+        uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+        if (hash.IsNull()) continue;
+
+        // Check if already connected
+        CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
+        if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
             continue;
         }
 
-        // Check peer capacity using per-block tracking
-        int peer_blocks_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id);
-        int peer_capacity = MAX_BLOCKS_IN_TRANSIT_PER_PEER - peer_blocks_in_flight;
-        if (peer_capacity <= 0) {
-            continue;  // Peer at capacity
+        // Request block from our single sync peer
+        if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, h, hash)) {
+            getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
         }
+    }
 
-        // Skip peers that are behind us
-        // BUG #168 FIX: Use best_known_height (updated when we receive headers from peer)
-        // instead of start_height (only set at VERSION time, never updated)
-        int peer_height = peer->best_known_height;
-        if (peer_height == 0) {
-            peer_height = peer->start_height;  // Fallback for peers we haven't received headers from
-        }
-        if (peer_height <= chain_height) {
-            continue;
-        }
-
-        // Get next blocks to request (up to peer's remaining capacity)
-        // Pure per-block: pass chain and header heights directly
-        std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(peer_capacity, chain_height, header_height);
-        if (blocks_to_request.empty()) {
-            break;  // All blocks either connected or in-flight
-        }
-
-        // Filter and build GETDATA
-        std::vector<NetProtocol::CInv> getdata;
-        getdata.reserve(blocks_to_request.size());
-
-        for (int h : blocks_to_request) {
-            // CAPACITY FIX: Re-check capacity before each request to prevent exceeding limit
-            // This prevents race condition where multiple blocks are added in quick succession
-            int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id);
-            if (current_in_flight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
-                break;  // Peer reached capacity - stop requesting more
-            }
-
-            // Filter: within header range, not already have, peer has it
-            if (h > header_height) continue;
-            if (h <= chain_height) continue;
-            if (h > peer_height) continue;
-
-            uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-            if (hash.IsNull()) continue;
-
-            // Check if already connected
-            CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
-            if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                continue;
-            }
-
-            // Request this block from peer using per-block API
-            if (m_node_context.block_fetcher->RequestBlockFromPeer(peer_id, h, hash)) {
-                getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
-                total_blocks_requested++;
-            }
-        }
-
-        // Send batched GETDATA for all blocks assigned to this peer
-        if (!getdata.empty()) {
-            CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
-            bool sent = m_node_context.connman->PushMessage(peer_id, msg);
-            if (!sent) {
-                // FIX #25: Only requeue blocks that were actually added to tracker
-                // The getdata vector contains exactly the blocks that were tracked
-                for (const auto& inv : getdata) {
-                    int height = m_node_context.headers_manager->GetHeightForHash(inv.hash);
-                    if (height > 0) {
-                        m_node_context.block_fetcher->RequeueBlock(height);
-                    }
+    // Send GETDATA to our single sync peer
+    if (!getdata.empty()) {
+        CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
+        bool sent = m_node_context.connman->PushMessage(m_blocks_sync_peer, msg);
+        if (!sent) {
+            for (const auto& inv : getdata) {
+                int height = m_node_context.headers_manager->GetHeightForHash(inv.hash);
+                if (height > 0) {
+                    m_node_context.block_fetcher->RequeueBlock(height);
                 }
-                LogPrintIBD(WARN, "GETDATA send failed for peer %d", peer_id);
-                continue;
             }
-
-            std::cout << "[PerBlock] Requested " << getdata.size() << " blocks from peer " << peer_id
-                      << " (peer now has " << m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id)
-                      << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << " in-flight)" << std::endl;
-
-            LogPrintIBD(INFO, "Requested %zu blocks from peer %d (in-flight=%d/%d)",
-                        getdata.size(), peer_id,
-                        m_node_context.block_fetcher->GetPeerBlocksInFlight(peer_id),
-                        MAX_BLOCKS_IN_TRANSIT_PER_PEER);
+            m_blocks_sync_peer = -1;  // Force peer reselection on next call
+            return false;
         }
+
+        std::cout << "[IBD] Requested " << getdata.size() << " blocks from peer " << m_blocks_sync_peer
+                  << " (in-flight=" << m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer)
+                  << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << ")" << std::endl;
+
+        return true;
     }
 
-    // FIX 3: Specific logging when no blocks requested
-    if (total_blocks_requested == 0 && !available_peers.empty()) {
-        // All peers were at capacity or skipped - this is normal during heavy IBD
-        LogPrintIBD(DEBUG, "All %zu peers at capacity - waiting for in-flight blocks to arrive",
-                    available_peers.size());
-        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
-    }
-
-    return total_blocks_requested > 0;
+    return false;
 }
 
 void CIbdCoordinator::RetryTimeoutsAndStalls() {
