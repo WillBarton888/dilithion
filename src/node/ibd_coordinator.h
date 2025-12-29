@@ -74,6 +74,30 @@ public:
         return m_state != IBDState::IDLE && m_state != IBDState::COMPLETE;
     }
 
+    /**
+     * @brief Called when an orphan block is received (Layer 2 fork detection)
+     *
+     * Consecutive orphan blocks during IBD suggest we may be on a fork.
+     * After ORPHAN_FORK_THRESHOLD consecutive orphans, triggers fork detection.
+     */
+    void OnOrphanBlockReceived() {
+        m_consecutive_orphan_blocks.fetch_add(1);
+    }
+
+    /**
+     * @brief Called when a block successfully connects to the chain
+     *
+     * Resets the orphan counter since the chain is progressing normally.
+     */
+    void OnBlockConnected() {
+        m_consecutive_orphan_blocks.store(0);
+    }
+
+    /**
+     * @brief Check if reindex is required due to deep fork
+     */
+    bool RequiresReindex() const { return m_requires_reindex; }
+
 private:
     void UpdateState();
     void ResetBackoffOnNewHeaders(int header_height);
@@ -132,6 +156,15 @@ private:
     std::atomic<int> m_fork_stall_cycles{0};  // Cycles where blocks aren't connecting
     std::atomic<bool> m_fork_detected{false}; // Whether we've detected a fork
     std::atomic<int> m_fork_point{-1};        // Height of common ancestor
+
+    // THREE-LAYER FORK DETECTION (Professional fix)
+    // Layer 1: Proactive O(1) chain mismatch (handled inline in DownloadBlocks)
+    // Layer 2: Orphan block counter - consecutive orphans suggest fork
+    std::atomic<int> m_consecutive_orphan_blocks{0};
+    static constexpr int ORPHAN_FORK_THRESHOLD = 10;  // Trigger fork check after 10 consecutive orphans
+    // Layer 3: Deep fork handling - requires manual reindex for security
+    bool m_requires_reindex{false};
+    static constexpr int MAX_AUTO_REORG_DEPTH = 100;  // Max blocks to auto-reorg
 
     // Fork detection frequency control (reduce CPU overhead)
     // PERFORMANCE FIX: Increased thresholds to prevent triggering during normal validation lag

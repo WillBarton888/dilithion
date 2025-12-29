@@ -308,21 +308,81 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
     LogPrintIBD(INFO, "Headers ahead of chain - downloading blocks (header=%d chain=%d)", header_height, chain_height);
 
-    // BUG #158 FIX: Fork detection - check if chain height isn't advancing
-    // THREAD SAFETY + PERFORMANCE FIX: Use member atomics, check less frequently
-    // Track stall cycles: if chain height doesn't advance despite IBD activity, we may be on a fork
+    // ============================================================================
+    // LAYER 1: PROACTIVE CHAIN MISMATCH DETECTION (O(1) - runs every tick)
+    // ============================================================================
+    // This catches the case where we're on a stale fork IMMEDIATELY, without
+    // waiting for stall detection. Critical for nodes that synced to a fork.
+    if (chain_height > 0 && m_node_context.headers_manager && !m_fork_detected.load()) {
+        uint256 our_tip_hash = m_chainstate.GetTipHash();
+        uint256 header_hash_at_our_height = m_node_context.headers_manager->GetBestChainHashAtHeight(chain_height);
 
-    // PROFESSIONAL FIX: Only enable fork detection when near chain tip
-    // During bulk IBD, rely on checkpoints + PoW validation (no lock contention)
-    // Near tip (within 100 blocks), enable full fork detection for reorg protection
-    // Security: PoW validation still happens for every block, checkpoints protect early chain
-    // This approach matches Bitcoin Core's IBD behavior
-    static constexpr int FORK_DETECTION_TIP_THRESHOLD = 100;  // Enable when within 100 blocks of tip
+        if (!header_hash_at_our_height.IsNull() && our_tip_hash != header_hash_at_our_height) {
+            // CHAIN MISMATCH: Our tip doesn't match the header chain at the same height
+            // This means we're on a fork - trigger immediate detection
+            std::cout << "\n[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
+            std::cout << "[FORK-DETECT] CHAIN MISMATCH DETECTED (Layer 1 - Proactive)" << std::endl;
+            std::cout << "[FORK-DETECT] Our chain tip at height " << chain_height << ":" << std::endl;
+            std::cout << "[FORK-DETECT]   Local:  " << our_tip_hash.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout << "[FORK-DETECT]   Header: " << header_hash_at_our_height.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout << "[FORK-DETECT] Finding fork point..." << std::endl;
+
+            int fork_point = FindForkPoint(chain_height);
+            if (fork_point > 0 && fork_point < chain_height) {
+                int fork_depth = chain_height - fork_point;
+                std::cout << "[FORK-DETECT] Fork point found at height " << fork_point
+                          << " (depth=" << fork_depth << " blocks)" << std::endl;
+
+                // Check if fork is too deep for automatic recovery
+                if (fork_depth > MAX_AUTO_REORG_DEPTH) {
+                    std::cerr << "[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
+                    std::cerr << "[FORK-DETECT] CRITICAL: Fork too deep for automatic recovery!" << std::endl;
+                    std::cerr << "[FORK-DETECT]   Fork depth: " << fork_depth << " blocks" << std::endl;
+                    std::cerr << "[FORK-DETECT]   Maximum: " << MAX_AUTO_REORG_DEPTH << " blocks" << std::endl;
+                    std::cerr << "[FORK-DETECT] Possible causes:" << std::endl;
+                    std::cerr << "[FORK-DETECT]   1. Extended network partition" << std::endl;
+                    std::cerr << "[FORK-DETECT]   2. Corrupted local blockchain data" << std::endl;
+                    std::cerr << "[FORK-DETECT]   3. Potential chain attack" << std::endl;
+                    std::cerr << "[FORK-DETECT] Resolution: Restart with --reindex flag" << std::endl;
+                    std::cerr << "[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
+                    m_requires_reindex = true;
+                    m_fork_detected.store(true);
+                    m_fork_point.store(fork_point);
+                    return;  // Don't proceed with downloads until reindex
+                }
+
+                HandleForkScenario(fork_point, chain_height);
+                std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
+                return;  // Let next tick handle downloads after fork recovery
+            } else {
+                std::cout << "[FORK-DETECT] Could not find fork point (fork_point=" << fork_point << ")" << std::endl;
+                std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
+            }
+        }
+    }
+
+    // ============================================================================
+    // LAYER 2: ORPHAN BLOCK DETECTION (checked via m_consecutive_orphan_blocks)
+    // ============================================================================
+    // If we've received many consecutive orphan blocks, force fork detection
+    // even if we're not "near tip". This catches timing edge cases.
+    bool force_fork_check = m_consecutive_orphan_blocks.load() >= ORPHAN_FORK_THRESHOLD;
+    if (force_fork_check && !m_fork_detected.load()) {
+        std::cout << "[FORK-DETECT] Layer 2 triggered: " << m_consecutive_orphan_blocks.load()
+                  << " consecutive orphan blocks received" << std::endl;
+        m_consecutive_orphan_blocks.store(0);  // Reset counter
+    }
+
+    // ============================================================================
+    // LAYER 3: STALL-BASED DETECTION (existing logic, now a safety net)
+    // ============================================================================
+    // Only enable expensive stall detection when near tip OR forced by Layer 2
+    static constexpr int FORK_DETECTION_TIP_THRESHOLD = 100;
     bool near_tip = (header_height - chain_height) < FORK_DETECTION_TIP_THRESHOLD;
 
-    if (!near_tip) {
-        // Bulk IBD: checkpoints + PoW are sufficient protection
-        // Skip fork detection to avoid cs_main lock contention from FindForkPoint()
+    if (!near_tip && !force_fork_check) {
+        // Bulk IBD: checkpoints + PoW + Layer 1 are sufficient protection
+        // Skip expensive stall detection to avoid cs_main lock contention
         m_fork_stall_cycles.store(0);
     } else if (m_last_checked_chain_height == chain_height && !m_fork_detected.load()) {
         // Chain height hasn't advanced since last tick
