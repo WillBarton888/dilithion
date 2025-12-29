@@ -79,6 +79,9 @@ void CIbdCoordinator::Tick() {
             if (m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer, peer_height)) {
                 m_headers_in_flight = true;
             }
+            // IMPORTANT: Return here to prevent catch-up logic from firing in same tick
+            // before first batch arrives and sets m_last_request_hash
+            return;
         }
         // Note: Subsequent header requests are triggered by headers_manager's
         // SyncHeadersFromPeer() when headers are RECEIVED (not validated).
@@ -112,7 +115,11 @@ void CIbdCoordinator::Tick() {
                 }
 
                 // SSOT: Just ask HeadersManager to sync - it handles all dedup internally
-                if (best_peer != -1) {
+                // BUT: Only request if we don't have an outstanding prefetch
+                // (prefetch is in progress when requested_height > validated_height)
+                int requested_height = m_node_context.headers_manager->GetRequestedHeight();
+                int validated_height = m_node_context.headers_manager->GetBestHeight();
+                if (best_peer != -1 && requested_height <= validated_height) {
                     m_headers_sync_peer = best_peer;
                     m_node_context.headers_manager->SyncHeadersFromPeer(best_peer, best_height);
                 }
