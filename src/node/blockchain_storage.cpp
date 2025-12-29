@@ -923,22 +923,33 @@ bool CBlockchainDB::WriteBlockWithIndex(const uint256& hash, const CBlock& block
 // Phase 4.2: Reindex implementation
 bool CBlockchainDB::GetAllBlockHashes(std::vector<uint256>& block_hashes) const {
     if (!IsOpen()) return false;
-    
+
     std::lock_guard<std::mutex> lock(cs_db);
-    
+
     // Iterate over all keys starting with "b" (block prefix)
     leveldb::Iterator* it = db->NewIterator(leveldb::ReadOptions());
     for (it->Seek("b"); it->Valid() && it->key().ToString()[0] == 'b'; it->Next()) {
         std::string key = it->key().ToString();
-        if (key.length() > 1) {
-            // Extract hash from key (format: "b" + hex_hash)
+        // Block keys are exactly 65 chars: "b" + 64-char hex hash
+        // Skip other keys like "best" (best block pointer)
+        if (key.length() == 65) {
             std::string hex_hash = key.substr(1);
-            uint256 hash;
-            hash.SetHex(hex_hash);
-            block_hashes.push_back(hash);
+            // Validate it's actually hex before parsing
+            bool is_hex = true;
+            for (char c : hex_hash) {
+                if (!std::isxdigit(static_cast<unsigned char>(c))) {
+                    is_hex = false;
+                    break;
+                }
+            }
+            if (is_hex) {
+                uint256 hash;
+                hash.SetHex(hex_hash);
+                block_hashes.push_back(hash);
+            }
         }
     }
-    
+
     bool success = it->status().ok();
     delete it;
     return success;

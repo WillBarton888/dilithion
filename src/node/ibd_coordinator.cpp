@@ -337,7 +337,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
                 // Check if fork is too deep for automatic recovery
                 if (fork_depth > MAX_AUTO_REORG_DEPTH) {
-                    std::cerr << "[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
+                    std::cerr << "\n[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
                     std::cerr << "[FORK-DETECT] CRITICAL: Fork too deep for automatic recovery!" << std::endl;
                     std::cerr << "[FORK-DETECT]   Fork depth: " << fork_depth << " blocks" << std::endl;
                     std::cerr << "[FORK-DETECT]   Maximum: " << MAX_AUTO_REORG_DEPTH << " blocks" << std::endl;
@@ -345,8 +345,68 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     std::cerr << "[FORK-DETECT]   1. Extended network partition" << std::endl;
                     std::cerr << "[FORK-DETECT]   2. Corrupted local blockchain data" << std::endl;
                     std::cerr << "[FORK-DETECT]   3. Potential chain attack" << std::endl;
-                    std::cerr << "[FORK-DETECT] Resolution: Restart with --reindex flag" << std::endl;
                     std::cerr << "[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
+                    std::cerr << std::endl;
+                    std::cerr << "Would you like to resync from the network? This will:" << std::endl;
+                    std::cerr << "  - Clear your local chain data (blocks on the fork)" << std::endl;
+                    std::cerr << "  - Download the correct chain from peers" << std::endl;
+                    std::cerr << "  - Your wallet will NOT be affected" << std::endl;
+                    std::cerr << std::endl;
+                    std::cout << "Resync from network? [Y/n]: " << std::flush;
+
+                    std::string response;
+                    std::getline(std::cin, response);
+
+                    // Default to yes on empty input (just hitting Enter)
+                    if (response.empty() || response[0] == 'Y' || response[0] == 'y') {
+                        std::cout << "\n[RESYNC] Starting network resync..." << std::endl;
+                        std::cout << "[RESYNC] Clearing forked chain data..." << std::endl;
+
+                        // Clear chain state back to genesis
+                        // Get genesis hash from chain params
+                        const uint256& genesisHash = Dilithion::g_chainParams->GetConsensus().hashGenesisBlock;
+                        CBlockIndex* pgenesisIndex = m_chainstate.GetBlockIndex(genesisHash);
+
+                        if (pgenesisIndex) {
+                            // Reset tip to genesis
+                            m_chainstate.SetTip(pgenesisIndex);
+                            std::cout << "[RESYNC] Chain reset to genesis block" << std::endl;
+
+                            // Clear headers manager to re-download headers
+                            if (m_node_context.headers_manager) {
+                                m_node_context.headers_manager->Clear();
+                                std::cout << "[RESYNC] Headers cleared - will re-download from peers" << std::endl;
+                            }
+
+                            // Reset fork detection state
+                            m_fork_detected.store(false);
+                            m_fork_point.store(-1);
+                            m_fork_stall_cycles.store(0);
+                            m_consecutive_orphan_blocks.store(0);
+                            m_requires_reindex = false;
+
+                            // Reset IBD state to allow fresh sync
+                            m_state = IBDState::WAITING_FOR_PEERS;
+                            m_last_header_height = 0;
+                            m_ibd_no_peer_cycles = 0;
+
+                            // Reset headers sync peer tracking
+                            m_headers_sync_peer = -1;
+                            m_headers_sync_last_height = 0;
+                            m_headers_in_flight = false;
+
+                            std::cout << "[RESYNC] IBD state reset - will sync from peers" << std::endl;
+                            std::cout << "[RESYNC] ════════════════════════════════════════════════════\n" << std::endl;
+                            return;  // Let next tick start fresh IBD
+                        } else {
+                            std::cerr << "[RESYNC] ERROR: Could not find genesis block!" << std::endl;
+                            std::cerr << "[RESYNC] Please restart with --reindex flag" << std::endl;
+                        }
+                    } else {
+                        std::cout << "\n[FORK-DETECT] Resync declined. Node will not sync until resolved." << std::endl;
+                        std::cout << "[FORK-DETECT] You can restart with --reindex flag later." << std::endl;
+                    }
+
                     m_requires_reindex = true;
                     m_fork_detected.store(true);
                     m_fork_point.store(fork_point);
