@@ -1955,8 +1955,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             bool skipPoWCheck = (checkpointHeight > 0 && currentChainHeight < checkpointHeight);
 
             uint256 blockHash;
-            if (skipPoWCheck && g_node_context.headers_manager) {
-                // IBD OPTIMIZATION: Look up hash from headers instead of computing
+            if (g_node_context.headers_manager) {
+                // ALWAYS look up hash from headers first (both above and below checkpoint)
                 // Try chainstate first, then headers manager for parent lookup
                 int expectedHeight = -1;
 
