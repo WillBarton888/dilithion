@@ -889,6 +889,15 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
         return true;  // No sync peer, nothing to check
     }
 
+    // Skip stall check if already synced (header_height >= peer_height)
+    if (m_node_context.headers_manager) {
+        int header_height = m_node_context.headers_manager->GetBestHeight();
+        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+        if (header_height >= peer_height && peer_height > 0) {
+            return true;  // Already synced with this peer
+        }
+    }
+
     auto now = std::chrono::steady_clock::now();
     int current_height = m_node_context.headers_manager ?
                          m_node_context.headers_manager->GetBestHeight() : 0;

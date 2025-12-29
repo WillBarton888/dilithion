@@ -303,14 +303,12 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     std::string ip_str = strprintf("%d.%d.%d.%d",
                                    addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
 
-    // Prevent self-connection: check if target is our own listen address
-    if (m_options.fListen && addr.port == m_options.nListenPort) {
-        // Check if connecting to our own IP (or localhost)
-        if (IsOurAddress(addr)) {
-            LogPrintf(NET, WARN, "[CConnman] Preventing self-connection to %s:%d\n",
-                      ip_str.c_str(), addr.port);
-            return nullptr;
-        }
+    // Prevent self-connection: check if target is our own IP (any port)
+    // This prevents connecting to ourselves even on non-listen ports (from addr gossip)
+    if (IsOurAddress(addr)) {
+        LogPrintf(NET, WARN, "[CConnman] Preventing self-connection to %s:%d\n",
+                  ip_str.c_str(), addr.port);
+        return nullptr;
     }
 
     // Check connection limits

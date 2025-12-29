@@ -1167,8 +1167,19 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
 
 void CPeerManager::OnPeerDisconnected(int peer_id)
 {
-    // Re-queue any in-flight blocks from this peer
+    // Re-queue any in-flight blocks from this peer (legacy tracking)
     GetAndClearPeerBlocks(peer_id);
+
+    // SSOT: Also notify CBlockTracker to clear this peer's blocks
+    // This prevents "no suitable peers" stalls from stale in-flight blocks
+    if (g_node_context.block_tracker) {
+        auto heights = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
+        if (!heights.empty()) {
+            std::cout << "[BLOCK-TRACKER] Cleared " << heights.size()
+                      << " in-flight blocks from disconnected peer " << peer_id << std::endl;
+        }
+    }
+
     // The actual peer removal is handled by RemovePeer()
 }
 
