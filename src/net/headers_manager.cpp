@@ -1880,9 +1880,9 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
     // Don't wait for validation - keep the pipeline full
     int peer_height = GetPeerStartHeight(peer);
     if (peer_height > 0) {
-        // Update expected height based on what we just received
+        // Update received height tracking (capped at peer's actual height)
         int current_requested = m_headers_requested_height.load();
-        int new_requested = current_requested + static_cast<int>(header_count);
+        int new_requested = std::min(current_requested + static_cast<int>(header_count), peer_height);
         m_headers_requested_height.store(new_requested);
 
         // Request more if peer has more, using last received header as start point
