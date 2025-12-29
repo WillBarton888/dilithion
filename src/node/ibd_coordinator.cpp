@@ -107,10 +107,8 @@ void CIbdCoordinator::Tick() {
         auto now_catchup = std::chrono::steady_clock::now();
 
         // Rate limit: only check for catchup every 2 seconds to prevent spam
-        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_catchup - last_catchup_request).count();
         if (now_catchup - last_catchup_request > std::chrono::seconds(2)) {
-            std::cerr << "[RATE-DEBUG] Passed rate limit, elapsed=" << elapsed_ms << "ms" << std::endl;
-            last_catchup_request = now_catchup;  // Update FIRST to prevent spam
+            last_catchup_request = now_catchup;  // Update FIRST to guarantee rate limit
             if (m_node_context.peer_manager && m_node_context.headers_manager) {
                 auto peers = m_node_context.peer_manager->GetConnectedPeers();
                 int best_peer = -1;
