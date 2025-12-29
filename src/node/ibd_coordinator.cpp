@@ -314,10 +314,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // This catches the case where we're on a stale fork IMMEDIATELY, without
     // waiting for stall detection. Critical for nodes that synced to a fork.
     if (chain_height > 0 && m_node_context.headers_manager && !m_fork_detected.load()) {
-        uint256 our_tip_hash = m_chainstate.GetTipHash();
-        uint256 header_hash_at_our_height = m_node_context.headers_manager->GetBestChainHashAtHeight(chain_height);
+        CBlockIndex* tip = m_chainstate.GetTip();
+        if (tip) {  // Only check if we have a valid tip
+            uint256 our_tip_hash = tip->GetBlockHash();
+            uint256 header_hash_at_our_height = m_node_context.headers_manager->GetRandomXHashAtHeight(chain_height);
 
-        if (!header_hash_at_our_height.IsNull() && our_tip_hash != header_hash_at_our_height) {
+            if (!header_hash_at_our_height.IsNull() && !our_tip_hash.IsNull() && our_tip_hash != header_hash_at_our_height) {
             // CHAIN MISMATCH: Our tip doesn't match the header chain at the same height
             // This means we're on a fork - trigger immediate detection
             std::cout << "\n[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
@@ -357,6 +359,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             } else {
                 std::cout << "[FORK-DETECT] Could not find fork point (fork_point=" << fork_point << ")" << std::endl;
                 std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
+            }
             }
         }
     }
