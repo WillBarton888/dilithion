@@ -1871,14 +1871,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // BUG #62 FIX: Request headers when peer announces unknown blocks
-            // This ensures we get the FULL chain (all intermediate blocks), not just
-            // Header requests are managed by IBD coordinator (single sync peer).
-            // Don't request headers from INV handler - causes racing.
+            // Use TriggerHeaderPrefetch for dedup (won't request if already requested up to peer height)
             if (hasUnknownBlocks && g_node_context.headers_manager) {
-                std::cout << "[P2P] Unknown blocks announced by peer " << peer_id
-                          << " , requesting headers" << std::endl;
-                g_node_context.headers_manager->RequestHeaders(peer_id,
-                    g_node_context.headers_manager->GetBestHeaderHash());
+                int peer_height = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
+                if (peer_height > 0) {
+                    g_node_context.headers_manager->TriggerHeaderPrefetch(peer_id, peer_height);
+                }
             }
 
             // DISABLED: Legacy inv-based block requests

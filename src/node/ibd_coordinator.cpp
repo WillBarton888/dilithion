@@ -109,10 +109,12 @@ void CIbdCoordinator::Tick() {
                     }
                 }
 
-                // If a peer has more blocks, switch to them and request headers
-                if (best_peer != -1 && best_height > header_height) {
+                // If a peer has more blocks than we've REQUESTED, request more
+                // Use GetRequestedHeight() not GetBestHeight() to avoid duplicate requests
+                int requested_height = m_node_context.headers_manager->GetRequestedHeight();
+                if (best_peer != -1 && best_height > requested_height) {
                     std::cout << "[IBD] Peer " << best_peer << " has more blocks (height="
-                              << best_height << " > our headers=" << header_height
+                              << best_height << " > requested=" << requested_height
                               << "), requesting headers" << std::endl;
                     m_headers_sync_peer = best_peer;
                     m_node_context.headers_manager->RequestHeaders(best_peer,
