@@ -379,7 +379,7 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
 void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
 {
-    // No throttle needed - TriggerHeaderPrefetch handles dedup via m_headers_requested_height
+    // No throttle needed - SyncHeadersFromPeer handles dedup via m_headers_requested_height
     // Build locator and send request
 
     std::vector<uint256> locator;
@@ -403,34 +403,37 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 }
 
-void CHeadersManager::TriggerHeaderPrefetch(NodeId peer, int peer_height, const uint256& last_received_hash)
+bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height)
 {
-    // PIPELINE OPTIMIZATION: Request next headers batch immediately on RECEIPT
-    // Don't wait for validation - keep the pipeline full
+    // SSOT: Single entry point for all header requests
+    // Handles dedup, correct locator hash, and tracking
 
     int requested = m_headers_requested_height.load();
-    int validated = GetBestHeight();
 
-    // Only request if peer has more headers than we've requested
-    if (peer_height > requested) {
-        // Calculate target: don't get too far ahead of validated (keep pipeline manageable)
-        // Use requested (what we have) + 2000 (next batch), not validated + 2000
-        int expected_new_height = std::min(peer_height, requested + 2000);
-
-        // CRITICAL: Never regress - only update if we're actually advancing
-        if (expected_new_height > requested) {
-            m_headers_requested_height.store(expected_new_height);
-
-            std::cout << "[IBD-PREFETCH] Requesting headers (validated=" << validated
-                      << ", requested=" << requested << " -> " << expected_new_height
-                      << ", peer_height=" << peer_height << ")" << std::endl;
-
-            // Use last_received_hash if provided (for pipelining before validation),
-            // otherwise fall back to validated best header
-            uint256 request_from = last_received_hash.IsNull() ? GetBestHeaderHash() : last_received_hash;
-            RequestHeaders(peer, request_from);
-        }
+    // Already requested up to peer's height? Skip.
+    if (peer_height <= requested) {
+        return false;
     }
+
+    // Calculate target (cap at requested + 2000 to limit pipeline depth)
+    int expected_new_height = std::min(peer_height, requested + 2000);
+
+    // Update tracking BEFORE sending request (prevents duplicate requests)
+    m_headers_requested_height.store(expected_new_height);
+
+    // Use last request hash if we have one, otherwise validated tip
+    // m_last_request_hash is updated by QueueRawHeadersForProcessing when headers arrive
+    uint256 request_from;
+    {
+        std::lock_guard<std::mutex> lock(cs_headers);
+        request_from = m_last_request_hash.IsNull() ? hashBestHeader : m_last_request_hash;
+    }
+
+    std::cout << "[IBD-SYNC] Requesting headers (requested=" << requested
+              << " -> " << expected_new_height << ", peer_height=" << peer_height << ")" << std::endl;
+
+    RequestHeaders(peer, request_from);
+    return true;
 }
 
 void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256& hash)
@@ -1879,12 +1882,16 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
     // PIPELINE OPTIMIZATION: Immediately request NEXT batch of headers
     // Don't wait for validation - keep the pipeline full
     //
-    // NOTE: We do NOT update m_headers_requested_height here.
-    // TriggerHeaderPrefetch tracks what we've REQUESTED (to prevent duplicates).
-    // It updates m_headers_requested_height when it sends a request.
+    // SSOT: Update m_last_request_hash so SyncHeadersFromPeer uses correct locator
+    {
+        std::lock_guard<std::mutex> lock(cs_headers);
+        m_last_request_hash = last_header_hash;
+    }
+
+    // Request more headers if peer has more (single entry point)
     int peer_height = GetPeerStartHeight(peer);
     if (peer_height > 0) {
-        TriggerHeaderPrefetch(peer, peer_height, last_header_hash);
+        SyncHeadersFromPeer(peer, peer_height);
     }
 
     return true;

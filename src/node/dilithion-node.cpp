@@ -1871,11 +1871,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // BUG #62 FIX: Request headers when peer announces unknown blocks
-            // Use TriggerHeaderPrefetch for dedup (won't request if already requested up to peer height)
+            // SSOT: Use SyncHeadersFromPeer - handles all dedup internally
             if (hasUnknownBlocks && g_node_context.headers_manager) {
                 int peer_height = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
                 if (peer_height > 0) {
-                    g_node_context.headers_manager->TriggerHeaderPrefetch(peer_id, peer_height);
+                    g_node_context.headers_manager->SyncHeadersFromPeer(peer_id, peer_height);
                 }
             }
 

@@ -297,15 +297,18 @@ public:
     void SetRequestedHeight(int height) { m_headers_requested_height.store(height); }
 
     /**
-     * @brief Trigger prefetch of next headers batch if peer has more
+     * @brief Single entry point for requesting headers from a peer (SSOT)
      *
-     * Called immediately when headers are RECEIVED (before validation).
-     * This creates a pipeline: request N+1 while validating N.
+     * All header requests go through this function. It handles:
+     * - Deduplication (won't request if already requested up to peer_height)
+     * - Correct locator hash (uses m_last_request_hash, not validated tip)
+     * - Tracking (updates m_headers_requested_height)
      *
      * @param peer Peer to request from
      * @param peer_height Peer's advertised height
+     * @return true if a request was sent, false if skipped (already requested)
      */
-    void TriggerHeaderPrefetch(NodeId peer, int peer_height, const uint256& last_received_hash = uint256());
+    bool SyncHeadersFromPeer(NodeId peer, int peer_height);
 
     /**
      * @brief Get header by hash
@@ -575,6 +578,7 @@ private:
 
     // Header prefetch tracking (for pipeline efficiency)
     std::atomic<int> m_headers_requested_height{0};  ///< Highest height we've REQUESTED (not yet received)
+    uint256 m_last_request_hash;                     ///< Hash we last requested FROM (for locator) - protected by cs_headers
 
     // Bug #46 Fix: Track multiple chain tips for competing chains
     std::set<uint256> setChainTips;         ///< All known chain tips (leaves in tree)

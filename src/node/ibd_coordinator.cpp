@@ -72,14 +72,16 @@ void CIbdCoordinator::Tick() {
         int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
 
         if (!m_initial_request_done && header_height == 0 && peer_height > 0) {
-            // Initial request - we have no headers, kick off the pipeline
+            // Initial request - kick off the pipeline via SSOT entry point
             m_initial_request_done = true;
             std::cout << "[IBD] Initial header request from sync peer " << m_headers_sync_peer
                       << " (peer_height=" << peer_height << ")" << std::endl;
-            RequestHeadersFromSyncPeer();
+            if (m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer, peer_height)) {
+                m_headers_in_flight = true;
+            }
         }
         // Note: Subsequent header requests are triggered by headers_manager's
-        // TriggerHeaderPrefetch() when headers are RECEIVED (not validated).
+        // SyncHeadersFromPeer() when headers are RECEIVED (not validated).
         // This creates a pipeline where we request batch N+1 while validating batch N.
     }
 
@@ -109,17 +111,10 @@ void CIbdCoordinator::Tick() {
                     }
                 }
 
-                // If a peer has more blocks than we've REQUESTED, request more
-                // Use GetRequestedHeight() not GetBestHeight() to avoid duplicate requests
-                int requested_height = m_node_context.headers_manager->GetRequestedHeight();
-                if (best_peer != -1 && best_height > requested_height) {
-                    std::cout << "[IBD] Peer " << best_peer << " has more blocks (height="
-                              << best_height << " > requested=" << requested_height
-                              << "), requesting headers" << std::endl;
+                // SSOT: Just ask HeadersManager to sync - it handles all dedup internally
+                if (best_peer != -1) {
                     m_headers_sync_peer = best_peer;
-                    m_node_context.headers_manager->RequestHeaders(best_peer,
-                        m_node_context.headers_manager->GetBestHeaderHash());
-                    // Note: timestamp already updated at start of rate-limit block
+                    m_node_context.headers_manager->SyncHeadersFromPeer(best_peer, best_height);
                 }
             }
         }
@@ -931,31 +926,12 @@ void CIbdCoordinator::SwitchHeadersSyncPeer() {
     if (m_headers_sync_peer != -1 && m_headers_sync_peer != old_peer) {
         std::cout << "[IBD] Switched headers sync peer: " << old_peer
                   << " -> " << m_headers_sync_peer << std::endl;
-        // Immediately request headers from new peer
-        RequestHeadersFromSyncPeer();
-    }
-}
-
-void CIbdCoordinator::RequestHeadersFromSyncPeer() {
-    if (m_headers_sync_peer == -1 || !m_node_context.headers_manager) {
-        return;
-    }
-
-    // Get our best header hash for the request
-    uint256 bestHeaderHash = m_node_context.headers_manager->GetBestHeaderHash();
-    if (bestHeaderHash.IsNull()) {
-        // No headers yet, use genesis
-        if (Dilithion::g_chainParams) {
-            bestHeaderHash.SetHex(Dilithion::g_chainParams->genesisHash);
+        // SSOT: Request headers via single entry point
+        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+        if (m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer, peer_height)) {
+            m_headers_in_flight = true;
         }
     }
-
-    std::cout << "[IBD] Requesting headers from sync peer " << m_headers_sync_peer << std::endl;
-    m_node_context.headers_manager->RequestHeaders(m_headers_sync_peer, bestHeaderHash);
-
-    // FIX 2: Mark headers as in-flight to prevent block requests to this peer
-    // Block requests would queue behind headers and timeout
-    m_headers_in_flight = true;
 }
 
 

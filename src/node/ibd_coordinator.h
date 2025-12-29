@@ -92,7 +92,6 @@ private:
     void SelectHeadersSyncPeer();           // Pick a sync peer if none selected
     bool CheckHeadersSyncProgress();        // Check if sync peer is making progress
     void SwitchHeadersSyncPeer();           // Switch to a different peer
-    void RequestHeadersFromSyncPeer();      // Request headers from current sync peer
 
     // IBD HANG FIX #6: Hang cause tracking
     enum class HangCause {
