@@ -796,6 +796,10 @@ void CHeadersManager::Clear()
     setChainTips.clear();
     m_chainTipsTracker.Clear();
     InvalidateBestChainCache();
+
+    // Reset request tracking state (critical for resync after fork)
+    m_headers_requested_height.store(0);
+    m_last_request_hash = uint256();
 }
 
 // ============================================================================
