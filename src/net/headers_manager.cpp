@@ -394,7 +394,7 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 }
 
-void CHeadersManager::TriggerHeaderPrefetch(NodeId peer, int peer_height)
+void CHeadersManager::TriggerHeaderPrefetch(NodeId peer, int peer_height, const uint256& last_received_hash)
 {
     // PIPELINE OPTIMIZATION: Request next headers batch immediately on RECEIPT
     // Don't wait for validation - keep the pipeline full
@@ -416,7 +416,10 @@ void CHeadersManager::TriggerHeaderPrefetch(NodeId peer, int peer_height)
                       << ", requested=" << requested << " -> " << expected_new_height
                       << ", peer_height=" << peer_height << ")" << std::endl;
 
-            RequestHeaders(peer, GetBestHeaderHash());
+            // Use last_received_hash if provided (for pipelining before validation),
+            // otherwise fall back to validated best header
+            uint256 request_from = last_received_hash.IsNull() ? GetBestHeaderHash() : last_received_hash;
+            RequestHeaders(peer, request_from);
         }
     }
 }
@@ -1843,7 +1846,7 @@ void CHeadersManager::ValidationWorkerThread()
 bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlockHeader> headers)
 {
     // Instant return - just queue the headers for background processing
-    // P2P thread doesn't compute any hashes here
+    // P2P thread only computes ONE hash (for prefetch locator)
 
     if (headers.empty()) {
         return true;
@@ -1852,6 +1855,10 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
     size_t header_count = headers.size();
     std::cout << "[HeadersManager] Queueing " << header_count
               << " raw headers from peer " << peer << " for async processing" << std::endl;
+
+    // PIPELINE: Get last header's hash BEFORE moving for prefetch locator
+    // This is the only hash computed in P2P thread (1 hash vs 2000)
+    uint256 last_header_hash = headers.back().GetHash();
 
     {
         std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
@@ -1869,8 +1876,8 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
         int new_requested = current_requested + static_cast<int>(header_count);
         m_headers_requested_height.store(new_requested);
 
-        // Request more if peer has more
-        TriggerHeaderPrefetch(peer, peer_height);
+        // Request more if peer has more, using last received header as start point
+        TriggerHeaderPrefetch(peer, peer_height, last_header_hash);
     }
 
     return true;

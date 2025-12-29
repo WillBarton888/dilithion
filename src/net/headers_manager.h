@@ -305,7 +305,7 @@ public:
      * @param peer Peer to request from
      * @param peer_height Peer's advertised height
      */
-    void TriggerHeaderPrefetch(NodeId peer, int peer_height);
+    void TriggerHeaderPrefetch(NodeId peer, int peer_height, const uint256& last_received_hash = uint256());
 
     /**
      * @brief Get header by hash
