@@ -274,11 +274,38 @@ public:
     uint256 GetBestHeaderHash() const;
 
     /**
-     * @brief Get best header height
+     * @brief Get best header height (VALIDATED headers)
      *
-     * @return Height of best header chain
+     * @return Height of best validated header chain
      */
     int GetBestHeight() const;
+
+    /**
+     * @brief Get highest header height we've REQUESTED (not yet received/validated)
+     *
+     * Used for header prefetch pipeline - request next batch before current completes.
+     *
+     * @return Height of highest requested headers
+     */
+    int GetRequestedHeight() const { return m_headers_requested_height.load(); }
+
+    /**
+     * @brief Update the requested height after sending GETHEADERS
+     *
+     * @param height New requested height
+     */
+    void SetRequestedHeight(int height) { m_headers_requested_height.store(height); }
+
+    /**
+     * @brief Trigger prefetch of next headers batch if peer has more
+     *
+     * Called immediately when headers are RECEIVED (before validation).
+     * This creates a pipeline: request N+1 while validating N.
+     *
+     * @param peer Peer to request from
+     * @param peer_height Peer's advertised height
+     */
+    void TriggerHeaderPrefetch(NodeId peer, int peer_height);
 
     /**
      * @brief Get header by hash
@@ -544,7 +571,10 @@ private:
 
     // Best header tracking
     uint256 hashBestHeader;                 ///< Hash of best header (most work)
-    int nBestHeight;                        ///< Height of best header
+    int nBestHeight;                        ///< Height of best header (VALIDATED)
+
+    // Header prefetch tracking (for pipeline efficiency)
+    std::atomic<int> m_headers_requested_height{0};  ///< Highest height we've REQUESTED (not yet received)
 
     // Bug #46 Fix: Track multiple chain tips for competing chains
     std::set<uint256> setChainTips;         ///< All known chain tips (leaves in tree)

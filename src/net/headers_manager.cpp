@@ -379,9 +379,6 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
 void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
 {
-    // Header requests are coordinated by IBD coordinator's prefetch logic
-    // which triggers at chain milestones (1000, 3000, 5000...).
-
     // THROTTLE: Don't send header requests if we have no headers yet AND batches pending
     // This prevents flooding with duplicate requests during initial async header processing.
     // But once we have headers (nBestHeight > 0), allow requests for NEW headers.
@@ -396,23 +393,41 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 
     // Build locator (holds cs_headers briefly, DOES NOT access blockchain)
-    std::cout << "[IBD] RequestHeaders: Building locator..." << std::flush;
     std::vector<uint256> locator = GetLocator(hashStart);
-    std::cout << " done (size=" << locator.size() << ")" << std::endl;
-    // cs_headers is now released
 
     // Send message (no locks held - safe for network I/O)
-    // BUG #143 FIX: Use g_node_context.connman instead of deprecated g_connection_manager
     auto* connman = g_node_context.connman.get();
     auto* msg_proc = g_message_processor.load();
     if (connman && msg_proc) {
         NetProtocol::CGetHeadersMessage msg(locator, uint256());
         CNetMessage getheaders = msg_proc->CreateGetHeadersMessage(msg);
         connman->PushMessage(peer, getheaders);
-        std::cout << "[IBD] RequestHeaders: PushMessage(" << peer << ") GETHEADERS (locator size=" << locator.size() << ")" << std::endl;
-    } else {
-        std::cout << "[IBD] RequestHeaders: FAILED - connman=" << (connman ? "valid" : "null")
-                  << " msg_proc=" << (msg_proc ? "valid" : "null") << std::endl;
+        std::cout << "[IBD] RequestHeaders: Sent GETHEADERS to peer " << peer << std::endl;
+    }
+}
+
+void CHeadersManager::TriggerHeaderPrefetch(NodeId peer, int peer_height)
+{
+    // PIPELINE OPTIMIZATION: Request next headers batch immediately on RECEIPT
+    // Don't wait for validation - keep the pipeline full
+
+    int requested = m_headers_requested_height.load();
+    int validated = GetBestHeight();
+
+    // Only request if:
+    // 1. Peer has more headers than we've requested
+    // 2. We haven't already requested up to peer's height
+    if (peer_height > requested) {
+        // Update requested height BEFORE sending (prevents duplicate requests)
+        // We're requesting headers starting from our current best, peer will send up to 2000
+        int expected_new_height = std::min(peer_height, validated + 2000);
+        m_headers_requested_height.store(expected_new_height);
+
+        std::cout << "[IBD-PREFETCH] Requesting headers (validated=" << validated
+                  << ", requested=" << requested << " -> " << expected_new_height
+                  << ", peer_height=" << peer_height << ")" << std::endl;
+
+        RequestHeaders(peer, GetBestHeaderHash());
     }
 }
 
@@ -1844,7 +1859,8 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
         return true;
     }
 
-    std::cout << "[HeadersManager] Queueing " << headers.size()
+    size_t header_count = headers.size();
+    std::cout << "[HeadersManager] Queueing " << header_count
               << " raw headers from peer " << peer << " for async processing" << std::endl;
 
     {
@@ -1853,6 +1869,20 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
     }
 
     m_raw_queue_cv.notify_one();
+
+    // PIPELINE OPTIMIZATION: Immediately request NEXT batch of headers
+    // Don't wait for validation - keep the pipeline full
+    int peer_height = GetPeerStartHeight(peer);
+    if (peer_height > 0) {
+        // Update expected height based on what we just received
+        int current_requested = m_headers_requested_height.load();
+        int new_requested = current_requested + static_cast<int>(header_count);
+        m_headers_requested_height.store(new_requested);
+
+        // Request more if peer has more
+        TriggerHeaderPrefetch(peer, peer_height);
+    }
+
     return true;
 }
 

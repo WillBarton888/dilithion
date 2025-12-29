@@ -66,35 +66,21 @@ void CIbdCoordinator::Tick() {
         SwitchHeadersSyncPeer();
     }
 
-    // 3. Request headers if needed (peer has more than we have)
+    // 3. Request initial headers if we have none
+    // PIPELINE: After initial request, headers_manager handles prefetch on RECEIPT
     if (m_headers_sync_peer != -1) {
         int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
 
-        // Request headers at milestones: initial (chain=0), then 1000, 3000, 5000...
-        // After initial batch of ~2000 headers, wait until chain reaches 1000 before requesting more
-        // Issue #11 FIX: Using member variables instead of static
-
-        bool should_request = false;
         if (!m_initial_request_done && header_height == 0 && peer_height > 0) {
-            // Initial request - we have no headers
-            should_request = true;
+            // Initial request - we have no headers, kick off the pipeline
             m_initial_request_done = true;
-        } else if (peer_height > header_height) {
-            // Request next headers when chain is within 1000 blocks of header tip
-            // This gives ~90 seconds for RandomX processing while blocks download
-            int headers_ahead = header_height - chain_height;
-            if (headers_ahead < 1000 && header_height > m_last_request_trigger) {
-                should_request = true;
-                m_last_request_trigger = header_height;
-            }
-        }
-
-        if (should_request) {
-            std::cout << "[IBD] Chain at " << chain_height
-                      << ", headers at " << header_height
-                      << ", requesting from sync peer " << m_headers_sync_peer << std::endl;
+            std::cout << "[IBD] Initial header request from sync peer " << m_headers_sync_peer
+                      << " (peer_height=" << peer_height << ")" << std::endl;
             RequestHeadersFromSyncPeer();
         }
+        // Note: Subsequent header requests are triggered by headers_manager's
+        // TriggerHeaderPrefetch() when headers are RECEIVED (not validated).
+        // This creates a pipeline where we request batch N+1 while validating batch N.
     }
 
     // =========================================================================
