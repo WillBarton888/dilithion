@@ -226,6 +226,12 @@ CNetMessageProcessor::CNetMessageProcessor(CPeerManager& peer_mgr)
     on_tx = [](int, const CTransaction&) {};
     on_getheaders = [](int, const NetProtocol::CGetHeadersMessage&) {};
     on_headers = [](int, const std::vector<CBlockHeader>&) {};
+    on_sendheaders = [](int) {};  // BIP 130
+    // BIP 152: Compact block handlers
+    on_sendcmpct = [](int, bool, uint64_t) {};
+    on_cmpctblock = [](int, const CBlockHeaderAndShortTxIDs&) {};
+    on_getblocktxn = [](int, const BlockTransactionsRequest&) {};
+    on_blocktxn = [](int, const BlockTransactions&) {};
 }
 
 bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& message) {
@@ -259,6 +265,11 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         {"getblocks",  {36, 8236}},                  // Similar to getheaders
         {"mempool",    {0, 0}},                      // Empty message
         {"reject",     {1, 1024}},                   // Variable, max 1KB for reject messages
+        {"sendheaders", {0, 0}},                     // BIP 130: Empty message (signal only)
+        {"sendcmpct", {9, 9}},                       // BIP 152: bool (1) + uint64_t (8) = 9 bytes
+        {"cmpctblock", {88, 8 * 1024 * 1024}},       // BIP 152: Header + short IDs (min 88 bytes header)
+        {"getblocktxn", {33, 50000 * 4 + 33}},       // BIP 152: block hash + varint + indices
+        {"blocktxn",   {33, 8 * 1024 * 1024}},       // BIP 152: block hash + transactions
     };
 
     auto it = size_limits.find(command);
@@ -311,6 +322,14 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         return ProcessHeadersMessage(peer_id, stream);
     } else if (command == "sendheaders") {
         return ProcessSendHeadersMessage(peer_id);  // BIP 130
+    } else if (command == "sendcmpct") {
+        return ProcessSendCmpctMessage(peer_id, stream);  // BIP 152
+    } else if (command == "cmpctblock") {
+        return ProcessCmpctBlockMessage(peer_id, stream);  // BIP 152
+    } else if (command == "getblocktxn") {
+        return ProcessGetBlockTxnMessage(peer_id, stream);  // BIP 152
+    } else if (command == "blocktxn") {
+        return ProcessBlockTxnMessage(peer_id, stream);  // BIP 152
     }
 
     // Unknown message type
@@ -1224,6 +1243,286 @@ bool CNetMessageProcessor::ProcessSendHeadersMessage(int peer_id) {
     return true;
 }
 
+// BIP 152: sendcmpct message
+bool CNetMessageProcessor::ProcessSendCmpctMessage(int peer_id, CDataStream& stream) {
+    try {
+        // sendcmpct payload: bool high_bandwidth + uint64_t version
+        uint8_t high_bandwidth_byte = stream.ReadUint8();
+        bool high_bandwidth = (high_bandwidth_byte != 0);
+        uint64_t version = stream.ReadUint64();
+
+        // BIP 152 only supports version 1 (version 2 is for segwit, not applicable to Dilithion)
+        if (version != 1) {
+            std::cout << "[P2P] Peer " << peer_id << " sent sendcmpct with unsupported version "
+                      << version << " (expected 1)" << std::endl;
+            return true;  // Ignore but don't disconnect
+        }
+
+        std::cout << "[BIP152] Peer " << peer_id << " sent sendcmpct (high_bandwidth="
+                  << (high_bandwidth ? "true" : "false") << ", version=" << version << ")" << std::endl;
+
+        // Call handler to update peer preference
+        if (on_sendcmpct) {
+            on_sendcmpct(peer_id, high_bandwidth, version);
+        }
+
+        return true;
+    } catch (const std::out_of_range& e) {
+        std::cout << "[P2P] ERROR: SENDCMPCT message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: SENDCMPCT message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+// BIP 152: cmpctblock message
+bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& stream) {
+    try {
+        CBlockHeaderAndShortTxIDs cmpctblock;
+
+        // Deserialize header
+        cmpctblock.header.nVersion = stream.ReadInt32();
+        cmpctblock.header.hashPrevBlock = stream.ReadUint256();
+        cmpctblock.header.hashMerkleRoot = stream.ReadUint256();
+        cmpctblock.header.nTime = stream.ReadUint32();
+        cmpctblock.header.nBits = stream.ReadUint32();
+        cmpctblock.header.nNonce = stream.ReadUint32();
+
+        // Nonce for short ID calculation
+        cmpctblock.nonce = stream.ReadUint64();
+
+        // Initialize short ID keys from header and nonce
+        cmpctblock.InitializeShortIdKeys();
+
+        // Read prefilled transactions
+        uint64_t prefilled_count = stream.ReadCompactSize();
+        if (prefilled_count > 10000) {  // Sanity limit
+            std::cout << "[P2P] ERROR: CMPCTBLOCK with too many prefilled txs from peer "
+                      << peer_id << std::endl;
+            peer_manager.Misbehaving(peer_id, 100);
+            return false;
+        }
+
+        cmpctblock.prefilledtxn.reserve(prefilled_count);
+        for (uint64_t i = 0; i < prefilled_count; i++) {
+            PrefilledTransaction ptx;
+            ptx.index = static_cast<uint16_t>(stream.ReadCompactSize());
+
+            // Deserialize transaction
+            ptx.tx.nVersion = stream.ReadInt32();
+
+            // Read inputs
+            uint64_t vin_size = stream.ReadCompactSize();
+            if (vin_size > 10000) {
+                throw std::runtime_error("Too many tx inputs");
+            }
+            ptx.tx.vin.resize(vin_size);
+            for (uint64_t j = 0; j < vin_size; j++) {
+                ptx.tx.vin[j].prevout.hash = stream.ReadUint256();
+                ptx.tx.vin[j].prevout.n = stream.ReadUint32();
+                uint64_t script_size = stream.ReadCompactSize();
+                if (script_size > 10000) throw std::runtime_error("Script too large");
+                ptx.tx.vin[j].scriptSig.resize(script_size);
+                if (script_size > 0) {
+                    stream.read(ptx.tx.vin[j].scriptSig.data(), script_size);
+                }
+                ptx.tx.vin[j].nSequence = stream.ReadUint32();
+            }
+
+            // Read outputs
+            uint64_t vout_size = stream.ReadCompactSize();
+            if (vout_size > 10000) {
+                throw std::runtime_error("Too many tx outputs");
+            }
+            ptx.tx.vout.resize(vout_size);
+            for (uint64_t j = 0; j < vout_size; j++) {
+                ptx.tx.vout[j].nValue = stream.ReadUint64();
+                uint64_t script_size = stream.ReadCompactSize();
+                if (script_size > 10000) throw std::runtime_error("Script too large");
+                ptx.tx.vout[j].scriptPubKey.resize(script_size);
+                if (script_size > 0) {
+                    stream.read(ptx.tx.vout[j].scriptPubKey.data(), script_size);
+                }
+            }
+
+            ptx.tx.nLockTime = stream.ReadUint32();
+            cmpctblock.prefilledtxn.push_back(std::move(ptx));
+        }
+
+        // Read short IDs (6 bytes each)
+        uint64_t shortid_count = stream.ReadCompactSize();
+        if (shortid_count > 100000) {  // Sanity limit
+            std::cout << "[P2P] ERROR: CMPCTBLOCK with too many short IDs from peer "
+                      << peer_id << std::endl;
+            peer_manager.Misbehaving(peer_id, 100);
+            return false;
+        }
+
+        cmpctblock.shorttxids.reserve(shortid_count);
+        for (uint64_t i = 0; i < shortid_count; i++) {
+            // Short IDs are 6 bytes, stored as uint64_t with upper 2 bytes zeroed
+            uint8_t shortid_bytes[6];
+            stream.read(shortid_bytes, 6);
+            uint64_t shortid = 0;
+            for (int j = 0; j < 6; j++) {
+                shortid |= (static_cast<uint64_t>(shortid_bytes[j]) << (j * 8));
+            }
+            cmpctblock.shorttxids.push_back(shortid);
+        }
+
+        std::cout << "[BIP152] Received CMPCTBLOCK from peer " << peer_id
+                  << " (hash=" << cmpctblock.header.GetHash().GetHex().substr(0, 16)
+                  << "..., prefilled=" << cmpctblock.prefilledtxn.size()
+                  << ", shorttxids=" << cmpctblock.shorttxids.size() << ")" << std::endl;
+
+        // Call handler for block reconstruction
+        if (on_cmpctblock) {
+            on_cmpctblock(peer_id, cmpctblock);
+        }
+
+        return true;
+    } catch (const std::out_of_range& e) {
+        std::cout << "[P2P] ERROR: CMPCTBLOCK message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: CMPCTBLOCK message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+// BIP 152: getblocktxn message
+bool CNetMessageProcessor::ProcessGetBlockTxnMessage(int peer_id, CDataStream& stream) {
+    try {
+        BlockTransactionsRequest req;
+
+        // Read block hash
+        req.blockhash = stream.ReadUint256();
+
+        // Read requested indices
+        uint64_t index_count = stream.ReadCompactSize();
+        if (index_count > 50000) {  // Sanity limit
+            std::cout << "[P2P] ERROR: GETBLOCKTXN with too many indices from peer "
+                      << peer_id << std::endl;
+            peer_manager.Misbehaving(peer_id, 100);
+            return false;
+        }
+
+        req.indices.reserve(index_count);
+        for (uint64_t i = 0; i < index_count; i++) {
+            req.indices.push_back(static_cast<uint16_t>(stream.ReadCompactSize()));
+        }
+
+        std::cout << "[BIP152] Received GETBLOCKTXN from peer " << peer_id
+                  << " (block=" << req.blockhash.GetHex().substr(0, 16)
+                  << "..., " << req.indices.size() << " txns requested)" << std::endl;
+
+        // Call handler to serve requested transactions
+        if (on_getblocktxn) {
+            on_getblocktxn(peer_id, req);
+        }
+
+        return true;
+    } catch (const std::out_of_range& e) {
+        std::cout << "[P2P] ERROR: GETBLOCKTXN message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: GETBLOCKTXN message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+// BIP 152: blocktxn message
+bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stream) {
+    try {
+        BlockTransactions resp;
+
+        // Read block hash
+        resp.blockhash = stream.ReadUint256();
+
+        // Read transactions
+        uint64_t tx_count = stream.ReadCompactSize();
+        if (tx_count > 100000) {  // Sanity limit
+            std::cout << "[P2P] ERROR: BLOCKTXN with too many transactions from peer "
+                      << peer_id << std::endl;
+            peer_manager.Misbehaving(peer_id, 100);
+            return false;
+        }
+
+        resp.txn.reserve(tx_count);
+        for (uint64_t i = 0; i < tx_count; i++) {
+            CTransaction tx;
+            tx.nVersion = stream.ReadInt32();
+
+            // Read inputs
+            uint64_t vin_size = stream.ReadCompactSize();
+            if (vin_size > 10000) {
+                throw std::runtime_error("Too many tx inputs");
+            }
+            tx.vin.resize(vin_size);
+            for (uint64_t j = 0; j < vin_size; j++) {
+                tx.vin[j].prevout.hash = stream.ReadUint256();
+                tx.vin[j].prevout.n = stream.ReadUint32();
+                uint64_t script_size = stream.ReadCompactSize();
+                if (script_size > 10000) throw std::runtime_error("Script too large");
+                tx.vin[j].scriptSig.resize(script_size);
+                if (script_size > 0) {
+                    stream.read(tx.vin[j].scriptSig.data(), script_size);
+                }
+                tx.vin[j].nSequence = stream.ReadUint32();
+            }
+
+            // Read outputs
+            uint64_t vout_size = stream.ReadCompactSize();
+            if (vout_size > 10000) {
+                throw std::runtime_error("Too many tx outputs");
+            }
+            tx.vout.resize(vout_size);
+            for (uint64_t j = 0; j < vout_size; j++) {
+                tx.vout[j].nValue = stream.ReadUint64();
+                uint64_t script_size = stream.ReadCompactSize();
+                if (script_size > 10000) throw std::runtime_error("Script too large");
+                tx.vout[j].scriptPubKey.resize(script_size);
+                if (script_size > 0) {
+                    stream.read(tx.vout[j].scriptPubKey.data(), script_size);
+                }
+            }
+
+            tx.nLockTime = stream.ReadUint32();
+            resp.txn.push_back(std::move(tx));
+        }
+
+        std::cout << "[BIP152] Received BLOCKTXN from peer " << peer_id
+                  << " (block=" << resp.blockhash.GetHex().substr(0, 16)
+                  << "..., " << resp.txn.size() << " txns)" << std::endl;
+
+        // Call handler to complete block reconstruction
+        if (on_blocktxn) {
+            on_blocktxn(peer_id, resp);
+        }
+
+        return true;
+    } catch (const std::out_of_range& e) {
+        std::cout << "[P2P] ERROR: BLOCKTXN message truncated from peer " << peer_id << std::endl;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        std::cout << "[P2P] ERROR: BLOCKTXN message parsing failed from peer " << peer_id
+                  << ": " << e.what() << std::endl;
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
 // Create messages
 
 CNetMessage CNetMessageProcessor::CreateVersionMessage(const NetProtocol::CAddress& addr_recv, const NetProtocol::CAddress& addr_from) {
@@ -1434,6 +1733,145 @@ CNetMessage CNetMessageProcessor::CreateSendHeadersMessage() {
     g_network_stats.bytes_sent += 24;  // Just the header, no payload
 
     return CNetMessage("sendheaders", std::vector<uint8_t>());
+}
+
+// BIP 152: sendcmpct message
+CNetMessage CNetMessageProcessor::CreateSendCmpctMessage(bool high_bandwidth, uint64_t version) {
+    CDataStream stream;
+
+    // Payload: bool (1 byte) + uint64_t version (8 bytes)
+    stream.WriteUint8(high_bandwidth ? 1 : 0);
+    stream.WriteUint64(version);
+
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+
+    return CNetMessage("sendcmpct", stream.GetData());
+}
+
+// BIP 152: cmpctblock message
+CNetMessage CNetMessageProcessor::CreateCmpctBlockMessage(const CBlockHeaderAndShortTxIDs& cmpctblock) {
+    CDataStream stream;
+
+    // Serialize header
+    stream.WriteInt32(cmpctblock.header.nVersion);
+    stream.WriteUint256(cmpctblock.header.hashPrevBlock);
+    stream.WriteUint256(cmpctblock.header.hashMerkleRoot);
+    stream.WriteUint32(cmpctblock.header.nTime);
+    stream.WriteUint32(cmpctblock.header.nBits);
+    stream.WriteUint32(cmpctblock.header.nNonce);
+
+    // Nonce for short ID calculation
+    stream.WriteUint64(cmpctblock.nonce);
+
+    // Prefilled transactions
+    stream.WriteCompactSize(cmpctblock.prefilledtxn.size());
+    for (const auto& ptx : cmpctblock.prefilledtxn) {
+        stream.WriteCompactSize(ptx.index);
+
+        // Serialize transaction
+        stream.WriteInt32(ptx.tx.nVersion);
+
+        // Inputs
+        stream.WriteCompactSize(ptx.tx.vin.size());
+        for (const auto& txin : ptx.tx.vin) {
+            stream.WriteUint256(txin.prevout.hash);
+            stream.WriteUint32(txin.prevout.n);
+            stream.WriteCompactSize(txin.scriptSig.size());
+            if (!txin.scriptSig.empty()) {
+                stream.write(txin.scriptSig.data(), txin.scriptSig.size());
+            }
+            stream.WriteUint32(txin.nSequence);
+        }
+
+        // Outputs
+        stream.WriteCompactSize(ptx.tx.vout.size());
+        for (const auto& txout : ptx.tx.vout) {
+            stream.WriteUint64(txout.nValue);
+            stream.WriteCompactSize(txout.scriptPubKey.size());
+            if (!txout.scriptPubKey.empty()) {
+                stream.write(txout.scriptPubKey.data(), txout.scriptPubKey.size());
+            }
+        }
+
+        stream.WriteUint32(ptx.tx.nLockTime);
+    }
+
+    // Short IDs (6 bytes each)
+    stream.WriteCompactSize(cmpctblock.shorttxids.size());
+    for (uint64_t shortid : cmpctblock.shorttxids) {
+        // Write lower 6 bytes of the short ID
+        for (int i = 0; i < 6; i++) {
+            stream.WriteUint8((shortid >> (i * 8)) & 0xFF);
+        }
+    }
+
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+
+    return CNetMessage("cmpctblock", stream.GetData());
+}
+
+// BIP 152: getblocktxn message
+CNetMessage CNetMessageProcessor::CreateGetBlockTxnMessage(const BlockTransactionsRequest& req) {
+    CDataStream stream;
+
+    // Block hash
+    stream.WriteUint256(req.blockhash);
+
+    // Indices
+    stream.WriteCompactSize(req.indices.size());
+    for (uint16_t idx : req.indices) {
+        stream.WriteCompactSize(idx);
+    }
+
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+
+    return CNetMessage("getblocktxn", stream.GetData());
+}
+
+// BIP 152: blocktxn message
+CNetMessage CNetMessageProcessor::CreateBlockTxnMessage(const BlockTransactions& resp) {
+    CDataStream stream;
+
+    // Block hash
+    stream.WriteUint256(resp.blockhash);
+
+    // Transactions
+    stream.WriteCompactSize(resp.txn.size());
+    for (const auto& tx : resp.txn) {
+        stream.WriteInt32(tx.nVersion);
+
+        // Inputs
+        stream.WriteCompactSize(tx.vin.size());
+        for (const auto& txin : tx.vin) {
+            stream.WriteUint256(txin.prevout.hash);
+            stream.WriteUint32(txin.prevout.n);
+            stream.WriteCompactSize(txin.scriptSig.size());
+            if (!txin.scriptSig.empty()) {
+                stream.write(txin.scriptSig.data(), txin.scriptSig.size());
+            }
+            stream.WriteUint32(txin.nSequence);
+        }
+
+        // Outputs
+        stream.WriteCompactSize(tx.vout.size());
+        for (const auto& txout : tx.vout) {
+            stream.WriteUint64(txout.nValue);
+            stream.WriteCompactSize(txout.scriptPubKey.size());
+            if (!txout.scriptPubKey.empty()) {
+                stream.write(txout.scriptPubKey.data(), txout.scriptPubKey.size());
+            }
+        }
+
+        stream.WriteUint32(tx.nLockTime);
+    }
+
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+
+    return CNetMessage("blocktxn", stream.GetData());
 }
 
 // Serialization helpers

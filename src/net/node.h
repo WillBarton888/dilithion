@@ -114,6 +114,13 @@ public:
     std::atomic<bool> fSentSendHeaders{false};  // We sent sendheaders to this peer
 
     //
+    // BIP 152: Compact block preference
+    //
+    std::atomic<bool> fSupportsCompactBlocks{false};  // Peer supports compact blocks
+    std::atomic<bool> fHighBandwidth{false};          // High-bandwidth mode (unsolicited cmpctblock)
+    std::atomic<bool> fSentSendCmpct{false};          // We sent sendcmpct to this peer
+
+    //
     // Timestamps
     //
     int64_t nTimeConnected = 0;             // Connection time

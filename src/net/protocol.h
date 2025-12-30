@@ -56,6 +56,10 @@ enum MessageType {
     MSG_MEMPOOL,
     MSG_REJECT,
     MSG_SENDHEADERS,  // BIP 130: Request headers-first block announcements
+    MSG_SENDCMPCT,    // BIP 152: Request compact block relay
+    MSG_CMPCTBLOCK,   // BIP 152: Compact block message
+    MSG_GETBLOCKTXN,  // BIP 152: Request missing transactions
+    MSG_BLOCKTXN,     // BIP 152: Missing transactions response
 };
 
 /** Inventory vector types */
@@ -261,6 +265,10 @@ inline const char* GetMessageCommand(MessageType type) {
         case MSG_MEMPOOL: return "mempool";
         case MSG_REJECT: return "reject";
         case MSG_SENDHEADERS: return "sendheaders";
+        case MSG_SENDCMPCT: return "sendcmpct";
+        case MSG_CMPCTBLOCK: return "cmpctblock";
+        case MSG_GETBLOCKTXN: return "getblocktxn";
+        case MSG_BLOCKTXN: return "blocktxn";
         default: return "unknown";
     }
 }

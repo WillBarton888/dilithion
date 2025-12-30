@@ -7,6 +7,8 @@
 #include <memory>
 #include <atomic>
 #include <string>
+#include <map>
+#include <mutex>
 
 // Forward declarations
 class CChainState;
@@ -27,6 +29,8 @@ class CHttpServer;
 class CBlockchainDB;  // IBD HANG FIX #14: Block serving needs database access
 class CBlockTracker;  // IBD Redesign: Single source of truth for block download state
 class CIbdCoordinator;  // Phase 5.1: IBD state machine coordinator
+class PartiallyDownloadedBlock;  // BIP 152: Compact block reconstruction state
+class uint256;  // Forward declaration for block hash
 
 /**
  * NodeContext - Bitcoin Core-style global state management
@@ -74,6 +78,12 @@ struct NodeContext {
     std::atomic<bool> running{false};
     std::atomic<bool> new_block_found{false};
     std::atomic<bool> mining_enabled{false};
+
+    // BIP 152: Compact block reconstruction state
+    // Maps block hash -> (sender_peer_id, partial_block)
+    // Protected by cs_partial_blocks for thread safety
+    std::map<std::string, std::pair<int, std::unique_ptr<PartiallyDownloadedBlock>>> partial_blocks;
+    mutable std::mutex cs_partial_blocks;
 
     /**
      * Check if node is fully initialized

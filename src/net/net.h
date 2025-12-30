@@ -10,6 +10,7 @@
 #include <net/socket.h>
 #include <net/bandwidth_throttle.h>  // Network: Bandwidth throttling
 #include <net/partition_detector.h>  // Network: Partition detection
+#include <net/blockencodings.h>      // BIP 152: Compact blocks
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <string>
@@ -40,6 +41,11 @@ public:
     using GetHeadersHandler = std::function<void(int peer_id, const NetProtocol::CGetHeadersMessage&)>;
     using HeadersHandler = std::function<void(int peer_id, const std::vector<CBlockHeader>&)>;
     using SendHeadersHandler = std::function<void(int peer_id)>;  // BIP 130
+    // BIP 152: Compact block handlers
+    using SendCmpctHandler = std::function<void(int peer_id, bool high_bandwidth, uint64_t version)>;
+    using CmpctBlockHandler = std::function<void(int peer_id, const CBlockHeaderAndShortTxIDs&)>;
+    using GetBlockTxnHandler = std::function<void(int peer_id, const BlockTransactionsRequest&)>;
+    using BlockTxnHandler = std::function<void(int peer_id, const BlockTransactions&)>;
 
     CNetMessageProcessor(CPeerManager& peer_mgr);
 
@@ -60,6 +66,11 @@ public:
     CNetMessage CreateGetHeadersMessage(const NetProtocol::CGetHeadersMessage& msg);
     CNetMessage CreateHeadersMessage(const std::vector<CBlockHeader>& headers);
     CNetMessage CreateSendHeadersMessage();  // BIP 130
+    // BIP 152: Compact block messages
+    CNetMessage CreateSendCmpctMessage(bool high_bandwidth, uint64_t version);
+    CNetMessage CreateCmpctBlockMessage(const CBlockHeaderAndShortTxIDs& cmpctblock);
+    CNetMessage CreateGetBlockTxnMessage(const BlockTransactionsRequest& req);
+    CNetMessage CreateBlockTxnMessage(const BlockTransactions& resp);
 
     // Register handlers
     void SetVersionHandler(VersionHandler handler) { on_version = handler; }
@@ -74,6 +85,11 @@ public:
     void SetGetHeadersHandler(GetHeadersHandler handler) { on_getheaders = handler; }
     void SetHeadersHandler(HeadersHandler handler) { on_headers = handler; }
     void SetSendHeadersHandler(SendHeadersHandler handler) { on_sendheaders = handler; }  // BIP 130
+    // BIP 152: Compact block handler setters
+    void SetSendCmpctHandler(SendCmpctHandler handler) { on_sendcmpct = handler; }
+    void SetCmpctBlockHandler(CmpctBlockHandler handler) { on_cmpctblock = handler; }
+    void SetGetBlockTxnHandler(GetBlockTxnHandler handler) { on_getblocktxn = handler; }
+    void SetBlockTxnHandler(BlockTxnHandler handler) { on_blocktxn = handler; }
 
 private:
     CPeerManager& peer_manager;
@@ -98,6 +114,11 @@ private:
     GetHeadersHandler on_getheaders;
     HeadersHandler on_headers;
     SendHeadersHandler on_sendheaders;  // BIP 130
+    // BIP 152: Compact block handlers
+    SendCmpctHandler on_sendcmpct;
+    CmpctBlockHandler on_cmpctblock;
+    GetBlockTxnHandler on_getblocktxn;
+    BlockTxnHandler on_blocktxn;
 
     // Process specific message types
     bool ProcessVersionMessage(int peer_id, CDataStream& stream);
@@ -113,6 +134,11 @@ private:
     bool ProcessGetHeadersMessage(int peer_id, CDataStream& stream);
     bool ProcessHeadersMessage(int peer_id, CDataStream& stream);
     bool ProcessSendHeadersMessage(int peer_id);  // BIP 130
+    // BIP 152: Compact block message processing
+    bool ProcessSendCmpctMessage(int peer_id, CDataStream& stream);
+    bool ProcessCmpctBlockMessage(int peer_id, CDataStream& stream);
+    bool ProcessGetBlockTxnMessage(int peer_id, CDataStream& stream);
+    bool ProcessBlockTxnMessage(int peer_id, CDataStream& stream);
 
     // Serialization helpers
     std::vector<uint8_t> SerializeVersionMessage(const NetProtocol::CVersionMessage& msg);
