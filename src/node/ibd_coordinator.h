@@ -166,6 +166,12 @@ private:
     bool m_requires_reindex{false};
     static constexpr int MAX_AUTO_REORG_DEPTH = 100;  // Max blocks to auto-reorg
 
+    // Resync tracking for completion message
+    bool m_resync_in_progress{false};
+    int m_resync_fork_point{0};
+    int m_resync_original_height{0};
+    int m_resync_target_height{0};
+
     // Fork detection frequency control (reduce CPU overhead)
     // PERFORMANCE FIX: Increased thresholds to prevent triggering during normal validation lag
     // Normal IBD has 2-10 second validation lag - don't misinterpret as fork

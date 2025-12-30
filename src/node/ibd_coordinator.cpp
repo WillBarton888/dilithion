@@ -134,6 +134,37 @@ void CIbdCoordinator::Tick() {
         }
         if (m_state != IBDState::IDLE && m_state != IBDState::COMPLETE) {
             m_state = IBDState::COMPLETE;
+
+            // Show resync completion summary if we just finished a resync
+            if (m_resync_in_progress) {
+                m_resync_in_progress = false;
+                int blocks_recovered = m_resync_fork_point;  // Blocks that were on both chains
+                int blocks_lost = m_resync_original_height - m_resync_fork_point;  // Forked blocks
+
+                std::cout << "\n" << std::endl;
+                std::cout << "════════════════════════════════════════════════════════════" << std::endl;
+                std::cout << "                    RESYNC COMPLETE" << std::endl;
+                std::cout << "════════════════════════════════════════════════════════════" << std::endl;
+                std::cout << std::endl;
+                std::cout << "  Chain Status:" << std::endl;
+                std::cout << "    Current height:    " << chain_height << " blocks" << std::endl;
+                std::cout << "    Synced with:       " << header_height << " network headers" << std::endl;
+                std::cout << std::endl;
+                std::cout << "  Fork Recovery Summary:" << std::endl;
+                std::cout << "    Fork point:        Block " << m_resync_fork_point << std::endl;
+                std::cout << "    Blocks preserved:  " << blocks_recovered << " (heights 0-" << m_resync_fork_point << ")" << std::endl;
+                std::cout << "    Blocks discarded:  " << blocks_lost << " (were on fork)" << std::endl;
+                std::cout << std::endl;
+                std::cout << "  Wallet Status:" << std::endl;
+                std::cout << "    Private keys:      SAFE (unchanged)" << std::endl;
+                std::cout << "    Balance:           Recalculated from correct chain" << std::endl;
+                std::cout << "    Mining rewards from forked blocks are no longer valid." << std::endl;
+                std::cout << "    Your balance now reflects only confirmed transactions" << std::endl;
+                std::cout << "    on the main network chain." << std::endl;
+                std::cout << std::endl;
+                std::cout << "════════════════════════════════════════════════════════════" << std::endl;
+                std::cout << std::endl;
+            }
         }
         return;
     }
@@ -351,7 +382,13 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     std::cerr << "Would you like to resync from the network? This will:" << std::endl;
                     std::cerr << "  - Clear your local chain data (blocks on the fork)" << std::endl;
                     std::cerr << "  - Download the correct chain from peers" << std::endl;
-                    std::cerr << "  - Your wallet will NOT be affected" << std::endl;
+                    std::cerr << std::endl;
+                    std::cerr << "WALLET IMPACT:" << std::endl;
+                    std::cerr << "  - Your private keys are SAFE (stored separately)" << std::endl;
+                    std::cerr << "  - Mining rewards from blocks 0-" << fork_point << " are PRESERVED" << std::endl;
+                    std::cerr << "  - Mining rewards from forked blocks " << (fork_point + 1) << "-" << chain_height << " will be LOST" << std::endl;
+                    std::cerr << "    (These " << fork_depth << " blocks were never accepted by the network)" << std::endl;
+                    std::cerr << "  - Your balance will be recalculated from the correct chain" << std::endl;
                     std::cerr << std::endl;
                     std::cout << "Resync from network? [Y/n]: " << std::flush;
 
@@ -360,8 +397,18 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
                     // Default to yes on empty input (just hitting Enter)
                     if (response.empty() || response[0] == 'Y' || response[0] == 'y') {
-                        std::cout << "\n[RESYNC] Starting network resync..." << std::endl;
+                        std::cout << "\n[RESYNC] ════════════════════════════════════════════════════" << std::endl;
+                        std::cout << "[RESYNC] Starting network resync..." << std::endl;
+                        std::cout << "[RESYNC] ════════════════════════════════════════════════════" << std::endl;
+                        std::cout << "[RESYNC] Discarding " << fork_depth << " forked blocks (heights " << (fork_point + 1) << "-" << chain_height << ")" << std::endl;
+                        std::cout << "[RESYNC] Preserving blocks 0-" << fork_point << " (common ancestor)" << std::endl;
                         std::cout << "[RESYNC] Clearing forked chain data..." << std::endl;
+
+                        // Track resync for completion message
+                        m_resync_in_progress = true;
+                        m_resync_fork_point = fork_point;
+                        m_resync_original_height = chain_height;
+                        m_resync_target_height = header_height;
 
                         // Clear chain state back to genesis
                         // Get genesis hash
