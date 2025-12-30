@@ -2974,7 +2974,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                             // Queue block broadcast asynchronously (non-blocking!)
                             // BIP 130: Pass header to enable HEADERS vs INV routing by peer preference
-                            if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, *pblock, peer_ids)) {
+                            if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, block, peer_ids)) {
                                 std::cout << "[P2P] Queued block broadcast to " << peer_ids.size()
                                           << " peer(s) (async)" << std::endl;
                             } else {
