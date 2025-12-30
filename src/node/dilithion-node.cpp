@@ -1860,8 +1860,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             for (const auto& item : inv_items) {
                 if (item.type == NetProtocol::MSG_BLOCK_INV) {
+                    // DEBUG: Log every block INV received
+                    bool exists = blockchain.BlockExists(item.hash);
+                    std::cout << "[INV-DEBUG] Peer " << peer_id << " announced block "
+                              << item.hash.GetHex().substr(0, 16) << "... exists="
+                              << (exists ? "YES" : "NO") << std::endl;
+
                     // Check if we already have this block
-                    if (!blockchain.BlockExists(item.hash)) {
+                    if (!exists) {
                         std::cout << "[P2P] Peer " << peer_id << " announced new block: "
                                   << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
                         hasUnknownBlocks = true;
@@ -2924,6 +2930,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
 
                         if (!peer_ids.empty()) {
+                            // DEBUG: Log which peers we're broadcasting to
+                            std::cout << "[P2P-DEBUG] Broadcasting block to peers: ";
+                            for (int id : peer_ids) {
+                                auto peer = g_node_context.peer_manager->GetPeer(id);
+                                std::cout << id;
+                                if (peer) {
+                                    std::cout << "(" << peer->addr.ToStringIP() << ")";
+                                }
+                                std::cout << " ";
+                            }
+                            std::cout << std::endl;
+
                             // Queue block broadcast asynchronously (non-blocking!)
                             if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, peer_ids)) {
                                 std::cout << "[P2P] Queued block broadcast to " << peer_ids.size()
