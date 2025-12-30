@@ -8,6 +8,7 @@
 #include <net/orphan_manager.h>
 #include <net/block_fetcher.h>
 #include <net/block_tracker.h>  // IBD Redesign: Single source of truth
+#include <net/blockencodings.h>  // BIP 152: For PartiallyDownloadedBlock destructor
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <util/logging.h>
 #include <iostream>

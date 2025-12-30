@@ -1295,8 +1295,8 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
         // Nonce for short ID calculation
         cmpctblock.nonce = stream.ReadUint64();
 
-        // Initialize short ID keys from header and nonce
-        cmpctblock.InitializeShortIdKeys();
+        // Initialize short ID selector from header and nonce
+        cmpctblock.FillShortTxIDSelector();
 
         // Read prefilled transactions
         uint64_t prefilled_count = stream.ReadCompactSize();
@@ -1414,14 +1414,14 @@ bool CNetMessageProcessor::ProcessGetBlockTxnMessage(int peer_id, CDataStream& s
             return false;
         }
 
-        req.indices.reserve(index_count);
+        req.indexes.reserve(index_count);
         for (uint64_t i = 0; i < index_count; i++) {
-            req.indices.push_back(static_cast<uint16_t>(stream.ReadCompactSize()));
+            req.indexes.push_back(static_cast<uint16_t>(stream.ReadCompactSize()));
         }
 
         std::cout << "[BIP152] Received GETBLOCKTXN from peer " << peer_id
                   << " (block=" << req.blockhash.GetHex().substr(0, 16)
-                  << "..., " << req.indices.size() << " txns requested)" << std::endl;
+                  << "..., " << req.indexes.size() << " txns requested)" << std::endl;
 
         // Call handler to serve requested transactions
         if (on_getblocktxn) {
@@ -1819,9 +1819,9 @@ CNetMessage CNetMessageProcessor::CreateGetBlockTxnMessage(const BlockTransactio
     // Block hash
     stream.WriteUint256(req.blockhash);
 
-    // Indices
-    stream.WriteCompactSize(req.indices.size());
-    for (uint16_t idx : req.indices) {
+    // Indices (field name is 'indexes' per BIP 152)
+    stream.WriteCompactSize(req.indexes.size());
+    for (uint16_t idx : req.indexes) {
         stream.WriteCompactSize(idx);
     }
 
