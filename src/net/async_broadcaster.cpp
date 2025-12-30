@@ -207,6 +207,87 @@ bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const CBlockHeader& 
     return success;
 }
 
+// BIP 152: Queue a block broadcast with compact blocks to high-bandwidth peers
+bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const CBlock& block, const std::vector<int>& peer_ids) {
+    if (!m_connman) {
+        std::cerr << "[AsyncBroadcaster] No connection manager for BIP 152 routing" << std::endl;
+        return false;
+    }
+
+    auto* msg_processor = g_message_processor.load();
+    if (!msg_processor) {
+        std::cerr << "[AsyncBroadcaster] No message processor for BIP 152 routing" << std::endl;
+        return false;
+    }
+
+    // Partition peers by their preferences:
+    // 1. High-bandwidth compact block peers (fHighBandwidth = true) → CMPCTBLOCK
+    // 2. Headers-preferring peers (fPreferHeaders = true) → HEADERS
+    // 3. Other peers → INV
+    std::vector<int> cmpctblock_peers;  // Peers who want CMPCTBLOCK (BIP 152 high-bandwidth)
+    std::vector<int> headers_peers;      // Peers who want HEADERS (BIP 130)
+    std::vector<int> inv_peers;          // Peers who want INV
+
+    for (int peer_id : peer_ids) {
+        CNode* pnode = m_connman->GetNode(peer_id);
+        if (pnode && !pnode->fDisconnect.load()) {
+            if (pnode->fSupportsCompactBlocks.load() && pnode->fHighBandwidth.load()) {
+                cmpctblock_peers.push_back(peer_id);
+            } else if (pnode->fPreferHeaders.load()) {
+                headers_peers.push_back(peer_id);
+            } else {
+                inv_peers.push_back(peer_id);
+            }
+        }
+    }
+
+    bool success = true;
+
+    // Send CMPCTBLOCK to high-bandwidth compact block peers (BIP 152)
+    if (!cmpctblock_peers.empty()) {
+        // Create compact block from full block
+        CBlockHeaderAndShortTxIDs cmpctblock(block);
+        CNetMessage cmpctblockMsg = msg_processor->CreateCmpctBlockMessage(cmpctblock);
+
+        if (!QueueBroadcast(cmpctblockMsg, cmpctblock_peers, PRIORITY_HIGH)) {
+            std::cerr << "[AsyncBroadcaster] Failed to queue CMPCTBLOCK broadcast" << std::endl;
+            success = false;
+        } else {
+            std::cout << "[BIP152] Sending CMPCTBLOCK to " << cmpctblock_peers.size() << " high-bandwidth peer(s) "
+                      << "(shorttxids=" << cmpctblock.shorttxids.size() << ", prefilled=" << cmpctblock.prefilledtxn.size() << ")" << std::endl;
+        }
+    }
+
+    // Send HEADERS to peers who prefer it (BIP 130)
+    if (!headers_peers.empty()) {
+        std::vector<CBlockHeader> headers_vec = {block};  // CBlock inherits from CBlockHeader
+        CNetMessage headersMsg = msg_processor->CreateHeadersMessage(headers_vec);
+
+        if (!QueueBroadcast(headersMsg, headers_peers, PRIORITY_HIGH)) {
+            std::cerr << "[AsyncBroadcaster] Failed to queue HEADERS broadcast" << std::endl;
+            success = false;
+        } else {
+            std::cout << "[BIP130] Sending HEADERS to " << headers_peers.size() << " peer(s)" << std::endl;
+        }
+    }
+
+    // Send INV to remaining peers
+    if (!inv_peers.empty()) {
+        NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, hash);
+        std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+        CNetMessage invMsg = msg_processor->CreateInvMessage(inv_vec);
+
+        if (!QueueBroadcast(invMsg, inv_peers, PRIORITY_HIGH)) {
+            std::cerr << "[AsyncBroadcaster] Failed to queue INV broadcast" << std::endl;
+            success = false;
+        } else {
+            std::cout << "[BIP152] Sending INV to " << inv_peers.size() << " peer(s)" << std::endl;
+        }
+    }
+
+    return success;
+}
+
 // Get current broadcast statistics
 CAsyncBroadcaster::Stats CAsyncBroadcaster::GetStats() const {
     std::lock_guard<std::mutex> lock(m_stats_mutex);

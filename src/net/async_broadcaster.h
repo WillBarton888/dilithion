@@ -6,6 +6,7 @@
 
 #include <net/serialize.h>
 #include <primitives/block.h>  // For CBlockHeader (BIP 130 HEADERS announcements)
+#include <net/blockencodings.h>  // BIP 152: Compact blocks
 #include <uint256.h>
 #include <atomic>
 #include <condition_variable>
@@ -141,6 +142,15 @@ public:
      * @return true if queued successfully
      */
     bool BroadcastBlock(const uint256& hash, const CBlockHeader& header, const std::vector<int>& peer_ids);
+
+    /**
+     * Queue a block broadcast with BIP 152 compact blocks (CMPCTBLOCK to high-bandwidth peers)
+     * @param hash Block hash
+     * @param block Full block (needed to create compact block)
+     * @param peer_ids List of peer IDs to send to
+     * @return true if queued successfully
+     */
+    bool BroadcastBlock(const uint256& hash, const CBlock& block, const std::vector<int>& peer_ids);
 
     /**
      * Get current broadcast statistics
