@@ -619,12 +619,27 @@ bool CIbdCoordinator::FetchBlocks() {
     }
 
     // ============ SELECT BLOCK SYNC PEER ============
-    // Check if current block sync peer is still valid
+    // Check if current block sync peer is still valid AND has blocks we need
     if (m_blocks_sync_peer != -1) {
         auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
         if (!peer) {
             std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer << " disconnected" << std::endl;
             m_blocks_sync_peer = -1;
+        } else {
+            // BUG FIX: Re-select peer if their height is too low for blocks we need
+            // This happens when:
+            // 1. Peer selected during IBD with height N
+            // 2. Network advances, we need block N+1
+            // 3. Peer's best_known_height wasn't updated (or is stale)
+            // Without this check, we'd be stuck requesting from a peer that can't serve us
+            int peer_height = peer->best_known_height;
+            if (peer_height == 0) peer_height = peer->start_height;
+            if (peer_height <= chain_height) {
+                std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
+                          << " height (" << peer_height << ") too low (need > " << chain_height
+                          << "), reselecting" << std::endl;
+                m_blocks_sync_peer = -1;
+            }
         }
     }
 
