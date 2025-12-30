@@ -1871,12 +1871,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // BUG #62 FIX: Request headers when peer announces unknown blocks
-            // SSOT: Use SyncHeadersFromPeer - handles all dedup internally
+            // When a peer announces a block via INV, they have blocks we don't know about.
+            // Request headers from them - use a large assumed height since peer will only
+            // send headers they actually have. The peer's best_known_height will be updated
+            // automatically when we receive their headers (in headers_manager.cpp).
             if (hasUnknownBlocks && g_node_context.headers_manager) {
-                int peer_height = g_node_context.headers_manager->GetPeerStartHeight(peer_id);
-                if (peer_height > 0) {
-                    g_node_context.headers_manager->SyncHeadersFromPeer(peer_id, peer_height);
-                }
+                int our_header_height = g_node_context.headers_manager->GetBestHeight();
+                // Use large number - peer sends whatever they actually have (up to 2000 per batch)
+                int assumed_peer_height = our_header_height + 2000;
+                g_node_context.headers_manager->SyncHeadersFromPeer(peer_id, assumed_peer_height);
             }
 
             // DISABLED: Legacy inv-based block requests
