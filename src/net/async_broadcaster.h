@@ -5,6 +5,7 @@
 #define DILITHION_NET_ASYNC_BROADCASTER_H
 
 #include <net/serialize.h>
+#include <primitives/block.h>  // For CBlockHeader (BIP 130 HEADERS announcements)
 #include <uint256.h>
 #include <atomic>
 #include <condition_variable>
@@ -131,6 +132,15 @@ public:
      * @return true if queued successfully
      */
     bool BroadcastBlock(const uint256& hash, const std::vector<int>& peer_ids);
+
+    /**
+     * Queue a block broadcast with BIP 130 routing (HEADERS vs INV by peer preference)
+     * @param hash Block hash
+     * @param header Block header (for HEADERS message to preferring peers)
+     * @param peer_ids List of peer IDs to send to
+     * @return true if queued successfully
+     */
+    bool BroadcastBlock(const uint256& hash, const CBlockHeader& header, const std::vector<int>& peer_ids);
 
     /**
      * Get current broadcast statistics

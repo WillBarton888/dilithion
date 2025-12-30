@@ -55,6 +55,7 @@ enum MessageType {
     MSG_GETBLOCKS,
     MSG_MEMPOOL,
     MSG_REJECT,
+    MSG_SENDHEADERS,  // BIP 130: Request headers-first block announcements
 };
 
 /** Inventory vector types */
@@ -259,6 +260,7 @@ inline const char* GetMessageCommand(MessageType type) {
         case MSG_GETBLOCKS: return "getblocks";
         case MSG_MEMPOOL: return "mempool";
         case MSG_REJECT: return "reject";
+        case MSG_SENDHEADERS: return "sendheaders";
         default: return "unknown";
     }
 }

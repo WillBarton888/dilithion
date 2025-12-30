@@ -1801,6 +1801,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Requesting from every peer on VERSION causes header racing.
             (void)peerHeight;  // Suppress unused warning
             (void)ourHeight;
+
+            // BIP 130: Send sendheaders to request HEADERS instead of INV for new blocks
+            // This reduces latency by 1 round trip when peer announces new blocks
+            if (g_node_context.connman && g_node_context.message_processor) {
+                CNode* node = g_node_context.connman->GetNode(peer_id);
+                if (node && !node->fSentSendHeaders.load()) {
+                    CNetMessage sendheaders_msg = g_node_context.message_processor->CreateSendHeadersMessage();
+                    g_node_context.connman->PushMessage(peer_id, sendheaders_msg);
+                    node->fSentSendHeaders.store(true);
+                    std::cout << "[P2P] Sent sendheaders to peer " << peer_id << std::endl;
+                }
+            }
         });
 
         // Register ping handler to automatically respond with pong
@@ -2393,7 +2405,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                             if (!relay_peer_ids.empty()) {
                                 // Queue block relay asynchronously (non-blocking!)
-                                if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, relay_peer_ids)) {
+                                // BIP 130: Pass header to enable HEADERS vs INV routing by peer preference
+                                if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, block, relay_peer_ids)) {
                                     std::cout << "[P2P] Relaying block to " << relay_peer_ids.size()
                                               << " peer(s) (excluding sender peer " << peer_id << ")" << std::endl;
                                 } else {
@@ -2521,6 +2534,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Peer height update moved to background thread completion
             } else {
                 std::cerr << "[IBD] Failed to queue headers for processing" << std::endl;
+            }
+        });
+
+        // BIP 130: Handle sendheaders from peers
+        // When a peer sends sendheaders, they want us to announce new blocks via HEADERS
+        // instead of INV (saves 1 round trip)
+        message_processor.SetSendHeadersHandler([](int peer_id) {
+            if (g_node_context.connman) {
+                CNode* node = g_node_context.connman->GetNode(peer_id);
+                if (node) {
+                    node->fPreferHeaders.store(true);
+                    std::cout << "[P2P] Peer " << peer_id << " now prefers HEADERS announcements" << std::endl;
+                }
             }
         });
 
@@ -2947,7 +2973,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             std::cout << std::endl;
 
                             // Queue block broadcast asynchronously (non-blocking!)
-                            if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, peer_ids)) {
+                            // BIP 130: Pass header to enable HEADERS vs INV routing by peer preference
+                            if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, *pblock, peer_ids)) {
                                 std::cout << "[P2P] Queued block broadcast to " << peer_ids.size()
                                           << " peer(s) (async)" << std::endl;
                             } else {

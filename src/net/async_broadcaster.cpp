@@ -3,6 +3,7 @@
 
 #include <net/async_broadcaster.h>
 #include <net/net.h>
+#include <net/node.h>     // BIP 130: For CNode::fPreferHeaders
 #include <net/connman.h>  // Phase 5: CConnman
 #include <net/protocol.h>
 #include <iostream>
@@ -144,6 +145,66 @@ bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const std::vector<in
 
     // Queue with HIGH priority
     return QueueBroadcast(invMsg, peer_ids, PRIORITY_HIGH);
+}
+
+// BIP 130: Queue a block broadcast with HEADERS vs INV routing by peer preference
+bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const CBlockHeader& header, const std::vector<int>& peer_ids) {
+    if (!m_connman) {
+        std::cerr << "[AsyncBroadcaster] No connection manager for BIP 130 routing" << std::endl;
+        return false;
+    }
+
+    auto* msg_processor = g_message_processor.load();
+    if (!msg_processor) {
+        std::cerr << "[AsyncBroadcaster] No message processor for BIP 130 routing" << std::endl;
+        return false;
+    }
+
+    // Partition peers by their sendheaders preference
+    std::vector<int> headers_peers;  // Peers who want HEADERS (fPreferHeaders = true)
+    std::vector<int> inv_peers;      // Peers who want INV (fPreferHeaders = false)
+
+    for (int peer_id : peer_ids) {
+        CNode* pnode = m_connman->GetNode(peer_id);
+        if (pnode && !pnode->fDisconnect.load()) {
+            if (pnode->fPreferHeaders.load()) {
+                headers_peers.push_back(peer_id);
+            } else {
+                inv_peers.push_back(peer_id);
+            }
+        }
+    }
+
+    bool success = true;
+
+    // Send HEADERS to peers who prefer it (BIP 130)
+    if (!headers_peers.empty()) {
+        std::vector<CBlockHeader> headers_vec = {header};
+        CNetMessage headersMsg = msg_processor->CreateHeadersMessage(headers_vec);
+
+        if (!QueueBroadcast(headersMsg, headers_peers, PRIORITY_HIGH)) {
+            std::cerr << "[AsyncBroadcaster] Failed to queue HEADERS broadcast" << std::endl;
+            success = false;
+        } else {
+            std::cout << "[BIP130] Sending HEADERS to " << headers_peers.size() << " peer(s)" << std::endl;
+        }
+    }
+
+    // Send INV to peers who don't prefer HEADERS
+    if (!inv_peers.empty()) {
+        NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, hash);
+        std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+        CNetMessage invMsg = msg_processor->CreateInvMessage(inv_vec);
+
+        if (!QueueBroadcast(invMsg, inv_peers, PRIORITY_HIGH)) {
+            std::cerr << "[AsyncBroadcaster] Failed to queue INV broadcast" << std::endl;
+            success = false;
+        } else {
+            std::cout << "[BIP130] Sending INV to " << inv_peers.size() << " peer(s)" << std::endl;
+        }
+    }
+
+    return success;
 }
 
 // Get current broadcast statistics

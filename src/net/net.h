@@ -39,6 +39,7 @@ public:
     using TxHandler = std::function<void(int peer_id, const CTransaction&)>;
     using GetHeadersHandler = std::function<void(int peer_id, const NetProtocol::CGetHeadersMessage&)>;
     using HeadersHandler = std::function<void(int peer_id, const std::vector<CBlockHeader>&)>;
+    using SendHeadersHandler = std::function<void(int peer_id)>;  // BIP 130
 
     CNetMessageProcessor(CPeerManager& peer_mgr);
 
@@ -58,6 +59,7 @@ public:
     CNetMessage CreateTxMessage(const CTransaction& tx);
     CNetMessage CreateGetHeadersMessage(const NetProtocol::CGetHeadersMessage& msg);
     CNetMessage CreateHeadersMessage(const std::vector<CBlockHeader>& headers);
+    CNetMessage CreateSendHeadersMessage();  // BIP 130
 
     // Register handlers
     void SetVersionHandler(VersionHandler handler) { on_version = handler; }
@@ -71,6 +73,7 @@ public:
     void SetTxHandler(TxHandler handler) { on_tx = handler; }
     void SetGetHeadersHandler(GetHeadersHandler handler) { on_getheaders = handler; }
     void SetHeadersHandler(HeadersHandler handler) { on_headers = handler; }
+    void SetSendHeadersHandler(SendHeadersHandler handler) { on_sendheaders = handler; }  // BIP 130
 
 private:
     CPeerManager& peer_manager;
@@ -94,6 +97,7 @@ private:
     TxHandler on_tx;
     GetHeadersHandler on_getheaders;
     HeadersHandler on_headers;
+    SendHeadersHandler on_sendheaders;  // BIP 130
 
     // Process specific message types
     bool ProcessVersionMessage(int peer_id, CDataStream& stream);
@@ -108,6 +112,7 @@ private:
     bool ProcessTxMessage(int peer_id, CDataStream& stream);
     bool ProcessGetHeadersMessage(int peer_id, CDataStream& stream);
     bool ProcessHeadersMessage(int peer_id, CDataStream& stream);
+    bool ProcessSendHeadersMessage(int peer_id);  // BIP 130
 
     // Serialization helpers
     std::vector<uint8_t> SerializeVersionMessage(const NetProtocol::CVersionMessage& msg);

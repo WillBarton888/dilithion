@@ -108,6 +108,12 @@ public:
     bool fRelay = true;                     // Whether peer relays tx
 
     //
+    // BIP 130: sendheaders preference
+    //
+    std::atomic<bool> fPreferHeaders{false};    // Peer sent sendheaders (wants HEADERS not INV)
+    std::atomic<bool> fSentSendHeaders{false};  // We sent sendheaders to this peer
+
+    //
     // Timestamps
     //
     int64_t nTimeConnected = 0;             // Connection time

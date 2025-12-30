@@ -309,6 +309,8 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         return ProcessGetHeadersMessage(peer_id, stream);
     } else if (command == "headers") {
         return ProcessHeadersMessage(peer_id, stream);
+    } else if (command == "sendheaders") {
+        return ProcessSendHeadersMessage(peer_id);  // BIP 130
     }
 
     // Unknown message type
@@ -1206,6 +1208,22 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
     }
 }
 
+// BIP 130: sendheaders message
+bool CNetMessageProcessor::ProcessSendHeadersMessage(int peer_id) {
+    // sendheaders is a signal message with no payload
+    // When received, the peer is requesting that we send HEADERS instead of INV
+    // for new block announcements
+
+    std::cout << "[P2P] Peer " << peer_id << " sent sendheaders (prefers HEADERS over INV)" << std::endl;
+
+    // Call handler to update peer preference
+    if (on_sendheaders) {
+        on_sendheaders(peer_id);
+    }
+
+    return true;
+}
+
 // Create messages
 
 CNetMessage CNetMessageProcessor::CreateVersionMessage(const NetProtocol::CAddress& addr_recv, const NetProtocol::CAddress& addr_from) {
@@ -1406,6 +1424,16 @@ CNetMessage CNetMessageProcessor::CreateHeadersMessage(const std::vector<CBlockH
     g_network_stats.bytes_sent += 24 + stream.size();
 
     return CNetMessage("headers", stream.GetData());
+}
+
+// BIP 130: sendheaders message (empty payload - just a signal)
+CNetMessage CNetMessageProcessor::CreateSendHeadersMessage() {
+    // sendheaders has no payload - it's just a signal that we prefer HEADERS over INV
+
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24;  // Just the header, no payload
+
+    return CNetMessage("sendheaders", std::vector<uint8_t>());
 }
 
 // Serialization helpers
