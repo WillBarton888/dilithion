@@ -306,9 +306,10 @@ public:
      *
      * @param peer Peer to request from
      * @param peer_height Peer's advertised height
+     * @param force If true, bypass dedup check (used for INV-triggered requests)
      * @return true if a request was sent, false if skipped (already requested)
      */
-    bool SyncHeadersFromPeer(NodeId peer, int peer_height);
+    bool SyncHeadersFromPeer(NodeId peer, int peer_height, bool force = false);
 
     /**
      * @brief Get header by hash

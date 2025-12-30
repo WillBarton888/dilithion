@@ -403,15 +403,17 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     }
 }
 
-bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height)
+bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height, bool force)
 {
     // SSOT: Single entry point for all header requests
     // Handles dedup, correct locator hash, and tracking
 
     int requested = m_headers_requested_height.load();
 
-    // Already requested up to peer's height? Skip.
-    if (peer_height <= requested) {
+    // Already requested up to peer's height? Skip (unless forced).
+    // Force is used when receiving INV for unknown blocks - we MUST request
+    // headers even if our tracking says we already requested "enough".
+    if (!force && peer_height <= requested) {
         return false;
     }
 
