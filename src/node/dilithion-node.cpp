@@ -2584,6 +2584,116 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         });
 
+        // BIP 152: Handle cmpctblock (compact block) from peers
+        // Try to reconstruct block from mempool, request missing txns if needed
+        message_processor.SetCmpctBlockHandler([&blockchain, &message_processor](int peer_id, const CBlockHeaderAndShortTxIDs& cmpctblock) {
+            std::cout << "[BIP152] Received CMPCTBLOCK from peer " << peer_id
+                      << " (hash=" << cmpctblock.header.GetHash().GetHex().substr(0, 16) << "...)" << std::endl;
+
+            // Check if we already have this block
+            uint256 blockHash = cmpctblock.header.GetHash();
+            CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
+            if (pindex) {
+                std::cout << "[BIP152] Already have block " << blockHash.GetHex().substr(0, 16)
+                          << "... at height " << pindex->nHeight << std::endl;
+                return;
+            }
+
+            // Try to reconstruct block from mempool
+            // For now, we'll request all transactions since we don't have mempool integration yet
+            // In a full implementation, we would:
+            // 1. Create PartiallyDownloadedBlock
+            // 2. Fill transactions from mempool using short IDs
+            // 3. Request only missing transactions
+
+            // For Phase 3, request the full block via getdata
+            // Full compact block reconstruction will be added later
+            std::cout << "[BIP152] Requesting full block (mempool reconstruction not yet implemented)" << std::endl;
+
+            if (g_node_context.connman && g_node_context.message_processor) {
+                NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, blockHash);
+                std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+                CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(inv_vec);
+                g_node_context.connman->PushMessage(peer_id, getdata_msg);
+            }
+        });
+
+        // BIP 152: Handle getblocktxn (request for missing transactions)
+        // Peer needs specific transactions from a block we sent as compact
+        message_processor.SetGetBlockTxnHandler([&blockchain, &message_processor](int peer_id, const BlockTransactionsRequest& req) {
+            std::cout << "[BIP152] Received GETBLOCKTXN from peer " << peer_id
+                      << " (block=" << req.blockhash.GetHex().substr(0, 16)
+                      << "..., " << req.indexes.size() << " txns requested)" << std::endl;
+
+            // Load the requested block
+            CBlock block;
+            if (!blockchain.ReadBlock(req.blockhash, block)) {
+                std::cout << "[BIP152] Don't have requested block " << req.blockhash.GetHex().substr(0, 16) << "..." << std::endl;
+                return;
+            }
+
+            // Deserialize transactions from block
+            std::vector<CTransaction> transactions;
+            if (!DeserializeTransactionsFromVtx(block.vtx, transactions)) {
+                std::cout << "[BIP152] Failed to deserialize transactions from block" << std::endl;
+                return;
+            }
+
+            // Build response with requested transactions
+            BlockTransactions resp;
+            resp.blockhash = req.blockhash;
+
+            for (uint16_t idx : req.indexes) {
+                if (idx >= transactions.size()) {
+                    std::cout << "[BIP152] Peer requested invalid tx index " << idx
+                              << " (block has " << transactions.size() << " txns)" << std::endl;
+                    // Misbehave
+                    if (g_node_context.peer_manager) {
+                        g_node_context.peer_manager->Misbehaving(peer_id, 10);
+                    }
+                    return;
+                }
+                resp.txn.push_back(transactions[idx]);
+            }
+
+            // Send blocktxn response
+            if (g_node_context.connman && g_node_context.message_processor) {
+                CNetMessage blocktxn_msg = g_node_context.message_processor->CreateBlockTxnMessage(resp);
+                g_node_context.connman->PushMessage(peer_id, blocktxn_msg);
+                std::cout << "[BIP152] Sent BLOCKTXN with " << resp.txn.size() << " transactions to peer " << peer_id << std::endl;
+            }
+        });
+
+        // BIP 152: Handle blocktxn (missing transactions response)
+        // Complete block reconstruction with received transactions
+        message_processor.SetBlockTxnHandler([](int peer_id, const BlockTransactions& resp) {
+            std::cout << "[BIP152] Received BLOCKTXN from peer " << peer_id
+                      << " (block=" << resp.blockhash.GetHex().substr(0, 16)
+                      << "..., " << resp.txn.size() << " txns)" << std::endl;
+
+            // For Phase 3, this is a stub
+            // Full implementation would:
+            // 1. Find pending PartiallyDownloadedBlock for this block hash
+            // 2. Fill in the missing transactions
+            // 3. Complete block reconstruction
+            // 4. Submit to validation
+
+            // Check if we have pending reconstruction state
+            std::lock_guard<std::mutex> lock(g_node_context.cs_partial_blocks);
+            auto it = g_node_context.partial_blocks.find(resp.blockhash.GetHex());
+            if (it == g_node_context.partial_blocks.end()) {
+                std::cout << "[BIP152] No pending partial block for " << resp.blockhash.GetHex().substr(0, 16)
+                          << "... (may have been completed or timed out)" << std::endl;
+                return;
+            }
+
+            // TODO: Complete reconstruction
+            std::cout << "[BIP152] Would complete block reconstruction (not yet implemented)" << std::endl;
+
+            // Clean up
+            g_node_context.partial_blocks.erase(it);
+        });
+
         // BUG #138 FIX: Start CConnman AFTER all handlers are registered
         // This ensures no messages are processed before handlers are in place
         if (!g_node_context.connman->Start(*g_node_context.peer_manager, message_processor, connman_opts)) {
