@@ -1294,9 +1294,7 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
 
         // Nonce for short ID calculation
         cmpctblock.nonce = stream.ReadUint64();
-
-        // Initialize short ID selector from header and nonce
-        cmpctblock.FillShortTxIDSelector();
+        // Note: Short ID keys are lazily initialized by GetShortID() when needed
 
         // Read prefilled transactions
         uint64_t prefilled_count = stream.ReadCompactSize();
