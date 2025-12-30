@@ -1813,6 +1813,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "[P2P] Sent sendheaders to peer " << peer_id << std::endl;
                 }
             }
+
+            // BIP 152: Send sendcmpct to signal we support compact blocks
+            // high_bandwidth=true means we want unsolicited compact blocks for new blocks
+            // version=1 is the only supported version (version 2 is for segwit)
+            if (g_node_context.connman && g_node_context.message_processor) {
+                CNode* node = g_node_context.connman->GetNode(peer_id);
+                if (node && !node->fSentSendCmpct.load()) {
+                    // Request high-bandwidth mode: peer sends cmpctblock immediately on new blocks
+                    CNetMessage sendcmpct_msg = g_node_context.message_processor->CreateSendCmpctMessage(true, 1);
+                    g_node_context.connman->PushMessage(peer_id, sendcmpct_msg);
+                    node->fSentSendCmpct.store(true);
+                    std::cout << "[BIP152] Sent sendcmpct (high_bandwidth=true, version=1) to peer " << peer_id << std::endl;
+                }
+            }
         });
 
         // Register ping handler to automatically respond with pong
@@ -2546,6 +2560,26 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (node) {
                     node->fPreferHeaders.store(true);
                     std::cout << "[P2P] Peer " << peer_id << " now prefers HEADERS announcements" << std::endl;
+                }
+            }
+        });
+
+        // BIP 152: Handle sendcmpct from peers
+        // When a peer sends sendcmpct, they support compact blocks and want us to send them
+        message_processor.SetSendCmpctHandler([](int peer_id, bool high_bandwidth, uint64_t version) {
+            if (version != 1) {
+                std::cout << "[BIP152] Peer " << peer_id << " sent sendcmpct with unsupported version "
+                          << version << " (ignoring)" << std::endl;
+                return;
+            }
+
+            if (g_node_context.connman) {
+                CNode* node = g_node_context.connman->GetNode(peer_id);
+                if (node) {
+                    node->fSupportsCompactBlocks.store(true);
+                    node->fHighBandwidth.store(high_bandwidth);
+                    std::cout << "[BIP152] Peer " << peer_id << " supports compact blocks (high_bandwidth="
+                              << (high_bandwidth ? "true" : "false") << ")" << std::endl;
                 }
             }
         });
