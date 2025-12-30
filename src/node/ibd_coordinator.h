@@ -75,6 +75,30 @@ public:
     }
 
     /**
+     * @brief Check if node is synced with the network (not in IBD)
+     *
+     * Thread-safe. Returns true when the node's chain is within
+     * SYNC_TOLERANCE_BLOCKS of the best known header height.
+     *
+     * Uses hysteresis to prevent state flapping:
+     * - Becomes synced when within SYNC_TOLERANCE_BLOCKS of headers
+     * - Becomes un-synced when more than UNSYNC_THRESHOLD_BLOCKS behind
+     *
+     * This method is designed to be called from any thread, including
+     * header validation workers. The atomic m_synced flag ensures
+     * thread-safe reads without locking.
+     */
+    bool IsSynced() const;
+
+    /**
+     * @brief Check if node is in Initial Block Download
+     *
+     * Inverse of IsSynced(). Returns true when the node is still
+     * catching up to the network and should not mine or relay transactions.
+     */
+    bool IsInitialBlockDownload() const;
+
+    /**
      * @brief Called when an orphan block is received (Layer 2 fork detection)
      *
      * Consecutive orphan blocks during IBD suggest we may be on a fork.
@@ -131,6 +155,12 @@ private:
 
     // State machine
     IBDState m_state{IBDState::IDLE};
+
+    // Sync state tracking (thread-safe)
+    // Uses hysteresis to prevent flapping between synced/not-synced states
+    std::atomic<bool> m_synced{false};
+    static constexpr int SYNC_TOLERANCE_BLOCKS = 2;   // Become synced when within N blocks
+    static constexpr int UNSYNC_THRESHOLD_BLOCKS = 10; // Become un-synced when N+ blocks behind
 
     // Headers sync peer tracking (Bitcoin Core style single-sync-peer)
     int m_headers_sync_peer{-1};                                    // NodeId of current sync peer (-1 = none)

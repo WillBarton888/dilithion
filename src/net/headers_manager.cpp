@@ -11,6 +11,7 @@
 #include <consensus/chain.h>
 #include <util/time.h>
 #include <node/genesis.h>
+#include <node/ibd_coordinator.h>  // Phase 1: IsSynced() check
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <algorithm>
@@ -407,6 +408,36 @@ bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height, bool for
 {
     // SSOT: Single entry point for all header requests
     // Handles dedup, correct locator hash, and tracking
+
+    // =========================================================================
+    // PHASE 1: SYNCED STATE - SIMPLE HEADER REQUEST
+    // =========================================================================
+    // When node is synced (not in IBD), bypass dedup logic entirely.
+    // In steady-state, we want to immediately request headers when:
+    // - We receive an INV for an unknown block
+    // - A peer announces a higher height
+    // The dedup logic is only needed during IBD to prevent request spam.
+    // =========================================================================
+
+    if (g_node_context.ibd_coordinator && g_node_context.ibd_coordinator->IsSynced()) {
+        // Synced state: Simple request, no dedup
+        uint256 request_from;
+        {
+            std::lock_guard<std::mutex> lock(cs_headers);
+            request_from = hashBestHeader;
+        }
+
+        std::cout << "[SYNCED] Requesting headers from peer " << peer
+                  << " (peer_height=" << peer_height
+                  << ", our_best=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
+
+        RequestHeaders(peer, request_from);
+        return true;
+    }
+
+    // =========================================================================
+    // IBD MODE: DEDUP LOGIC TO PREVENT REQUEST SPAM
+    // =========================================================================
 
     int requested = m_headers_requested_height.load();
 

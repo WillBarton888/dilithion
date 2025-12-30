@@ -200,6 +200,7 @@ void CIbdCoordinator::Tick() {
 void CIbdCoordinator::UpdateState() {
     if (!m_node_context.headers_manager) {
         m_state = IBDState::IDLE;
+        m_synced.store(false, std::memory_order_release);
         return;
     }
 
@@ -207,7 +208,38 @@ void CIbdCoordinator::UpdateState() {
     int chain_height = m_chainstate.GetHeight();
     size_t peer_count = m_node_context.peer_manager ? m_node_context.peer_manager->GetConnectionCount() : 0;
 
-    // Determine state based on current conditions
+    // =========================================================================
+    // SYNC STATE DETECTION WITH HYSTERESIS
+    // =========================================================================
+    // Uses different thresholds for entering vs leaving synced state to prevent
+    // flapping when chain height oscillates near header height.
+    //
+    // - Become synced: chain within SYNC_TOLERANCE_BLOCKS (2) of headers
+    // - Become un-synced: chain more than UNSYNC_THRESHOLD_BLOCKS (10) behind
+    //
+    // This is thread-safe: m_synced is atomic, only written here (main thread).
+    // =========================================================================
+
+    bool currently_synced = m_synced.load(std::memory_order_acquire);
+    int blocks_behind = header_height - chain_height;
+
+    if (currently_synced) {
+        // Already synced - only become un-synced if significantly behind
+        if (blocks_behind > UNSYNC_THRESHOLD_BLOCKS) {
+            m_synced.store(false, std::memory_order_release);
+            std::cout << "[IBD] Sync state: SYNCED -> NOT SYNCED (chain " << blocks_behind
+                      << " blocks behind headers)" << std::endl;
+        }
+    } else {
+        // Not synced - become synced if within tolerance
+        if (blocks_behind <= SYNC_TOLERANCE_BLOCKS && header_height > 0) {
+            m_synced.store(true, std::memory_order_release);
+            std::cout << "[IBD] Sync state: NOT SYNCED -> SYNCED (chain within "
+                      << SYNC_TOLERANCE_BLOCKS << " blocks of headers)" << std::endl;
+        }
+    }
+
+    // Determine IBD state based on current conditions
     if (header_height <= chain_height) {
         if (m_state != IBDState::IDLE && m_state != IBDState::COMPLETE) {
             m_state = IBDState::COMPLETE;
@@ -232,6 +264,14 @@ std::string CIbdCoordinator::GetStateName() const {
         case IBDState::COMPLETE: return "COMPLETE";
         default: return "UNKNOWN";
     }
+}
+
+bool CIbdCoordinator::IsSynced() const {
+    return m_synced.load(std::memory_order_acquire);
+}
+
+bool CIbdCoordinator::IsInitialBlockDownload() const {
+    return !IsSynced();
 }
 
 void CIbdCoordinator::ResetBackoffOnNewHeaders(int header_height) {

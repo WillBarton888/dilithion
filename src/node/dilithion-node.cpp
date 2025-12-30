@@ -3506,6 +3506,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Phase 5.1: Initialize IBD Coordinator (must be after all components are ready)
         CIbdCoordinator ibd_coordinator(g_chainstate, g_node_context);
+        g_node_context.ibd_coordinator = &ibd_coordinator;  // Register for IsSynced() access
         LogPrintf(IBD, INFO, "IBD Coordinator initialized");
 
         // Main loop
@@ -3720,6 +3721,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Shutdown
         std::cout << std::endl;
         std::cout << "[Shutdown] Initiating graceful shutdown..." << std::endl;
+
+        // Clear ibd_coordinator pointer before local variable goes out of scope
+        g_node_context.ibd_coordinator = nullptr;
 
         if (miner.IsMining()) {
             std::cout << "[Shutdown] Stopping mining..." << std::flush;
