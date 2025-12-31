@@ -1682,6 +1682,14 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                               << " pprev=" << (pprev ? std::to_string(pprev->height) : "NULL")
                               << " heightHasHeaders=" << (heightHasHeaders ? "YES" : "NO")
                               << std::endl;
+                    // Print full header details for debugging hash discrepancy
+                    std::cerr << "[FORK-TRACE] HEADER DETAILS height=" << expectedHeight
+                              << " version=" << header.nVersion
+                              << " nTime=" << header.nTime
+                              << " nBits=" << std::hex << header.nBits << std::dec
+                              << " nNonce=" << header.nNonce
+                              << " merkle=" << header.hashMerkleRoot.GetHex().substr(0, 16) << "..."
+                              << std::endl;
                     if (heightHasHeaders) {
                         std::cerr << "[FORK-TRACE] Existing hash at " << expectedHeight << ": "
                                   << (*heightIt->second.begin()).GetHex().substr(0, 16) << "..." << std::endl;
