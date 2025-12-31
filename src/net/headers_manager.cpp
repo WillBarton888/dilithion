@@ -148,6 +148,14 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         headerData.chainWork = chainWork;
         mapHeaders[storageHash] = headerData;
         AddToHeightIndex(storageHash, height);
+
+        // DEBUG: Log storage details near height 5547
+        if (height >= 5545 && height <= 5550) {
+            std::cerr << "[DEBUG-STORE] height=" << height
+                      << " storageHash=" << storageHash.GetHex().substr(0, 16) << "..."
+                      << " hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                      << std::endl;
+        }
         UpdateChainTips(storageHash);
         UpdateBestHeader(storageHash);
 
@@ -1217,6 +1225,37 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
             std::cerr << "[GetBestChainHashAtHeight] CHAIN BREAK at height " << currentHeight
                       << " - cannot find hash " << current.GetHex().substr(0, 16) << "..."
                       << " (started from " << nBestHeight << ", target=" << height << ")" << std::endl;
+
+            // DEBUG: What hashes DO we have at this height?
+            auto heightIt = mapHeightIndex.find(currentHeight);
+            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+                std::cerr << "[DEBUG] mapHeightIndex HAS " << heightIt->second.size()
+                          << " hash(es) at height " << currentHeight << ":" << std::endl;
+                for (const auto& h : heightIt->second) {
+                    std::cerr << "  - " << h.GetHex().substr(0, 16) << "..." << std::endl;
+                }
+            } else {
+                std::cerr << "[DEBUG] mapHeightIndex has NO hashes at height " << currentHeight << std::endl;
+            }
+
+            // DEBUG: Check if the hash exists anywhere with different key (only once)
+            static int debugLogCount = 0;
+            if (debugLogCount < 3) {  // Only log first 3 breaks
+                debugLogCount++;
+                int foundCount = 0;
+                for (const auto& entry : mapHeaders) {
+                    if (entry.second.height == currentHeight) {
+                        std::cerr << "[DEBUG] Found header at height " << currentHeight
+                                  << " stored under key " << entry.first.GetHex().substr(0, 16) << "..."
+                                  << " hashPrevBlock=" << entry.second.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                                  << std::endl;
+                        foundCount++;
+                    }
+                }
+                if (foundCount == 0) {
+                    std::cerr << "[DEBUG] NO header found at height " << currentHeight << " in mapHeaders!" << std::endl;
+                }
+            }
             break;
         }
 
