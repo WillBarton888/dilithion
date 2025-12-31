@@ -1426,16 +1426,31 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         if (headers[0].hashPrevBlock == genesisHash || headers[0].hashPrevBlock.IsNull()) {
             startHeight = 1;
 
-            // OPTIMIZATION: Early duplicate detection
-            // If we're starting from genesis but already have headers, this is likely a duplicate batch.
-            // Check if we already have headers at height 1 - if so, skip expensive hash computation.
+            // BUG #178 FIX: REMOVED early "duplicate batch" optimization
+            //
+            // Old buggy code assumed any headers starting from genesis are duplicates
+            // if we already have headers at height 1. This is WRONG because:
+            //
+            // 1. A competing fork ALSO starts from genesis
+            // 2. Both forks may share headers 1-N, then diverge at height N+1
+            // 3. Comparing only height 1 cannot detect forks at higher heights
+            //
+            // Example: London stuck at 5569, NYC at 5660 on different fork
+            // - Both share headers 1-5568 (same hashes)
+            // - Diverged at height 5569 (different hashes)
+            // - NYC sends headers from genesis (London's locator unknown)
+            // - Old code: "We have height 1, skip!" → London stays stuck
+            // - Fixed code: Process all headers, per-header logic detects fork at 5569
+            //
+            // The per-header logic at lines ~1609-1623 correctly handles:
+            // - True duplicates (same hash): continue, update pprev
+            // - Fork headers (different hash at same height): detect and track
+            //
+            // Cost: ~50ms to compute 2000 hashes in parallel (acceptable)
+            // Benefit: Fork safety - nodes can always sync to best chain
             if (nBestHeight > 0) {
-                auto heightIt = mapHeightIndex.find(1);
-                if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-                    std::cout << "[HeadersManager] DUPLICATE BATCH DETECTED: Already have headers from genesis"
-                              << " (nBestHeight=" << nBestHeight << "), skipping" << std::endl;
-                    return true;  // Already have these headers, skip entirely
-                }
+                std::cout << "[HeadersManager] Headers start from genesis, nBestHeight="
+                          << nBestHeight << " - processing to check for forks" << std::endl;
             }
 
             std::cout << "[HeadersManager] Parent is genesis, startHeight=1" << std::endl;
