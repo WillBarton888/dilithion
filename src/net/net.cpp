@@ -59,10 +59,13 @@ static std::mutex cs_getdata_rate;
 static const size_t MAX_GETDATA_PER_SECOND = 50;
 
 // P3-N2 FIX: Rate limiting for HEADERS messages (DoS protection)
-// Limits: 3 HEADERS messages per second per peer (headers are large)
+// BUG #178 FIX: Increased from 3 to 10 per second
+// During IBD/sync, peers legitimately send many header batches in response to
+// GETHEADERS. 3/sec was too aggressive and caused peers to be banned mid-sync.
+// 10/sec allows for fast sync while still protecting against DoS floods.
 static std::map<int, std::vector<int64_t>> g_peer_headers_timestamps;
 static std::mutex cs_headers_rate;
-static const size_t MAX_HEADERS_PER_SECOND = 3;
+static const size_t MAX_HEADERS_PER_SECOND = 10;
 
 // P2-2 FIX: Per-IP connection cooldown to prevent rapid reconnection DoS
 // Prevents attackers from exhausting connection slots via reconnection churn

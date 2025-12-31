@@ -383,15 +383,23 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     // No throttle needed - SyncHeadersFromPeer handles dedup via m_headers_requested_height
     // Build locator and send request
 
-    std::vector<uint256> locator;
-    if (!hashStart.IsNull()) {
-        // PIPELINE OPTIMIZATION: If we have a specific hash (from prefetch),
-        // use it directly as a single-element locator. Peer will find it and
-        // send headers from there. Much simpler than complex GetLocator().
-        locator.push_back(hashStart);
-        std::cout << "[IBD] RequestHeaders: Using direct hash locator" << std::endl;
+    // BUG #178 FIX (Part 2): Always use full exponential locator
+    //
+    // Old bug: Used single-hash locator when hashStart was provided.
+    // Problem: If peer doesn't have that hash (we're on a fork), peer falls
+    // back to genesis instead of finding the common ancestor.
+    //
+    // Fix: Always build exponential locator. If hashStart is provided,
+    // prepend it so peer tries that first, but has fallback hashes.
+    // This allows peers to find the fork point instead of starting from genesis.
+    std::vector<uint256> locator = GetLocator(hashStart);
+
+    // Prepend hashStart if it's not already first in locator
+    if (!hashStart.IsNull() && (locator.empty() || locator[0] != hashStart)) {
+        locator.insert(locator.begin(), hashStart);
+        std::cout << "[IBD] RequestHeaders: Prepended hashStart to exponential locator" << std::endl;
     } else {
-        locator = GetLocator(hashStart);
+        std::cout << "[IBD] RequestHeaders: Using exponential locator (size=" << locator.size() << ")" << std::endl;
     }
 
     auto* connman = g_node_context.connman.get();
