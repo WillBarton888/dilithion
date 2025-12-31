@@ -1653,13 +1653,6 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
                 // Skip TRUE duplicates (same hash already exists)
                 if (mapHeaders.find(storageHash) != mapHeaders.end()) {
-                    // DEBUG: Trace duplicate skips near fork point
-                    if (expectedHeight >= 5545 && expectedHeight <= 5555) {
-                        std::cerr << "[FORK-TRACE] DUPLICATE expectedHeight=" << expectedHeight
-                                  << " storageHash=" << storageHash.GetHex().substr(0, 16) << "..."
-                                  << " setting pprev to existing header at height "
-                                  << mapHeaders[storageHash].height << std::endl;
-                    }
                     // BUG FIX: Still update best header for existing headers!
                     // After restart, nBestHeight may be stale while headers exist.
                     // This ensures best header tracking catches up to stored headers.
@@ -1672,28 +1665,6 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 // FORK DETECTION: Only relevant above checkpoint
                 if (heightHasHeaders && expectedHeight > checkpointHeight) {
                     std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
-                }
-
-                // DEBUG: Trace processing near fork point
-                if (expectedHeight >= 5545 && expectedHeight <= 5555) {
-                    std::cerr << "[FORK-TRACE] expectedHeight=" << expectedHeight
-                              << " storageHash=" << storageHash.GetHex().substr(0, 16) << "..."
-                              << " header.hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                              << " pprev=" << (pprev ? std::to_string(pprev->height) : "NULL")
-                              << " heightHasHeaders=" << (heightHasHeaders ? "YES" : "NO")
-                              << std::endl;
-                    // Print full header details for debugging hash discrepancy
-                    std::cerr << "[FORK-TRACE] HEADER DETAILS height=" << expectedHeight
-                              << " version=" << header.nVersion
-                              << " nTime=" << header.nTime
-                              << " nBits=" << std::hex << header.nBits << std::dec
-                              << " nNonce=" << header.nNonce
-                              << " merkle=" << header.hashMerkleRoot.GetHex().substr(0, 16) << "..."
-                              << std::endl;
-                    if (heightHasHeaders) {
-                        std::cerr << "[FORK-TRACE] Existing hash at " << expectedHeight << ": "
-                                  << (*heightIt->second.begin()).GetHex().substr(0, 16) << "..." << std::endl;
-                    }
                 }
 
                 // Quick validate (structure only - fast)
@@ -1710,23 +1681,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 headerData.chainWork = chainWork;
                 mapHeaders[storageHash] = headerData;
                 AddToHeightIndex(storageHash, height);
-
-                // DEBUG: Confirm storage near fork point
-                if (height >= 5545 && height <= 5555) {
-                    std::cerr << "[FORK-TRACE] STORED height=" << height
-                              << " key=" << storageHash.GetHex().substr(0, 16) << "..."
-                              << " hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                              << std::endl;
-                }
                 UpdateChainTips(storageHash);
                 UpdateBestHeader(storageHash);
-
-                // DEBUG: Log storage of headers near height 2000 (checkpoint height)
-                if (height >= 1998 && height <= 2002) {
-                    std::cout << "[HeadersManager] STORED height=" << height
-                              << " hash=" << storageHash.GetHex().substr(0, 16) << "..."
-                              << " pprev=" << (pprev ? "SET" : "NULL") << std::endl;
-                }
 
                 // Queue for background PoW validation (only for blocks above checkpoint)
                 if (expectedHeight > checkpointHeight) {

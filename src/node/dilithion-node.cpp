@@ -1072,20 +1072,6 @@ int main(int argc, char* argv[]) {
         randomx_init_validation_mode(rx_key, strlen(rx_key));
         // Validation mode is now ready - node can verify blocks immediately
 
-        // DEBUG: Compute hash for known header (block 5547) to verify consistency across nodes
-        {
-            CBlockHeader testHeader;
-            testHeader.nVersion = 1;
-            testHeader.hashPrevBlock.SetHex("0000f8ee649f0424660275f12fe44bf09fecc05c191aa87f58944f6bda9ec8cc");
-            testHeader.hashMerkleRoot.SetHex("c068284aefd303617259b4890bfcd057cd88f9ae632db04cd3dc0cbef9c0afae");
-            testHeader.nTime = 1767107562;
-            testHeader.nBits = 0x1f010000;
-            testHeader.nNonce = 96937;
-            uint256 testHash = testHeader.GetHash();
-            std::cout << "[HASH-TEST] Block 5547 hash computed: " << testHash.GetHex() << std::endl;
-            std::cout << "[HASH-TEST] Expected from NYC: 00001aea636a98de983830299303abf19d9f4bd2778429c2895333a425382207" << std::endl;
-        }
-
         // Step 2: Check if FULL mode will be available (RAM >= 3GB)
         // NOTE: Actual mining init is deferred until AFTER sync completes (BUG #97 fix)
         bool full_mode_available = (total_ram_mb >= 3072);
