@@ -1213,7 +1213,10 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
 
         auto it = mapHeaders.find(current);
         if (it == mapHeaders.end()) {
-            // Orphaned chain - shouldn't happen but handle gracefully
+            // BUG #178 DEBUG: Log exactly where chain walk breaks
+            std::cerr << "[GetBestChainHashAtHeight] CHAIN BREAK at height " << currentHeight
+                      << " - cannot find hash " << current.GetHex().substr(0, 16) << "..."
+                      << " (started from " << nBestHeight << ", target=" << height << ")" << std::endl;
             break;
         }
 
