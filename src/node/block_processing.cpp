@@ -18,6 +18,7 @@
 #include <net/async_broadcaster.h>
 #include <net/net.h>
 #include <net/protocol.h>
+#include <net/connman.h>
 #include <api/metrics.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
@@ -27,10 +28,18 @@
 #include <mutex>
 #include <unordered_map>
 
+// NodeState struct (defined in globals.cpp, duplicated here for extern declaration)
+struct NodeState {
+    std::atomic<bool> running{false};
+    std::atomic<bool> new_block_found{false};
+    std::atomic<bool> mining_enabled{false};
+    CMiningController* miner{nullptr};
+    CWallet* wallet{nullptr};
+};
+
 // External globals (used throughout codebase, thread-safe via internal mutexes)
 extern CChainState g_chainstate;
 extern NodeState g_node_state;
-extern CNodeMetrics g_metrics;
 
 // Forward declarations for mining (defined in dilithion-node.cpp)
 extern std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWallet& wallet, bool verbose);
