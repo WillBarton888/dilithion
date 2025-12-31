@@ -2585,13 +2585,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // BIP 152: Handle cmpctblock (compact block) from peers
-        // Try to reconstruct block from mempool, request missing txns if needed
+        // Phase 4: Full mempool-based block reconstruction
         message_processor.SetCmpctBlockHandler([&blockchain, &message_processor](int peer_id, const CBlockHeaderAndShortTxIDs& cmpctblock) {
+            uint256 blockHash = cmpctblock.header.GetHash();
             std::cout << "[BIP152] Received CMPCTBLOCK from peer " << peer_id
-                      << " (hash=" << cmpctblock.header.GetHash().GetHex().substr(0, 16) << "...)" << std::endl;
+                      << " (hash=" << blockHash.GetHex().substr(0, 16) << "..."
+                      << ", prefilled=" << cmpctblock.prefilledtxn.size()
+                      << ", shorttxids=" << cmpctblock.shorttxids.size() << ")" << std::endl;
 
             // Check if we already have this block
-            uint256 blockHash = cmpctblock.header.GetHash();
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
             if (pindex) {
                 std::cout << "[BIP152] Already have block " << blockHash.GetHex().substr(0, 16)
@@ -2599,22 +2601,85 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 return;
             }
 
-            // Try to reconstruct block from mempool
-            // For now, we'll request all transactions since we don't have mempool integration yet
-            // In a full implementation, we would:
-            // 1. Create PartiallyDownloadedBlock
-            // 2. Fill transactions from mempool using short IDs
-            // 3. Request only missing transactions
+            // Phase 4: Full mempool reconstruction
+            // 1. Get mempool transactions
+            CTxMemPool* mempool = g_mempool.load();
+            std::vector<CTransaction> mempool_txs;
+            if (mempool) {
+                auto tx_refs = mempool->GetOrderedTxs();
+                mempool_txs.reserve(tx_refs.size());
+                for (const auto& tx_ref : tx_refs) {
+                    if (tx_ref) {
+                        mempool_txs.push_back(*tx_ref);
+                    }
+                }
+                std::cout << "[BIP152] Attempting reconstruction with " << mempool_txs.size() << " mempool txns" << std::endl;
+            }
 
-            // For Phase 3, request the full block via getdata
-            // Full compact block reconstruction will be added later
-            std::cout << "[BIP152] Requesting full block (mempool reconstruction not yet implemented)" << std::endl;
+            // 2. Create PartiallyDownloadedBlock and fill from mempool
+            auto partial_block = std::make_unique<PartiallyDownloadedBlock>();
+            ReadStatus status = partial_block->InitData(cmpctblock, mempool_txs);
 
-            if (g_node_context.connman && g_node_context.message_processor) {
-                NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, blockHash);
-                std::vector<NetProtocol::CInv> inv_vec = {block_inv};
-                CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(inv_vec);
-                g_node_context.connman->PushMessage(peer_id, getdata_msg);
+            if (status == ReadStatus::OK) {
+                // 3a. Fully reconstructed - extract and validate block
+                CBlock block;
+                if (!partial_block->GetBlock(block)) {
+                    std::cout << "[BIP152] Block reconstruction failed (merkle mismatch) - requesting full block" << std::endl;
+                    // Merkle root mismatch - request full block as fallback
+                    if (g_node_context.connman && g_node_context.message_processor) {
+                        NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, blockHash);
+                        std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+                        CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(inv_vec);
+                        g_node_context.connman->PushMessage(peer_id, getdata_msg);
+                    }
+                    return;
+                }
+
+                std::cout << "[BIP152] Block fully reconstructed from mempool!" << std::endl;
+
+                // Submit to validation queue
+                if (g_node_context.validation_queue) {
+                    g_node_context.validation_queue->SubmitBlock(std::make_shared<CBlock>(block), peer_id);
+                    std::cout << "[BIP152] Submitted reconstructed block to validation queue" << std::endl;
+                } else {
+                    std::cout << "[BIP152] No validation queue - cannot submit block" << std::endl;
+                }
+
+            } else if (status == ReadStatus::EXTRA_TXN) {
+                // 3b. Need missing transactions - send GETBLOCKTXN
+                auto missing_indices = partial_block->GetMissingTxIndices();
+                size_t missing_count = missing_indices.size();
+                size_t total_txns = cmpctblock.prefilledtxn.size() + cmpctblock.shorttxids.size();
+
+                std::cout << "[BIP152] Need " << missing_count << "/" << total_txns
+                          << " missing transactions - sending GETBLOCKTXN" << std::endl;
+
+                // Store partial block for completion when BLOCKTXN arrives
+                {
+                    std::lock_guard<std::mutex> lock(g_node_context.cs_partial_blocks);
+                    g_node_context.partial_blocks[blockHash.GetHex()] =
+                        std::make_pair(peer_id, std::move(partial_block));
+                }
+
+                // Send GETBLOCKTXN request
+                if (g_node_context.connman && g_node_context.message_processor) {
+                    BlockTransactionsRequest req;
+                    req.blockhash = blockHash;
+                    req.indexes = missing_indices;
+                    CNetMessage getblocktxn_msg = g_node_context.message_processor->CreateGetBlockTxnMessage(req);
+                    g_node_context.connman->PushMessage(peer_id, getblocktxn_msg);
+                }
+
+            } else {
+                // 3c. Invalid compact block - request full block as fallback
+                std::cout << "[BIP152] Compact block invalid (status=" << static_cast<int>(status)
+                          << ") - requesting full block" << std::endl;
+                if (g_node_context.connman && g_node_context.message_processor) {
+                    NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, blockHash);
+                    std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+                    CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(inv_vec);
+                    g_node_context.connman->PushMessage(peer_id, getdata_msg);
+                }
             }
         });
 
@@ -2665,33 +2730,71 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // BIP 152: Handle blocktxn (missing transactions response)
-        // Complete block reconstruction with received transactions
+        // Phase 4: Complete block reconstruction with received transactions
         message_processor.SetBlockTxnHandler([](int peer_id, const BlockTransactions& resp) {
             std::cout << "[BIP152] Received BLOCKTXN from peer " << peer_id
                       << " (block=" << resp.blockhash.GetHex().substr(0, 16)
                       << "..., " << resp.txn.size() << " txns)" << std::endl;
 
-            // For Phase 3, this is a stub
-            // Full implementation would:
-            // 1. Find pending PartiallyDownloadedBlock for this block hash
-            // 2. Fill in the missing transactions
-            // 3. Complete block reconstruction
-            // 4. Submit to validation
+            // Find pending partial block
+            std::unique_ptr<PartiallyDownloadedBlock> partial_block;
+            int original_peer_id = -1;
+            {
+                std::lock_guard<std::mutex> lock(g_node_context.cs_partial_blocks);
+                auto it = g_node_context.partial_blocks.find(resp.blockhash.GetHex());
+                if (it == g_node_context.partial_blocks.end()) {
+                    std::cout << "[BIP152] No pending partial block for " << resp.blockhash.GetHex().substr(0, 16)
+                              << "... (may have been completed or timed out)" << std::endl;
+                    return;
+                }
+                original_peer_id = it->second.first;
+                partial_block = std::move(it->second.second);
+                g_node_context.partial_blocks.erase(it);
+            }
 
-            // Check if we have pending reconstruction state
-            std::lock_guard<std::mutex> lock(g_node_context.cs_partial_blocks);
-            auto it = g_node_context.partial_blocks.find(resp.blockhash.GetHex());
-            if (it == g_node_context.partial_blocks.end()) {
-                std::cout << "[BIP152] No pending partial block for " << resp.blockhash.GetHex().substr(0, 16)
-                          << "... (may have been completed or timed out)" << std::endl;
+            // Verify response is from the peer we requested from
+            if (peer_id != original_peer_id) {
+                std::cout << "[BIP152] BLOCKTXN from unexpected peer " << peer_id
+                          << " (expected " << original_peer_id << ") - accepting anyway" << std::endl;
+            }
+
+            // Fill in missing transactions
+            ReadStatus status = partial_block->FillMissingTxs(resp.txn);
+            if (status != ReadStatus::OK) {
+                std::cout << "[BIP152] Failed to fill missing transactions (status=" << static_cast<int>(status)
+                          << ") - requesting full block" << std::endl;
+                // Fall back to full block request
+                if (g_node_context.connman && g_node_context.message_processor) {
+                    NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, resp.blockhash);
+                    std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+                    CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(inv_vec);
+                    g_node_context.connman->PushMessage(peer_id, getdata_msg);
+                }
                 return;
             }
 
-            // TODO: Complete reconstruction
-            std::cout << "[BIP152] Would complete block reconstruction (not yet implemented)" << std::endl;
+            // Extract reconstructed block
+            CBlock block;
+            if (!partial_block->GetBlock(block)) {
+                std::cout << "[BIP152] Block reconstruction failed (merkle mismatch) - requesting full block" << std::endl;
+                if (g_node_context.connman && g_node_context.message_processor) {
+                    NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, resp.blockhash);
+                    std::vector<NetProtocol::CInv> inv_vec = {block_inv};
+                    CNetMessage getdata_msg = g_node_context.message_processor->CreateGetDataMessage(inv_vec);
+                    g_node_context.connman->PushMessage(peer_id, getdata_msg);
+                }
+                return;
+            }
 
-            // Clean up
-            g_node_context.partial_blocks.erase(it);
+            std::cout << "[BIP152] Block fully reconstructed with " << resp.txn.size() << " received transactions!" << std::endl;
+
+            // Submit to validation queue
+            if (g_node_context.validation_queue) {
+                g_node_context.validation_queue->SubmitBlock(std::make_shared<CBlock>(block), peer_id);
+                std::cout << "[BIP152] Submitted reconstructed block to validation queue" << std::endl;
+            } else {
+                std::cout << "[BIP152] No validation queue - cannot submit block" << std::endl;
+            }
         });
 
         // BUG #138 FIX: Start CConnman AFTER all handlers are registered
