@@ -74,13 +74,18 @@ uint256 CBlockHeader::GetHash() const {
     const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&nNonce);
     data.insert(data.end(), nonceBytes, nonceBytes + 4);
 
-    // DEBUG: Log serialized data for height 5547 (nNonce=96937)
+    // DEBUG: Log ALL 80 bytes of serialized data for height 5547 (nNonce=96937)
     if (nNonce == 96937) {
-        std::cerr << "[HASH-DEBUG] nNonce=96937 (height 5547) serialized data first 16 bytes: ";
-        for (size_t i = 0; i < 16 && i < data.size(); i++) {
+        std::cerr << "[HASH-DEBUG] nNonce=96937 (height 5547) ALL 80 bytes: ";
+        for (size_t i = 0; i < data.size(); i++) {
             std::cerr << std::hex << std::setw(2) << std::setfill('0') << (int)data[i];
         }
         std::cerr << std::dec << std::endl;
+        std::cerr << "[HASH-DEBUG] Fields: version=" << nVersion
+                  << " prevBlock=" << hashPrevBlock.GetHex()
+                  << " merkle=" << hashMerkleRoot.GetHex()
+                  << " time=" << nTime << " bits=" << std::hex << nBits << std::dec
+                  << " nonce=" << nNonce << std::endl;
     }
 
     // RandomX hash (CPU-mining resistant, ASIC-resistant)
