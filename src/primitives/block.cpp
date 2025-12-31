@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <cstring>
 #include <ostream>
+#include <iostream>
 
 std::string uint256::GetHex() const {
     std::stringstream ss;
