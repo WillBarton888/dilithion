@@ -3496,36 +3496,67 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                 }
 
-                // BUG #49: Check if mining in isolation
-                if (miner.IsMining()) {
-                    size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
+                // ========================================================================
+                // BUG #49 + BUG #180: Solo mining prevention with 120s grace period
+                // ========================================================================
+                // After IBD completes, if peers disconnect:
+                // - Start 120 second countdown
+                // - If no peer reconnects within 120s, auto-pause mining
+                // - When peer reconnects, auto-resume mining
+                // This prevents accidentally creating a fork while disconnected.
+                size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
+                auto now = std::chrono::steady_clock::now();
 
-                    auto now = std::chrono::steady_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::minutes>(now - last_isolation_check);
+                if (peer_count == 0) {
+                    // No peers - check if we need to start countdown or pause mining
+                    if (no_peers_since == std::chrono::steady_clock::time_point{}) {
+                        // Just lost peers - start the countdown
+                        no_peers_since = now;
+                        if (miner.IsMining()) {
+                            std::cout << "[Mining] WARNING: No connected peers - " << SOLO_MINING_GRACE_PERIOD_SECONDS
+                                      << "s grace period started" << std::endl;
+                        }
+                    } else if (miner.IsMining() && !mining_paused_no_peers) {
+                        // Check if grace period expired
+                        auto seconds_without_peers = std::chrono::duration_cast<std::chrono::seconds>(now - no_peers_since).count();
 
-                    if (elapsed.count() >= 1) {
-                        last_isolation_check = now;
-
-                        if (peer_count == 0) {
-                            mining_without_peers_minutes++;
-
-                            if (mining_without_peers_minutes == 1) {
-                                std::cout << "[Mining] WARNING: Mining with no connected peers" << std::endl;
-                            } else if (mining_without_peers_minutes == 5) {
-                                std::cout << "[Mining] WARNING: Mining in isolation for 5 minutes - possible chain fork" << std::endl;
-                            } else if (mining_without_peers_minutes == 10) {
-                                std::cout << "[Mining] ⚠️  CRITICAL: Mining in isolation for 10 minutes!" << std::endl;
-                                std::cout << "[Mining] ⚠️  You are likely creating a chain fork that will be rejected when reconnecting" << std::endl;
-                                std::cout << "[Mining] ⚠️  Consider stopping mining until peers are available" << std::endl;
-                            } else if (mining_without_peers_minutes % 10 == 0) {
-                                std::cout << "[Mining] ⚠️  Still mining in isolation (" << mining_without_peers_minutes
-                                          << " minutes) - chain fork highly likely!" << std::endl;
-                            }
+                        if (seconds_without_peers >= SOLO_MINING_GRACE_PERIOD_SECONDS) {
+                            // Grace period expired - pause mining
+                            std::cout << "[Mining] PAUSING: No peers for " << seconds_without_peers << " seconds" << std::endl;
+                            std::cout << "[Mining] Mining will resume automatically when a peer connects" << std::endl;
+                            miner.StopMining();
+                            mining_paused_no_peers = true;
                         } else {
-                            if (mining_without_peers_minutes > 0) {
-                                std::cout << "[Mining] Peer connectivity restored - no longer mining in isolation" << std::endl;
-                                mining_without_peers_minutes = 0;
+                            // Still in grace period - show countdown every 30 seconds
+                            int remaining = SOLO_MINING_GRACE_PERIOD_SECONDS - static_cast<int>(seconds_without_peers);
+                            if ((remaining % 30 == 0 || remaining <= 10) && remaining != last_remaining_logged) {
+                                std::cout << "[Mining] WARNING: No peers - mining will pause in " << remaining << "s" << std::endl;
+                                last_remaining_logged = remaining;
                             }
+                        }
+                    }
+                } else {
+                    // Have peers - reset countdown and resume if paused
+                    if (no_peers_since != std::chrono::steady_clock::time_point{}) {
+                        if (miner.IsMining() || mining_paused_no_peers) {
+                            std::cout << "[Mining] Peer connected - grace period cancelled" << std::endl;
+                        }
+                        no_peers_since = std::chrono::steady_clock::time_point{};
+                        last_remaining_logged = -1;
+                    }
+
+                    if (mining_paused_no_peers) {
+                        // Was paused due to no peers - resume mining
+                        std::cout << "[Mining] Peer connectivity restored - resuming mining" << std::endl;
+                        mining_paused_no_peers = false;
+
+                        // Rebuild template and restart mining
+                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false);
+                        if (templateOpt) {
+                            miner.StartMining(*templateOpt);
+                            std::cout << "[Mining] Mining resumed with fresh template" << std::endl;
+                        } else {
+                            std::cerr << "[Mining] ERROR: Failed to build template for resume" << std::endl;
                         }
                     }
                 }
