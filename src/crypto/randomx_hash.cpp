@@ -457,15 +457,13 @@ extern "C" void randomx_init_mining_mode_async(const void* key, size_t key_len) 
     // Atomic compare-exchange to prevent race condition
     bool expected = false;
     if (!g_mining_initializing.compare_exchange_strong(expected, true)) {
-        std::cout << "  [MINING] Already initializing" << std::endl;
-        return;
+        return;  // Already initializing
     }
 
     // Check if already ready
     if (g_mining_ready.load()) {
         g_mining_initializing = false;
-        std::cout << "  [MINING] Already initialized" << std::endl;
-        return;
+        return;  // Already initialized
     }
 
     // Join any existing thread
@@ -479,7 +477,6 @@ extern "C" void randomx_init_mining_mode_async(const void* key, size_t key_len) 
     // Launch async initialization thread
     g_mining_init_thread = std::thread([key_copy]() {
         try {
-            std::cout << "  [MINING] Starting FULL mode initialization in background..." << std::endl;
             auto start_time = std::chrono::steady_clock::now();
 
             std::lock_guard<std::mutex> lock(g_mining_mutex);
@@ -575,8 +572,6 @@ extern "C" void randomx_init_mining_mode_async(const void* key, size_t key_len) 
         }
         g_mining_initializing = false;
     });
-
-    std::cout << "  [MINING] Background initialization started (non-blocking)" << std::endl;
 }
 
 extern "C" int randomx_is_mining_mode_ready() {
