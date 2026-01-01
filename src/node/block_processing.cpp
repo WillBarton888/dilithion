@@ -488,6 +488,37 @@ BlockProcessResult ProcessNewBlock(
             }
         }
 
+        // FORK REORG FIX: Process orphan children after successful block activation
+        // When a block validates successfully, check if any orphans were waiting for it as their parent
+        // This mirrors the logic in block_validation_queue.cpp for the async path
+        // Without this, nodes fail to reorganize to longer chains (blocks marked ORPHAN instead of connecting)
+        if (ctx.orphan_manager) {
+            std::vector<uint256> orphanChildren = ctx.orphan_manager->GetOrphanChildren(blockHash);
+            if (!orphanChildren.empty()) {
+                std::cout << "[ProcessNewBlock] Found " << orphanChildren.size()
+                          << " orphan children waiting for block " << blockHash.GetHex().substr(0, 16)
+                          << "... at height " << pblockIndexPtr->nHeight << std::endl;
+
+                // Process orphan children by recursively calling ProcessNewBlock
+                for (const uint256& orphanHash : orphanChildren) {
+                    CBlock orphanBlock;
+                    if (ctx.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
+                        // Erase from orphan pool BEFORE processing to avoid re-entry
+                        ctx.orphan_manager->EraseOrphanBlock(orphanHash);
+
+                        // Recursively process the orphan block
+                        uint256 orphanBlockHash = orphanBlock.GetHash();
+                        std::cout << "[ProcessNewBlock] Processing orphan child "
+                                  << orphanBlockHash.GetHex().substr(0, 16) << "..." << std::endl;
+
+                        BlockProcessResult orphan_result = ProcessNewBlock(ctx, db, -1, orphanBlock, &orphanBlockHash);
+                        std::cout << "[ProcessNewBlock] Orphan child result: "
+                                  << BlockProcessResultToString(orphan_result) << std::endl;
+                    }
+                }
+            }
+        }
+
         // Notify BlockFetcher
         if (ctx.block_fetcher) {
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
