@@ -6,6 +6,7 @@
 #include <ctime>
 #include <chrono>
 #include <iostream>  // For std::cout, std::endl (BUG #109 debug)
+#include <util/logging.h>  // For g_verbose flag
 
 static const size_t DEFAULT_MAX_MEMPOOL_SIZE = 300 * 1024 * 1024;
 
@@ -487,10 +488,11 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
         auto set_result = setEntries.insert(entry_ptr);
 
         // BUG #109 DEBUG: Track setEntries insertion
-        std::cout << "[MEMPOOL-DEBUG] AddTx: txid=" << txid.GetHex().substr(0, 16)
-                  << " mapTx.size()=" << mapTx.size()
-                  << " setEntries.size()=" << setEntries.size()
-                  << " insert_success=" << set_result.second << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[MEMPOOL-DEBUG] AddTx: txid=" << txid.GetHex().substr(0, 16)
+                      << " mapTx.size()=" << mapTx.size()
+                      << " setEntries.size()=" << setEntries.size()
+                      << " insert_success=" << set_result.second << std::endl;
 
         guard.MarkSetInserted();
 
@@ -811,8 +813,9 @@ std::vector<CTransactionRef> CTxMemPool::GetOrderedTxs() const {
     std::lock_guard<std::mutex> lock(cs);
 
     // BUG #109 DEBUG: Log mempool state when GetOrderedTxs is called
-    std::cout << "[MEMPOOL-DEBUG] GetOrderedTxs: mapTx.size()=" << mapTx.size()
-              << " setEntries.size()=" << setEntries.size() << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[MEMPOOL-DEBUG] GetOrderedTxs: mapTx.size()=" << mapTx.size()
+                  << " setEntries.size()=" << setEntries.size() << std::endl;
 
     // MEMPOOL-015 FIX: Limit GetOrderedTxs to prevent DoS via unbounded allocation
     // Without limit, 1.2M transactions → 9.6MB vector allocation + O(n) iteration

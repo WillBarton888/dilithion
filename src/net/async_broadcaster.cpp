@@ -6,6 +6,7 @@
 #include <net/node.h>     // BIP 130: For CNode::fPreferHeaders
 #include <net/connman.h>  // Phase 5: CConnman
 #include <net/protocol.h>
+#include <util/logging.h>  // For g_verbose flag
 #include <iostream>
 #include <chrono>
 
@@ -253,8 +254,9 @@ bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const CBlock& block,
             std::cerr << "[AsyncBroadcaster] Failed to queue CMPCTBLOCK broadcast" << std::endl;
             success = false;
         } else {
-            std::cout << "[BIP152] Sending CMPCTBLOCK to " << cmpctblock_peers.size() << " high-bandwidth peer(s) "
-                      << "(shorttxids=" << cmpctblock.shorttxids.size() << ", prefilled=" << cmpctblock.prefilledtxn.size() << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BIP152] Sending CMPCTBLOCK to " << cmpctblock_peers.size() << " high-bandwidth peer(s) "
+                          << "(shorttxids=" << cmpctblock.shorttxids.size() << ", prefilled=" << cmpctblock.prefilledtxn.size() << ")" << std::endl;
         }
     }
 
@@ -281,7 +283,8 @@ bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const CBlock& block,
             std::cerr << "[AsyncBroadcaster] Failed to queue INV broadcast" << std::endl;
             success = false;
         } else {
-            std::cout << "[BIP152] Sending INV to " << inv_peers.size() << " peer(s)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BIP152] Sending INV to " << inv_peers.size() << " peer(s)" << std::endl;
         }
     }
 

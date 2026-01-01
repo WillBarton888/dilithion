@@ -114,7 +114,8 @@ bool CBlockchainDB::ValidateDatabasePath(const std::string& path, std::string& c
             "Invalid database path");
         error.cause = e.what();
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-        std::cout << "[DB-DEBUG] Path validation error: " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] Path validation error: " << e.what() << std::endl;
         return false;
     }
 }
@@ -181,7 +182,8 @@ bool CBlockchainDB::Open(const std::string& path, bool create_if_missing) {
         
         LogPrintf(ALL, ERROR, "Failed to open database: %s", error_msg.c_str());
         std::cerr << "[ERROR] Failed to open database" << std::endl;
-        std::cout << "[DB-DEBUG] " << error_msg << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] " << error_msg << std::endl;
         
         // Log specific recovery advice
         if (error_type == DBErrorType::CORRUPTION) {
@@ -307,7 +309,8 @@ bool CBlockchainDB::WriteBlock(const uint256& hash, const CBlock& block) {
         LogPrintf(ALL, ERROR, "WriteBlock failed: %s", error_msg.c_str());
         ErrorMessage error = CErrorFormatter::DatabaseError("write block", error_msg);
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-        std::cout << "[DB-DEBUG] " << error_msg << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] " << error_msg << std::endl;
         
         // Phase 4.2: Verify fsync actually worked (if sync was requested)
         if (options.sync && error_type == DBErrorType::IO_ERROR) {
@@ -352,7 +355,8 @@ bool CBlockchainDB::ReadBlock(const uint256& hash, CBlock& block) {
             "Invalid data size: " + std::to_string(value.size()) + " bytes (min: " + 
             std::to_string(MIN_SIZE) + ")");
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-        std::cout << "[DB-DEBUG] Data size: " << value.size() << " bytes (min: " << MIN_SIZE << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] Data size: " << value.size() << " bytes (min: " << MIN_SIZE << ")" << std::endl;
         (void)BENCHMARK_END("db_read_block");
         return false;
     }
@@ -366,10 +370,11 @@ bool CBlockchainDB::ReadBlock(const uint256& hash, CBlock& block) {
     offset += sizeof(version);
 
     if (version != 1) {
-        ErrorMessage error = CErrorFormatter::DatabaseError("read block", 
+        ErrorMessage error = CErrorFormatter::DatabaseError("read block",
             "Unsupported format version: " + std::to_string(version) + " (expected 1)");
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-        std::cout << "[DB-DEBUG] Version: " << version << " (expected 1)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] Version: " << version << " (expected 1)" << std::endl;
         (void)BENCHMARK_END("db_read_block");
         return false;
     }
@@ -393,11 +398,12 @@ bool CBlockchainDB::ReadBlock(const uint256& hash, CBlock& block) {
     // DB-001 FIX: SHA-256 is 32 bytes (not 4 byte uint32_t)
     const size_t expected_total_size = sizeof(version) + sizeof(data_length) + data_length + 32;
     if (value.size() != expected_total_size) {
-        ErrorMessage error = CErrorFormatter::DatabaseError("read block", 
-            "Size mismatch: expected " + std::to_string(expected_total_size) + 
+        ErrorMessage error = CErrorFormatter::DatabaseError("read block",
+            "Size mismatch: expected " + std::to_string(expected_total_size) +
             ", got " + std::to_string(value.size()));
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-        std::cout << "[DB-DEBUG] Expected: " << expected_total_size << ", Got: " << value.size() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] Expected: " << expected_total_size << ", Got: " << value.size() << std::endl;
         (void)BENCHMARK_END("db_read_block");
         return false;
     }
@@ -436,8 +442,10 @@ bool CBlockchainDB::ReadBlock(const uint256& hash, CBlock& block) {
         error.recovery_steps.push_back("Use --reindex to rebuild the database");
         error.recovery_steps.push_back("If problem persists, database may be corrupted");
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-        std::cout << "[DB-DEBUG] Stored:     " << stored_checksum.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "[DB-DEBUG] Calculated: " << calculated_checksum.GetHex().substr(0, 16) << "..." << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            std::cout << "[DB-DEBUG] Stored:     " << stored_checksum.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout << "[DB-DEBUG] Calculated: " << calculated_checksum.GetHex().substr(0, 16) << "..." << std::endl;
+        }
         (void)BENCHMARK_END("db_read_block");
         return false;
     }
@@ -586,7 +594,8 @@ bool CBlockchainDB::WriteBlockIndex(const uint256& hash, const CBlockIndex& inde
         
         LogPrintf(ALL, ERROR, "WriteBlockIndex failed: %s", error_msg.c_str());
         std::cerr << "[ERROR] WriteBlockIndex failed" << std::endl;
-        std::cout << "[DB-DEBUG] " << error_msg << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] " << error_msg << std::endl;
         
         if (options.sync && error_type == DBErrorType::IO_ERROR) {
             LogPrintf(ALL, ERROR, "Fsync verification failed - index may not be persisted");
@@ -765,7 +774,8 @@ bool CBlockchainDB::WriteBestBlock(const uint256& hash) {
         
         LogPrintf(ALL, ERROR, "WriteBestBlock failed: %s", error_msg.c_str());
         std::cerr << "[ERROR] WriteBestBlock failed" << std::endl;
-        std::cout << "[DB-DEBUG] " << error_msg << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] " << error_msg << std::endl;
     }
     return status.ok();
 }
@@ -893,7 +903,8 @@ bool CBlockchainDB::WriteBlockWithIndex(const uint256& hash, const CBlock& block
         
         LogPrintf(ALL, ERROR, "WriteBlockWithIndex: Atomic batch write failed: %s", error_msg.c_str());
         std::cerr << "[ERROR] WriteBlockWithIndex: Atomic batch write failed" << std::endl;
-        std::cout << "[DB-DEBUG] " << error_msg << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[DB-DEBUG] " << error_msg << std::endl;
         
         if (options.sync && error_type == DBErrorType::IO_ERROR) {
             LogPrintf(ALL, ERROR, "Fsync verification failed - batch may not be persisted");

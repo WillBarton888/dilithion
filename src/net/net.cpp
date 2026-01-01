@@ -1261,8 +1261,9 @@ bool CNetMessageProcessor::ProcessSendCmpctMessage(int peer_id, CDataStream& str
             return true;  // Ignore but don't disconnect
         }
 
-        std::cout << "[BIP152] Peer " << peer_id << " sent sendcmpct (high_bandwidth="
-                  << (high_bandwidth ? "true" : "false") << ", version=" << version << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[BIP152] Peer " << peer_id << " sent sendcmpct (high_bandwidth="
+                      << (high_bandwidth ? "true" : "false") << ", version=" << version << ")" << std::endl;
 
         // Call handler to update peer preference
         if (on_sendcmpct) {
@@ -1375,10 +1376,11 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
             cmpctblock.shorttxids.push_back(shortid);
         }
 
-        std::cout << "[BIP152] Received CMPCTBLOCK from peer " << peer_id
-                  << " (hash=" << cmpctblock.header.GetHash().GetHex().substr(0, 16)
-                  << "..., prefilled=" << cmpctblock.prefilledtxn.size()
-                  << ", shorttxids=" << cmpctblock.shorttxids.size() << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[BIP152] Received CMPCTBLOCK from peer " << peer_id
+                      << " (hash=" << cmpctblock.header.GetHash().GetHex().substr(0, 16)
+                      << "..., prefilled=" << cmpctblock.prefilledtxn.size()
+                      << ", shorttxids=" << cmpctblock.shorttxids.size() << ")" << std::endl;
 
         // Call handler for block reconstruction
         if (on_cmpctblock) {
@@ -1420,9 +1422,10 @@ bool CNetMessageProcessor::ProcessGetBlockTxnMessage(int peer_id, CDataStream& s
             req.indexes.push_back(static_cast<uint16_t>(stream.ReadCompactSize()));
         }
 
-        std::cout << "[BIP152] Received GETBLOCKTXN from peer " << peer_id
-                  << " (block=" << req.blockhash.GetHex().substr(0, 16)
-                  << "..., " << req.indexes.size() << " txns requested)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[BIP152] Received GETBLOCKTXN from peer " << peer_id
+                      << " (block=" << req.blockhash.GetHex().substr(0, 16)
+                      << "..., " << req.indexes.size() << " txns requested)" << std::endl;
 
         // Call handler to serve requested transactions
         if (on_getblocktxn) {
@@ -1502,9 +1505,10 @@ bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stre
             resp.txn.push_back(std::move(tx));
         }
 
-        std::cout << "[BIP152] Received BLOCKTXN from peer " << peer_id
-                  << " (block=" << resp.blockhash.GetHex().substr(0, 16)
-                  << "..., " << resp.txn.size() << " txns)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[BIP152] Received BLOCKTXN from peer " << peer_id
+                      << " (block=" << resp.blockhash.GetHex().substr(0, 16)
+                      << "..., " << resp.txn.size() << " txns)" << std::endl;
 
         // Call handler to complete block reconstruction
         if (on_blocktxn) {

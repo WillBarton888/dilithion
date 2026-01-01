@@ -12,6 +12,10 @@
 #include <memory>
 #include <cstdint>
 
+// Global verbose flag - controlled by --verbose/-v command line option
+// When false (default), debug output is hidden for cleaner miner experience
+extern std::atomic<bool> g_verbose;
+
 /**
  * Bitcoin Core-style logging system
  *

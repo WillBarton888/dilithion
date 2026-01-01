@@ -34,7 +34,7 @@ CIbdCoordinator::CIbdCoordinator(CChainState& chainstate, NodeContext& node_cont
 void CIbdCoordinator::Tick() {
     // IBD DEBUG: Confirm Tick() is being called
     static int tick_count = 0;
-    if (++tick_count <= 5 || tick_count % 60 == 0) {
+    if (g_verbose.load(std::memory_order_relaxed) && (++tick_count <= 5 || tick_count % 60 == 0)) {
         std::cerr << "[IBD-DEBUG] Tick() called #" << tick_count << std::endl;
     }
 
@@ -45,7 +45,7 @@ void CIbdCoordinator::Tick() {
     if (!m_node_context.headers_manager || !m_node_context.block_fetcher) {
         // IBD DEBUG: Log why we're returning early
         static int no_components_count = 0;
-        if (++no_components_count <= 5) {
+        if (g_verbose.load(std::memory_order_relaxed) && ++no_components_count <= 5) {
             std::cerr << "[IBD-DEBUG] Tick() returning: no headers_manager or block_fetcher" << std::endl;
         }
         return;
@@ -128,7 +128,7 @@ void CIbdCoordinator::Tick() {
         }
 
         static int synced_count = 0;
-        if (++synced_count <= 5 || synced_count % 60 == 0) {
+        if (g_verbose.load(std::memory_order_relaxed) && (++synced_count <= 5 || synced_count % 60 == 0)) {
             std::cerr << "[IBD-DEBUG] Tick() returning: synced (header=" << header_height
                       << " <= chain=" << chain_height << ")" << std::endl;
         }
@@ -175,7 +175,7 @@ void CIbdCoordinator::Tick() {
     if (!ShouldAttemptDownload()) {
         // IBD DEBUG: Log why we're returning early
         static int backoff_count = 0;
-        if (++backoff_count <= 5 || backoff_count % 60 == 0) {
+        if (g_verbose.load(std::memory_order_relaxed) && (++backoff_count <= 5 || backoff_count % 60 == 0)) {
             std::cerr << "[IBD-DEBUG] Tick() returning: ShouldAttemptDownload=false (backoff)" << std::endl;
         }
         return;
@@ -364,7 +364,8 @@ void CIbdCoordinator::HandleNoPeers(std::chrono::steady_clock::time_point now) {
 void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                                      std::chrono::steady_clock::time_point now) {
     // IBD DEBUG: Track entry into DownloadBlocks
-    std::cerr << "[IBD-DEBUG] DownloadBlocks entered: header=" << header_height << " chain=" << chain_height << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cerr << "[IBD-DEBUG] DownloadBlocks entered: header=" << header_height << " chain=" << chain_height << std::endl;
 
     // Bug #150: Log fork status periodically (every 100 calls)
     static size_t download_call_count = 0;
@@ -634,7 +635,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     BENCHMARK_END("ibd_download_blocks");
 
     // IBD DEBUG: DownloadBlocks complete
-    std::cerr << "[IBD-DEBUG] DownloadBlocks complete" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cerr << "[IBD-DEBUG] DownloadBlocks complete" << std::endl;
 }
 
 // QueueMissingBlocks REMOVED - pure per-block model uses GetNextBlocksToRequest() directly

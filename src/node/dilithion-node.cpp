@@ -292,6 +292,7 @@ struct NodeConfig {
     std::vector<std::string> add_nodes;      // --addnode nodes (additional)
     bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
+    bool verbose = false;           // Show debug output (hidden by default)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -383,6 +384,10 @@ struct NodeConfig {
                 // Phase 4.2: Rescan wallet transactions
                 rescan = true;
             }
+            else if (arg == "--verbose" || arg == "-v") {
+                // Show debug output
+                verbose = true;
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -415,6 +420,7 @@ struct NodeConfig {
         std::cout << "  --addnode=<ip:port>   Add node to connect to (repeatable)" << std::endl;
         std::cout << "  --mine                Start mining automatically" << std::endl;
         std::cout << "  --threads=<n|auto>    Mining threads (number or 'auto' to detect)" << std::endl;
+        std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -882,7 +888,15 @@ int main(int argc, char* argv[]) {
     if (!config.rescan) {
         config.rescan = config_parser.GetBool("rescan", false);
     }
-    
+
+    // Verbose mode (only if not set via command-line)
+    if (!config.verbose) {
+        config.verbose = config_parser.GetBool("verbose", false);
+    }
+
+    // Set global verbose flag for debug output
+    g_verbose.store(config.verbose, std::memory_order_relaxed);
+
     if (config_parser.IsLoaded()) {
         LogPrintf(ALL, INFO, "Configuration loaded from: %s", config_file.c_str());
     }
@@ -1863,7 +1877,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     CNetMessage sendcmpct_msg = g_node_context.message_processor->CreateSendCmpctMessage(true, 1);
                     g_node_context.connman->PushMessage(peer_id, sendcmpct_msg);
                     node->fSentSendCmpct.store(true);
-                    std::cout << "[BIP152] Sent sendcmpct (high_bandwidth=true, version=1) to peer " << peer_id << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[BIP152] Sent sendcmpct (high_bandwidth=true, version=1) to peer " << peer_id << std::endl;
                 }
             }
         });
@@ -1927,9 +1942,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (item.type == NetProtocol::MSG_BLOCK_INV) {
                     // DEBUG: Log every block INV received
                     bool exists = blockchain.BlockExists(item.hash);
-                    std::cout << "[INV-DEBUG] Peer " << peer_id << " announced block "
-                              << item.hash.GetHex().substr(0, 16) << "... exists="
-                              << (exists ? "YES" : "NO") << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[INV-DEBUG] Peer " << peer_id << " announced block "
+                                  << item.hash.GetHex().substr(0, 16) << "... exists="
+                                  << (exists ? "YES" : "NO") << std::endl;
 
                     // Check if we already have this block
                     if (!exists) {
@@ -1997,12 +2013,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "[P2P] Peer " << peer_id << " requested unknown block: "
                                   << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
                         // DEBUG: Check if block exists in chainstate under this hash
-                        CBlockIndex* pindex = g_chainstate.GetBlockIndex(item.hash);
-                        if (pindex) {
-                            std::cout << "[DEBUG] Block IS in chainstate at height " << pindex->nHeight
-                                      << " but NOT in block database!" << std::endl;
-                        } else {
-                            std::cout << "[DEBUG] Block NOT in chainstate either - hash doesn't exist" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed)) {
+                            CBlockIndex* pindex = g_chainstate.GetBlockIndex(item.hash);
+                            if (pindex) {
+                                std::cout << "[DEBUG] Block IS in chainstate at height " << pindex->nHeight
+                                          << " but NOT in block database!" << std::endl;
+                            } else {
+                                std::cout << "[DEBUG] Block NOT in chainstate either - hash doesn't exist" << std::endl;
+                            }
                         }
                     }
                 }
@@ -2060,11 +2078,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(hashStart);
 
             // DEBUG: Check pnext chain
-            if (pindex) {
-                std::cout << "[IBD-DEBUG] Found start block at height " << pindex->nHeight
-                          << " pnext=" << (pindex->pnext ? "SET" : "NULL") << std::endl;
-            } else {
-                std::cout << "[IBD-DEBUG] Start block NOT FOUND: " << hashStart.GetHex().substr(0,16) << "..." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                if (pindex) {
+                    std::cout << "[IBD-DEBUG] Found start block at height " << pindex->nHeight
+                              << " pnext=" << (pindex->pnext ? "SET" : "NULL") << std::endl;
+                } else {
+                    std::cout << "[IBD-DEBUG] Start block NOT FOUND: " << hashStart.GetHex().substr(0,16) << "..." << std::endl;
+                }
             }
 
             if (pindex) {
@@ -2072,9 +2092,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 while (pindex && headers.size() < 2000) {
                     // BUG #70 DEBUG: Log merkle root of each header being sent
-                    std::cerr << "[BUG70-DEBUG] Sending header height=" << pindex->nHeight
-                              << " merkle=" << pindex->header.hashMerkleRoot.GetHex().substr(0,16)
-                              << "..." << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cerr << "[BUG70-DEBUG] Sending header height=" << pindex->nHeight
+                                  << " merkle=" << pindex->header.hashMerkleRoot.GetHex().substr(0,16)
+                                  << "..." << std::endl;
                     headers.push_back(pindex->header);
                     pindex = pindex->pnext;
 
@@ -2137,8 +2158,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // When a peer sends sendcmpct, they support compact blocks and want us to send them
         message_processor.SetSendCmpctHandler([](int peer_id, bool high_bandwidth, uint64_t version) {
             if (version != 1) {
-                std::cout << "[BIP152] Peer " << peer_id << " sent sendcmpct with unsupported version "
-                          << version << " (ignoring)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Peer " << peer_id << " sent sendcmpct with unsupported version "
+                              << version << " (ignoring)" << std::endl;
                 return;
             }
 
@@ -2147,8 +2169,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (node) {
                     node->fSupportsCompactBlocks.store(true);
                     node->fHighBandwidth.store(high_bandwidth);
-                    std::cout << "[BIP152] Peer " << peer_id << " supports compact blocks (high_bandwidth="
-                              << (high_bandwidth ? "true" : "false") << ")" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[BIP152] Peer " << peer_id << " supports compact blocks (high_bandwidth="
+                                  << (high_bandwidth ? "true" : "false") << ")" << std::endl;
                 }
             }
         });
@@ -2157,16 +2180,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 4: Full mempool-based block reconstruction
         message_processor.SetCmpctBlockHandler([&blockchain, &message_processor](int peer_id, const CBlockHeaderAndShortTxIDs& cmpctblock) {
             uint256 blockHash = cmpctblock.header.GetHash();
-            std::cout << "[BIP152] Received CMPCTBLOCK from peer " << peer_id
-                      << " (hash=" << blockHash.GetHex().substr(0, 16) << "..."
-                      << ", prefilled=" << cmpctblock.prefilledtxn.size()
-                      << ", shorttxids=" << cmpctblock.shorttxids.size() << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BIP152] Received CMPCTBLOCK from peer " << peer_id
+                          << " (hash=" << blockHash.GetHex().substr(0, 16) << "..."
+                          << ", prefilled=" << cmpctblock.prefilledtxn.size()
+                          << ", shorttxids=" << cmpctblock.shorttxids.size() << ")" << std::endl;
 
             // Check if we already have this block
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
             if (pindex) {
-                std::cout << "[BIP152] Already have block " << blockHash.GetHex().substr(0, 16)
-                          << "... at height " << pindex->nHeight << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Already have block " << blockHash.GetHex().substr(0, 16)
+                              << "... at height " << pindex->nHeight << std::endl;
                 return;
             }
 
@@ -2182,7 +2207,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         mempool_txs.push_back(*tx_ref);
                     }
                 }
-                std::cout << "[BIP152] Attempting reconstruction with " << mempool_txs.size() << " mempool txns" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Attempting reconstruction with " << mempool_txs.size() << " mempool txns" << std::endl;
             }
 
             // 2. Create PartiallyDownloadedBlock and fill from mempool
@@ -2193,7 +2219,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // 3a. Fully reconstructed - extract and validate block
                 CBlock block;
                 if (!partial_block->GetBlock(block)) {
-                    std::cout << "[BIP152] Block reconstruction failed (merkle mismatch) - requesting full block" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[BIP152] Block reconstruction failed (merkle mismatch) - requesting full block" << std::endl;
                     // Merkle root mismatch - request full block as fallback
                     if (g_node_context.connman && g_node_context.message_processor) {
                         NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, blockHash);
@@ -2204,11 +2231,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     return;
                 }
 
-                std::cout << "[BIP152] Block fully reconstructed from mempool!" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Block fully reconstructed from mempool!" << std::endl;
 
                 // Process the reconstructed block using ProcessNewBlock with precomputed hash
                 auto result = ProcessNewBlock(g_node_context, blockchain, peer_id, block, &blockHash);
-                std::cout << "[BIP152] ProcessNewBlock result: " << BlockProcessResultToString(result) << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] ProcessNewBlock result: " << BlockProcessResultToString(result) << std::endl;
 
             } else if (status == ReadStatus::EXTRA_TXN) {
                 // 3b. Need missing transactions - send GETBLOCKTXN
@@ -2216,8 +2245,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 size_t missing_count = missing_indices.size();
                 size_t total_txns = cmpctblock.prefilledtxn.size() + cmpctblock.shorttxids.size();
 
-                std::cout << "[BIP152] Need " << missing_count << "/" << total_txns
-                          << " missing transactions - sending GETBLOCKTXN" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Need " << missing_count << "/" << total_txns
+                              << " missing transactions - sending GETBLOCKTXN" << std::endl;
 
                 // Store partial block for completion when BLOCKTXN arrives
                 {
@@ -2237,8 +2267,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             } else {
                 // 3c. Invalid compact block - request full block as fallback
-                std::cout << "[BIP152] Compact block invalid (status=" << static_cast<int>(status)
-                          << ") - requesting full block" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Compact block invalid (status=" << static_cast<int>(status)
+                              << ") - requesting full block" << std::endl;
                 if (g_node_context.connman && g_node_context.message_processor) {
                     NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, blockHash);
                     std::vector<NetProtocol::CInv> inv_vec = {block_inv};
@@ -2251,21 +2282,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // BIP 152: Handle getblocktxn (request for missing transactions)
         // Peer needs specific transactions from a block we sent as compact
         message_processor.SetGetBlockTxnHandler([&blockchain, &message_processor](int peer_id, const BlockTransactionsRequest& req) {
-            std::cout << "[BIP152] Received GETBLOCKTXN from peer " << peer_id
-                      << " (block=" << req.blockhash.GetHex().substr(0, 16)
-                      << "..., " << req.indexes.size() << " txns requested)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BIP152] Received GETBLOCKTXN from peer " << peer_id
+                          << " (block=" << req.blockhash.GetHex().substr(0, 16)
+                          << "..., " << req.indexes.size() << " txns requested)" << std::endl;
 
             // Load the requested block
             CBlock block;
             if (!blockchain.ReadBlock(req.blockhash, block)) {
-                std::cout << "[BIP152] Don't have requested block " << req.blockhash.GetHex().substr(0, 16) << "..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Don't have requested block " << req.blockhash.GetHex().substr(0, 16) << "..." << std::endl;
                 return;
             }
 
             // Deserialize transactions from block
             std::vector<CTransaction> transactions;
             if (!DeserializeTransactionsFromVtx(block.vtx, transactions)) {
-                std::cout << "[BIP152] Failed to deserialize transactions from block" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Failed to deserialize transactions from block" << std::endl;
                 return;
             }
 
@@ -2275,8 +2309,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             for (uint16_t idx : req.indexes) {
                 if (idx >= transactions.size()) {
-                    std::cout << "[BIP152] Peer requested invalid tx index " << idx
-                              << " (block has " << transactions.size() << " txns)" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[BIP152] Peer requested invalid tx index " << idx
+                                  << " (block has " << transactions.size() << " txns)" << std::endl;
                     // Misbehave
                     if (g_node_context.peer_manager) {
                         g_node_context.peer_manager->Misbehaving(peer_id, 10);
@@ -2290,16 +2325,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_context.connman && g_node_context.message_processor) {
                 CNetMessage blocktxn_msg = g_node_context.message_processor->CreateBlockTxnMessage(resp);
                 g_node_context.connman->PushMessage(peer_id, blocktxn_msg);
-                std::cout << "[BIP152] Sent BLOCKTXN with " << resp.txn.size() << " transactions to peer " << peer_id << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Sent BLOCKTXN with " << resp.txn.size() << " transactions to peer " << peer_id << std::endl;
             }
         });
 
         // BIP 152: Handle blocktxn (missing transactions response)
         // Phase 4: Complete block reconstruction with received transactions
         message_processor.SetBlockTxnHandler([&blockchain](int peer_id, const BlockTransactions& resp) {
-            std::cout << "[BIP152] Received BLOCKTXN from peer " << peer_id
-                      << " (block=" << resp.blockhash.GetHex().substr(0, 16)
-                      << "..., " << resp.txn.size() << " txns)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BIP152] Received BLOCKTXN from peer " << peer_id
+                          << " (block=" << resp.blockhash.GetHex().substr(0, 16)
+                          << "..., " << resp.txn.size() << " txns)" << std::endl;
 
             // Find pending partial block
             std::unique_ptr<PartiallyDownloadedBlock> partial_block;
@@ -2308,8 +2345,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::lock_guard<std::mutex> lock(g_node_context.cs_partial_blocks);
                 auto it = g_node_context.partial_blocks.find(resp.blockhash.GetHex());
                 if (it == g_node_context.partial_blocks.end()) {
-                    std::cout << "[BIP152] No pending partial block for " << resp.blockhash.GetHex().substr(0, 16)
-                              << "... (may have been completed or timed out)" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[BIP152] No pending partial block for " << resp.blockhash.GetHex().substr(0, 16)
+                                  << "... (may have been completed or timed out)" << std::endl;
                     return;
                 }
                 original_peer_id = it->second.first;
@@ -2318,7 +2356,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Verify response is from the peer we requested from
-            if (peer_id != original_peer_id) {
+            if (g_verbose.load(std::memory_order_relaxed) && peer_id != original_peer_id) {
                 std::cout << "[BIP152] BLOCKTXN from unexpected peer " << peer_id
                           << " (expected " << original_peer_id << ") - accepting anyway" << std::endl;
             }
@@ -2326,8 +2364,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Fill in missing transactions
             ReadStatus status = partial_block->FillMissingTxs(resp.txn);
             if (status != ReadStatus::OK) {
-                std::cout << "[BIP152] Failed to fill missing transactions (status=" << static_cast<int>(status)
-                          << ") - requesting full block" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Failed to fill missing transactions (status=" << static_cast<int>(status)
+                              << ") - requesting full block" << std::endl;
                 // Fall back to full block request
                 if (g_node_context.connman && g_node_context.message_processor) {
                     NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, resp.blockhash);
@@ -2341,7 +2380,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Extract reconstructed block
             CBlock block;
             if (!partial_block->GetBlock(block)) {
-                std::cout << "[BIP152] Block reconstruction failed (merkle mismatch) - requesting full block" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BIP152] Block reconstruction failed (merkle mismatch) - requesting full block" << std::endl;
                 if (g_node_context.connman && g_node_context.message_processor) {
                     NetProtocol::CInv block_inv(NetProtocol::MSG_BLOCK_INV, resp.blockhash);
                     std::vector<NetProtocol::CInv> inv_vec = {block_inv};
@@ -2351,11 +2391,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 return;
             }
 
-            std::cout << "[BIP152] Block fully reconstructed with " << resp.txn.size() << " received transactions!" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BIP152] Block fully reconstructed with " << resp.txn.size() << " received transactions!" << std::endl;
 
             // Process the reconstructed block using ProcessNewBlock with precomputed hash
             auto result = ProcessNewBlock(g_node_context, blockchain, peer_id, block, &resp.blockhash);
-            std::cout << "[BIP152] ProcessNewBlock result: " << BlockProcessResultToString(result) << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BIP152] ProcessNewBlock result: " << BlockProcessResultToString(result) << std::endl;
         });
 
         // BUG #138 FIX: Start CConnman AFTER all handlers are registered
@@ -2769,16 +2811,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                         if (!peer_ids.empty()) {
                             // DEBUG: Log which peers we're broadcasting to
-                            std::cout << "[P2P-DEBUG] Broadcasting block to peers: ";
-                            for (int id : peer_ids) {
-                                auto peer = g_node_context.peer_manager->GetPeer(id);
-                                std::cout << id;
-                                if (peer) {
-                                    std::cout << "(" << peer->addr.ToStringIP() << ")";
+                            if (g_verbose.load(std::memory_order_relaxed)) {
+                                std::cout << "[P2P-DEBUG] Broadcasting block to peers: ";
+                                for (int id : peer_ids) {
+                                    auto peer = g_node_context.peer_manager->GetPeer(id);
+                                    std::cout << id;
+                                    if (peer) {
+                                        std::cout << "(" << peer->addr.ToStringIP() << ")";
+                                    }
+                                    std::cout << " ";
                                 }
-                                std::cout << " ";
+                                std::cout << std::endl;
                             }
-                            std::cout << std::endl;
 
                             // Queue block broadcast asynchronously (non-blocking!)
                             // BIP 130: Pass header to enable HEADERS vs INV routing by peer preference
@@ -3476,7 +3520,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // IBD DEBUG: Log that Tick() returned and main loop continues
             static int main_loop_count = 0;
-            if (++main_loop_count <= 5 || main_loop_count % 60 == 0) {
+            if (g_verbose.load(std::memory_order_relaxed) && (++main_loop_count <= 5 || main_loop_count % 60 == 0)) {
                 std::cerr << "[MAIN-LOOP-DEBUG] Tick() returned, loop iteration #" << main_loop_count << std::endl;
             }
 

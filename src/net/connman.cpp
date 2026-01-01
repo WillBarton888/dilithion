@@ -1313,9 +1313,10 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // DEBUG: Log parsed header
         std::string cmd = header.GetCommand();
-        std::cout << "[EXTRACT-DEBUG] node=" << pnode->id << " cmd=" << cmd
-                  << " payload_size=" << header.payload_size
-                  << " buffer=" << buffer.size() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[EXTRACT-DEBUG] node=" << pnode->id << " cmd=" << cmd
+                      << " payload_size=" << header.payload_size
+                      << " buffer=" << buffer.size() << std::endl;
 
         // Validate header
         if (!header.IsValid(NetProtocol::g_network_magic)) {
@@ -1346,7 +1347,7 @@ void CConnman::ExtractMessages(CNode* pnode) {
         // Check if we have the complete message
         if (buffer.size() < total_size) {
             // DEBUG: Log partial message waiting
-            if (cmd == "block") {
+            if (g_verbose.load(std::memory_order_relaxed) && cmd == "block") {
                 std::cout << "[EXTRACT-PARTIAL] node=" << pnode->id << " cmd=" << cmd
                           << " need=" << total_size << " have=" << buffer.size() << std::endl;
             }
@@ -1391,8 +1392,9 @@ void CConnman::ExtractMessages(CNode* pnode) {
         std::string command = header.GetCommand();
 
         // DEBUG: Log when message is fully extracted and pushed to queue
-        std::cout << "[EXTRACT-PUSHED] node=" << pnode->id << " cmd=" << command
-                  << " payload_size=" << header.payload_size << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[EXTRACT-PUSHED] node=" << pnode->id << " cmd=" << command
+                      << " payload_size=" << header.payload_size << std::endl;
 
         // PIPELINE COUNTER: Step 1 & 2 - Block extracted from TCP and pushed to vProcessMsg
         // Note: Steps 1 & 2 are atomic (PushProcessMsg is just a vector push)

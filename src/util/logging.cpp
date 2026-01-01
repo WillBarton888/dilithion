@@ -18,6 +18,9 @@
 #include <cstring>  // CID 1675220: For strerror
 #endif
 
+// Global verbose flag - default to false for cleaner output
+std::atomic<bool> g_verbose{false};
+
 // CLoggingConfig implementation
 CLoggingConfig& CLoggingConfig::GetInstance() {
     static CLoggingConfig instance;

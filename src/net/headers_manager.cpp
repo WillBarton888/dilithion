@@ -10,6 +10,7 @@
 #include <consensus/pow.h>
 #include <consensus/chain.h>
 #include <util/time.h>
+#include <util/logging.h>  // For g_verbose flag
 #include <node/genesis.h>
 #include <node/ibd_coordinator.h>  // Phase 1: IsSynced() check
 #include <core/node_context.h>
@@ -1227,33 +1228,35 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
                       << " (started from " << nBestHeight << ", target=" << height << ")" << std::endl;
 
             // DEBUG: What hashes DO we have at this height?
-            auto heightIt = mapHeightIndex.find(currentHeight);
-            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-                std::cerr << "[DEBUG] mapHeightIndex HAS " << heightIt->second.size()
-                          << " hash(es) at height " << currentHeight << ":" << std::endl;
-                for (const auto& h : heightIt->second) {
-                    std::cerr << "  - " << h.GetHex().substr(0, 16) << "..." << std::endl;
-                }
-            } else {
-                std::cerr << "[DEBUG] mapHeightIndex has NO hashes at height " << currentHeight << std::endl;
-            }
-
-            // DEBUG: Check if the hash exists anywhere with different key (only once)
-            static int debugLogCount = 0;
-            if (debugLogCount < 3) {  // Only log first 3 breaks
-                debugLogCount++;
-                int foundCount = 0;
-                for (const auto& entry : mapHeaders) {
-                    if (entry.second.height == currentHeight) {
-                        std::cerr << "[DEBUG] Found header at height " << currentHeight
-                                  << " stored under key " << entry.first.GetHex().substr(0, 16) << "..."
-                                  << " hashPrevBlock=" << entry.second.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                                  << std::endl;
-                        foundCount++;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                auto heightIt = mapHeightIndex.find(currentHeight);
+                if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+                    std::cerr << "[DEBUG] mapHeightIndex HAS " << heightIt->second.size()
+                              << " hash(es) at height " << currentHeight << ":" << std::endl;
+                    for (const auto& h : heightIt->second) {
+                        std::cerr << "  - " << h.GetHex().substr(0, 16) << "..." << std::endl;
                     }
+                } else {
+                    std::cerr << "[DEBUG] mapHeightIndex has NO hashes at height " << currentHeight << std::endl;
                 }
-                if (foundCount == 0) {
-                    std::cerr << "[DEBUG] NO header found at height " << currentHeight << " in mapHeaders!" << std::endl;
+
+                // DEBUG: Check if the hash exists anywhere with different key (only once)
+                static int debugLogCount = 0;
+                if (debugLogCount < 3) {  // Only log first 3 breaks
+                    debugLogCount++;
+                    int foundCount = 0;
+                    for (const auto& entry : mapHeaders) {
+                        if (entry.second.height == currentHeight) {
+                            std::cerr << "[DEBUG] Found header at height " << currentHeight
+                                      << " stored under key " << entry.first.GetHex().substr(0, 16) << "..."
+                                      << " hashPrevBlock=" << entry.second.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                                      << std::endl;
+                            foundCount++;
+                        }
+                    }
+                    if (foundCount == 0) {
+                        std::cerr << "[DEBUG] NO header found at height " << currentHeight << " in mapHeaders!" << std::endl;
+                    }
                 }
             }
             break;
@@ -1405,7 +1408,7 @@ bool CHeadersManager::FullValidateHeader(const CBlockHeader& header, int height)
 
     // DEBUG: Log checkpoint check (first 10 headers only)
     static int debug_count = 0;
-    if (debug_count < 10) {
+    if (g_verbose.load(std::memory_order_relaxed) && debug_count < 10) {
         debug_count++;
         std::cout << "[DEBUG] FullValidateHeader height=" << height
                   << " g_chainParams=" << (Dilithion::g_chainParams ? "SET" : "NULL");
