@@ -73,7 +73,7 @@ static CBlock CreateTestBlock(size_t num_txs)
     SerializeTransactionsToVtx(transactions, block.vtx);
 
     // Compute merkle root
-    block.hashMerkleRoot = ComputeMerkleRoot(transactions);
+    block.hashMerkleRoot = BuildMerkleRootFromTxs(transactions);
 
     return block;
 }
