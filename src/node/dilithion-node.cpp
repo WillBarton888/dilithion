@@ -1542,6 +1542,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
         std::cout << "  [OK] Chain tip callback registered for HeadersManager" << std::endl;
 
+        // BUG #32 FIX: Register callback for mining template updates on chain tip change
+        SetChainTipUpdateCallback([&blockchain](CBlockchainDB& db, int new_height, bool is_reorg) {
+            // Only update if mining is enabled and not in IBD
+            if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
+                std::cout << "[Mining] " << (is_reorg ? "Reorg" : "New tip")
+                          << " detected - updating template immediately..." << std::endl;
+                auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false);
+                if (templateOpt) {
+                    g_node_state.miner->UpdateTemplate(*templateOpt);
+                    std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
+                }
+            }
+        });
+        std::cout << "  [OK] Mining template update callback registered" << std::endl;
+
         // Bug #41 fix: Initialize HeadersManager with existing chain from database
         // This ensures HeadersManager can serve historical headers, not just newly mined ones
         {
@@ -3443,10 +3458,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Print mining stats every 10 seconds if mining
-            // BUG #49: Add isolation detection when mining
+            // BUG #49 + BUG #180: Solo mining prevention with 120s grace period
             static int counter = 0;
-            static int mining_without_peers_minutes = 0;
-            static auto last_isolation_check = std::chrono::steady_clock::now();
+            static auto no_peers_since = std::chrono::steady_clock::time_point{};  // When peers dropped to 0
+            static bool mining_paused_no_peers = false;  // Whether we auto-paused mining
+            static int last_remaining_logged = -1;  // For countdown logging
+            static constexpr int SOLO_MINING_GRACE_PERIOD_SECONDS = 120;  // 2 minute grace period
 
             if (config.start_mining && ++counter % 10 == 0) {
                 auto stats = miner.GetStats();

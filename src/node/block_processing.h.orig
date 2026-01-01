@@ -6,7 +6,6 @@
 
 #include <primitives/block.h>
 #include <uint256.h>
-#include <functional>
 
 // Forward declarations
 class CBlockchainDB;
@@ -62,27 +61,5 @@ BlockProcessResult ProcessNewBlock(
  * @brief Convert result to human-readable string (for logging)
  */
 const char* BlockProcessResultToString(BlockProcessResult result);
-
-/**
- * @brief Callback type for chain tip updates
- *
- * Called when a new block becomes the chain tip (either new block or reorg).
- * Used by the main node to update mining templates without creating a
- * compile-time dependency on node-specific code.
- *
- * @param db         Reference to blockchain database
- * @param new_height The new chain tip height
- * @param is_reorg   True if this was a reorg, false for new block
- */
-using ChainTipUpdateCallback = std::function<void(CBlockchainDB& db, int new_height, bool is_reorg)>;
-
-/**
- * @brief Set the callback for chain tip updates
- *
- * Called by the main node at startup to register a handler for chain tip changes.
- *
- * @param callback The callback function (or nullptr to disable)
- */
-void SetChainTipUpdateCallback(ChainTipUpdateCallback callback);
 
 #endif // DILITHION_NODE_BLOCK_PROCESSING_H

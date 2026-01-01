@@ -5,7 +5,7 @@
 
 // Configuration
 const TESTNET_LAUNCH_DATE = 1762041600000; // Nov 2, 2025 00:00:00 UTC
-const MAINNET_LAUNCH_DATE = 1767225600000; // Jan 1, 2026 00:00:00 UTC
+const MAINNET_LAUNCH_DATE = 1768435200000; // Jan 15, 2026 00:00:00 UTC
 const RPC_ENDPOINT = 'http://localhost:8332';
 const API_ENDPOINT = '/api/stats.php'; // PHP proxy to backend nodes
 const STATS_JSON_URL = 'https://dilithion.org/network-stats.json';
@@ -62,10 +62,10 @@ function updateNetworkStatus(live) {
 
     if (live) {
         statusDot.classList.add('live');
-        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 1, 2026';
+        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 15, 2026';
     } else {
         statusDot.classList.remove('live');
-        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 1, 2026';
+        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 15, 2026';
     }
 }
 

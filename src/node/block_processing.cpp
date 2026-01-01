@@ -41,9 +41,13 @@ struct NodeState {
 extern CChainState g_chainstate;
 extern NodeState g_node_state;
 
-// Forward declarations for mining (defined in dilithion-node.cpp)
-extern std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWallet& wallet, bool verbose);
-extern bool IsInitialBlockDownload();
+// Chain tip update callback (set by main node at startup)
+static ChainTipUpdateCallback g_chain_tip_callback = nullptr;
+
+void SetChainTipUpdateCallback(ChainTipUpdateCallback callback) {
+    g_chain_tip_callback = callback;
+}
+
 
 const char* BlockProcessResultToString(BlockProcessResult result) {
     switch (result) {
@@ -441,14 +445,9 @@ BlockProcessResult ProcessNewBlock(
 
             g_node_state.new_block_found = true;
 
-            // BUG #32 FIX: Immediately update mining template when reorg occurs
-            if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
-                std::cout << "[Mining] Reorg detected - updating template immediately..." << std::endl;
-                auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false);
-                if (templateOpt) {
-                    g_node_state.miner->UpdateTemplate(*templateOpt);
-                    std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
-                }
+            // BUG #32 FIX: Notify callback to update mining template when reorg occurs
+            if (g_chain_tip_callback) {
+                g_chain_tip_callback(db, g_chainstate.GetHeight(), true /* is_reorg */);
             }
         } else {
             std::cout << "[ProcessNewBlock] Block activated successfully" << std::endl;
@@ -459,14 +458,9 @@ BlockProcessResult ProcessNewBlock(
                 std::cout << "[ProcessNewBlock] Updated best block to height " << pblockIndexPtr->nHeight << std::endl;
                 g_node_state.new_block_found = true;
 
-                // BUG #32 FIX: Immediately update mining template
-                if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
-                    std::cout << "[Mining] Block became new tip - updating template immediately..." << std::endl;
-                    auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false);
-                    if (templateOpt) {
-                        g_node_state.miner->UpdateTemplate(*templateOpt);
-                        std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
-                    }
+                // BUG #32 FIX: Notify callback to update mining template
+                if (g_chain_tip_callback) {
+                    g_chain_tip_callback(db, pblockIndexPtr->nHeight, false /* is_reorg */);
                 }
 
                 // BUG #43 FIX: Relay received blocks to other peers (Bitcoin Core standard)
