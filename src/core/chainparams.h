@@ -65,9 +65,9 @@ public:
 
     // Testnet-only: Allow minimum difficulty blocks if no block for 2x target time
     // SECURITY: Must be FALSE for mainnet (prevents difficulty gaming attacks)
-    // When enabled, if a block takes > 2x target time (480s), miners can submit
-    // blocks at minimum difficulty. This prevents testnet from getting stuck
-    // when miners leave, but would be exploitable on mainnet.
+    // When enabled, if a block takes > 2x target time (e.g., 120s for 60s testnet),
+    // miners can submit blocks at minimum difficulty. This prevents testnet from
+    // getting stuck when miners leave, but would be exploitable on mainnet.
     bool fPowAllowMinDifficultyBlocks;
 
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations

@@ -87,8 +87,8 @@ ChainParams ChainParams::Testnet() {
     // Data directory (use absolute path from utility function - separate from mainnet)
     params.dataDir = GetDataDir(true);
 
-    // Consensus parameters (same as mainnet for realistic testing)
-    params.blockTime = 240;                // 4 minutes (same as mainnet)
+    // Consensus parameters (faster blocks for testnet)
+    params.blockTime = 60;                 // 1 minute (4x faster than mainnet for quicker testing)
     params.halvingInterval = 210000;       // Same as mainnet
     params.difficultyAdjustment = 2016;    // Same as mainnet
     params.maxBlockSize = 4 * 1024 * 1024; // 4 MB (same as mainnet)
@@ -97,7 +97,7 @@ ChainParams ChainParams::Testnet() {
     params.initialReward = 50ULL * 100000000ULL; // 50 DIL (same as mainnet)
 
     // TESTNET: Allow minimum difficulty blocks for network resilience
-    // If no block is found for 2x target time (480s), allow easy difficulty
+    // If no block is found for 2x target time (120s), allow easy difficulty
     // This prevents testnet from getting stuck when miners leave
     // Safe for testnet since coins have no value (would be exploitable on mainnet)
     params.fPowAllowMinDifficultyBlocks = true;
