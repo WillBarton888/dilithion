@@ -42,6 +42,10 @@ ChainParams ChainParams::Mainnet() {
     // Mining parameters
     params.initialReward = 50ULL * 100000000ULL; // 50 DIL (in ions: 1 DIL = 100,000,000 ions)
 
+    // MAINNET SECURITY: Never allow minimum difficulty blocks
+    // This prevents attackers from gaming timestamps to get easy blocks
+    params.fPowAllowMinDifficultyBlocks = false;
+
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
     //
@@ -91,6 +95,12 @@ ChainParams ChainParams::Testnet() {
 
     // Mining parameters (same as mainnet)
     params.initialReward = 50ULL * 100000000ULL; // 50 DIL (same as mainnet)
+
+    // TESTNET: Allow minimum difficulty blocks for network resilience
+    // If no block is found for 2x target time (480s), allow easy difficulty
+    // This prevents testnet from getting stuck when miners leave
+    // Safe for testnet since coins have no value (would be exploitable on mainnet)
+    params.fPowAllowMinDifficultyBlocks = true;
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint

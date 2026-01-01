@@ -63,6 +63,13 @@ public:
     // Mining parameters
     uint64_t initialReward;         // Initial block reward in ions (1 DIL = 100,000,000 ions)
 
+    // Testnet-only: Allow minimum difficulty blocks if no block for 2x target time
+    // SECURITY: Must be FALSE for mainnet (prevents difficulty gaming attacks)
+    // When enabled, if a block takes > 2x target time (480s), miners can submit
+    // blocks at minimum difficulty. This prevents testnet from getting stuck
+    // when miners leave, but would be exploitable on mainnet.
+    bool fPowAllowMinDifficultyBlocks;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release
