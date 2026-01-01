@@ -43,6 +43,29 @@ OPENSUSE:
 These libraries are required for the blockchain database.
 
 ================================================================
+  FAST SYNC WITH BOOTSTRAP (OPTIONAL)
+================================================================
+
+Want to skip the initial blockchain download? Download our
+bootstrap file to start with a pre-synced blockchain!
+
+1. Download the bootstrap from the GitHub release:
+   https://github.com/WillBarton888/dilithion/releases
+
+   Look for: bootstrap-testnet-blockXXXXX.tar.gz
+
+2. Create the data directory (if it doesn't exist):
+   mkdir -p ~/.dilithion-testnet
+
+3. Extract the bootstrap:
+   tar -xzf bootstrap-testnet-*.tar.gz -C ~/.dilithion-testnet --strip-components=1
+
+4. Start the node normally - it will sync from the bootstrap height!
+
+NOTE: If you're starting fresh, you can skip this step. The node
+will sync automatically (just takes a bit longer).
+
+================================================================
   GETTING STARTED - THREE EASY WAYS
 ================================================================
 
