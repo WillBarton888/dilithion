@@ -690,7 +690,6 @@ bool CIbdCoordinator::FetchBlocks() {
         auto peers = m_node_context.peer_manager->GetConnectedPeers();
         int best_peer = -1;
         int best_height = chain_height;
-        int headers_peer_height = 0;  // Track headers sync peer as fallback
 
         for (const auto& peer : peers) {
             if (!peer) continue;
@@ -698,9 +697,8 @@ bool CIbdCoordinator::FetchBlocks() {
             int peer_height = peer->best_known_height;
             if (peer_height == 0) peer_height = peer->start_height;
 
-            // Prefer non-headers-sync peers
+            // Skip headers sync peer in first pass - prefer other peers for block download
             if (peer->id == m_headers_sync_peer) {
-                headers_peer_height = peer_height;
                 continue;
             }
 
@@ -711,9 +709,12 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // If no other peer found, use headers sync peer for blocks too
-        if (best_peer == -1 && m_headers_sync_peer != -1 && headers_peer_height > chain_height) {
+        // BUG FIX: Use header_height from headers manager (authoritative) instead of
+        // peer->best_known_height which may be stale due to async header processing.
+        // The headers sync peer sent us headers up to header_height, so they have those blocks.
+        if (best_peer == -1 && m_headers_sync_peer != -1 && header_height > chain_height) {
             best_peer = m_headers_sync_peer;
-            best_height = headers_peer_height;
+            best_height = header_height;
         }
 
         if (best_peer != -1) {
