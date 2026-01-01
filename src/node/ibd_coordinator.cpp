@@ -739,6 +739,7 @@ bool CIbdCoordinator::FetchBlocks() {
     int peer_blocks_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
     int peer_capacity = MAX_BLOCKS_IN_TRANSIT_PER_PEER - peer_blocks_in_flight;
     if (peer_capacity <= 0) {
+        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
         return false;  // Peer at capacity - wait for blocks to arrive
     }
 
