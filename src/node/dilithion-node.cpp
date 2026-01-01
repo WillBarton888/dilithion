@@ -478,23 +478,30 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
     }
 
-    // Read best block index to get height and calculate next difficulty
-    CBlockIndex bestIndex;
-    const CBlockIndex* pindexPrev = nullptr;
-    if (blockchain.ReadBlockIndex(hashBestBlock, bestIndex)) {
-        nHeight = bestIndex.nHeight + 1;  // New block height
-        pindexPrev = &bestIndex;  // For difficulty calculation
+    // CRITICAL FIX: Use g_chainstate.GetTip() for difficulty calculation
+    // Database reads return CBlockIndex without pprev linkage, breaking
+    // GetNextWorkRequired() which needs to walk back 2015 blocks via pprev.
+    const CBlockIndex* pindexPrev = g_chainstate.GetTip();
+    if (pindexPrev != nullptr && pindexPrev->GetBlockHash() == hashBestBlock) {
+        nHeight = pindexPrev->nHeight + 1;  // New block height
         if (verbose) {
-            std::cout << "  Building on block height " << bestIndex.nHeight << std::endl;
+            std::cout << "  Building on block height " << pindexPrev->nHeight << std::endl;
             std::cout << "  Mining block height " << nHeight << std::endl;
+        }
+    } else if (pindexPrev != nullptr) {
+        // Chain tip doesn't match DB - use chain tip anyway (has pprev linkage)
+        std::cerr << "[Mining] WARNING: Chain tip doesn't match DB best block" << std::endl;
+        hashBestBlock = pindexPrev->GetBlockHash();
+        nHeight = pindexPrev->nHeight + 1;
+        if (verbose) {
+            std::cout << "  Using chain tip at height " << pindexPrev->nHeight << std::endl;
         }
     } else {
         if (verbose) {
-            std::cout << "  WARNING: Cannot read block index for best block" << std::endl;
+            std::cout << "  WARNING: Chain state has no tip" << std::endl;
             std::cout << "  Assuming best block is genesis, mining block 1" << std::endl;
         }
         nHeight = 1;  // Mining block 1 (after genesis at 0)
-        pindexPrev = nullptr;  // Will use genesis difficulty
     }
 
     // Create block header
