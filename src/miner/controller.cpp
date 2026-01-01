@@ -208,6 +208,9 @@ bool CMiningController::StartMining(const CBlockTemplate& blockTemplate) {
     } else {
         std::cout << "[Mining] Using RandomX LIGHT mode (~3-10 H/s)" << std::endl;
         if (total_ram_mb >= 3072) {
+            // BUG FIX: Actually start FULL mode initialization (was missing!)
+            const char* rx_key = "Dilithion-RandomX-v1";
+            randomx_init_mining_mode_async(rx_key, strlen(rx_key));
             std::cout << "[Mining] FULL mode initializing in background - will auto-upgrade" << std::endl;
         }
     }
