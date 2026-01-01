@@ -1081,6 +1081,13 @@ int main(int argc, char* argv[]) {
             std::cout << "  Mining mode: LIGHT only (RAM < 3GB)" << std::endl;
         }
 
+        // Step 3: For 8GB+ systems, start FULL mode init NOW for faster IBD verification
+        // This makes IBD ~20x faster since FULL mode verifies at ~100 H/s vs ~5 H/s
+        if (total_ram_mb >= 8192) {
+            std::cout << "  Starting FULL mode init for faster IBD (8GB+ RAM detected)..." << std::endl;
+            randomx_init_mining_mode_async(rx_key, strlen(rx_key));
+        }
+
         // NO WAIT - node continues immediately, can validate blocks right away
 
         // Load and verify genesis block
