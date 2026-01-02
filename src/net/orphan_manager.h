@@ -268,6 +268,14 @@ private:
      * @return true if peer is at or above limit
      */
     bool PeerExceedsOrphanLimit(NodeId peer) const;
+
+    /**
+     * @brief Update Prometheus metrics for orphan pool
+     *
+     * Updates g_metrics with current orphan pool state.
+     * Must be called with cs_orphans lock held.
+     */
+    void UpdateMetrics() const;
 };
 
 #endif // DILITHION_NET_ORPHAN_MANAGER_H

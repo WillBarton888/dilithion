@@ -93,6 +93,29 @@ public:
     std::atomic<uint64_t> tx_validation_time_us{0};  // Last tx validation time
 
     // ============================================
+    // Orphan Pool Metrics (Phase 2 Stress Test)
+    // ============================================
+    std::atomic<int64_t> orphan_pool_size{0};           // Current orphan count
+    std::atomic<int64_t> orphan_pool_bytes{0};          // Total memory used by orphans
+    std::atomic<int64_t> orphan_pool_connectable{0};    // Orphans whose parent exists
+    std::atomic<int64_t> orphan_pool_unconnectable{0};  // Orphans whose parent missing
+    std::atomic<int64_t> orphan_pool_oldest_age_secs{0}; // Age of oldest orphan in seconds
+
+    // ============================================
+    // Validation Queue Metrics (Phase 2 Stress Test)
+    // ============================================
+    std::atomic<int64_t> validation_queue_depth{0};      // Blocks waiting for validation
+    std::atomic<int64_t> validation_processing_ms{0};    // Current block processing time
+    std::atomic<int64_t> validation_last_completion{0};  // Unix timestamp of last completion
+
+    // ============================================
+    // Parent Request Metrics (Phase 2 Stress Test)
+    // ============================================
+    std::atomic<int64_t> parent_requests_pending{0};     // Pending parent requests
+    std::atomic<uint64_t> parent_requests_timeout{0};    // Parent requests that timed out
+    std::atomic<uint64_t> parent_requests_success{0};    // Parent requests that succeeded
+
+    // ============================================
     // Helper Methods
     // ============================================
 
@@ -276,6 +299,53 @@ public:
         out << "# HELP dilithion_block_validation_ms Last block validation time in ms\n";
         out << "# TYPE dilithion_block_validation_ms gauge\n";
         out << "dilithion_block_validation_ms " << block_validation_time_ms.load() << "\n\n";
+
+        // Orphan pool metrics (Phase 2 Stress Test)
+        out << "# HELP dilithion_orphan_pool_size Current orphan block count\n";
+        out << "# TYPE dilithion_orphan_pool_size gauge\n";
+        out << "dilithion_orphan_pool_size " << orphan_pool_size.load() << "\n\n";
+
+        out << "# HELP dilithion_orphan_pool_bytes Memory used by orphan blocks\n";
+        out << "# TYPE dilithion_orphan_pool_bytes gauge\n";
+        out << "dilithion_orphan_pool_bytes " << orphan_pool_bytes.load() << "\n\n";
+
+        out << "# HELP dilithion_orphan_pool_connectable Orphans whose parent exists\n";
+        out << "# TYPE dilithion_orphan_pool_connectable gauge\n";
+        out << "dilithion_orphan_pool_connectable " << orphan_pool_connectable.load() << "\n\n";
+
+        out << "# HELP dilithion_orphan_pool_unconnectable Orphans whose parent is missing\n";
+        out << "# TYPE dilithion_orphan_pool_unconnectable gauge\n";
+        out << "dilithion_orphan_pool_unconnectable " << orphan_pool_unconnectable.load() << "\n\n";
+
+        out << "# HELP dilithion_orphan_pool_oldest_age_secs Age of oldest orphan in seconds\n";
+        out << "# TYPE dilithion_orphan_pool_oldest_age_secs gauge\n";
+        out << "dilithion_orphan_pool_oldest_age_secs " << orphan_pool_oldest_age_secs.load() << "\n\n";
+
+        // Validation queue metrics (Phase 2 Stress Test)
+        out << "# HELP dilithion_validation_queue_depth Blocks waiting for validation\n";
+        out << "# TYPE dilithion_validation_queue_depth gauge\n";
+        out << "dilithion_validation_queue_depth " << validation_queue_depth.load() << "\n\n";
+
+        out << "# HELP dilithion_validation_processing_ms Current block processing time in ms\n";
+        out << "# TYPE dilithion_validation_processing_ms gauge\n";
+        out << "dilithion_validation_processing_ms " << validation_processing_ms.load() << "\n\n";
+
+        out << "# HELP dilithion_validation_last_completion Unix timestamp of last validation\n";
+        out << "# TYPE dilithion_validation_last_completion gauge\n";
+        out << "dilithion_validation_last_completion " << validation_last_completion.load() << "\n\n";
+
+        // Parent request metrics (Phase 2 Stress Test)
+        out << "# HELP dilithion_parent_requests_pending Pending parent block requests\n";
+        out << "# TYPE dilithion_parent_requests_pending gauge\n";
+        out << "dilithion_parent_requests_pending " << parent_requests_pending.load() << "\n\n";
+
+        out << "# HELP dilithion_parent_requests_timeout_total Parent requests that timed out\n";
+        out << "# TYPE dilithion_parent_requests_timeout_total counter\n";
+        out << "dilithion_parent_requests_timeout_total " << parent_requests_timeout.load() << "\n\n";
+
+        out << "# HELP dilithion_parent_requests_success_total Parent requests that succeeded\n";
+        out << "# TYPE dilithion_parent_requests_success_total counter\n";
+        out << "dilithion_parent_requests_success_total " << parent_requests_success.load() << "\n\n";
 
         return out.str();
     }

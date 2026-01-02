@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <net/orphan_manager.h>
+#include <api/metrics.h>
 #include <algorithm>
 #include <iostream>
 
@@ -61,6 +62,9 @@ bool COrphanManager::AddOrphanBlock(NodeId peer, const CBlock& block)
     // Enforce limits after adding
     LimitOrphans();
 
+    // Update Prometheus metrics
+    UpdateMetrics();
+
     return true;
 }
 
@@ -97,6 +101,9 @@ bool COrphanManager::EraseOrphanBlock(const uint256& hash)
 
     // Remove from all indices
     EraseOrphanInternal(it);
+
+    // Update Prometheus metrics
+    UpdateMetrics();
 
     return true;
 }
@@ -382,4 +389,28 @@ bool COrphanManager::PeerExceedsOrphanLimit(NodeId peer) const
     }
 
     return it->second.size() >= MAX_ORPHANS_PER_PEER;
+}
+
+void COrphanManager::UpdateMetrics() const
+{
+    // Must be called with cs_orphans lock held
+    // Updates Prometheus metrics for orphan pool monitoring
+
+    g_metrics.orphan_pool_size = mapOrphanBlocks.size();
+    g_metrics.orphan_pool_bytes = nOrphanBytes;
+
+    // Calculate oldest orphan age
+    int64_t oldest_age_secs = 0;
+    auto now = std::chrono::steady_clock::now();
+    for (const auto& [hash, orphan] : mapOrphanBlocks) {
+        auto age = std::chrono::duration_cast<std::chrono::seconds>(
+            now - orphan.timeReceived).count();
+        if (age > oldest_age_secs) {
+            oldest_age_secs = age;
+        }
+    }
+    g_metrics.orphan_pool_oldest_age_secs = oldest_age_secs;
+
+    // Note: connectable/unconnectable counts require chainstate access
+    // These will be updated by the caller when chainstate is available
 }
