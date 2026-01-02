@@ -70,7 +70,10 @@ void CIbdCoordinator::Tick() {
     // 3. Request initial headers if we have none
     // PIPELINE: After initial request, headers_manager handles prefetch on RECEIPT
     if (m_headers_sync_peer != -1) {
-        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+        // BUG FIX: Use best_known_height for dynamic peer height
+        auto sync_peer = m_node_context.peer_manager ? m_node_context.peer_manager->GetPeer(m_headers_sync_peer) : nullptr;
+        int peer_height = sync_peer ? (sync_peer->best_known_height > 0 ? sync_peer->best_known_height : sync_peer->start_height)
+                                    : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
 
         if (!m_initial_request_done && header_height <= 0 && peer_height > 0) {
             // Initial request - kick off the pipeline via SSOT entry point
@@ -108,7 +111,11 @@ void CIbdCoordinator::Tick() {
 
                 for (const auto& peer : peers) {
                     if (!peer) continue;
-                    int peer_height = m_node_context.headers_manager->GetPeerStartHeight(peer->id);
+                    // BUG FIX: Use best_known_height (updated dynamically) instead of
+                    // GetPeerStartHeight (static from connection time). After reorg,
+                    // peers may have advanced but start_height wouldn't reflect that.
+                    int peer_height = peer->best_known_height;
+                    if (peer_height == 0) peer_height = peer->start_height;
                     if (peer_height > best_height) {
                         best_height = peer_height;
                         best_peer = peer->id;
@@ -1092,7 +1099,9 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
 
     for (const auto& peer : peers) {
         if (!peer) continue;
-        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(peer->id);
+        // BUG FIX: Use best_known_height (dynamic) instead of GetPeerStartHeight (static)
+        int peer_height = peer->best_known_height;
+        if (peer_height == 0) peer_height = peer->start_height;
         if (peer_height > best_height) {
             best_height = peer_height;
             best_peer = peer->id;
@@ -1121,9 +1130,12 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
     }
 
     // Skip stall check if already synced (header_height >= peer_height)
-    if (m_node_context.headers_manager) {
+    if (m_node_context.headers_manager && m_node_context.peer_manager) {
         int header_height = m_node_context.headers_manager->GetBestHeight();
-        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+        // BUG FIX: Use best_known_height for dynamic peer height
+        auto sync_peer = m_node_context.peer_manager->GetPeer(m_headers_sync_peer);
+        int peer_height = sync_peer ? (sync_peer->best_known_height > 0 ? sync_peer->best_known_height : sync_peer->start_height)
+                                    : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
         if (header_height >= peer_height && peer_height > 0) {
             return true;  // Already synced with this peer
         }
@@ -1142,7 +1154,10 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
         m_headers_in_flight = false;
 
         // Recalculate timeout based on remaining headers
-        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+        // BUG FIX: Use best_known_height for dynamic peer height
+        auto progress_peer = m_node_context.peer_manager ? m_node_context.peer_manager->GetPeer(m_headers_sync_peer) : nullptr;
+        int peer_height = progress_peer ? (progress_peer->best_known_height > 0 ? progress_peer->best_known_height : progress_peer->start_height)
+                                        : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
         int headers_missing = peer_height - current_height;
         if (headers_missing > 0) {
             int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
@@ -1174,7 +1189,10 @@ void CIbdCoordinator::SwitchHeadersSyncPeer() {
         std::cout << "[IBD] Switched headers sync peer: " << old_peer
                   << " -> " << m_headers_sync_peer << std::endl;
         // SSOT: Request headers via single entry point
-        int peer_height = m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+        // BUG FIX: Use best_known_height for dynamic peer height
+        auto new_peer = m_node_context.peer_manager ? m_node_context.peer_manager->GetPeer(m_headers_sync_peer) : nullptr;
+        int peer_height = new_peer ? (new_peer->best_known_height > 0 ? new_peer->best_known_height : new_peer->start_height)
+                                   : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
         if (m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer, peer_height)) {
             m_headers_in_flight = true;
         }
