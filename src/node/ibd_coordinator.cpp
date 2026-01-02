@@ -751,8 +751,14 @@ bool CIbdCoordinator::FetchBlocks() {
     }
 
     // Get peer height
+    // BUG FIX: If this peer is our headers sync peer, they have blocks up to header_height
+    // (they sent us the headers). Use header_height instead of stale best_known_height.
     int peer_height = peer->best_known_height;
     if (peer_height == 0) peer_height = peer->start_height;
+    if (m_blocks_sync_peer == m_headers_sync_peer) {
+        // Headers sync peer definitely has blocks up to header_height
+        peer_height = std::max(peer_height, header_height);
+    }
 
     // Get next blocks to request
     std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(

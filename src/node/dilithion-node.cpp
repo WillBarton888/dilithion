@@ -2937,12 +2937,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         g_node_state.new_block_found = true;
                     }
                 } else {
-                    std::cout << "[Blockchain] WARNING: Mined block is valid but not on best chain" << std::endl;
-                    std::cout << "  This should not happen during solo mining" << std::endl;
-                    std::cout << "  Current tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
+                    // Stale block - another miner found a block at the same height
+                    // This is normal in a multi-miner network (race condition)
+                    std::cout << "[Blockchain] STALE BLOCK: Another miner found block at same height first" << std::endl;
+                    std::cout << "  Your block is valid but was beaten by: "
+                              << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
                               << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
+                    std::cout << "  This is normal - continuing to mine on new tip" << std::endl;
 
-                    // Stop mining and reassess
+                    // Update template and continue mining
                     g_node_state.new_block_found = true;
                 }
             } else {
