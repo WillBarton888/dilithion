@@ -343,13 +343,16 @@ BlockProcessResult ProcessNewBlock(
                 // BUG #149 FIX: Parent is not in our header chain (competing fork)
                 // Instead of requesting one block at a time (inefficient for deep forks),
                 // request HEADERS to find common ancestor efficiently
-                uint256 missing_parent = block.hashPrevBlock;
-                std::cout << "[ProcessNewBlock] Competing fork detected - requesting headers from "
-                          << missing_parent.GetHex().substr(0, 16) << "..." << std::endl;
+                //
+                // CRITICAL: Pass null hash (not missing_parent) to get pure exponential locator.
+                // If we pass missing_parent, peer finds it and returns headers AFTER it (useless).
+                // With null hash, peer finds common ancestor and returns full fork chain.
+                std::cout << "[ProcessNewBlock] Competing fork detected (parent "
+                          << block.hashPrevBlock.GetHex().substr(0, 16) << " unknown) - requesting headers" << std::endl;
 
-                // Use HeadersManager to request ancestors (same as header-level fork detection)
+                // Use pure locator from our tip to find common ancestor
                 if (ctx.headers_manager) {
-                    ctx.headers_manager->RequestHeaders(peer_id, missing_parent);
+                    ctx.headers_manager->RequestHeaders(peer_id, uint256());  // null = use our tip's locator
                     // Signal fork detected for mining pause
                     g_node_context.fork_detected.store(true);
                 }

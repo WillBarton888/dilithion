@@ -132,14 +132,17 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                 // FORK DETECTED: Parent not found - this is a competing chain
                 // Check if we already requested this parent (avoid duplicate requests)
                 if (m_pendingParentRequests.find(header.hashPrevBlock) == m_pendingParentRequests.end()) {
-                    std::cout << "[HeadersManager] FORK: Requesting ancestors for parent "
-                              << header.hashPrevBlock.GetHex().substr(0, 16) << " (peer=" << peer << ")" << std::endl;
+                    std::cout << "[HeadersManager] FORK: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
+                              << " unknown - requesting headers from common ancestor (peer=" << peer << ")" << std::endl;
 
                     // Track missing parent and request ancestors immediately
                     m_pendingParentRequests.insert(header.hashPrevBlock);
 
-                    // Request ancestors - RequestHeaders works from any thread
-                    RequestHeaders(peer, header.hashPrevBlock);
+                    // CRITICAL: Pass null hash to get pure exponential locator from OUR tip.
+                    // This lets peer find common ancestor and return full fork chain.
+                    // If we passed missing_parent, peer would find it and return headers
+                    // AFTER it (useless - we need headers BEFORE it to connect).
+                    RequestHeaders(peer, uint256());
 
                     // Signal fork detected for mining pause
                     g_node_context.fork_detected.store(true);
