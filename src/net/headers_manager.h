@@ -598,6 +598,9 @@ private:
     std::map<NodeId, PeerSyncState> mapPeerStates;        ///< Peer -> Basic sync state
     std::map<NodeId, int> mapPeerStartHeight;             ///< BUG #62: Peer -> Starting height from VERSION
 
+    // Fork handling: Track missing parents we've requested ancestors for
+    std::set<uint256> m_pendingParentRequests;            ///< Parents we've requested via GETHEADERS
+
     // Configuration
     static constexpr size_t MAX_HEADERS_BUFFER = 2000;     ///< Max headers per message (Bitcoin Core std)
     static constexpr int MAX_HEADERS_AGE_SECONDS = 7200;   ///< 2 hours max header age

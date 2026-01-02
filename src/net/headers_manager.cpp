@@ -129,9 +129,24 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             if (parentIt != mapHeaders.end()) {
                 pprev = &parentIt->second;
             } else {
-                std::cerr << "[HeadersManager] ORPHAN: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
-                          << " not found for height " << expectedHeight << std::endl;
-                return false;
+                // FORK DETECTED: Parent not found - this is a competing chain
+                // Check if we already requested this parent (avoid duplicate requests)
+                if (m_pendingParentRequests.find(header.hashPrevBlock) == m_pendingParentRequests.end()) {
+                    std::cout << "[HeadersManager] FORK: Requesting ancestors for parent "
+                              << header.hashPrevBlock.GetHex().substr(0, 16) << " (peer=" << peer << ")" << std::endl;
+
+                    // Track missing parent and request ancestors immediately
+                    m_pendingParentRequests.insert(header.hashPrevBlock);
+
+                    // Request ancestors - RequestHeaders works from any thread
+                    RequestHeaders(peer, header.hashPrevBlock);
+
+                    // Signal fork detected for mining pause
+                    g_node_context.fork_detected.store(true);
+                }
+
+                // Continue - remaining headers will also fail to connect, that's expected
+                continue;
             }
         }
 
@@ -159,6 +174,19 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         }
         UpdateChainTips(storageHash);
         UpdateBestHeader(storageHash);
+
+        // FORK RESOLUTION: Check if this header was a pending parent
+        // If so, the fork is resolving - clear from pending and check if fully resolved
+        if (m_pendingParentRequests.erase(storageHash) > 0) {
+            std::cout << "[HeadersManager] Pending parent " << storageHash.GetHex().substr(0, 16)
+                      << " arrived at height " << height << " - fork resolving" << std::endl;
+
+            // If no more pending parents, fork is fully resolved
+            if (m_pendingParentRequests.empty()) {
+                std::cout << "[HeadersManager] Fork resolved - all ancestors received, mining can resume" << std::endl;
+                g_node_context.fork_detected.store(false);
+            }
+        }
 
         // Update for next iteration
         pprev = &mapHeaders[storageHash];
@@ -985,6 +1013,12 @@ size_t CHeadersManager::GetOrphanedHeaderCount() const
 
     return orphaned;
 }
+
+// ============================================================================
+// Note: Orphan header storage was removed (KISS approach)
+// Fork handling now uses direct ancestor requests instead of storing orphans.
+// See ProcessHeaders() - when parent not found, we request ancestors immediately.
+// ============================================================================
 
 // ============================================================================
 // Private: Chain Work Calculations

@@ -3644,6 +3644,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             static int counter = 0;
             static auto no_peers_since = std::chrono::steady_clock::time_point{};  // When peers dropped to 0
             static bool mining_paused_no_peers = false;  // Whether we auto-paused mining
+            static bool mining_paused_fork = false;  // Whether we auto-paused for fork resolution
             static int last_remaining_logged = -1;  // For countdown logging
             static constexpr int SOLO_MINING_GRACE_PERIOD_SECONDS = 120;  // 2 minute grace period
 
@@ -3740,6 +3741,34 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         } else {
                             std::cerr << "[Mining] ERROR: Failed to build template for resume" << std::endl;
                         }
+                    }
+                }
+
+                // ========================================================================
+                // Fork detection: Pause mining during fork resolution
+                // ========================================================================
+                // When a competing chain is detected (headers with unknown parent),
+                // pause mining to avoid wasting hashpower on potentially orphaned blocks.
+                // Mining resumes automatically when fork is resolved.
+                if (g_node_context.fork_detected.load() && miner.IsMining() && !mining_paused_fork) {
+                    std::cout << "[Mining] PAUSING: Fork detected - resolving competing chain..." << std::endl;
+                    std::cout << "[Mining] Mining will resume automatically when fork is resolved" << std::endl;
+                    miner.StopMining();
+                    mining_paused_fork = true;
+                }
+
+                // Resume mining when fork is resolved
+                if (mining_paused_fork && !g_node_context.fork_detected.load()) {
+                    std::cout << "[Mining] Fork resolved - resuming mining" << std::endl;
+                    mining_paused_fork = false;
+
+                    // Rebuild template and restart mining
+                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
+                    if (templateOpt) {
+                        miner.StartMining(*templateOpt);
+                        std::cout << "[Mining] Mining resumed with fresh template after fork resolution" << std::endl;
+                    } else {
+                        std::cerr << "[Mining] ERROR: Failed to build template after fork resolution" << std::endl;
                     }
                 }
             }
