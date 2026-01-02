@@ -62,6 +62,7 @@ class DilithionTestFramework:
         """Initialize test framework"""
         self.num_nodes = 1
         self.setup_clean_chain = False
+        self.use_real_nodes = False  # Set True for integration/chaos tests
         self.nodes = []
         self.mocktime = 0
         self.rpc_timeout = 60
@@ -78,6 +79,9 @@ class DilithionTestFramework:
         # Temporary directory for test data
         self.options = None
         self.tmpdir = None
+
+        # Network manipulation state
+        self._disconnected_pairs = set()  # Set of (node_i, node_j) pairs
 
     def set_test_params(self):
         """Set test parameters (override in subclass)
@@ -113,15 +117,67 @@ class DilithionTestFramework:
 
     def setup_nodes(self):
         """Start all nodes with default configuration"""
-        self.log.info(f"Starting {self.num_nodes} node(s)...")
+        self.log.info(f"Starting {self.num_nodes} node(s) (real={self.use_real_nodes})...")
 
         for i in range(self.num_nodes):
             self.log.info(f"Starting node {i}")
-            # TODO: Implement actual node starting
-            # For now, create placeholder
-            self.nodes.append(TestNode(i, self.tmpdir, self))
+            node = TestNode(i, self.tmpdir, self, use_real_node=self.use_real_nodes)
+            node.start()
+            self.nodes.append(node)
 
         self.log.info("All nodes started successfully")
+
+    def disconnect_nodes(self, node_a_idx: int, node_b_idx: int):
+        """Disconnect two nodes (block P2P traffic between them)
+
+        For mock mode: Just tracks disconnection state
+        For real mode: Would use iptables/netsh to block traffic
+
+        Args:
+            node_a_idx: First node index
+            node_b_idx: Second node index
+        """
+        pair = (min(node_a_idx, node_b_idx), max(node_a_idx, node_b_idx))
+        self._disconnected_pairs.add(pair)
+        self.log.info(f"Disconnected nodes {node_a_idx} <-> {node_b_idx}")
+
+        if self.use_real_nodes:
+            # For real nodes, we'd need to use network tools
+            # This is a placeholder - actual implementation would use:
+            # - Linux: iptables -A INPUT -s <ip> -p tcp --dport <port> -j DROP
+            # - Windows: netsh advfirewall firewall add rule
+            node_a = self.nodes[node_a_idx]
+            node_b = self.nodes[node_b_idx]
+            self.log.warning(f"Real network partition not implemented yet "
+                           f"(would block {node_a.p2p_port} <-> {node_b.p2p_port})")
+
+    def connect_nodes(self, node_a_idx: int, node_b_idx: int):
+        """Reconnect two previously disconnected nodes
+
+        Args:
+            node_a_idx: First node index
+            node_b_idx: Second node index
+        """
+        pair = (min(node_a_idx, node_b_idx), max(node_a_idx, node_b_idx))
+        self._disconnected_pairs.discard(pair)
+        self.log.info(f"Reconnected nodes {node_a_idx} <-> {node_b_idx}")
+
+        if self.use_real_nodes:
+            # Would remove firewall rules here
+            self.log.warning("Real network reconnection not implemented yet")
+
+    def are_nodes_connected(self, node_a_idx: int, node_b_idx: int) -> bool:
+        """Check if two nodes are connected
+
+        Args:
+            node_a_idx: First node index
+            node_b_idx: Second node index
+
+        Returns:
+            True if nodes can communicate
+        """
+        pair = (min(node_a_idx, node_b_idx), max(node_a_idx, node_b_idx))
+        return pair not in self._disconnected_pairs
 
     def run_test(self):
         """Run the actual test logic (override in subclass)"""
@@ -220,8 +276,19 @@ class DilithionTestFramework:
             action="store_true",
             help="Print RPC calls"
         )
+        parser.add_argument(
+            "--real-nodes",
+            dest="real_nodes",
+            default=False,
+            action="store_true",
+            help="Use real dilithion-node processes instead of mocks"
+        )
 
         self.options = parser.parse_args()
+
+        # Apply real nodes setting
+        if self.options.real_nodes:
+            self.use_real_nodes = True
 
         # Set up logging
         log_level = logging.DEBUG if self.options.verbose else logging.INFO
@@ -291,25 +358,38 @@ class TestNode:
     """Represents a Dilithion node in the test framework
 
     Provides:
-    - Node process management
-    - RPC interface
+    - Node process management (mock or real)
+    - RPC/HTTP interface
     - Block generation helpers
+    - Chaos testing support (crash, network faults)
+
+    Modes:
+    - Mock mode (default): Uses in-memory state for fast unit tests
+    - Real mode: Spawns actual dilithion-node process for integration tests
     """
 
-    def __init__(self, index: int, datadir: str, test_framework):
+    def __init__(self, index: int, datadir: str, test_framework, use_real_node: bool = False):
         """Initialize test node
 
         Args:
             index: Node index number
             datadir: Data directory path
             test_framework: Parent test framework instance
+            use_real_node: If True, spawn real dilithion-node process
         """
         self.index = index
         self.datadir = os.path.join(datadir, f"node{index}")
         self.test_framework = test_framework
         self.process = None
-        self.rpc_port = 8332 + index
-        self.p2p_port = 8333 + index
+        self.use_real_node = use_real_node
+
+        # Port assignments (avoid conflicts between test nodes)
+        self.rpc_port = 18400 + index * 10  # HTTP API port
+        self.p2p_port = 18401 + index * 10  # P2P port
+        self.host = "127.0.0.1"
+
+        # Path to dilithion-node binary
+        self.binary_path = self._find_binary()
 
         # Create data directory
         os.makedirs(self.datadir, exist_ok=True)
@@ -327,8 +407,22 @@ class TestNode:
         # Initialize genesis block
         self._initialize_genesis()
 
-        # TODO: Start actual dilithion-node process
-        # For now, this is a placeholder
+    def _find_binary(self) -> str:
+        """Find the dilithion-node binary"""
+        # Look in common locations
+        candidates = [
+            os.path.join(os.path.dirname(__file__), '..', '..', '..', 'dilithion-node.exe'),
+            os.path.join(os.path.dirname(__file__), '..', '..', '..', 'dilithion-node'),
+            './dilithion-node.exe',
+            './dilithion-node',
+            'dilithion-node.exe',
+            'dilithion-node',
+        ]
+        for path in candidates:
+            full_path = os.path.abspath(path)
+            if os.path.exists(full_path):
+                return full_path
+        return 'dilithion-node'  # Hope it's in PATH
 
     def _initialize_genesis(self):
         """Initialize genesis block"""
@@ -405,33 +499,142 @@ class TestNode:
         if extra_args is None:
             extra_args = []
 
-        # TODO: Implement actual node starting
-        # Example:
-        # self.process = subprocess.Popen([
-        #     './dilithion-node',
-        #     f'-datadir={self.datadir}',
-        #     f'-rpcport={self.rpc_port}',
-        #     f'-port={self.p2p_port}',
-        #     *extra_args
-        # ])
+        if not self.use_real_node:
+            # Mock mode - no real process
+            return
 
-        pass
+        # Real mode - spawn dilithion-node process
+        cmd = [
+            self.binary_path,
+            '--testnet',
+            f'--datadir={self.datadir}',
+            f'--port={self.p2p_port}',
+            f'--rpcport={self.rpc_port}',
+            '--nolisten=0',  # Accept incoming connections
+            *extra_args
+        ]
+
+        self.test_framework.log.info(f"Starting node {self.index}: {' '.join(cmd)}")
+
+        # Start process
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=os.path.dirname(self.binary_path) or '.'
+        )
+
+        # Wait for node to be ready (HTTP API responding)
+        self.wait_for_rpc_connection()
 
     def stop(self):
-        """Stop the node process"""
+        """Stop the node process gracefully"""
         if self.process:
+            self.test_framework.log.info(f"Stopping node {self.index} (pid={self.process.pid})")
             self.process.terminate()
-            self.process.wait(timeout=10)
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.test_framework.log.warning(f"Node {self.index} didn't stop gracefully, killing")
+                self.process.kill()
+                self.process.wait(timeout=5)
             self.process = None
 
+    def crash(self):
+        """Forcefully kill the node process (simulate crash)
+
+        Used for chaos testing - SIGKILL with no cleanup.
+        """
+        if self.process:
+            self.test_framework.log.info(f"CRASH: Killing node {self.index} (pid={self.process.pid})")
+            self.process.kill()  # SIGKILL - no cleanup
+            self.process.wait(timeout=5)
+            self.process = None
+
+    def is_running(self) -> bool:
+        """Check if node process is running"""
+        if not self.process:
+            return False
+        return self.process.poll() is None
+
     def wait_for_rpc_connection(self):
-        """Wait for RPC interface to be available"""
+        """Wait for RPC/HTTP interface to be available"""
+        if not self.use_real_node:
+            return  # Mock mode - always ready
+
+        import urllib.request
+        import urllib.error
+
         def check_rpc():
-            # TODO: Implement actual RPC check
-            # For now, just wait a bit
-            return True
+            try:
+                url = f"http://{self.host}:{self.rpc_port}/api/health"
+                req = urllib.request.Request(url, method='GET')
+                with urllib.request.urlopen(req, timeout=2) as response:
+                    return response.status == 200
+            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionRefusedError):
+                return False
+            except Exception:
+                return False
 
         wait_until(check_rpc, timeout=60, label=f"node{self.index} RPC connection")
+
+    def http_get(self, endpoint: str, timeout: int = 5):
+        """Make HTTP GET request to node API
+
+        Args:
+            endpoint: API endpoint (e.g., '/api/stats')
+            timeout: Request timeout in seconds
+
+        Returns:
+            Response data as dict (JSON parsed) or None on error
+        """
+        import urllib.request
+        import urllib.error
+        import json
+
+        try:
+            url = f"http://{self.host}:{self.rpc_port}{endpoint}"
+            req = urllib.request.Request(url, method='GET')
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                data = response.read().decode('utf-8')
+                try:
+                    return json.loads(data)
+                except json.JSONDecodeError:
+                    return {'raw': data}
+        except Exception as e:
+            self.test_framework.log.warning(f"HTTP GET {endpoint} failed: {e}")
+            return None
+
+    def get_metrics(self) -> dict:
+        """Get Prometheus metrics from node
+
+        Returns:
+            Dict of metric name -> value
+        """
+        import urllib.request
+
+        try:
+            url = f"http://{self.host}:{self.rpc_port}/metrics"
+            req = urllib.request.Request(url, method='GET')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                text = response.read().decode('utf-8')
+                metrics = {}
+                for line in text.split('\n'):
+                    if line and not line.startswith('#'):
+                        parts = line.split(' ')
+                        if len(parts) >= 2:
+                            key = parts[0].replace('dilithion_', '')
+                            try:
+                                metrics[key] = int(parts[1])
+                            except ValueError:
+                                try:
+                                    metrics[key] = float(parts[1])
+                                except ValueError:
+                                    metrics[key] = parts[1]
+                return metrics
+        except Exception as e:
+            self.test_framework.log.warning(f"Failed to get metrics: {e}")
+            return {}
 
     # RPC method placeholders (to be implemented)
     def getblockcount(self) -> int:
