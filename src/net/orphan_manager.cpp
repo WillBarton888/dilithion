@@ -3,8 +3,13 @@
 
 #include <net/orphan_manager.h>
 #include <api/metrics.h>
+#include <consensus/chain.h>
 #include <algorithm>
+#include <climits>
 #include <iostream>
+
+// Access global chainstate for parent existence checks
+extern CChainState g_chainstate;
 
 COrphanManager::COrphanManager()
     : nOrphanBytes(0)
@@ -314,23 +319,55 @@ void COrphanManager::LimitOrphans()
 uint256 COrphanManager::SelectOrphanForEviction()
 {
     // Must be called with cs_orphans lock held
+    // PHASE 2.1: Score-based eviction (replaces FIFO)
+    //
+    // Scoring priorities:
+    // 1. Connectability: +100 if parent exists in block index (can connect soon)
+    // 2. Age penalty: -1 per minute old (max -20, to prevent very old orphans)
+    //
+    // Evict the orphan with the LOWEST score first
 
     if (mapOrphanBlocks.empty()) {
         return uint256();  // Null hash
     }
 
-    // FIFO eviction: Find oldest orphan
-    auto oldest = mapOrphanBlocks.begin();
-    auto oldestTime = oldest->second.timeReceived;
+    auto now = std::chrono::steady_clock::now();
+    auto lowestScoreIt = mapOrphanBlocks.begin();
+    int lowestScore = INT_MAX;
+    int64_t connectableCount = 0;
+    int64_t unconnectableCount = 0;
 
     for (auto it = mapOrphanBlocks.begin(); it != mapOrphanBlocks.end(); ++it) {
-        if (it->second.timeReceived < oldestTime) {
-            oldest = it;
-            oldestTime = it->second.timeReceived;
+        const COrphanBlock& orphan = it->second;
+        int score = 0;
+
+        // Connectability: +100 if parent exists in chainstate
+        // This is the most important factor - we want to keep orphans that can connect
+        if (g_chainstate.GetBlockIndex(orphan.block.hashPrevBlock) != nullptr) {
+            score += 100;
+            connectableCount++;
+        } else {
+            unconnectableCount++;
+        }
+
+        // Age penalty: -1 per minute old (max -20)
+        // Prevents keeping very old orphans indefinitely
+        auto age_mins = std::chrono::duration_cast<std::chrono::minutes>(
+            now - orphan.timeReceived).count();
+        score -= std::min(20, static_cast<int>(age_mins));
+
+        // Track lowest score
+        if (score < lowestScore) {
+            lowestScore = score;
+            lowestScoreIt = it;
         }
     }
 
-    return oldest->first;
+    // Update connectable/unconnectable metrics
+    g_metrics.orphan_pool_connectable = connectableCount;
+    g_metrics.orphan_pool_unconnectable = unconnectableCount;
+
+    return lowestScoreIt->first;
 }
 
 void COrphanManager::EraseOrphanInternal(std::map<uint256, COrphanBlock>::iterator it)
