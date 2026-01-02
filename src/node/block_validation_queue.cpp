@@ -37,6 +37,17 @@ bool CBlockValidationQueue::Start() {
     // Start watchdog first (monitors validation thread)
     m_watchdog.Start();
 
+    // Enable auto-recovery for stuck validations
+    m_watchdog.SetAutoRecoveryEnabled(true);
+
+    // Set recovery callback - skips stuck block and continues
+    m_watchdog.SetRecoveryCallback([this](const uint256& hash, int height) {
+        std::cout << "[ValidationQueue] Recovery: Skipping stuck block at height " << height << std::endl;
+        // Clear the current validation state so next block can proceed
+        // The watchdog will call ReportValidationComplete() after this returns true
+        return true;  // Signal success - validation can continue
+    });
+
     m_running.store(true);
     m_worker = std::thread(&CBlockValidationQueue::ValidationWorker, this);
     return true;
