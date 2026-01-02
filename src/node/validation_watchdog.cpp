@@ -84,11 +84,6 @@ void CValidationWatchdog::SetTimeoutCallback(TimeoutCallback callback) {
     m_timeout_callback = std::move(callback);
 }
 
-void CValidationWatchdog::SetRecoveryCallback(RecoveryCallback callback) {
-    std::lock_guard<std::mutex> lock(m_callback_mutex);
-    m_recovery_callback = std::move(callback);
-}
-
 bool CValidationWatchdog::GetCurrentValidation(uint256& hash, int& height, int64_t& start_time) const {
     start_time = m_validation_start_time.load();
     if (start_time == 0) {
@@ -160,48 +155,9 @@ void CValidationWatchdog::WatchdogThread() {
                 }
             }
 
-            // Phase 3.3: Attempt automatic recovery if enabled
-            bool recovery_succeeded = false;
-            if (m_recovery_enabled.load()) {
-                m_recovery_attempts.fetch_add(1);
-
-                std::cout << "[ValidationWatchdog] Attempting automatic recovery for stuck block at height "
-                          << height << "..." << std::endl;
-
-                RecoveryCallback callback;
-                {
-                    std::lock_guard<std::mutex> lock(m_callback_mutex);
-                    callback = m_recovery_callback;
-                }
-
-                if (callback) {
-                    try {
-                        recovery_succeeded = callback(hash, height);
-                        if (recovery_succeeded) {
-                            m_recovery_successes.fetch_add(1);
-                            std::cout << "[ValidationWatchdog] Recovery SUCCESSFUL - skipped stuck block and continuing"
-                                      << std::endl;
-                            // Clear validation state since we're skipping this block
-                            ReportValidationComplete();
-                        } else {
-                            std::cerr << "[ValidationWatchdog] Recovery FAILED - callback returned false"
-                                      << std::endl;
-                        }
-                    } catch (const std::exception& e) {
-                        std::cerr << "[ValidationWatchdog] Recovery EXCEPTION: " << e.what() << std::endl;
-                    }
-                } else {
-                    std::cerr << "[ValidationWatchdog] Recovery FAILED - no callback registered"
-                              << std::endl;
-                }
-            }
-
             // Don't spam - wait longer before next check for same block
             // The block might eventually complete or the node might need restart
-            // If recovery succeeded, continue immediately
-            if (!recovery_succeeded) {
-                std::this_thread::sleep_for(std::chrono::seconds(VALIDATION_TIMEOUT_SECONDS));
-            }
+            std::this_thread::sleep_for(std::chrono::seconds(VALIDATION_TIMEOUT_SECONDS));
         }
     }
 }
@@ -236,10 +192,6 @@ void CValidationWatchdog::HandleTimeout(const uint256& hash, int height, int64_t
               << "  2. Deadlock in validation thread\n"
               << "  3. Uncaught exception in validation code\n"
               << "  4. System resource exhaustion (memory, disk I/O)\n"
-              << "-------------------------------------------------------------------------------\n"
-              << "Auto-Recovery: " << (m_recovery_enabled.load() ? "ENABLED" : "DISABLED") << "\n"
-              << "Recovery Stats: " << m_recovery_successes.load() << "/" << m_recovery_attempts.load()
-              << " successful\n"
               << "-------------------------------------------------------------------------------\n"
               << "Recommended Actions:\n"
               << "  1. Check system resources (memory, disk, CPU)\n"

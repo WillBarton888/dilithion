@@ -522,6 +522,17 @@ public:
 
 private:
     /**
+     * @brief Build block locator - caller MUST hold cs_headers
+     *
+     * This is the implementation of GetLocator without lock acquisition.
+     * Used internally by functions that already hold cs_headers to avoid deadlock.
+     *
+     * @param hashTip Starting point for locator (unused, uses best chain)
+     * @return Vector of block hashes for locator
+     */
+    std::vector<uint256> GetLocatorImpl(const uint256& hashTip) const;
+
+    /**
      * @struct PeerSyncState
      * @brief Tracks basic synchronization state for each peer
      *

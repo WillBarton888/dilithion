@@ -138,11 +138,20 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                     // Track missing parent and request ancestors immediately
                     m_pendingParentRequests.insert(header.hashPrevBlock);
 
-                    // CRITICAL: Pass null hash to get pure exponential locator from OUR tip.
-                    // This lets peer find common ancestor and return full fork chain.
-                    // If we passed missing_parent, peer would find it and return headers
-                    // AFTER it (useless - we need headers BEFORE it to connect).
-                    RequestHeaders(peer, uint256());
+                    // DEADLOCK FIX: Use GetLocatorImpl directly since we already hold cs_headers.
+                    // Calling RequestHeaders() would call GetLocator() which tries to relock cs_headers,
+                    // causing a deadlock (std::mutex is not recursive).
+                    std::vector<uint256> locator = GetLocatorImpl(uint256());
+
+                    // Send GETHEADERS message directly
+                    auto* connman = g_node_context.connman.get();
+                    auto* msg_proc = g_message_processor.load();
+                    if (connman && msg_proc) {
+                        NetProtocol::CGetHeadersMessage msg(locator, uint256());
+                        CNetMessage getheaders = msg_proc->CreateGetHeadersMessage(msg);
+                        connman->PushMessage(peer, getheaders);
+                        std::cout << "[HeadersManager] FORK: Sent GETHEADERS to peer " << peer << std::endl;
+                    }
 
                     // Signal fork detected for mining pause
                     g_node_context.fork_detected.store(true);
@@ -567,6 +576,14 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
 std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
 {
     std::lock_guard<std::mutex> lock(cs_headers);
+    return GetLocatorImpl(hashTip);
+}
+
+std::vector<uint256> CHeadersManager::GetLocatorImpl(const uint256& hashTip) const
+{
+    // NOTE: Caller MUST hold cs_headers lock
+    // This is the implementation of GetLocator without lock acquisition.
+    // Used by internal functions that already hold the lock to avoid deadlock.
 
     std::vector<uint256> locator;
     locator.reserve(32);  // Pre-allocate for efficiency
