@@ -186,7 +186,8 @@ NODE_SOURCES := src/node/block_index.cpp \
                 src/node/genesis.cpp \
                 src/node/utxo_set.cpp \
                 src/node/ibd_coordinator.cpp \
-                src/node/block_validation_queue.cpp
+                src/node/block_validation_queue.cpp \
+                src/node/validation_watchdog.cpp
 
 PRIMITIVES_SOURCES := src/primitives/block.cpp \
                       src/primitives/transaction.cpp
@@ -199,7 +200,8 @@ RPC_SOURCES := src/rpc/server.cpp \
                src/rpc/ssl_wrapper.cpp \
                src/rpc/websocket.cpp
 
-API_SOURCES := src/api/http_server.cpp
+API_SOURCES := src/api/http_server.cpp \
+               src/api/cached_stats.cpp
 
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp \
@@ -221,7 +223,8 @@ UTIL_SOURCES := src/util/strencodings.cpp \
                 src/util/config.cpp \
                 src/util/config_validator.cpp \
                 src/util/error_format.cpp \
-                src/util/bench.cpp
+                src/util/bench.cpp \
+                src/util/pidfile.cpp
 
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \
