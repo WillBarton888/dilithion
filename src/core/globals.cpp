@@ -21,12 +21,16 @@ CChainState g_chainstate;
 
 // Legacy NodeState struct (kept for backward compatibility during migration)
 // TODO: Remove after full migration to NodeContext
+// NOTE: This struct MUST match the definition in dilithion-node.cpp exactly
 struct NodeState {
     std::atomic<bool> running{false};
-    std::atomic<bool> new_block_found{false};
-    std::atomic<bool> mining_enabled{false};
+    std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
+    std::atomic<bool> mining_enabled{false};   // Whether user requested --mine
+    std::atomic<uint64_t> template_version{0}; // BUG #109 FIX: Template version counter for race detection
+    std::string mining_address_override;       // --mining-address=Dxxx (empty = privacy mode)
     class CRPCServer* rpc_server = nullptr;
     class CMiningController* miner = nullptr;
+    class CWallet* wallet = nullptr;
     class CSocket* p2p_socket = nullptr;
     class CHttpServer* http_server = nullptr;
 };
