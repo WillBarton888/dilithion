@@ -188,7 +188,8 @@ NODE_SOURCES := src/node/block_index.cpp \
                 src/node/utxo_set.cpp \
                 src/node/ibd_coordinator.cpp \
                 src/node/block_validation_queue.cpp \
-                src/node/validation_watchdog.cpp
+                src/node/validation_watchdog.cpp \
+                src/node/resource_monitor.cpp
 
 PRIMITIVES_SOURCES := src/primitives/block.cpp \
                       src/primitives/transaction.cpp

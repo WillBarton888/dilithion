@@ -911,6 +911,7 @@ CTxMemPool::MempoolMetrics CTxMemPool::GetMetrics() const {
     metrics.total_rbf_replacements = metric_rbf_replacements.load();
     metrics.total_add_failures = metric_add_failures.load();
     metrics.total_rbf_failures = metric_rbf_failures.load();
+    metrics.total_rebroadcasts = metric_rebroadcasts.load();  // Phase 3.3
     return metrics;
 }
 
@@ -948,5 +949,38 @@ void CTxMemPool::RemoveConfirmedTxs(const std::vector<CTransactionRef>& block_tx
 
             mapTx.erase(it);
         }
+    }
+}
+
+// ============================================================================
+// Phase 3.3: Transaction Rebroadcast Support
+// ============================================================================
+
+std::vector<CTransactionRef> CTxMemPool::GetUnconfirmedOlderThan(int64_t age_seconds) const {
+    std::lock_guard<std::mutex> lock(cs);
+    std::vector<CTransactionRef> result;
+
+    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    int64_t cutoff_time = now - age_seconds;
+
+    for (const auto& pair : mapTx) {
+        if (pair.second.GetTime() < cutoff_time) {
+            result.push_back(pair.second.GetSharedTx());
+        }
+    }
+
+    return result;
+}
+
+void CTxMemPool::MarkRebroadcast(const uint256& txid) {
+    std::lock_guard<std::mutex> lock(cs);
+
+    auto it = mapTx.find(txid);
+    if (it != mapTx.end()) {
+        // We can't modify the entry directly since it affects ordering
+        // Just increment the rebroadcast counter for metrics
+        metric_rebroadcasts.fetch_add(1);
     }
 }

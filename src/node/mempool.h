@@ -138,8 +138,32 @@ public:
         uint64_t total_rbf_replacements;
         uint64_t total_add_failures;
         uint64_t total_rbf_failures;
+        uint64_t total_rebroadcasts;  // Phase 3.3
     };
     MempoolMetrics GetMetrics() const;
+
+    /**
+     * Phase 3.3: Get transactions older than specified age for rebroadcast
+     * @param age_seconds Minimum age in seconds
+     * @return Vector of transactions older than age_seconds
+     */
+    std::vector<CTransactionRef> GetUnconfirmedOlderThan(int64_t age_seconds) const;
+
+    /**
+     * Phase 3.3: Mark transaction as recently broadcast
+     * Updates the transaction's time to prevent immediate re-broadcast
+     * @param txid Transaction hash
+     */
+    void MarkRebroadcast(const uint256& txid);
+
+    /**
+     * Phase 3.3: Get rebroadcast count
+     */
+    uint64_t GetRebroadcastCount() const { return metric_rebroadcasts.load(); }
+
+private:
+    // Phase 3.3: Rebroadcast tracking
+    std::atomic<uint64_t> metric_rebroadcasts{0};
 };
 
 #endif

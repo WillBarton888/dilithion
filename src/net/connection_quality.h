@@ -100,6 +100,33 @@ public:
      */
     bool ShouldDisconnect(int peer_id) const;
 
+    /**
+     * Phase 3.3: Get download speed in bytes per second
+     * Calculates average download speed since connection
+     */
+    double GetDownloadSpeed(int peer_id) const;
+
+    /**
+     * Phase 3.3: Get peers ranked by download speed (fastest first)
+     * Returns vector of (peer_id, bytes_per_second) pairs
+     */
+    std::vector<std::pair<int, double>> GetPeersBySpeed() const;
+
+    /**
+     * Phase 3.3: Check if peer is slow (below threshold)
+     * @param peer_id Peer to check
+     * @param min_speed_bps Minimum acceptable bytes per second
+     * @return true if peer is below threshold
+     */
+    bool IsSlowPeer(int peer_id, double min_speed_bps = 10000.0) const;
+
+    /**
+     * Phase 3.3: Get slow peers that should be rotated
+     * @param min_speed_bps Minimum acceptable bytes per second
+     * @return List of slow peer IDs
+     */
+    std::vector<int> GetSlowPeers(double min_speed_bps = 10000.0) const;
+
 private:
     mutable std::mutex m_mutex;
     std::map<int, ConnectionQuality> m_qualities;
