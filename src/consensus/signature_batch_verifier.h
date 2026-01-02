@@ -40,6 +40,7 @@
 #include <queue>
 #include <functional>
 #include <cstdint>
+#include <string>
 
 /**
  * CSignatureTask - A single signature verification task
