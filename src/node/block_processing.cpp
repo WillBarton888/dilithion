@@ -341,20 +341,17 @@ BlockProcessResult ProcessNewBlock(
                           << " already in-flight" << std::endl;
             } else if (parent_height <= 0) {
                 // BUG #149 FIX: Parent is not in our header chain (competing fork)
-                uint256 orphan_root = ctx.orphan_manager->GetOrphanRoot(blockHash);
-                CBlock orphan_block;
-                if (ctx.orphan_manager->GetOrphanBlock(orphan_root, orphan_block)) {
-                    uint256 missing_parent = orphan_block.hashPrevBlock;
-                    std::cout << "[ProcessNewBlock] Orphan on competing fork - requesting parent block: "
-                              << missing_parent.GetHex().substr(0, 16) << "..." << std::endl;
+                // Instead of requesting one block at a time (inefficient for deep forks),
+                // request HEADERS to find common ancestor efficiently
+                uint256 missing_parent = block.hashPrevBlock;
+                std::cout << "[ProcessNewBlock] Competing fork detected - requesting headers from "
+                          << missing_parent.GetHex().substr(0, 16) << "..." << std::endl;
 
-                    // Phase 2.2: Record parent request for timeout tracking
-                    ctx.orphan_manager->RecordParentRequest(orphan_root, missing_parent, peer_id);
-
-                    std::vector<NetProtocol::CInv> getdata_inv;
-                    getdata_inv.emplace_back(NetProtocol::MSG_BLOCK_INV, missing_parent);
-                    CNetMessage getdata_msg = ctx.message_processor->CreateGetDataMessage(getdata_inv);
-                    ctx.connman->PushMessage(peer_id, getdata_msg);
+                // Use HeadersManager to request ancestors (same as header-level fork detection)
+                if (ctx.headers_manager) {
+                    ctx.headers_manager->RequestHeaders(peer_id, missing_parent);
+                    // Signal fork detected for mining pause
+                    g_node_context.fork_detected.store(true);
                 }
             } else {
                 std::cout << "[ProcessNewBlock] Orphan block stored - IBD coordinator will handle block request" << std::endl;
