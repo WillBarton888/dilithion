@@ -34,7 +34,7 @@
 
 // Constructor
 CHttpServer::CHttpServer(int port)
-    : m_port(port) {
+    : m_port(port), m_num_threads(DEFAULT_HTTP_THREADS), m_work_queue(CHttpWorkQueue<SOCKET>::DEFAULT_HTTP_WORKQUEUE) {
 }
 
 // Destructor
@@ -121,18 +121,35 @@ bool CHttpServer::Start() {
 
     m_running.store(true);
 
-    // Launch server thread
+    // STRESS TEST FIX: Launch worker threads first (thread pool pattern)
+    // This ensures workers are ready before accept thread starts queueing
     try {
-        m_server_thread = std::thread(&CHttpServer::ServerThread, this);
-        std::cout << "[HttpServer] Started on port " << m_port << std::endl;
+        for (int i = 0; i < m_num_threads; i++) {
+            m_workers.emplace_back(&CHttpServer::WorkerThread, this);
+        }
+        std::cout << "[HttpServer] Started " << m_num_threads << " worker threads" << std::endl;
+
+        // Launch accept thread
+        m_accept_thread = std::thread(&CHttpServer::AcceptThread, this);
+        std::cout << "[HttpServer] Started on port " << m_port << " with " << m_num_threads << " workers" << std::endl;
         return true;
     } catch (const std::exception& e) {
         m_running.store(false);
+        m_work_queue.Shutdown();
+
+        // Wait for any started workers
+        for (auto& worker : m_workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        m_workers.clear();
+
         close(m_server_socket);
 #ifdef _WIN32
         WSACleanup();
 #endif
-        std::cerr << "[HttpServer] Failed to start server thread: " << e.what() << std::endl;
+        std::cerr << "[HttpServer] Failed to start server: " << e.what() << std::endl;
         return false;
     }
 }
@@ -148,6 +165,9 @@ void CHttpServer::Stop() {
     // Signal server to stop
     m_running.store(false);
 
+    // Signal work queue to wake up blocked workers
+    m_work_queue.Shutdown();
+
     // Close server socket to unblock accept()
     if (m_server_socket != INVALID_SOCKET) {
         shutdown(m_server_socket, SHUT_RDWR);
@@ -155,10 +175,18 @@ void CHttpServer::Stop() {
         m_server_socket = INVALID_SOCKET;
     }
 
-    // Wait for server thread to finish
-    if (m_server_thread.joinable()) {
-        m_server_thread.join();
+    // Wait for accept thread to finish
+    if (m_accept_thread.joinable()) {
+        m_accept_thread.join();
     }
+
+    // Wait for worker threads to finish
+    for (auto& worker : m_workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    m_workers.clear();
 
 #ifdef _WIN32
     // Cleanup Winsock on Windows
@@ -168,9 +196,9 @@ void CHttpServer::Stop() {
     std::cout << "[HttpServer] Stopped" << std::endl;
 }
 
-// Server thread main loop
-void CHttpServer::ServerThread() {
-    std::cout << "[HttpServer] Server thread started" << std::endl;
+// Accept thread main loop - STRESS TEST FIX: Only accepts connections and queues them
+void CHttpServer::AcceptThread() {
+    std::cout << "[HttpServer] Accept thread started" << std::endl;
 
     while (m_running.load()) {
         // Accept connection
@@ -187,7 +215,31 @@ void CHttpServer::ServerThread() {
             continue;
         }
 
-        // Handle request (synchronous for simplicity)
+        // STRESS TEST FIX: Queue request for worker thread instead of blocking here
+        // This prevents one slow request from blocking the accept loop
+        if (!m_work_queue.Enqueue(client_socket)) {
+            // Queue is full - send 503 Service Unavailable
+            std::cerr << "[HttpServer] Work queue full, rejecting request" << std::endl;
+            Send503(client_socket);
+            close(client_socket);
+        }
+        // Worker thread will close the socket after handling
+    }
+
+    std::cout << "[HttpServer] Accept thread stopped" << std::endl;
+}
+
+// Worker thread main loop - STRESS TEST FIX: Processes requests from queue
+void CHttpServer::WorkerThread() {
+    while (m_running.load()) {
+        SOCKET client_socket;
+
+        // Wait for work from queue (blocks until item available or shutdown)
+        if (!m_work_queue.Dequeue(client_socket)) {
+            break;  // Shutdown signaled
+        }
+
+        // Handle request
         try {
             HandleRequest(client_socket);
         } catch (const std::exception& e) {
@@ -197,8 +249,6 @@ void CHttpServer::ServerThread() {
         // Close client socket
         close(client_socket);
     }
-
-    std::cout << "[HttpServer] Server thread stopped" << std::endl;
 }
 
 // Handle a single HTTP request
@@ -222,6 +272,13 @@ void CHttpServer::HandleRequest(SOCKET client_socket) {
     std::string method, path;
     if (!ParseRequest(request, method, path)) {
         Send500(client_socket);
+        return;
+    }
+
+    // STRESS TEST FIX: Handle GET /api/health - simple health check that NEVER blocks
+    // This endpoint is always available, even during high load
+    if (method == "GET" && path == "/api/health") {
+        SendResponse(client_socket, 200, "application/json", R"({"status":"ok"})");
         return;
     }
 
@@ -367,4 +424,10 @@ void CHttpServer::Send404(SOCKET client_socket) {
 void CHttpServer::Send500(SOCKET client_socket) {
     std::string body = R"({"error": "Internal Server Error"})";
     SendResponse(client_socket, 500, "application/json", body);
+}
+
+// Send 503 Service Unavailable (STRESS TEST FIX: queue full)
+void CHttpServer::Send503(SOCKET client_socket) {
+    std::string body = R"({"error": "Service Unavailable", "reason": "Server busy"})";
+    SendResponse(client_socket, 503, "application/json", body);
 }

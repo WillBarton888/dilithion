@@ -40,6 +40,7 @@
 #include <net/feeler.h>  // Bitcoin Core-style feeler connections
 #include <net/connman.h>  // Phase 5: Event-driven connection manager
 #include <api/http_server.h>
+#include <api/cached_stats.h>
 #include <api/metrics.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
@@ -53,6 +54,7 @@
 #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
 #include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
+#include <util/pidfile.h>  // STRESS TEST FIX: Stale lock detection
 #include <util/config.h>  // Phase 10: Configuration system
 #include <util/config_validator.h>  // UX: Configuration validation
 #include <util/error_format.h>  // User experience: Better error messages
@@ -125,6 +127,7 @@ struct NodeState {
     std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
     std::atomic<bool> mining_enabled{false};   // Whether user requested --mine
     std::atomic<uint64_t> template_version{0}; // BUG #109 FIX: Template version counter for race detection
+    std::string mining_address_override;       // --mining-address=Dxxx (empty = privacy mode)
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
     CWallet* wallet = nullptr;
@@ -288,6 +291,7 @@ struct NodeConfig {
     uint16_t p2pport = 0;           // Will be set based on network
     bool start_mining = false;
     int mining_threads = 0;         // 0 = auto-detect
+    std::string mining_address_override = "";  // --mining-address=Dxxx (empty = use wallet)
     std::vector<std::string> connect_nodes;  // --connect nodes (exclusive)
     std::vector<std::string> add_nodes;      // --addnode nodes (additional)
     bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
@@ -376,6 +380,16 @@ struct NodeConfig {
                     }
                 }
             }
+            else if (arg.find("--mining-address=") == 0) {
+                mining_address_override = arg.substr(17);
+                // Validate address format (allow any valid address, even external)
+                CDilithiumAddress testAddr;
+                if (!testAddr.SetString(mining_address_override)) {
+                    std::cerr << "Error: Invalid mining address: " << mining_address_override << std::endl;
+                    std::cerr << "Address must start with 'D' and be 34 characters" << std::endl;
+                    return false;
+                }
+            }
             else if (arg == "--reindex" || arg == "-reindex") {
                 // Phase 4.2: Rebuild block index from blocks on disk
                 reindex = true;
@@ -420,6 +434,7 @@ struct NodeConfig {
         std::cout << "  --addnode=<ip:port>   Add node to connect to (repeatable)" << std::endl;
         std::cout << "  --mine                Start mining automatically" << std::endl;
         std::cout << "  --threads=<n|auto>    Mining threads (number or 'auto' to detect)" << std::endl;
+        std::cout << "  --mining-address=<addr> Send mining rewards to this address" << std::endl;
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
@@ -455,9 +470,10 @@ static std::mutex g_coinbaseMutex;
  * @param blockchain Reference to blockchain database
  * @param wallet Reference to wallet (for coinbase reward address)
  * @param verbose If true, print detailed template information
+ * @param mining_address_override Optional address to override wallet address (for --mining-address flag)
  * @return Optional containing template if successful, nullopt if error
  */
-std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWallet& wallet, bool verbose = false) {
+std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWallet& wallet, bool verbose = false, const std::string& mining_address_override = "") {
     // Get blockchain tip to build on
     uint256 hashBestBlock;
     uint32_t nHeight = 0;
@@ -532,8 +548,22 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     block.nNonce = 0;
 
     // Get wallet address for coinbase reward
-    CDilithiumAddress minerAddress = wallet.GetNewAddress();
-    std::vector<uint8_t> minerPubKeyHash = wallet.GetPubKeyHash();
+    CDilithiumAddress minerAddress;
+    std::vector<uint8_t> minerPubKeyHash;
+
+    if (!mining_address_override.empty()) {
+        // Fixed address mode: use the override address
+        minerAddress.SetString(mining_address_override);
+        // Extract pubkey hash from address (skip version byte)
+        const std::vector<uint8_t>& addrData = minerAddress.GetData();
+        if (addrData.size() >= 21) {
+            minerPubKeyHash.assign(addrData.begin() + 1, addrData.begin() + 21);
+        }
+    } else {
+        // Privacy mode: use a new address from wallet
+        minerAddress = wallet.GetNewAddress();
+        minerPubKeyHash = wallet.GetPubKeyHash();
+    }
 
     // Calculate block subsidy using consensus parameters
     int64_t nSubsidy = Consensus::INITIAL_BLOCK_SUBSIDY;
@@ -998,6 +1028,34 @@ int main(int argc, char* argv[]) {
     std::cerr.flush();
     
     try {
+        // STRESS TEST FIX: Acquire PID file lock and clean up stale locks
+        // This must happen before opening databases to handle crashed process locks
+        std::cout << "Checking for existing instance..." << std::endl;
+        CPidFile pidfile(config.datadir);
+        if (!pidfile.TryAcquire()) {
+            // Check if the lock is stale (crashed process)
+            std::string pidfilePath = config.datadir + "/dilithion.pid";
+            if (CPidFile::IsStale(pidfilePath)) {
+                // Clean up stale database locks from crashed process
+                std::cout << "  Detected crashed process, cleaning up stale locks..." << std::endl;
+                CPidFile::RemoveStaleLocks(config.datadir);
+
+                // Retry acquiring PID file
+                if (!pidfile.TryAcquire()) {
+                    std::cerr << "ERROR: Failed to acquire lock after cleanup" << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "ERROR: Another instance is already running" << std::endl;
+                std::cerr << "If you believe this is an error, delete: " << pidfilePath << std::endl;
+                return 1;
+            }
+        }
+        std::cout << "  [OK] PID file lock acquired" << std::endl;
+
+        // Store mining address override in global state for callbacks to access
+        g_node_state.mining_address_override = config.mining_address_override;
+
         // Phase 1: Initialize blockchain storage and mempool
         std::cerr.flush();
         LogPrintf(ALL, INFO, "Initializing blockchain storage...");
@@ -1007,6 +1065,7 @@ int main(int argc, char* argv[]) {
             ErrorMessage error = CErrorFormatter::DatabaseError("open blockchain database", config.datadir + "/blocks");
             std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
             LogPrintf(ALL, ERROR, "%s", CErrorFormatter::FormatForLog(error).c_str());
+            pidfile.Release();  // Release PID file on error
             return 1;
         }
         LogPrintf(ALL, INFO, "Blockchain database opened successfully");
@@ -1592,7 +1651,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                 std::cout << "[Mining] " << (is_reorg ? "Reorg" : "New tip")
                           << " detected - updating template immediately..." << std::endl;
-                auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false);
+                auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false, g_node_state.mining_address_override);
                 if (templateOpt) {
                     g_node_state.miner->UpdateTemplate(*templateOpt);
                     std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
@@ -1684,54 +1743,38 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         CHttpServer http_server(api_port);
         g_node_state.http_server = &http_server;
 
-        // Set stats handler that returns current node statistics as JSON
-        http_server.SetStatsHandler([&config]() -> std::string {
+        // STRESS TEST FIX: Create cached stats for lock-free API responses
+        // Stats are updated every 1 second by background thread, never blocking API
+        CCachedChainStats cached_stats;
+        cached_stats.Start([]() -> CCachedChainStats::UpdateData {
+            CCachedChainStats::UpdateData data;
+
             // Get current stats from chain state
             CBlockIndex* tip = g_chainstate.GetTip();
-            int block_height = tip ? tip->nHeight : 0;
-            uint32_t difficulty = tip ? tip->nBits : 0;
-            int64_t total_supply = block_height * 50;  // 50 coins per block
-            size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectedPeers().size() : 0;
+            data.block_height = tip ? tip->nHeight : 0;
+            data.difficulty = tip ? tip->nBits : 0;
+            data.last_block_time = tip ? static_cast<int64_t>(tip->nTime) : 0;
 
-            // Get async broadcaster stats
-            size_t async_broadcasts = 0;
-            size_t async_success = 0;
-            size_t async_failed = 0;
-            if (g_node_context.async_broadcaster) {
-                auto stats = g_node_context.async_broadcaster->GetStats();
-                async_broadcasts = stats.total_queued;
-                async_success = stats.total_sent;
-                async_failed = stats.total_failed;
+            // Get headers height
+            if (g_node_context.headers_manager) {
+                data.headers_height = g_node_context.headers_manager->GetBestHeight();
             }
 
-            // Calculate success rate
-            int success_rate = (async_broadcasts > 0)
-                ? (int)((async_success * 100) / async_broadcasts)
-                : 100;
+            // Get peer count
+            if (g_node_context.peer_manager) {
+                data.peer_count = static_cast<int>(g_node_context.peer_manager->GetConnectedPeers().size());
+            }
 
-            // Calculate blocks until halving
-            int blocks_until_halving = 210000 - block_height;
+            // Check if syncing
+            data.is_syncing = (data.headers_height > data.block_height + 10);
 
-            // Build JSON response
-            std::ostringstream json;
-            json << "{\n";
-            json << "  \"timestamp\": \"" << std::time(nullptr) << "\",\n";
-            json << "  \"network\": \"" << (config.testnet ? "testnet" : "mainnet") << "\",\n";
-            json << "  \"blockHeight\": " << block_height << ",\n";
-            json << "  \"difficulty\": " << difficulty << ",\n";
-            json << "  \"networkHashRate\": " << (difficulty / 240) << ",\n";
-            json << "  \"totalSupply\": " << total_supply << ",\n";
-            json << "  \"blockReward\": 50,\n";
-            json << "  \"blocksUntilHalving\": " << blocks_until_halving << ",\n";
-            json << "  \"peerCount\": " << peer_count << ",\n";
-            json << "  \"averageBlockTime\": 240,\n";
-            json << "  \"status\": \"live\",\n";
-            json << "  \"asyncBroadcasts\": " << async_success << ",\n";
-            json << "  \"asyncSuccessRate\": \"" << success_rate << "%\",\n";
-            json << "  \"asyncValidation\": \"" << (async_success >= 10 ? "COMPLETE" : "IN_PROGRESS") << "\"\n";
-            json << "}";
+            return data;
+        });
 
-            return json.str();
+        // Set stats handler that returns cached statistics as JSON (never blocks)
+        std::string network_name = config.testnet ? "testnet" : "mainnet";
+        http_server.SetStatsHandler([&cached_stats, network_name]() -> std::string {
+            return cached_stats.ToJSON(network_name);
         });
 
         // Set metrics handler for Prometheus scraping
@@ -2503,14 +2546,49 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 CDilithiumAddress addr = wallet.GetNewHDAddress();
                 std::string addrStr = addr.ToString();
 
+                // Save seed phrase to backup file
+                std::string backup_path = config.datadir + "/SEED-BACKUP-DO-NOT-SHARE.txt";
+                std::ofstream backup_file(backup_path);
+                if (backup_file.is_open()) {
+                    // Get current time
+                    auto now = std::chrono::system_clock::now();
+                    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+
+                    backup_file << "=== DILITHION WALLET RECOVERY SEED ===" << std::endl;
+                    backup_file << "Created: " << std::ctime(&time_t_now);
+                    backup_file << std::endl;
+                    backup_file << "Your 24-word recovery phrase:" << std::endl;
+                    for (size_t i = 0; i < words.size(); ++i) {
+                        backup_file << (i + 1) << ". " << words[i] << std::endl;
+                    }
+                    backup_file << std::endl;
+                    backup_file << "Mining Address: " << addrStr << std::endl;
+                    backup_file << std::endl;
+                    backup_file << "WARNING: Anyone with this phrase can steal your coins!" << std::endl;
+                    backup_file << "Store this file securely or delete after writing it down on paper." << std::endl;
+                    backup_file.close();
+
+                    std::cout << "  [OK] Backup saved to: " << backup_path << std::endl;
+                    std::cout << std::endl;
+                }
+
                 std::cout << "+==============================================================================+" << std::endl;
-                std::cout << "|              YOUR PUBLIC RECEIVING ADDRESS (Copy & Share)                   |" << std::endl;
+                std::cout << "|              YOUR MINING WALLET                                             |" << std::endl;
                 std::cout << "+------------------------------------------------------------------------------+" << std::endl;
+                std::cout << "|  All mining rewards go to your wallet. You control them with your seed.     |" << std::endl;
                 std::cout << "|                                                                              |" << std::endl;
+                std::cout << "|  PRIVACY MODE (Default):                                                     |" << std::endl;
+                std::cout << "|  - Each mined block uses a NEW address from your wallet                     |" << std::endl;
+                std::cout << "|  - This prevents others from tracking your total mining income              |" << std::endl;
+                std::cout << "|  - All addresses belong to YOU - check balance with 'getbalance' RPC        |" << std::endl;
+                std::cout << "|                                                                              |" << std::endl;
+                std::cout << "|  FIXED ADDRESS MODE (Optional):                                              |" << std::endl;
+                std::cout << "|  - Use --mining-address=Dxxx to send ALL rewards to one address             |" << std::endl;
+                std::cout << "|  - Useful for: pools, public transparency, or personal preference           |" << std::endl;
+                std::cout << "|  - Less private: anyone can see your total mining income                    |" << std::endl;
+                std::cout << "|                                                                              |" << std::endl;
+                std::cout << "|  Example address from your wallet:                                          |" << std::endl;
                 std::cout << "|  " << addrStr << std::string(76 - addrStr.length(), ' ') << "|" << std::endl;
-                std::cout << "|                                                                              |" << std::endl;
-                std::cout << "+------------------------------------------------------------------------------+" << std::endl;
-                std::cout << "|  Share this address to receive DIL. Safe to share publicly.                 |" << std::endl;
                 std::cout << "+==============================================================================+" << std::endl;
                 std::cout << std::endl;
 
@@ -2794,7 +2872,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     bool immediate_update_succeeded = false;
                     if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
                         std::cout << "[Mining] Locally mined block became new tip - updating template immediately..." << std::endl;
-                        auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false);
+                        auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false, g_node_state.mining_address_override);
                         if (templateOpt) {
                             g_node_state.miner->UpdateTemplate(*templateOpt);
                             std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
@@ -3316,6 +3394,27 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (config.start_mining) {
             g_node_state.mining_enabled = true;  // Track that mining was requested
             std::cout << std::endl;
+
+            // Display mining mode info
+            if (!config.mining_address_override.empty()) {
+                // Fixed address mode
+                std::cout << "+----------------------------------------------------------------------+" << std::endl;
+                std::cout << "| Mining Mode: FIXED ADDRESS                                          |" << std::endl;
+                std::cout << "+----------------------------------------------------------------------+" << std::endl;
+                std::cout << "  Mining to: " << config.mining_address_override << std::endl;
+                std::cout << "  WARNING: All rewards visible at this address (less private)" << std::endl;
+                std::cout << std::endl;
+            } else {
+                // Privacy mode (default)
+                std::cout << "+----------------------------------------------------------------------+" << std::endl;
+                std::cout << "| Mining Mode: PRIVACY (new address per block)                        |" << std::endl;
+                std::cout << "+----------------------------------------------------------------------+" << std::endl;
+                std::cout << "  Rewards go to your wallet (seed phrase controls all addresses)" << std::endl;
+                std::cout << "  Check balance: 'getbalance' RPC or wallet.html" << std::endl;
+                std::cout << "  For fixed address: restart with --mining-address=Dxxx" << std::endl;
+                std::cout << std::endl;
+            }
+
             std::cout << "Mining enabled - checking sync status..." << std::endl;
 
             // BUG #52 FIX: Check IBD before starting mining (Bitcoin pattern)
@@ -3363,7 +3462,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                 std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
+                auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
                 if (!templateOpt) {
                     std::cerr << "ERROR: Failed to build mining template" << std::endl;
                     std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
@@ -3432,7 +3531,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     constexpr int MAX_TEMPLATE_RETRIES = 3;
 
                     for (int attempt = 1; attempt <= MAX_TEMPLATE_RETRIES; attempt++) {
-                        templateOpt = BuildMiningTemplate(blockchain, wallet, false);
+                        templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
                         if (templateOpt) {
                             break;  // Success!
                         }
@@ -3495,7 +3594,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                     std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, true);
+                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
                     if (templateOpt) {
                         miner.StartMining(*templateOpt);
                         std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
@@ -3562,7 +3661,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (mempool && mempool->Size() > 0) {
                         std::cout << "[Mining] BUG #109: Mempool has " << mempool->Size()
                                   << " tx(s), refreshing template..." << std::endl;
-                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false);
+                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
                         if (templateOpt) {
                             miner.UpdateTemplate(*templateOpt);
                             std::cout << "[Mining] Template refreshed with mempool transactions" << std::endl;
@@ -3625,7 +3724,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         mining_paused_no_peers = false;
 
                         // Rebuild template and restart mining
-                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false);
+                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
                         if (templateOpt) {
                             miner.StartMining(*templateOpt);
                             std::cout << "[Mining] Mining resumed with fresh template" << std::endl;

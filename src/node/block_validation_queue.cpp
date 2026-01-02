@@ -34,6 +34,9 @@ bool CBlockValidationQueue::Start() {
         return false;  // Already running
     }
 
+    // Start watchdog first (monitors validation thread)
+    m_watchdog.Start();
+
     m_running.store(true);
     m_worker = std::thread(&CBlockValidationQueue::ValidationWorker, this);
     return true;
@@ -50,6 +53,9 @@ void CBlockValidationQueue::Stop() {
     if (m_worker.joinable()) {
         m_worker.join();
     }
+
+    // Stop watchdog after worker thread is done
+    m_watchdog.Stop();
 }
 
 bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int expected_height, const uint256& blockHash, CBlockIndex* pindex) {
@@ -252,17 +258,26 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     std::cout << "[ValidationQueue] Processing block " << blockHash.GetHex().substr(0, 16)
               << "... at height " << expected_height << std::endl;
 
-    // ORPHAN BOTTLENECK FIX #2: Ensure block is saved to database
-    // For orphan blocks (peer_id == -1), block should already be saved before queueing
-    // For regular blocks, block is saved in block handler before queueing
-    // This is a safety check - should already be saved, but verify
-    if (!m_db.BlockExists(blockHash)) {
-        std::cerr << "[ValidationQueue] WARNING: Block not in database, saving now (should be rare)" << std::endl;
-        if (!m_db.WriteBlock(blockHash, block)) {
-            std::cerr << "[ValidationQueue] ERROR: Failed to save block to database" << std::endl;
-            return false;
+    // STRESS TEST FIX: Report to watchdog that validation is starting
+    // Watchdog will alert if validation takes longer than VALIDATION_TIMEOUT_SECONDS
+    m_watchdog.ReportValidationStart(blockHash, expected_height);
+
+    // STRESS TEST FIX: Wrap validation in try-catch to ensure watchdog is notified
+    // on any exception. This prevents the watchdog from falsely detecting a stuck
+    // validation when an exception was thrown.
+    try {
+        // ORPHAN BOTTLENECK FIX #2: Ensure block is saved to database
+        // For orphan blocks (peer_id == -1), block should already be saved before queueing
+        // For regular blocks, block is saved in block handler before queueing
+        // This is a safety check - should already be saved, but verify
+        if (!m_db.BlockExists(blockHash)) {
+            std::cerr << "[ValidationQueue] WARNING: Block not in database, saving now (should be rare)" << std::endl;
+            if (!m_db.WriteBlock(blockHash, block)) {
+                std::cerr << "[ValidationQueue] ERROR: Failed to save block to database" << std::endl;
+                m_watchdog.ReportValidationComplete();
+                return false;
+            }
         }
-    }
 
     // Get or create block index
     CBlockIndex* pindex = queued_block.pindex;
@@ -280,6 +295,7 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         pblockIndex->pprev = m_chainstate.GetBlockIndex(block.hashPrevBlock);
         if (!pblockIndex->pprev) {
             std::cerr << "[ValidationQueue] ERROR: Parent block not found for block at height " << expected_height << std::endl;
+            m_watchdog.ReportValidationComplete();
             return false;
         }
 
@@ -290,6 +306,7 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         // Save block index to database
         if (!m_db.WriteBlockIndex(blockHash, *pblockIndex)) {
             std::cerr << "[ValidationQueue] ERROR: Failed to save block index" << std::endl;
+            m_watchdog.ReportValidationComplete();
             return false;
         }
 
@@ -299,6 +316,7 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
             pindex = m_chainstate.GetBlockIndex(blockHash);
             if (!pindex) {
                 std::cerr << "[ValidationQueue] ERROR: Block index not found after add failed" << std::endl;
+                m_watchdog.ReportValidationComplete();
                 return false;
             }
             // Continue with existing block index
@@ -306,6 +324,7 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
             pindex = m_chainstate.GetBlockIndex(blockHash);
             if (!pindex) {
                 std::cerr << "[ValidationQueue] CRITICAL ERROR: Block index not found after adding!" << std::endl;
+                m_watchdog.ReportValidationComplete();
                 return false;
             }
         }
@@ -315,6 +334,7 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     bool reorgOccurred = false;
     if (!m_chainstate.ActivateBestChain(pindex, block, reorgOccurred)) {
         std::cerr << "[ValidationQueue] ERROR: ActivateBestChain failed for block at height " << expected_height << std::endl;
+        m_watchdog.ReportValidationComplete();
         return false;
     }
 
@@ -403,7 +423,23 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     }
 
     std::cout << "[ValidationQueue] Successfully validated block at height " << expected_height << std::endl;
+    m_watchdog.ReportValidationComplete();
     return true;
+
+    } catch (const std::exception& e) {
+        // STRESS TEST FIX: Catch and log all exceptions to prevent frozen validation
+        std::cerr << "[ValidationQueue] EXCEPTION validating block " << blockHash.GetHex().substr(0, 16)
+                  << "... at height " << expected_height << ": " << e.what() << std::endl;
+        m_watchdog.ReportValidationComplete();
+        return false;
+
+    } catch (...) {
+        // STRESS TEST FIX: Catch unknown exceptions
+        std::cerr << "[ValidationQueue] UNKNOWN EXCEPTION validating block " << blockHash.GetHex().substr(0, 16)
+                  << "... at height " << expected_height << std::endl;
+        m_watchdog.ReportValidationComplete();
+        return false;
+    }
 }
 
 void CBlockValidationQueue::NotifyBlockValidated(const uint256& hash, bool success) {

@@ -1,0 +1,111 @@
+// Copyright (c) 2025-2026 The Dilithion Core developers
+// Distributed under the MIT software license
+
+#include <api/cached_stats.h>
+
+#include <iostream>
+#include <sstream>
+#include <ctime>
+
+CCachedChainStats::CCachedChainStats() = default;
+
+CCachedChainStats::~CCachedChainStats() {
+    Stop();
+}
+
+bool CCachedChainStats::Start(UpdateCallback callback) {
+    if (m_running.load()) {
+        return false;  // Already running
+    }
+
+    m_callback = std::move(callback);
+    m_shutdown.store(false);
+    m_running.store(true);
+    m_thread = std::thread(&CCachedChainStats::UpdateThread, this);
+
+    std::cout << "[CachedStats] Started background update thread (interval: "
+              << UPDATE_INTERVAL_MS << "ms)" << std::endl;
+
+    return true;
+}
+
+void CCachedChainStats::Stop() {
+    if (!m_running.load()) {
+        return;
+    }
+
+    m_shutdown.store(true);
+    m_running.store(false);
+
+    if (m_thread.joinable()) {
+        m_thread.join();
+    }
+
+    std::cout << "[CachedStats] Stopped background update thread" << std::endl;
+}
+
+void CCachedChainStats::UpdateThread() {
+    while (!m_shutdown.load()) {
+        try {
+            // Get current state from callback
+            UpdateData data = m_callback();
+
+            // Update atomic values
+            m_block_height.store(data.block_height);
+            m_headers_height.store(data.headers_height);
+            m_peer_count.store(data.peer_count);
+            m_difficulty.store(data.difficulty);
+            m_last_block_time.store(data.last_block_time);
+            m_is_syncing.store(data.is_syncing);
+
+            // Update cache timestamp
+            auto now = std::chrono::system_clock::now();
+            m_cache_time.store(std::chrono::duration_cast<std::chrono::seconds>(
+                now.time_since_epoch()).count());
+
+        } catch (const std::exception& e) {
+            std::cerr << "[CachedStats] Update error: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[CachedStats] Unknown update error" << std::endl;
+        }
+
+        // Sleep for interval
+        std::this_thread::sleep_for(std::chrono::milliseconds(UPDATE_INTERVAL_MS));
+    }
+}
+
+std::string CCachedChainStats::ToJSON(const std::string& network) const {
+    // All reads are lock-free atomic loads
+    int block_height = m_block_height.load();
+    int headers_height = m_headers_height.load();
+    int peer_count = m_peer_count.load();
+    uint32_t difficulty = m_difficulty.load();
+    int64_t cache_time = m_cache_time.load();
+    bool is_syncing = m_is_syncing.load();
+
+    // Calculate derived values
+    int64_t total_supply = block_height * 50;  // 50 coins per block
+    int blocks_until_halving = 210000 - block_height;
+    int64_t cache_age = GetCacheAge();
+
+    // Build JSON response
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"timestamp\": \"" << std::time(nullptr) << "\",\n";
+    json << "  \"network\": \"" << network << "\",\n";
+    json << "  \"blockHeight\": " << block_height << ",\n";
+    json << "  \"headersHeight\": " << headers_height << ",\n";
+    json << "  \"difficulty\": " << difficulty << ",\n";
+    json << "  \"networkHashRate\": " << (difficulty / 240) << ",\n";
+    json << "  \"totalSupply\": " << total_supply << ",\n";
+    json << "  \"blockReward\": 50,\n";
+    json << "  \"blocksUntilHalving\": " << blocks_until_halving << ",\n";
+    json << "  \"peerCount\": " << peer_count << ",\n";
+    json << "  \"averageBlockTime\": 240,\n";
+    json << "  \"status\": \"" << (is_syncing ? "syncing" : "live") << "\",\n";
+    json << "  \"cacheAge\": " << cache_age << ",\n";
+    json << "  \"cached\": true\n";
+    json << "}";
+
+    return json.str();
+}

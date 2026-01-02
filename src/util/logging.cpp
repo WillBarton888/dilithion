@@ -320,3 +320,38 @@ std::string CLogger::FormatLogMsg(LogCategory category, LogLevel level, const st
     return oss.str();
 }
 
+// STRESS TEST FIX: Thread-safe console output
+// Global console mutex - intentionally leaked to avoid shutdown ordering issues
+static std::mutex& GetConsoleMutexInternal() {
+    static std::mutex* mutex = new std::mutex();
+    return *mutex;
+}
+
+std::mutex& GetConsoleMutex() {
+    return GetConsoleMutexInternal();
+}
+
+void ThreadSafeLog(const char* format, ...) {
+    char buffer[4096];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    std::lock_guard<std::mutex> lock(GetConsoleMutexInternal());
+    std::cout << buffer;
+    std::cout.flush();
+}
+
+void ThreadSafeError(const char* format, ...) {
+    char buffer[4096];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    std::lock_guard<std::mutex> lock(GetConsoleMutexInternal());
+    std::cerr << buffer;
+    std::cerr.flush();
+}
+

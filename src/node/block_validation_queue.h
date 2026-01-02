@@ -18,6 +18,7 @@
 
 #include <primitives/block.h>  // CBlock (needed as complete type in QueuedBlock)
 #include <uint256.h>           // uint256 (needed as complete type in QueuedBlock)
+#include <node/validation_watchdog.h>  // CValidationWatchdog for stuck validation detection
 
 // Forward declarations
 class CChainState;
@@ -172,6 +173,9 @@ private:
 
     CChainState& m_chainstate;
     CBlockchainDB& m_db;
+
+    // Watchdog to detect frozen validation threads (Issue 1 from stress test)
+    CValidationWatchdog m_watchdog;
 
     // SSOT FIX #3: m_queue is private - all access must go through GetQueueDepth()
     // This ensures queue depth is always checked atomically with proper locking

@@ -8,6 +8,11 @@
 #include <thread>
 #include <atomic>
 #include <functional>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <vector>
+#include <memory>
 
 // Forward declare SOCKET type (cross-platform)
 #ifdef _WIN32
@@ -18,14 +23,100 @@
 #endif
 
 /**
- * CHttpServer - Lightweight HTTP server for REST API
+ * CHttpWorkQueue - Thread-safe work queue for HTTP requests
+ *
+ * Based on Bitcoin Core's WorkQueue pattern from httpserver.cpp.
+ * Provides producer-consumer queue for request processing.
+ *
+ * STRESS TEST FIX: Issue 2 - HTTP API unresponsive during load.
+ * This allows multiple worker threads to process requests concurrently,
+ * preventing one slow request from blocking others.
+ */
+template<typename T>
+class CHttpWorkQueue {
+public:
+    explicit CHttpWorkQueue(size_t max_depth = DEFAULT_HTTP_WORKQUEUE)
+        : m_max_depth(max_depth), m_shutdown(false) {}
+
+    /**
+     * Enqueue a work item
+     * @param item Work item to enqueue
+     * @return true if queued, false if queue is full or shutting down
+     */
+    bool Enqueue(T item) {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        if (m_shutdown || m_queue.size() >= m_max_depth) {
+            return false;
+        }
+        m_queue.push(std::move(item));
+        m_cv.notify_one();
+        return true;
+    }
+
+    /**
+     * Dequeue a work item (blocks until item available or shutdown)
+     * @return Work item, or empty optional if shutting down
+     */
+    bool Dequeue(T& item) {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv.wait(lock, [this] {
+            return !m_queue.empty() || m_shutdown;
+        });
+
+        if (m_queue.empty()) {
+            return false;  // Shutdown signaled
+        }
+
+        item = std::move(m_queue.front());
+        m_queue.pop();
+        return true;
+    }
+
+    /**
+     * Signal shutdown and wake all waiting threads
+     */
+    void Shutdown() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_shutdown = true;
+        m_cv.notify_all();
+    }
+
+    /**
+     * Get current queue depth
+     */
+    size_t Size() const {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        return m_queue.size();
+    }
+
+    // Configuration constants (match Bitcoin Core defaults)
+    static constexpr size_t DEFAULT_HTTP_WORKQUEUE = 16;
+
+private:
+    std::queue<T> m_queue;
+    mutable std::mutex m_mutex;
+    std::condition_variable m_cv;
+    size_t m_max_depth;
+    bool m_shutdown;
+};
+
+/**
+ * CHttpServer - Multi-threaded HTTP server for REST API
+ *
+ * STRESS TEST FIX: Issue 2 - HTTP API unresponsive during load.
+ * Uses a thread pool pattern from Bitcoin Core's httpserver.cpp.
+ *
+ * Architecture:
+ * - Accept thread: Listens for connections and queues them
+ * - Worker threads: Process requests from the queue concurrently
  *
  * Provides simple HTTP server for exposing node statistics via REST API.
  * Supports:
  * - GET /api/stats - Returns JSON with current node statistics
+ * - GET /api/health - Returns simple health check (never blocks)
  * - GET /metrics - Returns Prometheus-format metrics
  * - CORS headers for cross-origin requests
- * - Non-blocking operation with background thread
+ * - Non-blocking operation with background threads
  * - Graceful shutdown
  *
  * Usage:
@@ -100,10 +191,16 @@ public:
 
 private:
     /**
-     * Server thread main loop
-     * Listens for HTTP connections and handles requests
+     * Accept thread main loop
+     * Listens for HTTP connections and queues them for worker threads
      */
-    void ServerThread();
+    void AcceptThread();
+
+    /**
+     * Worker thread main loop
+     * Processes requests from the work queue
+     */
+    void WorkerThread();
 
     /**
      * Handle a single HTTP request
@@ -143,19 +240,33 @@ private:
      */
     void Send500(SOCKET client_socket);
 
-    // Configuration
-    int m_port;                          // Server port
-    StatsHandler m_stats_handler;         // Stats handler function
-    MetricsHandler m_metrics_handler;     // Prometheus metrics handler
+    /**
+     * Send 503 Service Unavailable response (queue full)
+     * @param client_socket Socket file descriptor
+     */
+    void Send503(SOCKET client_socket);
 
-    // Server state
-    std::thread m_server_thread;          // Server worker thread
-    std::atomic<bool> m_running{false};   // Running flag
+    // Configuration
+    int m_port;                            // Server port
+    int m_num_threads;                     // Number of worker threads
+    StatsHandler m_stats_handler;          // Stats handler function
+    MetricsHandler m_metrics_handler;      // Prometheus metrics handler
+
+    // Server state - STRESS TEST FIX: Thread pool pattern
+    std::thread m_accept_thread;           // Accept thread (listens for connections)
+    std::vector<std::thread> m_workers;    // Worker threads (process requests)
+    CHttpWorkQueue<SOCKET> m_work_queue;   // Work queue for pending requests
+    std::atomic<bool> m_running{false};    // Running flag
+
 #ifdef _WIN32
     SOCKET m_server_socket{INVALID_SOCKET}; // Server socket file descriptor
 #else
     SOCKET m_server_socket{-1};             // Server socket file descriptor
 #endif
+
+    // Configuration constants (match Bitcoin Core defaults)
+    static constexpr int DEFAULT_HTTP_THREADS = 4;
+    static constexpr int HTTP_REQUEST_TIMEOUT_SECONDS = 30;
 };
 
 /**

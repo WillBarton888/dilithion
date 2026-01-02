@@ -159,5 +159,22 @@ private:
 #define LogWarn(...) LogPrintf(ALL, WARN, __VA_ARGS__)
 #define LogDebug(...) LogPrintf(ALL, DEBUG, __VA_ARGS__)
 
+/**
+ * Thread-safe console output
+ *
+ * STRESS TEST FIX: Issue 5 - Log corruption from race conditions.
+ * All critical path code should use these functions instead of raw
+ * std::cout/std::cerr to prevent interleaved output.
+ *
+ * Usage:
+ *   ThreadSafeLog("Processing block at height %d\n", height);
+ *   ThreadSafeError("Failed to validate block\n");
+ */
+void ThreadSafeLog(const char* format, ...);
+void ThreadSafeError(const char* format, ...);
+
+// Get reference to console mutex (for advanced use cases)
+std::mutex& GetConsoleMutex();
+
 #endif // DILITHION_UTIL_LOGGING_H
 
