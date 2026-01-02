@@ -145,7 +145,60 @@ public:
      */
     size_t EraseExpiredOrphans(std::chrono::seconds maxAge = std::chrono::seconds(1200));
 
-    // Statistics and monitoring
+    // =========================================================================
+    // Parent Request Tracking (Phase 2.2)
+    // =========================================================================
+
+    /**
+     * @brief Record a parent block request for an orphan
+     *
+     * Called when we request the parent of an orphan block from a peer.
+     * Tracks the request for timeout detection and retry logic.
+     *
+     * @param orphanHash Hash of the orphan block
+     * @param parentHash Hash of the parent we're requesting
+     * @param peer Peer we're requesting from
+     */
+    void RecordParentRequest(const uint256& orphanHash, const uint256& parentHash, NodeId peer);
+
+    /**
+     * @brief Mark a parent request as fulfilled
+     *
+     * Called when we receive a block that was a pending parent request.
+     * Removes the request from tracking and updates metrics.
+     *
+     * @param parentHash Hash of the parent block received
+     */
+    void MarkParentReceived(const uint256& parentHash);
+
+    /**
+     * @brief Get all parent requests that have timed out
+     *
+     * Returns parent hashes that have been pending longer than PARENT_REQUEST_TIMEOUT_SECS.
+     * Used by the caller to retry with different peers or deprioritize orphans.
+     *
+     * @return Vector of timed-out parent hashes with their orphan info
+     */
+    std::vector<std::pair<uint256, uint256>> GetTimedOutParentRequests();
+
+    /**
+     * @brief Check if a parent request is pending
+     *
+     * @param parentHash Hash of the parent to check
+     * @return true if we have a pending request for this parent
+     */
+    bool HasPendingParentRequest(const uint256& parentHash) const;
+
+    /**
+     * @brief Get count of pending parent requests
+     *
+     * @return Number of pending parent requests
+     */
+    size_t GetPendingParentRequestCount() const;
+
+    // =========================================================================
+    // Statistics and Monitoring
+    // =========================================================================
 
     /**
      * @brief Get total number of orphans in storage
@@ -210,6 +263,32 @@ private:
     // Memory tracking
     size_t nOrphanBytes;  ///< Total bytes used by orphan blocks
 
+    /**
+     * @struct PendingParentRequest
+     * @brief Tracks an outstanding request for a parent block
+     *
+     * Used to implement priority parent requests with timeout detection.
+     * When an orphan is added, we request its parent and track that request.
+     */
+    struct PendingParentRequest {
+        uint256 parentHash;                                          ///< Hash of the parent we're requesting
+        uint256 orphanHash;                                          ///< Hash of the orphan waiting for this parent
+        NodeId requestedFrom;                                        ///< Peer we requested from
+        std::chrono::steady_clock::time_point requestTime;           ///< When request was sent
+        int retryCount;                                              ///< Number of retry attempts
+
+        PendingParentRequest(const uint256& parent, const uint256& orphan, NodeId peer)
+            : parentHash(parent)
+            , orphanHash(orphan)
+            , requestedFrom(peer)
+            , requestTime(std::chrono::steady_clock::now())
+            , retryCount(0)
+        {}
+    };
+
+    // Pending parent request tracking (by parent hash)
+    std::map<uint256, PendingParentRequest> mapPendingParentRequests;
+
     // Configuration constants
     // IBD HANG FIX #12: Increased limits to support chunk-based IBD
     // Previously: 100 blocks/peer caused immediate overflow with 128-block chunks
@@ -218,6 +297,8 @@ private:
     static constexpr size_t MAX_ORPHAN_BYTES = 100 * 1024 * 1024; ///< Maximum bytes (100MB)
     static constexpr size_t MAX_ORPHANS_PER_PEER = 256;           ///< Maximum orphans from single peer
     static constexpr int DEFAULT_ORPHAN_EXPIRATION_SECS = 1200;   ///< 20 minutes
+    static constexpr int PARENT_REQUEST_TIMEOUT_SECS = 30;        ///< Timeout for parent requests
+    static constexpr int MAX_PARENT_REQUEST_RETRIES = 3;          ///< Max retry attempts per parent
 
     // Thread safety
     mutable std::mutex cs_orphans;  ///< Protects all data members

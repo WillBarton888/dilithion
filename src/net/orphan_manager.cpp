@@ -276,7 +276,95 @@ void COrphanManager::Clear()
     mapOrphanBlocks.clear();
     mapOrphanBlocksByPrev.clear();
     mapOrphanBlocksByPeer.clear();
+    mapPendingParentRequests.clear();
     nOrphanBytes = 0;
+}
+
+// ============================================================================
+// Parent Request Tracking (Phase 2.2)
+// ============================================================================
+
+void COrphanManager::RecordParentRequest(const uint256& orphanHash, const uint256& parentHash, NodeId peer)
+{
+    std::lock_guard<std::mutex> lock(cs_orphans);
+
+    // Check if we already have a pending request for this parent
+    auto it = mapPendingParentRequests.find(parentHash);
+    if (it != mapPendingParentRequests.end()) {
+        // Already have a request - don't duplicate
+        return;
+    }
+
+    // Add new pending request
+    mapPendingParentRequests.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(parentHash),
+        std::forward_as_tuple(parentHash, orphanHash, peer)
+    );
+
+    // Update metrics
+    g_metrics.parent_requests_pending = mapPendingParentRequests.size();
+}
+
+void COrphanManager::MarkParentReceived(const uint256& parentHash)
+{
+    std::lock_guard<std::mutex> lock(cs_orphans);
+
+    auto it = mapPendingParentRequests.find(parentHash);
+    if (it != mapPendingParentRequests.end()) {
+        mapPendingParentRequests.erase(it);
+
+        // Update metrics
+        g_metrics.parent_requests_pending = mapPendingParentRequests.size();
+        g_metrics.parent_requests_success++;
+    }
+}
+
+std::vector<std::pair<uint256, uint256>> COrphanManager::GetTimedOutParentRequests()
+{
+    std::lock_guard<std::mutex> lock(cs_orphans);
+
+    std::vector<std::pair<uint256, uint256>> timedOut;
+    auto now = std::chrono::steady_clock::now();
+
+    for (auto it = mapPendingParentRequests.begin(); it != mapPendingParentRequests.end(); ) {
+        auto age = std::chrono::duration_cast<std::chrono::seconds>(
+            now - it->second.requestTime).count();
+
+        if (age > PARENT_REQUEST_TIMEOUT_SECS) {
+            // Check if we've exceeded retry limit
+            if (it->second.retryCount >= MAX_PARENT_REQUEST_RETRIES) {
+                // Too many retries - add to result and remove from tracking
+                timedOut.emplace_back(it->second.parentHash, it->second.orphanHash);
+                g_metrics.parent_requests_timeout++;
+                it = mapPendingParentRequests.erase(it);
+            } else {
+                // Still have retries left - add to result but keep tracking
+                timedOut.emplace_back(it->second.parentHash, it->second.orphanHash);
+                // Increment retry count and reset timer
+                it->second.retryCount++;
+                it->second.requestTime = now;
+                ++it;
+            }
+        } else {
+            ++it;
+        }
+    }
+
+    g_metrics.parent_requests_pending = mapPendingParentRequests.size();
+    return timedOut;
+}
+
+bool COrphanManager::HasPendingParentRequest(const uint256& parentHash) const
+{
+    std::lock_guard<std::mutex> lock(cs_orphans);
+    return mapPendingParentRequests.find(parentHash) != mapPendingParentRequests.end();
+}
+
+size_t COrphanManager::GetPendingParentRequestCount() const
+{
+    std::lock_guard<std::mutex> lock(cs_orphans);
+    return mapPendingParentRequests.size();
 }
 
 // ============================================================================

@@ -345,6 +345,11 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     // DEAD CODE REMOVED: OnChunkBlockReceived and OnWindowBlockConnected
     // CBlockTracker is now the SSOT - tracking already updated via OnBlockReceived
 
+    // Phase 2.2: Mark this block as received if it was a pending parent request
+    if (g_node_context.orphan_manager) {
+        g_node_context.orphan_manager->MarkParentReceived(blockHash);
+    }
+
     // IBD HANG FIX #23b: Process orphan children after async validation completes
     // When a block validates successfully, check if any orphans were waiting for it as their parent
     // This was previously only done in the synchronous block handler path

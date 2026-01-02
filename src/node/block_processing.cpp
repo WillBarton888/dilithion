@@ -348,6 +348,9 @@ BlockProcessResult ProcessNewBlock(
                     std::cout << "[ProcessNewBlock] Orphan on competing fork - requesting parent block: "
                               << missing_parent.GetHex().substr(0, 16) << "..." << std::endl;
 
+                    // Phase 2.2: Record parent request for timeout tracking
+                    ctx.orphan_manager->RecordParentRequest(orphan_root, missing_parent, peer_id);
+
                     std::vector<NetProtocol::CInv> getdata_inv;
                     getdata_inv.emplace_back(NetProtocol::MSG_BLOCK_INV, missing_parent);
                     CNetMessage getdata_msg = ctx.message_processor->CreateGetDataMessage(getdata_inv);
@@ -452,6 +455,11 @@ BlockProcessResult ProcessNewBlock(
         } else {
             std::cout << "[ProcessNewBlock] Block activated successfully" << std::endl;
             g_metrics.blocks_accepted_total++;
+
+            // Phase 2.2: Mark this block as received if it was a pending parent request
+            if (ctx.orphan_manager) {
+                ctx.orphan_manager->MarkParentReceived(blockHash);
+            }
 
             // Check if this became the new tip
             if (g_chainstate.GetTip() == pblockIndexPtr) {
