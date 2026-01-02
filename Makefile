@@ -136,6 +136,7 @@ CONSENSUS_SOURCES := src/consensus/fees.cpp \
                      src/consensus/reorg_wal.cpp \
                      src/consensus/chain_verifier.cpp \
                      src/consensus/tx_validation.cpp \
+                     src/consensus/signature_batch_verifier.cpp \
                      src/consensus/validation.cpp
 
 CORE_SOURCES_UTIL := src/core/chainparams.cpp \

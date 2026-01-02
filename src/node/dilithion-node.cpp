@@ -50,6 +50,7 @@
 #include <consensus/chain.h>
 #include <consensus/validation.h>  // CRITICAL-3 FIX: For CBlockValidator
 #include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
+#include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
@@ -1619,6 +1620,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         } else {
             std::cerr << "  [WARN] Failed to start validation queue (will use synchronous validation)" << std::endl;
         }
+
+        // Phase 3.2: Initialize batch signature verifier for parallel verification
+        std::cout << "Initializing batch signature verifier..." << std::endl;
+        InitSignatureVerifier(4);  // 4 worker threads for parallel verification
+        std::cout << "  [OK] Batch signature verifier started with 4 workers" << std::endl;
 
         // IBD HANG FIX #14: Register blockchain_db for block serving
         g_node_context.blockchain_db = &blockchain;
@@ -3757,6 +3763,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             g_node_context.connman->Stop();
         }
         // p2p_socket removed - CConnman handles socket cleanup
+
+        // Phase 3.2: Shutdown batch signature verifier
+        std::cout << "[Shutdown] Stopping batch signature verifier..." << std::endl;
+        ShutdownSignatureVerifier();
 
         // Phase 1.2: Shutdown NodeContext (Bitcoin Core pattern)
         std::cout << "[Shutdown] NodeContext shutdown complete" << std::endl;

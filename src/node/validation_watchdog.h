@@ -53,6 +53,22 @@ public:
     using TimeoutCallback = std::function<void(const uint256&, int, int64_t)>;
 
     /**
+     * @brief Callback type for automatic recovery
+     *
+     * Phase 3.3: Resilience feature - automatic validation recovery.
+     * When called, should skip the stuck block and continue with next block.
+     *
+     * Parameters:
+     * - uint256 blockHash: Hash of the stuck block to skip
+     * - int height: Height of the stuck block
+     *
+     * Returns:
+     * - true if recovery was successful
+     * - false if recovery failed (e.g., queue empty)
+     */
+    using RecoveryCallback = std::function<bool(const uint256&, int)>;
+
+    /**
      * @brief Constructor
      */
     CValidationWatchdog();
@@ -114,6 +130,42 @@ public:
     void SetTimeoutCallback(TimeoutCallback callback);
 
     /**
+     * @brief Enable automatic recovery on timeout
+     *
+     * Phase 3.3: When enabled, the watchdog will attempt to skip stuck blocks
+     * and continue validation. This prevents a single bad block from stalling
+     * the entire node.
+     *
+     * @param enabled true to enable, false to disable
+     */
+    void SetAutoRecoveryEnabled(bool enabled) { m_recovery_enabled.store(enabled); }
+
+    /**
+     * @brief Check if auto recovery is enabled
+     */
+    bool IsAutoRecoveryEnabled() const { return m_recovery_enabled.load(); }
+
+    /**
+     * @brief Set recovery callback
+     *
+     * The callback should skip the stuck block and signal the validation queue
+     * to continue with the next block.
+     *
+     * @param callback Function to call for recovery
+     */
+    void SetRecoveryCallback(RecoveryCallback callback);
+
+    /**
+     * @brief Get recovery attempt count
+     */
+    int64_t GetRecoveryAttemptCount() const { return m_recovery_attempts.load(); }
+
+    /**
+     * @brief Get successful recovery count
+     */
+    int64_t GetRecoverySuccessCount() const { return m_recovery_successes.load(); }
+
+    /**
      * @brief Get current validation state for diagnostics
      *
      * @param[out] hash Hash of block currently being validated (or zero if idle)
@@ -160,6 +212,12 @@ private:
 
     // Optional custom timeout callback
     TimeoutCallback m_timeout_callback;
+
+    // Phase 3.3: Automatic recovery support
+    std::atomic<bool> m_recovery_enabled{false};    // Enable auto-recovery on timeout
+    RecoveryCallback m_recovery_callback;            // Callback to skip stuck block
+    std::atomic<int64_t> m_recovery_attempts{0};    // Number of recovery attempts
+    std::atomic<int64_t> m_recovery_successes{0};   // Number of successful recoveries
 
     // Mutex for callback access (rarely contended)
     mutable std::mutex m_callback_mutex;
