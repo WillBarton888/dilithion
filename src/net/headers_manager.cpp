@@ -1666,38 +1666,10 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     int endHeight = startHeight + static_cast<int>(headers.size()) - 1;
     bool skipHashComputation = false;
 
-    if (endHeight <= nBestHeight && startHeight > 0) {
-        // Check ALL headers' hashPrevBlock against our stored hashes
-        // This is O(n) map lookups (microseconds) vs O(n) hash computations (100+ seconds)
-        // Must check every header to catch fork at ANY position in the batch
-        std::lock_guard<std::mutex> lock(cs_headers);
-        bool allMatch = true;
-
-        for (size_t i = 0; i < headers.size(); ++i) {
-            int height = startHeight + static_cast<int>(i);
-            int prevHeight = height - 1;
-
-            // Every header's hashPrevBlock must match our stored hash at prevHeight
-            auto heightIt = mapHeightIndex.find(prevHeight);
-            if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
-                allMatch = false;
-                break;
-            }
-
-            uint256 storedPrevHash = *heightIt->second.begin();
-            if (headers[i].hashPrevBlock != storedPrevHash) {
-                // Fork detected at this position - cannot skip
-                allMatch = false;
-                break;
-            }
-        }
-
-        if (allMatch) {
-            skipHashComputation = true;
-            std::cout << "[HeadersManager] OPTIMIZATION: Skipping hash computation for heights "
-                      << startHeight << "-" << endHeight << " (shared history)" << std::endl;
-        }
-    }
+    // TEMPORARILY DISABLED - debugging memory corruption
+    // The optimization check was causing crashes. Need to investigate further.
+    // For now, always do full hash computation.
+    (void)endHeight;  // Suppress unused warning
 
     // =========================================================================
     // STEP 1: Compute ALL hashes in PARALLEL using N worker threads
@@ -1738,18 +1710,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     auto hash_end = std::chrono::steady_clock::now();
     auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
 
-    if (skipHashComputation) {
-        // FAST PATH: All headers in this batch are shared history (already stored)
-        // Skip hash computation entirely - QueueRawHeadersForProcessing already
-        // updated m_last_request_hash and requested more headers.
-        //
-        // IMPORTANT: Do NOT update m_last_request_hash here! The P2P thread has
-        // already set it to the newest batch's last hash. Updating it here would
-        // overwrite with an OLDER value, causing request loops.
-        std::cout << "[HeadersManager] FAST PATH: Skipped " << headers.size()
-                  << " shared history headers (already stored)" << std::endl;
-        return true;
-    }
+    // FAST PATH disabled - optimization temporarily disabled for debugging
+    (void)skipHashComputation;
 
     std::cout << "[HeadersManager] Parallel hash computation: " << headers.size()
               << " headers, " << numWorkers << " workers, " << hash_ms << "ms" << std::endl;
