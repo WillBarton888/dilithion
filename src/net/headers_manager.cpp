@@ -1682,16 +1682,44 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             int prevHeight = height - 1;
 
             // Every header's hashPrevBlock must match our stored hash at prevHeight
-            auto heightIt = mapHeightIndex.find(prevHeight);
-            if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
+            auto prevHeightIt = mapHeightIndex.find(prevHeight);
+            if (prevHeightIt == mapHeightIndex.end() || prevHeightIt->second.empty()) {
                 allMatch = false;
                 break;
             }
 
-            // DEFENSIVE: Copy the hash to avoid iterator issues
-            uint256 storedPrevHash = *heightIt->second.begin();
+            uint256 storedPrevHash = *prevHeightIt->second.begin();
             if (headers[i].hashPrevBlock != storedPrevHash) {
-                // Fork detected at this position - cannot skip
+                allMatch = false;
+                break;
+            }
+
+            // BUG FIX #182: Also verify the header at THIS height matches the incoming header
+            // Two different blocks can have the same parent (fork scenario), so we must
+            // verify the actual header content matches, not just the parent hash.
+            auto heightIt = mapHeightIndex.find(height);
+            if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
+                // No header stored at this height - cannot skip
+                allMatch = false;
+                break;
+            }
+
+            uint256 storedHashAtHeight = *heightIt->second.begin();
+            auto storedIt = mapHeaders.find(storedHashAtHeight);
+            if (storedIt == mapHeaders.end()) {
+                allMatch = false;
+                break;
+            }
+
+            // Compare ALL header fields to confirm it's truly the same header
+            const CBlockHeader& stored = storedIt->second.header;
+            if (headers[i].nVersion != stored.nVersion ||
+                headers[i].hashPrevBlock != stored.hashPrevBlock ||
+                headers[i].hashMerkleRoot != stored.hashMerkleRoot ||
+                headers[i].nTime != stored.nTime ||
+                headers[i].nBits != stored.nBits ||
+                headers[i].nNonce != stored.nNonce) {
+                // Header fields differ - this is a FORK, cannot skip
                 allMatch = false;
                 break;
             }
