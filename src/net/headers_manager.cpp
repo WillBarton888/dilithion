@@ -1727,22 +1727,20 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
 
     if (skipHashComputation) {
-        std::cout << "[HeadersManager] FAST PATH: Skipped hash computation for " << headers.size()
-                  << " shared history headers (" << hash_ms << "ms)" << std::endl;
+        // Compute ONLY the last header's hash for continuation locator
+        // This is 1 hash (~50ms) vs 2000 hashes (~100 seconds)
+        uint256 lastHash = headers.back().GetHash();
 
-        // Update best header tracking and m_last_request_hash for continuation
+        std::cout << "[HeadersManager] FAST PATH: Skipped hash computation for " << headers.size()
+                  << " shared history headers, computed 1 hash for continuation" << std::endl;
+
+        // Update tracking for continuation requests
         {
             std::lock_guard<std::mutex> lock(cs_headers);
-            int lastHeight = startHeight + static_cast<int>(headers.size()) - 1;
-            auto heightIt = mapHeightIndex.find(lastHeight);
-            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-                uint256 lastHash = *heightIt->second.begin();
-                UpdateBestHeader(lastHash);
-                m_last_request_hash = lastHash;  // For continuation requests
-            }
+            m_last_request_hash = lastHash;
         }
 
-        // Still need to request more headers
+        // Request more headers using the fork chain's last hash
         int peer_height = GetPeerStartHeight(peer);
         if (peer_height > 0) {
             SyncHeadersFromPeer(peer, peer_height);
