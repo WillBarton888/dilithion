@@ -595,7 +595,8 @@ private:
 
     // Header prefetch tracking (for pipeline efficiency)
     std::atomic<int> m_headers_requested_height{0};  ///< Highest height we've REQUESTED (not yet received)
-    uint256 m_last_request_hash;                     ///< Hash we last requested FROM (for locator) - protected by cs_headers
+    uint256 m_last_request_hash;                     ///< Hash of last RECEIVED header (for locator) - protected by cs_headers
+    uint256 m_last_sent_locator_hash;                ///< Hash we last SENT request for (for dedup) - protected by cs_headers
 
     // Bug #46 Fix: Track multiple chain tips for competing chains
     std::set<uint256> setChainTips;         ///< All known chain tips (leaves in tree)

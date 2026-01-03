@@ -514,19 +514,29 @@ bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height, bool for
     // =========================================================================
 
     if (g_node_context.ibd_coordinator && g_node_context.ibd_coordinator->IsSynced()) {
-        // Synced state: Simple request, no dedup
-        // Bug #179 Fix: Use m_last_request_hash to continue fork chain sync
-        // If we received headers from a fork, hashBestHeader won't update (fork has less work),
-        // but m_last_request_hash will have the last received fork header so we can continue.
+        // Synced state: Use m_last_request_hash to continue fork chain sync
+        // Bug #179 Fix: If we received headers from a fork, hashBestHeader won't update
+        // (fork has less work), but m_last_request_hash has the last received fork header.
+        //
+        // Bug #181 Fix: Add dedup to prevent flooding peer with duplicate requests.
+        // Only send a new request if the locator hash has CHANGED since last request.
         uint256 request_from;
         {
             std::lock_guard<std::mutex> lock(cs_headers);
             request_from = m_last_request_hash.IsNull() ? hashBestHeader : m_last_request_hash;
+
+            // Dedup: Skip if we already sent a request with this same hash
+            if (request_from == m_last_sent_locator_hash && !force) {
+                return false;  // Already requested from this point
+            }
+
+            // Update tracking BEFORE sending (prevents duplicate requests)
+            m_last_sent_locator_hash = request_from;
         }
 
         std::cout << "[SYNCED] Requesting headers from peer " << peer
                   << " (peer_height=" << peer_height
-                  << ", our_best=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
+                  << ", locator=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
 
         RequestHeaders(peer, request_from);
         return true;
