@@ -1729,25 +1729,15 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
 
     if (skipHashComputation) {
-        // Compute ONLY the last header's hash for continuation locator
-        // This is 1 hash (~50ms) vs 2000 hashes (~100 seconds)
-        uint256 lastHash = headers.back().GetHash();
-
-        std::cout << "[HeadersManager] FAST PATH: Skipped hash computation for " << headers.size()
-                  << " shared history headers, computed 1 hash for continuation" << std::endl;
-
-        // Update tracking for continuation requests
-        {
-            std::lock_guard<std::mutex> lock(cs_headers);
-            m_last_request_hash = lastHash;
-        }
-
-        // Request more headers using the fork chain's last hash
-        int peer_height = GetPeerStartHeight(peer);
-        if (peer_height > 0) {
-            SyncHeadersFromPeer(peer, peer_height);
-        }
-
+        // FAST PATH: All headers in this batch are shared history (already stored)
+        // Skip hash computation entirely - QueueRawHeadersForProcessing already
+        // updated m_last_request_hash and requested more headers.
+        //
+        // IMPORTANT: Do NOT update m_last_request_hash here! The P2P thread has
+        // already set it to the newest batch's last hash. Updating it here would
+        // overwrite with an OLDER value, causing request loops.
+        std::cout << "[HeadersManager] FAST PATH: Skipped " << headers.size()
+                  << " shared history headers (already stored)" << std::endl;
         return true;
     }
 
