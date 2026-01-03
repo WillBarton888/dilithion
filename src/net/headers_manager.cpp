@@ -597,6 +597,15 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
     // Calculate chain work
     uint256 chainWork = CalculateChainWork(header, pprev);
 
+    // DEBUG: Log chain work for first few blocks
+    static int debugCount = 0;
+    if (debugCount < 5) {
+        std::cout << "[OnBlockActivated DEBUG] height=" << height
+                  << " chainWork=" << chainWork.GetHex()
+                  << " pprev=" << (pprev ? "yes" : "no") << std::endl;
+        debugCount++;
+    }
+
     // Store header
     HeaderWithChainWork headerData(header, height);
     headerData.chainWork = chainWork;
@@ -1111,6 +1120,19 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
     uint256 proof;
     memset(proof.data, 0, 32);
 
+    // DEBUG: Log nBits and calculation
+    static bool firstCall = true;
+    if (firstCall) {
+        int size = nBits >> 24;
+        uint64_t mantissa = nBits & 0x00FFFFFF;
+        int work_exponent = 256 - 8 * size;
+        int work_byte_pos = work_exponent / 8;
+        std::cout << "[GetBlockWork DEBUG] nBits=0x" << std::hex << nBits << std::dec
+                  << " size=" << size << " mantissa=" << mantissa
+                  << " work_exp=" << work_exponent << " byte_pos=" << work_byte_pos << std::endl;
+        firstCall = false;
+    }
+
     // If target is zero, return max work (should never happen)
     bool isZero = true;
     for (int i = 0; i < 32; i++) {
@@ -1150,6 +1172,13 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
     // Store the work value at the appropriate byte position
     for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
         proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
+    }
+
+    // DEBUG: Log resulting proof
+    static bool firstProof = true;
+    if (firstProof) {
+        std::cout << "[GetBlockWork DEBUG] proof=" << proof.GetHex() << std::endl;
+        firstProof = false;
     }
 
     return proof;
