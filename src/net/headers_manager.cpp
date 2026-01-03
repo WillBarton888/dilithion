@@ -65,10 +65,32 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
     std::cout << "[HeadersManager] Processing " << headers.size() << " headers" << std::endl;
 
+    // COMMON ANCESTOR OPTIMIZATION: Find where incoming chain diverges from ours.
+    // Headers below the common ancestor are identical on both chains - skip hash computation.
+    // Only compute expensive RandomX hashes for headers ABOVE the divergence point.
+    int commonAncestorHeight = -1;
+    const HeaderWithChainWork* commonAncestor = nullptr;
+
+    // Check first header's parent to find common ancestor
+    if (!headers.empty()) {
+        const uint256& firstParent = headers[0].hashPrevBlock;
+        auto parentIt = mapHeaders.find(firstParent);
+        if (parentIt != mapHeaders.end()) {
+            commonAncestorHeight = parentIt->second.height;
+            commonAncestor = &parentIt->second;
+            std::cout << "[HeadersManager] Common ancestor found at height " << commonAncestorHeight
+                      << " - will skip hash computation for heights <= " << commonAncestorHeight << std::endl;
+        }
+    }
+
     // Process each header sequentially
-    const HeaderWithChainWork* pprev = nullptr;
+    const HeaderWithChainWork* pprev = commonAncestor;  // Start from common ancestor if found
     uint256 prevHash;  // Track previous header's hash for sequential iteration
-    int heightStart = -1;
+    int heightStart = commonAncestorHeight;
+
+    // Get checkpoint height once
+    int highestCheckpoint = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
     for (size_t i = 0; i < headers.size(); i++) {
         const CBlockHeader& header = headers[i];
@@ -76,17 +98,11 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // Calculate expected height
         int expectedHeight = pprev ? (pprev->height + 1) : 1;
 
-        // CHECKPOINT OPTIMIZATION: Below checkpoint, forks are impossible (checkpoint guarantees canonical chain).
-        // Skip expensive hash computation for headers at heights we already have.
-        // Above checkpoint, we need full fork detection (compute hash, check for competing chains).
-        int highestCheckpoint = Dilithion::g_chainParams ?
-            Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
-
         auto heightIt = mapHeightIndex.find(expectedHeight);
         bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-        // FAST PATH: Below checkpoint, if height exists, skip entirely (no hash computation)
-        // This restores the Bug #164 optimization for checkpointed blocks
+        // FAST PATH 1: Below checkpoint, if height exists, skip entirely (no hash computation)
+        // Checkpoints are hardcoded guarantees of the canonical chain
         if (expectedHeight <= highestCheckpoint && heightHasHeaders) {
             uint256 existingHash = *heightIt->second.begin();
             auto existingIt = mapHeaders.find(existingHash);
@@ -99,7 +115,21 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             }
         }
 
-        // SLOW PATH: Above checkpoint or new height - compute hash for duplicate/fork detection
+        // FAST PATH 2: Below common ancestor height, headers are identical on both chains
+        // Skip hash computation - use our existing headers instead
+        if (commonAncestorHeight > 0 && expectedHeight <= commonAncestorHeight && heightHasHeaders) {
+            uint256 existingHash = *heightIt->second.begin();
+            auto existingIt = mapHeaders.find(existingHash);
+            if (existingIt != mapHeaders.end()) {
+                pprev = &existingIt->second;
+                prevHash = existingHash;
+                heightStart = existingIt->second.height;
+                // Don't update best header - just traversing common history
+                continue;  // Skip without computing hash
+            }
+        }
+
+        // SLOW PATH: Above common ancestor - compute hash for fork detection and work comparison
         uint256 storageHash = header.GetHash();
 
         // Skip TRUE duplicates (same hash already exists)
