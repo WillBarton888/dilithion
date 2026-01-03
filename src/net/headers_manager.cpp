@@ -1657,26 +1657,28 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     bool skipHashComputation = false;
 
     if (endHeight <= nBestHeight && startHeight > 0) {
-        // Check first, middle, and last headers against stored headers
+        // Check ALL headers' hashPrevBlock against our stored hashes
+        // This is O(n) map lookups (microseconds) vs O(n) hash computations (100+ seconds)
+        // Must check every header to catch fork at ANY position in the batch
         std::lock_guard<std::mutex> lock(cs_headers);
-
-        size_t sampleIndices[] = {0, headers.size() / 2, headers.size() - 1};
         bool allMatch = true;
 
-        for (size_t idx : sampleIndices) {
-            int height = startHeight + static_cast<int>(idx);
-            auto heightIt = mapHeightIndex.find(height);
+        for (size_t i = 0; i < headers.size(); ++i) {
+            int height = startHeight + static_cast<int>(i);
+            int prevHeight = height - 1;
+
+            // Every header's hashPrevBlock must match our stored hash at prevHeight
+            auto heightIt = mapHeightIndex.find(prevHeight);
             if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
                 allMatch = false;
                 break;
             }
-            // Compare hashPrevBlock to verify chain continuity
-            if (idx > 0) {
-                uint256 prevHeight = *mapHeightIndex[height - 1].begin();
-                if (headers[idx].hashPrevBlock != prevHeight) {
-                    allMatch = false;
-                    break;
-                }
+
+            uint256 storedPrevHash = *heightIt->second.begin();
+            if (headers[i].hashPrevBlock != storedPrevHash) {
+                // Fork detected at this position - cannot skip
+                allMatch = false;
+                break;
             }
         }
 
