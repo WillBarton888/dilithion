@@ -515,10 +515,13 @@ bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height, bool for
 
     if (g_node_context.ibd_coordinator && g_node_context.ibd_coordinator->IsSynced()) {
         // Synced state: Simple request, no dedup
+        // Bug #179 Fix: Use m_last_request_hash to continue fork chain sync
+        // If we received headers from a fork, hashBestHeader won't update (fork has less work),
+        // but m_last_request_hash will have the last received fork header so we can continue.
         uint256 request_from;
         {
             std::lock_guard<std::mutex> lock(cs_headers);
-            request_from = hashBestHeader;
+            request_from = m_last_request_hash.IsNull() ? hashBestHeader : m_last_request_hash;
         }
 
         std::cout << "[SYNCED] Requesting headers from peer " << peer
