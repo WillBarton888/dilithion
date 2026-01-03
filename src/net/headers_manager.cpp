@@ -1648,6 +1648,46 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     size_t totalProcessed = 0;
 
     // =========================================================================
+    // COMMON ANCESTOR OPTIMIZATION (Bug #180)
+    // =========================================================================
+    // If all headers in this batch are below our current best height AND we can
+    // verify a sample matches, skip the expensive hash computation entirely.
+    // This dramatically speeds up fork chain sync through shared history.
+    int endHeight = startHeight + static_cast<int>(headers.size()) - 1;
+    bool skipHashComputation = false;
+
+    if (endHeight <= nBestHeight && startHeight > 0) {
+        // Check first, middle, and last headers against stored headers
+        std::lock_guard<std::mutex> lock(cs_headers);
+
+        size_t sampleIndices[] = {0, headers.size() / 2, headers.size() - 1};
+        bool allMatch = true;
+
+        for (size_t idx : sampleIndices) {
+            int height = startHeight + static_cast<int>(idx);
+            auto heightIt = mapHeightIndex.find(height);
+            if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
+                allMatch = false;
+                break;
+            }
+            // Compare hashPrevBlock to verify chain continuity
+            if (idx > 0) {
+                uint256 prevHeight = *mapHeightIndex[height - 1].begin();
+                if (headers[idx].hashPrevBlock != prevHeight) {
+                    allMatch = false;
+                    break;
+                }
+            }
+        }
+
+        if (allMatch) {
+            skipHashComputation = true;
+            std::cout << "[HeadersManager] OPTIMIZATION: Skipping hash computation for heights "
+                      << startHeight << "-" << endHeight << " (shared history)" << std::endl;
+        }
+    }
+
+    // =========================================================================
     // STEP 1: Compute ALL hashes in PARALLEL using N worker threads
     // =========================================================================
     // Use fixed number of threads (= CPU cores) to avoid thread creation overhead.
@@ -1663,17 +1703,19 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
     auto hash_start = std::chrono::steady_clock::now();
 
-    for (size_t w = 0; w < numWorkers; ++w) {
-        size_t start = w * chunkSize;
-        size_t end = std::min(start + chunkSize, headers.size());
-        if (start >= end) break;
+    if (!skipHashComputation) {
+        for (size_t w = 0; w < numWorkers; ++w) {
+            size_t start = w * chunkSize;
+            size_t end = std::min(start + chunkSize, headers.size());
+            if (start >= end) break;
 
-        workers.push_back(std::async(std::launch::async, [&headers, &allHashes, start, end]() {
-            // Each worker processes its chunk sequentially, reusing thread-local RandomX VM
-            for (size_t i = start; i < end; ++i) {
-                allHashes[i] = headers[i].GetHash();
-            }
-        }));
+            workers.push_back(std::async(std::launch::async, [&headers, &allHashes, start, end]() {
+                // Each worker processes its chunk sequentially, reusing thread-local RandomX VM
+                for (size_t i = start; i < end; ++i) {
+                    allHashes[i] = headers[i].GetHash();
+                }
+            }));
+        }
     }
 
     // Wait for all workers to complete
@@ -1683,6 +1725,32 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
     auto hash_end = std::chrono::steady_clock::now();
     auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
+
+    if (skipHashComputation) {
+        std::cout << "[HeadersManager] FAST PATH: Skipped hash computation for " << headers.size()
+                  << " shared history headers (" << hash_ms << "ms)" << std::endl;
+
+        // Update best header tracking and m_last_request_hash for continuation
+        {
+            std::lock_guard<std::mutex> lock(cs_headers);
+            int lastHeight = startHeight + static_cast<int>(headers.size()) - 1;
+            auto heightIt = mapHeightIndex.find(lastHeight);
+            if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+                uint256 lastHash = *heightIt->second.begin();
+                UpdateBestHeader(lastHash);
+                m_last_request_hash = lastHash;  // For continuation requests
+            }
+        }
+
+        // Still need to request more headers
+        int peer_height = GetPeerStartHeight(peer);
+        if (peer_height > 0) {
+            SyncHeadersFromPeer(peer, peer_height);
+        }
+
+        return true;
+    }
+
     std::cout << "[HeadersManager] Parallel hash computation: " << headers.size()
               << " headers, " << numWorkers << " workers, " << hash_ms << "ms" << std::endl;
 
