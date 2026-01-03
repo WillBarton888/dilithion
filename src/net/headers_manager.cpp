@@ -1286,13 +1286,13 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     // IBD DEBUG: Log every 100th comparison or when update happens
     static int compare_count = 0;
     if (hasMoreWork || (compare_count++ % 100 == 0)) {
-        // Show LAST 16 chars of hex (where non-zero work resides for easy targets)
+        // Show LAST 24 chars of hex (where work resides, including overflow bytes)
         std::string currWork = bestIt->second.chainWork.GetHex();
         std::string newWork = it->second.chainWork.GetHex();
         std::cout << "[UpdateBestHeader] height=" << nBestHeight << " vs new=" << newHeight
                   << " hasMoreWork=" << hasMoreWork
-                  << " current_work=..." << currWork.substr(currWork.size() > 16 ? currWork.size() - 16 : 0)
-                  << " new_work=..." << newWork.substr(newWork.size() > 16 ? newWork.size() - 16 : 0) << std::endl;
+                  << " current=..." << currWork.substr(currWork.size() > 24 ? currWork.size() - 24 : 0)
+                  << " new=..." << newWork.substr(newWork.size() > 24 ? newWork.size() - 24 : 0) << std::endl;
     }
 
     if (hasMoreWork) {
