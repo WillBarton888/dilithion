@@ -1666,10 +1666,51 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     int endHeight = startHeight + static_cast<int>(headers.size()) - 1;
     bool skipHashComputation = false;
 
-    // TEMPORARILY DISABLED - debugging memory corruption
-    // The optimization check was causing crashes. Need to investigate further.
-    // For now, always do full hash computation.
-    (void)endHeight;  // Suppress unused warning
+    // CHECK ALL HEADERS for duplicate detection
+    // =========================================================================
+    // If all headers in this batch are below our current best height AND all
+    // headers' hashPrevBlock match our stored hashes, skip hash computation.
+    // This is O(n) map lookups (microseconds) vs O(n) hash computations (100+ seconds).
+    // =========================================================================
+
+    if (endHeight <= nBestHeight && startHeight > 0) {
+        std::lock_guard<std::mutex> lock(cs_headers);
+        bool allMatch = true;
+
+        for (size_t i = 0; i < headers.size(); ++i) {
+            int height = startHeight + static_cast<int>(i);
+            int prevHeight = height - 1;
+
+            // Every header's hashPrevBlock must match our stored hash at prevHeight
+            auto heightIt = mapHeightIndex.find(prevHeight);
+            if (heightIt == mapHeightIndex.end() || heightIt->second.empty()) {
+                allMatch = false;
+                break;
+            }
+
+            // DEFENSIVE: Copy the hash to avoid iterator issues
+            uint256 storedPrevHash = *heightIt->second.begin();
+            if (headers[i].hashPrevBlock != storedPrevHash) {
+                // Fork detected at this position - cannot skip
+                allMatch = false;
+                break;
+            }
+        }
+
+        if (allMatch) {
+            skipHashComputation = true;
+            std::cout << "[HeadersManager] OPTIMIZATION: Skipping hash computation for heights "
+                      << startHeight << "-" << endHeight << " (shared history)" << std::endl;
+        }
+    }
+
+    // FAST PATH: If all headers are shared history, return immediately
+    // Do this BEFORE allocating allHashes to avoid unnecessary memory allocation
+    if (skipHashComputation) {
+        std::cout << "[HeadersManager] FAST PATH: Skipped " << headers.size()
+                  << " shared history headers (already stored)" << std::endl;
+        return true;
+    }
 
     // =========================================================================
     // STEP 1: Compute ALL hashes in PARALLEL using N worker threads
@@ -1687,19 +1728,17 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
     auto hash_start = std::chrono::steady_clock::now();
 
-    if (!skipHashComputation) {
-        for (size_t w = 0; w < numWorkers; ++w) {
-            size_t start = w * chunkSize;
-            size_t end = std::min(start + chunkSize, headers.size());
-            if (start >= end) break;
+    for (size_t w = 0; w < numWorkers; ++w) {
+        size_t start = w * chunkSize;
+        size_t end = std::min(start + chunkSize, headers.size());
+        if (start >= end) break;
 
-            workers.push_back(std::async(std::launch::async, [&headers, &allHashes, start, end]() {
-                // Each worker processes its chunk sequentially, reusing thread-local RandomX VM
-                for (size_t i = start; i < end; ++i) {
-                    allHashes[i] = headers[i].GetHash();
-                }
-            }));
-        }
+        workers.push_back(std::async(std::launch::async, [&headers, &allHashes, start, end]() {
+            // Each worker processes its chunk sequentially, reusing thread-local RandomX VM
+            for (size_t i = start; i < end; ++i) {
+                allHashes[i] = headers[i].GetHash();
+            }
+        }));
     }
 
     // Wait for all workers to complete
@@ -1709,9 +1748,6 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
     auto hash_end = std::chrono::steady_clock::now();
     auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
-
-    // FAST PATH disabled - optimization temporarily disabled for debugging
-    (void)skipHashComputation;
 
     std::cout << "[HeadersManager] Parallel hash computation: " << headers.size()
               << " headers, " << numWorkers << " workers, " << hash_ms << "ms" << std::endl;
