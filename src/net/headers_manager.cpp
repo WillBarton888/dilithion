@@ -43,6 +43,12 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
     std::cout << "[HeadersManager] ProcessHeaders called: peer=" << peer
               << ", count=" << headers.size() << std::endl;
 
+    // DEADLOCK FIX: Get chainstate tip BEFORE acquiring cs_headers
+    // This is needed because GetLocatorImpl may be called while holding cs_headers,
+    // and we must avoid calling GetTip() (which needs cs_main) while holding cs_headers.
+    CBlockIndex* pTipPreFetched = g_chainstate.GetTip();
+    int chainstateHeightPreFetched = (pTipPreFetched && pTipPreFetched->nHeight > 0) ? pTipPreFetched->nHeight : 0;
+
     std::lock_guard<std::mutex> lock(cs_headers);
     std::cout << "[HeadersManager] Lock acquired" << std::endl;
 
@@ -141,7 +147,8 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                     // DEADLOCK FIX: Use GetLocatorImpl directly since we already hold cs_headers.
                     // Calling RequestHeaders() would call GetLocator() which tries to relock cs_headers,
                     // causing a deadlock (std::mutex is not recursive).
-                    std::vector<uint256> locator = GetLocatorImpl(uint256());
+                    // Pass pre-fetched tip to avoid cs_main/cs_headers lock inversion.
+                    std::vector<uint256> locator = GetLocatorImpl(uint256(), pTipPreFetched, chainstateHeightPreFetched);
 
                     // Send GETHEADERS message directly
                     auto* connman = g_node_context.connman.get();
@@ -575,15 +582,25 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
 
 std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
 {
+    // DEADLOCK FIX: Get chainstate tip BEFORE acquiring cs_headers
+    // to avoid cs_headers/cs_main lock order inversion.
+    // (OnBlockActivated holds cs_main and wants cs_headers;
+    //  GetLocatorImpl would hold cs_headers and want cs_main via GetTip)
+    CBlockIndex* pTip = g_chainstate.GetTip();
+    int chainstateHeight = (pTip && pTip->nHeight > 0) ? pTip->nHeight : 0;
+
     std::lock_guard<std::mutex> lock(cs_headers);
-    return GetLocatorImpl(hashTip);
+    return GetLocatorImpl(hashTip, pTip, chainstateHeight);
 }
 
-std::vector<uint256> CHeadersManager::GetLocatorImpl(const uint256& hashTip) const
+std::vector<uint256> CHeadersManager::GetLocatorImpl(const uint256& hashTip, CBlockIndex* pTip, int chainstateHeight) const
 {
     // NOTE: Caller MUST hold cs_headers lock
     // This is the implementation of GetLocator without lock acquisition.
     // Used by internal functions that already hold the lock to avoid deadlock.
+    //
+    // DEADLOCK FIX: pTip and chainstateHeight must be obtained BEFORE
+    // acquiring cs_headers to avoid lock order inversion with cs_main.
 
     std::vector<uint256> locator;
     locator.reserve(32);  // Pre-allocate for efficiency
@@ -599,9 +616,7 @@ std::vector<uint256> CHeadersManager::GetLocatorImpl(const uint256& hashTip) con
     // 3. For heights > chainstate: use headers_manager best chain hashes
     //
     // This ensures we don't re-request headers while maintaining fork safety.
-
-    CBlockIndex* pTip = g_chainstate.GetTip();
-    int chainstateHeight = (pTip && pTip->nHeight > 0) ? pTip->nHeight : 0;
+    // Note: pTip and chainstateHeight are pre-fetched before cs_headers lock.
 
     // Get headers_manager's best header height
     int headersHeight = 0;

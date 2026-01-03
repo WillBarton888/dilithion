@@ -527,10 +527,15 @@ private:
      * This is the implementation of GetLocator without lock acquisition.
      * Used internally by functions that already hold cs_headers to avoid deadlock.
      *
+     * DEADLOCK FIX: The chainstate tip must be obtained BEFORE acquiring cs_headers
+     * to avoid cs_headers/cs_main deadlock. Pass the pre-fetched tip here.
+     *
      * @param hashTip Starting point for locator (unused, uses best chain)
+     * @param pTip Pre-fetched chainstate tip (obtained before cs_headers lock)
+     * @param chainstateHeight Pre-fetched chainstate height
      * @return Vector of block hashes for locator
      */
-    std::vector<uint256> GetLocatorImpl(const uint256& hashTip) const;
+    std::vector<uint256> GetLocatorImpl(const uint256& hashTip, CBlockIndex* pTip, int chainstateHeight) const;
 
     /**
      * @struct PeerSyncState
