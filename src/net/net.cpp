@@ -1168,9 +1168,12 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
                 timestamps.end());
 
             if (timestamps.size() >= MAX_HEADERS_PER_SECOND) {
-                std::cout << "[P2P] RATE LIMIT: Too many HEADERS from peer " << peer_id
+                // Note: We no longer penalize peers for sending many HEADERS.
+                // HEADERS are responses to our GETHEADERS requests, so high volume
+                // during fork sync is expected and not malicious behavior.
+                // We still skip processing to avoid memory pressure, but don't ban.
+                std::cout << "[P2P] RATE LIMIT: Skipping HEADERS from peer " << peer_id
                           << " (" << timestamps.size() << "/" << MAX_HEADERS_PER_SECOND << " per second)" << std::endl;
-                peer_manager.Misbehaving(peer_id, 10);
                 return false;
             }
             timestamps.push_back(now);
