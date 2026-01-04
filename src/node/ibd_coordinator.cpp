@@ -877,7 +877,9 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
 
     // RACE CONDITION FIX: Get a thread-safe snapshot of the chain
     // This holds cs_main while copying the data, then releases it
-    const int MAX_CHECKS = 1000;
+    // BUG #187 FIX: Use chain_height as max, not fixed 1000.
+    // Fork point could be anywhere in the chain (e.g., 16k blocks deep).
+    const int MAX_CHECKS = chain_height + 1;  // +1 to include genesis if needed
     auto chainSnapshot = m_chainstate.GetChainSnapshot(MAX_CHECKS, 0);
 
     if (chainSnapshot.empty()) {
@@ -911,8 +913,8 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
         checks++;
     }
 
-    // No common ancestor found - something is very wrong
-    std::cerr << "[FORK-DETECT] ERROR: No common ancestor found after " << checks << " blocks!" << std::endl;
+    // No common ancestor found - this means we're on a completely different chain (very unusual)
+    std::cerr << "[FORK-DETECT] ERROR: No common ancestor found after checking " << checks << " blocks back to genesis!" << std::endl;
     return 0;
 }
 
