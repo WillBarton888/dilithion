@@ -344,17 +344,20 @@ BlockProcessResult ProcessNewBlock(
                 // Instead of requesting one block at a time (inefficient for deep forks),
                 // request HEADERS to find common ancestor efficiently
                 //
-                // CRITICAL: Pass null hash (not missing_parent) to get pure exponential locator.
-                // If we pass missing_parent, peer finds it and returns headers AFTER it (useless).
-                // With null hash, peer finds common ancestor and returns full fork chain.
-                std::cout << "[ProcessNewBlock] Competing fork detected (parent "
-                          << block.hashPrevBlock.GetHex().substr(0, 16) << " unknown) - requesting headers" << std::endl;
+                // BUG #186 FIX: Only request headers if we're not already syncing.
+                // During fork sync, every compact block triggers this code, but FAST PATH
+                // is already requesting headers efficiently. Avoid redundant requests.
+                if (ctx.headers_manager && !ctx.headers_manager->IsHeaderSyncInProgress()) {
+                    std::cout << "[ProcessNewBlock] Competing fork detected (parent "
+                              << block.hashPrevBlock.GetHex().substr(0, 16) << " unknown) - requesting headers" << std::endl;
 
-                // Use pure locator from our tip to find common ancestor
-                if (ctx.headers_manager) {
+                    // Use pure locator from our tip to find common ancestor
                     ctx.headers_manager->RequestHeaders(peer_id, uint256());  // null = use our tip's locator
                     // Signal fork detected for mining pause
                     g_node_context.fork_detected.store(true);
+                } else {
+                    // Header sync already in progress - skip redundant request
+                    std::cout << "[ProcessNewBlock] Fork header sync already in progress - skipping redundant request" << std::endl;
                 }
             } else {
                 std::cout << "[ProcessNewBlock] Orphan block stored - IBD coordinator will handle block request" << std::endl;

@@ -799,6 +799,12 @@ int CHeadersManager::GetBestHeight() const
     return nBestHeight;
 }
 
+bool CHeadersManager::IsHeaderSyncInProgress() const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    return !m_last_request_hash.IsNull();
+}
+
 bool CHeadersManager::GetHeader(const uint256& hash, CBlockHeader& header) const
 {
     std::lock_guard<std::mutex> lock(cs_headers);

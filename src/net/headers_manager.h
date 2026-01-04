@@ -281,6 +281,16 @@ public:
     int GetBestHeight() const;
 
     /**
+     * @brief Check if header sync is in progress
+     *
+     * Returns true if m_last_request_hash is set, indicating we're actively
+     * syncing headers from a peer. Used to prevent redundant GETHEADERS requests.
+     *
+     * @return true if header sync is in progress
+     */
+    bool IsHeaderSyncInProgress() const;
+
+    /**
      * @brief Get highest header height we've REQUESTED (not yet received/validated)
      *
      * Used for header prefetch pipeline - request next batch before current completes.
