@@ -1673,6 +1673,9 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     // This is O(n) map lookups (microseconds) vs O(n) hash computations (100+ seconds).
     // =========================================================================
 
+    // Track the stored hash at endHeight for FAST PATH m_last_request_hash update
+    uint256 storedHashAtEndHeight;
+
     if (endHeight <= nBestHeight && startHeight > 0) {
         std::lock_guard<std::mutex> lock(cs_headers);
         bool allMatch = true;
@@ -1723,6 +1726,9 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 allMatch = false;
                 break;
             }
+
+            // Track the last (endHeight) stored hash for FAST PATH
+            storedHashAtEndHeight = storedHashAtHeight;
         }
 
         if (allMatch) {
@@ -1735,6 +1741,15 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     // FAST PATH: If all headers are shared history, return immediately
     // Do this BEFORE allocating allHashes to avoid unnecessary memory allocation
     if (skipHashComputation) {
+        // BUG FIX #183: Update m_last_request_hash with our STORED hash at endHeight
+        // This ensures the next GETHEADERS uses a hash we KNOW exists in our chain,
+        // rather than the hash computed from incoming headers (which may differ).
+        {
+            std::lock_guard<std::mutex> lock(cs_headers);
+            m_last_request_hash = storedHashAtEndHeight;
+            std::cout << "[HeadersManager] FAST PATH: Updated m_last_request_hash to stored hash at height "
+                      << endHeight << " (" << storedHashAtEndHeight.GetHex().substr(0, 16) << "...)" << std::endl;
+        }
         std::cout << "[HeadersManager] FAST PATH: Skipped " << headers.size()
                   << " shared history headers (already stored)" << std::endl;
         return true;
