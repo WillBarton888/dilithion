@@ -1935,6 +1935,15 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     std::cout << "[HeadersManager] Progressive processing complete: " << totalProcessed
               << " headers stored in " << total_ms << "ms (hashes: " << hash_ms << "ms)" << std::endl;
 
+    // BUG FIX #183: Update m_last_request_hash AFTER successful processing
+    // Use the hash of the last stored header (prevHash tracks this during processing)
+    if (!prevHash.IsNull()) {
+        std::lock_guard<std::mutex> lock(cs_headers);
+        m_last_request_hash = prevHash;
+        std::cout << "[HeadersManager] Updated m_last_request_hash to last stored hash: "
+                  << prevHash.GetHex().substr(0, 16) << "..." << std::endl;
+    }
+
     return true;
 }
 
@@ -2176,9 +2185,9 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
     std::cout << "[HeadersManager] Queueing " << header_count
               << " raw headers from peer " << peer << " for async processing" << std::endl;
 
-    // PIPELINE: Get last header's hash BEFORE moving for prefetch locator
-    // This is the only hash computed in P2P thread (1 hash vs 2000)
-    uint256 last_header_hash = headers.back().GetHash();
+    // Note: We no longer compute the last header's hash here.
+    // m_last_request_hash is updated by AddHeaders AFTER validation.
+    // This avoids the premature hash update that caused sync loops.
 
     {
         std::lock_guard<std::mutex> lock(m_raw_queue_mutex);
@@ -2187,16 +2196,20 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
 
     m_raw_queue_cv.notify_one();
 
-    // PIPELINE OPTIMIZATION: Immediately request NEXT batch of headers
-    // Don't wait for validation - keep the pipeline full
+    // BUG FIX #183: DON'T update m_last_request_hash here (before validation)
+    // Problem: If we set m_last_request_hash to the incoming header's hash before
+    // processing, and FAST PATH later determines these are shared history,
+    // the hash may not be recognized by the peer (hash mismatch).
     //
-    // SSOT: Update m_last_request_hash so SyncHeadersFromPeer uses correct locator
-    {
-        std::lock_guard<std::mutex> lock(cs_headers);
-        m_last_request_hash = last_header_hash;
-    }
+    // Solution: Let AddHeaders update m_last_request_hash AFTER validation:
+    // - FAST PATH: Uses our STORED hash at endHeight (guaranteed to exist)
+    // - Normal path: Uses the validated/stored hash
+    //
+    // The first request will use hashBestHeader (fallback when m_last_request_hash is null).
+    // After processing, m_last_request_hash is correctly set for subsequent requests.
 
     // Request more headers if peer has more (single entry point)
+    // Note: SyncHeadersFromPeer will use m_last_request_hash if set, else hashBestHeader
     int peer_height = GetPeerStartHeight(peer);
     if (peer_height > 0) {
         SyncHeadersFromPeer(peer, peer_height);
