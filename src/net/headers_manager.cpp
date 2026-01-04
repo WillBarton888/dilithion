@@ -1752,6 +1752,14 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         }
         std::cout << "[HeadersManager] FAST PATH: Skipped " << headers.size()
                   << " shared history headers (already stored)" << std::endl;
+
+        // BUG FIX #183 Part 2: Request more headers NOW with the updated m_last_request_hash
+        // The previous GETHEADERS was sent before this update, so we need to send another.
+        int peer_height = GetPeerStartHeight(peer);
+        if (peer_height > 0 && endHeight < peer_height) {
+            SyncHeadersFromPeer(peer, peer_height, true);  // force=true to bypass dedup
+        }
+
         return true;
     }
 
@@ -1942,6 +1950,15 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         m_last_request_hash = prevHash;
         std::cout << "[HeadersManager] Updated m_last_request_hash to last stored hash: "
                   << prevHash.GetHex().substr(0, 16) << "..." << std::endl;
+    }
+
+    // BUG FIX #184: Request more headers AFTER processing completes (SSOT)
+    // This ensures m_last_request_hash is set correctly before the request is sent.
+    // Previously, the request was sent from QueueRawHeadersForProcessing BEFORE
+    // processing, causing infinite loops with stale hash values.
+    int peer_height = GetPeerStartHeight(peer);
+    if (peer_height > 0 && !prevHash.IsNull()) {
+        SyncHeadersFromPeer(peer, peer_height);
     }
 
     return true;
@@ -2196,24 +2213,10 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
 
     m_raw_queue_cv.notify_one();
 
-    // BUG FIX #183: DON'T update m_last_request_hash here (before validation)
-    // Problem: If we set m_last_request_hash to the incoming header's hash before
-    // processing, and FAST PATH later determines these are shared history,
-    // the hash may not be recognized by the peer (hash mismatch).
-    //
-    // Solution: Let AddHeaders update m_last_request_hash AFTER validation:
-    // - FAST PATH: Uses our STORED hash at endHeight (guaranteed to exist)
-    // - Normal path: Uses the validated/stored hash
-    //
-    // The first request will use hashBestHeader (fallback when m_last_request_hash is null).
-    // After processing, m_last_request_hash is correctly set for subsequent requests.
-
-    // Request more headers if peer has more (single entry point)
-    // Note: SyncHeadersFromPeer will use m_last_request_hash if set, else hashBestHeader
-    int peer_height = GetPeerStartHeight(peer);
-    if (peer_height > 0) {
-        SyncHeadersFromPeer(peer, peer_height);
-    }
+    // BUG FIX #184: DO NOT request headers here (before processing)!
+    // The async worker will call SyncHeadersFromPeer AFTER processing completes,
+    // using the correct m_last_request_hash (SSOT principle).
+    // Requesting here caused infinite loops because m_last_request_hash was stale.
 
     return true;
 }
