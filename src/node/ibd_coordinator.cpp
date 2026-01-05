@@ -410,7 +410,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             std::cout << "[FORK-DETECT] Finding fork point..." << std::endl;
 
             int fork_point = FindForkPoint(chain_height);
-            if (fork_point > 0 && fork_point < chain_height) {
+            // BUG #189 FIX: Changed < to <= to handle edge case where fork_point equals chain_height
+            if (fork_point > 0 && fork_point <= chain_height) {
                 int fork_depth = chain_height - fork_point;
                 std::cout << "[FORK-DETECT] Fork point found at height " << fork_point
                           << " (depth=" << fork_depth << " blocks)" << std::endl;
