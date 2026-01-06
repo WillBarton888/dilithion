@@ -410,9 +410,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             std::cout << "[FORK-DETECT] Finding fork point..." << std::endl;
 
             int fork_point = FindForkPoint(chain_height);
-            // BUG #189 FIX: Changed < to <= to handle edge case where fork_point equals chain_height
-            if (fork_point > 0 && fork_point <= chain_height) {
-                int fork_depth = chain_height - fork_point;
+            // BUG #189 FIX: Allow fork_point up to chain_height + 1 to handle race conditions
+            // where chain advances during fork detection
+            if (fork_point > 0 && fork_point <= chain_height + 1) {
+                // fork_depth can be 0 or negative if chain advanced during detection (race condition)
+                // In that case, no blocks need to be disconnected
+                int fork_depth = std::max(0, chain_height - fork_point);
                 std::cout << "[FORK-DETECT] Fork point found at height " << fork_point
                           << " (depth=" << fork_depth << " blocks)" << std::endl;
 
@@ -569,16 +572,18 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                           << " for " << stall_cycles << " cycles - checking for fork..." << std::endl;
 
                 int fork_point = FindForkPoint(chain_height);
-                if (fork_point > 0 && fork_point < chain_height) {
+                // BUG #189 FIX: Allow fork_point up to chain_height + 1 to handle race conditions
+                if (fork_point > 0 && fork_point <= chain_height + 1) {
+                    int fork_depth = std::max(0, chain_height - fork_point);
                     std::cout << "[FORK-DETECT] Fork detected! Local chain diverged at height " << fork_point
-                              << " (chain=" << chain_height << ", fork_depth=" << (chain_height - fork_point) << ")" << std::endl;
+                              << " (chain=" << chain_height << ", fork_depth=" << fork_depth << ")" << std::endl;
                     HandleForkScenario(fork_point, chain_height);
                     m_fork_stall_cycles.store(0);
                     m_last_checked_chain_height = -1;  // Reset to allow fresh tracking
                     // Continue with normal IBD - window has been reset to fork point
-                } else if (fork_point == chain_height) {
-                    // Not a fork - just slow downloads, reset counter
-                    std::cout << "[FORK-DETECT] No fork detected (tip matches header chain)" << std::endl;
+                } else if (fork_point == 0) {
+                    // No common ancestor found - unusual, just reset counter
+                    std::cout << "[FORK-DETECT] No common ancestor found" << std::endl;
                     m_fork_stall_cycles.store(0);
                 }
             }
