@@ -1278,7 +1278,7 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     if (hasMoreWork) {
         std::cout << "[UpdateBestHeader] UPDATING: " << nBestHeight << " -> " << newHeight << std::endl;
     } else if (compare_count++ % 1000 == 0) {
-        std::cout << "[UpdateBestHeader] Comparing: height=" << nBestHeight << " vs fork=" << newHeight << std::endl;
+        std::cout << "[UpdateBestHeader] Comparing: height=" << nBestHeight << " vs fork=" << newHeight << " bestWork=" << bestIt->second.chainWork.GetHex().substr(0, 16) << " forkWork=" << it->second.chainWork.GetHex().substr(0, 16) << std::endl;
     }
 
     if (hasMoreWork) {
