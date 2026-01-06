@@ -610,6 +610,16 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
     // Calculate chain work
     uint256 chainWork = CalculateChainWork(header, pprev);
 
+    // DEBUG: Log OnBlockActivated chainWork calculation
+    static int activate_log_count = 0;
+    if (activate_log_count++ < 10 || height > 23000) {
+        std::cout << "[DEBUG-ACTIVATE] height=" << height
+                  << " chainWork=" << chainWork.GetHex().substr(0, 16)
+                  << " pprev=" << (pprev ? "found" : "NULL")
+                  << " hashPrev=" << header.hashPrevBlock.GetHex().substr(0, 16)
+                  << std::endl;
+    }
+
     // Store header
     HeaderWithChainWork headerData(header, height);
     headerData.chainWork = chainWork;
