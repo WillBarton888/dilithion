@@ -1136,6 +1136,12 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
     // Uses same logic as CBlockIndex::GetBlockProof()
     // Bug #47 Fix: Use consensus CompactToBig instead of custom GetTarget
 
+    // DEBUG: Log nBits input
+    static int blockwork_log_count = 0;
+    if (blockwork_log_count++ < 5) {
+        std::cout << "[DEBUG-BLOCKWORK] nBits=" << std::hex << nBits << std::dec << std::endl;
+    }
+
     uint256 target = CompactToBig(nBits);
     uint256 proof;
     memset(proof.data, 0, 32);
@@ -1179,6 +1185,11 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
     // Store the work value at the appropriate byte position
     for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
         proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
+    }
+
+    // DEBUG: Log result
+    if (blockwork_log_count <= 5) {
+        std::cout << "[DEBUG-BLOCKWORK] result=" << proof.GetHex().substr(0, 16) << std::endl;
     }
 
     return proof;
