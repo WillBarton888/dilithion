@@ -24,6 +24,17 @@ bool HashLessThan(const uint256& hash, const uint256& target) {
 bool ChainWorkGreaterThan(const uint256& work1, const uint256& work2) {
     // Compare chain work as big-endian (most significant byte first)
     // Returns true if work1 > work2
+
+    // DEBUG: Log comparison
+    static int cmp_log_count = 0;
+    if (cmp_log_count++ % 5000 == 0) {
+        std::cout << "[DEBUG-CMP] work1_bytes[8-1]: ";
+        for (int j = 8; j >= 1; j--) printf("%02x", work1.data[j]);
+        std::cout << " vs work2_bytes[8-1]: ";
+        for (int j = 8; j >= 1; j--) printf("%02x", work2.data[j]);
+        std::cout << std::endl;
+    }
+
     for (int i = 31; i >= 0; i--) {
         if (work1.data[i] > work2.data[i])
             return true;
