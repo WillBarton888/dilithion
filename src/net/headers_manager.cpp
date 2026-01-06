@@ -1902,6 +1902,16 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 int height = pprev ? (pprev->height + 1) : 1;
                 uint256 chainWork = CalculateChainWork(header, pprev);
 
+                // DEBUG: Log chainWork at storage time
+                static int storage_log_count = 0;
+                if (storage_log_count++ % 1000 == 0 || height > 23000) {
+                    std::cout << "[DEBUG-STORE] height=" << height
+                              << " chainWork=" << chainWork.GetHex().substr(0, 16)
+                              << " pprev=" << (pprev ? "valid" : "NULL")
+                              << (pprev ? (" pprevWork=" + pprev->chainWork.GetHex().substr(0, 16)) : "")
+                              << std::endl;
+                }
+
                 // Store header
                 HeaderWithChainWork headerData(header, height);
                 headerData.chainWork = chainWork;
