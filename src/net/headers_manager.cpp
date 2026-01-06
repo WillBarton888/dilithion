@@ -610,13 +610,14 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
     // Calculate chain work
     uint256 chainWork = CalculateChainWork(header, pprev);
 
-    // DEBUG: Log OnBlockActivated chainWork calculation
+    // DEBUG: Log OnBlockActivated chainWork calculation (show LSB)
     static int activate_log_count = 0;
     if (activate_log_count++ < 10 || height > 23000) {
+        std::string hex = chainWork.GetHex();
         std::cout << "[DEBUG-ACTIVATE] height=" << height
-                  << " chainWork=" << chainWork.GetHex().substr(0, 16)
+                  << " chainWork(LSB)=" << hex.substr(hex.length() > 16 ? hex.length() - 16 : 0)
+                  << " isNull=" << (chainWork.IsNull() ? "yes" : "no")
                   << " pprev=" << (pprev ? "found" : "NULL")
-                  << " hashPrev=" << header.hashPrevBlock.GetHex().substr(0, 16)
                   << std::endl;
     }
 
@@ -1187,9 +1188,11 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
         proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
     }
 
-    // DEBUG: Log result
+    // DEBUG: Log result (show last 16 chars which are LSB)
     if (blockwork_log_count <= 5) {
-        std::cout << "[DEBUG-BLOCKWORK] result=" << proof.GetHex().substr(0, 16) << std::endl;
+        std::string hex = proof.GetHex();
+        std::cout << "[DEBUG-BLOCKWORK] result(LSB)=" << hex.substr(hex.length() > 16 ? hex.length() - 16 : 0)
+                  << " work_byte_pos=" << work_byte_pos << std::endl;
     }
 
     return proof;
@@ -1294,12 +1297,16 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
         hasMoreWork = (newHeight > nBestHeight);
     }
 
-    // Log updates and periodic comparisons
+    // Log updates and periodic comparisons (show LSB of chainWork)
     static int compare_count = 0;
     if (hasMoreWork) {
         std::cout << "[UpdateBestHeader] UPDATING: " << nBestHeight << " -> " << newHeight << std::endl;
     } else if (compare_count++ % 1000 == 0) {
-        std::cout << "[UpdateBestHeader] Comparing: height=" << nBestHeight << " vs fork=" << newHeight << " bestWork=" << bestIt->second.chainWork.GetHex().substr(0, 16) << " forkWork=" << it->second.chainWork.GetHex().substr(0, 16) << std::endl;
+        std::string bestHex = bestIt->second.chainWork.GetHex();
+        std::string forkHex = it->second.chainWork.GetHex();
+        std::cout << "[UpdateBestHeader] Comparing: height=" << nBestHeight << " vs fork=" << newHeight
+                  << " bestWork(LSB)=" << bestHex.substr(bestHex.length() > 16 ? bestHex.length() - 16 : 0)
+                  << " forkWork(LSB)=" << forkHex.substr(forkHex.length() > 16 ? forkHex.length() - 16 : 0) << std::endl;
     }
 
     if (hasMoreWork) {
