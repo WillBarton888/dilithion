@@ -1894,6 +1894,15 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     uint256 existingHash = *heightIt->second.begin();
                     auto existingIt = mapHeaders.find(existingHash);
                     if (existingIt != mapHeaders.end()) {
+                        // DEBUG: Log checkpoint optimization with work info
+                        static int ckpt_log_count = 0;
+                        if (ckpt_log_count++ < 20 || expectedHeight == checkpointHeight) {
+                            std::string workHex = existingIt->second.chainWork.GetHex();
+                            std::cout << "[DEBUG-CKPT] height=" << expectedHeight
+                                      << " using existing pprev work(LSB)="
+                                      << workHex.substr(workHex.length() > 16 ? workHex.length() - 16 : 0)
+                                      << std::endl;
+                        }
                         // BUG FIX: Update best header for existing checkpoint headers too
                         UpdateBestHeader(existingHash);
                         pprev = &existingIt->second;
@@ -1930,13 +1939,15 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 int height = pprev ? (pprev->height + 1) : 1;
                 uint256 chainWork = CalculateChainWork(header, pprev);
 
-                // DEBUG: Log chainWork at storage time
+                // DEBUG: Log chainWork at storage time (LSB where work is stored)
                 static int storage_log_count = 0;
                 if (storage_log_count++ % 1000 == 0 || height > 23000) {
+                    std::string workHex = chainWork.GetHex();
+                    std::string pprevHex = pprev ? pprev->chainWork.GetHex() : "";
                     std::cout << "[DEBUG-STORE] height=" << height
-                              << " chainWork=" << chainWork.GetHex().substr(0, 16)
+                              << " work(LSB)=" << workHex.substr(workHex.length() > 16 ? workHex.length() - 16 : 0)
                               << " pprev=" << (pprev ? "valid" : "NULL")
-                              << (pprev ? (" pprevWork=" + pprev->chainWork.GetHex().substr(0, 16)) : "")
+                              << (pprev ? (" pprevWork(LSB)=" + pprevHex.substr(pprevHex.length() > 16 ? pprevHex.length() - 16 : 0)) : "")
                               << std::endl;
                 }
 
