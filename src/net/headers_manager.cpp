@@ -1939,16 +1939,19 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 int height = pprev ? (pprev->height + 1) : 1;
                 uint256 chainWork = CalculateChainWork(header, pprev);
 
-                // DEBUG: Log chainWork at storage time (LSB where work is stored)
+                // DEBUG: Log chainWork at storage time - show byte[8] (MSB of work)
                 static int storage_log_count = 0;
-                if (storage_log_count++ % 1000 == 0 || height > 23000) {
-                    std::string workHex = chainWork.GetHex();
-                    std::string pprevHex = pprev ? pprev->chainWork.GetHex() : "";
+                if (storage_log_count++ % 500 == 0 || height > 23000 || (height >= 11920 && height <= 11930)) {
                     std::cout << "[DEBUG-STORE] height=" << height
-                              << " work(LSB)=" << workHex.substr(workHex.length() > 16 ? workHex.length() - 16 : 0)
-                              << " pprev=" << (pprev ? "valid" : "NULL")
-                              << (pprev ? (" pprevWork(LSB)=" + pprevHex.substr(pprevHex.length() > 16 ? pprevHex.length() - 16 : 0)) : "")
-                              << std::endl;
+                              << " byte8=0x" << std::hex << (int)chainWork.data[8] << std::dec
+                              << " byte7=0x" << std::hex << (int)chainWork.data[7] << std::dec;
+                    if (pprev) {
+                        std::cout << " pprev_byte8=0x" << std::hex << (int)pprev->chainWork.data[8] << std::dec
+                                  << " pprev_byte7=0x" << std::hex << (int)pprev->chainWork.data[7] << std::dec;
+                    } else {
+                        std::cout << " pprev=NULL";
+                    }
+                    std::cout << std::endl;
                 }
 
                 // Store header
