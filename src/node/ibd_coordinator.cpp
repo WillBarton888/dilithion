@@ -7,6 +7,15 @@
 #include <set>
 #include <vector>
 
+// Bug #191: Platform-specific terminal detection
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define STDIN_FILENO 0
+#else
+#include <unistd.h>
+#endif
+
 #include <consensus/chain.h>
 #include <core/chainparams.h>  // Initial header request needs genesis hash
 #include <node/genesis.h>      // Genesis::GetGenesisHash()
@@ -442,13 +451,25 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     std::cerr << "    (These " << fork_depth << " blocks were never accepted by the network)" << std::endl;
                     std::cerr << "  - Your balance will be recalculated from the correct chain" << std::endl;
                     std::cerr << std::endl;
-                    std::cout << "Resync from network? [Y/n]: " << std::flush;
+                    // Bug #191: Check if stdin is a terminal before prompting
+                    bool user_accepted = false;
+                    if (!isatty(STDIN_FILENO)) {
+                        // Running as daemon or with redirected input - require explicit consent
+                        std::cerr << "[FORK-DETECT] Cannot prompt for resync - not running in interactive mode" << std::endl;
+                        std::cerr << "[FORK-DETECT] To resync manually, restart the node interactively or use --resync flag" << std::endl;
+                        std::cerr << "[FORK-DETECT] Node will continue on current chain (may be on a fork)" << std::endl;
+                        user_accepted = false;
+                    } else {
+                        std::cout << "Resync from network? [Y/n]: " << std::flush;
 
-                    std::string response;
-                    std::getline(std::cin, response);
+                        std::string response;
+                        std::getline(std::cin, response);
 
-                    // Default to yes on empty input (just hitting Enter)
-                    if (response.empty() || response[0] == 'Y' || response[0] == 'y') {
+                        // Default to yes on empty input (just hitting Enter) - only for interactive terminals
+                        user_accepted = (response.empty() || response[0] == 'Y' || response[0] == 'y');
+                    }
+
+                    if (user_accepted) {
                         std::cout << "\n[RESYNC] ════════════════════════════════════════════════════" << std::endl;
                         std::cout << "[RESYNC] Starting network resync..." << std::endl;
                         std::cout << "[RESYNC] ════════════════════════════════════════════════════" << std::endl;
@@ -462,15 +483,29 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         m_resync_original_height = chain_height;
                         m_resync_target_height = header_height;
 
-                        // Clear chain state back to genesis
-                        // Get genesis hash
-                        uint256 genesisHash = Genesis::GetGenesisHash();
-                        CBlockIndex* pgenesisIndex = m_chainstate.GetBlockIndex(genesisHash);
+                        // Bug #192: Reset to fork point, NOT genesis (preserves valid blocks 0-fork_point)
+                        // Walk backwards from current tip to find the fork point block
+                        CBlockIndex* pForkPointIndex = nullptr;
+                        CBlockIndex* pindex = m_chainstate.GetTip();
+                        while (pindex && pindex->nHeight > fork_point) {
+                            pindex = pindex->pprev;
+                        }
+                        if (pindex && pindex->nHeight == fork_point) {
+                            pForkPointIndex = pindex;
+                        }
 
-                        if (pgenesisIndex) {
-                            // Reset tip to genesis
-                            m_chainstate.SetTip(pgenesisIndex);
-                            std::cout << "[RESYNC] Chain reset to genesis block" << std::endl;
+                        // Fallback to genesis only if fork point block not found (shouldn't happen)
+                        if (!pForkPointIndex) {
+                            std::cerr << "[RESYNC] WARNING: Could not find block at fork point " << fork_point << std::endl;
+                            std::cerr << "[RESYNC] Falling back to genesis block" << std::endl;
+                            uint256 genesisHash = Genesis::GetGenesisHash();
+                            pForkPointIndex = m_chainstate.GetBlockIndex(genesisHash);
+                        }
+
+                        if (pForkPointIndex) {
+                            // Reset tip to fork point (preserves blocks 0 to fork_point)
+                            m_chainstate.SetTip(pForkPointIndex);
+                            std::cout << "[RESYNC] Chain reset to fork point at height " << pForkPointIndex->nHeight << std::endl;
 
                             // Clear headers manager to re-download headers
                             if (m_node_context.headers_manager) {
