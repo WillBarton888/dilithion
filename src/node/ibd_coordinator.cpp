@@ -430,6 +430,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
                 // Check if fork is too deep for automatic recovery
                 if (fork_depth > MAX_AUTO_REORG_DEPTH) {
+                    // Temporarily disable verbose output while user reads the prompt
+                    bool was_verbose = g_verbose.load(std::memory_order_relaxed);
+                    g_verbose.store(false, std::memory_order_relaxed);
+
                     std::cerr << "\n[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
                     std::cerr << "[FORK-DETECT] CRITICAL: Fork too deep for automatic recovery!" << std::endl;
                     std::cerr << "[FORK-DETECT]   Fork depth: " << fork_depth << " blocks" << std::endl;
@@ -459,11 +463,15 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         std::cerr << "[FORK-DETECT] To resync manually, restart the node interactively or use --resync flag" << std::endl;
                         std::cerr << "[FORK-DETECT] Node will continue on current chain (may be on a fork)" << std::endl;
                         user_accepted = false;
+                        g_verbose.store(was_verbose, std::memory_order_relaxed);  // Restore verbose
                     } else {
                         std::cout << "Resync from network? [Y/n]: " << std::flush;
 
                         std::string response;
                         std::getline(std::cin, response);
+
+                        // Restore verbose output after user responds
+                        g_verbose.store(was_verbose, std::memory_order_relaxed);
 
                         // Default to yes on empty input (just hitting Enter) - only for interactive terminals
                         user_accepted = (response.empty() || response[0] == 'Y' || response[0] == 'y');

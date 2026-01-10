@@ -215,7 +215,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         AddToHeightIndex(storageHash, height);
 
         // DEBUG: Log storage details near height 5547
-        if (height >= 5545 && height <= 5550) {
+        if (g_verbose.load(std::memory_order_relaxed) && height >= 5545 && height <= 5550) {
             std::cerr << "[DEBUG-STORE] height=" << height
                       << " storageHash=" << storageHash.GetHex().substr(0, 16) << "..."
                       << " hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
@@ -1299,14 +1299,16 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
 
     // Log updates and periodic comparisons (show LSB of chainWork)
     static int compare_count = 0;
-    if (hasMoreWork) {
-        std::cout << "[UpdateBestHeader] UPDATING: " << nBestHeight << " -> " << newHeight << std::endl;
-    } else if (compare_count++ % 1000 == 0) {
-        std::string bestHex = bestIt->second.chainWork.GetHex();
-        std::string forkHex = it->second.chainWork.GetHex();
-        std::cout << "[UpdateBestHeader] Comparing: height=" << nBestHeight << " vs fork=" << newHeight
-                  << " bestWork(LSB)=" << bestHex.substr(bestHex.length() > 16 ? bestHex.length() - 16 : 0)
-                  << " forkWork(LSB)=" << forkHex.substr(forkHex.length() > 16 ? forkHex.length() - 16 : 0) << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        if (hasMoreWork) {
+            std::cout << "[UpdateBestHeader] UPDATING: " << nBestHeight << " -> " << newHeight << std::endl;
+        } else if (compare_count++ % 1000 == 0) {
+            std::string bestHex = bestIt->second.chainWork.GetHex();
+            std::string forkHex = it->second.chainWork.GetHex();
+            std::cout << "[UpdateBestHeader] Comparing: height=" << nBestHeight << " vs fork=" << newHeight
+                      << " bestWork(LSB)=" << bestHex.substr(bestHex.length() > 16 ? bestHex.length() - 16 : 0)
+                      << " forkWork(LSB)=" << forkHex.substr(forkHex.length() > 16 ? forkHex.length() - 16 : 0) << std::endl;
+        }
     }
 
     if (hasMoreWork) {
@@ -1834,8 +1836,10 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     auto hash_end = std::chrono::steady_clock::now();
     auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
 
-    std::cout << "[HeadersManager] Parallel hash computation: " << headers.size()
-              << " headers, " << numWorkers << " workers, " << hash_ms << "ms" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[HeadersManager] Parallel hash computation: " << headers.size()
+                  << " headers, " << numWorkers << " workers, " << hash_ms << "ms" << std::endl;
+    }
 
     // =========================================================================
     // STEP 2: Store ALL headers progressively in batches (for block download)
@@ -1941,7 +1945,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
                 // DEBUG: Log chainWork at storage time - show byte[8] (MSB of work)
                 static int storage_log_count = 0;
-                if (storage_log_count++ % 500 == 0 || height > 23000 || (height >= 11920 && height <= 11930)) {
+                if (g_verbose.load(std::memory_order_relaxed) &&
+                    (storage_log_count++ % 500 == 0 || height > 23000 || (height >= 11920 && height <= 11930))) {
                     std::cout << "[DEBUG-STORE] height=" << height
                               << " byte8=0x" << std::hex << (int)chainWork.data[8] << std::dec
                               << " byte7=0x" << std::hex << (int)chainWork.data[7] << std::dec;
