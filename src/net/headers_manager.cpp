@@ -975,7 +975,7 @@ void CHeadersManager::Clear()
     m_last_request_hash = uint256();
 }
 
-void CHeadersManager::ClearAboveHeight(int keepHeight)
+void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredHash)
 {
     std::lock_guard<std::mutex> lock(cs_headers);
 
@@ -1009,8 +1009,19 @@ void CHeadersManager::ClearAboveHeight(int keepHeight)
     // Look for the header at keepHeight (should be the fork point)
     auto heightIt = mapHeightIndex.find(keepHeight);
     if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-        // Use the first hash at this height (there should only be one on the common chain)
-        hashBestHeader = *heightIt->second.begin();
+        // BUG #194 FIX: If preferredHash is provided and exists at this height, use it
+        // This ensures we select the header matching chainstate, not arbitrary hash order
+        if (!preferredHash.IsNull() && heightIt->second.count(preferredHash) > 0) {
+            hashBestHeader = preferredHash;
+            std::cout << "[HeadersManager] Using preferred hash (chainstate match) at height " << keepHeight << std::endl;
+        } else {
+            // Fall back to first hash (original behavior)
+            hashBestHeader = *heightIt->second.begin();
+            if (heightIt->second.size() > 1) {
+                std::cout << "[HeadersManager] WARNING: Multiple headers at height " << keepHeight
+                          << ", selecting " << hashBestHeader.GetHex().substr(0, 16) << "... (no preferred hash provided)" << std::endl;
+            }
+        }
         nBestHeight = keepHeight;
         std::cout << "[HeadersManager] New best header at height " << nBestHeight
                   << " hash=" << hashBestHeader.GetHex().substr(0, 16) << "..." << std::endl;

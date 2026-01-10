@@ -515,9 +515,13 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                             m_chainstate.SetTip(pForkPointIndex);
                             std::cout << "[RESYNC] Chain reset to fork point at height " << pForkPointIndex->nHeight << std::endl;
 
+                            // BUG #194 FIX: Pass chainstate's hash at fork point so ClearAboveHeight
+                            // selects the correct header when multiple exist at that height
+                            uint256 chainstateHashAtForkPoint = pForkPointIndex->GetBlockHash();
+
                             // Clear only headers above fork point (preserves common ancestor chain)
                             if (m_node_context.headers_manager) {
-                                m_node_context.headers_manager->ClearAboveHeight(fork_point);
+                                m_node_context.headers_manager->ClearAboveHeight(fork_point, chainstateHashAtForkPoint);
                                 std::cout << "[RESYNC] Headers above fork point cleared - will re-download from peers" << std::endl;
                             }
 
@@ -909,13 +913,16 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
 
 /**
  * BUG #158 FIX: Find the fork point between local chain and header chain
+ * BUG #194 FIX: Walk FORWARD from genesis to find true divergence point
  *
  * RACE CONDITION FIX: Uses thread-safe GetChainSnapshot() to avoid reading
  * pprev pointers without holding cs_main. Previously, this function could
  * cause use-after-free if validation workers modified the chain concurrently.
  *
- * Returns the height where local chain matches header chain (common ancestor),
- * or 0 if no match found.
+ * CHAIN BREAK FIX: Uses GetHeadersAtHeight() instead of GetRandomXHashAtHeight()
+ * to avoid chain walk issues when headers don't fully connect.
+ *
+ * Returns the height of the last common block (fork_point), or 0 if no match found.
  */
 int CIbdCoordinator::FindForkPoint(int chain_height) {
     if (!m_node_context.headers_manager) {
@@ -926,8 +933,6 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
 
     // RACE CONDITION FIX: Get a thread-safe snapshot of the chain
     // This holds cs_main while copying the data, then releases it
-    // BUG #187 FIX: Use chain_height as max, not fixed 1000.
-    // Fork point could be anywhere in the chain (e.g., 16k blocks deep).
     const int MAX_CHECKS = chain_height + 1;  // +1 to include genesis if needed
     auto chainSnapshot = m_chainstate.GetChainSnapshot(MAX_CHECKS, 0);
 
@@ -936,35 +941,97 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
         return 0;
     }
 
-    int checks = 0;
-    for (const auto& [height, local_hash] : chainSnapshot) {
-        // Get header hash at this height (this is the network's chain)
-        uint256 header_hash = m_node_context.headers_manager->GetRandomXHashAtHeight(height);
-        if (header_hash.IsNull()) {
-            checks++;
-            continue;  // No header at this height, keep searching
-        }
-
-        // Compare: if they match, we found the fork point
-        if (local_hash == header_hash) {
-            std::cout << "[FORK-DETECT] Found common ancestor at height " << height
-                      << " hash=" << local_hash.GetHex().substr(0, 16) << "..." << std::endl;
-            return height;
-        }
-
-        // Log divergence for debugging (first few mismatches only)
-        if (checks < 6) {
-            std::cout << "[FORK-DETECT] Height " << height << " diverges:"
-                      << " local=" << local_hash.GetHex().substr(0, 16) << "..."
-                      << " header=" << header_hash.GetHex().substr(0, 16) << "..." << std::endl;
-        }
-
-        checks++;
+    // BUG #194 FIX: Build height->hash map for forward iteration
+    // chainSnapshot is tip-downward, we need to walk genesis-upward
+    std::map<int, uint256> chainstateByHeight;
+    for (const auto& [height, hash] : chainSnapshot) {
+        chainstateByHeight[height] = hash;
     }
 
-    // No common ancestor found - this means we're on a completely different chain (very unusual)
-    std::cerr << "[FORK-DETECT] ERROR: No common ancestor found after checking " << checks << " blocks back to genesis!" << std::endl;
-    return 0;
+    // Step 1: Verify genesis matches
+    auto genesisIt = chainstateByHeight.find(0);
+    if (genesisIt != chainstateByHeight.end()) {
+        std::vector<uint256> headersAtGenesis = m_node_context.headers_manager->GetHeadersAtHeight(0);
+        bool genesisFound = false;
+        for (const auto& h : headersAtGenesis) {
+            if (h == genesisIt->second) {
+                genesisFound = true;
+                break;
+            }
+        }
+        if (!genesisFound && !headersAtGenesis.empty()) {
+            std::cerr << "[FORK-DETECT] CRITICAL: Genesis mismatch! Different chains." << std::endl;
+            return 0;
+        }
+    }
+
+    // Step 2: Walk FORWARD from genesis to find first divergence
+    // The fork point is the LAST height where chains UNAMBIGUOUSLY match
+    int last_common_height = 0;
+    int first_divergence = -1;
+    int logged_divergences = 0;
+
+    for (int h = 0; h <= chain_height; h++) {
+        auto it = chainstateByHeight.find(h);
+        if (it == chainstateByHeight.end()) {
+            continue;  // No chainstate block at this height (shouldn't happen)
+        }
+
+        uint256 local_hash = it->second;
+
+        // BUG #194 FIX: Use GetHeadersAtHeight instead of GetRandomXHashAtHeight
+        // This queries mapHeightIndex directly, avoiding chain walk issues
+        std::vector<uint256> headers_at_height = m_node_context.headers_manager->GetHeadersAtHeight(h);
+
+        if (headers_at_height.empty()) {
+            // No headers at this height - network chain doesn't have this block yet
+            // This is OK during IBD, continue checking
+            continue;
+        }
+
+        // BUG #194 FIX: If there are MULTIPLE headers at this height, it means
+        // competing forks exist. Even if our hash is among them, we can't be sure
+        // we're on the same chain as the network. Treat as potential divergence.
+        if (headers_at_height.size() > 1) {
+            // Multiple competing headers = fork point
+            if (first_divergence < 0) {
+                first_divergence = h;
+                std::cout << "[FORK-DETECT] Competing forks at height " << h
+                          << " (" << headers_at_height.size() << " headers)"
+                          << " - treating as divergence point" << std::endl;
+            }
+            continue;  // Don't update last_common_height
+        }
+
+        // Exactly one header at this height - check if it matches chainstate
+        if (headers_at_height[0] == local_hash) {
+            last_common_height = h;
+        } else {
+            // Single header but doesn't match chainstate = divergence
+            if (first_divergence < 0) {
+                first_divergence = h;
+                std::cout << "[FORK-DETECT] Chain diverges at height " << h
+                          << " local=" << local_hash.GetHex().substr(0, 16) << "..."
+                          << " header=" << headers_at_height[0].GetHex().substr(0, 16) << "..." << std::endl;
+            }
+            if (logged_divergences < 5) {
+                std::cout << "[FORK-DETECT] Height " << h << " diverges: local="
+                          << local_hash.GetHex().substr(0, 16) << "..." << std::endl;
+                logged_divergences++;
+            }
+        }
+    }
+
+    if (first_divergence >= 0) {
+        // Chains diverge - fork point is the last UNAMBIGUOUS common height
+        std::cout << "[FORK-DETECT] Found fork point at height " << last_common_height
+                  << " (first divergence/fork at " << first_divergence << ")" << std::endl;
+        return last_common_height;
+    }
+
+    // No divergence found - chains match completely
+    std::cout << "[FORK-DETECT] No fork detected - chains match up to height " << chain_height << std::endl;
+    return chain_height;
 }
 
 /**

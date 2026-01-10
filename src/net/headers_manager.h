@@ -457,9 +457,13 @@ public:
      * Keeps headers at heights 0 through keepHeight, removes all above.
      * Used during fork resync to preserve the common ancestor chain.
      *
+     * BUG #194 FIX: When there are multiple headers at keepHeight (competing forks),
+     * use preferredHash to select the correct one (matching chainstate).
+     *
      * @param keepHeight The highest height to keep (fork point)
+     * @param preferredHash If provided, select this hash at keepHeight when multiple exist
      */
-    void ClearAboveHeight(int keepHeight);
+    void ClearAboveHeight(int keepHeight, const uint256& preferredHash = uint256());
 
     // ========================================================================
     // Bug #150 Fix: Fork Management API
