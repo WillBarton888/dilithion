@@ -515,10 +515,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                             m_chainstate.SetTip(pForkPointIndex);
                             std::cout << "[RESYNC] Chain reset to fork point at height " << pForkPointIndex->nHeight << std::endl;
 
-                            // Clear headers manager to re-download headers
+                            // Clear only headers above fork point (preserves common ancestor chain)
                             if (m_node_context.headers_manager) {
-                                m_node_context.headers_manager->Clear();
-                                std::cout << "[RESYNC] Headers cleared - will re-download from peers" << std::endl;
+                                m_node_context.headers_manager->ClearAboveHeight(fork_point);
+                                std::cout << "[RESYNC] Headers above fork point cleared - will re-download from peers" << std::endl;
                             }
 
                             // Reset fork detection state

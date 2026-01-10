@@ -451,6 +451,16 @@ public:
      */
     void Clear();
 
+    /**
+     * @brief Clear headers above a given height (for fork resync)
+     *
+     * Keeps headers at heights 0 through keepHeight, removes all above.
+     * Used during fork resync to preserve the common ancestor chain.
+     *
+     * @param keepHeight The highest height to keep (fork point)
+     */
+    void ClearAboveHeight(int keepHeight);
+
     // ========================================================================
     // Bug #150 Fix: Fork Management API
     // ========================================================================

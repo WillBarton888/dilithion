@@ -975,6 +975,75 @@ void CHeadersManager::Clear()
     m_last_request_hash = uint256();
 }
 
+void CHeadersManager::ClearAboveHeight(int keepHeight)
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    std::cout << "[HeadersManager] Clearing headers above height " << keepHeight << std::endl;
+
+    // Collect hashes to remove (heights > keepHeight)
+    std::vector<uint256> hashesToRemove;
+    for (auto it = mapHeightIndex.begin(); it != mapHeightIndex.end(); ) {
+        if (it->first > keepHeight) {
+            // Add all hashes at this height to removal list
+            for (const auto& hash : it->second) {
+                hashesToRemove.push_back(hash);
+            }
+            it = mapHeightIndex.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Remove headers from mapHeaders
+    for (const auto& hash : hashesToRemove) {
+        mapHeaders.erase(hash);
+    }
+
+    std::cout << "[HeadersManager] Removed " << hashesToRemove.size() << " headers above height " << keepHeight << std::endl;
+
+    // Find the new best header at or below keepHeight
+    hashBestHeader = uint256();
+    nBestHeight = -1;
+
+    // Look for the header at keepHeight (should be the fork point)
+    auto heightIt = mapHeightIndex.find(keepHeight);
+    if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
+        // Use the first hash at this height (there should only be one on the common chain)
+        hashBestHeader = *heightIt->second.begin();
+        nBestHeight = keepHeight;
+        std::cout << "[HeadersManager] New best header at height " << nBestHeight
+                  << " hash=" << hashBestHeader.GetHex().substr(0, 16) << "..." << std::endl;
+    } else {
+        // Fall back to finding the highest header below keepHeight
+        for (auto it = mapHeightIndex.rbegin(); it != mapHeightIndex.rend(); ++it) {
+            if (it->first <= keepHeight && !it->second.empty()) {
+                hashBestHeader = *it->second.begin();
+                nBestHeight = it->first;
+                std::cout << "[HeadersManager] Best header found at height " << nBestHeight << std::endl;
+                break;
+            }
+        }
+    }
+
+    // Clear chain tips and rebuild with just the best header
+    setChainTips.clear();
+    m_chainTipsTracker.Clear();
+    if (!hashBestHeader.IsNull()) {
+        setChainTips.insert(hashBestHeader);
+    }
+
+    // Invalidate cache
+    InvalidateBestChainCache();
+
+    // Reset request tracking to continue from the new best header
+    m_headers_requested_height.store(nBestHeight);
+    m_last_request_hash = hashBestHeader;
+
+    std::cout << "[HeadersManager] Headers pruned to height " << nBestHeight
+              << ", mapHeaders.size=" << mapHeaders.size() << std::endl;
+}
+
 // ============================================================================
 // Bug #150 Fix: Fork Management API
 // ============================================================================
