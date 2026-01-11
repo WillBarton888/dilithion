@@ -15,6 +15,7 @@
 #include <node/ibd_coordinator.h>  // Phase 1: IsSynced() check
 #include <core/node_context.h>
 #include <core/chainparams.h>
+#include <api/metrics.h>  // Fork detection metrics
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -192,6 +193,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
                     // Signal fork detected for mining pause
                     g_node_context.fork_detected.store(true);
+                    g_metrics.SetForkDetected(true, 0, 0);  // Depth will be set by IBD coordinator
                 }
 
                 // Continue - remaining headers will also fail to connect, that's expected
@@ -234,6 +236,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             if (m_pendingParentRequests.empty()) {
                 std::cout << "[HeadersManager] Fork resolved - all ancestors received, mining can resume" << std::endl;
                 g_node_context.fork_detected.store(false);
+                g_metrics.ClearForkDetected();  // Clear Prometheus metrics
             }
         }
 

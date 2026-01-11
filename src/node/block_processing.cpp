@@ -355,6 +355,7 @@ BlockProcessResult ProcessNewBlock(
                     ctx.headers_manager->RequestHeaders(peer_id, uint256());  // null = use our tip's locator
                     // Signal fork detected for mining pause
                     g_node_context.fork_detected.store(true);
+                    g_metrics.SetForkDetected(true, 0, 0);  // Depth will be set by IBD coordinator
                 } else {
                     // Header sync already in progress - skip redundant request
                     std::cout << "[ProcessNewBlock] Fork header sync already in progress - skipping redundant request" << std::endl;

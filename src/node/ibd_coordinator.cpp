@@ -31,6 +31,7 @@
 #include <net/orphan_manager.h>  // IBD STUCK FIX #3: Periodic orphan scan
 #include <util/logging.h>
 #include <util/bench.h>  // Performance: Benchmarking
+#include <api/metrics.h>  // Fork detection metrics
 
 // IBD STUCK FIX #3: Access to global NodeContext for orphan manager
 extern NodeContext g_node_context;
@@ -527,6 +528,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
                             // Reset fork detection state
                             m_fork_detected.store(false);
+                            g_metrics.ClearForkDetected();  // Clear Prometheus metrics
                             m_fork_point.store(-1);
                             m_fork_stall_cycles.store(0);
                             m_consecutive_orphan_blocks.store(0);
@@ -558,6 +560,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     m_requires_reindex = true;
                     m_fork_detected.store(true);
                     m_fork_point.store(fork_point);
+                    g_metrics.SetForkDetected(true, chain_height - fork_point, fork_point);  // Set Prometheus metrics
                     return;  // Don't proceed with downloads until reindex
                 }
 
@@ -644,6 +647,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << current_fork_point
                       << " to " << chain_height << " - fork recovery complete" << std::endl;
             m_fork_detected.store(false);
+            g_metrics.ClearForkDetected();  // Clear Prometheus metrics
             m_fork_point.store(-1);
         }
     }

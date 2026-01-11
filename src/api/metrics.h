@@ -84,6 +84,8 @@ public:
     std::atomic<uint64_t> connection_rejected_total{0};
     std::atomic<uint64_t> dos_score_exceeded_total{0};
     std::atomic<int64_t> fork_detected{0};  // 1 if fork detected, 0 otherwise
+    std::atomic<int64_t> fork_depth{0};      // Depth of detected fork (blocks behind)
+    std::atomic<int64_t> fork_point_height{0}; // Height where fork diverged
 
     // ============================================
     // Performance Metrics
@@ -165,6 +167,18 @@ public:
     void RecordConnectionAttempt(bool accepted) {
         connection_attempts_total++;
         if (!accepted) connection_rejected_total++;
+    }
+
+    void SetForkDetected(bool detected, int64_t depth = 0, int64_t forkPointHeight = 0) {
+        fork_detected.store(detected ? 1 : 0);
+        fork_depth.store(depth);
+        fork_point_height.store(forkPointHeight);
+    }
+
+    void ClearForkDetected() {
+        fork_detected.store(0);
+        fork_depth.store(0);
+        fork_point_height.store(0);
     }
 
     // Get uptime in seconds
@@ -294,6 +308,14 @@ public:
         out << "# HELP dilithion_fork_detected Fork detected indicator (eclipse attack)\n";
         out << "# TYPE dilithion_fork_detected gauge\n";
         out << "dilithion_fork_detected " << fork_detected.load() << "\n\n";
+
+        out << "# HELP dilithion_fork_depth Depth of detected fork in blocks\n";
+        out << "# TYPE dilithion_fork_depth gauge\n";
+        out << "dilithion_fork_depth " << fork_depth.load() << "\n\n";
+
+        out << "# HELP dilithion_fork_point_height Height where fork diverged\n";
+        out << "# TYPE dilithion_fork_point_height gauge\n";
+        out << "dilithion_fork_point_height " << fork_point_height.load() << "\n\n";
 
         // Performance metrics
         out << "# HELP dilithion_block_validation_ms Last block validation time in ms\n";
