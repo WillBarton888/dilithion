@@ -5,6 +5,7 @@
 #include <net/dns.h>
 #include <net/block_tracker.h>
 #include <core/node_context.h>
+#include <core/chainparams.h>
 #include <node/block_index.h>
 #include <util/strencodings.h>
 #include <util/logging.h>
@@ -458,42 +459,93 @@ void CPeerManager::InitializeSeedNodes() {
     // Hardcoded seed nodes for Dilithion network
     // These are reliable nodes run by the community
 
-    dns_seeds = {
-        "seed.dilithion.com",
-        "seed1.dilithion.com",
-        "seed2.dilithion.com",
-    };
-
-    // Hardcoded IP addresses as fallback
-    // Format: IPv4 mapped to IPv6
     seed_nodes.clear();
 
-    // TESTNET SEED NODE #1: NYC (DigitalOcean NYC3)
-    // IP: 134.122.4.164, Port: 18444 (testnet)
-    NetProtocol::CAddress seed_nyc;
-    seed_nyc.services = NetProtocol::NODE_NETWORK;
-    seed_nyc.SetIPv4(0x867A04A4);  // 134.122.4.164
-    seed_nyc.port = NetProtocol::TESTNET_PORT;
-    seed_nyc.time = GetTime();
-    seed_nodes.push_back(seed_nyc);
+    // Check if we're on mainnet or testnet
+    bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
 
-    // TESTNET SEED NODE #2: London (DigitalOcean LON1)
-    // IP: 209.97.177.197, Port: 18444 (testnet)
-    NetProtocol::CAddress seed_london;
-    seed_london.services = NetProtocol::NODE_NETWORK;
-    seed_london.SetIPv4(0xD161B1C5);  // 209.97.177.197
-    seed_london.port = NetProtocol::TESTNET_PORT;
-    seed_london.time = GetTime();
-    seed_nodes.push_back(seed_london);
+    if (isTestnet) {
+        // ============================================
+        // TESTNET SEED NODES
+        // ============================================
+        dns_seeds = {
+            "seed-testnet.dilithion.org",
+            "seed-testnet1.dilithion.org",
+            "seed-testnet2.dilithion.org",
+        };
 
-    // TESTNET SEED NODE #3: Singapore (DigitalOcean SGP1)
-    // IP: 188.166.255.63, Port: 18444 (testnet)
-    NetProtocol::CAddress seed_singapore;
-    seed_singapore.services = NetProtocol::NODE_NETWORK;
-    seed_singapore.SetIPv4(0xBCA6FF3F);  // 188.166.255.63
-    seed_singapore.port = NetProtocol::TESTNET_PORT;
-    seed_singapore.time = GetTime();
-    seed_nodes.push_back(seed_singapore);
+        // TESTNET SEED NODE #1: NYC (DigitalOcean NYC3)
+        // IP: 134.122.4.164, Port: 18444 (testnet)
+        NetProtocol::CAddress seed_nyc;
+        seed_nyc.services = NetProtocol::NODE_NETWORK;
+        seed_nyc.SetIPv4(0x867A04A4);  // 134.122.4.164
+        seed_nyc.port = NetProtocol::TESTNET_PORT;
+        seed_nyc.time = GetTime();
+        seed_nodes.push_back(seed_nyc);
+
+        // TESTNET SEED NODE #2: London (DigitalOcean LON1)
+        // IP: 209.97.177.197, Port: 18444 (testnet)
+        NetProtocol::CAddress seed_london;
+        seed_london.services = NetProtocol::NODE_NETWORK;
+        seed_london.SetIPv4(0xD161B1C5);  // 209.97.177.197
+        seed_london.port = NetProtocol::TESTNET_PORT;
+        seed_london.time = GetTime();
+        seed_nodes.push_back(seed_london);
+
+        // TESTNET SEED NODE #3: Singapore (DigitalOcean SGP1)
+        // IP: 188.166.255.63, Port: 18444 (testnet)
+        NetProtocol::CAddress seed_singapore;
+        seed_singapore.services = NetProtocol::NODE_NETWORK;
+        seed_singapore.SetIPv4(0xBCA6FF3F);  // 188.166.255.63
+        seed_singapore.port = NetProtocol::TESTNET_PORT;
+        seed_singapore.time = GetTime();
+        seed_nodes.push_back(seed_singapore);
+    } else {
+        // ============================================
+        // MAINNET SEED NODES
+        // ============================================
+        dns_seeds = {
+            "seed.dilithion.org",
+            "seed1.dilithion.org",
+            "seed2.dilithion.org",
+        };
+
+        // MAINNET SEED NODE #1: NYC (DigitalOcean NYC3)
+        // IP: 138.197.68.128, Port: 8444 (mainnet)
+        NetProtocol::CAddress seed_nyc;
+        seed_nyc.services = NetProtocol::NODE_NETWORK;
+        seed_nyc.SetIPv4(0x8AC54480);  // 138.197.68.128
+        seed_nyc.port = NetProtocol::DEFAULT_PORT;
+        seed_nyc.time = GetTime();
+        seed_nodes.push_back(seed_nyc);
+
+        // MAINNET SEED NODE #2: London (DigitalOcean LON1)
+        // IP: 167.172.56.119, Port: 8444 (mainnet)
+        NetProtocol::CAddress seed_london;
+        seed_london.services = NetProtocol::NODE_NETWORK;
+        seed_london.SetIPv4(0xA7AC3877);  // 167.172.56.119
+        seed_london.port = NetProtocol::DEFAULT_PORT;
+        seed_london.time = GetTime();
+        seed_nodes.push_back(seed_london);
+
+        // MAINNET SEED NODE #3: Singapore (DigitalOcean SGP1)
+        // IP: 165.22.103.114, Port: 8444 (mainnet)
+        NetProtocol::CAddress seed_singapore;
+        seed_singapore.services = NetProtocol::NODE_NETWORK;
+        seed_singapore.SetIPv4(0xA5166772);  // 165.22.103.114
+        seed_singapore.port = NetProtocol::DEFAULT_PORT;
+        seed_singapore.time = GetTime();
+        seed_nodes.push_back(seed_singapore);
+
+        // MAINNET SEED NODE #4: Sydney (DigitalOcean SYD1)
+        // IP: 134.199.159.83, Port: 8444 (mainnet)
+        NetProtocol::CAddress seed_sydney;
+        seed_sydney.services = NetProtocol::NODE_NETWORK;
+        seed_sydney.SetIPv4(0x86C79F53);  // 134.199.159.83
+        seed_sydney.port = NetProtocol::DEFAULT_PORT;
+        seed_sydney.time = GetTime();
+        seed_nodes.push_back(seed_sydney);
+    }
 
     // FUTURE: Add more seed nodes as they become available
     // Community operators can run seed nodes and submit them via GitHub
