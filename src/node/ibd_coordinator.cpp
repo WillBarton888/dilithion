@@ -528,6 +528,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
                             // Reset fork detection state
                             m_fork_detected.store(false);
+                            g_node_context.fork_detected.store(false);  // Clear global flag so mining can resume
                             g_metrics.ClearForkDetected();  // Clear Prometheus metrics
                             m_fork_point.store(-1);
                             m_fork_stall_cycles.store(0);
@@ -647,6 +648,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << current_fork_point
                       << " to " << chain_height << " - fork recovery complete" << std::endl;
             m_fork_detected.store(false);
+            g_node_context.fork_detected.store(false);  // Clear global flag so mining can resume
             g_metrics.ClearForkDetected();  // Clear Prometheus metrics
             m_fork_point.store(-1);
         }
