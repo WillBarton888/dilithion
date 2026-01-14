@@ -7,6 +7,7 @@
 #include <consensus/pow.h>
 #include <consensus/tx_validation.h>
 #include <consensus/params.h>
+#include <core/chainparams.h>
 #include <node/mempool.h>
 #include <node/utxo_set.h>
 #include <util/time.h>
@@ -624,25 +625,46 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
     uint64_t totalFees,
     const std::vector<uint8_t>& minerAddress
 ) {
-    // Calculate total coinbase value: subsidy + fees
+    // Calculate block subsidy
     uint64_t nSubsidy = CalculateBlockSubsidy(nHeight);
 
-    // MINE-001 FIX: Proper overflow handling
-    // Check for overflow when adding fees to subsidy
-    uint64_t nCoinbaseValue = nSubsidy;
-    if (totalFees > 0) {
-        // Check if addition would overflow
-        if (nCoinbaseValue > UINT64_MAX - totalFees) {
-            // Overflow would occur - reject this block
-            throw std::runtime_error(
-                "CreateCoinbaseTransaction: Integer overflow - totalFees too large " +
-                std::to_string(totalFees) + " + subsidy " + std::to_string(nSubsidy)
-            );
-        }
-        nCoinbaseValue += totalFees;
+    // Check if we're on testnet (no mining tax on testnet)
+    bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
+
+    // =========================================================================
+    // Mining Development Contribution (2% of subsidy, MAINNET ONLY)
+    // - Dev Fund:   1% of subsidy (infrastructure, audits, community)
+    // - Dev Reward: 1% of subsidy (core developer compensation)
+    // - Miner:      98% of subsidy + 100% of fees (mainnet)
+    //               100% of subsidy + 100% of fees (testnet)
+    // =========================================================================
+    uint64_t devFundAmount = 0;
+    uint64_t devRewardAmount = 0;
+    uint64_t minerSubsidy = nSubsidy;
+
+    if (!isTestnet) {
+        // MAINNET: Apply 2% mining tax
+        uint64_t taxTotal = (nSubsidy * Consensus::MINING_TAX_PERCENT) / 100;
+        devFundAmount = (taxTotal * Consensus::DEV_FUND_SHARE) / 100;
+        devRewardAmount = taxTotal - devFundAmount;  // Remainder avoids rounding loss
+        minerSubsidy = nSubsidy - taxTotal;
     }
 
-    // Validate coinbase value is within monetary policy limits
+    // MINE-001 FIX: Proper overflow handling
+    // Check for overflow when adding fees to miner subsidy
+    uint64_t minerAmount = minerSubsidy;
+    if (totalFees > 0) {
+        if (minerAmount > UINT64_MAX - totalFees) {
+            throw std::runtime_error(
+                "CreateCoinbaseTransaction: Integer overflow - totalFees too large " +
+                std::to_string(totalFees) + " + minerSubsidy " + std::to_string(minerSubsidy)
+            );
+        }
+        minerAmount += totalFees;
+    }
+
+    // Validate total coinbase value is within monetary policy limits
+    uint64_t nCoinbaseValue = minerAmount + devFundAmount + devRewardAmount;
     if (nCoinbaseValue > static_cast<uint64_t>(MAX_MONEY)) {
         throw std::runtime_error(
             "CreateCoinbaseTransaction: Coinbase value exceeds MAX_MONEY: " +
@@ -660,7 +682,6 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
     coinbaseIn.prevout.SetNull();
 
     // Encode height in scriptSig (BIP34-style)
-    // Format: <height> <arbitrary data>
     std::string coinbaseMsg = "Block " + std::to_string(nHeight) + " - Dilithion";
     coinbaseIn.scriptSig.push_back(static_cast<uint8_t>(nHeight & 0xFF));
     coinbaseIn.scriptSig.push_back(static_cast<uint8_t>((nHeight >> 8) & 0xFF));
@@ -670,29 +691,49 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
                                  coinbaseMsg.begin(), coinbaseMsg.end());
 
     coinbaseIn.nSequence = CTxIn::SEQUENCE_FINAL;
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // coinbaseIn is a local variable that's no longer used after push_back
     coinbase.vin.push_back(std::move(coinbaseIn));
 
-    // Coinbase output: pay to miner address
-    CTxOut coinbaseOut;
-    coinbaseOut.nValue = nCoinbaseValue;
+    // Helper lambda to create P2PKH scriptPubKey from pubkey hash
+    auto createP2PKHScript = [](const uint8_t* pubKeyHash) -> std::vector<uint8_t> {
+        std::vector<uint8_t> script;
+        script.push_back(0x76);  // OP_DUP
+        script.push_back(0xa9);  // OP_HASH160
+        script.push_back(0x14);  // Push 20 bytes
+        script.insert(script.end(), pubKeyHash, pubKeyHash + 20);
+        script.push_back(0x88);  // OP_EQUALVERIFY
+        script.push_back(0xac);  // OP_CHECKSIG
+        return script;
+    };
 
-    // Create proper 25-byte P2PKH scriptPubKey
-    // minerAddress format: version_byte (1) + pubkey_hash (20) = 21 bytes
-    // P2PKH format: OP_DUP OP_HASH160 <20> <hash> OP_EQUALVERIFY OP_CHECKSIG = 25 bytes
-    std::vector<uint8_t> script;
-    script.push_back(0x76);  // OP_DUP
-    script.push_back(0xa9);  // OP_HASH160
-    script.push_back(0x14);  // Push 20 bytes
-    script.insert(script.end(), minerAddress.begin() + 1, minerAddress.begin() + 21);
-    script.push_back(0x88);  // OP_EQUALVERIFY
-    script.push_back(0xac);  // OP_CHECKSIG
-    coinbaseOut.scriptPubKey = script;
+    // OUTPUT 0: Miner reward
+    // Mainnet: 98% of subsidy + all fees
+    // Testnet: 100% of subsidy + all fees
+    CTxOut minerOut;
+    minerOut.nValue = minerAmount;
+    std::vector<uint8_t> minerScript;
+    minerScript.push_back(0x76);  // OP_DUP
+    minerScript.push_back(0xa9);  // OP_HASH160
+    minerScript.push_back(0x14);  // Push 20 bytes
+    minerScript.insert(minerScript.end(), minerAddress.begin() + 1, minerAddress.begin() + 21);
+    minerScript.push_back(0x88);  // OP_EQUALVERIFY
+    minerScript.push_back(0xac);  // OP_CHECKSIG
+    minerOut.scriptPubKey = minerScript;
+    coinbase.vout.push_back(std::move(minerOut));
 
-    // CID 1675171 FIX: Use std::move to avoid unnecessary copy
-    // coinbaseOut is a local variable that's no longer used after push_back
-    coinbase.vout.push_back(std::move(coinbaseOut));
+    // MAINNET ONLY: Add Dev Fund and Dev Reward outputs
+    if (!isTestnet) {
+        // OUTPUT 1: Dev Fund (1% of subsidy)
+        CTxOut devFundOut;
+        devFundOut.nValue = devFundAmount;
+        devFundOut.scriptPubKey = createP2PKHScript(Consensus::DEV_FUND_PUBKEY_HASH);
+        coinbase.vout.push_back(std::move(devFundOut));
+
+        // OUTPUT 2: Developer Reward (1% of subsidy)
+        CTxOut devRewardOut;
+        devRewardOut.nValue = devRewardAmount;
+        devRewardOut.scriptPubKey = createP2PKHScript(Consensus::DEV_REWARD_PUBKEY_HASH);
+        coinbase.vout.push_back(std::move(devRewardOut));
+    }
 
     return MakeTransactionRef(coinbase);
 }

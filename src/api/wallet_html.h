@@ -581,84 +581,6 @@ inline const std::string& GetWalletHTML() {
                 font-size: 1.5rem;
             }
         }
-
-        /* Confirmation Modal */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-        .modal-overlay.active {
-            display: flex;
-        }
-        .modal {
-            background: var(--bg-card);
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 450px;
-            width: 90%;
-            border: 1px solid var(--border);
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-        }
-        .modal-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .modal-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border);
-        }
-        .modal-label {
-            color: var(--text-secondary);
-        }
-        .modal-value {
-            font-weight: 500;
-            text-align: right;
-            word-break: break-all;
-            max-width: 60%;
-        }
-        .modal-value.address {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.85rem;
-        }
-        .modal-warning {
-            background: rgba(245, 158, 11, 0.1);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-            border-radius: 8px;
-            padding: 12px;
-            margin: 16px 0;
-            font-size: 0.9rem;
-            color: #f59e0b;
-        }
-        .modal-buttons {
-            display: flex;
-            gap: 12px;
-            margin-top: 20px;
-        }
-        .modal-buttons .btn {
-            flex: 1;
-        }
-        .btn-cancel {
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-        .btn-cancel:hover {
-            background: var(--bg-card-hover);
-        }
     </style>
 </head>
 <body>
@@ -701,6 +623,12 @@ inline const std::string& GetWalletHTML() {
                 </svg>
                 <span>History</span>
             </div>
+            <div class="nav-item" data-page="backup">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                <span>Backup & Recover</span>
+            </div>
         </div>
 
         <div class="nav-section">
@@ -726,11 +654,12 @@ inline const std::string& GetWalletHTML() {
             </div>
         </div>
 
-        <div class="connection-status">
+        <div class="connection-status" style="cursor: pointer;" onclick="navigateTo('settings')" title="Click to configure connection">
             <div class="status-indicator">
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Connecting...</span>
             </div>
+            <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); connect();">Reconnect</button>
         </div>
     </nav>
 
@@ -767,23 +696,82 @@ inline const std::string& GetWalletHTML() {
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-title">Quick Actions</div>
-                <div style="display: flex; gap: 12px;">
-                    <button class="btn btn-primary" onclick="navigateTo('send')">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            <div class="cards-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <!-- Mining Card -->
+                <div class="card">
+                    <div class="card-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px; vertical-align: middle;">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                            <path d="M2 17l10 5 10-5"></path>
+                            <path d="M2 12l10 5 10-5"></path>
                         </svg>
-                        Send DIL
-                    </button>
-                    <button class="btn btn-secondary" onclick="navigateTo('receive')">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
-                            <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path>
-                        </svg>
-                        Receive DIL
-                    </button>
+                        Mining
+                    </div>
+                    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                        <button id="miningToggle" class="btn btn-primary" onclick="toggleMining()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                            <span id="miningBtnText">Start Mining</span>
+                        </button>
+                        <select id="miningThreads" class="form-input" style="width: auto; padding: 8px 12px;" onchange="handleThreadChange()">
+                            <option value="2">2 Threads</option>
+                            <option value="4" selected>4 Threads</option>
+                            <option value="8">8 Threads</option>
+                            <option value="max">Maximum</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                        <input type="number" id="customThreads" class="form-input" style="width: 70px; padding: 8px 12px; display: none;" min="1" max="64" placeholder="#">
+                    </div>
+                    <div class="info-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Status</span>
+                            <span class="info-value" style="display: flex; align-items: center; gap: 6px;">
+                                <span id="miningStatusDot" class="status-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #666;"></span>
+                                <span id="miningStatus">Stopped</span>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Hash Rate</span>
+                            <span class="info-value" id="dashHashRate">0 H/s</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Blocks Found</span>
+                            <span class="info-value" id="blocksFound">0</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Est. Time to Block</span>
+                            <span class="info-value" id="etaToBlock">N/A</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions Card -->
+                <div class="card">
+                    <div class="card-title">Quick Actions</div>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <button class="btn btn-primary" onclick="navigateTo('send')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                            Send DIL
+                        </button>
+                        <button class="btn btn-secondary" onclick="navigateTo('receive')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+                                <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path>
+                            </svg>
+                            Receive DIL
+                        </button>
+                        <button class="btn btn-secondary" onclick="rescanWallet()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                            </svg>
+                            <span id="rescanBtnText">Rescan Wallet</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -845,7 +833,12 @@ inline const std::string& GetWalletHTML() {
                 <div class="qr-container">
                     <canvas id="qrcode"></canvas>
                 </div>
-                <button class="btn btn-secondary" onclick="generateNewAddress()" style="width: 100%;">
+                <div style="margin-top: 16px; display: flex; gap: 8px;">
+                    <input type="text" class="form-input" id="addressLabelInput" placeholder="Add a label (e.g., 'Mining Rewards')" style="flex: 1;">
+                    <button class="btn btn-secondary" onclick="saveCurrentAddressLabel()">Save Label</button>
+                </div>
+                <div id="currentAddressLabel" style="margin-top: 8px; color: #888; font-size: 12px;"></div>
+                <button class="btn btn-secondary" onclick="generateNewAddress()" style="width: 100%; margin-top: 12px;">
                     Generate New Address
                 </button>
             </div>
@@ -930,6 +923,89 @@ inline const std::string& GetWalletHTML() {
             </div>
         </div>
 
+        <!-- Backup & Recovery Page -->
+        <div class="page" id="page-backup">
+            <div class="page-header">
+                <h1 class="page-title">Backup & Recover</h1>
+                <p class="page-subtitle">Secure your wallet with a recovery phrase</p>
+            </div>
+
+            <!-- Recovery Alert -->
+            <div id="backupAlert"></div>
+
+            <!-- Show Mnemonic Section -->
+            <div class="card">
+                <div class="card-title">Export Recovery Phrase</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                    Your 24-word recovery phrase is the only way to restore your wallet.
+                    Keep it safe and never share it with anyone.
+                </p>
+                <div id="mnemonicDisplay" style="display: none;">
+                    <div class="alert" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--warning); margin-bottom: 16px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; flex-shrink: 0;">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
+                            <line x1="12" y1="9" x2="12" y2="13"></line>
+                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                        </svg>
+                        <span>Write down these words in order and store them securely offline. Anyone with this phrase can access your funds.</span>
+                    </div>
+                    <div class="mnemonic-grid" id="mnemonicWords" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px;">
+                    </div>
+                    <button class="btn btn-secondary" onclick="hideMnemonic()">Hide Recovery Phrase</button>
+                </div>
+                <div id="mnemonicHidden">
+                    <div class="form-group">
+                        <label class="form-label">Wallet Password (if encrypted)</label>
+                        <input type="password" class="form-input" id="exportPassword" placeholder="Enter your wallet password">
+                    </div>
+                    <button class="btn btn-primary" onclick="showMnemonic()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        Show Recovery Phrase
+                    </button>
+                </div>
+            </div>
+
+            <!-- Recover Wallet Section -->
+            <div class="card">
+                <div class="card-title">Recover Wallet</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                    Restore your wallet using your 24-word recovery phrase. This will only work on an empty wallet.
+                </p>
+                <div class="form-group">
+                    <label class="form-label">Recovery Phrase (24 words)</label>
+                    <textarea class="form-input" id="recoveryMnemonic" rows="4" placeholder="Enter your 24-word recovery phrase, separated by spaces" style="resize: vertical; font-family: 'JetBrains Mono', monospace;"></textarea>
+                    <div class="form-hint">Enter all 24 words in the correct order, separated by spaces</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Passphrase (optional)</label>
+                    <input type="password" class="form-input" id="recoveryPassphrase" placeholder="Leave empty if you didn't set a passphrase">
+                    <div class="form-hint">Only enter if you used a passphrase when creating the wallet</div>
+                </div>
+                <button class="btn btn-primary" onclick="recoverWallet()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1014.85-9.36L1 10"></path>
+                    </svg>
+                    Recover Wallet
+                </button>
+            </div>
+
+            <!-- Security Tips -->
+            <div class="card">
+                <div class="card-title">Security Tips</div>
+                <ul style="color: var(--text-secondary); margin-left: 20px; line-height: 1.8;">
+                    <li>Never share your recovery phrase with anyone</li>
+                    <li>Write it down on paper and store it in a secure location</li>
+                    <li>Consider using a metal backup for fire/water resistance</li>
+                    <li>Never store your recovery phrase digitally or take photos of it</li>
+                    <li>Verify your backup works before storing significant funds</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Settings Page -->
         <div class="page" id="page-settings">
             <div class="page-header">
@@ -946,6 +1022,7 @@ inline const std::string& GetWalletHTML() {
                 <div class="form-group">
                     <label class="form-label">RPC Port</label>
                     <input type="number" class="form-input" id="rpcPort" value="8332">
+                    <small style="color: var(--text-muted); font-size: 0.75rem;">Mainnet: 8332, Testnet: 18332</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">RPC Username (optional)</label>
@@ -959,66 +1036,40 @@ inline const std::string& GetWalletHTML() {
             </div>
 
             <div class="card">
+                <div class="card-title">Connection Help</div>
+                <p style="color: var(--text-secondary); margin-bottom: 12px;">
+                    This wallet connects to your local Dilithion node via RPC.
+                </p>
+                <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">
+                    <strong>To start your node:</strong>
+                </p>
+                <code style="display: block; background: var(--bg-darker); padding: 12px; border-radius: 6px; font-size: 0.8rem; color: var(--accent); margin-bottom: 12px; overflow-x: auto;">
+                    # Mainnet<br>
+                    dilithion-node --port=8444 --rpcport=8332<br><br>
+                    # Testnet<br>
+                    dilithion-node --testnet --port=18444 --rpcport=18332
+                </code>
+                <p style="font-size: 0.875rem; color: var(--text-muted);">
+                    The wallet will automatically connect once the node is running.
+                </p>
+            </div>
+
+            <div class="card">
                 <div class="card-title">About</div>
                 <p style="color: var(--text-secondary); margin-bottom: 12px;">
                     Dilithion Web Wallet v1.0.0<br>
                     Post-quantum secure cryptocurrency
                 </p>
-                <p style="font-size: 0.875rem; color: var(--text-muted);">
-                    This wallet connects to your local Dilithion node.
-                    Make sure your node is running with RPC enabled (--rpc flag).
-                </p>
             </div>
         </div>
     </main>
-
-    <!-- Send Confirmation Modal -->
-    <div class="modal-overlay" id="confirmModal">
-        <div class="modal">
-            <div class="modal-title">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-                Confirm Transaction
-            </div>
-            <div class="modal-row">
-                <span class="modal-label">To Address</span>
-                <span class="modal-value address" id="confirmAddress">-</span>
-            </div>
-            <div class="modal-row">
-                <span class="modal-label">Amount</span>
-                <span class="modal-value" id="confirmAmount">-</span>
-            </div>
-            <div class="modal-row">
-                <span class="modal-label">Network Fee</span>
-                <span class="modal-value" id="confirmFee">~0.0001 DIL</span>
-            </div>
-            <div class="modal-row" style="border-bottom: 2px solid var(--accent);">
-                <span class="modal-label" style="font-weight: 600;">Total</span>
-                <span class="modal-value" id="confirmTotal" style="color: var(--accent);">-</span>
-            </div>
-            <div class="modal-warning">
-                <strong>Warning:</strong> This transaction cannot be reversed. Please verify the address carefully.
-            </div>
-            <div class="modal-buttons">
-                <button class="btn btn-cancel" onclick="hideConfirmModal()">Cancel</button>
-                <button class="btn btn-primary" id="confirmSendBtn" onclick="confirmSend()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                    Confirm Send
-                </button>
-            </div>
-        </div>
-    </div>
 
     <script>
         // Wallet State
         let connected = false;
         let rpcConfig = {
             host: '127.0.0.1',
-            port: 18332,  // Testnet RPC port (mainnet: 8332)
+            port: 8332,  // Mainnet RPC port (testnet: 18332)
             user: '',
             pass: ''
         };
@@ -1047,7 +1098,7 @@ inline const std::string& GetWalletHTML() {
             connect();
         }
 
-        // RPC Call
+        // RPC Call with timeout
         async function rpcCall(method, params = []) {
             const url = `http://${rpcConfig.host}:${rpcConfig.port}/`;
             const headers = {
@@ -1059,22 +1110,52 @@ inline const std::string& GetWalletHTML() {
                 headers['Authorization'] = 'Basic ' + btoa(rpcConfig.user + ':' + rpcConfig.pass);
             }
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: Date.now(),
-                    method: method,
-                    params: params
-                })
-            });
+            // Retry logic with exponential backoff for connection errors
+            const maxRetries = 3;
+            let lastError = null;
 
-            const data = await response.json();
-            if (data.error) {
-                throw new Error(data.error.message || 'RPC Error');
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: headers,
+                        signal: controller.signal,
+                        body: JSON.stringify({
+                            jsonrpc: '2.0',
+                            id: Date.now(),
+                            method: method,
+                            params: params
+                        })
+                    });
+                    clearTimeout(timeoutId);
+
+                    const data = await response.json();
+                    if (data.error) {
+                        throw new Error(data.error.message || 'RPC Error');
+                    }
+                    return data.result;
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    lastError = e;
+
+                    // Don't retry on timeout or RPC errors, only connection errors
+                    if (e.name === 'AbortError') {
+                        throw new Error('Request timed out');
+                    }
+                    if (e.message && !e.message.includes('fetch')) {
+                        throw e;  // RPC error, don't retry
+                    }
+
+                    // Wait before retry (exponential backoff: 100ms, 200ms, 400ms)
+                    if (attempt < maxRetries - 1) {
+                        await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt)));
+                    }
+                }
             }
-            return data.result;
+            throw lastError || new Error('Connection failed after retries');
         }
 
         // Update connection status
@@ -1082,13 +1163,19 @@ inline const std::string& GetWalletHTML() {
             connected = isConnected;
             const dot = document.getElementById('statusDot');
             const statusText = document.getElementById('statusText');
+            const reconnectBtn = document.getElementById('reconnectBtn');
 
             if (isConnected) {
                 dot.classList.add('connected');
                 statusText.textContent = text || 'Connected';
+                if (reconnectBtn) reconnectBtn.style.display = 'none';
             } else {
                 dot.classList.remove('connected');
                 statusText.textContent = text || 'Disconnected';
+                // Show reconnect button when disconnected (but not during initial connecting)
+                if (reconnectBtn && text !== 'Connecting...') {
+                    reconnectBtn.style.display = 'block';
+                }
             }
         }
 
@@ -1105,15 +1192,17 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        // Refresh all data
+        // Refresh all data (serialized to prevent connection overload)
         async function refreshAll() {
             if (!connected) return;
+            const wait = () => new Promise(r => setTimeout(r, 200));  // 200ms between function calls
             try {
-                await Promise.all([
-                    refreshBalance(),
-                    refreshBlockchainInfo(),
-                    refreshTransactions()
-                ]);
+                // Serialize requests with delays to prevent server socket issues
+                await refreshBalance();
+                await wait();
+                await refreshBlockchainInfo();
+                await wait();
+                await refreshTransactions();
             } catch(e) {
                 console.error('Refresh error:', e);
             }
@@ -1140,12 +1229,15 @@ inline const std::string& GetWalletHTML() {
 
         // Refresh blockchain info
         async function refreshBlockchainInfo() {
+            const wait = () => new Promise(r => setTimeout(r, 150));  // 150ms delay between calls
             try {
                 const info = await rpcCall('getblockchaininfo');
                 document.getElementById('networkName').textContent = info.chain || 'Unknown';
                 document.getElementById('blockHeight').textContent = info.blocks?.toLocaleString() || '-';
                 document.getElementById('bestBlock').textContent = info.bestblockhash || '-';
                 document.getElementById('difficulty').textContent = info.difficulty?.toFixed(6) || '-';
+
+                await wait();  // Delay before next RPC call
 
                 // Peer info
                 try {
@@ -1159,12 +1251,17 @@ inline const std::string& GetWalletHTML() {
                     document.getElementById('peerCount').textContent = '-';
                 }
 
+                await wait();  // Delay before next RPC call
+
                 // Mining info
                 try {
                     const mining = await rpcCall('getmininginfo');
                     document.getElementById('miningActive').textContent = mining.mining ? 'Yes' : 'No';
                     document.getElementById('hashRate').textContent = mining.hashrate ?
                         mining.hashrate.toFixed(2) + ' H/s' : '-';
+
+                    // Update dashboard mining card
+                    updateMiningDashboard(mining, info.difficulty);
                 } catch(e) {
                     document.getElementById('miningActive').textContent = '-';
                     document.getElementById('hashRate').textContent = '-';
@@ -1174,7 +1271,163 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        // Refresh transactions - BUG #104 FIX: Use listtransactions to include sent tx
+        // Track blocks found - counts actual mining rewards (49 DILI coinbase transactions)
+        let totalBlocksMined = 0;
+        let lastBlockHeight = 0;
+        let isMiningActive = false;
+
+        // Update mining dashboard card
+        function updateMiningDashboard(miningInfo, difficulty) {
+            const miningActive = miningInfo.mining || false;
+            const hashrate = miningInfo.hashrate || 0;
+
+            // Update status
+            isMiningActive = miningActive;
+            const statusDot = document.getElementById('miningStatusDot');
+            const statusText = document.getElementById('miningStatus');
+            const btnText = document.getElementById('miningBtnText');
+            const btn = document.getElementById('miningToggle');
+
+            if (miningActive) {
+                statusDot.style.background = '#22c55e';  // Green
+                statusText.textContent = 'Mining';
+                btnText.textContent = 'Stop Mining';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-secondary');
+            } else {
+                statusDot.style.background = '#666';  // Gray
+                statusText.textContent = 'Stopped';
+                btnText.textContent = 'Start Mining';
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-primary');
+            }
+
+            // Update hash rate
+            const hashRateEl = document.getElementById('dashHashRate');
+            if (hashrate >= 1000000) {
+                hashRateEl.textContent = (hashrate / 1000000).toFixed(2) + ' MH/s';
+            } else if (hashrate >= 1000) {
+                hashRateEl.textContent = (hashrate / 1000).toFixed(2) + ' KH/s';
+            } else {
+                hashRateEl.textContent = hashrate.toFixed(2) + ' H/s';
+            }
+
+            // Display blocks found (updated from transaction data)
+            document.getElementById('blocksFound').textContent = totalBlocksMined;
+
+            // Calculate estimated time to block
+            const etaEl = document.getElementById('etaToBlock');
+            if (!miningActive || hashrate <= 0) {
+                etaEl.textContent = 'N/A';
+            } else {
+                etaEl.textContent = estimateTimeToBlock(hashrate, difficulty);
+            }
+        }
+
+        // Estimate time to find next block
+        function estimateTimeToBlock(hashrate, difficulty) {
+            if (!hashrate || hashrate <= 0 || !difficulty) return 'N/A';
+
+            // For RandomX, difficulty represents expected hashes needed
+            // Simplified: expectedHashes = difficulty * 2^32
+            const expectedHashes = difficulty * Math.pow(2, 32);
+            const secondsToBlock = expectedHashes / hashrate;
+
+            if (secondsToBlock < 60) return '< 1 min';
+            if (secondsToBlock < 3600) return '~' + Math.round(secondsToBlock / 60) + ' min';
+            if (secondsToBlock < 86400) return '~' + Math.round(secondsToBlock / 3600) + ' hrs';
+            return '~' + Math.round(secondsToBlock / 86400) + ' days';
+        }
+
+        // Handle thread selector change
+        function handleThreadChange() {
+            const select = document.getElementById('miningThreads');
+            const customInput = document.getElementById('customThreads');
+
+            if (select.value === 'custom') {
+                customInput.style.display = 'inline-block';
+                customInput.focus();
+            } else {
+                customInput.style.display = 'none';
+            }
+        }
+
+        // Get selected thread count
+        function getSelectedThreads() {
+            const select = document.getElementById('miningThreads');
+            const customInput = document.getElementById('customThreads');
+
+            if (select.value === 'max') {
+                // Use all available CPU cores
+                return navigator.hardwareConcurrency || 4;
+            } else if (select.value === 'custom') {
+                const custom = parseInt(customInput.value);
+                return (custom > 0 && custom <= 64) ? custom : 4;
+            } else {
+                return parseInt(select.value) || 4;
+            }
+        }
+
+        // Toggle mining on/off
+        async function toggleMining() {
+            const btn = document.getElementById('miningToggle');
+            const btnText = document.getElementById('miningBtnText');
+            btn.disabled = true;
+
+            try {
+                if (isMiningActive) {
+                    // Stop mining
+                    btnText.textContent = 'Stopping...';
+                    await rpcCall('stopmining');
+                } else {
+                    // Start mining with selected threads
+                    const threads = getSelectedThreads();
+                    btnText.textContent = 'Starting...';
+                    console.log('[Mining] Starting with', threads, 'threads');
+                    await rpcCall('startmining', { threads: threads });
+                }
+                // Refresh to get new status
+                await refreshBlockchainInfo();
+            } catch(e) {
+                console.error('Mining toggle error:', e);
+                alert('Failed to toggle mining: ' + e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Rescan wallet for missing transactions
+        async function rescanWallet() {
+            const btnText = document.getElementById('rescanBtnText');
+            const originalText = btnText.textContent;
+            btnText.textContent = 'Scanning...';
+
+            try {
+                const result = await rpcCall('rescanwallet', {});
+                btnText.textContent = 'Done!';
+                console.log('[Wallet] Rescan result:', result);
+
+                // Refresh balance and transactions
+                await refreshBalance();
+                await refreshTransactions();
+
+                setTimeout(() => {
+                    btnText.textContent = originalText;
+                }, 2000);
+            } catch(e) {
+                console.error('Rescan error:', e);
+                btnText.textContent = 'Failed';
+                setTimeout(() => {
+                    btnText.textContent = originalText;
+                }, 2000);
+            }
+        }
+
+        // BUG #113 FIX: Refresh transactions using listtransactions for complete history
+        // BUG #116 FIX: Don't overwrite existing transactions on refresh failure
+        // BUG #117 FIX: Keep showing "Loading..." during initial connection
+        let lastTransactions = null;  // Cache last successful transaction load
+        let txLoadAttempts = 0;       // Track load attempts
         async function refreshTransactions() {
             try {
                 console.log('[Wallet] Fetching transactions...');
@@ -1182,17 +1435,37 @@ inline const std::string& GetWalletHTML() {
                 console.log('[Wallet] RPC result:', result);
                 const transactions = result.transactions || [];
                 console.log('[Wallet] Transactions count:', transactions.length);
+                lastTransactions = transactions;  // Cache successful result
+                txLoadAttempts = 0;  // Reset on success
+
+                // Count blocks mined (unique coinbase txids with 'generated' flag)
+                const generatedTxids = new Set(
+                    transactions.filter(t => t.generated === true).map(t => t.txid)
+                );
+                totalBlocksMined = generatedTxids.size;
+                console.log('[Wallet] Blocks mined:', totalBlocksMined, 'unique coinbase txids');
+                const blocksFoundEl = document.getElementById('blocksFound');
+                if (blocksFoundEl) blocksFoundEl.textContent = totalBlocksMined;
+
                 renderTransactions(transactions);
             } catch(e) {
-                console.error('Transaction error:', e);
-                document.getElementById('recentTxList').innerHTML =
-                    '<div class="empty-state">Unable to load transactions</div>';
-                document.getElementById('txList').innerHTML =
-                    '<div class="empty-state">Unable to load transactions</div>';
+                console.error('Transaction refresh error:', e);
+                txLoadAttempts++;
+                // Only show error after multiple failed attempts AND if we never had data
+                // This prevents "Unable to load" flash on page refresh
+                if (!lastTransactions && txLoadAttempts >= 3) {
+                    document.getElementById('recentTxList').innerHTML =
+                        '<div class="empty-state">Unable to load transactions</div>';
+                    const txListEl = document.getElementById('txList');
+                    if (txListEl) {
+                        txListEl.innerHTML = '<div class="empty-state">Unable to load transactions</div>';
+                    }
+                }
+                // If we had transactions before, keep showing them (don't overwrite on refresh failure)
             }
         }
 
-        // Format timestamp for display
+        // Format timestamp for display - shows both relative and absolute time
         function formatTimestamp(unixTime) {
             if (!unixTime) return 'Pending';
             const date = new Date(unixTime * 1000);
@@ -1202,15 +1475,56 @@ inline const std::string& GetWalletHTML() {
             const diffHours = Math.floor(diffMs / 3600000);
             const diffDays = Math.floor(diffMs / 86400000);
 
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
+            // Format the absolute time
+            const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const dateStr = date.toLocaleDateString([], {month: 'short', day: 'numeric'});
 
-            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            // Combine relative and absolute
+            let relative;
+            if (diffMins < 1) relative = 'Just now';
+            else if (diffMins < 60) relative = `${diffMins}m ago`;
+            else if (diffHours < 24) relative = `${diffHours}h ago`;
+            else if (diffDays < 7) relative = `${diffDays}d ago`;
+            else relative = null;
+
+            if (relative) {
+                return `${relative} • ${dateStr} ${timeStr}`;
+            }
+            return `${dateStr} ${timeStr}`;
         }
 
-        // Render transaction list - BUG #104 FIX: Show both sent and received
+        // Get full timestamp for tooltip
+        function getFullTimestamp(unixTime) {
+            if (!unixTime) return '';
+            const date = new Date(unixTime * 1000);
+            return date.toLocaleString();
+        }
+
+        // Address labeling
+        const addressLabels = JSON.parse(localStorage.getItem('dilithionAddressLabels') || '{}');
+
+        function getAddressLabel(address) {
+            if (!address) return '';
+            return addressLabels[address] || '';
+        }
+
+        function getAddressDisplay(address) {
+            if (!address) return 'Unknown';
+            const label = getAddressLabel(address);
+            if (label) return label;
+            return address.substring(0, 12) + '...';
+        }
+
+        function saveAddressLabel(address, label) {
+            if (label && label.trim()) {
+                addressLabels[address] = label.trim();
+            } else {
+                delete addressLabels[address];
+            }
+            localStorage.setItem('dilithionAddressLabels', JSON.stringify(addressLabels));
+        }
+
+        // BUG #113 FIX: Render transaction list with full history support
         function renderTransactions(transactions) {
             if (!transactions || transactions.length === 0) {
                 const html = '<div class="empty-state">No transactions yet</div>';
@@ -1227,30 +1541,34 @@ inline const std::string& GetWalletHTML() {
                 const category = tx.category || 'receive';
                 const isSend = category === 'send';
                 const isMining = category === 'generate' || category === 'immature';
-                const isSpent = category === 'spent';  // BUG #113 FIX: Handle spent outputs
+                const isSpent = category === 'spent';
                 const fee = tx.fee || 0;
                 const timestamp = tx.time || tx.blocktime || 0;
                 const address = tx.address || '';
 
                 // Determine origin type and icon
-                let iconClass, typeText, originLabel;
+                let iconClass, typeText, originLabel, iconSvg;
+                const addressDisplay = getAddressDisplay(address);
                 if (isMining) {
                     iconClass = 'mining';
                     typeText = 'Mining Reward';
                     originLabel = 'Block Subsidy';
+                    iconSvg = '<circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path>';
                 } else if (isSend) {
                     iconClass = 'sent';
                     typeText = 'Sent';
-                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                    originLabel = address ? `To: ${addressDisplay}` : 'Transaction';
+                    iconSvg = '<polyline points="22 2 15 22 11 13 2 9 22 2"></polyline>';
                 } else if (isSpent) {
-                    // BUG #113 FIX: Show spent received outputs
                     iconClass = 'spent';
                     typeText = 'Received (Spent)';
-                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                    originLabel = address ? `To: ${addressDisplay}` : 'Transaction';
+                    iconSvg = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
                 } else {
                     iconClass = 'received';
                     typeText = 'Received';
-                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                    originLabel = address ? `To: ${addressDisplay}` : 'Transaction';
+                    iconSvg = '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>';
                 }
 
                 const amountClass = isSend ? 'negative' : 'positive';
@@ -1258,18 +1576,7 @@ inline const std::string& GetWalletHTML() {
                 const displayAmount = Math.abs(amount).toFixed(8);
                 const feeText = isSend && fee > 0 ? ` (fee: ${fee.toFixed(4)})` : '';
                 const timeText = formatTimestamp(timestamp);
-
-                // BUG #113 FIX: Different icon for each transaction type
-                let iconSvg;
-                if (isMining) {
-                    iconSvg = '<circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path>';
-                } else if (isSend) {
-                    iconSvg = '<polyline points="22 2 15 22 11 13 2 9 22 2"></polyline>';
-                } else if (isSpent) {
-                    iconSvg = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
-                } else {
-                    iconSvg = '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>';
-                }
+                const fullTimestamp = getFullTimestamp(timestamp);
 
                 html += `
                     <div class="tx-item">
@@ -1279,8 +1586,8 @@ inline const std::string& GetWalletHTML() {
                             </svg>
                         </div>
                         <div class="tx-details">
-                            <div class="tx-type">${typeText} <span style="color:#888;font-size:12px;">${timeText}</span></div>
-                            <div class="tx-hash" style="font-size:11px;color:#666;">${originLabel}</div>
+                            <div class="tx-type">${typeText} <span style="color:#888;font-size:12px;" title="${fullTimestamp}">${timeText}</span></div>
+                            <div class="tx-hash" style="font-size:11px;color:#666;" title="${address || ''}">${originLabel}</div>
                             <div class="tx-hash">${txid.substring(0, 16)}...${txid.substring(txid.length - 8)}</div>
                         </div>
                         <div>
@@ -1313,9 +1620,46 @@ inline const std::string& GetWalletHTML() {
                         }
                     });
                 }
+
+                // Show existing label if any
+                updateAddressLabelDisplay(address);
             } catch(e) {
                 document.getElementById('receiveAddress').textContent = 'Error loading address';
                 console.error('Address error:', e);
+            }
+        }
+
+        // Update address label display
+        function updateAddressLabelDisplay(address) {
+            const labelEl = document.getElementById('currentAddressLabel');
+            const inputEl = document.getElementById('addressLabelInput');
+            const existingLabel = getAddressLabel(address);
+
+            if (existingLabel) {
+                labelEl.textContent = 'Label: ' + existingLabel;
+                inputEl.value = existingLabel;
+            } else {
+                labelEl.textContent = '';
+                inputEl.value = '';
+            }
+        }
+
+        // Save label for current address
+        function saveCurrentAddressLabel() {
+            const address = document.getElementById('receiveAddress').textContent;
+            const label = document.getElementById('addressLabelInput').value;
+
+            if (!address || address === 'Loading...' || address === 'Error loading address') {
+                alert('No address to label');
+                return;
+            }
+
+            saveAddressLabel(address, label);
+            updateAddressLabelDisplay(address);
+
+            // Refresh transactions to show updated labels
+            if (lastTransactions) {
+                renderTransactions(lastTransactions);
             }
         }
 
@@ -1338,66 +1682,191 @@ inline const std::string& GetWalletHTML() {
             });
         }
 
-        // Pending transaction data for confirmation
-        let pendingTx = { address: '', amount: 0 };
-        const ESTIMATED_FEE = 0.0001;
+        // Mnemonic auto-hide timeout
+        let mnemonicHideTimeout = null;
+        let mnemonicCountdownInterval = null;
+        const MNEMONIC_DISPLAY_SECONDS = 60;
 
-        // Show confirmation modal
-        function showConfirmModal(address, amount) {
-            pendingTx = { address, amount };
-            document.getElementById('confirmAddress').textContent = address;
-            document.getElementById('confirmAmount').textContent = amount.toFixed(8) + ' DIL';
-            document.getElementById('confirmFee').textContent = '~' + ESTIMATED_FEE + ' DIL';
-            document.getElementById('confirmTotal').textContent = (amount + ESTIMATED_FEE).toFixed(8) + ' DIL';
-            document.getElementById('confirmModal').classList.add('active');
+        // Show mnemonic recovery phrase
+        async function showMnemonic() {
+            const alertDiv = document.getElementById('backupAlert');
+            const password = document.getElementById('exportPassword').value;
+
+            // Show confirmation dialog first
+            const confirmed = confirm(
+                "WARNING: You are about to display your recovery phrase.\n\n" +
+                "Anyone who sees these 24 words can steal ALL your funds.\n\n" +
+                "Make sure:\n" +
+                "- No one is watching your screen\n" +
+                "- No screen recording is active\n" +
+                "- You are in a private location\n\n" +
+                "The phrase will auto-hide after 60 seconds.\n\n" +
+                "Do you want to continue?"
+            );
+
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                // First unlock wallet if password provided
+                if (password) {
+                    try {
+                        await rpcCall('walletpassphrase', {passphrase: password, timeout: 60});
+                    } catch(e) {
+                        // Wallet might not be encrypted, continue anyway
+                    }
+                }
+
+                const result = await rpcCall('exportmnemonic', {});
+
+                if (result && result.mnemonic) {
+                    const words = result.mnemonic.split(' ');
+                    const wordsContainer = document.getElementById('mnemonicWords');
+                    wordsContainer.innerHTML = '';
+
+                    words.forEach((word, index) => {
+                        const wordDiv = document.createElement('div');
+                        wordDiv.style.cssText = 'background: var(--bg-darker); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); font-family: "JetBrains Mono", monospace; font-size: 0.85rem;';
+                        wordDiv.innerHTML = `<span style="color: var(--text-muted); margin-right: 8px;">${index + 1}.</span>${word}`;
+                        wordsContainer.appendChild(wordDiv);
+                    });
+
+                    document.getElementById('mnemonicDisplay').style.display = 'block';
+                    document.getElementById('mnemonicHidden').style.display = 'none';
+                    alertDiv.innerHTML = '';
+
+                    // Start auto-hide countdown
+                    startMnemonicCountdown();
+                } else {
+                    throw new Error('No mnemonic returned. This wallet may not be an HD wallet.');
+                }
+            } catch(e) {
+                alertDiv.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+            }
         }
 
-        // Hide confirmation modal
-        function hideConfirmModal() {
-            document.getElementById('confirmModal').classList.remove('active');
-            pendingTx = { address: '', amount: 0 };
+        // Start countdown timer for auto-hide
+        function startMnemonicCountdown() {
+            // Clear any existing timers
+            clearMnemonicTimers();
+
+            let secondsLeft = MNEMONIC_DISPLAY_SECONDS;
+            const hideBtn = document.querySelector('#mnemonicDisplay button');
+
+            // Update button text with countdown every second
+            mnemonicCountdownInterval = setInterval(() => {
+                if (secondsLeft > 0 && document.getElementById('mnemonicDisplay').style.display !== 'none') {
+                    hideBtn.textContent = `Hide Recovery Phrase (${secondsLeft}s)`;
+                    secondsLeft--;
+                } else {
+                    clearMnemonicTimers();
+                }
+            }, 1000);
+
+            // Auto-hide after timeout
+            mnemonicHideTimeout = setTimeout(() => {
+                hideMnemonic();
+            }, MNEMONIC_DISPLAY_SECONDS * 1000);
         }
 
-        // Close modal on overlay click or Escape key
-        document.getElementById('confirmModal').addEventListener('click', (e) => {
-            if (e.target.id === 'confirmModal') hideConfirmModal();
-        });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') hideConfirmModal();
-        });
+        // Clear mnemonic timers
+        function clearMnemonicTimers() {
+            if (mnemonicHideTimeout) {
+                clearTimeout(mnemonicHideTimeout);
+                mnemonicHideTimeout = null;
+            }
+            if (mnemonicCountdownInterval) {
+                clearInterval(mnemonicCountdownInterval);
+                mnemonicCountdownInterval = null;
+            }
+        }
 
-        // Handle send - shows confirmation modal
-        function handleSend(event) {
+        // Hide mnemonic
+        function hideMnemonic() {
+            // Clear timers
+            clearMnemonicTimers();
+
+            document.getElementById('mnemonicDisplay').style.display = 'none';
+            document.getElementById('mnemonicHidden').style.display = 'block';
+            document.getElementById('mnemonicWords').innerHTML = '';
+            document.getElementById('exportPassword').value = '';
+
+            // Reset button text
+            const hideBtn = document.querySelector('#mnemonicDisplay button');
+            if (hideBtn) {
+                hideBtn.textContent = 'Hide Recovery Phrase';
+            }
+
+            // Lock wallet again
+            rpcCall('walletlock', {}).catch(() => {});
+        }
+
+        // Recover wallet from mnemonic
+        async function recoverWallet() {
+            const alertDiv = document.getElementById('backupAlert');
+            const mnemonicInput = document.getElementById('recoveryMnemonic').value.trim();
+            const passphrase = document.getElementById('recoveryPassphrase').value;
+
+            // Validate mnemonic
+            const words = mnemonicInput.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+            if (words.length !== 24) {
+                alertDiv.innerHTML = `<div class="alert alert-error">Invalid recovery phrase. Please enter exactly 24 words. You entered ${words.length} words.</div>`;
+                return;
+            }
+
+            const mnemonic = words.join(' ');
+
+            alertDiv.innerHTML = '<div class="alert" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary);">Recovering wallet... This may take a moment.</div>';
+
+            try {
+                const params = {mnemonic: mnemonic};
+                if (passphrase) {
+                    params.passphrase = passphrase;
+                }
+
+                const result = await rpcCall('restorehdwallet', params);
+
+                alertDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        Wallet recovered successfully!<br>
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;">
+                            Address: ${result.address || 'Generated'}
+                        </span>
+                    </div>
+                `;
+
+                // Clear the input fields
+                document.getElementById('recoveryMnemonic').value = '';
+                document.getElementById('recoveryPassphrase').value = '';
+
+                // Refresh wallet data
+                await refreshBalance();
+                await refreshReceiveAddress();
+                await refreshTransactions();
+            } catch(e) {
+                alertDiv.innerHTML = `<div class="alert alert-error">Recovery failed: ${e.message}</div>`;
+            }
+        }
+
+        // Handle send
+        async function handleSend(event) {
             event.preventDefault();
-            const address = document.getElementById('sendAddress').value.trim();
+            const address = document.getElementById('sendAddress').value;
             const amount = parseFloat(document.getElementById('sendAmount').value);
             const alertDiv = document.getElementById('sendAlert');
+            const sendBtn = document.getElementById('sendBtn');
 
             if (!address || !amount || amount <= 0) {
                 alertDiv.innerHTML = '<div class="alert alert-error">Please enter a valid address and amount</div>';
                 return;
             }
 
-            // Clear any previous alerts
-            alertDiv.innerHTML = '';
-
-            // Show confirmation modal
-            showConfirmModal(address, amount);
-        }
-
-        // Confirm and send the transaction
-        async function confirmSend() {
-            const address = pendingTx.address;
-            const amount = pendingTx.amount;
-            const alertDiv = document.getElementById('sendAlert');
-            const confirmBtn = document.getElementById('confirmSendBtn');
-
-            confirmBtn.disabled = true;
-            confirmBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
 
             try {
                 const txid = await rpcCall('sendtoaddress', {address: address, amount: parseFloat(amount)});
-                hideConfirmModal();
                 alertDiv.innerHTML = `
                     <div class="alert alert-success">
                         Transaction sent successfully!<br>
@@ -1411,16 +1880,16 @@ inline const std::string& GetWalletHTML() {
                 await refreshBalance();
                 await refreshTransactions();
             } catch(e) {
-                hideConfirmModal();
                 alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
             }
 
-            confirmBtn.disabled = false;
-            confirmBtn.innerHTML = `
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = `
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="20 6 9 17 4 12"></polyline>
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                 </svg>
-                Confirm Send
+                Send Transaction
             `;
         }
 
@@ -1454,14 +1923,27 @@ inline const std::string& GetWalletHTML() {
         loadSettings();
         connect();
 
-        // BUG #115 FIX: Faster auto-refresh (5 seconds) and include transactions
-        setInterval(() => {
-            if (connected) {
-                refreshBalance();
-                refreshBlockchainInfo();
-                refreshTransactions();  // BUG #115: Also refresh transaction history
+        // BUG #115 FIX: Auto-refresh with serialized requests to prevent connection overload
+        let refreshInProgress = false;
+        const wait200 = () => new Promise(r => setTimeout(r, 200));
+
+        setInterval(async () => {
+            if (connected && !refreshInProgress) {
+                refreshInProgress = true;
+                try {
+                    // Serialize requests with 200ms delays to prevent server socket issues
+                    await refreshBalance();
+                    await wait200();
+                    await refreshBlockchainInfo();
+                    await wait200();
+                    await refreshTransactions();
+                } catch (e) {
+                    console.warn('[Wallet] Refresh cycle error:', e.message);
+                } finally {
+                    refreshInProgress = false;
+                }
             }
-        }, 5000);  // BUG #115: Reduced from 10 to 5 seconds
+        }, 10000);  // Refresh every 10 seconds
     </script>
 </body>
 </html>

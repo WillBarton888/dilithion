@@ -22,7 +22,7 @@ ChainParams ChainParams::Mainnet() {
     // Genesis block parameters
     params.genesisTime = 1767225600;   // January 1, 2026 00:00:00 UTC
     params.genesisNonce = 0;           // TO BE UPDATED after mining
-    params.genesisNBits = 0x1e00ffff;  // RandomX-appropriate difficulty (~9 hours solo with good CPU)
+    params.genesisNBits = 0x1f007fff;  // Accessible initial difficulty (~4 min at 10K H/s, adjusts as network grows)
     params.genesisHash = "";           // TO BE UPDATED after mining
     params.genesisCoinbaseMsg = "The Guardian 01/Jan/2026: Quantum computing advances threaten cryptocurrency security - Dilithion launches with post-quantum protection for The People's Coin";
 

@@ -2941,7 +2941,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                         if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
                             CDilithiumAddress our_address = wallet.GetNewAddress();
-                            wallet.AddTxOut(coinbase->GetHash(), 0, coinbaseOut.nValue, our_address, pblockIndexPtr->nHeight);
+                            wallet.AddTxOut(coinbase->GetHash(), 0, coinbaseOut.nValue, our_address, pblockIndexPtr->nHeight, true);  // true = coinbase
 
                             double amountDIL = static_cast<double>(coinbaseOut.nValue) / 100000000.0;
                             std::cout << "[Wallet] Coinbase credited: " << std::fixed << std::setprecision(8)

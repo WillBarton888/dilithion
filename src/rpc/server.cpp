@@ -2285,6 +2285,7 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
         unsigned int confirmations;
         std::string blockhash;
         int64_t time;          // for sorting
+        bool generated;        // true if coinbase (mining reward)
     };
     std::vector<TxInfo> allTx;
 
@@ -2302,14 +2303,21 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
             info.confirmations = currentHeight - utxo.nHeight + 1;
         }
         info.blockhash = "";
+        info.time = std::time(nullptr);  // Default to current time
+        info.generated = false;  // Check UTXO set for coinbase status
         if (utxo.nHeight > 0) {
             std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(utxo.nHeight);
             if (!hashes.empty()) {
                 info.blockhash = hashes[0].GetHex();
+                // Get actual block timestamp
+                CBlockIndex* pindex = m_chainstate->GetBlockIndex(hashes[0]);
+                if (pindex) {
+                    info.time = pindex->nTime;
+                }
             }
         }
-        // Estimate time from height (10 min blocks)
-        info.time = utxo.nHeight > 0 ? static_cast<int64_t>(utxo.nHeight) * 600 : std::time(nullptr);
+        // Use coinbase flag from wallet's stored transaction data
+        info.generated = utxo.fCoinbase;
         allTx.push_back(info);
     }
 
@@ -2334,6 +2342,7 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
             }
         }
         info.time = stx.nTime;
+        info.generated = false;  // Sent transactions are never coinbase
         allTx.push_back(info);
     }
 
@@ -2356,7 +2365,9 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
             oss << "\"fee\":" << FormatAmount(tx.fee) << ",";
         }
         oss << "\"confirmations\":" << tx.confirmations << ",";
-        oss << "\"blockhash\":\"" << tx.blockhash << "\"";
+        oss << "\"blockhash\":\"" << tx.blockhash << "\",";
+        oss << "\"time\":" << tx.time << ",";
+        oss << "\"generated\":" << (tx.generated ? "true" : "false");
         oss << "}";
     }
     oss << "]}";

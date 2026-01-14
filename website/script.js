@@ -265,7 +265,10 @@ function updateDashboardFromStats(stats) {
 
     // Update last update time
     if (stats.timestamp) {
-        const statsTime = new Date(stats.timestamp);
+        // Handle both Unix seconds (from API) and ISO strings (from static JSON)
+        const statsTime = typeof stats.timestamp === 'number'
+            ? new Date(stats.timestamp * 1000)
+            : new Date(stats.timestamp);
         const now = new Date();
         const secondsAgo = Math.floor((now - statsTime) / 1000);
 

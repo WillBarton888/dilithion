@@ -354,7 +354,8 @@ bool CWallet::SignHash(const CDilithiumAddress& address, const uint256& hash,
 // FIX-006 (WALLET-002): Internal helper that assumes lock is already held
 // Used by ScanUTXOs to avoid deadlock
 bool CWallet::AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValue,
-                                const CDilithiumAddress& address, uint32_t nHeight) {
+                                const CDilithiumAddress& address, uint32_t nHeight,
+                                bool fCoinbase) {
     // REQUIRES: cs_wallet must be held by caller
 
     CWalletTx wtx;
@@ -363,6 +364,7 @@ bool CWallet::AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValu
     wtx.nValue = nValue;
     wtx.address = address;
     wtx.fSpent = false;
+    wtx.fCoinbase = fCoinbase;
     wtx.nHeight = nHeight;
 
     // FIX-005 (WALLET-001): Use COutPoint as key to prevent collision
@@ -373,9 +375,10 @@ bool CWallet::AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValu
 }
 
 bool CWallet::AddTxOut(const uint256& txid, uint32_t vout, int64_t nValue,
-                       const CDilithiumAddress& address, uint32_t nHeight) {
+                       const CDilithiumAddress& address, uint32_t nHeight,
+                       bool fCoinbase) {
     std::lock_guard<std::mutex> lock(cs_wallet);
-    return AddTxOutUnlocked(txid, vout, nValue, address, nHeight);
+    return AddTxOutUnlocked(txid, vout, nValue, address, nHeight, fCoinbase);
 }
 
 bool CWallet::MarkSpent(const uint256& txid, uint32_t vout) {
@@ -577,7 +580,7 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                     for (const auto& addr : vchAddresses) {
                         std::vector<uint8_t> addrPKH = GetPubKeyHashFromAddress(addr);
                         if (addrPKH == scriptPKH) {
-                            AddTxOutUnlocked(tx.GetHash(), i, out.nValue, addr, height);
+                            AddTxOutUnlocked(tx.GetHash(), i, out.nValue, addr, height, tx.IsCoinBase());
 
                             // Notify user when mining reward is credited
                             if (tx.IsCoinBase()) {
@@ -1335,14 +1338,15 @@ bool CWallet::Load(const std::string& filename) {
 
     std::string magic_str(magic, 8);
     // FIX-011 (PERSIST-001): Support DILWLT03 format with file integrity HMAC
-    if (magic_str != "DILWLT01" && magic_str != "DILWLT02" && magic_str != "DILWLT03") {
+    // v4: Added fCoinbase field to track mining rewards
+    if (magic_str != "DILWLT01" && magic_str != "DILWLT02" && magic_str != "DILWLT03" && magic_str != "DILWLT04") {
         return false;  // Invalid file format
     }
 
     uint32_t version;
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
     if (!file.good()) return false;  // SEC-001: Check I/O error
-    if (version != 1 && version != 2 && version != 3) {
+    if (version != 1 && version != 2 && version != 3 && version != 4) {
         return false;  // Unsupported version
     }
 
@@ -1357,8 +1361,8 @@ bool CWallet::Load(const std::string& filename) {
     std::vector<uint8_t> hmac_salt;
     std::streampos data_start_pos;  // Position where HMAC-protected data starts (salt position)
 
-    if (version == 3) {
-        // v3 format: [Magic][Version][Flags][HMAC][Salt][Data...]
+    if (version >= 3) {
+        // v3+ format: [Magic][Version][Flags][HMAC][Salt][Data...]
         // Read stored HMAC
         stored_hmac.resize(WALLET_FILE_HMAC_SIZE);
         file.read(reinterpret_cast<char*>(stored_hmac.data()), WALLET_FILE_HMAC_SIZE);
@@ -1732,6 +1736,15 @@ bool CWallet::Load(const std::string& filename) {
         file.read(reinterpret_cast<char*>(&wtx.nHeight), sizeof(wtx.nHeight));
         if (!file.good()) return false;  // SEC-001: Check I/O error
 
+        // Read fCoinbase only for v4+ wallets (added to track mining rewards)
+        wtx.fCoinbase = false;
+        if (version >= 4) {
+            uint8_t fCoinbase = 0;
+            file.read(reinterpret_cast<char*>(&fCoinbase), 1);
+            if (!file.good()) return false;
+            wtx.fCoinbase = (fCoinbase != 0);
+        }
+
         // FIX-005 (WALLET-001): Use COutPoint as composite key to prevent collision
         // When a transaction has multiple outputs to wallet, using only txid causes overwrites
         COutPoint outpoint(wtx.txid, wtx.vout);
@@ -1761,8 +1774,8 @@ bool CWallet::Load(const std::string& filename) {
         return false;  // File error occurred, temp data discarded
     }
 
-    // FIX-011 (PERSIST-001): Verify HMAC for v3 format
-    if (version == 3) {
+    // FIX-011 (PERSIST-001): Verify HMAC for v3+ format
+    if (version >= 3) {
         // Remember current position (end of data)
         std::streampos end_pos = file.tellg();
 
@@ -1950,10 +1963,10 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
 
     // FIX-011 (PERSIST-001): Write header with file integrity HMAC (v3 format)
     // Format: [Magic][Version][Flags][HMAC-placeholder][Salt][Data...]
-    file.write(WALLET_FILE_MAGIC_V3, 8);  // "DILWLT03"
+    file.write(WALLET_FILE_MAGIC_V4, 8);  // "DILWLT04" - v4 adds fCoinbase field
     if (!file.good()) return false;
 
-    uint32_t version = WALLET_FILE_VERSION_3;
+    uint32_t version = WALLET_FILE_VERSION_4;
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
     if (!file.good()) return false;
 
@@ -2179,6 +2192,9 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         file.write(reinterpret_cast<const char*>(&fSpent), 1);
         if (!file.good()) return false;  // SEC-001: Check I/O error
         file.write(reinterpret_cast<const char*>(&wtx.nHeight), sizeof(wtx.nHeight));
+        if (!file.good()) return false;  // SEC-001: Check I/O error
+        uint8_t fCoinbase = wtx.fCoinbase ? 1 : 0;
+        file.write(reinterpret_cast<const char*>(&fCoinbase), 1);
         if (!file.good()) return false;  // SEC-001: Check I/O error
     }
 
@@ -2847,7 +2863,7 @@ bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
                 std::vector<uint8_t> addrHash = GetPubKeyHashFromAddress(addr);
                 if (addrHash == scriptPubKeyHash) {
                     // FIX-006 (WALLET-002): Use unlocked version since we hold lock
-                    AddTxOutUnlocked(outpoint.hash, outpoint.n, entry.out.nValue, addr, entry.nHeight);
+                    AddTxOutUnlocked(outpoint.hash, outpoint.n, entry.out.nValue, addr, entry.nHeight, entry.fCoinBase);
                     utxosFound++;
 
                     std::cout << "[Wallet] Found UTXO: " << outpoint.hash.GetHex().substr(0, 16)

@@ -1259,8 +1259,8 @@
             }
         }
 
-        // Track blocks found this session
-        let sessionBlocksFound = 0;
+        // Track blocks found - counts actual mining rewards (49 DILI coinbase transactions)
+        let totalBlocksMined = 0;
         let lastBlockHeight = 0;
         let isMiningActive = false;
 
@@ -1300,13 +1300,8 @@
                 hashRateEl.textContent = hashrate.toFixed(2) + ' H/s';
             }
 
-            // Track blocks found (check if height increased while mining)
-            const currentHeight = miningInfo.blocks || 0;
-            if (lastBlockHeight > 0 && currentHeight > lastBlockHeight && miningActive) {
-                sessionBlocksFound += (currentHeight - lastBlockHeight);
-            }
-            lastBlockHeight = currentHeight;
-            document.getElementById('blocksFound').textContent = sessionBlocksFound;
+            // Display blocks found (updated from transaction data)
+            document.getElementById('blocksFound').textContent = totalBlocksMined;
 
             // Calculate estimated time to block
             const etaEl = document.getElementById('etaToBlock');
@@ -1430,6 +1425,16 @@
                 console.log('[Wallet] Transactions count:', transactions.length);
                 lastTransactions = transactions;  // Cache successful result
                 txLoadAttempts = 0;  // Reset on success
+
+                // Count blocks mined (unique coinbase txids with 'generated' flag)
+                const generatedTxids = new Set(
+                    transactions.filter(t => t.generated === true).map(t => t.txid)
+                );
+                totalBlocksMined = generatedTxids.size;
+                console.log('[Wallet] Blocks mined:', totalBlocksMined, 'unique coinbase txids');
+                const blocksFoundEl = document.getElementById('blocksFound');
+                if (blocksFoundEl) blocksFoundEl.textContent = totalBlocksMined;
+
                 renderTransactions(transactions);
             } catch(e) {
                 console.error('Transaction refresh error:', e);
@@ -1448,7 +1453,7 @@
             }
         }
 
-        // Format timestamp for display
+        // Format timestamp for display - shows both relative and absolute time
         function formatTimestamp(unixTime) {
             if (!unixTime) return 'Pending';
             const date = new Date(unixTime * 1000);
@@ -1458,12 +1463,22 @@
             const diffHours = Math.floor(diffMs / 3600000);
             const diffDays = Math.floor(diffMs / 86400000);
 
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
-            if (diffDays < 7) return `${diffDays}d ago`;
+            // Format the absolute time
+            const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const dateStr = date.toLocaleDateString([], {month: 'short', day: 'numeric'});
 
-            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            // Combine relative and absolute
+            let relative;
+            if (diffMins < 1) relative = 'Just now';
+            else if (diffMins < 60) relative = `${diffMins}m ago`;
+            else if (diffHours < 24) relative = `${diffHours}h ago`;
+            else if (diffDays < 7) relative = `${diffDays}d ago`;
+            else relative = null;
+
+            if (relative) {
+                return `${relative} • ${dateStr} ${timeStr}`;
+            }
+            return `${dateStr} ${timeStr}`;
         }
 
         // Get full timestamp for tooltip

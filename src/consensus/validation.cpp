@@ -4,6 +4,8 @@
 #include <consensus/validation.h>
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
+#include <consensus/params.h>
+#include <core/chainparams.h>
 #include <crypto/sha3.h>
 #include <amount.h>
 #include <util/assert.h>
@@ -269,6 +271,82 @@ bool CBlockValidator::CheckCoinbase(
     // Coinbase value must not exceed subsidy + fees
     if (nCoinbaseValue > nMaxValue) {
         error = "Coinbase value exceeds subsidy + fees";
+        return false;
+    }
+
+    // =========================================================================
+    // Mining Development Contribution Validation (2% of subsidy)
+    // Every block must include outputs to Dev Fund and Dev Reward addresses
+    // NOTE: Only enforced on MAINNET - testnet blocks don't require tax outputs
+    // =========================================================================
+
+    // Skip mining tax validation on testnet (allows existing testnet chain to continue)
+    bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
+    if (isTestnet) {
+        return true;  // Testnet: no mining tax required
+    }
+
+    uint64_t nSubsidy = CalculateBlockSubsidy(nHeight);
+    uint64_t taxTotal = (nSubsidy * Consensus::MINING_TAX_PERCENT) / 100;
+    uint64_t requiredDevFund = (taxTotal * Consensus::DEV_FUND_SHARE) / 100;
+    uint64_t requiredDevReward = taxTotal - requiredDevFund;
+
+    // Must have at least 3 outputs (miner + dev fund + dev reward)
+    if (coinbase.vout.size() < 3) {
+        error = "Coinbase must have at least 3 outputs for mining development contribution";
+        return false;
+    }
+
+    // Helper to extract pubkey hash from P2PKH scriptPubKey
+    auto extractPubKeyHash = [](const std::vector<uint8_t>& script) -> std::vector<uint8_t> {
+        // P2PKH format: OP_DUP(0x76) OP_HASH160(0xa9) 0x14 <20 bytes> OP_EQUALVERIFY(0x88) OP_CHECKSIG(0xac)
+        if (script.size() == 25 &&
+            script[0] == 0x76 &&
+            script[1] == 0xa9 &&
+            script[2] == 0x14 &&
+            script[23] == 0x88 &&
+            script[24] == 0xac) {
+            return std::vector<uint8_t>(script.begin() + 3, script.begin() + 23);
+        }
+        return {};
+    };
+
+    bool foundDevFund = false;
+    bool foundDevReward = false;
+
+    for (const auto& out : coinbase.vout) {
+        std::vector<uint8_t> scriptHash = extractPubKeyHash(out.scriptPubKey);
+        if (scriptHash.size() != 20) continue;
+
+        // Check Dev Fund output
+        if (std::equal(scriptHash.begin(), scriptHash.end(),
+                       Consensus::DEV_FUND_PUBKEY_HASH)) {
+            if (out.nValue < static_cast<CAmount>(requiredDevFund)) {
+                error = "Dev Fund output insufficient: got " + std::to_string(out.nValue) +
+                        ", required " + std::to_string(requiredDevFund);
+                return false;
+            }
+            foundDevFund = true;
+        }
+
+        // Check Dev Reward output
+        if (std::equal(scriptHash.begin(), scriptHash.end(),
+                       Consensus::DEV_REWARD_PUBKEY_HASH)) {
+            if (out.nValue < static_cast<CAmount>(requiredDevReward)) {
+                error = "Dev Reward output insufficient: got " + std::to_string(out.nValue) +
+                        ", required " + std::to_string(requiredDevReward);
+                return false;
+            }
+            foundDevReward = true;
+        }
+    }
+
+    if (!foundDevFund) {
+        error = "Missing Dev Fund output in coinbase (address: DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC)";
+        return false;
+    }
+    if (!foundDevReward) {
+        error = "Missing Dev Reward output in coinbase (address: DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR)";
         return false;
     }
 

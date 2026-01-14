@@ -123,7 +123,7 @@
 <p><strong>Version 1.0</strong></p>
 <strong>October 2025</strong>
 
-<strong>Launch Date:</strong> January 1, 2026
+<strong>Launch Date:</strong> January 15, 2026
 
 <hr>
 
@@ -139,7 +139,7 @@
 <li><strong>Optimized consensus:</strong> 4-minute blocks for large signature propagation
 <li><strong>Fair distribution:</strong> No premine, pure proof-of-work launch
 <li><strong>Fixed supply:</strong> 21 million coins
-<li><strong>Launch:</strong> January 1, 2026, 00:00:00 UTC
+<li><strong>Launch:</strong> January 15, 2026, 00:00:00 UTC
 
 <hr>
 
@@ -160,6 +160,9 @@
 <li>[Technical Architecture](#3-technical-architecture)
 <li>[Consensus Mechanism](#4-consensus-mechanism)
 <li>[Economic Model](#5-economic-model)
+   <ul>
+   <li>5.5 Mining Development Contribution (2% mainnet tax)
+   </ul>
 <li>[Network Security](#6-network-security)
 <li>[Roadmap](#7-roadmap)
 <li>[Conclusion](#8-conclusion)
@@ -553,7 +556,60 @@
 <li><strong>Year 1-2:</strong> Monitor usage patterns and fee adequacy
 <li><strong>Year 2+:</strong> Implement dynamic fee market (EIP-1559 style consideration)
 
-<h3>5.5 Inflation Rate</h3>
+<h3>5.5 Mining Development Contribution (Mainnet Only)</h3>
+
+<p>To ensure sustainable long-term development and maintenance, Dilithion implements a <strong>2% mining development contribution</strong> on mainnet. This is NOT a premine—it is an ongoing, transparent allocation from block subsidies.</p>
+
+<strong>Structure:</strong>
+<li><strong>Total allocation:</strong> 2% of each block subsidy (NOT transaction fees)
+<li><strong>Dev Fund (1%):</strong> Long-term development, security audits, infrastructure
+<li><strong>Developer Reward (1%):</strong> Active contributor compensation
+<li><strong>Miner receives:</strong> 98% of block subsidy + 100% of transaction fees
+
+<strong>Example Calculation:</strong>
+<pre><code>
+Block Subsidy: 50 DIL (100%)
+├── Miner Reward:     49 DIL (98%)
+├── Dev Fund:         0.5 DIL (1%)
+└── Developer Reward: 0.5 DIL (1%)
+
+After First Halving (25 DIL subsidy):
+├── Miner Reward:     24.5 DIL (98%)
+├── Dev Fund:         0.25 DIL (1%)
+└── Developer Reward: 0.25 DIL (1%)
+</code></pre>
+
+<strong>Hardcoded Addresses:</strong>
+<li><strong>Dev Fund:</strong> DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC
+<li><strong>Developer Reward:</strong> DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR
+
+<strong>Consensus Enforcement:</strong>
+<p>All nodes validate that mined blocks include the correct development outputs at the correct amounts. Blocks without valid development outputs are rejected by the network.</p>
+
+<strong>Testnet Exception:</strong>
+<p>The mining development contribution is <strong>disabled on testnet</strong> to allow the existing testnet chain to continue operating and to simplify testing. Testnet miners receive 100% of block rewards.</p>
+
+<strong>Why 2%?</strong>
+<li><strong>Sustainable:</strong> Small enough to not discourage mining (98% to miners)
+<li><strong>Meaningful:</strong> Provides resources for professional development and security
+<li><strong>Transparent:</strong> Fixed addresses, verifiable on-chain
+<li><strong>Fair:</strong> No premine, no ICO—development funded by ongoing work
+<li><strong>Precedent:</strong> Similar to Zcash (20% founder's reward) but much smaller
+
+<strong>Annual Development Funding (Year 1 estimates):</strong>
+<pre><code>
+Blocks per year: ~131,400 (at 4-minute target)
+Average subsidy: 50 DIL (before halving)
+Dev contribution per block: 1 DIL total
+Annual dev funding: ~131,400 DIL
+
+At various DIL prices:
+  $0.10/DIL: ~$13,140/year
+  $1.00/DIL: ~$131,400/year
+  $10.00/DIL: ~$1,314,000/year
+</code></pre>
+
+<h3>5.6 Inflation Rate</h3>
 
 <p>| Year | Supply Start | Annual Emission | Supply End | Inflation Rate |</p>
 <p>|------|--------------|-----------------|------------|----------------|</p>
@@ -679,10 +735,10 @@
 
 <h2>7. Roadmap</h2>
 
-<h3>7.1 Genesis Launch (January 1, 2026)</h3>
+<h3>7.1 Genesis Launch (January 15, 2026)</h3>
 
 <strong>Launch Specifications:</strong>
-<li><strong>Genesis timestamp:</strong> January 1, 2026, 00:00:00 UTC
+<li><strong>Genesis timestamp:</strong> January 15, 2026, 00:00:00 UTC
 <li><strong>Initial difficulty:</strong> Bitcoin-equivalent (0x1d00ffff)
 <li><strong>First halving:</strong> Block 210,000 (~July 2027)
 <li><strong>Network:</strong> Mainnet with seed nodes
@@ -840,8 +896,16 @@
 <li>✅ Pure proof-of-work from genesis
 <li>✅ Open-source (MIT license)
 <li>✅ Community-driven development
+<li>✅ Transparent 2% development contribution (see Section 5.5)
 
-<strong>Everyone starts equal on January 1, 2026.</strong>
+<strong>Development Funding Transparency:</strong>
+<p>Unlike projects with large premines or founder allocations, Dilithion has ZERO coins at genesis. The 2% mining development contribution is:</p>
+<li>Earned through ongoing mining (not pre-allocated)
+<li>Hardcoded to fixed, public addresses
+<li>Verifiable on-chain by anyone
+<li>Much smaller than comparable projects (Zcash: 20%, Dash: 10%)
+
+<strong>Everyone starts equal on January 15, 2026.</strong>
 
 <h3>8.4 Long-term Vision</h3>
 
@@ -858,7 +922,7 @@
 <h3>8.5 Call to Action</h3>
 
 <strong>For Miners:</strong>
-<li>CPU mining opens January 1, 2026
+<li>CPU mining opens January 15, 2026
 <li>Fair distribution, no ASIC advantage
 <li>Early adoption opportunity
 
@@ -883,10 +947,11 @@
 
 <p>| Parameter | Value |</p>
 <p>|-----------|-------|</p>
-<p>| <strong>Launch Date</strong> | January 1, 2026, 00:00:00 UTC |</p>
+<p>| <strong>Launch Date</strong> | January 15, 2026, 00:00:00 UTC |</p>
 <p>| <strong>Total Supply</strong> | 21,000,000 DIL |</p>
 <p>| <strong>Block Time</strong> | 4 minutes (240 seconds) |</p>
-<p>| <strong>Block Reward</strong> | 50 DIL (halves every 210,000 blocks) |</p>
+<p>| <strong>Block Reward</strong> | 50 DIL (49 DIL to miner, 1 DIL dev contribution on mainnet) |</p>
+<p>| <strong>Mining Dev Contribution</strong> | 2% of subsidy (mainnet only): 1% dev fund + 1% dev reward |</p>
 <p>| <strong>Halving Interval</strong> | Every 210,000 blocks (~1.6 years) |</p>
 <p>| <strong>Signature Algorithm</strong> | CRYSTALS-Dilithium3 (NIST FIPS 204) |</p>
 <p>| <strong>Hash Algorithm</strong> | SHA-3-256 (NIST FIPS 202) |</p>
@@ -895,7 +960,7 @@
 <p>| <strong>Address Format</strong> | Dilithium3 public key hash (SHA-3) |</p>
 <p>| <strong>Transaction Fee</strong> | 0.0005 DIL base + 25 ions/byte |</p>
 <p>| <strong>Confirmations (typical)</strong> | 3-10 blocks (12-40 minutes) |</p>
-<p>| <strong>Genesis Block</strong> | Hardcoded, January 1, 2026 |</p>
+<p>| <strong>Genesis Block</strong> | Hardcoded, January 15, 2026 |</p>
 
 <hr>
 

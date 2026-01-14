@@ -378,7 +378,7 @@
                 <div class="feature-card">
                     <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-target"/></svg></div>
                     <h3>Fair Launch</h3>
-                    <p>No premine, no ICO, no VC allocation. 100% proof-of-work. Everyone starts equal on January 15, 2026.</p>
+                    <p>No premine, no ICO, no VC allocation. Pure proof-of-work with transparent 2% dev contribution. Everyone starts equal on January 15, 2026.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-cpu"/></svg></div>
@@ -394,6 +394,11 @@
                     <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-globe"/></svg></div>
                     <h3>Decentralized</h3>
                     <p>Fully peer-to-peer network. No central authority, no master nodes, no staking. Pure proof-of-work.</p>
+                </div>
+                <div class="feature-card" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(99, 102, 241, 0.3);">
+                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-code"/></svg></div>
+                    <h3>Sustainable Development</h3>
+                    <p>2% mining development contribution (mainnet only) funds ongoing development. Split 50/50 between dev fund and developer rewards. Miners keep 98%.</p>
                 </div>
             </div>
         </div>
@@ -716,7 +721,11 @@
                 </div>
                 <div class="spec-row">
                     <div class="spec-label">Initial Block Reward</div>
-                    <div class="spec-value">50 DIL</div>
+                    <div class="spec-value">50 DIL (49 DIL to miner on mainnet)</div>
+                </div>
+                <div class="spec-row">
+                    <div class="spec-label">Mining Dev Contribution</div>
+                    <div class="spec-value">2% of subsidy (mainnet only): 1% dev fund + 1% dev reward</div>
                 </div>
                 <div class="spec-row">
                     <div class="spec-label">Halving Period</div>
@@ -828,6 +837,28 @@
                         <p><strong>Halving:</strong> Every 210,000 blocks (~1.6 years with 4-minute blocks)</p>
                         <p><strong>Final halving:</strong> Around 2089 when block reward becomes negligible</p>
                         <p>This creates predictable, deflationary economics similar to Bitcoin's proven model.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>What is the 2% mining development contribution?</span>
+                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p><strong>On mainnet only</strong>, 2% of each block subsidy (NOT transaction fees) is allocated to fund ongoing development:</p>
+                        <ul>
+                            <li><strong>1% Dev Fund:</strong> Long-term development, security audits, infrastructure</li>
+                            <li><strong>1% Developer Reward:</strong> Active contributor compensation</li>
+                        </ul>
+                        <p><strong>Example:</strong> From a 50 DIL block reward, the miner receives 49 DIL (98%), while 0.5 DIL goes to the dev fund and 0.5 DIL to developer rewards.</p>
+                        <p><strong>Important:</strong> Testnet has no mining tax—miners receive 100% of block rewards during testing. This contribution only applies after mainnet launch on January 15, 2026.</p>
+                        <p><strong>Addresses:</strong></p>
+                        <ul>
+                            <li>Dev Fund: <code style="font-size: 0.85rem;">DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC</code></li>
+                            <li>Dev Reward: <code style="font-size: 0.85rem;">DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR</code></li>
+                        </ul>
+                        <p>These addresses are hardcoded in consensus rules—all nodes validate that blocks include the correct development outputs.</p>
                     </div>
                 </div>
 

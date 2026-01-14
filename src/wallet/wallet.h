@@ -33,6 +33,9 @@ static const size_t DILITHIUM_SIGNATURE_SIZE = 3309;
 // File format: [Magic][Version][Flags][HMAC][Salt][Data...]
 static const char WALLET_FILE_MAGIC_V3[] = "DILWLT03";
 static const uint32_t WALLET_FILE_VERSION_3 = 3;
+// v4: Added fCoinbase field to wallet transactions for tracking mining rewards
+static const char WALLET_FILE_MAGIC_V4[] = "DILWLT04";
+static const uint32_t WALLET_FILE_VERSION_4 = 4;
 static const size_t WALLET_FILE_HMAC_SIZE = 32;    // HMAC-SHA3-256 output
 static const size_t WALLET_FILE_SALT_SIZE = 32;    // Salt for HMAC
 static const size_t WALLET_FILE_HEADER_SIZE = 8 + 4 + 4 + 32 + 32;  // Magic + Version + Flags + HMAC + Salt = 80 bytes
@@ -174,9 +177,10 @@ struct CWalletTx {
     int64_t nValue;
     CDilithiumAddress address;
     bool fSpent;
+    bool fCoinbase;  // True if this is a coinbase (mining reward) output
     uint32_t nHeight;
 
-    CWalletTx() : vout(0), nValue(0), fSpent(false), nHeight(0) {}
+    CWalletTx() : vout(0), nValue(0), fSpent(false), fCoinbase(false), nHeight(0) {}
 };
 
 /**
@@ -311,7 +315,8 @@ private:
     bool IsCryptedUnlocked() const;  // BUG #56 FIX: Check encryption without lock (avoids deadlock in ValidateConsistency)
     // FIX-006 (WALLET-002): Internal helper to add UTXO without acquiring lock (avoids deadlock in ScanUTXOs)
     bool AddTxOutUnlocked(const uint256& txid, uint32_t vout, int64_t nValue,
-                          const CDilithiumAddress& address, uint32_t nHeight);
+                          const CDilithiumAddress& address, uint32_t nHeight,
+                          bool fCoinbase = false);
 
     // HD wallet private helpers - assume caller already holds cs_wallet lock
     bool DeriveAndCacheHDAddress(const CHDKeyPath& path);
@@ -434,9 +439,11 @@ public:
 
     /**
      * Add a transaction output to the wallet
+     * @param fCoinbase True if this is a coinbase (mining reward) output
      */
     bool AddTxOut(const uint256& txid, uint32_t vout, int64_t nValue,
-                  const CDilithiumAddress& address, uint32_t nHeight);
+                  const CDilithiumAddress& address, uint32_t nHeight,
+                  bool fCoinbase = false);
 
     /**
      * Mark a transaction output as spent
