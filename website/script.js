@@ -9,7 +9,7 @@ const MAINNET_LAUNCH_DATE = 1768435200000; // Jan 15, 2026 00:00:00 UTC
 const RPC_ENDPOINT = 'http://localhost:8332';
 const API_ENDPOINT = '/api/stats.php'; // PHP proxy to backend nodes
 const STATS_JSON_URL = 'https://dilithion.org/network-stats.json';
-const UPDATE_INTERVAL = 5000; // 5 seconds for live testnet updates
+const UPDATE_INTERVAL = 5000; // 5 seconds for live network updates
 
 // State
 let isNetworkLive = false;

@@ -18,22 +18,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // Seed node configuration
-// Note: Testnet uses port 18334, mainnet uses 8334
+// Mainnet uses port 8334 for API (RPC port 8332, P2P port 8444)
 $seedNodes = [
     'nyc' => [
         'name' => 'NYC (Primary)',
-        'ip' => '134.122.4.164',
-        'api_port' => 18334
-    ],
-    'sgp' => [
-        'name' => 'Singapore',
-        'ip' => '188.166.255.63',
-        'api_port' => 18334
+        'ip' => '138.197.68.128',
+        'api_port' => 8334
     ],
     'ldn' => [
         'name' => 'London',
-        'ip' => '209.97.177.197',
-        'api_port' => 18334
+        'ip' => '167.172.56.119',
+        'api_port' => 8334
+    ],
+    'sgp' => [
+        'name' => 'Singapore',
+        'ip' => '165.22.103.114',
+        'api_port' => 8334
+    ],
+    'syd' => [
+        'name' => 'Sydney',
+        'ip' => '134.199.159.83',
+        'api_port' => 8334
     ]
 ];
 

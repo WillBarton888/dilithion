@@ -1,16 +1,14 @@
 {
-  "timestamp": "2025-11-08T01:55:00Z",
-  "network": "testnet",
-  "blockHeight": 11,
-  "difficulty": 393216,
-  "networkHashRate": 30,
-  "totalSupply": 550,
+  "timestamp": "2026-01-15T00:00:00Z",
+  "network": "mainnet",
+  "blockHeight": 0,
+  "difficulty": 524287,
+  "networkHashRate": 0,
+  "totalSupply": 0,
   "blockReward": 50,
-  "blocksUntilHalving": 209989,
-  "peerCount": 4,
+  "blocksUntilHalving": 210000,
+  "peerCount": 0,
   "averageBlockTime": 240,
   "status": "live",
-  "asyncBroadcasts": 11,
-  "asyncSuccessRate": "100%",
-  "asyncValidation": "COMPLETE"
+  "genesisHash": "37435a5433945e1ad37e910198c7361f10f7a2e2b07857ca9cef6a685e91cf0a"
 }
