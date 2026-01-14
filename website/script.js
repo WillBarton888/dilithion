@@ -24,10 +24,11 @@ function updateCountdown() {
 
     // If countdown is finished
     if (distance < 0) {
-        document.getElementById('days').textContent = '00';
-        document.getElementById('hours').textContent = '00';
-        document.getElementById('minutes').textContent = '00';
-        document.getElementById('seconds').textContent = '00';
+        // Hide countdown timer and show "LIVE" message
+        const countdownContainer = document.querySelector('.countdown');
+        if (countdownContainer) {
+            countdownContainer.innerHTML = '<div class="mainnet-live-banner"><h2>MAINNET IS LIVE!</h2><p>Start mining now - download below</p></div>';
+        }
 
         // Update status to live
         updateNetworkStatus(true);
@@ -59,13 +60,20 @@ function updateNetworkStatus(live) {
     isNetworkLive = live;
     const statusDot = document.getElementById('status-dot');
     const statusText = document.getElementById('status-text');
+    const now = new Date().getTime();
+    const mainnetLive = now >= MAINNET_LAUNCH_DATE;
 
-    if (live) {
+    if (mainnetLive) {
+        // Mainnet is live
         statusDot.classList.add('live');
-        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 15, 2026';
+        statusText.textContent = 'MAINNET IS LIVE';
+    } else if (live) {
+        // Testnet only
+        statusDot.classList.add('live');
+        statusText.textContent = 'Testnet: LIVE | Mainnet: January 15, 2026';
     } else {
         statusDot.classList.remove('live');
-        statusText.textContent = 'Testnet: LIVE NOW | Mainnet: January 15, 2026';
+        statusText.textContent = 'Coming Soon';
     }
 }
 
@@ -294,9 +302,10 @@ function updateDashboardFromStats(stats) {
  */
 function updateSeedNodePanels(nodes) {
     const nodeMapping = {
-        'nyc': { ip: '134.122.4.164', prefix: 'nyc' },
-        'sgp': { ip: '188.166.255.63', prefix: 'sgp' },
-        'ldn': { ip: '209.97.177.197', prefix: 'ldn' }
+        'nyc': { ip: '138.197.68.128', prefix: 'nyc' },
+        'ldn': { ip: '167.172.56.119', prefix: 'ldn' },
+        'sgp': { ip: '165.22.103.114', prefix: 'sgp' },
+        'syd': { ip: '134.199.159.83', prefix: 'syd' }
     };
 
     for (const [nodeId, config] of Object.entries(nodeMapping)) {
@@ -464,19 +473,19 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize smooth scrolling
     initSmoothScroll();
 
-    // Check if testnet is already live (separate from mainnet countdown)
+    // Check network status and start dashboard
     const now = new Date().getTime();
-    if (now >= TESTNET_LAUNCH_DATE) {
-        // Testnet is live - start showing stats immediately
+    if (now >= MAINNET_LAUNCH_DATE) {
+        // Mainnet is live - show mainnet status
+        updateNetworkStatus(true);
+        startDashboardUpdates();
+    } else if (now >= TESTNET_LAUNCH_DATE) {
+        // Testnet is live but mainnet not yet
         updateNetworkStatus(true);
         startDashboardUpdates();
     } else {
-        // Schedule dashboard start for testnet launch time
-        const timeUntilLaunch = TESTNET_LAUNCH_DATE - now;
-        setTimeout(() => {
-            updateNetworkStatus(true);
-            startDashboardUpdates();
-        }, timeUntilLaunch);
+        // Neither network is live yet
+        updateNetworkStatus(false);
     }
 });
 
