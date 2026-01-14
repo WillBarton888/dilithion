@@ -1318,6 +1318,12 @@ void CIbdCoordinator::SwitchHeadersSyncPeer() {
     if (m_headers_sync_peer != -1 && m_headers_sync_peer != old_peer) {
         std::cout << "[IBD] Switched headers sync peer: " << old_peer
                   << " -> " << m_headers_sync_peer << std::endl;
+
+        // BUG #195 FIX: Clear pending sync state when switching peers after a stall.
+        // This ensures the new request uses our validated tip (hashBestHeader) instead of
+        // a stale m_last_request_hash that the new peer may not recognize.
+        m_node_context.headers_manager->ClearPendingSync();
+
         // SSOT: Request headers via single entry point
         // BUG FIX: Use best_known_height for dynamic peer height
         auto new_peer = m_node_context.peer_manager ? m_node_context.peer_manager->GetPeer(m_headers_sync_peer) : nullptr;

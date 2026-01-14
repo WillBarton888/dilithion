@@ -819,6 +819,25 @@ bool CHeadersManager::IsHeaderSyncInProgress() const
     return !m_last_request_hash.IsNull();
 }
 
+void CHeadersManager::ClearPendingSync()
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    // Bug #195 FIX: Clear request tracking state when switching peers after a stall.
+    // This allows the next SyncHeadersFromPeer() call to:
+    // 1. Use hashBestHeader (our validated tip) instead of stale m_last_request_hash
+    // 2. Pass the dedup check (m_last_sent_locator_hash won't match the new locator)
+    // 3. Make IsHeaderSyncInProgress() return false until new headers arrive
+
+    if (!m_last_request_hash.IsNull()) {
+        std::cout << "[HeadersManager] Clearing pending sync state (was: "
+                  << m_last_request_hash.GetHex().substr(0, 16) << "...)" << std::endl;
+    }
+
+    m_last_request_hash = uint256();
+    m_last_sent_locator_hash = uint256();
+}
+
 bool CHeadersManager::GetHeader(const uint256& hash, CBlockHeader& header) const
 {
     std::lock_guard<std::mutex> lock(cs_headers);

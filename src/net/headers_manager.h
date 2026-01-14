@@ -291,6 +291,17 @@ public:
     bool IsHeaderSyncInProgress() const;
 
     /**
+     * @brief Clear pending header sync state (Bug #195 fix)
+     *
+     * Called when switching header sync peers after a stall. Clears m_last_request_hash
+     * and m_last_sent_locator_hash so that:
+     * 1. IsHeaderSyncInProgress() returns false
+     * 2. Next SyncHeadersFromPeer() uses hashBestHeader (our validated tip)
+     * 3. Dedup check doesn't block the new request
+     */
+    void ClearPendingSync();
+
+    /**
      * @brief Get highest header height we've REQUESTED (not yet received/validated)
      *
      * Used for header prefetch pipeline - request next batch before current completes.
