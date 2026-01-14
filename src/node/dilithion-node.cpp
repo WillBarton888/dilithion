@@ -465,10 +465,10 @@ struct NodeConfig {
         std::cout << "  Testnet:  datadir=.dilithion-testnet port=18444 rpcport=18332" << std::endl;
         std::cout << std::endl;
         std::cout << "Examples:" << std::endl;
-        std::cout << "  " << program << "                                                    (Quick start testnet)" << std::endl;
-        std::cout << "  " << program << " --testnet --mine --threads=auto                     (Same as above)" << std::endl;
-        std::cout << "  " << program << " --testnet --addnode=134.122.4.164:18444 --mine     (Connect to seed)" << std::endl;
-        std::cout << "  " << program << " --testnet --mine --threads=4                        (4 CPU cores)" << std::endl;
+        std::cout << "  " << program << "                                                    (Quick start mainnet)" << std::endl;
+        std::cout << "  " << program << " --mine --threads=auto                               (Mainnet mining)" << std::endl;
+        std::cout << "  " << program << " --testnet --mine                                    (Testnet mining)" << std::endl;
+        std::cout << "  " << program << " --testnet --addnode=134.122.4.164:18444 --mine     (Testnet with seed)" << std::endl;
         std::cout << std::endl;
         std::cout << "Post-Quantum Security Stack:" << std::endl;
         std::cout << "  Mining:      RandomX (CPU-friendly, ASIC-resistant)" << std::endl;
@@ -882,18 +882,19 @@ int main(int argc, char* argv[]) {
     NodeConfig config;
 
     if (quick_start_mode) {
-        // Smart defaults for crypto novices
+        // Smart defaults - MAINNET by default
         std::cout << "\033[1;32m" << std::endl;  // Green bold
         std::cout << "======================================" << std::endl;
         std::cout << "  DILITHION QUICK START MODE" << std::endl;
         std::cout << "======================================" << std::endl;
         std::cout << "\033[0m" << std::endl;  // Reset color
-        std::cout << "No arguments detected - using beginner-friendly defaults:" << std::endl;
-        std::cout << "  • Testnet:    ENABLED (coins have no value)" << std::endl;
-        std::cout << "  • Seed node:  134.122.4.164:18444 (NYC - official)" << std::endl;
+        std::cout << "No arguments detected - using defaults:" << std::endl;
+        std::cout << "  • Network:    MAINNET (real coins with value)" << std::endl;
+        std::cout << "  • Seed node:  138.197.68.128:8444 (NYC - official)" << std::endl;
         std::cout << "  • Mining:     ENABLED" << std::endl;
         std::cout << "  • Threads:    AUTO-DETECT (50-75% of your CPU)" << std::endl;
         std::cout << std::endl;
+        std::cout << "For testnet (practice coins), run: " << argv[0] << " --testnet" << std::endl;
         std::cout << "To customize settings, run: " << argv[0] << " --help" << std::endl;
         std::cout << "To stop mining anytime: Press Ctrl+C" << std::endl;
         std::cout << std::endl;
@@ -901,11 +902,11 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::seconds(3));
         std::cout << std::endl;
 
-        // Apply smart defaults
-        config.testnet = true;
+        // Apply smart defaults - MAINNET
+        config.testnet = false;
         config.start_mining = true;
         config.mining_threads = 0;  // 0 = auto-detect
-        config.add_nodes.push_back("134.122.4.164:18444");  // NYC seed node
+        config.add_nodes.push_back("138.197.68.128:8444");  // NYC mainnet seed node
     }
     else if (!config.ParseArgs(argc, argv)) {
         config.PrintUsage(argv[0]);
