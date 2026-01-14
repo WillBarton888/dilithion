@@ -702,12 +702,14 @@
                             </svg>
                             <span id="miningBtnText">Start Mining</span>
                         </button>
-                        <select id="miningThreads" class="form-input" style="width: auto; padding: 8px 12px;">
-                            <option value="1">1 Thread</option>
+                        <select id="miningThreads" class="form-input" style="width: auto; padding: 8px 12px;" onchange="handleThreadChange()">
                             <option value="2">2 Threads</option>
                             <option value="4" selected>4 Threads</option>
                             <option value="8">8 Threads</option>
+                            <option value="max">Maximum</option>
+                            <option value="custom">Custom...</option>
                         </select>
+                        <input type="number" id="customThreads" class="form-input" style="width: 70px; padding: 8px 12px; display: none;" min="1" max="64" placeholder="#">
                     </div>
                     <div class="info-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         <div class="info-item">
@@ -1330,6 +1332,35 @@
             return '~' + Math.round(secondsToBlock / 86400) + ' days';
         }
 
+        // Handle thread selector change
+        function handleThreadChange() {
+            const select = document.getElementById('miningThreads');
+            const customInput = document.getElementById('customThreads');
+
+            if (select.value === 'custom') {
+                customInput.style.display = 'inline-block';
+                customInput.focus();
+            } else {
+                customInput.style.display = 'none';
+            }
+        }
+
+        // Get selected thread count
+        function getSelectedThreads() {
+            const select = document.getElementById('miningThreads');
+            const customInput = document.getElementById('customThreads');
+
+            if (select.value === 'max') {
+                // Use all available CPU cores
+                return navigator.hardwareConcurrency || 4;
+            } else if (select.value === 'custom') {
+                const custom = parseInt(customInput.value);
+                return (custom > 0 && custom <= 64) ? custom : 4;
+            } else {
+                return parseInt(select.value) || 4;
+            }
+        }
+
         // Toggle mining on/off
         async function toggleMining() {
             const btn = document.getElementById('miningToggle');
@@ -1343,8 +1374,9 @@
                     await rpcCall('stopmining');
                 } else {
                     // Start mining with selected threads
-                    const threads = parseInt(document.getElementById('miningThreads').value) || 4;
+                    const threads = getSelectedThreads();
                     btnText.textContent = 'Starting...';
+                    console.log('[Mining] Starting with', threads, 'threads');
                     await rpcCall('startmining', { threads: threads });
                 }
                 // Refresh to get new status
