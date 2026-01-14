@@ -293,6 +293,7 @@ struct NodeConfig {
     bool start_mining = false;
     int mining_threads = 0;         // 0 = auto-detect
     std::string mining_address_override = "";  // --mining-address=Dxxx (empty = use wallet)
+    std::string restore_mnemonic = "";        // --restore-mnemonic="word1 word2..." (restore wallet from seed)
     std::vector<std::string> connect_nodes;  // --connect nodes (exclusive)
     std::vector<std::string> add_nodes;      // --addnode nodes (additional)
     bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
@@ -391,6 +392,20 @@ struct NodeConfig {
                     return false;
                 }
             }
+            else if (arg.find("--restore-mnemonic=") == 0) {
+                restore_mnemonic = arg.substr(19);
+                // Basic validation: should have 24 words
+                std::istringstream iss(restore_mnemonic);
+                std::vector<std::string> words;
+                std::string word;
+                while (iss >> word) {
+                    words.push_back(word);
+                }
+                if (words.size() != 24) {
+                    std::cerr << "Error: Recovery phrase must be exactly 24 words (got " << words.size() << ")" << std::endl;
+                    return false;
+                }
+            }
             else if (arg == "--reindex" || arg == "-reindex") {
                 // Phase 4.2: Rebuild block index from blocks on disk
                 reindex = true;
@@ -436,6 +451,7 @@ struct NodeConfig {
         std::cout << "  --mine                Start mining automatically" << std::endl;
         std::cout << "  --threads=<n|auto>    Mining threads (number or 'auto' to detect)" << std::endl;
         std::cout << "  --mining-address=<addr> Send mining rewards to this address" << std::endl;
+        std::cout << "  --restore-mnemonic=\"words\" Restore wallet from 24-word recovery phrase" << std::endl;
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
@@ -705,11 +721,79 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         }
     }
 
-    // Coinbase output (reward to miner = subsidy + fees)
-    CTxOut coinbaseOut;
-    coinbaseOut.nValue = nSubsidy + static_cast<int64_t>(totalFees);
-    coinbaseOut.scriptPubKey = WalletCrypto::CreateScriptPubKey(minerPubKeyHash);
-    coinbaseTx.vout.push_back(coinbaseOut);
+    // =========================================================================
+    // Mining Development Contribution (2% of subsidy, MAINNET ONLY)
+    // - Dev Fund:   1% of subsidy (infrastructure, audits, community)
+    // - Dev Reward: 1% of subsidy (core developer compensation)
+    // - Miner:      98% of subsidy + 100% of fees (mainnet)
+    //               100% of subsidy + 100% of fees (testnet)
+    // =========================================================================
+    bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
+
+    int64_t minerAmount = nSubsidy;
+    int64_t devFundAmount = 0;
+    int64_t devRewardAmount = 0;
+
+    if (!isTestnet) {
+        // MAINNET: Apply 2% mining tax (split 50/50 between dev fund and dev reward)
+        int64_t taxTotal = (nSubsidy * Consensus::MINING_TAX_PERCENT) / 100;
+        devFundAmount = (taxTotal * Consensus::DEV_FUND_SHARE) / 100;
+        devRewardAmount = taxTotal - devFundAmount;  // Remainder avoids rounding loss
+        minerAmount = nSubsidy - taxTotal;
+
+        std::cout << "[Mining] Mainnet tax: subsidy=" << nSubsidy
+                  << " miner=" << minerAmount
+                  << " devFund=" << devFundAmount
+                  << " devReward=" << devRewardAmount << std::endl;
+    }
+
+    // Add fees to miner amount (miner gets 100% of fees regardless of network)
+    minerAmount += static_cast<int64_t>(totalFees);
+
+    // OUTPUT 0: Miner reward
+    CTxOut minerOut;
+    minerOut.nValue = minerAmount;
+    minerOut.scriptPubKey = WalletCrypto::CreateScriptPubKey(minerPubKeyHash);
+    coinbaseTx.vout.push_back(minerOut);
+
+    // MAINNET ONLY: Add dev fund and dev reward outputs
+    if (!isTestnet && devFundAmount > 0) {
+        // OUTPUT 1: Dev Fund (1% of subsidy) -> DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC
+        CTxOut devFundOut;
+        devFundOut.nValue = devFundAmount;
+        std::vector<uint8_t> devFundScript;
+        devFundScript.push_back(0x76);  // OP_DUP
+        devFundScript.push_back(0xa9);  // OP_HASH160
+        devFundScript.push_back(0x14);  // Push 20 bytes
+        devFundScript.insert(devFundScript.end(),
+            Consensus::DEV_FUND_PUBKEY_HASH,
+            Consensus::DEV_FUND_PUBKEY_HASH + 20);
+        devFundScript.push_back(0x88);  // OP_EQUALVERIFY
+        devFundScript.push_back(0xac);  // OP_CHECKSIG
+        devFundOut.scriptPubKey = devFundScript;
+        coinbaseTx.vout.push_back(devFundOut);
+
+        // OUTPUT 2: Dev Reward (1% of subsidy) -> DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR
+        CTxOut devRewardOut;
+        devRewardOut.nValue = devRewardAmount;
+        std::vector<uint8_t> devRewardScript;
+        devRewardScript.push_back(0x76);  // OP_DUP
+        devRewardScript.push_back(0xa9);  // OP_HASH160
+        devRewardScript.push_back(0x14);  // Push 20 bytes
+        devRewardScript.insert(devRewardScript.end(),
+            Consensus::DEV_REWARD_PUBKEY_HASH,
+            Consensus::DEV_REWARD_PUBKEY_HASH + 20);
+        devRewardScript.push_back(0x88);  // OP_EQUALVERIFY
+        devRewardScript.push_back(0xac);  // OP_CHECKSIG
+        devRewardOut.scriptPubKey = devRewardScript;
+        coinbaseTx.vout.push_back(devRewardOut);
+
+        std::cout << "[Mining] Coinbase outputs: " << coinbaseTx.vout.size()
+                  << " (miner=" << minerAmount/100000000.0
+                  << " DIL, devFund=" << devFundAmount/100000000.0
+                  << " DIL -> DL7XM8..., devReward=" << devRewardAmount/100000000.0
+                  << " DIL -> DLcWZk...)" << std::endl;
+    }
 
     // Store coinbase transaction globally for callback access
     {
@@ -2503,8 +2587,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  No existing wallet found, creating new one" << std::endl;
         }
 
-        // Generate HD wallet if wallet is empty (new wallet creation)
+        // Generate HD wallet if wallet is empty (new wallet creation) or restore from mnemonic
         if (wallet.GetAddresses().empty()) {
+            // Check if restoring from mnemonic
+            if (!config.restore_mnemonic.empty()) {
+                std::cout << "  Restoring wallet from provided recovery phrase..." << std::endl;
+                if (wallet.InitializeHDWallet(config.restore_mnemonic, "")) {
+                    std::cout << "  [OK] Wallet restored successfully from recovery phrase!" << std::endl;
+
+                    // Generate and display first receiving address
+                    CDilithiumAddress addr = wallet.GetNewHDAddress();
+                    std::string addrStr = addr.ToString();
+                    std::cout << "  First address from restored wallet: " << addrStr << std::endl;
+                    std::cout << std::endl;
+                } else {
+                    std::cerr << "  ERROR: Failed to restore wallet from mnemonic" << std::endl;
+                    std::cerr << "  Please check that your recovery phrase is correct" << std::endl;
+                    return 1;
+                }
+            } else {
             std::cout << "  Generating HD wallet with 24-word recovery phrase..." << std::endl;
             std::string mnemonic;
             if (wallet.GenerateHDWallet(mnemonic, "")) {
@@ -2628,6 +2729,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 CDilithiumAddress addr = wallet.GetNewAddress();
                 std::cout << "  [OK] Initial address (legacy): " << addr.ToString() << std::endl;
             }
+            }  // end else (not restore mode)
         }
 
         // Enable auto-save (CRITICAL: must be done after Load or key generation)

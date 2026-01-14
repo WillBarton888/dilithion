@@ -52,6 +52,7 @@ void CRPCPermissions::InitializeMethodPermissions() {
     m_methodPermissions["listtransactions"]   = readWallet;
     m_methodPermissions["gethdwalletinfo"]    = readWallet;
     m_methodPermissions["listhdaddresses"]    = readWallet;
+    m_methodPermissions["rescanwallet"]       = readWallet;
 
     // ========================================================================
     // Mempool Read Methods (READ_MEMPOOL = 0x0004)

@@ -36,6 +36,31 @@ static const int SUBSIDY_HALVING_BITS = 64;
 static const unsigned int COINBASE_MATURITY = 100;
 
 //==============================================================================
+// Mining Development Contribution (2% of block subsidy)
+//==============================================================================
+
+/** Mining tax percentage (2% of block subsidy, NOT fees) */
+static const uint64_t MINING_TAX_PERCENT = 2;
+
+/** Dev Fund share of tax (50% of 2% = 1% of subsidy) */
+static const uint64_t DEV_FUND_SHARE = 50;
+
+/** Developer Reward share of tax (50% of 2% = 1% of subsidy) */
+static const uint64_t DEV_REWARD_SHARE = 50;
+
+/** Dev Fund pubkey hash (20 bytes) - Address: DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC */
+static const uint8_t DEV_FUND_PUBKEY_HASH[20] = {
+    0xa4, 0x3d, 0xc3, 0x78, 0xcc, 0xde, 0x4f, 0xe3, 0xcd, 0xf5,
+    0xa7, 0xa5, 0xa7, 0x9f, 0xb3, 0xab, 0x8d, 0x38, 0x68, 0x25
+};
+
+/** Developer Reward pubkey hash (20 bytes) - Address: DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR */
+static const uint8_t DEV_REWARD_PUBKEY_HASH[20] = {
+    0xa9, 0xb9, 0x2c, 0x66, 0xac, 0x90, 0x96, 0x5a, 0x2c, 0xc2,
+    0x3c, 0x06, 0x10, 0xdd, 0xa4, 0xaf, 0x2b, 0x6b, 0x3e, 0x7a
+};
+
+//==============================================================================
 // Network Protocol Limits
 //==============================================================================
 

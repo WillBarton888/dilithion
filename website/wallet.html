@@ -642,11 +642,12 @@
             </div>
         </div>
 
-        <div class="connection-status">
+        <div class="connection-status" style="cursor: pointer;" onclick="navigateTo('settings')" title="Click to configure connection">
             <div class="status-indicator">
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Connecting...</span>
             </div>
+            <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); connect();">Reconnect</button>
         </div>
     </nav>
 
@@ -683,23 +684,80 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-title">Quick Actions</div>
-                <div style="display: flex; gap: 12px;">
-                    <button class="btn btn-primary" onclick="navigateTo('send')">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            <div class="cards-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <!-- Mining Card -->
+                <div class="card">
+                    <div class="card-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px; vertical-align: middle;">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                            <path d="M2 17l10 5 10-5"></path>
+                            <path d="M2 12l10 5 10-5"></path>
                         </svg>
-                        Send DIL
-                    </button>
-                    <button class="btn btn-secondary" onclick="navigateTo('receive')">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
-                            <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path>
-                        </svg>
-                        Receive DIL
-                    </button>
+                        Mining
+                    </div>
+                    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                        <button id="miningToggle" class="btn btn-primary" onclick="toggleMining()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                            <span id="miningBtnText">Start Mining</span>
+                        </button>
+                        <select id="miningThreads" class="form-input" style="width: auto; padding: 8px 12px;">
+                            <option value="1">1 Thread</option>
+                            <option value="2">2 Threads</option>
+                            <option value="4" selected>4 Threads</option>
+                            <option value="8">8 Threads</option>
+                        </select>
+                    </div>
+                    <div class="info-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Status</span>
+                            <span class="info-value" style="display: flex; align-items: center; gap: 6px;">
+                                <span id="miningStatusDot" class="status-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #666;"></span>
+                                <span id="miningStatus">Stopped</span>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Hash Rate</span>
+                            <span class="info-value" id="dashHashRate">0 H/s</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Blocks Found</span>
+                            <span class="info-value" id="blocksFound">0</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label" style="color: #888; font-size: 12px;">Est. Time to Block</span>
+                            <span class="info-value" id="etaToBlock">N/A</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions Card -->
+                <div class="card">
+                    <div class="card-title">Quick Actions</div>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <button class="btn btn-primary" onclick="navigateTo('send')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                            Send DIL
+                        </button>
+                        <button class="btn btn-secondary" onclick="navigateTo('receive')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+                                <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path>
+                            </svg>
+                            Receive DIL
+                        </button>
+                        <button class="btn btn-secondary" onclick="rescanWallet()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                            </svg>
+                            <span id="rescanBtnText">Rescan Wallet</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -761,7 +819,12 @@
                 <div class="qr-container">
                     <canvas id="qrcode"></canvas>
                 </div>
-                <button class="btn btn-secondary" onclick="generateNewAddress()" style="width: 100%;">
+                <div style="margin-top: 16px; display: flex; gap: 8px;">
+                    <input type="text" class="form-input" id="addressLabelInput" placeholder="Add a label (e.g., 'Mining Rewards')" style="flex: 1;">
+                    <button class="btn btn-secondary" onclick="saveCurrentAddressLabel()">Save Label</button>
+                </div>
+                <div id="currentAddressLabel" style="margin-top: 8px; color: #888; font-size: 12px;"></div>
+                <button class="btn btn-secondary" onclick="generateNewAddress()" style="width: 100%; margin-top: 12px;">
                     Generate New Address
                 </button>
             </div>
@@ -945,6 +1008,7 @@
                 <div class="form-group">
                     <label class="form-label">RPC Port</label>
                     <input type="number" class="form-input" id="rpcPort" value="8332">
+                    <small style="color: var(--text-muted); font-size: 0.75rem;">Mainnet: 8332, Testnet: 18332</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">RPC Username (optional)</label>
@@ -958,14 +1022,29 @@
             </div>
 
             <div class="card">
+                <div class="card-title">Connection Help</div>
+                <p style="color: var(--text-secondary); margin-bottom: 12px;">
+                    This wallet connects to your local Dilithion node via RPC.
+                </p>
+                <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">
+                    <strong>To start your node:</strong>
+                </p>
+                <code style="display: block; background: var(--bg-darker); padding: 12px; border-radius: 6px; font-size: 0.8rem; color: var(--accent); margin-bottom: 12px; overflow-x: auto;">
+                    # Mainnet<br>
+                    dilithion-node --port=8444 --rpcport=8332<br><br>
+                    # Testnet<br>
+                    dilithion-node --testnet --port=18444 --rpcport=18332
+                </code>
+                <p style="font-size: 0.875rem; color: var(--text-muted);">
+                    The wallet will automatically connect once the node is running.
+                </p>
+            </div>
+
+            <div class="card">
                 <div class="card-title">About</div>
                 <p style="color: var(--text-secondary); margin-bottom: 12px;">
                     Dilithion Web Wallet v1.0.0<br>
                     Post-quantum secure cryptocurrency
-                </p>
-                <p style="font-size: 0.875rem; color: var(--text-muted);">
-                    This wallet connects to your local Dilithion node.
-                    Make sure your node is running with RPC enabled (--rpc flag).
                 </p>
             </div>
         </div>
@@ -976,7 +1055,7 @@
         let connected = false;
         let rpcConfig = {
             host: '127.0.0.1',
-            port: 18332,  // Testnet RPC port (mainnet: 8332)
+            port: 8332,  // Mainnet RPC port (testnet: 18332)
             user: '',
             pass: ''
         };
@@ -1005,7 +1084,7 @@
             connect();
         }
 
-        // RPC Call
+        // RPC Call with timeout
         async function rpcCall(method, params = []) {
             const url = `http://${rpcConfig.host}:${rpcConfig.port}/`;
             const headers = {
@@ -1017,22 +1096,52 @@
                 headers['Authorization'] = 'Basic ' + btoa(rpcConfig.user + ':' + rpcConfig.pass);
             }
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: Date.now(),
-                    method: method,
-                    params: params
-                })
-            });
+            // Retry logic with exponential backoff for connection errors
+            const maxRetries = 3;
+            let lastError = null;
 
-            const data = await response.json();
-            if (data.error) {
-                throw new Error(data.error.message || 'RPC Error');
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: headers,
+                        signal: controller.signal,
+                        body: JSON.stringify({
+                            jsonrpc: '2.0',
+                            id: Date.now(),
+                            method: method,
+                            params: params
+                        })
+                    });
+                    clearTimeout(timeoutId);
+
+                    const data = await response.json();
+                    if (data.error) {
+                        throw new Error(data.error.message || 'RPC Error');
+                    }
+                    return data.result;
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    lastError = e;
+
+                    // Don't retry on timeout or RPC errors, only connection errors
+                    if (e.name === 'AbortError') {
+                        throw new Error('Request timed out');
+                    }
+                    if (e.message && !e.message.includes('fetch')) {
+                        throw e;  // RPC error, don't retry
+                    }
+
+                    // Wait before retry (exponential backoff: 100ms, 200ms, 400ms)
+                    if (attempt < maxRetries - 1) {
+                        await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt)));
+                    }
+                }
             }
-            return data.result;
+            throw lastError || new Error('Connection failed after retries');
         }
 
         // Update connection status
@@ -1040,13 +1149,19 @@
             connected = isConnected;
             const dot = document.getElementById('statusDot');
             const statusText = document.getElementById('statusText');
+            const reconnectBtn = document.getElementById('reconnectBtn');
 
             if (isConnected) {
                 dot.classList.add('connected');
                 statusText.textContent = text || 'Connected';
+                if (reconnectBtn) reconnectBtn.style.display = 'none';
             } else {
                 dot.classList.remove('connected');
                 statusText.textContent = text || 'Disconnected';
+                // Show reconnect button when disconnected (but not during initial connecting)
+                if (reconnectBtn && text !== 'Connecting...') {
+                    reconnectBtn.style.display = 'block';
+                }
             }
         }
 
@@ -1063,15 +1178,17 @@
             }
         }
 
-        // Refresh all data
+        // Refresh all data (serialized to prevent connection overload)
         async function refreshAll() {
             if (!connected) return;
+            const wait = () => new Promise(r => setTimeout(r, 200));  // 200ms between function calls
             try {
-                await Promise.all([
-                    refreshBalance(),
-                    refreshBlockchainInfo(),
-                    refreshTransactions()
-                ]);
+                // Serialize requests with delays to prevent server socket issues
+                await refreshBalance();
+                await wait();
+                await refreshBlockchainInfo();
+                await wait();
+                await refreshTransactions();
             } catch(e) {
                 console.error('Refresh error:', e);
             }
@@ -1098,12 +1215,15 @@
 
         // Refresh blockchain info
         async function refreshBlockchainInfo() {
+            const wait = () => new Promise(r => setTimeout(r, 150));  // 150ms delay between calls
             try {
                 const info = await rpcCall('getblockchaininfo');
                 document.getElementById('networkName').textContent = info.chain || 'Unknown';
                 document.getElementById('blockHeight').textContent = info.blocks?.toLocaleString() || '-';
                 document.getElementById('bestBlock').textContent = info.bestblockhash || '-';
                 document.getElementById('difficulty').textContent = info.difficulty?.toFixed(6) || '-';
+
+                await wait();  // Delay before next RPC call
 
                 // Peer info
                 try {
@@ -1117,12 +1237,17 @@
                     document.getElementById('peerCount').textContent = '-';
                 }
 
+                await wait();  // Delay before next RPC call
+
                 // Mining info
                 try {
                     const mining = await rpcCall('getmininginfo');
                     document.getElementById('miningActive').textContent = mining.mining ? 'Yes' : 'No';
                     document.getElementById('hashRate').textContent = mining.hashrate ?
                         mining.hashrate.toFixed(2) + ' H/s' : '-';
+
+                    // Update dashboard mining card
+                    updateMiningDashboard(mining, info.difficulty);
                 } catch(e) {
                     document.getElementById('miningActive').textContent = '-';
                     document.getElementById('hashRate').textContent = '-';
@@ -1132,7 +1257,138 @@
             }
         }
 
+        // Track blocks found this session
+        let sessionBlocksFound = 0;
+        let lastBlockHeight = 0;
+        let isMiningActive = false;
+
+        // Update mining dashboard card
+        function updateMiningDashboard(miningInfo, difficulty) {
+            const miningActive = miningInfo.mining || false;
+            const hashrate = miningInfo.hashrate || 0;
+
+            // Update status
+            isMiningActive = miningActive;
+            const statusDot = document.getElementById('miningStatusDot');
+            const statusText = document.getElementById('miningStatus');
+            const btnText = document.getElementById('miningBtnText');
+            const btn = document.getElementById('miningToggle');
+
+            if (miningActive) {
+                statusDot.style.background = '#22c55e';  // Green
+                statusText.textContent = 'Mining';
+                btnText.textContent = 'Stop Mining';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-secondary');
+            } else {
+                statusDot.style.background = '#666';  // Gray
+                statusText.textContent = 'Stopped';
+                btnText.textContent = 'Start Mining';
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-primary');
+            }
+
+            // Update hash rate
+            const hashRateEl = document.getElementById('dashHashRate');
+            if (hashrate >= 1000000) {
+                hashRateEl.textContent = (hashrate / 1000000).toFixed(2) + ' MH/s';
+            } else if (hashrate >= 1000) {
+                hashRateEl.textContent = (hashrate / 1000).toFixed(2) + ' KH/s';
+            } else {
+                hashRateEl.textContent = hashrate.toFixed(2) + ' H/s';
+            }
+
+            // Track blocks found (check if height increased while mining)
+            const currentHeight = miningInfo.blocks || 0;
+            if (lastBlockHeight > 0 && currentHeight > lastBlockHeight && miningActive) {
+                sessionBlocksFound += (currentHeight - lastBlockHeight);
+            }
+            lastBlockHeight = currentHeight;
+            document.getElementById('blocksFound').textContent = sessionBlocksFound;
+
+            // Calculate estimated time to block
+            const etaEl = document.getElementById('etaToBlock');
+            if (!miningActive || hashrate <= 0) {
+                etaEl.textContent = 'N/A';
+            } else {
+                etaEl.textContent = estimateTimeToBlock(hashrate, difficulty);
+            }
+        }
+
+        // Estimate time to find next block
+        function estimateTimeToBlock(hashrate, difficulty) {
+            if (!hashrate || hashrate <= 0 || !difficulty) return 'N/A';
+
+            // For RandomX, difficulty represents expected hashes needed
+            // Simplified: expectedHashes = difficulty * 2^32
+            const expectedHashes = difficulty * Math.pow(2, 32);
+            const secondsToBlock = expectedHashes / hashrate;
+
+            if (secondsToBlock < 60) return '< 1 min';
+            if (secondsToBlock < 3600) return '~' + Math.round(secondsToBlock / 60) + ' min';
+            if (secondsToBlock < 86400) return '~' + Math.round(secondsToBlock / 3600) + ' hrs';
+            return '~' + Math.round(secondsToBlock / 86400) + ' days';
+        }
+
+        // Toggle mining on/off
+        async function toggleMining() {
+            const btn = document.getElementById('miningToggle');
+            const btnText = document.getElementById('miningBtnText');
+            btn.disabled = true;
+
+            try {
+                if (isMiningActive) {
+                    // Stop mining
+                    btnText.textContent = 'Stopping...';
+                    await rpcCall('stopmining');
+                } else {
+                    // Start mining with selected threads
+                    const threads = parseInt(document.getElementById('miningThreads').value) || 4;
+                    btnText.textContent = 'Starting...';
+                    await rpcCall('startmining', { threads: threads });
+                }
+                // Refresh to get new status
+                await refreshBlockchainInfo();
+            } catch(e) {
+                console.error('Mining toggle error:', e);
+                alert('Failed to toggle mining: ' + e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Rescan wallet for missing transactions
+        async function rescanWallet() {
+            const btnText = document.getElementById('rescanBtnText');
+            const originalText = btnText.textContent;
+            btnText.textContent = 'Scanning...';
+
+            try {
+                const result = await rpcCall('rescanwallet', {});
+                btnText.textContent = 'Done!';
+                console.log('[Wallet] Rescan result:', result);
+
+                // Refresh balance and transactions
+                await refreshBalance();
+                await refreshTransactions();
+
+                setTimeout(() => {
+                    btnText.textContent = originalText;
+                }, 2000);
+            } catch(e) {
+                console.error('Rescan error:', e);
+                btnText.textContent = 'Failed';
+                setTimeout(() => {
+                    btnText.textContent = originalText;
+                }, 2000);
+            }
+        }
+
         // BUG #113 FIX: Refresh transactions using listtransactions for complete history
+        // BUG #116 FIX: Don't overwrite existing transactions on refresh failure
+        // BUG #117 FIX: Keep showing "Loading..." during initial connection
+        let lastTransactions = null;  // Cache last successful transaction load
+        let txLoadAttempts = 0;       // Track load attempts
         async function refreshTransactions() {
             try {
                 console.log('[Wallet] Fetching transactions...');
@@ -1140,13 +1396,23 @@
                 console.log('[Wallet] RPC result:', result);
                 const transactions = result.transactions || [];
                 console.log('[Wallet] Transactions count:', transactions.length);
+                lastTransactions = transactions;  // Cache successful result
+                txLoadAttempts = 0;  // Reset on success
                 renderTransactions(transactions);
             } catch(e) {
-                console.error('Transaction error:', e);
-                document.getElementById('recentTxList').innerHTML =
-                    '<div class="empty-state">Unable to load transactions</div>';
-                document.getElementById('txList').innerHTML =
-                    '<div class="empty-state">Unable to load transactions</div>';
+                console.error('Transaction refresh error:', e);
+                txLoadAttempts++;
+                // Only show error after multiple failed attempts AND if we never had data
+                // This prevents "Unable to load" flash on page refresh
+                if (!lastTransactions && txLoadAttempts >= 3) {
+                    document.getElementById('recentTxList').innerHTML =
+                        '<div class="empty-state">Unable to load transactions</div>';
+                    const txListEl = document.getElementById('txList');
+                    if (txListEl) {
+                        txListEl.innerHTML = '<div class="empty-state">Unable to load transactions</div>';
+                    }
+                }
+                // If we had transactions before, keep showing them (don't overwrite on refresh failure)
             }
         }
 
@@ -1166,6 +1432,37 @@
             if (diffDays < 7) return `${diffDays}d ago`;
 
             return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        }
+
+        // Get full timestamp for tooltip
+        function getFullTimestamp(unixTime) {
+            if (!unixTime) return '';
+            const date = new Date(unixTime * 1000);
+            return date.toLocaleString();
+        }
+
+        // Address labeling
+        const addressLabels = JSON.parse(localStorage.getItem('dilithionAddressLabels') || '{}');
+
+        function getAddressLabel(address) {
+            if (!address) return '';
+            return addressLabels[address] || '';
+        }
+
+        function getAddressDisplay(address) {
+            if (!address) return 'Unknown';
+            const label = getAddressLabel(address);
+            if (label) return label;
+            return address.substring(0, 12) + '...';
+        }
+
+        function saveAddressLabel(address, label) {
+            if (label && label.trim()) {
+                addressLabels[address] = label.trim();
+            } else {
+                delete addressLabels[address];
+            }
+            localStorage.setItem('dilithionAddressLabels', JSON.stringify(addressLabels));
         }
 
         // BUG #113 FIX: Render transaction list with full history support
@@ -1192,6 +1489,7 @@
 
                 // Determine origin type and icon
                 let iconClass, typeText, originLabel, iconSvg;
+                const addressDisplay = getAddressDisplay(address);
                 if (isMining) {
                     iconClass = 'mining';
                     typeText = 'Mining Reward';
@@ -1200,17 +1498,17 @@
                 } else if (isSend) {
                     iconClass = 'sent';
                     typeText = 'Sent';
-                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                    originLabel = address ? `To: ${addressDisplay}` : 'Transaction';
                     iconSvg = '<polyline points="22 2 15 22 11 13 2 9 22 2"></polyline>';
                 } else if (isSpent) {
                     iconClass = 'spent';
                     typeText = 'Received (Spent)';
-                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                    originLabel = address ? `To: ${addressDisplay}` : 'Transaction';
                     iconSvg = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
                 } else {
                     iconClass = 'received';
                     typeText = 'Received';
-                    originLabel = address ? `To: ${address.substring(0, 12)}...` : 'Transaction';
+                    originLabel = address ? `To: ${addressDisplay}` : 'Transaction';
                     iconSvg = '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>';
                 }
 
@@ -1219,6 +1517,7 @@
                 const displayAmount = Math.abs(amount).toFixed(8);
                 const feeText = isSend && fee > 0 ? ` (fee: ${fee.toFixed(4)})` : '';
                 const timeText = formatTimestamp(timestamp);
+                const fullTimestamp = getFullTimestamp(timestamp);
 
                 html += `
                     <div class="tx-item">
@@ -1228,8 +1527,8 @@
                             </svg>
                         </div>
                         <div class="tx-details">
-                            <div class="tx-type">${typeText} <span style="color:#888;font-size:12px;">${timeText}</span></div>
-                            <div class="tx-hash" style="font-size:11px;color:#666;">${originLabel}</div>
+                            <div class="tx-type">${typeText} <span style="color:#888;font-size:12px;" title="${fullTimestamp}">${timeText}</span></div>
+                            <div class="tx-hash" style="font-size:11px;color:#666;" title="${address || ''}">${originLabel}</div>
                             <div class="tx-hash">${txid.substring(0, 16)}...${txid.substring(txid.length - 8)}</div>
                         </div>
                         <div>
@@ -1262,9 +1561,46 @@
                         }
                     });
                 }
+
+                // Show existing label if any
+                updateAddressLabelDisplay(address);
             } catch(e) {
                 document.getElementById('receiveAddress').textContent = 'Error loading address';
                 console.error('Address error:', e);
+            }
+        }
+
+        // Update address label display
+        function updateAddressLabelDisplay(address) {
+            const labelEl = document.getElementById('currentAddressLabel');
+            const inputEl = document.getElementById('addressLabelInput');
+            const existingLabel = getAddressLabel(address);
+
+            if (existingLabel) {
+                labelEl.textContent = 'Label: ' + existingLabel;
+                inputEl.value = existingLabel;
+            } else {
+                labelEl.textContent = '';
+                inputEl.value = '';
+            }
+        }
+
+        // Save label for current address
+        function saveCurrentAddressLabel() {
+            const address = document.getElementById('receiveAddress').textContent;
+            const label = document.getElementById('addressLabelInput').value;
+
+            if (!address || address === 'Loading...' || address === 'Error loading address') {
+                alert('No address to label');
+                return;
+            }
+
+            saveAddressLabel(address, label);
+            updateAddressLabelDisplay(address);
+
+            // Refresh transactions to show updated labels
+            if (lastTransactions) {
+                renderTransactions(lastTransactions);
             }
         }
 
@@ -1528,14 +1864,27 @@
         loadSettings();
         connect();
 
-        // BUG #115 FIX: Faster auto-refresh (5 seconds) and include transactions
-        setInterval(() => {
-            if (connected) {
-                refreshBalance();
-                refreshBlockchainInfo();
-                refreshTransactions();  // BUG #115: Also refresh transaction history
+        // BUG #115 FIX: Auto-refresh with serialized requests to prevent connection overload
+        let refreshInProgress = false;
+        const wait200 = () => new Promise(r => setTimeout(r, 200));
+
+        setInterval(async () => {
+            if (connected && !refreshInProgress) {
+                refreshInProgress = true;
+                try {
+                    // Serialize requests with 200ms delays to prevent server socket issues
+                    await refreshBalance();
+                    await wait200();
+                    await refreshBlockchainInfo();
+                    await wait200();
+                    await refreshTransactions();
+                } catch (e) {
+                    console.warn('[Wallet] Refresh cycle error:', e.message);
+                } finally {
+                    refreshInProgress = false;
+                }
             }
-        }, 5000);  // BUG #115: Reduced from 10 to 5 seconds
+        }, 10000);  // Refresh every 10 seconds
     </script>
 </body>
 </html>

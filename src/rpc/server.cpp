@@ -172,6 +172,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["exportmnemonic"] = [this](const std::string& p) { return RPC_ExportMnemonic(p); };
     m_handlers["gethdwalletinfo"] = [this](const std::string& p) { return RPC_GetHDWalletInfo(p); };
     m_handlers["listhdaddresses"] = [this](const std::string& p) { return RPC_ListHDAddresses(p); };
+    m_handlers["rescanwallet"] = [this](const std::string& p) { return RPC_RescanWallet(p); };
 
     // Mining
     m_handlers["getmininginfo"] = [this](const std::string& p) { return RPC_GetMiningInfo(p); };
@@ -456,9 +457,11 @@ void CRPCServer::WorkerThread() {
         }
 
         // Handle client connection (outside the lock)
+        // NOTE: HandleClient closes the socket internally in all code paths
         if (clientSocket != INVALID_SOCKET) {
             HandleClient(clientSocket);
-            closesocket(clientSocket);
+            // Socket is already closed by HandleClient - do NOT close again here
+            // Double-close was causing ERR_CONNECTION_ABORTED for subsequent connections
         }
         }
     } catch (const std::exception& e) {
@@ -3150,6 +3153,44 @@ std::string CRPCServer::RPC_ListHDAddresses(const std::string& params) {
     return oss.str();
 }
 
+std::string CRPCServer::RPC_RescanWallet(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+    if (!m_utxo_set) {
+        throw std::runtime_error("UTXO set not initialized");
+    }
+
+    // Get number of addresses before rescan
+    size_t numAddresses = m_wallet->GetAddresses().size();
+
+    // Perform UTXO scan for all wallet addresses
+    std::cout << "[RPC] Starting wallet rescan with " << numAddresses << " addresses..." << std::endl;
+    bool success = m_wallet->ScanUTXOs(*m_utxo_set);
+
+    if (!success) {
+        throw std::runtime_error("Wallet rescan failed");
+    }
+
+    // Get updated balance
+    unsigned int currentHeight = m_chainstate ? m_chainstate->GetHeight() : 0;
+    CAmount balance = m_wallet->GetAvailableBalance(*m_utxo_set, currentHeight);
+    CAmount immatureBalance = m_wallet->GetImmatureBalance(*m_utxo_set, currentHeight);
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"success\":true,";
+    oss << "\"addresses_scanned\":" << numAddresses << ",";
+    oss << "\"balance\":" << FormatAmount(balance) << ",";
+    oss << "\"immature_balance\":" << FormatAmount(immatureBalance);
+    oss << "}";
+
+    std::cout << "[RPC] Wallet rescan complete. Balance: " << FormatAmount(balance)
+              << ", Immature: " << FormatAmount(immatureBalance) << std::endl;
+
+    return oss.str();
+}
+
 std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
@@ -3349,6 +3390,7 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getbalance - Get wallet balance (available, unconfirmed, immature)\",";
     oss << "\"getaddresses - List all wallet addresses\",";
     oss << "\"listunspent - List unspent transaction outputs\",";
+    oss << "\"rescanwallet - Rescan blockchain for wallet transactions\",";
 
     // Transaction creation
     oss << "\"sendtoaddress - Send coins to an address\",";
