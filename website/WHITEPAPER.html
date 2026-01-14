@@ -17,6 +17,7 @@
             margin: 0 auto;
             padding: 20px;
             font-size: 11pt;
+            background: #fff;
         }
         h1 {
             color: #1a1a1a;
@@ -39,6 +40,13 @@
             font-size: 14pt;
             margin-top: 20px;
             margin-bottom: 10px;
+            page-break-after: avoid;
+        }
+        h4 {
+            color: #4a5568;
+            font-size: 12pt;
+            margin-top: 18px;
+            margin-bottom: 8px;
             page-break-after: avoid;
         }
         p {
@@ -70,11 +78,16 @@
             line-height: 1.4;
             page-break-inside: avoid;
         }
+        pre code {
+            background: none;
+            padding: 0;
+        }
         table {
             border-collapse: collapse;
             width: 100%;
             margin: 15px 0;
             page-break-inside: avoid;
+            font-size: 10pt;
         }
         th, td {
             border: 1px solid #ddd;
@@ -92,19 +105,68 @@
             margin: 20px 0;
             page-break-inside: avoid;
         }
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 20px 0;
+            page-break-inside: avoid;
+        }
         .title-page {
             text-align: center;
             page-break-after: always;
-            padding-top: 200px;
+            padding-top: 150px;
         }
         .title-page h1 {
             font-size: 32pt;
             border: none;
             margin-bottom: 20px;
         }
-        .title-page p {
+        .title-page .subtitle {
             font-size: 14pt;
             margin: 10px 0;
+            color: #555;
+        }
+        .title-page .version {
+            font-size: 12pt;
+            margin: 30px 0 10px 0;
+        }
+        .abstract {
+            margin: 30px 0;
+            padding: 20px;
+            background: #fafafa;
+            border-left: 4px solid #2c3e50;
+        }
+        blockquote {
+            margin: 20px 0;
+            padding: 15px 20px;
+            background: #f9f9f9;
+            border-left: 4px solid #6c757d;
+            font-style: italic;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 30px 0;
+        }
+        .toc {
+            background: #fafafa;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .toc ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        .toc ul ul {
+            padding-left: 20px;
+        }
+        .toc a {
+            color: #2c3e50;
+            text-decoration: none;
+        }
+        .toc a:hover {
+            text-decoration: underline;
         }
         @media print {
             body {
@@ -118,456 +180,741 @@
     </style>
 </head>
 <body>
-<div class="title-page"><h1>Dilithion: A Post-Quantum Cryptocurrency</h1>
 
-<p><strong>Version 1.0</strong></p>
-<strong>October 2025</strong>
-
-<strong>Launch Date:</strong> January 15, 2026
-
-<hr>
+<div class="title-page">
+    <h1>Dilithion: A Post-Quantum Cryptocurrency</h1>
+    <p class="subtitle">Whitepaper</p>
+    <p class="version"><strong>Version 1.0</strong></p>
+    <p class="version">October 2025</p>
+    <p class="version"><strong>Launch Date:</strong> January 15, 2026</p>
+</div>
 
 <h2>Abstract</h2>
 
+<div class="abstract">
 <p>Dilithion is a decentralized cryptocurrency designed from the ground up for the post-quantum era. As quantum computers advance toward breaking classical cryptographic systems like ECDSA and RSA, the need for quantum-resistant blockchain technology becomes critical. Dilithion addresses this threat by implementing CRYSTALS-Dilithium, a NIST-standardized post-quantum digital signature scheme, combined with RandomX proof-of-work for ASIC-resistant CPU mining.</p>
 
 <p>This whitepaper presents Dilithion's technical architecture, consensus parameters optimized for large post-quantum signatures, economic model, and roadmap for sustainable decentralized currency in the quantum age.</p>
+</div>
 
-<strong>Key Features:</strong>
-<li><strong>Post-quantum security:</strong> CRYSTALS-Dilithium (NIST FIPS 204)
-<li><strong>ASIC-resistant mining:</strong> RandomX proof-of-work
-<li><strong>Optimized consensus:</strong> 4-minute blocks for large signature propagation
-<li><strong>Fair distribution:</strong> No premine, pure proof-of-work launch
-<li><strong>Fixed supply:</strong> 21 million coins
-<li><strong>Launch:</strong> January 15, 2026, 00:00:00 UTC
+<p><strong>Key Features:</strong></p>
+<ul>
+    <li><strong>Post-quantum security:</strong> CRYSTALS-Dilithium (NIST FIPS 204)</li>
+    <li><strong>ASIC-resistant mining:</strong> RandomX proof-of-work</li>
+    <li><strong>Optimized consensus:</strong> 4-minute blocks for large signature propagation</li>
+    <li><strong>Fair distribution:</strong> No premine, pure proof-of-work launch</li>
+    <li><strong>Fixed supply:</strong> 21 million coins</li>
+    <li><strong>Launch:</strong> January 15, 2026, 00:00:00 UTC</li>
+</ul>
 
 <hr>
 
 <h2>Important Disclosure</h2>
 
-<strong>Experimental Nature:</strong> Dilithion is an experimental cryptocurrency project. This software has NOT been professionally audited and may contain bugs or vulnerabilities. Use at your own risk.
+<div class="warning-box">
+<p><strong>Experimental Nature:</strong> Dilithion is an experimental cryptocurrency project. This software has NOT been professionally audited and may contain bugs or vulnerabilities. Use at your own risk.</p>
 
-<strong>AI-Assisted Development:</strong> This project was developed with AI assistance (Anthropic's Claude Code). While AI tools enable rapid development and comprehensive documentation, all code requires careful human review and community scrutiny. We believe in full transparency about our development methods.
+<p><strong>AI-Assisted Development:</strong> This project was developed with AI assistance (Anthropic's Claude Code). While AI tools enable rapid development and comprehensive documentation, all code requires careful human review and community scrutiny. We believe in full transparency about our development methods.</p>
 
-<strong>No Guarantees:</strong> This project comes with no guarantee of success, security, or value. Users assume all risks. This is not financial advice. Do your own research (DYOR) before participating.
+<p><strong>No Guarantees:</strong> This project comes with no guarantee of success, security, or value. Users assume all risks. This is not financial advice. Do your own research (DYOR) before participating.</p>
+</div>
 
 <hr>
 
 <h2>Table of Contents</h2>
 
-<li>[Introduction: The Quantum Threat](#1-introduction-the-quantum-threat)
-<li>[Post-Quantum Cryptography](#2-post-quantum-cryptography)
-<li>[Technical Architecture](#3-technical-architecture)
-<li>[Consensus Mechanism](#4-consensus-mechanism)
-<li>[Economic Model](#5-economic-model)
-   <ul>
-   <li>5.5 Mining Development Contribution (2% mainnet tax)
-   </ul>
-<li>[Network Security](#6-network-security)
-<li>[Roadmap](#7-roadmap)
-<li>[Conclusion](#8-conclusion)
+<div class="toc">
+<ul>
+    <li><a href="#section1">1. Introduction: The Quantum Threat</a></li>
+    <li><a href="#section2">2. Post-Quantum Cryptography</a></li>
+    <li><a href="#section3">3. Technical Architecture</a></li>
+    <li><a href="#section4">4. Consensus Mechanism</a></li>
+    <li><a href="#section5">5. Economic Model</a>
+        <ul>
+            <li><a href="#section5-5">5.5 Mining Development Contribution (2% mainnet tax)</a></li>
+        </ul>
+    </li>
+    <li><a href="#section6">6. Network Security</a></li>
+    <li><a href="#section7">7. Roadmap</a></li>
+    <li><a href="#section8">8. Conclusion</a></li>
+</ul>
+</div>
 
 <hr>
 
-<h2>1. Introduction: The Quantum Threat</h2>
+<h2 id="section1">1. Introduction: The Quantum Threat</h2>
 
 <h3>1.1 The Problem</h3>
 
 <p>Modern cryptocurrency security relies on classical cryptography:</p>
-<li><strong>ECDSA (Bitcoin, Ethereum):</strong> Elliptic Curve Digital Signature Algorithm
-<li><strong>RSA:</strong> Rivest-Shamir-Adleman encryption
-<li><strong>SHA-256:</strong> Secure Hash Algorithm (for mining)
+<ul>
+    <li><strong>ECDSA (Bitcoin, Ethereum):</strong> Elliptic Curve Digital Signature Algorithm</li>
+    <li><strong>RSA:</strong> Rivest-Shamir-Adleman encryption</li>
+    <li><strong>SHA-256:</strong> Secure Hash Algorithm (for mining)</li>
+</ul>
 
-<strong>Shor's Algorithm</strong> (1994) demonstrated that quantum computers can break ECDSA and RSA in polynomial time. While SHA-256 mining receives only a modest speedup (Grover's algorithm), <strong>digital signatures are critically vulnerable</strong>.
+<p><strong>Shor's Algorithm</strong> (1994) demonstrated that quantum computers can break ECDSA and RSA in polynomial time. While SHA-256 mining receives only a modest speedup (Grover's algorithm), <strong>digital signatures are critically vulnerable</strong>.</p>
 
 <h3>1.2 Timeline to Quantum Threat</h3>
 
-<strong>Current State (2025):</strong>
-<li>IBM: 1,121-qubit quantum computer (Condor)
-<li>Google: Quantum supremacy claimed
-<li>China: Pan-Jianwei's quantum network
+<p><strong>Current State (2025):</strong></p>
+<ul>
+    <li>IBM: 1,121-qubit quantum computer (Condor)</li>
+    <li>Google: Quantum supremacy claimed</li>
+    <li>China: Pan-Jianwei's quantum network</li>
+</ul>
 
-<strong>Expert Estimates:</strong>
-<li><strong>2030-2035:</strong> Cryptographically relevant quantum computers (CRQC)
-<li><strong>Breaking Bitcoin:</strong> Estimated 1,500-3,000 logical qubits required
-<li><strong>Current trajectory:</strong> Doubling qubits every ~2 years
+<p><strong>Expert Estimates:</strong></p>
+<ul>
+    <li><strong>2030-2035:</strong> Cryptographically relevant quantum computers (CRQC)</li>
+    <li><strong>Breaking Bitcoin:</strong> Estimated 1,500-3,000 logical qubits required</li>
+    <li><strong>Current trajectory:</strong> Doubling qubits every ~2 years</li>
+</ul>
 
-<strong>Conclusion:</strong> Cryptocurrencies must transition to post-quantum cryptography <strong>now</strong> to remain secure over their multi-decade lifespan.
+<p><strong>Conclusion:</strong> Cryptocurrencies must transition to post-quantum cryptography <strong>now</strong> to remain secure over their multi-decade lifespan.</p>
 
 <h3>1.3 Existing Cryptocurrency Vulnerability</h3>
 
-<p>| Cryptocurrency | Signature Scheme | Quantum Vulnerable? | Migration Plan? |</p>
-<p>|----------------|------------------|---------------------|-----------------|</p>
-<p>| Bitcoin | ECDSA | ✅ Yes | None announced |</p>
-<p>| Ethereum | ECDSA | ✅ Yes | Research phase only |</p>
-<p>| Litecoin | ECDSA | ✅ Yes | None announced |</p>
-<p>| Monero | EdDSA | ✅ Yes | None announced |</p>
-<p>| <strong>Dilithion</strong> | <strong>Dilithium3</strong> | <strong>❌ No</strong> | <strong>Built-in from genesis</strong> |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Cryptocurrency</th>
+            <th>Signature Scheme</th>
+            <th>Quantum Vulnerable?</th>
+            <th>Migration Plan?</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Bitcoin</td>
+            <td>ECDSA</td>
+            <td>Yes</td>
+            <td>None announced</td>
+        </tr>
+        <tr>
+            <td>Ethereum</td>
+            <td>ECDSA</td>
+            <td>Yes</td>
+            <td>Research phase only</td>
+        </tr>
+        <tr>
+            <td>Litecoin</td>
+            <td>ECDSA</td>
+            <td>Yes</td>
+            <td>None announced</td>
+        </tr>
+        <tr>
+            <td>Monero</td>
+            <td>EdDSA</td>
+            <td>Yes</td>
+            <td>None announced</td>
+        </tr>
+        <tr>
+            <td><strong>Dilithion</strong></td>
+            <td><strong>Dilithium3</strong></td>
+            <td><strong>No</strong></td>
+            <td><strong>Built-in from genesis</strong></td>
+        </tr>
+    </tbody>
+</table>
 
-<strong>Critical Issue:</strong> Retrofitting existing blockchains with post-quantum cryptography requires:
-<li>Hard fork (community consensus required)
-<li>Wallet migrations (user action required)
-<li>Backward compatibility challenges
-<li>Risk of botched transition
+<p><strong>Critical Issue:</strong> Retrofitting existing blockchains with post-quantum cryptography requires:</p>
+<ul>
+    <li>Hard fork (community consensus required)</li>
+    <li>Wallet migrations (user action required)</li>
+    <li>Backward compatibility challenges</li>
+    <li>Risk of botched transition</li>
+</ul>
 
-<strong>Dilithion's Solution:</strong> Start with post-quantum cryptography from genesis block.
+<p><strong>Dilithion's Solution:</strong> Start with post-quantum cryptography from genesis block.</p>
 
 <hr>
 
-<h2>2. Post-Quantum Cryptography</h2>
+<h2 id="section2">2. Post-Quantum Cryptography</h2>
 
 <h3>2.1 CRYSTALS-Dilithium</h3>
 
-<strong>Selection Process:</strong>
-<li>NIST Post-Quantum Cryptography Standardization (2016-2024)
-<li>82 initial submissions
-<li>Multiple rounds of evaluation
-<li><strong>Winner:</strong> CRYSTALS-Dilithium (2022)
-<li><strong>Standardized:</strong> FIPS 204 (August 2024)
+<p><strong>Selection Process:</strong></p>
+<ul>
+    <li>NIST Post-Quantum Cryptography Standardization (2016-2024)</li>
+    <li>82 initial submissions</li>
+    <li>Multiple rounds of evaluation</li>
+    <li><strong>Winner:</strong> CRYSTALS-Dilithium (2022)</li>
+    <li><strong>Standardized:</strong> FIPS 204 (August 2024)</li>
+</ul>
 
-<strong>Why Dilithium?</strong>
+<p><strong>Why Dilithium?</strong></p>
+<ul>
+    <li><strong>Security:</strong> Based on hard lattice problems (Module-LWE, Module-SIS)</li>
+    <li><strong>Performance:</strong> Fast signing and verification</li>
+    <li><strong>Standardization:</strong> Official NIST standard</li>
+    <li><strong>Analysis:</strong> Years of public cryptanalysis, no serious breaks</li>
+    <li><strong>Versatility:</strong> Three security levels (Dilithium2, 3, 5)</li>
+</ul>
 
-<li><strong>Security:</strong> Based on hard lattice problems (Module-LWE, Module-SIS)
-<li><strong>Performance:</strong> Fast signing and verification
-<li><strong>Standardization:</strong> Official NIST standard
-<li><strong>Analysis:</strong> Years of public cryptanalysis, no serious breaks
-<li><strong>Versatility:</strong> Three security levels (Dilithium2, 3, 5)
-
-<strong>Dilithion uses Dilithium3:</strong>
-<li><strong>Security level:</strong> NIST Level 3 (equivalent to AES-192)
-<li><strong>Public key size:</strong> 1,952 bytes
-<li><strong>Signature size:</strong> 3,309 bytes
-<li><strong>Signing speed:</strong> ~1-2 milliseconds
-<li><strong>Verification speed:</strong> ~1 millisecond
+<p><strong>Dilithion uses Dilithium3:</strong></p>
+<ul>
+    <li><strong>Security level:</strong> NIST Level 3 (equivalent to AES-192)</li>
+    <li><strong>Public key size:</strong> 1,952 bytes</li>
+    <li><strong>Signature size:</strong> 3,309 bytes</li>
+    <li><strong>Signing speed:</strong> ~1-2 milliseconds</li>
+    <li><strong>Verification speed:</strong> ~1 millisecond</li>
+</ul>
 
 <h3>2.2 Comparison to Classical Cryptography</h3>
 
-<p>| Metric | ECDSA (secp256k1) | Dilithium3 | Ratio |</p>
-<p>|--------|-------------------|------------|-------|</p>
-<p>| <strong>Public key</strong> | 33 bytes | 1,952 bytes | 59x larger |</p>
-<p>| <strong>Signature</strong> | 72 bytes | 3,309 bytes | 46x larger |</p>
-<p>| <strong>Security</strong> | ~128-bit | 192-bit (quantum-safe) | More secure |</p>
-<p>| <strong>Signing time</strong> | <1 ms | 1-2 ms | Comparable |</p>
-<p>| <strong>Verify time</strong> | ~1 ms | ~1 ms | Identical |</p>
-<p>| <strong>Quantum safe?</strong> | ❌ No | ✅ Yes | Critical advantage |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Metric</th>
+            <th>ECDSA (secp256k1)</th>
+            <th>Dilithium3</th>
+            <th>Ratio</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Public key</strong></td>
+            <td>33 bytes</td>
+            <td>1,952 bytes</td>
+            <td>59x larger</td>
+        </tr>
+        <tr>
+            <td><strong>Signature</strong></td>
+            <td>72 bytes</td>
+            <td>3,309 bytes</td>
+            <td>46x larger</td>
+        </tr>
+        <tr>
+            <td><strong>Security</strong></td>
+            <td>~128-bit</td>
+            <td>192-bit (quantum-safe)</td>
+            <td>More secure</td>
+        </tr>
+        <tr>
+            <td><strong>Signing time</strong></td>
+            <td>&lt;1 ms</td>
+            <td>1-2 ms</td>
+            <td>Comparable</td>
+        </tr>
+        <tr>
+            <td><strong>Verify time</strong></td>
+            <td>~1 ms</td>
+            <td>~1 ms</td>
+            <td>Identical</td>
+        </tr>
+        <tr>
+            <td><strong>Quantum safe?</strong></td>
+            <td>No</td>
+            <td>Yes</td>
+            <td>Critical advantage</td>
+        </tr>
+    </tbody>
+</table>
 
-<strong>Trade-off:</strong> Dilithion transactions are ~15x larger than Bitcoin transactions, but provide quantum resistance.
+<p><strong>Trade-off:</strong> Dilithion transactions are ~15x larger than Bitcoin transactions, but provide quantum resistance.</p>
 
 <h3>2.3 SHA-3 Hashing</h3>
 
 <p>Dilithion uses <strong>SHA-3 (Keccak)</strong> throughout:</p>
-<li><strong>Address generation:</strong> SHA3-256
-<li><strong>Transaction IDs:</strong> SHA3-256
-<li><strong>Merkle trees:</strong> SHA3-256
-<li><strong>Wallet encryption:</strong> SHA3-512 with PBKDF2
+<ul>
+    <li><strong>Address generation:</strong> SHA3-256</li>
+    <li><strong>Transaction IDs:</strong> SHA3-256</li>
+    <li><strong>Merkle trees:</strong> SHA3-256</li>
+    <li><strong>Wallet encryption:</strong> SHA3-512 with PBKDF2</li>
+</ul>
 
-<strong>Why SHA-3?</strong>
-<li>Quantum-resistant (Grover's algorithm provides only quadratic speedup)
-<li>NIST standard (FIPS 202)
-<li>Different construction than SHA-2 (defense in depth)
-<li>Well-analyzed and trusted
+<p><strong>Why SHA-3?</strong></p>
+<ul>
+    <li>Quantum-resistant (Grover's algorithm provides only quadratic speedup)</li>
+    <li>NIST standard (FIPS 202)</li>
+    <li>Different construction than SHA-2 (defense in depth)</li>
+    <li>Well-analyzed and trusted</li>
+</ul>
 
 <hr>
 
-<h2>3. Technical Architecture</h2>
+<h2 id="section3">3. Technical Architecture</h2>
 
 <h3>3.1 System Overview</h3>
 
-<pre><code>
-<p>┌─────────────────────────────────────────────────────────┐</p>
-<p>│                    Dilithion Network                     │</p>
-<p>├─────────────────────────────────────────────────────────┤</p>
-<p>│                                                           │</p>
-<p>│  ┌──────────┐    ┌──────────┐    ┌──────────┐          │</p>
-<p>│  │  Wallet  │◄──►│   Node   │◄──►│  Miner   │          │</p>
-<p>│  └──────────┘    └──────────┘    └──────────┘          │</p>
-<p>│       │               │                │                 │</p>
-<p>│       │         ┌─────┴──────┐        │                 │</p>
-<p>│       │         │            │         │                 │</p>
-<p>│  ┌────▼────┐  ┌▼─────┐  ┌──▼────┐  ┌▼────────┐        │</p>
-<p>│  │Dilithium│  │SHA-3 │  │LevelDB│  │RandomX  │        │</p>
-<p>│  │  Sigs   │  │ Hash │  │  DB   │  │   PoW   │        │</p>
-<p>│  └─────────┘  └──────┘  └───────┘  └─────────┘        │</p>
-<p>│                                                           │</p>
-<p>└─────────────────────────────────────────────────────────┘</p>
-<pre><code>
+<pre>
+┌─────────────────────────────────────────────────────────┐
+│                    Dilithion Network                    │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐          │
+│  │  Wallet  │◄──►│   Node   │◄──►│  Miner   │          │
+│  └──────────┘    └──────────┘    └──────────┘          │
+│       │               │                │               │
+│       │         ┌─────┴──────┐        │               │
+│       │         │            │         │               │
+│  ┌────▼────┐  ┌─▼─────┐  ┌──▼────┐  ┌─▼────────┐      │
+│  │Dilithium│  │SHA-3  │  │LevelDB│  │ RandomX  │      │
+│  │  Sigs   │  │ Hash  │  │  DB   │  │   PoW    │      │
+│  └─────────┘  └───────┘  └───────┘  └──────────┘      │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+</pre>
 
 <h3>3.2 Transaction Structure</h3>
 
-<pre><code>cpp
-<p>class CTransaction {</p>
-<p>    int32_t nVersion;               // Transaction version</p>
-<p>    std::vector<CTxIn> vin;         // Inputs</p>
-<p>    std::vector<CTxOut> vout;       // Outputs</p>
-<p>    uint32_t nLockTime;             // Lock time</p>
-<p>};</p>
+<pre><code class="cpp">class CTransaction {
+    int32_t nVersion;               // Transaction version
+    std::vector&lt;CTxIn&gt; vin;         // Inputs
+    std::vector&lt;CTxOut&gt; vout;       // Outputs
+    uint32_t nLockTime;             // Lock time
+};
 
-<p>class CTxIn {</p>
-<p>    COutPoint prevout;              // Previous output reference</p>
-<p>    std::vector<uint8_t> scriptSig; // Dilithium signature (3,309 bytes)</p>
-<p>    uint32_t nSequence;             // Sequence number</p>
-<p>};</p>
+class CTxIn {
+    COutPoint prevout;              // Previous output reference
+    std::vector&lt;uint8_t&gt; scriptSig; // Dilithium signature (3,309 bytes)
+    uint32_t nSequence;             // Sequence number
+};
 
-<p>class CTxOut {</p>
-<p>    CAmount nValue;                 // Amount in ions (smallest unit)</p>
-<p>    std::vector<uint8_t> scriptPubKey; // Dilithium public key (1,952 bytes)</p>
-<p>};</p>
-<pre><code>
+class CTxOut {
+    CAmount nValue;                 // Amount in ions (smallest unit)
+    std::vector&lt;uint8_t&gt; scriptPubKey; // Dilithium public key (1,952 bytes)
+};</code></pre>
 
-<strong>Typical Transaction Sizes:</strong>
-<li>1-input, 1-output: ~3,864 bytes
-<li>2-input, 2-output: ~9,598 bytes
-<li>Average: ~5,000-7,000 bytes
+<p><strong>Typical Transaction Sizes:</strong></p>
+<ul>
+    <li>1-input, 1-output: ~3,864 bytes</li>
+    <li>2-input, 2-output: ~9,598 bytes</li>
+    <li>Average: ~5,000-7,000 bytes</li>
+</ul>
 
-<strong>Comparison to Bitcoin:</strong>
-<li>Bitcoin typical: ~250 bytes
-<li><strong>Dilithion is ~15x larger</strong> (trade-off for quantum security)
+<p><strong>Comparison to Bitcoin:</strong></p>
+<ul>
+    <li>Bitcoin typical: ~250 bytes</li>
+    <li><strong>Dilithion is ~15x larger</strong> (trade-off for quantum security)</li>
+</ul>
 
 <h3>3.3 Currency Units and Denominations</h3>
 
-<strong>Base Unit: DIL</strong>
-<li>Symbol: <strong>DIL</strong>
-<li>Total Supply: 21,000,000 DIL
-<li>Decimal Places: 8
+<p><strong>Base Unit: DIL</strong></p>
+<ul>
+    <li>Symbol: <strong>DIL</strong></li>
+    <li>Total Supply: 21,000,000 DIL</li>
+    <li>Decimal Places: 8</li>
+</ul>
 
-<strong>Smallest Unit: ions</strong>
-<li>1 DIL = 100,000,000 ions
-<li>Named after "Dilith-<strong>ion</strong>" - fitting the post-quantum theme
-<li>Similar to how Bitcoin uses "satoshis" (named after Satoshi Nakamoto)
+<p><strong>Smallest Unit: ions</strong></p>
+<ul>
+    <li>1 DIL = 100,000,000 ions</li>
+    <li>Named after "Dilith-<strong>ion</strong>" - fitting the post-quantum theme</li>
+    <li>Similar to how Bitcoin uses "satoshis" (named after Satoshi Nakamoto)</li>
+</ul>
 
-<strong>Denomination Table:</strong>
+<p><strong>Denomination Table:</strong></p>
 
-<p>| Unit Name | Value in ions | Value in DIL | Description |</p>
-<p>|-----------|---------------|--------------|-------------|</p>
-<p>| <strong>ion</strong> | 1 | 0.00000001 DIL | Smallest unit (indivisible) |</p>
-<p>| <strong>kiloion</strong> | 1,000 | 0.00001 DIL | Thousand ions |</p>
-<p>| <strong>megaion</strong> | 1,000,000 | 0.01 DIL | Million ions (1 cent) |</p>
-<p>| <strong>DIL</strong> | 100,000,000 | 1 DIL | Base currency unit |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Unit Name</th>
+            <th>Value in ions</th>
+            <th>Value in DIL</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>ion</strong></td>
+            <td>1</td>
+            <td>0.00000001 DIL</td>
+            <td>Smallest unit (indivisible)</td>
+        </tr>
+        <tr>
+            <td><strong>kiloion</strong></td>
+            <td>1,000</td>
+            <td>0.00001 DIL</td>
+            <td>Thousand ions</td>
+        </tr>
+        <tr>
+            <td><strong>megaion</strong></td>
+            <td>1,000,000</td>
+            <td>0.01 DIL</td>
+            <td>Million ions (1 cent)</td>
+        </tr>
+        <tr>
+            <td><strong>DIL</strong></td>
+            <td>100,000,000</td>
+            <td>1 DIL</td>
+            <td>Base currency unit</td>
+        </tr>
+    </tbody>
+</table>
 
-<strong>Why "ions"?</strong>
-<li>Consistent with Dilithion branding
-<li>Quantum/scientific theme (from "Dilithium")
-<li>Short, memorable, easy to type
-<li>Avoids confusion with other cryptocurrencies
-<li>Represents the smallest "quantum" of value
+<p><strong>Why "ions"?</strong></p>
+<ul>
+    <li>Consistent with Dilithion branding</li>
+    <li>Quantum/scientific theme (from "Dilithium")</li>
+    <li>Short, memorable, easy to type</li>
+    <li>Avoids confusion with other cryptocurrencies</li>
+    <li>Represents the smallest "quantum" of value</li>
+</ul>
 
-<strong>Examples:</strong>
-<li>Minimum transaction fee: 50,000 ions (0.0005 DIL)
-<li>Typical transaction: 100,000-300,000 ions (0.001-0.003 DIL)
-<li>Block reward (initial): 5,000,000,000 ions (50 DIL)
-
-<hr>
+<p><strong>Examples:</strong></p>
+<ul>
+    <li>Minimum transaction fee: 50,000 ions (0.0005 DIL)</li>
+    <li>Typical transaction: 100,000-300,000 ions (0.001-0.003 DIL)</li>
+    <li>Block reward (initial): 5,000,000,000 ions (50 DIL)</li>
+</ul>
 
 <h3>3.4 Block Structure</h3>
 
-<pre><code>cpp
-<p>class CBlockHeader {</p>
-<p>    int32_t nVersion;               // Block version</p>
-<p>    uint256 hashPrevBlock;          // Previous block hash (SHA-3)</p>
-<p>    uint256 hashMerkleRoot;         // Merkle root of transactions</p>
-<p>    uint32_t nTime;                 // Block timestamp</p>
-<p>    uint32_t nBits;                 // Difficulty target (compact)</p>
-<p>    uint32_t nNonce;                // RandomX nonce</p>
-<p>};</p>
+<pre><code class="cpp">class CBlockHeader {
+    int32_t nVersion;               // Block version
+    uint256 hashPrevBlock;          // Previous block hash (SHA-3)
+    uint256 hashMerkleRoot;         // Merkle root of transactions
+    uint32_t nTime;                 // Block timestamp
+    uint32_t nBits;                 // Difficulty target (compact)
+    uint32_t nNonce;                // RandomX nonce
+};
 
-<p>class CBlock {</p>
-<p>    CBlockHeader header;            // Block header</p>
-<p>    std::vector<CTransaction> vtx;  // Transactions</p>
-<p>};</p>
-<pre><code>
+class CBlock {
+    CBlockHeader header;            // Block header
+    std::vector&lt;CTransaction&gt; vtx;  // Transactions
+};</code></pre>
 
-<strong>Block Properties:</strong>
-<li><strong>Target time:</strong> 4 minutes (240 seconds)
-<li><strong>Max size:</strong> 4 MB (soft limit, adjustable)
-<li><strong>Typical size:</strong> ~500 KB - 2 MB
-<li><strong>Hash algorithm:</strong> RandomX (for mining)
-<li><strong>Header hash:</strong> SHA-3-256
+<p><strong>Block Properties:</strong></p>
+<ul>
+    <li><strong>Target time:</strong> 4 minutes (240 seconds)</li>
+    <li><strong>Max size:</strong> 4 MB (soft limit, adjustable)</li>
+    <li><strong>Typical size:</strong> ~500 KB - 2 MB</li>
+    <li><strong>Hash algorithm:</strong> RandomX (for mining)</li>
+    <li><strong>Header hash:</strong> SHA-3-256</li>
+</ul>
 
 <hr>
 
-<h2>4. Consensus Mechanism</h2>
+<h2 id="section4">4. Consensus Mechanism</h2>
 
 <h3>4.1 RandomX Proof-of-Work</h3>
 
-<strong>Design Goals:</strong>
-<li>ASIC-resistant (keep mining decentralized)
-<li>CPU-optimized (accessible to everyone)
-<li>Memory-hard (prevent brute force)
+<p><strong>Design Goals:</strong></p>
+<ul>
+    <li>ASIC-resistant (keep mining decentralized)</li>
+    <li>CPU-optimized (accessible to everyone)</li>
+    <li>Memory-hard (prevent brute force)</li>
+</ul>
 
-<strong>RandomX Characteristics:</strong>
-<li><strong>Memory requirement:</strong> 2 GB (dataset)
-<li><strong>Algorithm:</strong> Random code execution
-<li><strong>Hash rate:</strong> ~60-80 H/s per CPU core (consumer hardware)
-<li><strong>ASIC resistance:</strong> High (designed to utilize general-purpose CPU features)
+<p><strong>RandomX Characteristics:</strong></p>
+<ul>
+    <li><strong>Memory requirement:</strong> 2 GB (dataset)</li>
+    <li><strong>Algorithm:</strong> Random code execution</li>
+    <li><strong>Hash rate:</strong> ~60-80 H/s per CPU core (consumer hardware)</li>
+    <li><strong>ASIC resistance:</strong> High (designed to utilize general-purpose CPU features)</li>
+</ul>
 
-<strong>Why RandomX?</strong>
-<li><strong>Proven:</strong> Used by Monero since 2019
-<li><strong>Fair:</strong> Anyone with a CPU can mine
-<li><strong>Decentralized:</strong> Prevents mining centralization
-<li><strong>Secure:</strong> Well-analyzed, no shortcuts found
+<p><strong>Why RandomX?</strong></p>
+<ul>
+    <li><strong>Proven:</strong> Used by Monero since 2019</li>
+    <li><strong>Fair:</strong> Anyone with a CPU can mine</li>
+    <li><strong>Decentralized:</strong> Prevents mining centralization</li>
+    <li><strong>Secure:</strong> Well-analyzed, no shortcuts found</li>
+</ul>
 
 <h3>4.2 Block Time: 4 Minutes</h3>
 
-<strong>Decision Rationale:</strong>
+<p><strong>Decision Rationale:</strong></p>
 
-<p>Original proposal: 2 minutes (5x faster than Bitcoin)</p>
-<strong>Final decision: 4 minutes</strong> (2.5x faster than Bitcoin)
+<p>Original proposal: 2 minutes (5x faster than Bitcoin)<br>
+<strong>Final decision: 4 minutes</strong> (2.5x faster than Bitcoin)</p>
 
-<strong>Why 4 minutes is optimal:</strong>
+<p><strong>Why 4 minutes is optimal:</strong></p>
 
-<li><strong>Large Signature Propagation</strong>
-<p>   - Dilithium signatures: 3,309 bytes each</p>
-<p>   - Typical block: 10-50 transactions = 33-165 KB of signatures</p>
-<p>   - Global network needs time to propagate</p>
-<p>   - <strong>4 minutes reduces orphan rate by ~50%</strong> vs 2-minute blocks</p>
-
-<li><strong>Blockchain Growth</strong>
-<p>   </code></pre></p>
-<p>   2-minute blocks: 720 blocks/day = ~767 GB/year</p>
-<p>   4-minute blocks: 360 blocks/day = ~365 GB/year (50% reduction)</p>
-<p>   </code></pre></p>
-
-<li><strong>Balanced Confirmation Time</strong>
-<p>   </code></pre></p>
-<p>   Bitcoin:    10 min/block × 6 confirmations = 60 minutes</p>
-<p>   Dilithion:   4 min/block × 3 confirmations = 12 minutes (5x faster)</p>
-<p>   Litecoin:  2.5 min/block × 6 confirmations = 15 minutes</p>
-<p>   </code></pre></p>
-
-<li><strong>Better Emission Schedule</strong>
-<p>   </code></pre></p>
-<p>   2-min: 62.6% mined in Year 1 (too aggressive)</p>
-<p>   4-min: 31.3% mined in Year 1 (balanced distribution)</p>
-<p>   </code></pre></p>
-
-<li><strong>Global Mining Fairness</strong>
-<p>   - Network latency (200-400ms globally) becomes smaller % of block time</p>
-<p>   - Miners worldwide have equal opportunity</p>
+<ul>
+    <li><strong>Large Signature Propagation</strong>
+        <ul>
+            <li>Dilithium signatures: 3,309 bytes each</li>
+            <li>Typical block: 10-50 transactions = 33-165 KB of signatures</li>
+            <li>Global network needs time to propagate</li>
+            <li><strong>4 minutes reduces orphan rate by ~50%</strong> vs 2-minute blocks</li>
+        </ul>
+    </li>
+    <li><strong>Blockchain Growth</strong>
+        <pre>
+2-minute blocks: 720 blocks/day = ~767 GB/year
+4-minute blocks: 360 blocks/day = ~365 GB/year (50% reduction)</pre>
+    </li>
+    <li><strong>Balanced Confirmation Time</strong>
+        <pre>
+Bitcoin:    10 min/block × 6 confirmations = 60 minutes
+Dilithion:   4 min/block × 3 confirmations = 12 minutes (5x faster)
+Litecoin:  2.5 min/block × 6 confirmations = 15 minutes</pre>
+    </li>
+    <li><strong>Better Emission Schedule</strong>
+        <pre>
+2-min: 62.6% mined in Year 1 (too aggressive)
+4-min: 31.3% mined in Year 1 (balanced distribution)</pre>
+    </li>
+    <li><strong>Global Mining Fairness</strong>
+        <ul>
+            <li>Network latency (200-400ms globally) becomes smaller % of block time</li>
+            <li>Miners worldwide have equal opportunity</li>
+        </ul>
+    </li>
+</ul>
 
 <h3>4.3 Difficulty Adjustment</h3>
 
-<strong>Algorithm:</strong> Similar to Bitcoin's difficulty adjustment
+<p><strong>Algorithm:</strong> Similar to Bitcoin's difficulty adjustment</p>
 
-<pre><code>cpp
-<p>// Adjust difficulty every 2016 blocks</p>
-<p>const int64_t DIFFICULTY_ADJUSTMENT_INTERVAL = 2016;</p>
-<p>const int64_t BLOCK_TARGET_SPACING = 240; // 4 minutes</p>
+<pre><code class="cpp">// Adjust difficulty every 2016 blocks
+const int64_t DIFFICULTY_ADJUSTMENT_INTERVAL = 2016;
+const int64_t BLOCK_TARGET_SPACING = 240; // 4 minutes
 
-<p>// Target timespan: 2016 blocks × 4 minutes = 5.6 days</p>
-<p>const int64_t TARGET_TIMESPAN = DIFFICULTY_ADJUSTMENT_INTERVAL * BLOCK_TARGET_SPACING;</p>
+// Target timespan: 2016 blocks × 4 minutes = 5.6 days
+const int64_t TARGET_TIMESPAN = DIFFICULTY_ADJUSTMENT_INTERVAL * BLOCK_TARGET_SPACING;
 
-<p>// Difficulty adjustment formula:</p>
-<p>new_difficulty = old_difficulty * (actual_time / target_time)</p>
+// Difficulty adjustment formula:
+new_difficulty = old_difficulty * (actual_time / target_time)
 
-<p>// With bounds:</p>
-<p>new_difficulty = clamp(new_difficulty, old_difficulty / 4, old_difficulty * 4)</p>
-<pre><code>
+// With bounds:
+new_difficulty = clamp(new_difficulty, old_difficulty / 4, old_difficulty * 4)</code></pre>
 
-<strong>Properties:</strong>
-<li>Adjusts every ~5.6 days
-<li>Maximum change: 4x per adjustment
-<li>Prevents difficulty manipulation attacks
-<li>Responsive to hash rate changes
+<p><strong>Properties:</strong></p>
+<ul>
+    <li>Adjusts every ~5.6 days</li>
+    <li>Maximum change: 4x per adjustment</li>
+    <li>Prevents difficulty manipulation attacks</li>
+    <li>Responsive to hash rate changes</li>
+</ul>
 
 <h3>4.4 Timestamp Validation</h3>
 
-<strong>Rules:</strong>
-<li>Block time must not be more than <strong>2 hours in the future</strong>
-<li>Block time must be greater than <strong>median-time-past</strong> (last 11 blocks)
+<p><strong>Rules:</strong></p>
+<ul>
+    <li>Block time must not be more than <strong>2 hours in the future</strong></li>
+    <li>Block time must be greater than <strong>median-time-past</strong> (last 11 blocks)</li>
+</ul>
 
-<strong>Prevents:</strong>
-<li>Time manipulation attacks
-<li>Difficulty adjustment gaming
-<li>Chain reorganization exploits
+<p><strong>Prevents:</strong></p>
+<ul>
+    <li>Time manipulation attacks</li>
+    <li>Difficulty adjustment gaming</li>
+    <li>Chain reorganization exploits</li>
+</ul>
 
 <hr>
 
-<h2>5. Economic Model</h2>
+<h2 id="section5">5. Economic Model</h2>
 
 <h3>5.1 Supply Schedule</h3>
 
-<pre><code>
-<p>Total Supply:    21,000,000 DIL (fixed cap)</p>
-<p>Initial Reward:  50 DIL per block</p>
-<p>Block Time:      4 minutes (240 seconds)</p>
-<p>Halving:         Every 210,000 blocks (~1.6 years)</p>
-<pre><code>
+<pre>
+Total Supply:    21,000,000 DIL (fixed cap)
+Initial Reward:  50 DIL per block
+Block Time:      4 minutes (240 seconds)
+Halving:         Every 210,000 blocks (~1.6 years)
+</pre>
 
 <h3>5.2 Emission Schedule</h3>
 
-<p>| Halving | Block Range | Reward | Duration | DIL Mined | % of Supply | Cumulative % |</p>
-<p>|---------|-------------|--------|----------|-----------|-------------|--------------|</p>
-<p>| 0 | 0 - 209,999 | 50 DIL | 1.60 years | 10,500,000 | 50.0% | 50.0% |</p>
-<p>| 1 | 210k - 419,999 | 25 DIL | 1.60 years | 5,250,000 | 25.0% | 75.0% |</p>
-<p>| 2 | 420k - 629,999 | 12.5 DIL | 1.60 years | 2,625,000 | 12.5% | 87.5% |</p>
-<p>| 3 | 630k - 839,999 | 6.25 DIL | 1.60 years | 1,312,500 | 6.25% | 93.75% |</p>
-<p>| 4+ | 840k+ | <6.25 DIL | ~8 years | ~1,312,500 | ~6.25% | ~100% |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Halving</th>
+            <th>Block Range</th>
+            <th>Reward</th>
+            <th>Duration</th>
+            <th>DIL Mined</th>
+            <th>% of Supply</th>
+            <th>Cumulative %</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>0</td>
+            <td>0 - 209,999</td>
+            <td>50 DIL</td>
+            <td>1.60 years</td>
+            <td>10,500,000</td>
+            <td>50.0%</td>
+            <td>50.0%</td>
+        </tr>
+        <tr>
+            <td>1</td>
+            <td>210k - 419,999</td>
+            <td>25 DIL</td>
+            <td>1.60 years</td>
+            <td>5,250,000</td>
+            <td>25.0%</td>
+            <td>75.0%</td>
+        </tr>
+        <tr>
+            <td>2</td>
+            <td>420k - 629,999</td>
+            <td>12.5 DIL</td>
+            <td>1.60 years</td>
+            <td>2,625,000</td>
+            <td>12.5%</td>
+            <td>87.5%</td>
+        </tr>
+        <tr>
+            <td>3</td>
+            <td>630k - 839,999</td>
+            <td>6.25 DIL</td>
+            <td>1.60 years</td>
+            <td>1,312,500</td>
+            <td>6.25%</td>
+            <td>93.75%</td>
+        </tr>
+        <tr>
+            <td>4+</td>
+            <td>840k+</td>
+            <td>&lt;6.25 DIL</td>
+            <td>~8 years</td>
+            <td>~1,312,500</td>
+            <td>~6.25%</td>
+            <td>~100%</td>
+        </tr>
+    </tbody>
+</table>
 
-<strong>Year-by-Year Emission:</strong>
-<li><strong>Year 1:</strong> 6,570,000 DIL (31.3% of total supply)
-<li><strong>Year 2:</strong> 5,250,000 DIL (25.0%)
-<li><strong>Year 3:</strong> 3,285,000 DIL (15.6%)
-<li><strong>Year 5:</strong> 89.1% mined
-<li><strong>Year 13:</strong> 99%+ mined
+<p><strong>Year-by-Year Emission:</strong></p>
+<ul>
+    <li><strong>Year 1:</strong> 6,570,000 DIL (31.3% of total supply)</li>
+    <li><strong>Year 2:</strong> 5,250,000 DIL (25.0%)</li>
+    <li><strong>Year 3:</strong> 3,285,000 DIL (15.6%)</li>
+    <li><strong>Year 5:</strong> 89.1% mined</li>
+    <li><strong>Year 13:</strong> 99%+ mined</li>
+</ul>
 
 <h3>5.3 Comparison to Bitcoin</h3>
 
-<p>| Metric | Bitcoin | Dilithion | Ratio |</p>
-<p>|--------|---------|-----------|-------|</p>
-<p>| <strong>Total Supply</strong> | 21M BTC | 21M DIL | 1:1 |</p>
-<p>| <strong>Initial Reward</strong> | 50 BTC | 50 DIL | 1:1 |</p>
-<p>| <strong>Block Time</strong> | 10 min | 4 min | 2.5x faster |</p>
-<p>| <strong>Halving Period</strong> | 210,000 blocks | 210,000 blocks | 1:1 |</p>
-<p>| <strong>First Halving</strong> | ~4 years | ~1.6 years | 2.5x faster |</p>
-<p>| <strong>99% Mined</strong> | ~32 years | ~12.8 years | 2.5x faster |</p>
-<p>| <strong>Year 1 Emission</strong> | 12.5% | 31.3% | 2.5x faster |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Metric</th>
+            <th>Bitcoin</th>
+            <th>Dilithion</th>
+            <th>Ratio</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Total Supply</strong></td>
+            <td>21M BTC</td>
+            <td>21M DIL</td>
+            <td>1:1</td>
+        </tr>
+        <tr>
+            <td><strong>Initial Reward</strong></td>
+            <td>50 BTC</td>
+            <td>50 DIL</td>
+            <td>1:1</td>
+        </tr>
+        <tr>
+            <td><strong>Block Time</strong></td>
+            <td>10 min</td>
+            <td>4 min</td>
+            <td>2.5x faster</td>
+        </tr>
+        <tr>
+            <td><strong>Halving Period</strong></td>
+            <td>210,000 blocks</td>
+            <td>210,000 blocks</td>
+            <td>1:1</td>
+        </tr>
+        <tr>
+            <td><strong>First Halving</strong></td>
+            <td>~4 years</td>
+            <td>~1.6 years</td>
+            <td>2.5x faster</td>
+        </tr>
+        <tr>
+            <td><strong>99% Mined</strong></td>
+            <td>~32 years</td>
+            <td>~12.8 years</td>
+            <td>2.5x faster</td>
+        </tr>
+        <tr>
+            <td><strong>Year 1 Emission</strong></td>
+            <td>12.5%</td>
+            <td>31.3%</td>
+            <td>2.5x faster</td>
+        </tr>
+    </tbody>
+</table>
 
-<strong>Conclusion:</strong> Dilithion's emission is <strong>exactly 2.5x faster</strong> than Bitcoin (matching the block time ratio).
+<p><strong>Conclusion:</strong> Dilithion's emission is <strong>exactly 2.5x faster</strong> than Bitcoin (matching the block time ratio).</p>
 
 <h3>5.4 Transaction Fees</h3>
 
-<strong>Fee Model (Option A):</strong>
+<p><strong>Fee Model:</strong></p>
 
-<pre><code>cpp
-<p>// Consensus parameters</p>
-<p>MIN_TX_FEE = 50,000 ions          // 0.0005 DIL (base fee)</p>
-<p>FEE_PER_BYTE = 25 ions            // 25 ions per byte</p>
-<p>MIN_RELAY_TX_FEE = 100,000 ions   // 0.001 DIL (relay minimum)</p>
+<pre><code class="cpp">// Consensus parameters
+MIN_TX_FEE = 50,000 ions          // 0.0005 DIL (base fee)
+FEE_PER_BYTE = 25 ions            // 25 ions per byte
+MIN_RELAY_TX_FEE = 100,000 ions   // 0.001 DIL (relay minimum)
 
-<p>// Fee calculation</p>
-<p>fee = MIN_TX_FEE + (transaction_size_bytes × FEE_PER_BYTE)</p>
-<pre><code>
+// Fee calculation
+fee = MIN_TX_FEE + (transaction_size_bytes × FEE_PER_BYTE)</code></pre>
 
-<strong>Typical Transaction Fees:</strong>
-<p>| Transaction Type | Size | Fee (DIL) | Fee (USD at $1/DIL) |</p>
-<p>|------------------|------|-----------|---------------------|</p>
-<p>| 1-in, 1-out | 3,864 bytes | 0.00147 | $0.00147 |</p>
-<p>| 1-in, 2-out | 5,816 bytes | 0.00195 | $0.00195 |</p>
-<p>| 2-in, 2-out | 9,598 bytes | 0.00290 | $0.00290 |</p>
+<p><strong>Typical Transaction Fees:</strong></p>
 
-<strong>Design Goals:</strong>
-<li><strong>Affordable:</strong> Fees remain negligible (<$0.003 per transaction)
-<li><strong>Spam protection:</strong> 3x higher than minimal baseline (prevents cheap attacks)
-<li><strong>Miner incentives:</strong> Provides meaningful revenue (3x improvement over original)
-<li><strong>Sustainable:</strong> Scales with transaction complexity
+<table>
+    <thead>
+        <tr>
+            <th>Transaction Type</th>
+            <th>Size</th>
+            <th>Fee (DIL)</th>
+            <th>Fee (USD at $1/DIL)</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>1-in, 1-out</td>
+            <td>3,864 bytes</td>
+            <td>0.00147</td>
+            <td>$0.00147</td>
+        </tr>
+        <tr>
+            <td>1-in, 2-out</td>
+            <td>5,816 bytes</td>
+            <td>0.00195</td>
+            <td>$0.00195</td>
+        </tr>
+        <tr>
+            <td>2-in, 2-out</td>
+            <td>9,598 bytes</td>
+            <td>0.00290</td>
+            <td>$0.00290</td>
+        </tr>
+    </tbody>
+</table>
 
-<strong>Long-term Fee Market:</strong>
-<li><strong>Short-term:</strong> Fixed fee model (simple, predictable)
-<li><strong>Year 1-2:</strong> Monitor usage patterns and fee adequacy
-<li><strong>Year 2+:</strong> Implement dynamic fee market (EIP-1559 style consideration)
+<p><strong>Design Goals:</strong></p>
+<ul>
+    <li><strong>Affordable:</strong> Fees remain negligible (&lt;$0.003 per transaction)</li>
+    <li><strong>Spam protection:</strong> 3x higher than minimal baseline (prevents cheap attacks)</li>
+    <li><strong>Miner incentives:</strong> Provides meaningful revenue (3x improvement over original)</li>
+    <li><strong>Sustainable:</strong> Scales with transaction complexity</li>
+</ul>
 
-<h3>5.5 Mining Development Contribution (Mainnet Only)</h3>
+<p><strong>Long-term Fee Market:</strong></p>
+<ul>
+    <li><strong>Short-term:</strong> Fixed fee model (simple, predictable)</li>
+    <li><strong>Year 1-2:</strong> Monitor usage patterns and fee adequacy</li>
+    <li><strong>Year 2+:</strong> Implement dynamic fee market (EIP-1559 style consideration)</li>
+</ul>
+
+<h3 id="section5-5">5.5 Mining Development Contribution (Mainnet Only)</h3>
 
 <p>To ensure sustainable long-term development and maintenance, Dilithion implements a <strong>2% mining development contribution</strong> on mainnet. This is NOT a premine—it is an ongoing, transparent allocation from block subsidies.</p>
 
-<strong>Structure:</strong>
-<li><strong>Total allocation:</strong> 2% of each block subsidy (NOT transaction fees)
-<li><strong>Dev Fund (1%):</strong> Long-term development, security audits, infrastructure
-<li><strong>Developer Reward (1%):</strong> Active contributor compensation
-<li><strong>Miner receives:</strong> 98% of block subsidy + 100% of transaction fees
+<p><strong>Structure:</strong></p>
+<ul>
+    <li><strong>Total allocation:</strong> 2% of each block subsidy (NOT transaction fees)</li>
+    <li><strong>Dev Fund (1%):</strong> Long-term development, security audits, infrastructure</li>
+    <li><strong>Developer Reward (1%):</strong> Active contributor compensation</li>
+    <li><strong>Miner receives:</strong> 98% of block subsidy + 100% of transaction fees</li>
+</ul>
 
-<strong>Example Calculation:</strong>
-<pre><code>
+<p><strong>Example Calculation:</strong></p>
+<pre>
 Block Subsidy: 50 DIL (100%)
 ├── Miner Reward:     49 DIL (98%)
 ├── Dev Fund:         0.5 DIL (1%)
@@ -577,27 +924,31 @@ After First Halving (25 DIL subsidy):
 ├── Miner Reward:     24.5 DIL (98%)
 ├── Dev Fund:         0.25 DIL (1%)
 └── Developer Reward: 0.25 DIL (1%)
-</code></pre>
+</pre>
 
-<strong>Hardcoded Addresses:</strong>
-<li><strong>Dev Fund:</strong> DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC
-<li><strong>Developer Reward:</strong> DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR
+<p><strong>Hardcoded Addresses:</strong></p>
+<ul>
+    <li><strong>Dev Fund:</strong> DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC</li>
+    <li><strong>Developer Reward:</strong> DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR</li>
+</ul>
 
-<strong>Consensus Enforcement:</strong>
+<p><strong>Consensus Enforcement:</strong></p>
 <p>All nodes validate that mined blocks include the correct development outputs at the correct amounts. Blocks without valid development outputs are rejected by the network.</p>
 
-<strong>Testnet Exception:</strong>
+<p><strong>Testnet Exception:</strong></p>
 <p>The mining development contribution is <strong>disabled on testnet</strong> to allow the existing testnet chain to continue operating and to simplify testing. Testnet miners receive 100% of block rewards.</p>
 
-<strong>Why 2%?</strong>
-<li><strong>Sustainable:</strong> Small enough to not discourage mining (98% to miners)
-<li><strong>Meaningful:</strong> Provides resources for professional development and security
-<li><strong>Transparent:</strong> Fixed addresses, verifiable on-chain
-<li><strong>Fair:</strong> No premine, no ICO—development funded by ongoing work
-<li><strong>Precedent:</strong> Similar to Zcash (20% founder's reward) but much smaller
+<p><strong>Why 2%?</strong></p>
+<ul>
+    <li><strong>Sustainable:</strong> Small enough to not discourage mining (98% to miners)</li>
+    <li><strong>Meaningful:</strong> Provides resources for professional development and security</li>
+    <li><strong>Transparent:</strong> Fixed addresses, verifiable on-chain</li>
+    <li><strong>Fair:</strong> No premine, no ICO—development funded by ongoing work</li>
+    <li><strong>Precedent:</strong> Similar to Zcash (20% founder's reward) but much smaller</li>
+</ul>
 
-<strong>Annual Development Funding (Year 1 estimates):</strong>
-<pre><code>
+<p><strong>Annual Development Funding (Year 1 estimates):</strong></p>
+<pre>
 Blocks per year: ~131,400 (at 4-minute target)
 Average subsidy: 50 DIL (before halving)
 Dev contribution per block: 1 DIL total
@@ -607,433 +958,689 @@ At various DIL prices:
   $0.10/DIL: ~$13,140/year
   $1.00/DIL: ~$131,400/year
   $10.00/DIL: ~$1,314,000/year
-</code></pre>
+</pre>
 
 <h3>5.6 Inflation Rate</h3>
 
-<p>| Year | Supply Start | Annual Emission | Supply End | Inflation Rate |</p>
-<p>|------|--------------|-----------------|------------|----------------|</p>
-<p>| 1 | 0 | 6,570,000 | 6,570,000 | N/A |</p>
-<p>| 2 | 6,570,000 | 5,250,000 | 11,820,000 | 79.9% |</p>
-<p>| 3 | 11,820,000 | 3,285,000 | 15,105,000 | 27.8% |</p>
-<p>| 4 | 15,105,000 | 1,965,000 | 17,070,000 | 13.0% |</p>
-<p>| 5 | 17,070,000 | 1,642,500 | 18,712,500 | 9.6% |</p>
-<p>| 10 | ~20,200,000 | ~205,000 | ~20,405,000 | ~1.0% |</p>
-<p>| 20 | ~20,900,000 | ~12,800 | ~20,912,800 | ~0.06% |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Year</th>
+            <th>Supply Start</th>
+            <th>Annual Emission</th>
+            <th>Supply End</th>
+            <th>Inflation Rate</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>1</td>
+            <td>0</td>
+            <td>6,570,000</td>
+            <td>6,570,000</td>
+            <td>N/A</td>
+        </tr>
+        <tr>
+            <td>2</td>
+            <td>6,570,000</td>
+            <td>5,250,000</td>
+            <td>11,820,000</td>
+            <td>79.9%</td>
+        </tr>
+        <tr>
+            <td>3</td>
+            <td>11,820,000</td>
+            <td>3,285,000</td>
+            <td>15,105,000</td>
+            <td>27.8%</td>
+        </tr>
+        <tr>
+            <td>4</td>
+            <td>15,105,000</td>
+            <td>1,965,000</td>
+            <td>17,070,000</td>
+            <td>13.0%</td>
+        </tr>
+        <tr>
+            <td>5</td>
+            <td>17,070,000</td>
+            <td>1,642,500</td>
+            <td>18,712,500</td>
+            <td>9.6%</td>
+        </tr>
+        <tr>
+            <td>10</td>
+            <td>~20,200,000</td>
+            <td>~205,000</td>
+            <td>~20,405,000</td>
+            <td>~1.0%</td>
+        </tr>
+        <tr>
+            <td>20</td>
+            <td>~20,900,000</td>
+            <td>~12,800</td>
+            <td>~20,912,800</td>
+            <td>~0.06%</td>
+        </tr>
+    </tbody>
+</table>
 
-<strong>Observation:</strong> Inflation drops to single digits by Year 5, below 1% by Year 10.
+<p><strong>Observation:</strong> Inflation drops to single digits by Year 5, below 1% by Year 10.</p>
 
 <hr>
 
-<h2>6. Network Security</h2>
+<h2 id="section6">6. Network Security</h2>
 
 <h3>6.1 Attack Vector Analysis</h3>
 
-<p>#### 6.1.1 51% Attack</p>
+<h4>6.1.1 51% Attack</h4>
 
-<strong>Definition:</strong> Attacker controls >50% of network hash rate
+<p><strong>Definition:</strong> Attacker controls &gt;50% of network hash rate</p>
 
-<strong>Dilithion Defenses:</strong>
-<li><strong>RandomX CPU Mining</strong>
-<p>   - No ASICs available (ASIC-resistant design)</p>
-<p>   - Attacker must acquire thousands of consumer CPUs</p>
-<p>   - Very expensive and detectable</p>
+<p><strong>Dilithion Defenses:</strong></p>
+<ul>
+    <li><strong>RandomX CPU Mining</strong>
+        <ul>
+            <li>No ASICs available (ASIC-resistant design)</li>
+            <li>Attacker must acquire thousands of consumer CPUs</li>
+            <li>Very expensive and detectable</li>
+        </ul>
+    </li>
+    <li><strong>Confirmation Requirements</strong>
+        <pre>
+Small tx (&lt;$100):    3 confirmations = 12 minutes
+Medium tx ($1K):     6 confirmations = 24 minutes
+Large tx ($10K+):    10 confirmations = 40 minutes
+Exchange deposits:   20+ confirmations = 80+ minutes</pre>
+    </li>
+    <li><strong>Economic Disincentive</strong>
+        <pre>
+Attack cost: $20,000-$50,000 (hardware)
+Attack profit: $1,000-$5,000 (one-time, if successful)
+Consequence: Coin price crashes, attacker's holdings worthless
+Result: Attacker loses money</pre>
+    </li>
+</ul>
 
-<li><strong>Confirmation Requirements</strong>
-<p>   </code></pre></p>
-<p>   Small tx (<$100):    3 confirmations = 12 minutes</p>
-<p>   Medium tx ($1K):     6 confirmations = 24 minutes</p>
-<p>   Large tx ($10K+):    10 confirmations = 40 minutes</p>
-<p>   Exchange deposits:   20+ confirmations = 80+ minutes</p>
-<p>   </code></pre></p>
+<p><strong>Risk Level:</strong> LOW to MEDIUM (economically impractical)</p>
 
-<li><strong>Economic Disincentive</strong>
-<p>   </code></pre></p>
-<p>   Attack cost: $20,000-$50,000 (hardware)</p>
-<p>   Attack profit: $1,000-$5,000 (one-time, if successful)</p>
-<p>   Consequence: Coin price crashes, attacker's holdings worthless</p>
-<p>   Result: Attacker loses money</p>
-<p>   </code></pre></p>
+<h4>6.1.2 Double-Spend Attack</h4>
 
-<strong>Risk Level:</strong> LOW to MEDIUM (economically impractical)
+<p><strong>Mitigation:</strong></p>
+<ul>
+    <li>Requires 51% attack to succeed</li>
+    <li>Exchanges wait for multiple confirmations</li>
+    <li>Cost exceeds potential gain</li>
+</ul>
 
-<p>#### 6.1.2 Double-Spend Attack</p>
+<p><strong>Risk Level:</strong> LOW (same as 51% attack)</p>
 
-<strong>Mitigation:</strong>
-<li>Requires 51% attack to succeed
-<li>Exchanges wait for multiple confirmations
-<li>Cost exceeds potential gain
+<h4>6.1.3 Sybil Attack</h4>
 
-<strong>Risk Level:</strong> LOW (same as 51% attack)
+<p><strong>Definition:</strong> Attacker creates many fake network nodes</p>
 
-<p>#### 6.1.3 Sybil Attack</p>
+<p><strong>Dilithion Defenses:</strong></p>
+<ul>
+    <li>Mining power matters, not node count</li>
+    <li>Nodes don't receive rewards (no incentive to fake)</li>
+    <li>Peer quality scoring (future enhancement)</li>
+</ul>
 
-<strong>Definition:</strong> Attacker creates many fake network nodes
+<p><strong>Risk Level:</strong> LOW (ineffective attack vector)</p>
 
-<strong>Dilithion Defenses:</strong>
-<li>Mining power matters, not node count
-<li>Nodes don't receive rewards (no incentive to fake)
-<li>Peer quality scoring (future enhancement)
+<h4>6.1.4 Eclipse Attack</h4>
 
-<strong>Risk Level:</strong> LOW (ineffective attack vector)
+<p><strong>Definition:</strong> Isolate a node from the honest network</p>
 
-<p>#### 6.1.4 Eclipse Attack</p>
+<p><strong>Mitigation:</strong></p>
+<ul>
+    <li>Multiple seed nodes (DNS + hardcoded)</li>
+    <li>Peer diversity requirements</li>
+    <li>Automatic peer discovery</li>
+</ul>
 
-<strong>Definition:</strong> Isolate a node from the honest network
+<p><strong>Risk Level:</strong> LOW (standard Bitcoin-style defenses)</p>
 
-<strong>Mitigation:</strong>
-<li>Multiple seed nodes (DNS + hardcoded)
-<li>Peer diversity requirements
-<li>Automatic peer discovery
+<h4>6.1.5 Quantum Computer Attack</h4>
 
-<strong>Risk Level:</strong> LOW (standard Bitcoin-style defenses)
+<p><strong>Definition:</strong> Use quantum computer to break cryptography</p>
 
-<p>#### 6.1.5 Quantum Computer Attack</p>
+<p><strong>Dilithion Defense:</strong></p>
+<ul>
+    <li><strong>Signatures:</strong> Quantum-resistant (Dilithium3)</li>
+    <li><strong>Hashing:</strong> Quantum-resistant (SHA-3, only Grover speedup)</li>
+    <li><strong>Mining:</strong> Quantum computers provide minimal advantage (Grover = 2x speedup at best)</li>
+</ul>
 
-<strong>Definition:</strong> Use quantum computer to break cryptography
-
-<strong>Dilithion Defense:</strong>
-<li><strong>Signatures:</strong> Quantum-resistant (Dilithium3)
-<li><strong>Hashing:</strong> Quantum-resistant (SHA-3, only Grover speedup)
-<li><strong>Mining:</strong> Quantum computers provide minimal advantage (Grover = 2x speedup at best)
-
-<strong>Verdict:</strong> ✅ <strong>Dilithion is quantum-safe</strong> (primary design goal)
+<div class="info-box">
+<p><strong>Verdict:</strong> Dilithion is quantum-safe (primary design goal)</p>
+</div>
 
 <h3>6.2 Wallet Security</h3>
 
-<strong>Features:</strong>
-<li><strong>AES-256-CBC Encryption</strong>
-<p>   - Industry-standard wallet encryption</p>
-<p>   - PBKDF2-SHA3 key derivation (100,000 rounds)</p>
-<p>   - Two-tier architecture (master key + encrypted private keys)</p>
+<p><strong>Features:</strong></p>
+<ul>
+    <li><strong>AES-256-CBC Encryption</strong>
+        <ul>
+            <li>Industry-standard wallet encryption</li>
+            <li>PBKDF2-SHA3 key derivation (100,000 rounds)</li>
+            <li>Two-tier architecture (master key + encrypted private keys)</li>
+        </ul>
+    </li>
+    <li><strong>Lock/Unlock Mechanism</strong>
+        <ul>
+            <li>Automatic lock after timeout</li>
+            <li>Secure memory wiping</li>
+            <li>Password strength requirements</li>
+        </ul>
+    </li>
+    <li><strong>Backup &amp; Recovery</strong>
+        <ul>
+            <li>Binary wallet file format (DILWLT01)</li>
+            <li>Encrypted backups</li>
+            <li>HD wallet with 24-word seed phrase</li>
+        </ul>
+    </li>
+</ul>
 
-<li><strong>Lock/Unlock Mechanism</strong>
-<p>   - Automatic lock after timeout</p>
-<p>   - Secure memory wiping</p>
-<p>   - Password strength requirements</p>
-
-<li><strong>Backup & Recovery</strong>
-<p>   - Binary wallet file format (DILWLT01)</p>
-<p>   - Encrypted backups</p>
-<p>   - <strong>Future:</strong> HD wallet with 24-word seed phrase (Month 1-2 post-launch)</p>
-
-<strong>Best Practices:</strong>
-<li>Always encrypt wallet with strong passphrase
-<li>Regular backups to multiple locations
-<li>Store backups encrypted
-<li>Use cold storage for large amounts
+<p><strong>Best Practices:</strong></p>
+<ul>
+    <li>Always encrypt wallet with strong passphrase</li>
+    <li>Regular backups to multiple locations</li>
+    <li>Store backups encrypted</li>
+    <li>Use cold storage for large amounts</li>
+</ul>
 
 <h3>6.3 Network Monitoring</h3>
 
-<strong>Planned Infrastructure:</strong>
-<li><strong>Seed Nodes:</strong> 3-5 globally distributed nodes
-<li><strong>DNS Seeds:</strong> Automatic peer discovery
-<li><strong>Block Explorer:</strong> Public blockchain viewer
-<li><strong>Hash Rate Monitor:</strong> Real-time network statistics
+<p><strong>Planned Infrastructure:</strong></p>
+<ul>
+    <li><strong>Seed Nodes:</strong> 3-5 globally distributed nodes</li>
+    <li><strong>DNS Seeds:</strong> Automatic peer discovery</li>
+    <li><strong>Block Explorer:</strong> Public blockchain viewer</li>
+    <li><strong>Hash Rate Monitor:</strong> Real-time network statistics</li>
+</ul>
 
 <hr>
 
-<h2>7. Roadmap</h2>
+<h2 id="section7">7. Roadmap</h2>
 
 <h3>7.1 Genesis Launch (January 15, 2026)</h3>
 
-<strong>Launch Specifications:</strong>
-<li><strong>Genesis timestamp:</strong> January 15, 2026, 00:00:00 UTC
-<li><strong>Initial difficulty:</strong> Bitcoin-equivalent (0x1d00ffff)
-<li><strong>First halving:</strong> Block 210,000 (~July 2027)
-<li><strong>Network:</strong> Mainnet with seed nodes
+<p><strong>Launch Specifications:</strong></p>
+<ul>
+    <li><strong>Genesis timestamp:</strong> January 15, 2026, 00:00:00 UTC</li>
+    <li><strong>Initial difficulty:</strong> Bitcoin-equivalent (0x1d00ffff)</li>
+    <li><strong>First halving:</strong> Block 210,000 (~July 2027)</li>
+    <li><strong>Network:</strong> Mainnet with seed nodes</li>
+</ul>
 
-<strong>Launch Readiness:</strong>
-<li>✅ Core node implementation complete
-<li>✅ Wallet functionality complete
-<li>✅ Mining integration complete
-<li>✅ Consensus parameters finalized
-<li>✅ Security features implemented
-<li>✅ Testing complete
+<p><strong>Launch Readiness:</strong></p>
+<ul>
+    <li>Core node implementation complete</li>
+    <li>Wallet functionality complete</li>
+    <li>Mining integration complete</li>
+    <li>Consensus parameters finalized</li>
+    <li>Security features implemented</li>
+    <li>Testing complete</li>
+</ul>
 
 <h3>7.2 Month 1-2 (Launch Infrastructure)</h3>
 
-<strong>Priority Features:</strong>
-<li><strong>Desktop GUI Wallet</strong>
-<p>   - User-friendly interface</p>
-<p>   - One-click mining</p>
-<p>   - Visual transaction history</p>
-<p>   - Windows, macOS, Linux support</p>
-
-<li><strong>Website Launch</strong>
-<p>   - Countdown timer</p>
-<p>   - Live network dashboard</p>
-<p>   - Getting started guide</p>
-<p>   - Documentation</p>
-
-<li><strong>Block Explorer</strong>
-<p>   - View blocks and transactions</p>
-<p>   - Search functionality</p>
-<p>   - Network statistics</p>
-<p>   - API for developers</p>
-
-<li><strong>Mining Pool Software</strong>
-<p>   - Stratum protocol implementation</p>
-<p>   - Pool operator toolkit</p>
-<p>   - Fair reward distribution</p>
+<p><strong>Priority Features:</strong></p>
+<ul>
+    <li><strong>Desktop GUI Wallet</strong>
+        <ul>
+            <li>User-friendly interface</li>
+            <li>One-click mining</li>
+            <li>Visual transaction history</li>
+            <li>Windows, macOS, Linux support</li>
+        </ul>
+    </li>
+    <li><strong>Website Launch</strong>
+        <ul>
+            <li>Countdown timer</li>
+            <li>Live network dashboard</li>
+            <li>Getting started guide</li>
+            <li>Documentation</li>
+        </ul>
+    </li>
+    <li><strong>Block Explorer</strong>
+        <ul>
+            <li>View blocks and transactions</li>
+            <li>Search functionality</li>
+            <li>Network statistics</li>
+            <li>API for developers</li>
+        </ul>
+    </li>
+    <li><strong>Mining Pool Software</strong>
+        <ul>
+            <li>Stratum protocol implementation</li>
+            <li>Pool operator toolkit</li>
+            <li>Fair reward distribution</li>
+        </ul>
+    </li>
+</ul>
 
 <h3>7.3 Month 2-3 (Ecosystem Growth)</h3>
 
-<strong>Key Milestones:</strong>
-<li><strong>HD Wallet Implementation</strong> (HIGH PRIORITY)
-<p>   - 24-word seed phrase recovery</p>
-<p>   - BIP32/BIP39 adapted for Dilithium</p>
-<p>   - Infinite address generation from single seed</p>
-<p>   - <strong>Impact:</strong> Prevents coin loss, major UX improvement</p>
-
-<li><strong>Mobile Wallets</strong>
-<p>   - iOS app</p>
-<p>   - Android app</p>
-<p>   - QR code scanning</p>
-<p>   - Push notifications</p>
-<p>   - SPV-style lightweight verification</p>
-
-<li><strong>Exchange Listings</strong>
-<p>   - Engage major exchanges (Binance, Coinbase, Kraken)</p>
-<p>   - Provide integration documentation</p>
-<p>   - Listing applications submitted</p>
-
-<li><strong>Dynamic Fee Market</strong>
-<p>   - Fee estimation API</p>
-<p>   - Market-driven pricing</p>
-<p>   - Mempool analytics</p>
+<p><strong>Key Milestones:</strong></p>
+<ul>
+    <li><strong>HD Wallet Implementation</strong> (HIGH PRIORITY)
+        <ul>
+            <li>24-word seed phrase recovery</li>
+            <li>BIP32/BIP39 adapted for Dilithium</li>
+            <li>Infinite address generation from single seed</li>
+            <li><strong>Impact:</strong> Prevents coin loss, major UX improvement</li>
+        </ul>
+    </li>
+    <li><strong>Mobile Wallets</strong>
+        <ul>
+            <li>iOS app</li>
+            <li>Android app</li>
+            <li>QR code scanning</li>
+            <li>Push notifications</li>
+            <li>SPV-style lightweight verification</li>
+        </ul>
+    </li>
+    <li><strong>Exchange Listings</strong>
+        <ul>
+            <li>Engage major exchanges (Binance, Coinbase, Kraken)</li>
+            <li>Provide integration documentation</li>
+            <li>Listing applications submitted</li>
+        </ul>
+    </li>
+    <li><strong>Dynamic Fee Market</strong>
+        <ul>
+            <li>Fee estimation API</li>
+            <li>Market-driven pricing</li>
+            <li>Mempool analytics</li>
+        </ul>
+    </li>
+</ul>
 
 <h3>7.4 Month 6+ (Advanced Features)</h3>
 
-<strong>Long-term Enhancements:</strong>
-<li><strong>Payment Integration</strong>
-<p>   - Merchant tools</p>
-<p>   - Point-of-sale systems</p>
-<p>   - E-commerce plugins</p>
-
-<li><strong>Hardware Wallet Support</strong>
-<p>   - Research custom PQC hardware wallet</p>
-<p>   - Ledger/Trezor collaboration exploration</p>
-<p>   - Secure key storage solutions</p>
-
-<li><strong>Layer 2 Scaling</strong>
-<p>   - Lightning Network research (adapted for PQC)</p>
-<p>   - Payment channels</p>
-<p>   - Atomic swaps</p>
-
-<li><strong>Signature Aggregation</strong>
-<p>   - Research academic developments</p>
-<p>   - Implement if available (75-85% size reduction potential)</p>
-<p>   - Significant transaction size improvement</p>
+<p><strong>Long-term Enhancements:</strong></p>
+<ul>
+    <li><strong>Payment Integration</strong>
+        <ul>
+            <li>Merchant tools</li>
+            <li>Point-of-sale systems</li>
+            <li>E-commerce plugins</li>
+        </ul>
+    </li>
+    <li><strong>Hardware Wallet Support</strong>
+        <ul>
+            <li>Research custom PQC hardware wallet</li>
+            <li>Ledger/Trezor collaboration exploration</li>
+            <li>Secure key storage solutions</li>
+        </ul>
+    </li>
+    <li><strong>Layer 2 Scaling</strong>
+        <ul>
+            <li>Lightning Network research (adapted for PQC)</li>
+            <li>Payment channels</li>
+            <li>Atomic swaps</li>
+        </ul>
+    </li>
+    <li><strong>Signature Aggregation</strong>
+        <ul>
+            <li>Research academic developments</li>
+            <li>Implement if available (75-85% size reduction potential)</li>
+            <li>Significant transaction size improvement</li>
+        </ul>
+    </li>
+</ul>
 
 <h3>7.5 Year 2+ (Ecosystem Maturity)</h3>
 
-<strong>Vision:</strong>
-<li><strong>DeFi Integration</strong>
-<p>   - Decentralized exchanges</p>
-<p>   - Lending protocols</p>
-<p>   - Liquidity pools</p>
-
-<li><strong>Smart Contracts</strong> (Research)
-<p>   - Post-quantum compatible VM</p>
-<p>   - Turing-complete capabilities</p>
-<p>   - Security-first design</p>
-
-<li><strong>Privacy Features</strong> (Optional)
-<p>   - Ring signatures or similar</p>
-<p>   - Optional privacy transactions</p>
-<p>   - Balance transparency vs. privacy</p>
-
-<li><strong>Cross-chain Bridges</strong>
-<p>   - Connect to other blockchains</p>
-<p>   - Atomic swaps</p>
-<p>   - Interoperability protocols</p>
+<p><strong>Vision:</strong></p>
+<ul>
+    <li><strong>DeFi Integration</strong>
+        <ul>
+            <li>Decentralized exchanges</li>
+            <li>Lending protocols</li>
+            <li>Liquidity pools</li>
+        </ul>
+    </li>
+    <li><strong>Smart Contracts</strong> (Research)
+        <ul>
+            <li>Post-quantum compatible VM</li>
+            <li>Turing-complete capabilities</li>
+            <li>Security-first design</li>
+        </ul>
+    </li>
+    <li><strong>Privacy Features</strong> (Optional)
+        <ul>
+            <li>Ring signatures or similar</li>
+            <li>Optional privacy transactions</li>
+            <li>Balance transparency vs. privacy</li>
+        </ul>
+    </li>
+    <li><strong>Cross-chain Bridges</strong>
+        <ul>
+            <li>Connect to other blockchains</li>
+            <li>Atomic swaps</li>
+            <li>Interoperability protocols</li>
+        </ul>
+    </li>
+</ul>
 
 <hr>
 
-<h2>8. Conclusion</h2>
+<h2 id="section8">8. Conclusion</h2>
 
 <h3>8.1 Why Dilithion Matters</h3>
 
-<strong>The Quantum Threat is Real:</strong>
-<li>Timeline: 5-10 years to cryptographically relevant quantum computers
-<li>Existing cryptocurrencies are vulnerable
-<li>Transition will be difficult and contentious
-<li><strong>Action needed now</strong>
+<p><strong>The Quantum Threat is Real:</strong></p>
+<ul>
+    <li>Timeline: 5-10 years to cryptographically relevant quantum computers</li>
+    <li>Existing cryptocurrencies are vulnerable</li>
+    <li>Transition will be difficult and contentious</li>
+    <li><strong>Action needed now</strong></li>
+</ul>
 
-<strong>Dilithion's Solution:</strong>
-<li>Built quantum-safe from genesis
-<li>No migration required
-<li>Users protected from day one
-<li>Proven cryptography (NIST standard)
+<p><strong>Dilithion's Solution:</strong></p>
+<ul>
+    <li>Built quantum-safe from genesis</li>
+    <li>No migration required</li>
+    <li>Users protected from day one</li>
+    <li>Proven cryptography (NIST standard)</li>
+</ul>
 
 <h3>8.2 Technical Excellence</h3>
 
-<strong>Optimized for Post-Quantum Era:</strong>
-<li>4-minute blocks accommodate large signatures
-<li>Balanced emission schedule (31.3% Year 1)
-<li>Affordable transaction fees
-<li>ASIC-resistant CPU mining
-<li>Professional-grade security
+<p><strong>Optimized for Post-Quantum Era:</strong></p>
+<ul>
+    <li>4-minute blocks accommodate large signatures</li>
+    <li>Balanced emission schedule (31.3% Year 1)</li>
+    <li>Affordable transaction fees</li>
+    <li>ASIC-resistant CPU mining</li>
+    <li>Professional-grade security</li>
+</ul>
 
-<strong>Comparison to Competition:</strong>
+<p><strong>Comparison to Competition:</strong></p>
 
-<p>| Feature | Bitcoin | Ethereum | Other PQC Projects | Dilithion |</p>
-<p>|---------|---------|----------|-------------------|-----------|</p>
-<p>| Quantum-safe signatures | ❌ No | ❌ No | ⚠️ Experimental | ✅ NIST standard |</p>
-<p>| ASIC-resistant mining | ❌ No | N/A (PoS) | Varies | ✅ RandomX |</p>
-<p>| Optimized for PQC | ❌ No | ❌ No | ⚠️ Partial | ✅ Yes (4-min blocks) |</p>
-<p>| Fixed supply | ✅ Yes | ❌ No | Varies | ✅ Yes (21M) |</p>
-<p>| Launch readiness | ✅ Mature | ✅ Mature | ⚠️ Alpha/Beta | ✅ Production-ready |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Feature</th>
+            <th>Bitcoin</th>
+            <th>Ethereum</th>
+            <th>Other PQC Projects</th>
+            <th>Dilithion</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Quantum-safe signatures</td>
+            <td>No</td>
+            <td>No</td>
+            <td>Experimental</td>
+            <td><strong>NIST standard</strong></td>
+        </tr>
+        <tr>
+            <td>ASIC-resistant mining</td>
+            <td>No</td>
+            <td>N/A (PoS)</td>
+            <td>Varies</td>
+            <td><strong>RandomX</strong></td>
+        </tr>
+        <tr>
+            <td>Optimized for PQC</td>
+            <td>No</td>
+            <td>No</td>
+            <td>Partial</td>
+            <td><strong>Yes (4-min blocks)</strong></td>
+        </tr>
+        <tr>
+            <td>Fixed supply</td>
+            <td>Yes</td>
+            <td>No</td>
+            <td>Varies</td>
+            <td><strong>Yes (21M)</strong></td>
+        </tr>
+        <tr>
+            <td>Launch readiness</td>
+            <td>Mature</td>
+            <td>Mature</td>
+            <td>Alpha/Beta</td>
+            <td><strong>Production-ready</strong></td>
+        </tr>
+    </tbody>
+</table>
 
 <h3>8.3 Fair Launch Principles</h3>
 
-<strong>Dilithion adheres to fair launch principles:</strong>
-<li>✅ No premine
-<li>✅ No ICO / token sale
-<li>✅ No founder allocation
-<li>✅ No venture capital pre-allocation
-<li>✅ Pure proof-of-work from genesis
-<li>✅ Open-source (MIT license)
-<li>✅ Community-driven development
-<li>✅ Transparent 2% development contribution (see Section 5.5)
+<p><strong>Dilithion adheres to fair launch principles:</strong></p>
+<ul>
+    <li>No premine</li>
+    <li>No ICO / token sale</li>
+    <li>No founder allocation</li>
+    <li>No venture capital pre-allocation</li>
+    <li>Pure proof-of-work from genesis</li>
+    <li>Open-source (MIT license)</li>
+    <li>Community-driven development</li>
+    <li>Transparent 2% development contribution (see Section 5.5)</li>
+</ul>
 
-<strong>Development Funding Transparency:</strong>
+<p><strong>Development Funding Transparency:</strong></p>
 <p>Unlike projects with large premines or founder allocations, Dilithion has ZERO coins at genesis. The 2% mining development contribution is:</p>
-<li>Earned through ongoing mining (not pre-allocated)
-<li>Hardcoded to fixed, public addresses
-<li>Verifiable on-chain by anyone
-<li>Much smaller than comparable projects (Zcash: 20%, Dash: 10%)
+<ul>
+    <li>Earned through ongoing mining (not pre-allocated)</li>
+    <li>Hardcoded to fixed, public addresses</li>
+    <li>Verifiable on-chain by anyone</li>
+    <li>Much smaller than comparable projects (Zcash: 20%, Dash: 10%)</li>
+</ul>
 
-<strong>Everyone starts equal on January 15, 2026.</strong>
+<p><strong>Everyone starts equal on January 15, 2026.</strong></p>
 
 <h3>8.4 Long-term Vision</h3>
 
 <p>Dilithion aims to be:</p>
-<li><strong>The standard</strong> for quantum-safe cryptocurrency
-<li><strong>A store of value</strong> in the post-quantum era
-<li><strong>A medium of exchange</strong> with reasonable fees
-<li><strong>A platform</strong> for decentralized applications
-<li><strong>A community</strong> of quantum-aware developers and users
+<ul>
+    <li><strong>The standard</strong> for quantum-safe cryptocurrency</li>
+    <li><strong>A store of value</strong> in the post-quantum era</li>
+    <li><strong>A medium of exchange</strong> with reasonable fees</li>
+    <li><strong>A platform</strong> for decentralized applications</li>
+    <li><strong>A community</strong> of quantum-aware developers and users</li>
+</ul>
 
-<strong>Mission Statement:</strong>
-<p>> "Secure digital currency for the quantum age, built by the community, for the community."</p>
+<blockquote>
+<strong>Mission Statement:</strong><br>
+"Secure digital currency for the quantum age, built by the community, for the community."
+</blockquote>
 
 <h3>8.5 Call to Action</h3>
 
-<strong>For Miners:</strong>
-<li>CPU mining opens January 15, 2026
-<li>Fair distribution, no ASIC advantage
-<li>Early adoption opportunity
+<p><strong>For Miners:</strong></p>
+<ul>
+    <li>CPU mining opens January 15, 2026</li>
+    <li>Fair distribution, no ASIC advantage</li>
+    <li>Early adoption opportunity</li>
+</ul>
 
-<strong>For Developers:</strong>
-<li>Open-source codebase (GitHub)
-<li>Documentation available
-<li>Contribute to post-quantum crypto future
+<p><strong>For Developers:</strong></p>
+<ul>
+    <li>Open-source codebase (GitHub)</li>
+    <li>Documentation available</li>
+    <li>Contribute to post-quantum crypto future</li>
+</ul>
 
-<strong>For Users:</strong>
-<li>Download wallet before launch
-<li>Participate in first quantum-safe cryptocurrency
-<li>Be part of the solution
+<p><strong>For Users:</strong></p>
+<ul>
+    <li>Download wallet before launch</li>
+    <li>Participate in first quantum-safe cryptocurrency</li>
+    <li>Be part of the solution</li>
+</ul>
 
-<strong>For Investors:</strong>
-<li>Study the technology
-<li>Understand the quantum threat
-<li>Position for the post-quantum era
+<p><strong>For Investors:</strong></p>
+<ul>
+    <li>Study the technology</li>
+    <li>Understand the quantum threat</li>
+    <li>Position for the post-quantum era</li>
+</ul>
 
 <hr>
 
 <h2>Technical Specifications Summary</h2>
 
-<p>| Parameter | Value |</p>
-<p>|-----------|-------|</p>
-<p>| <strong>Launch Date</strong> | January 15, 2026, 00:00:00 UTC |</p>
-<p>| <strong>Total Supply</strong> | 21,000,000 DIL |</p>
-<p>| <strong>Block Time</strong> | 4 minutes (240 seconds) |</p>
-<p>| <strong>Block Reward</strong> | 50 DIL (49 DIL to miner, 1 DIL dev contribution on mainnet) |</p>
-<p>| <strong>Mining Dev Contribution</strong> | 2% of subsidy (mainnet only): 1% dev fund + 1% dev reward |</p>
-<p>| <strong>Halving Interval</strong> | Every 210,000 blocks (~1.6 years) |</p>
-<p>| <strong>Signature Algorithm</strong> | CRYSTALS-Dilithium3 (NIST FIPS 204) |</p>
-<p>| <strong>Hash Algorithm</strong> | SHA-3-256 (NIST FIPS 202) |</p>
-<p>| <strong>Mining Algorithm</strong> | RandomX (Monero-derived, ASIC-resistant) |</p>
-<p>| <strong>Difficulty Adjustment</strong> | Every 2,016 blocks (~5.6 days) |</p>
-<p>| <strong>Address Format</strong> | Dilithium3 public key hash (SHA-3) |</p>
-<p>| <strong>Transaction Fee</strong> | 0.0005 DIL base + 25 ions/byte |</p>
-<p>| <strong>Confirmations (typical)</strong> | 3-10 blocks (12-40 minutes) |</p>
-<p>| <strong>Genesis Block</strong> | Hardcoded, January 15, 2026 |</p>
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Value</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Launch Date</strong></td>
+            <td>January 15, 2026, 00:00:00 UTC</td>
+        </tr>
+        <tr>
+            <td><strong>Total Supply</strong></td>
+            <td>21,000,000 DIL</td>
+        </tr>
+        <tr>
+            <td><strong>Block Time</strong></td>
+            <td>4 minutes (240 seconds)</td>
+        </tr>
+        <tr>
+            <td><strong>Block Reward</strong></td>
+            <td>50 DIL (49 DIL to miner, 1 DIL dev contribution on mainnet)</td>
+        </tr>
+        <tr>
+            <td><strong>Mining Dev Contribution</strong></td>
+            <td>2% of subsidy (mainnet only): 1% dev fund + 1% dev reward</td>
+        </tr>
+        <tr>
+            <td><strong>Halving Interval</strong></td>
+            <td>Every 210,000 blocks (~1.6 years)</td>
+        </tr>
+        <tr>
+            <td><strong>Signature Algorithm</strong></td>
+            <td>CRYSTALS-Dilithium3 (NIST FIPS 204)</td>
+        </tr>
+        <tr>
+            <td><strong>Hash Algorithm</strong></td>
+            <td>SHA-3-256 (NIST FIPS 202)</td>
+        </tr>
+        <tr>
+            <td><strong>Mining Algorithm</strong></td>
+            <td>RandomX (Monero-derived, ASIC-resistant)</td>
+        </tr>
+        <tr>
+            <td><strong>Difficulty Adjustment</strong></td>
+            <td>Every 2,016 blocks (~5.6 days)</td>
+        </tr>
+        <tr>
+            <td><strong>Address Format</strong></td>
+            <td>Dilithium3 public key hash (SHA-3)</td>
+        </tr>
+        <tr>
+            <td><strong>Transaction Fee</strong></td>
+            <td>0.0005 DIL base + 25 ions/byte</td>
+        </tr>
+        <tr>
+            <td><strong>Confirmations (typical)</strong></td>
+            <td>3-10 blocks (12-40 minutes)</td>
+        </tr>
+        <tr>
+            <td><strong>Genesis Block</strong></td>
+            <td>Hardcoded, January 15, 2026</td>
+        </tr>
+    </tbody>
+</table>
 
 <hr>
 
 <h2>References</h2>
 
-<li>NIST. (2024). *FIPS 204: Module-Lattice-Based Digital Signature Standard*. National Institute of Standards and Technology.
-
-<li>Ducas, L., et al. (2018). *CRYSTALS-Dilithium: A Lattice-Based Digital Signature Scheme*. IACR Transactions on Cryptographic Hardware and Embedded Systems.
-
-<li>Shor, P. (1994). *Algorithms for quantum computation: Discrete logarithms and factoring*. Proceedings 35th Annual Symposium on Foundations of Computer Science.
-
-<li>National Academies of Sciences, Engineering, and Medicine. (2019). *Quantum Computing: Progress and Prospects*. The National Academies Press.
-
-<li>Monero Research Lab. (2019). *RandomX: CPU-optimized Proof-of-Work*. https://github.com/tevador/RandomX
-
-<li>Nakamoto, S. (2008). *Bitcoin: A Peer-to-Peer Electronic Cash System*.
-
-<li>Bernstein, D. J., et al. (2015). *Post-quantum cryptography*. Nature, 549(7671), 188-194.
+<ol>
+    <li>NIST. (2024). <em>FIPS 204: Module-Lattice-Based Digital Signature Standard</em>. National Institute of Standards and Technology.</li>
+    <li>Ducas, L., et al. (2018). <em>CRYSTALS-Dilithium: A Lattice-Based Digital Signature Scheme</em>. IACR Transactions on Cryptographic Hardware and Embedded Systems.</li>
+    <li>Shor, P. (1994). <em>Algorithms for quantum computation: Discrete logarithms and factoring</em>. Proceedings 35th Annual Symposium on Foundations of Computer Science.</li>
+    <li>National Academies of Sciences, Engineering, and Medicine. (2019). <em>Quantum Computing: Progress and Prospects</em>. The National Academies Press.</li>
+    <li>Monero Research Lab. (2019). <em>RandomX: CPU-optimized Proof-of-Work</em>. https://github.com/tevador/RandomX</li>
+    <li>Nakamoto, S. (2008). <em>Bitcoin: A Peer-to-Peer Electronic Cash System</em>.</li>
+    <li>Bernstein, D. J., et al. (2015). <em>Post-quantum cryptography</em>. Nature, 549(7671), 188-194.</li>
+</ol>
 
 <hr>
 
 <h2>Appendix A: Glossary</h2>
 
-<strong>ASIC (Application-Specific Integrated Circuit):</strong> Specialized hardware designed for a specific task (e.g., Bitcoin mining). Dilithion uses RandomX to resist ASICs.
+<dl>
+    <dt><strong>ASIC (Application-Specific Integrated Circuit)</strong></dt>
+    <dd>Specialized hardware designed for a specific task (e.g., Bitcoin mining). Dilithion uses RandomX to resist ASICs.</dd>
 
-<strong>CRYSTALS-Dilithium:</strong> NIST-standardized post-quantum digital signature scheme based on lattice cryptography.
+    <dt><strong>CRYSTALS-Dilithium</strong></dt>
+    <dd>NIST-standardized post-quantum digital signature scheme based on lattice cryptography.</dd>
 
-<strong>Halving:</strong> Reduction of block reward by 50%, occurs every 210,000 blocks (~1.6 years for Dilithion).
+    <dt><strong>Halving</strong></dt>
+    <dd>Reduction of block reward by 50%, occurs every 210,000 blocks (~1.6 years for Dilithion).</dd>
 
-<strong>Hash Rate:</strong> Measure of mining computational power, typically measured in hashes per second (H/s).
+    <dt><strong>Hash Rate</strong></dt>
+    <dd>Measure of mining computational power, typically measured in hashes per second (H/s).</dd>
 
-<strong>Lattice Cryptography:</strong> Post-quantum cryptographic approach based on hard mathematical problems in lattice structures.
+    <dt><strong>Lattice Cryptography</strong></dt>
+    <dd>Post-quantum cryptographic approach based on hard mathematical problems in lattice structures.</dd>
 
-<strong>Module-LWE:</strong> Learning With Errors over Module Lattices, the hard problem underlying Dilithium's security.
+    <dt><strong>Module-LWE</strong></dt>
+    <dd>Learning With Errors over Module Lattices, the hard problem underlying Dilithium's security.</dd>
 
-<strong>Orphan Block:</strong> Valid block that's not included in the longest chain, typically due to network propagation delays.
+    <dt><strong>Orphan Block</strong></dt>
+    <dd>Valid block that's not included in the longest chain, typically due to network propagation delays.</dd>
 
-<strong>Post-Quantum Cryptography (PQC):</strong> Cryptographic algorithms designed to be secure against quantum computer attacks.
+    <dt><strong>Post-Quantum Cryptography (PQC)</strong></dt>
+    <dd>Cryptographic algorithms designed to be secure against quantum computer attacks.</dd>
 
-<strong>RandomX:</strong> ASIC-resistant proof-of-work algorithm optimized for general-purpose CPUs.
+    <dt><strong>RandomX</strong></dt>
+    <dd>ASIC-resistant proof-of-work algorithm optimized for general-purpose CPUs.</dd>
 
-<strong>SHA-3:</strong> Secure Hash Algorithm 3, NIST-standardized hash function (Keccak).
+    <dt><strong>SHA-3</strong></dt>
+    <dd>Secure Hash Algorithm 3, NIST-standardized hash function (Keccak).</dd>
 
-<strong>Shor's Algorithm:</strong> Quantum algorithm that can break RSA and ECDSA in polynomial time.
-
-<hr>
-
-<h2>Appendix B: Contact & Community</h2>
-
-<strong>Website:</strong> https://dilithion.org (launching soon)
-
-<strong>GitHub:</strong> https://github.com/WillBarton888/dilithion
-
-<strong>Discord:</strong> [Community server - launching Week 2]
-
-<strong>Twitter/X:</strong> @DilithionCoin
-
-<strong>Reddit:</strong> r/dilithion
-
-<strong>Contact:</strong>
-<li><strong>General Inquiries:</strong> team@dilithion.org
-<li><strong>Security Reports:</strong> security@dilithion.org
-<li><strong>Media Inquiries:</strong> media@dilithion.org
-<li><strong>User Support:</strong> support@dilithion.org
+    <dt><strong>Shor's Algorithm</strong></dt>
+    <dd>Quantum algorithm that can break RSA and ECDSA in polynomial time.</dd>
+</dl>
 
 <hr>
 
-<strong>Dilithion Whitepaper v1.0</strong>
-<strong>October 2025</strong>
-<strong>"Quantum-Safe. Community-Driven. Fair Launch."</strong>
+<h2>Appendix B: Contact &amp; Community</h2>
+
+<p><strong>Website:</strong> <a href="https://dilithion.org">https://dilithion.org</a></p>
+
+<p><strong>GitHub:</strong> <a href="https://github.com/WillBarton888/dilithion">https://github.com/WillBarton888/dilithion</a></p>
+
+<p><strong>Discord:</strong> Community server - launching soon</p>
+
+<p><strong>Twitter/X:</strong> @DilithionCoin</p>
+
+<p><strong>Reddit:</strong> r/dilithion</p>
+
+<p><strong>Contact:</strong></p>
+<ul>
+    <li><strong>General Inquiries:</strong> team@dilithion.org</li>
+    <li><strong>Security Reports:</strong> security@dilithion.org</li>
+    <li><strong>Media Inquiries:</strong> media@dilithion.org</li>
+    <li><strong>User Support:</strong> support@dilithion.org</li>
+</ul>
 
 <hr>
 
+<p style="text-align: center;">
+    <strong>Dilithion Whitepaper v1.0</strong><br>
+    October 2025<br>
+    <em>"Quantum-Safe. Community-Driven. Fair Launch."</em>
+</p>
+
+<hr>
+
+<p style="font-size: 9pt; color: #666; text-align: justify;">
 <strong>Disclaimer:</strong> This whitepaper is for informational and educational purposes only and does not constitute investment, financial, or legal advice. Dilithion is EXPERIMENTAL software developed with AI assistance and has NOT been professionally audited. The software may contain bugs, vulnerabilities, or design flaws. Cryptocurrency investments carry significant risk, including total loss of funds. No guarantees are made regarding security, functionality, future value, adoption, or success. Use this software entirely at your own risk. Users are responsible for securing their own keys and funds. Always do your own research (DYOR) and consult with qualified professionals before participating in any cryptocurrency project.
+</p>
+
 </body>
 </html>
