@@ -364,6 +364,47 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         msg.start_height = stream.ReadInt32();
         msg.relay = stream.ReadUint8() != 0;
 
+        // v1.4.2+: Genesis hash validation to prevent cross-chain connections
+        // Peers on different genesis chains (e.g., old testnet binary) cause chain sync issues
+        uint256 our_genesis = Genesis::GetGenesisHash();
+        bool has_genesis_hash = stream.size() >= 32;  // Check if there's more data
+
+        if (has_genesis_hash) {
+            stream.read(msg.genesis_hash.data, 32);
+
+            if (msg.genesis_hash != our_genesis) {
+                // Peer is on a different blockchain - likely hasn't updated their binary
+                // Be helpful: explain the issue and how to fix it
+                LogPrintf(NET, WARN, "Peer %d is on a DIFFERENT BLOCKCHAIN (genesis mismatch)", peer_id);
+                std::cout << "\n[P2P] ================================================" << std::endl;
+                std::cout << "[P2P] CONNECTION REJECTED - DIFFERENT BLOCKCHAIN" << std::endl;
+                std::cout << "[P2P] ================================================" << std::endl;
+                std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") is running on a different chain." << std::endl;
+                std::cout << "[P2P] Their genesis: " << msg.genesis_hash.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cout << "[P2P] Our genesis:   " << our_genesis.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cout << "[P2P] " << std::endl;
+                std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
+                std::cout << "[P2P] 1. Download the latest binary: https://github.com/WillBarton888/dilithion/releases" << std::endl;
+                std::cout << "[P2P] 2. Stop your node" << std::endl;
+                std::cout << "[P2P] 3. Delete your data directory (~/.dilithion or %APPDATA%\\.dilithion)" << std::endl;
+                std::cout << "[P2P] 4. Restart with the new binary" << std::endl;
+                std::cout << "[P2P] ================================================\n" << std::endl;
+
+                // Moderate misbehavior score (20 points) - this could be an innocent mistake
+                // After 5 failed attempts (5 x 20 = 100), peer will be banned
+                peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_GENESIS);
+                return false;
+            }
+        } else {
+            // Old client (pre-v1.4.2) - no genesis hash in VERSION message
+            // Allow connection but log warning - they might be on wrong chain
+            LogPrintf(NET, WARN, "Peer %d (%s) is running old protocol (no genesis hash)",
+                      peer_id, msg.user_agent.c_str());
+            std::cout << "[P2P] WARNING: Peer " << peer_id << " (" << msg.user_agent
+                      << ") is running old protocol without genesis validation." << std::endl;
+            std::cout << "[P2P] Please update to latest version: https://github.com/WillBarton888/dilithion/releases" << std::endl;
+        }
+
         // NET-001 FIX: Explicit user agent length validation (defense-in-depth)
         // Note: NET-002 already limits ReadString() to 256 bytes, but we validate explicitly
         if (msg.user_agent.length() > 256) {
@@ -1555,6 +1596,9 @@ CNetMessage CNetMessageProcessor::CreateVersionMessage(const NetProtocol::CAddre
     static std::mt19937_64 gen(rd());
     msg.nonce = gen();
 
+    // v1.4.2+: Include our genesis hash to prevent cross-chain connections
+    msg.genesis_hash = Genesis::GetGenesisHash();
+
     std::vector<uint8_t> payload = SerializeVersionMessage(msg);
 
     g_network_stats.messages_sent++;
@@ -1910,6 +1954,10 @@ std::vector<uint8_t> CNetMessageProcessor::SerializeVersionMessage(
     stream.WriteString(msg.user_agent);
     stream.WriteInt32(msg.start_height);
     stream.WriteUint8(msg.relay ? 1 : 0);
+
+    // v1.4.2+: Genesis hash to prevent cross-chain connections
+    // Old clients will ignore extra bytes, new clients validate genesis match
+    stream.write(msg.genesis_hash.data, 32);
 
     return stream.GetData();
 }

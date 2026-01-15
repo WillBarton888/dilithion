@@ -70,6 +70,7 @@ enum class MisbehaviorType : uint16_t {
     TOO_MANY_CONNECTIONS = 501,      // Exceeded connection limit attempts
     INVALID_HANDSHAKE = 502,         // Invalid version handshake
     DUPLICATE_VERSION = 503,         // Sent version message twice
+    INVALID_GENESIS = 504,           // Peer on different blockchain (wrong genesis hash)
 };
 
 /**
@@ -108,6 +109,7 @@ inline const char* MisbehaviorTypeToString(MisbehaviorType type) {
         case MisbehaviorType::TOO_MANY_CONNECTIONS: return "too_many_connections";
         case MisbehaviorType::INVALID_HANDSHAKE: return "invalid_handshake";
         case MisbehaviorType::DUPLICATE_VERSION: return "duplicate_version";
+        case MisbehaviorType::INVALID_GENESIS: return "invalid_genesis";
         default: return "unknown";
     }
 }
@@ -135,6 +137,7 @@ inline int GetMisbehaviorScore(MisbehaviorType type) {
         case MisbehaviorType::TX_NON_STANDARD: return 20;
         case MisbehaviorType::INVALID_HANDSHAKE: return 20;
         case MisbehaviorType::DUPLICATE_VERSION: return 20;
+        case MisbehaviorType::INVALID_GENESIS: return 20;  // Likely innocent - user hasn't updated binary
 
         // Severe violations (100 points - immediate ban)
         case MisbehaviorType::INVALID_BLOCK_HEADER: return 100;

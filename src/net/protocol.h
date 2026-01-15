@@ -212,6 +212,7 @@ struct CVersionMessage {
     std::string user_agent;   // Client version string
     int32_t start_height;     // Last block height
     bool relay;              // Relay transactions
+    uint256 genesis_hash;     // Genesis block hash (v1.4.2+) - prevents cross-chain connections
 
     // BUG #50 FIX: Accept blockchain height parameter (Bitcoin Core pattern)
     // Defaults to 0 for backward compatibility, but should be set to actual height
