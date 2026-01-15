@@ -128,6 +128,7 @@ bool MineGenesisBlock(CBlock& block, const uint256& target) {
     // Try different nonces until we find one that meets the target
     for (uint32_t nonce = 0; nonce < 0xFFFFFFFF; ++nonce) {
         block.nNonce = nonce;
+        block.InvalidateCache();  // CRITICAL: Must invalidate cache after changing nonce
 
         // Calculate hash
         uint256 hash = block.GetHash();
