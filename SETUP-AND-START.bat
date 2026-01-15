@@ -1,21 +1,21 @@
 @echo off
 REM =======================================================
-REM  DILITHION TESTNET - INTERACTIVE SETUP WIZARD
+REM  DILITHION MAINNET - INTERACTIVE SETUP WIZARD
 REM =======================================================
-REM  Based on v1.0.6 - SIMPLIFIED VERSION THAT WORKED
+REM  v1.4.0 - MAINNET LAUNCH
 REM =======================================================
 
 color 0B
 cls
 echo.
 echo  ========================================================
-echo    DILITHION TESTNET - FIRST TIME SETUP WIZARD
+echo    DILITHION MAINNET - FIRST TIME SETUP WIZARD
 echo  ========================================================
 echo.
 echo  Welcome to Dilithion - Post-Quantum Cryptocurrency!
 echo.
-echo  This wizard will help you get started mining testnet DIL.
-echo  Testnet coins have NO monetary value (for testing only).
+echo  This wizard will help you get started mining DIL.
+echo  You are joining the MAINNET - real DIL with real value!
 echo.
 echo  ========================================================
 echo.
@@ -90,8 +90,8 @@ echo    STEP 2: REVIEW CONFIGURATION
 echo  ========================================================
 echo.
 echo  Your Settings:
-echo    - Network:     TESTNET
-echo    - Seed Nodes:  NYC, Singapore, London (auto-connect)
+echo    - Network:     MAINNET
+echo    - Seed Nodes:  NYC, London, Singapore, Sydney (auto-connect)
 echo    - Mining:      ENABLED
 echo    - CPU Threads: %threads_display%
 echo.
@@ -104,7 +104,7 @@ pause
 cls
 echo.
 echo  ========================================================
-echo    DILITHION TESTNET MINER - STARTING
+echo    DILITHION MAINNET MINER - STARTING
 echo  ========================================================
 echo.
 echo  Connecting to seed nodes...
@@ -118,7 +118,7 @@ echo.
 timeout /t 2 /nobreak >nul
 
 REM Run the node - file check removed (causes false positives on some Windows systems)
-dilithion-node.exe --testnet --mine --threads=%threads%
+dilithion-node.exe --mine --threads=%threads%
 
 echo.
 echo  ========================================================
