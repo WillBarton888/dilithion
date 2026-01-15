@@ -22,7 +22,7 @@ ChainParams ChainParams::Mainnet() {
     // Genesis block parameters
     params.genesisTime = 1736899200;   // January 15, 2026 00:00:00 UTC (v2 genesis)
     params.genesisNonce = 0;           // TO BE UPDATED after mining
-    params.genesisNBits = 0x1f007fff;  // Accessible initial difficulty (~4 min at 10K H/s, adjusts as network grows)
+    params.genesisNBits = 0x1f0fffff;  // Low initial difficulty for genesis (adjusts quickly as miners join)
     params.genesisHash = "";           // TO BE UPDATED after mining
     params.genesisCoinbaseMsg = "Dilithion Mainnet Genesis v2 - 15/Jan/2026 - Post-Quantum Security For The People";
 
