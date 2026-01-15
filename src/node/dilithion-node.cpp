@@ -299,6 +299,7 @@ struct NodeConfig {
     bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
     bool verbose = false;           // Show debug output (hidden by default)
+    bool relay_only = false;        // Relay-only mode: skip wallet creation (for seed nodes)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -418,6 +419,10 @@ struct NodeConfig {
                 // Show debug output
                 verbose = true;
             }
+            else if (arg == "--relay-only") {
+                // Relay-only mode: skip wallet creation (for seed nodes)
+                relay_only = true;
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -454,6 +459,7 @@ struct NodeConfig {
         std::cout << "  --restore-mnemonic=\"words\" Restore wallet from 24-word recovery phrase" << std::endl;
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
+        std::cout << "  --relay-only          Relay-only mode: skip wallet (for seed nodes)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -2609,16 +2615,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Phase 4: Initialize wallet (before mining callback setup)
         // BUG #56 FIX: Full wallet persistence with Bitcoin Core pattern
-        std::cout << "Initializing wallet..." << std::endl;
         CWallet wallet;
         g_node_state.wallet = &wallet;
+        std::string wallet_path = config.datadir + "/wallet.dat";
+        bool wallet_loaded = false;
+
+        if (config.relay_only) {
+            // Relay-only mode: skip wallet creation (for seed nodes)
+            std::cout << "Initializing wallet... SKIPPED (relay-only mode)" << std::endl;
+        } else {
+        std::cout << "Initializing wallet..." << std::endl;
 
         // Build wallet file path
-        std::string wallet_path = config.datadir + "/wallet.dat";
         std::cout << "  Wallet file: " << wallet_path << std::endl;
 
         // Try to load existing wallet from disk
-        bool wallet_loaded = false;
         if (std::filesystem::exists(wallet_path)) {
             std::cout << "[3/6] Loading wallet..." << std::flush;
             std::cout.flush();
@@ -2873,6 +2884,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cerr << "  WARNING: Failed to save new wallet" << std::endl;
             }
         }
+        }  // end else (!relay_only)
 
         // Set up block found callback to save mined blocks and credit wallet
         miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
