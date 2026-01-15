@@ -187,187 +187,197 @@ public:
         return std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
     }
 
+    // Network name for metrics labeling
+    std::string network_name{"mainnet"};  // Default to mainnet
+
+    void SetNetworkName(const std::string& name) {
+        network_name = name;
+    }
+
     // ============================================
     // Generate Prometheus-format output
     // ============================================
     std::string ToPrometheus() const {
         std::ostringstream out;
 
+        // Common label for all metrics
+        std::string net_label = "network=\"" + network_name + "\"";
+
         // Node info
         out << "# HELP dilithion_info Node information\n";
         out << "# TYPE dilithion_info gauge\n";
-        out << "dilithion_info{network=\"testnet\",version=\"1.2.9\"} 1\n\n";
+        out << "dilithion_info{" << net_label << ",version=\"1.4.0\"} 1\n\n";
 
         // Uptime
         out << "# HELP dilithion_uptime_seconds Node uptime in seconds\n";
         out << "# TYPE dilithion_uptime_seconds counter\n";
-        out << "dilithion_uptime_seconds " << GetUptimeSeconds() << "\n\n";
+        out << "dilithion_uptime_seconds{" << net_label << "} " << GetUptimeSeconds() << "\n\n";
 
         // Block height
         out << "# HELP dilithion_block_height Current blockchain height\n";
         out << "# TYPE dilithion_block_height gauge\n";
-        out << "dilithion_block_height " << block_height.load() << "\n\n";
+        out << "dilithion_block_height{" << net_label << "} " << block_height.load() << "\n\n";
 
         // Headers height
         out << "# HELP dilithion_headers_height Current headers chain height\n";
         out << "# TYPE dilithion_headers_height gauge\n";
-        out << "dilithion_headers_height " << headers_height.load() << "\n\n";
+        out << "dilithion_headers_height{" << net_label << "} " << headers_height.load() << "\n\n";
 
         // Peer count
         out << "# HELP dilithion_peer_count Number of connected peers\n";
         out << "# TYPE dilithion_peer_count gauge\n";
-        out << "dilithion_peer_count " << peer_count.load() << "\n\n";
+        out << "dilithion_peer_count{" << net_label << "} " << peer_count.load() << "\n\n";
 
         // Mempool
         out << "# HELP dilithion_mempool_size Number of transactions in mempool\n";
         out << "# TYPE dilithion_mempool_size gauge\n";
-        out << "dilithion_mempool_size " << mempool_size.load() << "\n\n";
+        out << "dilithion_mempool_size{" << net_label << "} " << mempool_size.load() << "\n\n";
 
         // Messages received by type
         out << "# HELP dilithion_messages_received_total Total messages received by type\n";
         out << "# TYPE dilithion_messages_received_total counter\n";
-        out << "dilithion_messages_received_total{type=\"block\"} " << msg_block_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"tx\"} " << msg_tx_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"headers\"} " << msg_headers_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"inv\"} " << msg_inv_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"getdata\"} " << msg_getdata_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"getblocks\"} " << msg_getblocks_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"getheaders\"} " << msg_getheaders_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"ping\"} " << msg_ping_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"pong\"} " << msg_pong_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"addr\"} " << msg_addr_received.load() << "\n";
-        out << "dilithion_messages_received_total{type=\"version\"} " << msg_version_received.load() << "\n\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"block\"} " << msg_block_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"tx\"} " << msg_tx_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"headers\"} " << msg_headers_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"inv\"} " << msg_inv_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"getdata\"} " << msg_getdata_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"getblocks\"} " << msg_getblocks_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"getheaders\"} " << msg_getheaders_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"ping\"} " << msg_ping_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"pong\"} " << msg_pong_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"addr\"} " << msg_addr_received.load() << "\n";
+        out << "dilithion_messages_received_total{" << net_label << ",type=\"version\"} " << msg_version_received.load() << "\n\n";
 
         // Bandwidth
         out << "# HELP dilithion_bytes_received_total Total bytes received\n";
         out << "# TYPE dilithion_bytes_received_total counter\n";
-        out << "dilithion_bytes_received_total " << bytes_received_total.load() << "\n\n";
+        out << "dilithion_bytes_received_total{" << net_label << "} " << bytes_received_total.load() << "\n\n";
 
         out << "# HELP dilithion_bytes_sent_total Total bytes sent\n";
         out << "# TYPE dilithion_bytes_sent_total counter\n";
-        out << "dilithion_bytes_sent_total " << bytes_sent_total.load() << "\n\n";
+        out << "dilithion_bytes_sent_total{" << net_label << "} " << bytes_sent_total.load() << "\n\n";
 
         // Consensus metrics
         out << "# HELP dilithion_blocks_validated_total Total blocks validated\n";
         out << "# TYPE dilithion_blocks_validated_total counter\n";
-        out << "dilithion_blocks_validated_total " << blocks_validated_total.load() << "\n\n";
+        out << "dilithion_blocks_validated_total{" << net_label << "} " << blocks_validated_total.load() << "\n\n";
 
         out << "# HELP dilithion_blocks_accepted_total Total blocks accepted to chain\n";
         out << "# TYPE dilithion_blocks_accepted_total counter\n";
-        out << "dilithion_blocks_accepted_total " << blocks_accepted_total.load() << "\n\n";
+        out << "dilithion_blocks_accepted_total{" << net_label << "} " << blocks_accepted_total.load() << "\n\n";
 
         out << "# HELP dilithion_blocks_relayed_total Total blocks relayed to peers\n";
         out << "# TYPE dilithion_blocks_relayed_total counter\n";
-        out << "dilithion_blocks_relayed_total " << blocks_relayed_total.load() << "\n\n";
+        out << "dilithion_blocks_relayed_total{" << net_label << "} " << blocks_relayed_total.load() << "\n\n";
 
         out << "# HELP dilithion_reorgs_total Total chain reorganizations\n";
         out << "# TYPE dilithion_reorgs_total counter\n";
-        out << "dilithion_reorgs_total " << reorgs_total.load() << "\n\n";
+        out << "dilithion_reorgs_total{" << net_label << "} " << reorgs_total.load() << "\n\n";
 
         out << "# HELP dilithion_orphan_blocks_total Total orphan blocks received\n";
         out << "# TYPE dilithion_orphan_blocks_total counter\n";
-        out << "dilithion_orphan_blocks_total " << orphan_blocks_total.load() << "\n\n";
+        out << "dilithion_orphan_blocks_total{" << net_label << "} " << orphan_blocks_total.load() << "\n\n";
 
         out << "# HELP dilithion_ibd_progress_percent IBD progress percentage\n";
         out << "# TYPE dilithion_ibd_progress_percent gauge\n";
-        out << "dilithion_ibd_progress_percent " << ibd_progress_percent.load() << "\n\n";
+        out << "dilithion_ibd_progress_percent{" << net_label << "} " << ibd_progress_percent.load() << "\n\n";
 
         out << "# HELP dilithion_last_block_time Unix timestamp of last block\n";
         out << "# TYPE dilithion_last_block_time gauge\n";
-        out << "dilithion_last_block_time " << last_block_time.load() << "\n\n";
+        out << "dilithion_last_block_time{" << net_label << "} " << last_block_time.load() << "\n\n";
 
         // Attack detection metrics (CRITICAL)
         out << "# HELP dilithion_invalid_blocks_total Invalid blocks received (attack indicator)\n";
         out << "# TYPE dilithion_invalid_blocks_total counter\n";
-        out << "dilithion_invalid_blocks_total " << invalid_blocks_total.load() << "\n\n";
+        out << "dilithion_invalid_blocks_total{" << net_label << "} " << invalid_blocks_total.load() << "\n\n";
 
         out << "# HELP dilithion_invalid_headers_total Invalid headers received (DoS indicator)\n";
         out << "# TYPE dilithion_invalid_headers_total counter\n";
-        out << "dilithion_invalid_headers_total " << invalid_headers_total.load() << "\n\n";
+        out << "dilithion_invalid_headers_total{" << net_label << "} " << invalid_headers_total.load() << "\n\n";
 
         out << "# HELP dilithion_invalid_transactions_total Invalid transactions received\n";
         out << "# TYPE dilithion_invalid_transactions_total counter\n";
-        out << "dilithion_invalid_transactions_total " << invalid_transactions_total.load() << "\n\n";
+        out << "dilithion_invalid_transactions_total{" << net_label << "} " << invalid_transactions_total.load() << "\n\n";
 
         out << "# HELP dilithion_peer_bans_total Peers banned for misbehavior\n";
         out << "# TYPE dilithion_peer_bans_total counter\n";
-        out << "dilithion_peer_bans_total " << peer_bans_total.load() << "\n\n";
+        out << "dilithion_peer_bans_total{" << net_label << "} " << peer_bans_total.load() << "\n\n";
 
         out << "# HELP dilithion_duplicate_messages_total Duplicate messages received (spam indicator)\n";
         out << "# TYPE dilithion_duplicate_messages_total counter\n";
-        out << "dilithion_duplicate_messages_total " << duplicate_messages_total.load() << "\n\n";
+        out << "dilithion_duplicate_messages_total{" << net_label << "} " << duplicate_messages_total.load() << "\n\n";
 
         out << "# HELP dilithion_connection_attempts_total Total connection attempts\n";
         out << "# TYPE dilithion_connection_attempts_total counter\n";
-        out << "dilithion_connection_attempts_total " << connection_attempts_total.load() << "\n\n";
+        out << "dilithion_connection_attempts_total{" << net_label << "} " << connection_attempts_total.load() << "\n\n";
 
         out << "# HELP dilithion_connection_rejected_total Rejected connection attempts\n";
         out << "# TYPE dilithion_connection_rejected_total counter\n";
-        out << "dilithion_connection_rejected_total " << connection_rejected_total.load() << "\n\n";
+        out << "dilithion_connection_rejected_total{" << net_label << "} " << connection_rejected_total.load() << "\n\n";
 
         out << "# HELP dilithion_fork_detected Fork detected indicator (eclipse attack)\n";
         out << "# TYPE dilithion_fork_detected gauge\n";
-        out << "dilithion_fork_detected " << fork_detected.load() << "\n\n";
+        out << "dilithion_fork_detected{" << net_label << "} " << fork_detected.load() << "\n\n";
 
         out << "# HELP dilithion_fork_depth Depth of detected fork in blocks\n";
         out << "# TYPE dilithion_fork_depth gauge\n";
-        out << "dilithion_fork_depth " << fork_depth.load() << "\n\n";
+        out << "dilithion_fork_depth{" << net_label << "} " << fork_depth.load() << "\n\n";
 
         out << "# HELP dilithion_fork_point_height Height where fork diverged\n";
         out << "# TYPE dilithion_fork_point_height gauge\n";
-        out << "dilithion_fork_point_height " << fork_point_height.load() << "\n\n";
+        out << "dilithion_fork_point_height{" << net_label << "} " << fork_point_height.load() << "\n\n";
 
         // Performance metrics
         out << "# HELP dilithion_block_validation_ms Last block validation time in ms\n";
         out << "# TYPE dilithion_block_validation_ms gauge\n";
-        out << "dilithion_block_validation_ms " << block_validation_time_ms.load() << "\n\n";
+        out << "dilithion_block_validation_ms{" << net_label << "} " << block_validation_time_ms.load() << "\n\n";
 
         // Orphan pool metrics (Phase 2 Stress Test)
         out << "# HELP dilithion_orphan_pool_size Current orphan block count\n";
         out << "# TYPE dilithion_orphan_pool_size gauge\n";
-        out << "dilithion_orphan_pool_size " << orphan_pool_size.load() << "\n\n";
+        out << "dilithion_orphan_pool_size{" << net_label << "} " << orphan_pool_size.load() << "\n\n";
 
         out << "# HELP dilithion_orphan_pool_bytes Memory used by orphan blocks\n";
         out << "# TYPE dilithion_orphan_pool_bytes gauge\n";
-        out << "dilithion_orphan_pool_bytes " << orphan_pool_bytes.load() << "\n\n";
+        out << "dilithion_orphan_pool_bytes{" << net_label << "} " << orphan_pool_bytes.load() << "\n\n";
 
         out << "# HELP dilithion_orphan_pool_connectable Orphans whose parent exists\n";
         out << "# TYPE dilithion_orphan_pool_connectable gauge\n";
-        out << "dilithion_orphan_pool_connectable " << orphan_pool_connectable.load() << "\n\n";
+        out << "dilithion_orphan_pool_connectable{" << net_label << "} " << orphan_pool_connectable.load() << "\n\n";
 
         out << "# HELP dilithion_orphan_pool_unconnectable Orphans whose parent is missing\n";
         out << "# TYPE dilithion_orphan_pool_unconnectable gauge\n";
-        out << "dilithion_orphan_pool_unconnectable " << orphan_pool_unconnectable.load() << "\n\n";
+        out << "dilithion_orphan_pool_unconnectable{" << net_label << "} " << orphan_pool_unconnectable.load() << "\n\n";
 
         out << "# HELP dilithion_orphan_pool_oldest_age_secs Age of oldest orphan in seconds\n";
         out << "# TYPE dilithion_orphan_pool_oldest_age_secs gauge\n";
-        out << "dilithion_orphan_pool_oldest_age_secs " << orphan_pool_oldest_age_secs.load() << "\n\n";
+        out << "dilithion_orphan_pool_oldest_age_secs{" << net_label << "} " << orphan_pool_oldest_age_secs.load() << "\n\n";
 
         // Validation queue metrics (Phase 2 Stress Test)
         out << "# HELP dilithion_validation_queue_depth Blocks waiting for validation\n";
         out << "# TYPE dilithion_validation_queue_depth gauge\n";
-        out << "dilithion_validation_queue_depth " << validation_queue_depth.load() << "\n\n";
+        out << "dilithion_validation_queue_depth{" << net_label << "} " << validation_queue_depth.load() << "\n\n";
 
         out << "# HELP dilithion_validation_processing_ms Current block processing time in ms\n";
         out << "# TYPE dilithion_validation_processing_ms gauge\n";
-        out << "dilithion_validation_processing_ms " << validation_processing_ms.load() << "\n\n";
+        out << "dilithion_validation_processing_ms{" << net_label << "} " << validation_processing_ms.load() << "\n\n";
 
         out << "# HELP dilithion_validation_last_completion Unix timestamp of last validation\n";
         out << "# TYPE dilithion_validation_last_completion gauge\n";
-        out << "dilithion_validation_last_completion " << validation_last_completion.load() << "\n\n";
+        out << "dilithion_validation_last_completion{" << net_label << "} " << validation_last_completion.load() << "\n\n";
 
         // Parent request metrics (Phase 2 Stress Test)
         out << "# HELP dilithion_parent_requests_pending Pending parent block requests\n";
         out << "# TYPE dilithion_parent_requests_pending gauge\n";
-        out << "dilithion_parent_requests_pending " << parent_requests_pending.load() << "\n\n";
+        out << "dilithion_parent_requests_pending{" << net_label << "} " << parent_requests_pending.load() << "\n\n";
 
         out << "# HELP dilithion_parent_requests_timeout_total Parent requests that timed out\n";
         out << "# TYPE dilithion_parent_requests_timeout_total counter\n";
-        out << "dilithion_parent_requests_timeout_total " << parent_requests_timeout.load() << "\n\n";
+        out << "dilithion_parent_requests_timeout_total{" << net_label << "} " << parent_requests_timeout.load() << "\n\n";
 
         out << "# HELP dilithion_parent_requests_success_total Parent requests that succeeded\n";
         out << "# TYPE dilithion_parent_requests_success_total counter\n";
-        out << "dilithion_parent_requests_success_total " << parent_requests_success.load() << "\n\n";
+        out << "dilithion_parent_requests_success_total{" << net_label << "} " << parent_requests_success.load() << "\n\n";
 
         return out.str();
     }

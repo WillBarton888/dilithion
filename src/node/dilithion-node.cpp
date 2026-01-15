@@ -453,6 +453,7 @@ struct NodeConfig {
         std::cout << "  --mining-address=<addr> Send mining rewards to this address" << std::endl;
         std::cout << "  --restore-mnemonic=\"words\" Restore wallet from 24-word recovery phrase" << std::endl;
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
+        std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -1191,14 +1192,58 @@ int main(int argc, char* argv[]) {
         // P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations
         if (!g_chainstate.InitializeWAL(config.datadir)) {
             if (g_chainstate.RequiresReindex()) {
-                std::cerr << "========================================" << std::endl;
-                std::cerr << "CRITICAL: Incomplete reorganization detected!" << std::endl;
-                std::cerr << "The database may be in an inconsistent state." << std::endl;
-                std::cerr << "" << std::endl;
-                std::cerr << "Please restart with -reindex flag:" << std::endl;
-                std::cerr << "  dilithion-node --testnet -reindex" << std::endl;
-                std::cerr << "========================================" << std::endl;
-                return 1;
+                if (config.reindex) {
+                    // User requested reindex - delete corrupted data and rebuild
+                    std::cout << "\n==========================================================" << std::endl;
+                    std::cout << "REINDEX: Incomplete reorg detected, rebuilding chain..." << std::endl;
+                    std::cout << "==========================================================" << std::endl;
+
+                    // Delete WAL file
+                    std::string walPath = config.datadir + "/wal";
+                    std::remove(walPath.c_str());
+                    std::cout << "  [OK] Deleted incomplete reorg WAL" << std::endl;
+
+                    // Delete blocks and chainstate directories
+                    std::string blocksPath = config.datadir + "/blocks";
+                    std::string chainstPath = config.datadir + "/chainstate";
+
+                    // Remove blocks directory recursively
+                    std::filesystem::remove_all(blocksPath);
+                    std::cout << "  [OK] Deleted blocks directory" << std::endl;
+
+                    // Remove chainstate directory recursively
+                    std::filesystem::remove_all(chainstPath);
+                    std::cout << "  [OK] Deleted chainstate directory" << std::endl;
+
+                    std::cout << "  [OK] Chain data cleared - will sync fresh from network" << std::endl;
+                    std::cout << "==========================================================" << std::endl;
+
+                    // Re-initialize databases (they will be recreated)
+                    if (!blockchain.Initialize(blocksPath, "blocks")) {
+                        std::cerr << "[ERROR] Failed to reinitialize blockchain database after reindex" << std::endl;
+                        return 1;
+                    }
+
+                    if (!utxo_set.Open(chainstPath)) {
+                        std::cerr << "[ERROR] Failed to reinitialize UTXO database after reindex" << std::endl;
+                        return 1;
+                    }
+
+                    // Re-initialize WAL (should succeed now with clean state)
+                    if (!g_chainstate.InitializeWAL(config.datadir)) {
+                        std::cerr << "[ERROR] Failed to reinitialize WAL after reindex" << std::endl;
+                        return 1;
+                    }
+                } else {
+                    std::cerr << "========================================" << std::endl;
+                    std::cerr << "CRITICAL: Incomplete reorganization detected!" << std::endl;
+                    std::cerr << "The database may be in an inconsistent state." << std::endl;
+                    std::cerr << "" << std::endl;
+                    std::cerr << "Please restart with --reindex flag:" << std::endl;
+                    std::cerr << "  dilithion-node --reindex" << std::endl;
+                    std::cerr << "========================================" << std::endl;
+                    return 1;
+                }
             }
         }
         std::cout << "  [OK] Chain state initialized" << std::endl;
@@ -1867,6 +1912,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         http_server.SetStatsHandler([&cached_stats, network_name]() -> std::string {
             return cached_stats.ToJSON(network_name);
         });
+
+        // Set network name for Prometheus metrics labeling
+        g_metrics.SetNetworkName(network_name);
 
         // Set metrics handler for Prometheus scraping
         http_server.SetMetricsHandler([]() -> std::string {
