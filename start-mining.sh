@@ -1,8 +1,8 @@
 #!/bin/bash
 #########################################################
-#  DILITHION TESTNET - ONE-CLICK MINING
+#  DILITHION MAINNET - ONE-CLICK MINING
 #########################################################
-#  This script starts mining Dilithion testnet instantly
+#  This script starts mining Dilithion mainnet instantly
 #  No configuration needed - just run it!
 #########################################################
 
@@ -15,13 +15,13 @@ NC='\033[0m' # No Color
 clear
 echo -e "${GREEN}"
 echo "  ================================================"
-echo "    DILITHION TESTNET - QUICK START MINER"
+echo "    DILITHION MAINNET - QUICK START MINER"
 echo "  ================================================"
 echo -e "${NC}"
 echo ""
-echo -e "${BLUE}Starting Dilithion testnet mining...${NC}"
-echo "  - Network: TESTNET (coins have NO value)"
-echo "  - Seed Nodes: NYC, Singapore, London (auto-connect)"
+echo -e "${BLUE}Starting Dilithion mainnet mining...${NC}"
+echo "  - Network: MAINNET (real DIL!)"
+echo "  - Seed Nodes: NYC, London, Singapore, Sydney (auto-connect)"
 echo "  - Mining: ENABLED (auto-detecting CPU threads)"
 echo ""
 echo -e "${YELLOW}Mining will start in 3 seconds...${NC}"
@@ -195,7 +195,7 @@ fi
 echo -e "${GREEN}✓ All dependencies found${NC}"
 echo ""
 
-./dilithion-node --testnet --mine --threads=auto
+./dilithion-node --mine --threads=auto
 
 # If node exits, show message
 echo ""

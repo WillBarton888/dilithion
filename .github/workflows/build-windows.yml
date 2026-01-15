@@ -67,13 +67,13 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dilithion-testnet-${{ steps.get_version.outputs.version }}-windows-x64
-        path: releases/dilithion-testnet-${{ steps.get_version.outputs.version }}-windows-x64.zip
+        name: dilithion-${{ steps.get_version.outputs.version }}-mainnet-windows-x64
+        path: releases/dilithion-${{ steps.get_version.outputs.version }}-mainnet-windows-x64.zip
 
     - name: Upload to release (if tag)
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: releases/dilithion-testnet-${{ steps.get_version.outputs.version }}-windows-x64.zip
+        files: releases/dilithion-${{ steps.get_version.outputs.version }}-mainnet-windows-x64.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

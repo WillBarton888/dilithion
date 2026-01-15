@@ -5,11 +5,11 @@
 #  This script packages Windows binaries built by GitHub Actions
 ################################################################
 
-# Use VERSION from environment if set, otherwise default to v1.0.11
+# Use VERSION from environment if set, otherwise default to v1.4.0
 if [ -z "$VERSION" ]; then
-    VERSION="v1.0.11"
+    VERSION="v1.4.0"
 fi
-RELEASE_NAME="dilithion-testnet-${VERSION}-windows-x64"
+RELEASE_NAME="dilithion-${VERSION}-mainnet-windows-x64"
 RELEASE_DIR="releases/${RELEASE_NAME}"
 
 echo ""

@@ -1,6 +1,6 @@
 #!/bin/bash
 #########################################################
-#  DILITHION TESTNET - INTERACTIVE SETUP WIZARD
+#  DILITHION MAINNET - INTERACTIVE SETUP WIZARD
 #########################################################
 #  First-time setup guide for crypto beginners
 #########################################################
@@ -15,14 +15,14 @@ NC='\033[0m' # No Color
 clear
 echo -e "${BLUE}"
 echo "  ========================================================"
-echo "    DILITHION TESTNET - FIRST TIME SETUP WIZARD"
+echo "    DILITHION MAINNET - FIRST TIME SETUP WIZARD"
 echo "  ========================================================"
 echo -e "${NC}"
 echo ""
 echo "  Welcome to Dilithion - Post-Quantum Cryptocurrency!"
 echo ""
-echo "  This wizard will help you get started mining testnet DIL."
-echo "  Testnet coins have NO monetary value (for testing only)."
+echo "  This wizard will help you get started mining DIL."
+echo "  You are joining the MAINNET - real DIL with real value!"
 echo ""
 echo "  ========================================================"
 echo ""
@@ -87,8 +87,8 @@ echo "  ========================================================"
 echo -e "${NC}"
 echo ""
 echo -e "${GREEN}Your Settings:${NC}"
-echo "    - Network:     TESTNET"
-echo "    - Seed Nodes:  NYC, Singapore, London (auto-connect)"
+echo "    - Network:     MAINNET"
+echo "    - Seed Nodes:  NYC, London, Singapore, Sydney (auto-connect)"
 echo "    - Mining:      ENABLED"
 echo "    - CPU Threads: $threads_display"
 echo ""
@@ -101,11 +101,11 @@ read -p "Press ENTER to start..."
 clear
 echo -e "${GREEN}"
 echo "  ========================================================"
-echo "    DILITHION TESTNET MINER - STARTING"
+echo "    DILITHION MAINNET MINER - STARTING"
 echo "  ========================================================"
 echo -e "${NC}"
 echo ""
-echo "  Connecting to seed node..."
+echo "  Connecting to seed nodes..."
 echo "  Initializing mining with $threads_display..."
 echo ""
 echo "  The node will start shortly."
@@ -168,7 +168,7 @@ fi
 echo -e "${GREEN}✓ All dependencies found${NC}"
 echo ""
 
-./dilithion-node --testnet --mine --threads=$threads
+./dilithion-node --mine --threads=$threads
 
 echo ""
 echo -e "${YELLOW}"
