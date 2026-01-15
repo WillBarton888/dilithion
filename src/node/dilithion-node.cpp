@@ -1219,7 +1219,7 @@ int main(int argc, char* argv[]) {
                     std::cout << "==========================================================" << std::endl;
 
                     // Re-initialize databases (they will be recreated)
-                    if (!blockchain.Initialize(blocksPath, "blocks")) {
+                    if (!blockchain.Open(blocksPath)) {
                         std::cerr << "[ERROR] Failed to reinitialize blockchain database after reindex" << std::endl;
                         return 1;
                     }
