@@ -42,7 +42,7 @@ bool CChainState::RequiresReindex() const {
 
 void CChainState::Cleanup() {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
 
     // HIGH-C001 FIX: Smart pointers automatically destruct when map is cleared
     // No need for manual delete - RAII handles cleanup
@@ -54,7 +54,7 @@ void CChainState::Cleanup() {
 
 bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex> pindex) {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
 
     // HIGH-C001 FIX: Accept unique_ptr for automatic ownership transfer
     if (pindex == nullptr) {
@@ -88,7 +88,7 @@ bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex
 
 CBlockIndex* CChainState::GetBlockIndex(const uint256& hash) {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
 
     // HIGH-C001 FIX: Return raw pointer (non-owning) via .get()
     auto it = mapBlockIndex.find(hash);
@@ -100,7 +100,7 @@ CBlockIndex* CChainState::GetBlockIndex(const uint256& hash) {
 
 bool CChainState::HasBlockIndex(const uint256& hash) const {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
 
     return mapBlockIndex.count(hash) > 0;
 }
@@ -140,7 +140,7 @@ CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
 bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block, bool& reorgOccurred) {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
     // This protects pindexTip, mapBlockIndex, and all chain operations
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
 
     reorgOccurred = false;
 
@@ -708,7 +708,7 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
 
     // CRITICAL: Hold cs_main during chain state modifications
     {
-        std::lock_guard<std::mutex> lock(cs_main);
+        std::lock_guard<std::recursive_mutex> lock(cs_main);
 
         // Step 1: Load block data from database (needed for UTXO undo)
         if (pdb != nullptr) {
@@ -780,7 +780,7 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
 
 std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
 
     std::vector<uint256> result;
 
@@ -796,7 +796,7 @@ std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {
 
 // RACE CONDITION FIX: Thread-safe chain snapshot for fork detection
 std::vector<std::pair<int, uint256>> CChainState::GetChainSnapshot(int maxBlocks, int minHeight) const {
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
 
     std::vector<std::pair<int, uint256>> result;
     result.reserve(std::min(maxBlocks, pindexTip ? pindexTip->nHeight + 1 : 0));
@@ -816,12 +816,12 @@ std::vector<std::pair<int, uint256>> CChainState::GetChainSnapshot(int maxBlocks
 // CRITICAL-1 FIX: Thread-safe accessor methods moved from inline to .cpp
 
 CBlockIndex* CChainState::GetTip() const {
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
     return pindexTip;
 }
 
 void CChainState::SetTip(CBlockIndex* pindex) {
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
     
     // Consensus invariant: If tip is set, it must exist in mapBlockIndex
     if (pindex != nullptr) {
@@ -850,14 +850,14 @@ int CChainState::GetHeight() const {
 }
 
 uint256 CChainState::GetChainWork() const {
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
     return pindexTip ? pindexTip->nChainWork : uint256();
 }
 
 // Bug #40 fix: Callback registration and notification
 
 void CChainState::RegisterTipUpdateCallback(TipUpdateCallback callback) {
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
     m_tipCallbacks.push_back(callback);
 }
 
@@ -886,11 +886,11 @@ void CChainState::NotifyTipUpdate(const CBlockIndex* pindex) {
 // BUG #56 FIX: Block connect/disconnect callback registration
 
 void CChainState::RegisterBlockConnectCallback(BlockConnectCallback callback) {
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
     m_blockConnectCallbacks.push_back(callback);
 }
 
 void CChainState::RegisterBlockDisconnectCallback(BlockDisconnectCallback callback) {
-    std::lock_guard<std::mutex> lock(cs_main);
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
     m_blockDisconnectCallbacks.push_back(callback);
 }
