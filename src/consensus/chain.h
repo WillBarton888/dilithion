@@ -52,7 +52,9 @@ private:
 
     // CRITICAL-1 FIX: Mutex for thread-safe access to chain state
     // Protects mapBlockIndex, pindexTip, and all chain operations
-    mutable std::mutex cs_main;
+    // BUG #200 FIX: Changed to recursive_mutex to allow ActivateBestChain to call
+    // DisconnectTip without self-deadlock (both acquire cs_main)
+    mutable std::recursive_mutex cs_main;
 
     // BUG #74 FIX: Atomic cached height for lock-free reads
     // GetHeight() is called frequently by RPC and wallet operations
