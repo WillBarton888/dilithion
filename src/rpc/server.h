@@ -279,6 +279,7 @@ private:
     std::string RPC_GetHDWalletInfo(const std::string& params);
     std::string RPC_ListHDAddresses(const std::string& params);
     std::string RPC_RescanWallet(const std::string& params);
+    std::string RPC_ClearWalletTxs(const std::string& params);
 
     // Mining methods
     std::string RPC_GetMiningInfo(const std::string& params);

@@ -478,6 +478,16 @@ public:
      */
     size_t CleanupStaleUTXOs(class CUTXOSet& utxo_set);
 
+    /**
+     * Clear all transaction history from wallet
+     *
+     * Used after a blockchain reset to remove orphaned transactions
+     * that no longer exist on the chain. Preserves wallet keys and addresses.
+     *
+     * @return Number of transactions cleared
+     */
+    size_t ClearAllTransactions();
+
     // ============================================================================
     // BUG #56 FIX: Chain Notifications (Bitcoin Core Pattern - PR #30221)
     // ============================================================================

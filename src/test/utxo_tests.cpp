@@ -429,7 +429,7 @@ BOOST_AUTO_TEST_CASE(utxo_update_for_block) {
     CBlock block = CreateTestBlock(transactions, 1);
 
     // Apply block
-    BOOST_CHECK(utxo.ApplyBlock(block, 1));
+    BOOST_CHECK(utxo.ApplyBlock(block, 1, block.GetHash()));
 
     // Verify coinbase output was added
     uint256 coinbase_txid = coinbase->GetHash();
@@ -477,7 +477,7 @@ BOOST_AUTO_TEST_CASE(utxo_value_calculation) {
     CBlock block = CreateTestBlock(transactions, 2);
 
     // Apply block
-    BOOST_CHECK(utxo.ApplyBlock(block, 2));
+    BOOST_CHECK(utxo.ApplyBlock(block, 2, block.GetHash()));
 
     // Verify prev_out was spent
     BOOST_CHECK(!utxo.HaveUTXO(prev_out));
@@ -526,7 +526,7 @@ BOOST_AUTO_TEST_CASE(utxo_block_chain_updates) {
 
         // Create and apply block
         CBlock block = CreateTestBlock(transactions, height);
-        BOOST_CHECK(utxo.ApplyBlock(block, height));
+        BOOST_CHECK(utxo.ApplyBlock(block, height, block.GetHash()));
 
         prev_coinbase_txid = coinbase->GetHash();
     }
@@ -562,7 +562,7 @@ BOOST_AUTO_TEST_CASE(utxo_reorg_handling) {
     std::vector<CTransactionRef> transactions = {coinbase, spending};
     CBlock block = CreateTestBlock(transactions, 2);
 
-    BOOST_CHECK(utxo.ApplyBlock(block, 2));
+    BOOST_CHECK(utxo.ApplyBlock(block, 2, block.GetHash()));
 
     // After applying: prev_out should be spent, new outputs should exist
     BOOST_CHECK(!utxo.HaveUTXO(prev_out));
@@ -601,7 +601,7 @@ BOOST_AUTO_TEST_CASE(utxo_multiple_outputs) {
     // Create and apply block
     std::vector<CTransactionRef> transactions = {tx};
     CBlock block = CreateTestBlock(transactions, 1);
-    BOOST_CHECK(utxo.ApplyBlock(block, 1));
+    BOOST_CHECK(utxo.ApplyBlock(block, 1, block.GetHash()));
 
     // Verify all 3 outputs exist
     uint256 txid = tx->GetHash();
@@ -635,7 +635,7 @@ BOOST_AUTO_TEST_CASE(utxo_coinbase_maturity) {
     std::vector<CTransactionRef> transactions = {coinbase};
     CBlock block = CreateTestBlock(transactions, 100);
 
-    BOOST_CHECK(utxo.ApplyBlock(block, 100));
+    BOOST_CHECK(utxo.ApplyBlock(block, 100, block.GetHash()));
 
     uint256 coinbase_txid = coinbase->GetHash();
     COutPoint coinbase_out(coinbase_txid, 0);
@@ -823,7 +823,7 @@ BOOST_AUTO_TEST_CASE(utxo_complex_reorg) {
         CBlock block = CreateTestBlock(transactions, height);
         blocks.push_back(block);
 
-        BOOST_CHECK(utxo.ApplyBlock(block, height));
+        BOOST_CHECK(utxo.ApplyBlock(block, height, block.GetHash()));
     }
 
     // Verify all coinbases exist

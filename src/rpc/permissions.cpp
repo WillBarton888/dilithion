@@ -81,6 +81,7 @@ void CRPCPermissions::InitializeMethodPermissions() {
     m_methodPermissions["sendtoaddress"]      = writeWallet;
     m_methodPermissions["signrawtransaction"] = writeWallet;
     m_methodPermissions["createhdwallet"]     = writeWallet;
+    m_methodPermissions["clearwallettxs"]     = writeWallet;
     m_methodPermissions["restorehdwallet"]    = writeWallet;
 
     // ========================================================================

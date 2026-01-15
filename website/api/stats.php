@@ -67,8 +67,11 @@ function fetchNodeStats($ip, $port) {
                 'online' => true,
                 'blockHeight' => $data['blockHeight'] ?? 0,
                 'peerCount' => $data['peerCount'] ?? 0,
-                'hashrate' => $data['hashRate'] ?? $data['hashrate'] ?? 0,
-                'difficulty' => $data['difficulty'] ?? 0
+                'hashrate' => $data['networkHashRate'] ?? $data['hashRate'] ?? $data['hashrate'] ?? 0,
+                'difficulty' => $data['difficulty'] ?? 0,
+                'totalSupply' => $data['totalSupply'] ?? 0,
+                'blockReward' => $data['blockReward'] ?? 50,
+                'blocksUntilHalving' => $data['blocksUntilHalving'] ?? 210000
             ];
         }
     }
@@ -109,14 +112,24 @@ $response = [
     'nodes' => $nodes
 ];
 
-// Also include hashrate/difficulty from the first online node
+// Also include hashrate/difficulty/supply from the first online node
 foreach ($nodes as $nodeData) {
     if ($nodeData['online']) {
         if (isset($nodeData['hashrate']) && $nodeData['hashrate'] > 0) {
+            $response['networkHashRate'] = $nodeData['hashrate'];
             $response['hashRate'] = $nodeData['hashrate'];
         }
         if (isset($nodeData['difficulty']) && $nodeData['difficulty'] > 0) {
             $response['difficulty'] = $nodeData['difficulty'];
+        }
+        if (isset($nodeData['totalSupply']) && $nodeData['totalSupply'] > 0) {
+            $response['totalSupply'] = $nodeData['totalSupply'];
+        }
+        if (isset($nodeData['blockReward'])) {
+            $response['blockReward'] = $nodeData['blockReward'];
+        }
+        if (isset($nodeData['blocksUntilHalving'])) {
+            $response['blocksUntilHalving'] = $nodeData['blocksUntilHalving'];
         }
         break;
     }

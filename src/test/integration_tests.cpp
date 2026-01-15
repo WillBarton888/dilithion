@@ -18,6 +18,7 @@
 #include <consensus/pow.h>
 #include <net/peers.h>
 #include <net/net.h>
+#include <net/connman.h>
 #include <miner/controller.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
@@ -407,7 +408,7 @@ bool TestFullNodeStack() {
         // Phase 4: Wallet
         CWallet wallet;
         wallet.GenerateNewKey();
-        CAddress addr = wallet.GetNewAddress();
+        CDilithiumAddress addr = wallet.GetNewAddress();
         cout << "  ✓ Wallet initialized (address: " << addr.ToString() << ")" << endl;
 
         // Phase 4: RPC server

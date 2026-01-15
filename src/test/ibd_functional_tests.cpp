@@ -21,11 +21,15 @@
 #include <core/node_context.h>
 #include <consensus/chain.h>
 #include <net/block_fetcher.h>
+#include <net/block_tracker.h>
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/peers.h>
 #include <net/net.h>
+#include <net/socket.h>
+#include <net/connman.h>
 #include <net/protocol.h>
+#include <node/block_validation_queue.h>
 #include <primitives/block.h>
 #include <iostream>
 
@@ -48,57 +52,93 @@ BOOST_AUTO_TEST_CASE(test_ibd_coordinator_integration) {
     // Verify initial state
     BOOST_CHECK_EQUAL(chainstate.GetHeight(), -1);  // No blocks yet
     BOOST_CHECK_EQUAL(node_context.headers_manager->GetBestHeight(), -1);  // No headers yet (-1 = uninitialized)
-    BOOST_CHECK_EQUAL(node_context.block_fetcher->GetBlocksInFlight(), 0);  // No blocks in flight
+    BOOST_CHECK_EQUAL(node_context.block_fetcher->GetInFlightCount(), 0);  // No blocks in flight
     BOOST_CHECK_EQUAL(node_context.peer_manager->GetConnectionCount(), 0);  // No peers
 
     // Tick should do nothing when synced
     coordinator.Tick();
 
-    BOOST_CHECK_EQUAL(node_context.block_fetcher->GetBlocksInFlight(), 0);  // Still no blocks
+    BOOST_CHECK_EQUAL(node_context.block_fetcher->GetInFlightCount(), 0);  // Still no blocks
 }
 
-BOOST_AUTO_TEST_CASE(test_block_fetcher_queueing) {
-    // Test that block fetcher correctly queues blocks
-    CBlockFetcher fetcher;
+BOOST_AUTO_TEST_CASE(test_block_fetcher_request_tracking) {
+    // Test that block fetcher correctly tracks block requests by height
+    CPeerManager peer_manager("");
+    CBlockFetcher fetcher(&peer_manager);
 
+    // Initially no blocks in flight
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 0);
+
+    // Create test hashes
     uint256 hash1, hash2, hash3;
     hash1.data[0] = 1;
     hash2.data[0] = 2;
     hash3.data[0] = 3;
 
-    // Queue blocks
-    fetcher.QueueBlockForDownload(hash1, 100, -1);
-    fetcher.QueueBlockForDownload(hash2, 101, -1);
-    fetcher.QueueBlockForDownload(hash3, 102, -1);
+    // Request blocks from a mock peer (peer_id = 1)
+    NodeId peer_id = 1;
+    BOOST_CHECK(fetcher.RequestBlockFromPeer(peer_id, 100, hash1));
+    BOOST_CHECK(fetcher.RequestBlockFromPeer(peer_id, 101, hash2));
+    BOOST_CHECK(fetcher.RequestBlockFromPeer(peer_id, 102, hash3));
 
-    // Verify blocks are queued
-    BOOST_CHECK(fetcher.IsQueued(hash1));
-    BOOST_CHECK(fetcher.IsQueued(hash2));
-    BOOST_CHECK(fetcher.IsQueued(hash3));
+    // Verify blocks are in flight
+    BOOST_CHECK(fetcher.IsHeightInFlight(100));
+    BOOST_CHECK(fetcher.IsHeightInFlight(101));
+    BOOST_CHECK(fetcher.IsHeightInFlight(102));
+    BOOST_CHECK(!fetcher.IsHeightInFlight(103));  // Not requested
 
-    // Verify blocks are not in flight yet
-    BOOST_CHECK(!fetcher.IsDownloading(hash1));
-    BOOST_CHECK(!fetcher.IsDownloading(hash2));
-    BOOST_CHECK(!fetcher.IsDownloading(hash3));
+    // Verify total count
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 3);
+
+    // Verify per-peer count
+    BOOST_CHECK_EQUAL(fetcher.GetPeerBlocksInFlight(peer_id), 3);
+    BOOST_CHECK_EQUAL(fetcher.GetPeerBlocksInFlight(999), 0);  // Unknown peer
 }
 
 BOOST_AUTO_TEST_CASE(test_block_fetcher_deduplication) {
-    // Test that block fetcher doesn't queue duplicate blocks
-    CBlockFetcher fetcher;
+    // Test that block fetcher doesn't track duplicate heights
+    CPeerManager peer_manager("");
+    CBlockFetcher fetcher(&peer_manager);
 
     uint256 hash;
     hash.data[0] = 42;
 
-    // Queue same block twice
-    fetcher.QueueBlockForDownload(hash, 100, -1);
-    fetcher.QueueBlockForDownload(hash, 100, -1);
+    NodeId peer_id = 1;
 
-    // Should only be queued once
-    BOOST_CHECK(fetcher.IsQueued(hash));
+    // Request same height twice
+    BOOST_CHECK(fetcher.RequestBlockFromPeer(peer_id, 100, hash));
+    BOOST_CHECK(!fetcher.RequestBlockFromPeer(peer_id, 100, hash));  // Already tracked
 
-    // Get next blocks - should only return one
-    auto blocks = fetcher.GetNextBlocksToFetch(10);
-    BOOST_CHECK_EQUAL(blocks.size(), 1);
+    // Should only be tracked once
+    BOOST_CHECK(fetcher.IsHeightInFlight(100));
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 1);
+}
+
+BOOST_AUTO_TEST_CASE(test_block_fetcher_receive) {
+    // Test marking blocks as received
+    CPeerManager peer_manager("");
+    CBlockFetcher fetcher(&peer_manager);
+
+    uint256 hash1, hash2;
+    hash1.data[0] = 1;
+    hash2.data[0] = 2;
+
+    NodeId peer_id = 1;
+
+    // Request blocks
+    fetcher.RequestBlockFromPeer(peer_id, 100, hash1);
+    fetcher.RequestBlockFromPeer(peer_id, 101, hash2);
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 2);
+
+    // Receive first block
+    BOOST_CHECK(fetcher.OnBlockReceived(peer_id, 100));
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 1);
+    BOOST_CHECK(!fetcher.IsHeightInFlight(100));
+    BOOST_CHECK(fetcher.IsHeightInFlight(101));
+
+    // Receive second block
+    BOOST_CHECK(fetcher.OnBlockReceived(peer_id, 101));
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 0);
 }
 
 BOOST_AUTO_TEST_CASE(test_headers_manager_basic) {
@@ -179,6 +219,49 @@ BOOST_AUTO_TEST_CASE(test_ban_threshold_logic) {
             BOOST_CHECK_GE(peer_final->misbehavior_score, ban_threshold);
         }
     }
+}
+
+BOOST_AUTO_TEST_CASE(test_get_next_blocks_to_request) {
+    // Test the GetNextBlocksToRequest function
+    CPeerManager peer_manager("");
+    CBlockFetcher fetcher(&peer_manager);
+
+    // With chain at height 10 and headers at height 20, should request blocks 11-20
+    auto blocks = fetcher.GetNextBlocksToRequest(5, 10, 20);
+    BOOST_CHECK_EQUAL(blocks.size(), 5);
+
+    // First block should be 11 (chain_height + 1)
+    if (!blocks.empty()) {
+        BOOST_CHECK_EQUAL(blocks[0], 11);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(test_clear_above_height) {
+    // Test fork recovery by clearing blocks above a fork point
+    CPeerManager peer_manager("");
+    CBlockFetcher fetcher(&peer_manager);
+
+    uint256 hash;
+    hash.data[0] = 1;
+    NodeId peer_id = 1;
+
+    // Request blocks at heights 100-105
+    for (int h = 100; h <= 105; h++) {
+        hash.data[0] = static_cast<uint8_t>(h);
+        fetcher.RequestBlockFromPeer(peer_id, h, hash);
+    }
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 6);
+
+    // Clear blocks above height 102 (fork recovery)
+    int cleared = fetcher.ClearAboveHeight(102);
+    BOOST_CHECK_EQUAL(cleared, 3);  // Heights 103, 104, 105
+
+    // Only heights 100-102 should remain
+    BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 3);
+    BOOST_CHECK(fetcher.IsHeightInFlight(100));
+    BOOST_CHECK(fetcher.IsHeightInFlight(101));
+    BOOST_CHECK(fetcher.IsHeightInFlight(102));
+    BOOST_CHECK(!fetcher.IsHeightInFlight(103));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

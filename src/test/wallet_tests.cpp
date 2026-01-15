@@ -120,7 +120,7 @@ bool TestAddressGeneration() {
     }
 
     // Create address from public key
-    CAddress address(key.vchPubKey);
+    CDilithiumAddress address(key.vchPubKey);
 
     if (!address.IsValid()) {
         cout << "  ✗ Address invalid" << endl;
@@ -136,7 +136,7 @@ bool TestAddressGeneration() {
     }
 
     // Test round-trip (string -> address -> string)
-    CAddress address2;
+    CDilithiumAddress address2;
     if (!address2.SetString(addrStr)) {
         cout << "  ✗ Failed to parse address string" << endl;
         return false;
@@ -166,7 +166,7 @@ bool TestWalletBasics() {
     cout << "  Keys in wallet: " << wallet.GetKeyPoolSize() << endl;
 
     // Get address
-    CAddress addr = wallet.GetNewAddress();
+    CDilithiumAddress addr = wallet.GetNewAddress();
     if (!addr.IsValid()) {
         cout << "  ✗ Failed to get address" << endl;
         return false;
@@ -345,7 +345,7 @@ bool TestCoinSelection() {
     // Create wallet with multiple UTXOs
     CWallet wallet;
     wallet.GenerateNewKey();
-    CAddress addr = wallet.GetNewAddress();
+    CDilithiumAddress addr = wallet.GetNewAddress();
 
     // Create mock UTXO set
     CUTXOSet utxo_set;
@@ -407,11 +407,11 @@ bool TestTransactionCreation() {
     // Create two wallets
     CWallet sender_wallet;
     sender_wallet.GenerateNewKey();
-    CAddress sender_addr = sender_wallet.GetNewAddress();
+    CDilithiumAddress sender_addr = sender_wallet.GetNewAddress();
 
     CWallet recipient_wallet;
     recipient_wallet.GenerateNewKey();
-    CAddress recipient_addr = recipient_wallet.GetNewAddress();
+    CDilithiumAddress recipient_addr = recipient_wallet.GetNewAddress();
 
     // Create UTXO set
     CUTXOSet utxo_set;
@@ -505,7 +505,7 @@ bool TestTransactionSending() {
     // Create wallet
     CWallet wallet;
     wallet.GenerateNewKey();
-    CAddress addr = wallet.GetNewAddress();
+    CDilithiumAddress addr = wallet.GetNewAddress();
 
     // Create UTXO set
     CUTXOSet utxo_set;
@@ -528,7 +528,7 @@ bool TestTransactionSending() {
     // Create recipient
     CWallet recipient;
     recipient.GenerateNewKey();
-    CAddress recipient_addr = recipient.GetNewAddress();
+    CDilithiumAddress recipient_addr = recipient.GetNewAddress();
 
     // Create transaction
     CTransactionRef tx;
@@ -572,7 +572,7 @@ bool TestBalanceCalculation() {
 
     CWallet wallet;
     wallet.GenerateNewKey();
-    CAddress addr = wallet.GetNewAddress();
+    CDilithiumAddress addr = wallet.GetNewAddress();
 
     CUTXOSet utxo_set;
     utxo_set.Open(":memory:");
@@ -633,7 +633,7 @@ bool TestEdgeCases() {
 
     CWallet wallet;
     wallet.GenerateNewKey();
-    CAddress addr = wallet.GetNewAddress();
+    CDilithiumAddress addr = wallet.GetNewAddress();
 
     CUTXOSet utxo_set;
     utxo_set.Open(":memory:");

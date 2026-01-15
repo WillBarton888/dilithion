@@ -21,11 +21,14 @@
 #include <core/node_context.h>
 #include <consensus/chain.h>
 #include <net/block_fetcher.h>
+#include <net/block_tracker.h>
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
 #include <net/peers.h>
 #include <net/net.h>
 #include <net/socket.h>
+#include <net/connman.h>
+#include <node/block_validation_queue.h>
 #include <chrono>
 #include <thread>
 
@@ -70,7 +73,7 @@ BOOST_AUTO_TEST_CASE(test_tick_when_synced) {
     coordinator.Tick();
 
     // Verify no blocks were queued (block fetcher starts empty)
-    BOOST_CHECK_EQUAL(node_context.block_fetcher->GetBlocksInFlight(), 0);
+    BOOST_CHECK_EQUAL(node_context.block_fetcher->GetInFlightCount(), 0);
 }
 
 BOOST_AUTO_TEST_CASE(test_backoff_reset_mechanism) {

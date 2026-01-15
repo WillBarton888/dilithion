@@ -500,6 +500,32 @@ size_t CWallet::CleanupStaleUTXOsUnlocked(CUTXOSet& utxo_set) {
     return removed_count;
 }
 
+size_t CWallet::ClearAllTransactions() {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    size_t count = mapWalletTx.size();
+
+    if (count > 0) {
+        std::cout << "[WALLET] Clearing " << count << " transaction(s) from wallet history..." << std::endl;
+        mapWalletTx.clear();
+
+        // Reset best block pointer to genesis
+        m_bestBlockHeight = 0;
+        m_bestBlockHash = uint256();
+
+        // Save the cleared wallet
+        if (m_autoSave && !m_walletFile.empty()) {
+            SaveUnlocked(m_walletFile);
+        }
+
+        std::cout << "[WALLET] Cleared all transaction history. Wallet ready for rescan." << std::endl;
+    } else {
+        std::cout << "[WALLET] No transactions to clear." << std::endl;
+    }
+
+    return count;
+}
+
 // ============================================================================
 // BUG #56 FIX: Chain Notifications Implementation (Bitcoin Core Pattern)
 // ============================================================================

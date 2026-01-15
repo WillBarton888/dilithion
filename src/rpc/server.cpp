@@ -173,6 +173,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["gethdwalletinfo"] = [this](const std::string& p) { return RPC_GetHDWalletInfo(p); };
     m_handlers["listhdaddresses"] = [this](const std::string& p) { return RPC_ListHDAddresses(p); };
     m_handlers["rescanwallet"] = [this](const std::string& p) { return RPC_RescanWallet(p); };
+    m_handlers["clearwallettxs"] = [this](const std::string& p) { return RPC_ClearWalletTxs(p); };
 
     // Mining
     m_handlers["getmininginfo"] = [this](const std::string& p) { return RPC_GetMiningInfo(p); };
@@ -3202,6 +3203,24 @@ std::string CRPCServer::RPC_RescanWallet(const std::string& params) {
     return oss.str();
 }
 
+std::string CRPCServer::RPC_ClearWalletTxs(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    std::cout << "[RPC] Clearing wallet transaction history..." << std::endl;
+    size_t cleared = m_wallet->ClearAllTransactions();
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"success\":true,";
+    oss << "\"transactions_cleared\":" << cleared << ",";
+    oss << "\"message\":\"Wallet transaction history cleared. Call rescanwallet to repopulate from blockchain.\"";
+    oss << "}";
+
+    return oss.str();
+}
+
 std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
@@ -3402,6 +3421,7 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getaddresses - List all wallet addresses\",";
     oss << "\"listunspent - List unspent transaction outputs\",";
     oss << "\"rescanwallet - Rescan blockchain for wallet transactions\",";
+    oss << "\"clearwallettxs - Clear all wallet transaction history (for chain resets)\",";
 
     // Transaction creation
     oss << "\"sendtoaddress - Send coins to an address\",";
