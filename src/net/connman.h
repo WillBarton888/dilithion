@@ -34,6 +34,7 @@ struct CConnmanOptions {
     std::vector<NetProtocol::CAddress> vSeedNodes;
     bool fListen = true;
     uint16_t nListenPort = 18444;
+    bool upnp_enabled = false;  // Enable UPnP automatic port mapping
 };
 
 /**
@@ -127,6 +128,24 @@ public:
      * Get connection count
      */
     size_t GetNodeCount() const;
+
+    //
+    // External IP detection (for peer discovery)
+    //
+
+    /**
+     * Record an external IP reported by a peer
+     * Called when we receive VERSION and peer tells us what IP they see us as
+     * @param ip The external IP reported by peer
+     * @param peerId The peer that reported this IP
+     */
+    void RecordExternalIP(const std::string& ip, int peerId);
+
+    /**
+     * Get best known external IP
+     * @return External IP string, or empty if unknown
+     */
+    std::string GetExternalIP() const;
 
     //
     // Message sending
@@ -334,6 +353,19 @@ private:
     // Local addresses (for self-connection prevention)
     mutable std::mutex cs_localAddresses;
     std::set<std::string> m_localAddresses;
+
+    //
+    // External IP tracking - learn our public IP from peers
+    //
+
+    struct ExternalIPScore {
+        std::string ip;
+        int score;
+        int64_t lastSeen;
+    };
+    mutable std::mutex cs_externalIP;
+    std::vector<ExternalIPScore> m_externalIPs;
+    std::string m_bestExternalIP;  // Highest scored external IP
 
     //
     // External references (set in Start())

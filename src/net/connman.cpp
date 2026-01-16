@@ -1072,10 +1072,17 @@ void CConnman::SocketHandler() {
                         // Only send if node is outbound and VERSION hasn't been sent yet
                         if (!node->fInbound && !node->fVersionSent.load()) {
                             if (m_msg_processor) {
+                                // PEER DISCOVERY FIX: Use learned external IP instead of 0.0.0.0
                                 NetProtocol::CAddress local_addr;
                                 local_addr.services = NetProtocol::NODE_NETWORK;
-                                local_addr.SetIPv4(0);
-                                local_addr.port = 0;
+                                std::string externalIP = GetExternalIP();
+                                if (!externalIP.empty()) {
+                                    local_addr.SetFromString(externalIP);
+                                    local_addr.port = m_options.nListenPort;
+                                } else {
+                                    local_addr.SetIPv4(0);
+                                    local_addr.port = 0;
+                                }
                                 CNetMessage version_msg = m_msg_processor->CreateVersionMessage(node->addr, local_addr);
                                 PushMessage(node.get(), version_msg);
                                 node->fVersionSent.store(true);
@@ -1548,4 +1555,69 @@ bool CConnman::IsOurAddress(const NetProtocol::CAddress& addr) const {
     // Check against known local addresses
     std::lock_guard<std::mutex> lock(cs_localAddresses);
     return m_localAddresses.count(ip_str) > 0;
+}
+
+void CConnman::RecordExternalIP(const std::string& ip, int peerId) {
+    // Don't record private/local IPs - they're useless for global peer discovery
+    if (ip.empty() || ip == "0.0.0.0") {
+        return;
+    }
+
+    // Filter out RFC1918 private addresses
+    if (ip.substr(0, 8) == "192.168." ||
+        ip.substr(0, 3) == "10." ||
+        ip.substr(0, 4) == "127." ||
+        (ip.substr(0, 4) == "172." && ip.size() > 6)) {
+        // Check 172.16-31.x.x range
+        if (ip.substr(0, 4) == "172.") {
+            int second_octet = std::stoi(ip.substr(4, ip.find('.', 4) - 4));
+            if (second_octet >= 16 && second_octet <= 31) {
+                return;  // Private 172.16-31.x.x
+            }
+        } else {
+            return;  // Other private ranges
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(cs_externalIP);
+
+    // Find existing entry or create new
+    bool found = false;
+    for (auto& entry : m_externalIPs) {
+        if (entry.ip == ip) {
+            entry.score++;
+            entry.lastSeen = GetTime();
+            found = true;
+            LogPrintf(NET, DEBUG, "[CConnman] External IP %s score increased to %d (peer %d)\n",
+                      ip.c_str(), entry.score, peerId);
+            break;
+        }
+    }
+
+    if (!found) {
+        m_externalIPs.push_back({ip, 1, GetTime()});
+        LogPrintf(NET, DEBUG, "[CConnman] New external IP candidate: %s (peer %d)\n",
+                  ip.c_str(), peerId);
+    }
+
+    // Update best external IP (highest score)
+    int bestScore = 0;
+    std::string previousBest = m_bestExternalIP;
+    for (const auto& entry : m_externalIPs) {
+        if (entry.score > bestScore) {
+            bestScore = entry.score;
+            m_bestExternalIP = entry.ip;
+        }
+    }
+
+    // Log when we have confirmed external IP (2+ peers agree)
+    if (bestScore >= 2 && m_bestExternalIP != previousBest) {
+        LogPrintf(NET, INFO, "[CConnman] External IP detected: %s (confirmed by %d peers)\n",
+                  m_bestExternalIP.c_str(), bestScore);
+    }
+}
+
+std::string CConnman::GetExternalIP() const {
+    std::lock_guard<std::mutex> lock(cs_externalIP);
+    return m_bestExternalIP;
 }

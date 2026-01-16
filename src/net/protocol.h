@@ -6,6 +6,7 @@
 
 #include <primitives/block.h>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -157,6 +158,20 @@ struct CAddress {
         ip[13] = (ipv4 >> 16) & 0xFF;
         ip[14] = (ipv4 >> 8) & 0xFF;
         ip[15] = ipv4 & 0xFF;
+    }
+
+    // Set IPv4 address from dotted-decimal string (e.g., "192.168.1.1")
+    bool SetFromString(const std::string& ipStr) {
+        unsigned int a, b, c, d;
+        if (sscanf(ipStr.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+            return false;
+        }
+        if (a > 255 || b > 255 || c > 255 || d > 255) {
+            return false;
+        }
+        uint32_t ipv4 = (a << 24) | (b << 16) | (c << 8) | d;
+        SetIPv4(ipv4);
+        return true;
     }
 
     // NET-015 FIX: Validate IP address for P2P networking

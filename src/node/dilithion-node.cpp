@@ -39,6 +39,7 @@
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation queue
 #include <net/feeler.h>  // Bitcoin Core-style feeler connections
 #include <net/connman.h>  // Phase 5: Event-driven connection manager
+#include <net/upnp.h>     // UPnP automatic port mapping
 #include <api/http_server.h>
 #include <api/cached_stats.h>
 #include <api/metrics.h>
@@ -300,6 +301,8 @@ struct NodeConfig {
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
     bool verbose = false;           // Show debug output (hidden by default)
     bool relay_only = false;        // Relay-only mode: skip wallet creation (for seed nodes)
+    bool upnp_enabled = false;      // Enable UPnP automatic port mapping
+    bool upnp_prompted = false;     // True if user was already prompted or used explicit flag
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -423,6 +426,16 @@ struct NodeConfig {
                 // Relay-only mode: skip wallet creation (for seed nodes)
                 relay_only = true;
             }
+            else if (arg == "--upnp") {
+                // Enable UPnP automatic port mapping
+                upnp_enabled = true;
+                upnp_prompted = true;  // Don't prompt if explicitly enabled
+            }
+            else if (arg == "--no-upnp") {
+                // Disable UPnP (don't prompt)
+                upnp_enabled = false;
+                upnp_prompted = true;  // Don't prompt if explicitly disabled
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -460,6 +473,8 @@ struct NodeConfig {
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --relay-only          Relay-only mode: skip wallet (for seed nodes)" << std::endl;
+        std::cout << "  --upnp                Enable automatic port mapping (UPnP)" << std::endl;
+        std::cout << "  --no-upnp             Disable UPnP (don't prompt)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -1841,7 +1856,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         connman_opts.nMaxOutbound = 8;
         connman_opts.nMaxInbound = 117;
         connman_opts.nMaxTotal = 125;
-        
+        connman_opts.upnp_enabled = config.upnp_enabled;  // UPnP automatic port mapping
+
         // BUG #138 FIX: Set g_node_context pointers BEFORE starting threads
         // This allows handlers to access connman immediately when messages arrive
         // Start() is called AFTER handlers are registered (see below after SetHeadersHandler)
@@ -1967,6 +1983,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_node_context.headers_manager->SetPeerStartHeight(peer_id, msg.start_height);
             }
 
+            // PEER DISCOVERY FIX: Learn our external IP from what peer sees us as
+            // The peer's addr_recv field contains THEIR view of OUR address
+            // This helps us learn our public IP for advertising to other peers
+            if (g_node_context.connman) {
+                std::string peerSeesUsAs = msg.addr_recv.ToStringIP();
+                if (!peerSeesUsAs.empty() && peerSeesUsAs != "0.0.0.0") {
+                    g_node_context.connman->RecordExternalIP(peerSeesUsAs, peer_id);
+                }
+            }
+
             // BUG #129 FIX: Only send VERSION for inbound connections (state < VERSION_SENT)
             // For outbound connections, we already sent VERSION in ConnectAndHandshake()
             // Sending VERSION again causes an infinite VERSION ping-pong loop
@@ -1974,10 +2000,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             if (peer && peer->state < CPeer::STATE_VERSION_SENT) {
                 // Create and send version message for inbound peer
+                // PEER DISCOVERY FIX: Use learned external IP instead of 0.0.0.0
                 NetProtocol::CAddress local_addr;
                 local_addr.services = NetProtocol::NODE_NETWORK;
-                local_addr.SetIPv4(0);  // 0.0.0.0
-                local_addr.port = 0;
+                if (g_node_context.connman) {
+                    std::string externalIP = g_node_context.connman->GetExternalIP();
+                    if (!externalIP.empty()) {
+                        local_addr.SetFromString(externalIP);
+                        local_addr.port = 8444;  // Mainnet P2P port
+                    } else {
+                        local_addr.SetIPv4(0);
+                        local_addr.port = 0;
+                    }
+                } else {
+                    local_addr.SetIPv4(0);
+                    local_addr.port = 0;
+                }
                 CNetMessage version_msg = g_node_context.message_processor->CreateVersionMessage(peer->addr, local_addr);
                 if (g_node_context.connman) {
                     g_node_context.connman->PushMessage(peer_id, version_msg);
@@ -2594,6 +2632,59 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_verbose.load(std::memory_order_relaxed))
                 std::cout << "[BIP152] ProcessNewBlock result: " << BlockProcessResultToString(result) << std::endl;
         });
+
+        // PEER DISCOVERY: UPnP prompt - ask user permission for automatic port mapping
+        if (!config.upnp_prompted && !config.relay_only) {
+            std::cout << std::endl;
+            std::cout << "======================================" << std::endl;
+            std::cout << "  NETWORK CONNECTIVITY" << std::endl;
+            std::cout << "======================================" << std::endl;
+            std::cout << std::endl;
+            std::cout << "For best mining performance, your node needs to accept" << std::endl;
+            std::cout << "incoming connections from other miners." << std::endl;
+            std::cout << std::endl;
+            std::cout << "Would you like to enable automatic port mapping (UPnP)?" << std::endl;
+            std::cout << std::endl;
+            std::cout << "  YES - Automatically open port " << config.p2pport << " on your router" << std::endl;
+            std::cout << "        (Recommended for home miners)" << std::endl;
+            std::cout << std::endl;
+            std::cout << "  NO  - I'll configure port forwarding manually" << std::endl;
+            std::cout << "        (For advanced users or if UPnP is disabled)" << std::endl;
+            std::cout << std::endl;
+            std::cout << "Enable automatic port mapping? [Y/n]: ";
+
+            std::string response;
+            std::getline(std::cin, response);
+
+            if (response.empty() || response[0] == 'Y' || response[0] == 'y') {
+                config.upnp_enabled = true;
+                connman_opts.upnp_enabled = true;
+                std::cout << "  [OK] UPnP enabled - will attempt automatic port mapping" << std::endl;
+            } else {
+                config.upnp_enabled = false;
+                connman_opts.upnp_enabled = false;
+                std::cout << "  [OK] UPnP disabled - manual port forwarding required" << std::endl;
+            }
+            std::cout << std::endl;
+        }
+
+        // Attempt UPnP port mapping if enabled
+        if (connman_opts.upnp_enabled) {
+            std::cout << "  Attempting automatic port mapping (UPnP)..." << std::endl;
+            std::string upnpExternalIP;
+            if (UPnP::MapPort(connman_opts.nListenPort, upnpExternalIP)) {
+                std::cout << "    [OK] Port " << connman_opts.nListenPort << " mapped via UPnP" << std::endl;
+                if (!upnpExternalIP.empty()) {
+                    std::cout << "    [OK] External IP: " << upnpExternalIP << std::endl;
+                    // Store this as our known external IP immediately
+                    // This will be used when we send VERSION messages
+                }
+            } else {
+                std::cout << "    [WARN] UPnP port mapping failed: " << UPnP::GetLastError() << std::endl;
+                std::cout << "    [INFO] You may need to manually forward port "
+                          << connman_opts.nListenPort << " on your router" << std::endl;
+            }
+        }
 
         // BUG #138 FIX: Start CConnman AFTER all handlers are registered
         // This ensures no messages are processed before handlers are in place
@@ -3958,6 +4049,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             g_node_context.connman->Stop();
         }
         // p2p_socket removed - CConnman handles socket cleanup
+        std::cout << " done" << std::endl;
+
+        // Remove UPnP port mapping on shutdown
+        if (connman_opts.upnp_enabled) {
+            std::cout << "[Shutdown] Removing UPnP port mapping..." << std::flush;
+            UPnP::UnmapPort(connman_opts.nListenPort);
+            std::cout << " done" << std::endl;
+        }
 
         // Phase 3.2: Shutdown batch signature verifier
         std::cout << "[Shutdown] Stopping batch signature verifier..." << std::endl;

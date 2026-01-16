@@ -58,7 +58,8 @@ LDFLAGS += -L $(RANDOMX_BUILD_DIR) \
 
 # FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
 # Phase 2.2: Add dbghelp for Windows stack traces
-LIBS := -lrandomx -lleveldb -lpthread -lssl -lcrypto
+# PEER-DISCOVERY: Add miniupnpc for automatic UPnP port mapping
+LIBS := -lrandomx -lleveldb -lpthread -lssl -lcrypto -lminiupnpc
 
 # Platform-specific configuration
 ifeq ($(UNAME_S),Darwin)
@@ -68,17 +69,20 @@ ifeq ($(UNAME_S),Darwin)
     LDFLAGS += -L$(HOMEBREW_PREFIX)/opt/leveldb/lib
 else ifeq ($(UNAME_S),Windows)
     # Windows requires ws2_32 for sockets, bcrypt for secure RNG, and dbghelp for stack traces
-    LIBS += -lws2_32 -lbcrypt -ldbghelp
+    # iphlpapi is required by miniupnpc on Windows
+    LIBS += -lws2_32 -lbcrypt -ldbghelp -liphlpapi
     # Use MSYS2 MinGW64 includes - do NOT use MinGW-Builds paths (C:/ProgramData/mingw64)
     # as they lack C11 support (quick_exit, timespec_get)
     INCLUDES += -I depends/leveldb/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
     # MinGW/MSYS2 on Windows - use system OpenSSL 3.x from /mingw64
-    LIBS += -lws2_32 -lbcrypt -ldbghelp
+    # iphlpapi is required by miniupnpc on Windows
+    LIBS += -lws2_32 -lbcrypt -ldbghelp -liphlpapi
     INCLUDES += -I depends/leveldb/include -I /mingw64/include -I C:/msys64/mingw64/include
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
     # MSYS on Windows - use system OpenSSL 3.x from /mingw64
-    LIBS += -lws2_32 -lbcrypt -ldbghelp
+    # iphlpapi is required by miniupnpc on Windows
+    LIBS += -lws2_32 -lbcrypt -ldbghelp -liphlpapi
     INCLUDES += -I depends/leveldb/include -I /mingw64/include -I C:/msys64/mingw64/include
 endif
 
@@ -178,7 +182,8 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/partition_detector.cpp \
                src/net/connman.cpp \
                src/net/node.cpp \
-               src/net/sock.cpp
+               src/net/sock.cpp \
+               src/net/upnp.cpp
 
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \

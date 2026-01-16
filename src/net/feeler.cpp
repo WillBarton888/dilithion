@@ -56,10 +56,17 @@ bool CFeelerManager::ProcessFeelerConnections() {
     int peer_id = pnode->id;
 
     // Send VERSION message for outbound feeler connection
+    // PEER DISCOVERY FIX: Use learned external IP instead of 0.0.0.0
     NetProtocol::CAddress local_addr;
     local_addr.services = NetProtocol::NODE_NETWORK;
-    local_addr.SetIPv4(0);  // 0.0.0.0
-    local_addr.port = 0;
+    std::string externalIP = m_connman->GetExternalIP();
+    if (!externalIP.empty()) {
+        local_addr.SetFromString(externalIP);
+        local_addr.port = 8444;  // Mainnet P2P port
+    } else {
+        local_addr.SetIPv4(0);
+        local_addr.port = 0;
+    }
     CNetMessage version_msg = m_msg_processor->CreateVersionMessage(addr, local_addr);
     m_connman->PushMessage(peer_id, version_msg);
 
