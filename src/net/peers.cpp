@@ -122,15 +122,32 @@ std::shared_ptr<CPeer> CPeerManager::AddPeer(const NetProtocol::CAddress& addr) 
 }
 
 std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
-
     // BUG #124 FIX: Add peer with specific ID for inbound connections
     // Inbound connections don't go through AddPeer(), so we need to create the peer
     // with the exact ID that CConnectionManager uses
 
+    // First, try to get address from CNode (need to lock cs_nodes first to avoid deadlock)
+    NetProtocol::CAddress addr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+        auto node_it = node_refs.find(peer_id);
+        if (node_it != node_refs.end() && node_it->second) {
+            addr = node_it->second->addr;
+        }
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
     // Check if peer already exists
     auto it = peers.find(peer_id);
     if (it != peers.end()) {
+        // BUG FIX: Update address if it was zeroed
+        if (it->second->addr.IsNull() && !addr.IsNull()) {
+            it->second->addr = addr;
+        }
+        if (it->second->connect_time == 0) {
+            it->second->connect_time = GetTime();
+        }
         return it->second;
     }
 
@@ -145,9 +162,8 @@ std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
         return nullptr;
     }
 
-    // Create new peer with the specified ID
-    auto peer = std::make_shared<CPeer>();
-    peer->id = peer_id;
+    // Create new peer with the specified ID and address from CNode
+    auto peer = std::make_shared<CPeer>(peer_id, addr);
     peer->state = CPeer::STATE_CONNECTED;
     peers[peer_id] = peer;
 
@@ -1287,10 +1303,19 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
 
     {
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
-        if (peers.find(node_id) == peers.end()) {
+        auto it = peers.find(node_id);
+        if (it == peers.end()) {
+            // Create new peer
             auto peer = std::make_shared<CPeer>(node_id, addr);
             peer->state = inbound ? CPeer::STATE_CONNECTED : CPeer::STATE_CONNECTING;
             peers[node_id] = peer;
+        } else {
+            // BUG FIX: Update existing peer's address (may have been created by AddPeerWithId
+            // with zeroed address due to race condition)
+            it->second->addr = addr;
+            if (it->second->connect_time == 0) {
+                it->second->connect_time = GetTime();
+            }
         }
     }
 
