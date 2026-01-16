@@ -158,6 +158,51 @@ BlockProcessResult ProcessNewBlock(
     }
 
     // =========================================================================
+    // PHASE 2.5: COINBASE TAX VALIDATION (MAINNET ONLY)
+    // Validates that coinbase includes required Dev Fund & Dev Reward outputs
+    // =========================================================================
+    bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
+    if (!isTestnet && !skipPoWCheck) {
+        // Get block height
+        int blockHeight = currentChainHeight + 1;
+        CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+        if (pParent) {
+            blockHeight = pParent->nHeight + 1;
+        }
+
+        // Deserialize transactions to get coinbase
+        CBlockValidator validator;
+        std::vector<CTransactionRef> transactions;
+        std::string validationError;
+
+        if (!validator.DeserializeBlockTransactions(block, transactions, validationError)) {
+            std::cerr << "[ProcessNewBlock] ERROR: Failed to deserialize transactions for coinbase check: "
+                      << validationError << std::endl;
+            g_metrics.RecordInvalidBlock();
+            return BlockProcessResult::VALIDATION_ERROR;
+        }
+
+        if (transactions.empty()) {
+            std::cerr << "[ProcessNewBlock] ERROR: Block has no transactions" << std::endl;
+            g_metrics.RecordInvalidBlock();
+            return BlockProcessResult::VALIDATION_ERROR;
+        }
+
+        // CheckCoinbase validates:
+        // - Coinbase value doesn't exceed subsidy + fees
+        // - Required Dev Fund and Dev Reward outputs are present with correct amounts
+        // Note: We pass 0 for fees since tax is calculated from subsidy only
+        if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), 0, validationError)) {
+            std::cerr << "[ProcessNewBlock] ERROR: Coinbase validation failed: " << validationError << std::endl;
+            if (ctx.peer_manager) {
+                ctx.peer_manager->Misbehaving(peer_id, 100);  // Ban peer for invalid coinbase
+            }
+            g_metrics.RecordInvalidBlock();
+            return BlockProcessResult::VALIDATION_ERROR;
+        }
+    }
+
+    // =========================================================================
     // PHASE 3: DUPLICATE/EXISTING BLOCK CHECKS
     // BUG #114, #150 fixes
     // =========================================================================
