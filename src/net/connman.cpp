@@ -1058,7 +1058,7 @@ void CConnman::SocketHandler() {
             addr.port = port;
             addr.services = NetProtocol::NODE_NETWORK;
 
-            // Create CNode
+            // Create CNode first (before locking)
             int node_id = m_next_node_id++;
             auto node = std::make_unique<CNode>(node_id, addr, true);  // true = inbound
             CNode* pnode = node.get();
@@ -1066,9 +1066,29 @@ void CConnman::SocketHandler() {
             pnode->SetSocket(client_fd);
             pnode->state.store(CNode::STATE_CONNECTED);
 
-            // Add to m_nodes
+            // FIX: Check for duplicate AND add in ONE atomic operation
+            // Only ONE connection per peer allowed (regardless of direction)
             {
                 std::lock_guard<std::mutex> lock(cs_vNodes);
+
+                // Check for duplicate
+                bool is_duplicate = false;
+                for (const auto& existing_node : m_nodes) {
+                    if (existing_node && !existing_node->fDisconnect.load()) {
+                        if (existing_node->addr.ToStringIP() == std::string(ip_str)) {
+                            is_duplicate = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (is_duplicate) {
+                    LogPrintf(NET, WARN, "[CConnman] Rejecting duplicate inbound from %s (already connected)\n", ip_str);
+                    // Node destructor will close socket
+                    continue;  // Skip to next pending connection
+                }
+
+                // Not a duplicate - add to m_nodes (still holding lock)
                 m_nodes.push_back(std::move(node));
             }
 
