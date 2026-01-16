@@ -174,6 +174,12 @@ struct CAddress {
         return true;
     }
 
+    // BUG #125 FIX: Check if address is null/unset
+    bool IsNull() const {
+        static const uint8_t zeros[16] = {0};
+        return memcmp(ip, zeros, 16) == 0 && port == 0;
+    }
+
     // NET-015 FIX: Validate IP address for P2P networking
     bool IsRoutable() const {
         // Check if IPv4-mapped address

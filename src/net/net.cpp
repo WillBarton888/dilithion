@@ -471,6 +471,13 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             // Use AddPeerWithId to ensure the peer ID matches the connection manager's ID
             peer = peer_manager.AddPeerWithId(peer_id);
             if (peer) {
+                // BUG #125 FIX: Copy actual connection IP from CNode to CPeer
+                // AddPeerWithId creates peer without address, causing "no suitable peers"
+                // because IBD code can't identify which peer has blocks
+                CNode* node = peer_manager.GetNode(peer_id);
+                if (node) {
+                    peer->addr = node->addr;  // Copy actual TCP connection IP
+                }
                 std::cout << "[PeerManager] Created peer " << peer_id << " for inbound connection" << std::endl;
             }
         }
@@ -478,6 +485,14 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         if (peer) {
             LogPrintf(NET, INFO, "Received VERSION from peer %d (version=%d, agent=%s, height=%d, services=0x%016llx)",
                       peer_id, msg.version, msg.user_agent.c_str(), msg.start_height, msg.services);
+
+            // BUG #125 FIX: Ensure peer has valid address (may be null for existing peers)
+            if (peer->addr.IsNull()) {
+                CNode* node = peer_manager.GetNode(peer_id);
+                if (node) {
+                    peer->addr = node->addr;
+                }
+            }
 
             // Store peer data (but DON'T update state yet - handler needs to check state)
             peer->version = msg.version;
