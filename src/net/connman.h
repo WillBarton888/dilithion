@@ -147,6 +147,13 @@ public:
      */
     std::string GetExternalIP() const;
 
+    /**
+     * Set external IP manually (for --externalip option)
+     * Used when user has manually forwarded port on router
+     * @param ip The external IP to advertise
+     */
+    void SetExternalIP(const std::string& ip);
+
     //
     // Message sending
     //

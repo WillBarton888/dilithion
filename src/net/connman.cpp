@@ -1617,3 +1617,9 @@ std::string CConnman::GetExternalIP() const {
     std::lock_guard<std::mutex> lock(cs_externalIP);
     return m_bestExternalIP;
 }
+
+void CConnman::SetExternalIP(const std::string& ip) {
+    std::lock_guard<std::mutex> lock(cs_externalIP);
+    m_bestExternalIP = ip;
+    LogPrintf(NET, INFO, "[CConnman] External IP set manually: %s\n", ip.c_str());
+}

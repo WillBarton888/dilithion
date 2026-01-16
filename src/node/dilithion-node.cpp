@@ -305,6 +305,7 @@ struct NodeConfig {
     bool relay_only = false;        // Relay-only mode: skip wallet creation (for seed nodes)
     bool upnp_enabled = false;      // Enable UPnP automatic port mapping
     bool upnp_prompted = false;     // True if user was already prompted or used explicit flag
+    std::string external_ip = "";   // --externalip: Manual external IP (for manual port forwarding)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -438,6 +439,11 @@ struct NodeConfig {
                 upnp_enabled = false;
                 upnp_prompted = true;  // Don't prompt if explicitly disabled
             }
+            else if (arg.find("--externalip=") == 0) {
+                // Manual external IP for port forwarding (when UPnP fails/unavailable)
+                external_ip = arg.substr(13);
+                upnp_prompted = true;  // Don't prompt for UPnP if using manual IP
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -477,6 +483,7 @@ struct NodeConfig {
         std::cout << "  --relay-only          Relay-only mode: skip wallet (for seed nodes)" << std::endl;
         std::cout << "  --upnp                Enable automatic port mapping (UPnP)" << std::endl;
         std::cout << "  --no-upnp             Disable UPnP (don't prompt)" << std::endl;
+        std::cout << "  --externalip=<ip>     Your public IP (for manual port forwarding)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -2678,21 +2685,31 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << std::endl;
         }
 
-        // Attempt UPnP port mapping if enabled
-        if (connman_opts.upnp_enabled) {
+        // Handle external IP: --externalip takes priority, then UPnP
+        std::string effectiveExternalIP;
+
+        // Check for manual external IP first (manual port forwarding)
+        if (!config.external_ip.empty()) {
+            effectiveExternalIP = config.external_ip;
+            std::cout << "  [OK] Using manual external IP: " << effectiveExternalIP << std::endl;
+            std::cout << "    [INFO] Ensure port " << connman_opts.nListenPort
+                      << " is forwarded on your router" << std::endl;
+        }
+        // Attempt UPnP port mapping if enabled (and no manual IP)
+        else if (connman_opts.upnp_enabled) {
             std::cout << "  Attempting automatic port mapping (UPnP)..." << std::endl;
             std::string upnpExternalIP;
             if (UPnP::MapPort(connman_opts.nListenPort, upnpExternalIP)) {
                 std::cout << "    [OK] Port " << connman_opts.nListenPort << " mapped via UPnP" << std::endl;
                 if (!upnpExternalIP.empty()) {
+                    effectiveExternalIP = upnpExternalIP;
                     std::cout << "    [OK] External IP: " << upnpExternalIP << std::endl;
-                    // Store this as our known external IP immediately
-                    // This will be used when we send VERSION messages
                 }
             } else {
                 std::cout << "    [WARN] UPnP port mapping failed: " << UPnP::GetLastError() << std::endl;
                 std::cout << "    [INFO] You may need to manually forward port "
                           << connman_opts.nListenPort << " on your router" << std::endl;
+                std::cout << "    [INFO] Use --externalip=<your-public-ip> to enable inbound connections" << std::endl;
             }
         }
 
@@ -2701,6 +2718,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (!g_node_context.connman->Start(*g_node_context.peer_manager, message_processor, connman_opts)) {
             std::cerr << "Failed to start CConnman" << std::endl;
             return 1;
+        }
+
+        // Set external IP if we have one (for advertising to peers)
+        if (!effectiveExternalIP.empty()) {
+            g_node_context.connman->SetExternalIP(effectiveExternalIP);
         }
 
         std::cout << "  [OK] P2P components ready and started" << std::endl;
