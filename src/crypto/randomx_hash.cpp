@@ -181,6 +181,7 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
 
     g_current_key = new_key;
     g_is_light_mode = light_mode;
+    g_randomx_ready = true;  // Mark as ready for thread VM creation
 }
 
 void randomx_cleanup() {
