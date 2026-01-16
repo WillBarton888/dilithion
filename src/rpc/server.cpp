@@ -25,6 +25,7 @@
 #include <net/net.h>  // For CNetMessageProcessor and other networking types
 #include <net/protocol.h>  // For NetProtocol::CAddress
 #include <net/connman.h>  // Phase 5: For CConnman methods
+#include <net/banman.h>   // For CBanManager
 
 #include <sstream>
 #include <cstring>
@@ -196,6 +197,11 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getrawtransaction"] = [this](const std::string& p) { return RPC_GetRawTransaction(p); };
     m_handlers["decoderawtransaction"] = [this](const std::string& p) { return RPC_DecodeRawTransaction(p); };
     m_handlers["addnode"] = [this](const std::string& p) { return RPC_AddNode(p); };
+
+    // Ban management
+    m_handlers["setban"] = [this](const std::string& p) { return RPC_SetBan(p); };
+    m_handlers["listbanned"] = [this](const std::string& p) { return RPC_ListBanned(p); };
+    m_handlers["clearbanned"] = [this](const std::string& p) { return RPC_ClearBanned(p); };
 }
 
 CRPCServer::~CRPCServer() {
@@ -3455,6 +3461,13 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getnetworkinfo - Get network information\",";
     oss << "\"getpeerinfo - Get detailed information about connected peers\",";
     oss << "\"getconnectioncount - Get number of connections to other nodes\",";
+    oss << "\"addnode - Add or remove a peer connection\",";
+
+    // Ban management
+    oss << "\"setban - Add or remove an IP from the ban list\",";
+    oss << "\"listbanned - List all banned IPs\",";
+    oss << "\"clearbanned - Clear all banned IPs\",";
+
     oss << "\"help - This help message\",";
     oss << "\"stop - Stop the Dilithion node\"";
 
@@ -3765,6 +3778,162 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
     std::cout << "[RPC] addnode: Connected to " << node_str << " (node_id=" << pnode->id << ")" << std::endl;
 
     return "null";  // Success
+}
+
+// ============================================================================
+// BAN MANAGEMENT METHODS
+// ============================================================================
+
+std::string CRPCServer::RPC_SetBan(const std::string& params) {
+    // Parse params - expecting {"ip":"x.x.x.x", "command":"add|remove", "bantime":86400}
+    // Bitcoin Core compatible: setban "ip" "add|remove" (bantime) (absolute)
+
+    if (!g_node_context.peer_manager) {
+        throw std::runtime_error("Peer manager not initialized");
+    }
+
+    // Parse IP address
+    size_t ip_pos = params.find("\"ip\"");
+    if (ip_pos == std::string::npos) {
+        // Try positional format: first string is IP
+        size_t quote1 = params.find("\"");
+        if (quote1 == std::string::npos) {
+            throw std::runtime_error("Missing IP parameter. Usage: setban \"ip\" \"add|remove\" (bantime)");
+        }
+        size_t quote2 = params.find("\"", quote1 + 1);
+        if (quote2 == std::string::npos) {
+            throw std::runtime_error("Invalid IP parameter format");
+        }
+        // Fall through to named parameter parsing
+    }
+
+    size_t colon = params.find(":", ip_pos != std::string::npos ? ip_pos : 0);
+    size_t quote1 = params.find("\"", colon != std::string::npos ? colon : 0);
+    size_t quote2 = params.find("\"", quote1 + 1);
+    if (quote1 == std::string::npos || quote2 == std::string::npos) {
+        throw std::runtime_error("Invalid IP parameter format");
+    }
+
+    std::string ip_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+
+    // Validate IP format (basic check)
+    struct in_addr ipv4_addr;
+    if (inet_pton(AF_INET, ip_str.c_str(), &ipv4_addr) != 1) {
+        throw std::runtime_error("Invalid IPv4 address: " + ip_str);
+    }
+
+    // Parse command (add/remove)
+    std::string command = "add";  // default
+    size_t cmd_pos = params.find("\"command\"");
+    if (cmd_pos != std::string::npos) {
+        size_t cmd_colon = params.find(":", cmd_pos);
+        size_t cmd_quote1 = params.find("\"", cmd_colon);
+        size_t cmd_quote2 = params.find("\"", cmd_quote1 + 1);
+        if (cmd_quote1 != std::string::npos && cmd_quote2 != std::string::npos) {
+            command = params.substr(cmd_quote1 + 1, cmd_quote2 - cmd_quote1 - 1);
+        }
+    } else {
+        // Try to find "add" or "remove" as second quoted string
+        size_t next_quote1 = params.find("\"", quote2 + 1);
+        if (next_quote1 != std::string::npos) {
+            size_t next_quote2 = params.find("\"", next_quote1 + 1);
+            if (next_quote2 != std::string::npos) {
+                std::string cmd_str = params.substr(next_quote1 + 1, next_quote2 - next_quote1 - 1);
+                if (cmd_str == "add" || cmd_str == "remove") {
+                    command = cmd_str;
+                }
+            }
+        }
+    }
+
+    // Parse bantime (optional, default 24 hours)
+    int64_t bantime = 86400;  // 24 hours default
+    size_t bantime_pos = params.find("\"bantime\"");
+    if (bantime_pos != std::string::npos) {
+        size_t bt_colon = params.find(":", bantime_pos);
+        size_t bt_start = params.find_first_of("0123456789", bt_colon);
+        if (bt_start != std::string::npos) {
+            try {
+                bantime = std::stoll(params.substr(bt_start));
+            } catch (...) {
+                // Use default
+            }
+        }
+    }
+
+    CBanManager& banman = g_node_context.peer_manager->GetBanManager();
+
+    if (command == "add") {
+        // Ban the IP
+        banman.Ban(ip_str, bantime, "manual", 100);
+
+        // Also disconnect any existing connections from this IP
+        if (g_node_context.connman) {
+            auto nodes = g_node_context.connman->GetNodes();
+            for (CNode* node : nodes) {
+                if (node->addr.ToStringIP() == ip_str) {
+                    g_node_context.connman->DisconnectNode(node->id, "banned via RPC");
+                }
+            }
+        }
+
+        std::cout << "[RPC] setban: Banned " << ip_str << " for " << bantime << " seconds" << std::endl;
+        return "null";
+
+    } else if (command == "remove") {
+        // Unban the IP
+        banman.Unban(ip_str);
+        std::cout << "[RPC] setban: Unbanned " << ip_str << std::endl;
+        return "null";
+
+    } else {
+        throw std::runtime_error("Invalid command. Must be 'add' or 'remove'");
+    }
+}
+
+std::string CRPCServer::RPC_ListBanned(const std::string& params) {
+    (void)params;  // Unused
+
+    if (!g_node_context.peer_manager) {
+        throw std::runtime_error("Peer manager not initialized");
+    }
+
+    CBanManager& banman = g_node_context.peer_manager->GetBanManager();
+    auto banned = banman.GetBanned();
+
+    std::ostringstream oss;
+    oss << "[";
+
+    bool first = true;
+    for (const auto& entry : banned) {
+        if (!first) oss << ",";
+        first = false;
+
+        oss << "{";
+        oss << "\"address\":\"" << entry.first << "\",";
+        oss << "\"banned_until\":" << entry.second.ban_until << ",";
+        oss << "\"ban_created\":" << entry.second.create_time << ",";
+        oss << "\"ban_reason\":\"" << entry.second.reason << "\",";
+        oss << "\"ban_score\":" << entry.second.ban_score;
+        oss << "}";
+    }
+
+    oss << "]";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ClearBanned(const std::string& params) {
+    (void)params;  // Unused
+
+    if (!g_node_context.peer_manager) {
+        throw std::runtime_error("Peer manager not initialized");
+    }
+
+    CBanManager& banman = g_node_context.peer_manager->GetBanManager();
+    banman.ClearBanned();
+
+    std::cout << "[RPC] clearbanned: All bans cleared" << std::endl;
+    return "null";
 }
 
 // ============================================================================

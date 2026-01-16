@@ -313,6 +313,11 @@ private:
     // Missing network methods
     std::string RPC_AddNode(const std::string& params);
 
+    // Ban management methods
+    std::string RPC_SetBan(const std::string& params);
+    std::string RPC_ListBanned(const std::string& params);
+    std::string RPC_ClearBanned(const std::string& params);
+
     // Helper functions
     std::string FormatAmount(CAmount amount) const;
     bool ValidateAddress(const std::string& addressStr, CDilithiumAddress& addressOut) const;
