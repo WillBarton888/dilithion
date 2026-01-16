@@ -2905,11 +2905,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             int activationHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
             // Only process blocks after DFMP activation
-            if (height >= activationHeight) {
-                // Derive miner identity from coinbase
-                if (!block.vtx.empty()) {
-                    const CTransaction& coinbaseTx = block.vtx[0];
-                    DFMP::Identity identity = DFMP::DeriveIdentity(coinbaseTx);
+            if (height >= activationHeight && !block.vtx.empty()) {
+                // Deserialize block transactions to get coinbase
+                CBlockValidator validator;
+                std::vector<CTransactionRef> transactions;
+                std::string error;
+
+                if (validator.DeserializeBlockTransactions(block, transactions, error) && !transactions.empty()) {
+                    // Derive miner identity from coinbase (first transaction)
+                    DFMP::Identity identity = DFMP::DeriveIdentity(*transactions[0]);
 
                     if (!identity.IsNull()) {
                         // Record first-seen height if this is a new identity

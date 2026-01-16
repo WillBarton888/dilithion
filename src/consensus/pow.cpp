@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <consensus/pow.h>
+#include <consensus/validation.h>  // DFMP: For DeserializeBlockTransactions
 #include <node/block_index.h>
 #include <core/chainparams.h>
 #include <util/time.h>
@@ -173,8 +174,22 @@ bool CheckProofOfWorkDFMP(
         return false;
     }
 
-    // Get coinbase transaction
-    const CTransaction& coinbaseTx = block.vtx[0];
+    // Deserialize block transactions to get coinbase
+    CBlockValidator validator;
+    std::vector<CTransactionRef> transactions;
+    std::string deserializeError;
+    if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
+        std::cerr << "[DFMP] Failed to deserialize transactions: " << deserializeError << std::endl;
+        return false;
+    }
+
+    if (transactions.empty()) {
+        std::cerr << "[DFMP] No transactions after deserialization" << std::endl;
+        return false;
+    }
+
+    // Get coinbase transaction (first transaction in block)
+    const CTransaction& coinbaseTx = *transactions[0];
 
     // Derive miner identity from coinbase
     DFMP::Identity identity = DFMP::DeriveIdentity(coinbaseTx);

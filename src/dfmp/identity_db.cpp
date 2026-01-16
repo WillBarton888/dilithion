@@ -57,7 +57,7 @@ bool CIdentityDB::Open(const std::string& path) {
     options.create_if_missing = true;
     options.write_buffer_size = 4 * 1024 * 1024;  // 4MB write buffer
     options.max_open_files = 100;
-    options.block_cache = leveldb::NewLRUCache(8 * 1024 * 1024);  // 8MB block cache
+    // Note: LevelDB uses default block cache if not specified
 
     leveldb::DB* db = nullptr;
     leveldb::Status status = leveldb::DB::Open(options, path, &db);
