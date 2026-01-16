@@ -12,6 +12,7 @@
 #include <net/features.h>  // Feature flags system
 #include <core/node_context.h>  // Phase 1.2: NodeContext for global state
 #include <net/connman.h>  // Phase 5: For CConnman::PushMessage
+#include <net/node.h>     // For CNode (genesis mismatch IP tracking)
 #include <net/headers_manager.h>  // For CHeadersManager (IBD check)
 #include <util/strencodings.h>
 #include <util/time.h>
@@ -375,7 +376,12 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             if (msg.genesis_hash != our_genesis) {
                 // Peer is on a different blockchain - likely hasn't updated their binary
                 // Use IP-based rate limiting to detect and ban probing attacks
-                std::string peer_ip = msg.addr_from.ToStringIP();
+                // Get actual connection IP from CNode (not self-reported addr_from which may be 0.0.0.0)
+                std::string peer_ip = "0.0.0.0";  // Fallback
+                CNode* node = peer_manager.GetNode(peer_id);
+                if (node) {
+                    peer_ip = node->addr.ToStringIP();
+                }
                 std::string their_genesis_hex = msg.genesis_hash.GetHex().substr(0, 16);
 
                 // Record failure and check if IP should be banned
