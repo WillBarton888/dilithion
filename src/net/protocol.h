@@ -18,8 +18,8 @@ static const uint32_t TESTNET_MAGIC = 0xDAB5BFFA;
 static const uint32_t REGTEST_MAGIC = 0xFABFB5DA;
 
 /** Protocol version */
-static const int PROTOCOL_VERSION = 70001;
-static const int MIN_PEER_PROTO_VERSION = 70001;
+static const int PROTOCOL_VERSION = 70002;          // Bumped for mainnet v1.4.3
+static const int MIN_PEER_PROTO_VERSION = 70002;    // Reject old binaries
 
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;
