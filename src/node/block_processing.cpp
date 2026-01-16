@@ -134,13 +134,27 @@ BlockProcessResult ProcessNewBlock(
               << ", skipPoWCheck=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
 
     // =========================================================================
-    // PHASE 2: PROOF-OF-WORK VALIDATION
+    // PHASE 2: PROOF-OF-WORK VALIDATION (with DFMP enforcement)
     // =========================================================================
-    if (!skipPoWCheck && !CheckProofOfWork(blockHash, block.nBits)) {
-        std::cerr << "[ProcessNewBlock] ERROR: Block has invalid PoW" << std::endl;
-        std::cerr << "  Hash must be less than target" << std::endl;
-        g_metrics.RecordInvalidBlock();
-        return BlockProcessResult::INVALID_POW;
+    if (!skipPoWCheck) {
+        // Get block height for DFMP calculation
+        int blockHeight = currentChainHeight + 1;  // Default: next block
+        CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+        if (pParent) {
+            blockHeight = pParent->nHeight + 1;
+        }
+
+        // Get DFMP activation height
+        int dfmpActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+        // Use DFMP-aware PoW check (applies identity-based difficulty multipliers)
+        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
+            std::cerr << "[ProcessNewBlock] ERROR: Block has invalid PoW (DFMP check failed)" << std::endl;
+            std::cerr << "  Hash must be less than DFMP-adjusted target" << std::endl;
+            g_metrics.RecordInvalidBlock();
+            return BlockProcessResult::INVALID_POW;
+        }
     }
 
     // =========================================================================

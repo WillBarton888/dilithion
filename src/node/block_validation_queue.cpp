@@ -72,19 +72,29 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         return false;
     }
 
-    // Basic PoW check (cheap, can do in P2P thread)
+    // Basic PoW check with DFMP enforcement
     // Skip PoW check for checkpointed blocks (same as current code)
     int currentChainHeight = m_chainstate.GetHeight();
     int checkpointHeight = Dilithion::g_chainParams ?
         Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
     bool skipPoWCheck = (checkpointHeight > 0 && currentChainHeight < checkpointHeight);
 
-    if (!skipPoWCheck && !CheckProofOfWork(blockHash, block.nBits)) {
-        std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW, rejecting" << std::endl;
-        if (g_node_context.peer_manager) {
-            g_node_context.peer_manager->Misbehaving(peer_id, 10);
+    if (!skipPoWCheck) {
+        // Get block height for DFMP (use expected_height if valid, else estimate)
+        int blockHeight = (expected_height > 0) ? expected_height : (currentChainHeight + 1);
+
+        // Get DFMP activation height
+        int dfmpActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+        // Use DFMP-aware PoW check
+        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
+            std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW (DFMP check failed), rejecting" << std::endl;
+            if (g_node_context.peer_manager) {
+                g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+            }
+            return false;
         }
-        return false;
     }
 
     // Check if we already have this block

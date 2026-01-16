@@ -522,6 +522,19 @@ bool CBlockValidator::CheckBlock(
         return false;
     }
 
+    // DFMP enforcement: Re-check PoW with DFMP difficulty adjustment
+    // Note: This is defense-in-depth - primary enforcement is in block_processing.cpp
+    {
+        uint256 blockHash = block.GetHash();
+        int dfmpActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, nHeight, dfmpActivationHeight)) {
+            error = "Block fails DFMP difficulty check";
+            return false;
+        }
+    }
+
     // Step 2: Validate coinbase transaction
     // First transaction must be coinbase
     if (!transactions[0]->IsCoinBase()) {
