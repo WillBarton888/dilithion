@@ -311,6 +311,20 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
         return nullptr;
     }
 
+    // FIX: Check for duplicate connection (already connected to this IP)
+    // Only ONE connection per peer allowed (regardless of direction)
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        for (const auto& node : m_nodes) {
+            if (node && !node->fDisconnect.load()) {
+                if (node->addr.ToStringIP() == ip_str) {
+                    LogPrintf(NET, WARN, "[CConnman] Skipping duplicate outbound to %s (already connected)\n", ip_str.c_str());
+                    return nullptr;
+                }
+            }
+        }
+    }
+
     // Check connection limits
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
@@ -430,6 +444,20 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
     if (m_peer_manager && m_peer_manager->IsBanned(ip_str)) {
         LogPrintf(NET, WARN, "[CConnman] Rejecting connection from banned IP %s\n", ip_str.c_str());
         return false;
+    }
+
+    // FIX: Check for duplicate connection (already connected to this IP)
+    // This prevents A→B and B→A connections from both succeeding
+    {
+        std::lock_guard<std::mutex> lock(cs_vNodes);
+        for (const auto& node : m_nodes) {
+            if (node && !node->fDisconnect.load()) {
+                if (node->addr.ToStringIP() == ip_str) {
+                    LogPrintf(NET, WARN, "[CConnman] Rejecting duplicate inbound from %s (already connected)\n", ip_str.c_str());
+                    return false;
+                }
+            }
+        }
     }
 
     // Phase 2: Create CNode directly (CConnman owns nodes)
