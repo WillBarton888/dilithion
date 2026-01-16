@@ -3865,7 +3865,7 @@ std::string CRPCServer::RPC_SetBan(const std::string& params) {
 
     if (command == "add") {
         // Ban the IP
-        banman.Ban(ip_str, bantime, "manual", 100);
+        banman.Ban(ip_str, bantime, BanReason::ManuallyBanned);
 
         // Also disconnect any existing connections from this IP
         if (g_node_context.connman) {
@@ -3911,10 +3911,10 @@ std::string CRPCServer::RPC_ListBanned(const std::string& params) {
 
         oss << "{";
         oss << "\"address\":\"" << entry.first << "\",";
-        oss << "\"banned_until\":" << entry.second.ban_until << ",";
-        oss << "\"ban_created\":" << entry.second.create_time << ",";
-        oss << "\"ban_reason\":\"" << entry.second.reason << "\",";
-        oss << "\"ban_score\":" << entry.second.ban_score;
+        oss << "\"banned_until\":" << entry.second.nBanUntil << ",";
+        oss << "\"ban_created\":" << entry.second.nCreateTime << ",";
+        oss << "\"ban_reason\":" << static_cast<int>(entry.second.banReason) << ",";
+        oss << "\"misbehavior_score\":" << entry.second.nMisbehaviorScore;
         oss << "}";
     }
 
