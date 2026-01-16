@@ -35,10 +35,9 @@ bool MapPort(uint16_t port, std::string& externalIP) {
     }
 
     // Find valid IGD (Internet Gateway Device)
-    // miniupnpc 2.x requires 7 parameters
+    // Use 5-parameter API for maximum compatibility across miniupnpc versions
     char lanaddr[64] = "";
-    char wanaddr[64] = "";
-    int status = UPNP_GetValidIGD(s_devlist, &s_urls, &s_data, lanaddr, sizeof(lanaddr), wanaddr, sizeof(wanaddr));
+    int status = UPNP_GetValidIGD(s_devlist, &s_urls, &s_data, lanaddr, sizeof(lanaddr));
 
     if (status == 0) {
         s_lastError = "No valid IGD found";
