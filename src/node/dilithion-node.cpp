@@ -3547,69 +3547,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
                     }
 
-                    // ThreadOpenConnections: Proactively connect to addresses from AddrMan
-                    // Bitcoin Core pattern: maintain target of 8 outbound connections
-                    constexpr size_t TARGET_OUTBOUND = 8;
-                    if (g_node_context.peer_manager) {
-                        size_t outbound_count = g_node_context.peer_manager->GetOutboundCount();
-
-                        if (outbound_count < TARGET_OUTBOUND) {
-                            size_t needed = TARGET_OUTBOUND - outbound_count;
-
-                            // Get addresses from AddrMan (request extra in case some fail or are connected)
-                            auto addrs = g_node_context.peer_manager->SelectAddressesToConnect(static_cast<int>(needed * 3));
-
-                            if (!addrs.empty()) {
-                                // Get currently connected peer IPs to skip
-                                std::set<std::string> connected_ips;
-                                auto connected_peers = g_node_context.peer_manager->GetConnectedPeers();
-                                for (const auto& peer : connected_peers) {
-                                    if (peer) {
-                                        connected_ips.insert(peer->addr.ToStringIP());
-                                    }
-                                }
-
-                                size_t connections_made = 0;
-                                for (const auto& addr : addrs) {
-                                    if (connections_made >= needed) break;
-
-                                    std::string ip_str = addr.ToStringIP();
-
-                                    // Skip already connected
-                                    if (connected_ips.count(ip_str)) {
-                                        continue;
-                                    }
-
-                                    // Skip non-routable
-                                    if (!addr.IsRoutable()) {
-                                        continue;
-                                    }
-
-                                    // Mark as tried before attempting
-                                    g_node_context.peer_manager->MarkAddressTried(addr);
-
-                                    try {
-                                        // Phase 5: Use CConnman to connect and send VERSION
-                                        int peer_id = ConnectAndHandshake(addr);
-                                        if (peer_id >= 0) {
-                                            std::cout << "[P2P-OpenConn] Connected to " << ip_str
-                                                      << " from AddrMan (peer_id=" << peer_id << ")" << std::endl;
-                                            connections_made++;
-                                            // Phase 5: Mark as good on successful connection
-                                            g_node_context.peer_manager->MarkAddressGood(addr);
-                                        }
-                                    } catch (const std::exception& e) {
-                                        // Connection failed - that's OK, we'll try others
-                                    }
-                                }
-
-                                if (connections_made > 0) {
-                                    std::cout << "[P2P-OpenConn] Made " << connections_made
-                                              << " new connection(s) from AddrMan" << std::endl;
-                                }
-                            }
-                        }
-                    }
+                    // NOTE: Outbound connections are handled by CConnman::ThreadOpenConnections()
+                    // which runs in a dedicated thread. Do NOT duplicate that logic here
+                    // as it causes multiple connections to the same peer.
 
                     // BUG #49: Decay misbehavior scores (reduce by 1 point per minute)
                     // This happens every 30 seconds, so decay by 0.5 points

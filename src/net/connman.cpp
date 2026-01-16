@@ -871,12 +871,14 @@ void CConnman::ThreadOpenConnections() {
             continue;
         }
 
-        // Get currently connected peer IPs to skip
+        // Get currently connected peer IPs to skip (both inbound AND outbound)
+        // BUG FIX: Previously only checked outbound (!fInbound), causing duplicate
+        // connections when we had an inbound connection from the same peer
         std::set<std::string> connected_ips;
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
             for (const auto& node : m_nodes) {
-                if (node && !node->fInbound && !node->fDisconnect.load()) {
+                if (node && !node->fDisconnect.load()) {
                     connected_ips.insert(node->addr.ToStringIP());
                 }
             }
