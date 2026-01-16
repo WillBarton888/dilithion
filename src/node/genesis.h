@@ -64,9 +64,11 @@ bool IsGenesisBlock(const CBlock& block);
  *
  * @param block Genesis block to mine
  * @param target Target hash value (derived from nBits)
+ * @param numThreads Number of threads to use for mining (default: 1)
  * @return true if a valid nonce was found
  */
-bool MineGenesisBlock(CBlock& block, const uint256& target);
+bool MineGenesisBlock(CBlock& block, const uint256& target, int numThreads);
+bool MineGenesisBlock(CBlock& block, const uint256& target);  // Single-threaded overload
 
 } // namespace Genesis
 

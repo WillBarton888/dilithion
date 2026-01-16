@@ -22,9 +22,9 @@ ChainParams ChainParams::Mainnet() {
     // Genesis block parameters
     // v4 genesis - reset after pre-mine attack (January 16, 2026)
     params.genesisTime = 1737072000;   // January 17, 2026 00:00:00 UTC (v4 genesis)
-    params.genesisNonce = 0;           // TO BE MINED - DO NOT PUSH TO GITHUB
+    params.genesisNonce = 2362545302;  // MINED - DO NOT PUSH TO GITHUB UNTIL LAUNCH
     params.genesisNBits = 0x1e01fffe;  // 128x harder than original (50% reduction from 0x1e00ffff)
-    params.genesisHash = "0000000000000000000000000000000000000000000000000000000000000000";  // TO BE MINED
+    params.genesisHash = "0000016cec90019d35921b3f8678cdb1e2b338ea5fcfcf3e57aef6f9947f5b4d";  // MINED - DO NOT PUSH
     params.genesisCoinbaseMsg = "Dilithion Mainnet Genesis v4 - Quantum-Resistant Digital Gold";
 
     // Network ports

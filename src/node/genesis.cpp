@@ -11,6 +11,10 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <vector>
 
 namespace Genesis {
 
@@ -117,51 +121,134 @@ bool IsGenesisBlock(const CBlock& block) {
     return true;
 }
 
-bool MineGenesisBlock(CBlock& block, const uint256& target) {
+// Global state for multi-threaded mining
+static std::atomic<bool> g_found{false};
+static std::atomic<uint64_t> g_totalHashes{0};
+static std::mutex g_resultMutex;
+static uint32_t g_winningNonce = 0;
+static uint256 g_winningHash;
+
+// Serialize block header to 80 bytes (for thread-safe hashing)
+static void SerializeBlockHeader(const CBlock& block, uint32_t nonce, std::vector<uint8_t>& data) {
+    data.clear();
+    data.reserve(80);
+
+    // version (4) + prevBlock (32) + merkleRoot (32) + time (4) + bits (4) + nonce (4) = 80
+    const uint8_t* versionBytes = reinterpret_cast<const uint8_t*>(&block.nVersion);
+    data.insert(data.end(), versionBytes, versionBytes + 4);
+    data.insert(data.end(), block.hashPrevBlock.begin(), block.hashPrevBlock.end());
+    data.insert(data.end(), block.hashMerkleRoot.begin(), block.hashMerkleRoot.end());
+    const uint8_t* timeBytes = reinterpret_cast<const uint8_t*>(&block.nTime);
+    data.insert(data.end(), timeBytes, timeBytes + 4);
+    const uint8_t* bitsBytes = reinterpret_cast<const uint8_t*>(&block.nBits);
+    data.insert(data.end(), bitsBytes, bitsBytes + 4);
+    const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&nonce);
+    data.insert(data.end(), nonceBytes, nonceBytes + 4);
+}
+
+void MineWorker(int threadId, int numThreads, const CBlock& templateBlock, const uint256& target) {
+    // Each thread searches a different part of the nonce space
+    uint32_t start = (uint32_t)(((uint64_t)0xFFFFFFFF * threadId) / numThreads);
+    uint32_t end = (uint32_t)(((uint64_t)0xFFFFFFFF * (threadId + 1)) / numThreads);
+
+    // Create per-thread RandomX VM for true parallel mining
+    void* vm = randomx_create_thread_vm();
+    if (!vm) {
+        std::cerr << "[Thread " << threadId << "] Failed to create VM" << std::endl;
+        return;
+    }
+
+    std::vector<uint8_t> headerData;
+    uint64_t localHashes = 0;
+
+    for (uint32_t nonce = start; nonce < end && !g_found.load(); ++nonce) {
+        // Serialize header with current nonce
+        SerializeBlockHeader(templateBlock, nonce, headerData);
+
+        // Hash with thread-local VM (no mutex, fully parallel)
+        uint256 hash;
+        randomx_hash_thread(vm, headerData.data(), headerData.size(), hash.data);
+        localHashes++;
+
+        if (HashLessThan(hash, target)) {
+            // Found a valid nonce!
+            std::lock_guard<std::mutex> lock(g_resultMutex);
+            if (!g_found.load()) {  // Double-check under lock
+                g_found.store(true);
+                g_winningNonce = nonce;
+                g_winningHash = hash;
+            }
+            break;
+        }
+
+        // Update global counter periodically
+        if (localHashes % 1000 == 0) {
+            g_totalHashes.fetch_add(1000);
+        }
+    }
+
+    // Add remaining hashes to global counter
+    g_totalHashes.fetch_add(localHashes % 1000);
+
+    // Cleanup thread-local VM
+    randomx_destroy_thread_vm(vm);
+}
+
+bool MineGenesisBlock(CBlock& block, const uint256& target, int numThreads) {
     std::cout << "Mining genesis block..." << std::endl;
     std::cout << "Target: " << target.GetHex() << std::endl;
-    std::cout << "This may take a while..." << std::endl;
+    std::cout << "Using " << numThreads << " threads..." << std::endl;
 
-    uint64_t nHashesTried = 0;
-    const uint64_t REPORT_INTERVAL = 10000;
+    // Reset global state
+    g_found.store(false);
+    g_totalHashes.store(0);
+    g_winningNonce = 0;
+    g_winningHash = uint256();
 
-    // Try different nonces until we find one that meets the target
-    for (uint32_t nonce = 0; nonce < 0xFFFFFFFF; ++nonce) {
-        block.nNonce = nonce;
-        block.InvalidateCache();  // CRITICAL: Must invalidate cache after changing nonce
+    // Launch worker threads
+    std::vector<std::thread> threads;
+    for (int i = 0; i < numThreads; ++i) {
+        threads.emplace_back(MineWorker, i, numThreads, std::cref(block), std::cref(target));
+    }
 
-        // Calculate hash
-        uint256 hash = block.GetHash();
+    // Progress reporting in main thread
+    while (!g_found.load()) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::cout << "\rHashes: " << g_totalHashes.load() << std::flush;
+    }
 
-        // Check if hash is less than target (BIG-ENDIAN comparison for PoW)
-        if (HashLessThan(hash, target)) {
-            std::cout << "\nGenesis block found!" << std::endl;
-            std::cout << "Nonce: " << nonce << std::endl;
-            std::cout << "Hash: " << hash.GetHex() << std::endl;
-            std::cout << "Hashes tried: " << nHashesTried << std::endl;
+    // Wait for all threads to finish
+    for (auto& t : threads) {
+        t.join();
+    }
 
-            // Verify the found nonce passes consensus validation
-            std::cout << "Verifying with consensus rules..." << std::endl;
-            if (!CheckProofOfWork(hash, block.nBits)) {
-                std::cout << "ERROR: Found nonce does NOT pass CheckProofOfWork!" << std::endl;
-                std::cout << "This indicates a bug in the mining code." << std::endl;
-                return false;
-            }
-            std::cout << "Verification passed! Genesis block is valid." << std::endl;
+    if (g_found.load()) {
+        block.nNonce = g_winningNonce;
+        block.InvalidateCache();
 
-            return true;
+        std::cout << "\n\nGenesis block found!" << std::endl;
+        std::cout << "Nonce: " << g_winningNonce << std::endl;
+        std::cout << "Hash: " << g_winningHash.GetHex() << std::endl;
+        std::cout << "Hashes tried: " << g_totalHashes.load() << std::endl;
+
+        // Verify the found nonce passes consensus validation
+        std::cout << "Verifying with consensus rules..." << std::endl;
+        if (!CheckProofOfWork(g_winningHash, block.nBits)) {
+            std::cout << "ERROR: Found nonce does NOT pass CheckProofOfWork!" << std::endl;
+            return false;
         }
+        std::cout << "Verification passed! Genesis block is valid." << std::endl;
 
-        nHashesTried++;
-
-        // Report progress
-        if (nHashesTried % REPORT_INTERVAL == 0) {
-            std::cout << "\rHashes: " << nHashesTried << std::flush;
-        }
+        return true;
     }
 
     std::cout << "\nFailed to find valid nonce" << std::endl;
     return false;
+}
+
+// Backward compatible overload
+bool MineGenesisBlock(CBlock& block, const uint256& target) {
+    return MineGenesisBlock(block, target, 1);
 }
 
 } // namespace Genesis

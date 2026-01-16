@@ -64,6 +64,7 @@ int main(int argc, char* argv[]) {
     // Parse command-line arguments
     bool isTestnet = false;
     bool shouldMine = false;
+    int numThreads = 1;
 
     for (int i = 1; i < argc; i++) {
         string arg = argv[i];
@@ -71,13 +72,18 @@ int main(int argc, char* argv[]) {
             isTestnet = true;
         } else if (arg == "--mine") {
             shouldMine = true;
+        } else if (arg == "--threads" && i + 1 < argc) {
+            numThreads = atoi(argv[++i]);
+            if (numThreads < 1) numThreads = 1;
+            if (numThreads > 64) numThreads = 64;
         } else if (arg == "--help" || arg == "-h") {
             cout << "Usage: " << argv[0] << " [OPTIONS]" << endl;
             cout << endl;
             cout << "Options:" << endl;
-            cout << "  --testnet    Use testnet parameters (easier difficulty)" << endl;
-            cout << "  --mine       Mine the genesis block (find valid nonce)" << endl;
-            cout << "  --help       Show this help message" << endl;
+            cout << "  --testnet        Use testnet parameters (easier difficulty)" << endl;
+            cout << "  --mine           Mine the genesis block (find valid nonce)" << endl;
+            cout << "  --threads N      Use N threads for mining (default: 1)" << endl;
+            cout << "  --help           Show this help message" << endl;
             cout << endl;
             return 0;
         }
@@ -86,7 +92,7 @@ int main(int argc, char* argv[]) {
     // Initialize RandomX VM for proof-of-work hashing
     // For genesis mining: Use FULL mode (0) for ~50x faster mining
     // FULL mode requires ~2.5GB RAM but mines much faster (~100 H/s vs ~2 H/s)
-    // NYC node upgraded to 4GB RAM specifically for this task
+    // Dataset initialization auto-detects thread count
     const char* rx_key = "Dilithion-RandomX-v1";
     randomx_init_for_hashing(rx_key, strlen(rx_key), 0);  // full_mode=0 for fast genesis mining
 
@@ -118,8 +124,8 @@ int main(int argc, char* argv[]) {
         // Calculate target from nBits (using consensus CompactToBig)
         uint256 target = CompactToBig(genesis.nBits);
 
-        // Mine the genesis block
-        if (Genesis::MineGenesisBlock(genesis, target)) {
+        // Mine the genesis block with specified number of threads
+        if (Genesis::MineGenesisBlock(genesis, target, numThreads)) {
             cout << endl;
             cout << "======================================" << endl;
             cout << "Genesis Block Mined Successfully!" << endl;
