@@ -70,6 +70,13 @@ public:
     // getting stuck when miners leave, but would be exploitable on mainnet.
     bool fPowAllowMinDifficultyBlocks;
 
+    // DFMP (Fair Mining Protocol) activation height
+    // Before this height: Standard PoW (no identity penalties)
+    // After this height: DFMP active (pending + heat penalties apply)
+    // Mainnet: Activate from genesis (0) or early block to establish fair mining
+    // Testnet: Activate from genesis (0) for testing
+    int dfmpActivationHeight;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release

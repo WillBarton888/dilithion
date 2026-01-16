@@ -7,6 +7,12 @@
 #include <primitives/block.h>
 #include <cstdint>
 
+// Forward declarations for DFMP
+namespace DFMP {
+    class CHeatTracker;
+    class CIdentityDB;
+}
+
 /**
  * Consensus Parameters
  */
@@ -22,6 +28,27 @@ const uint32_t MAX_DIFFICULTY_BITS = 0x1f0fffff;
 
 /** Check whether a block hash satisfies the proof-of-work requirement */
 bool CheckProofOfWork(uint256 hash, uint32_t nBits);
+
+/**
+ * Check proof-of-work with DFMP difficulty adjustment
+ *
+ * This is the DFMP-aware version of CheckProofOfWork that applies
+ * identity-based difficulty multipliers.
+ *
+ * @param block Full block (needed to extract coinbase identity)
+ * @param hash Block hash (RandomX result)
+ * @param nBits Compact difficulty target
+ * @param height Block height
+ * @param activationHeight DFMP activation height (0 = always active)
+ * @return true if PoW meets DFMP-adjusted difficulty
+ */
+bool CheckProofOfWorkDFMP(
+    const CBlock& block,
+    const uint256& hash,
+    uint32_t nBits,
+    int height,
+    int activationHeight = 0
+);
 
 /** Get target from compact difficulty representation */
 uint256 CompactToBig(uint32_t nCompact);

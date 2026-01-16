@@ -20,11 +20,12 @@ ChainParams ChainParams::Mainnet() {
     params.chainID = 1;  // Mainnet Chain ID
 
     // Genesis block parameters
-    params.genesisTime = 1736899200;   // January 15, 2026 00:00:00 UTC (v2 genesis)
-    params.genesisNonce = 146455;
-    params.genesisNBits = 0x1e0fffff;  // Higher difficulty (16x harder) to prevent rapid external mining
-    params.genesisHash = "00000b9c54d61c85d570ed7bf97406a3aa40a136c62fa4fa38640d80f4708dfa";
-    params.genesisCoinbaseMsg = "Dilithion Mainnet Genesis v2 - 15/Jan/2026 - Post-Quantum Security For The People";
+    // v4 genesis - reset after pre-mine attack (January 16, 2026)
+    params.genesisTime = 1737072000;   // January 17, 2026 00:00:00 UTC (v4 genesis)
+    params.genesisNonce = 0;           // TO BE MINED - DO NOT PUSH TO GITHUB
+    params.genesisNBits = 0x1e01fffe;  // 128x harder than original (50% reduction from 0x1e00ffff)
+    params.genesisHash = "0000000000000000000000000000000000000000000000000000000000000000";  // TO BE MINED
+    params.genesisCoinbaseMsg = "Dilithion Mainnet Genesis v4 - Quantum-Resistant Digital Gold";
 
     // Network ports
     params.p2pPort = 8444;             // P2P network port
@@ -45,6 +46,11 @@ ChainParams ChainParams::Mainnet() {
     // MAINNET SECURITY: Never allow minimum difficulty blocks
     // This prevents attackers from gaming timestamps to get easy blocks
     params.fPowAllowMinDifficultyBlocks = false;
+
+    // DFMP (Fair Mining Protocol) activation
+    // Active from genesis to establish fair mining from the start
+    // This prevents early mining dominance before DFMP can take effect
+    params.dfmpActivationHeight = 0;
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
@@ -101,6 +107,10 @@ ChainParams ChainParams::Testnet() {
     // This prevents testnet from getting stuck when miners leave
     // Safe for testnet since coins have no value (would be exploitable on mainnet)
     params.fPowAllowMinDifficultyBlocks = true;
+
+    // DFMP (Fair Mining Protocol) activation
+    // Active from genesis for testing fair mining protocol
+    params.dfmpActivationHeight = 0;
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint

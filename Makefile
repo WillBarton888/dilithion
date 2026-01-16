@@ -158,6 +158,10 @@ CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
 
 MINER_SOURCES := src/miner/controller.cpp
 
+# DFMP (Fair Mining Protocol) sources
+DFMP_SOURCES := src/dfmp/dfmp.cpp \
+                src/dfmp/identity_db.cpp
+
 NET_SOURCES := src/net/protocol.cpp \
                src/net/serialize.cpp \
                src/net/net.cpp \
@@ -239,6 +243,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(DB_SOURCES) \
                 $(CRYPTO_SOURCES) \
                 $(MINER_SOURCES) \
+                $(DFMP_SOURCES) \
                 $(NET_SOURCES) \
                 $(NODE_SOURCES) \
                 $(PRIMITIVES_SOURCES) \
@@ -506,6 +511,7 @@ $(OBJ_DIR)/consensus \
 $(OBJ_DIR)/core \
 $(OBJ_DIR)/crypto \
 $(OBJ_DIR)/db \
+$(OBJ_DIR)/dfmp \
 $(OBJ_DIR)/miner \
 $(OBJ_DIR)/net \
 $(OBJ_DIR)/node \
@@ -519,7 +525,7 @@ $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 

@@ -50,6 +50,8 @@
 #include <consensus/pow.h>
 #include <consensus/chain.h>
 #include <consensus/validation.h>  // CRITICAL-3 FIX: For CBlockValidator
+#include <dfmp/dfmp.h>             // DFMP: Fair Mining Protocol
+#include <dfmp/identity_db.h>      // DFMP: Identity persistence
 #include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
@@ -1209,6 +1211,14 @@ int main(int argc, char* argv[]) {
         g_chainstate.SetDatabase(&blockchain);
         g_chainstate.SetUTXOSet(&utxo_set);
         g_chainstate.SetMemPool(&mempool);  // BUG #109 FIX: Enable mempool cleanup on block connect
+
+        // DFMP: Initialize Fair Mining Protocol subsystem
+        std::cout << "Initializing DFMP (Fair Mining Protocol)..." << std::endl;
+        if (!DFMP::InitializeDFMP(config.datadir)) {
+            std::cerr << "[ERROR] Failed to initialize DFMP subsystem" << std::endl;
+            return 1;
+        }
+        std::cout << "  [OK] DFMP subsystem initialized" << std::endl;
 
         // P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations
         if (!g_chainstate.InitializeWAL(config.datadir)) {
@@ -2888,6 +2898,43 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "  [OK] Auto-save enabled" << std::endl;
         std::cout.flush();
 
+        // DFMP: Register block connect/disconnect callbacks for fair mining protocol
+        // This updates identity DB (first-seen heights) and heat tracker (blocks per identity)
+        g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
+            // Get DFMP activation height from chain params
+            int activationHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+            // Only process blocks after DFMP activation
+            if (height >= activationHeight) {
+                // Derive miner identity from coinbase
+                if (!block.vtx.empty()) {
+                    const CTransaction& coinbaseTx = block.vtx[0];
+                    DFMP::Identity identity = DFMP::DeriveIdentity(coinbaseTx);
+
+                    if (!identity.IsNull()) {
+                        // Record first-seen height if this is a new identity
+                        if (DFMP::g_identityDb && !DFMP::g_identityDb->Exists(identity)) {
+                            DFMP::g_identityDb->SetFirstSeen(identity, height);
+                        }
+
+                        // Update heat tracker
+                        if (DFMP::g_heatTracker) {
+                            DFMP::g_heatTracker->OnBlockConnected(height, identity);
+                        }
+                    }
+                }
+            }
+        });
+
+        g_chainstate.RegisterBlockDisconnectCallback([](const CBlock& block, int height, const uint256& hash) {
+            // Update heat tracker on disconnect (reorg)
+            // Note: We do NOT remove from identity DB - once seen, always seen
+            if (DFMP::g_heatTracker) {
+                DFMP::g_heatTracker->OnBlockDisconnected(height);
+            }
+        });
+        std::cout << "  [OK] DFMP chain notification callbacks registered" << std::endl;
+
         // BUG #56 FIX: Register wallet callbacks with chain state (Bitcoin Core pattern)
         // Wallet will receive blockConnected/blockDisconnected notifications automatically
         // IBD OPTIMIZATION: Pass hash to avoid RandomX recomputation in wallet
@@ -4085,6 +4132,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         std::cout << "[Shutdown] Stopping RPC server..." << std::flush;
         rpc_server.Stop();
+
+        // DFMP: Shutdown Fair Mining Protocol subsystem
+        std::cout << "  Shutting down DFMP..." << std::endl;
+        DFMP::ShutdownDFMP();
 
         std::cout << "  Closing UTXO database..." << std::endl;
         utxo_set.Close();

@@ -5,10 +5,13 @@
 #include <node/block_index.h>
 #include <core/chainparams.h>
 #include <util/time.h>
+#include <dfmp/dfmp.h>
+#include <dfmp/identity_db.h>
 #include <algorithm>
 #include <vector>
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 
 bool HashLessThan(const uint256& hash, const uint256& target) {
     // Compare as big-endian (most significant byte first)
@@ -135,6 +138,85 @@ bool CheckProofOfWork(uint256 hash, uint32_t nBits) {
 
     // Check if hash is less than target
     return HashLessThan(hash, target);
+}
+
+bool CheckProofOfWorkDFMP(
+    const CBlock& block,
+    const uint256& hash,
+    uint32_t nBits,
+    int height,
+    int activationHeight)
+{
+    // Convert compact difficulty to full target
+    uint256 baseTarget = CompactToBig(nBits);
+
+    // Check for zero target (invalid)
+    bool isZero = true;
+    for (int i = 0; i < 32; i++) {
+        if (baseTarget.data[i] != 0) {
+            isZero = false;
+            break;
+        }
+    }
+    if (isZero) {
+        return false;
+    }
+
+    // Pre-activation: standard PoW check (no DFMP penalty)
+    if (height < activationHeight) {
+        return HashLessThan(hash, baseTarget);
+    }
+
+    // Ensure block has transactions (coinbase required)
+    if (block.vtx.empty()) {
+        std::cerr << "[DFMP] Block has no transactions" << std::endl;
+        return false;
+    }
+
+    // Get coinbase transaction
+    const CTransaction& coinbaseTx = block.vtx[0];
+
+    // Derive miner identity from coinbase
+    DFMP::Identity identity = DFMP::DeriveIdentity(coinbaseTx);
+    if (identity.IsNull()) {
+        std::cerr << "[DFMP] Could not derive identity from coinbase" << std::endl;
+        return false;
+    }
+
+    // Get first-seen height (-1 for new identity)
+    int firstSeen = -1;
+    if (DFMP::g_identityDb != nullptr) {
+        firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
+    }
+
+    // Get current heat
+    int heat = 0;
+    if (DFMP::g_heatTracker != nullptr) {
+        heat = DFMP::g_heatTracker->GetHeat(identity);
+    }
+
+    // Calculate total DFMP multiplier (pending × heat)
+    int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(height, firstSeen, heat);
+
+    // Calculate effective target: baseTarget / multiplier
+    uint256 effectiveTarget = DFMP::CalculateEffectiveTarget(baseTarget, multiplierFP);
+
+    // Log DFMP info for debugging (only if multiplier > 1.0)
+    double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
+    if (multiplier > 1.01) {
+        double pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP(height, firstSeen)) / DFMP::FP_SCALE;
+        double heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP(heat)) / DFMP::FP_SCALE;
+
+        std::cout << "[DFMP] Block " << height << " identity " << identity.GetHex().substr(0, 8) << "..."
+                  << " firstSeen=" << firstSeen
+                  << " heat=" << heat
+                  << " pending=" << std::fixed << std::setprecision(2) << pendingMult << "x"
+                  << " heatMult=" << heatMult << "x"
+                  << " total=" << multiplier << "x" << std::endl;
+    }
+
+    // Check if hash meets DFMP-adjusted difficulty
+    return HashLessThan(hash, effectiveTarget);
 }
 
 /**

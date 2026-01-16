@@ -13,6 +13,8 @@
 #include <util/time.h>
 #include <util/bench.h>  // Performance: Benchmarking
 #include <util/error_format.h>  // UX: Better error messages
+#include <dfmp/dfmp.h>         // DFMP: Fair Mining Protocol
+#include <dfmp/identity_db.h>  // DFMP: Identity persistence
 #include <amount.h>
 
 #include <iostream>
@@ -1105,6 +1107,50 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     if (hashTarget.IsNull()) {
         error = "Invalid nBits: expands to zero target";
         return std::nullopt;
+    }
+
+    // Step 7b: Apply DFMP difficulty adjustment
+    // DFMP adjusts the target based on miner's identity (pending penalty + heat)
+    if (Dilithion::g_chainParams && nHeight >= static_cast<uint32_t>(Dilithion::g_chainParams->dfmpActivationHeight)) {
+        // Derive miner identity from coinbase scriptPubKey (same as will be in block)
+        // The coinbase output[0].scriptPubKey is the P2PKH script we just created
+        std::vector<uint8_t> coinbaseScript = coinbaseTx->vout[0].scriptPubKey;
+        DFMP::Identity minerIdentity = DFMP::DeriveIdentityFromScript(coinbaseScript);
+
+        if (!minerIdentity.IsNull()) {
+            // Get first-seen height (-1 for new identity)
+            int firstSeen = -1;
+            if (DFMP::g_identityDb != nullptr) {
+                firstSeen = DFMP::g_identityDb->GetFirstSeen(minerIdentity);
+            }
+
+            // Get current heat from tracker
+            int heat = 0;
+            if (DFMP::g_heatTracker != nullptr) {
+                heat = DFMP::g_heatTracker->GetHeat(minerIdentity);
+            }
+
+            // Calculate total DFMP multiplier (pending × heat)
+            int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(nHeight, firstSeen, heat);
+
+            // Apply multiplier to get effective target
+            hashTarget = DFMP::CalculateEffectiveTarget(hashTarget, multiplierFP);
+
+            // Log DFMP info for miner awareness (only if multiplier > 1.0)
+            double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
+            if (multiplier > 1.01) {
+                double pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP(nHeight, firstSeen)) / DFMP::FP_SCALE;
+                double heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP(heat)) / DFMP::FP_SCALE;
+
+                std::cout << "[DFMP] Mining at height " << nHeight
+                          << " identity " << minerIdentity.GetHex().substr(0, 8) << "..."
+                          << " firstSeen=" << firstSeen
+                          << " heat=" << heat
+                          << " pending=" << std::fixed << std::setprecision(2) << pendingMult << "x"
+                          << " heatMult=" << heatMult << "x"
+                          << " total=" << multiplier << "x" << std::endl;
+            }
+        }
     }
 
     // MINE-012 FIX: Validate final block size
