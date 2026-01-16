@@ -836,9 +836,9 @@ void CConnman::BlocksWorkerThread() {
 void CConnman::ThreadOpenConnections() {
     LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections started\n");
 
-    // Bitcoin Core pattern: Maintain target of 8 outbound connections
+    // AGGRESSIVE connection settings
     constexpr size_t TARGET_OUTBOUND = 8;
-    constexpr int CONNECTION_INTERVAL_SECONDS = 60;  // Check every minute
+    constexpr int CONNECTION_INTERVAL_SECONDS = 10;  // Check every 10 seconds (was 60)
 
     while (!interruptNet.load()) {
         // Wait for connection interval or interrupt
@@ -854,26 +854,7 @@ void CConnman::ThreadOpenConnections() {
             continue;  // Not initialized yet
         }
 
-        // Check if we need more outbound connections
-        size_t outbound_count = m_peer_manager->GetOutboundCount();
-        if (outbound_count >= TARGET_OUTBOUND) {
-            continue;  // Already have enough
-        }
-
-        size_t needed = TARGET_OUTBOUND - outbound_count;
-        LogPrintf(NET, DEBUG, "[CConnman] Need %zu more outbound connections (have %zu, target %zu)\n",
-                  needed, outbound_count, TARGET_OUTBOUND);
-
-        // Get addresses from AddrMan (request extra in case some fail or are connected)
-        auto addrs = m_peer_manager->SelectAddressesToConnect(static_cast<int>(needed * 3));
-        if (addrs.empty()) {
-            LogPrintf(NET, DEBUG, "[CConnman] No addresses available for outbound connections\n");
-            continue;
-        }
-
-        // Get currently connected peer IPs to skip (both inbound AND outbound)
-        // BUG FIX: Previously only checked outbound (!fInbound), causing duplicate
-        // connections when we had an inbound connection from the same peer
+        // Get currently connected peer IPs (both inbound AND outbound)
         std::set<std::string> connected_ips;
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
@@ -884,43 +865,78 @@ void CConnman::ThreadOpenConnections() {
             }
         }
 
-        // Attempt connections
-        size_t connections_made = 0;
-        for (const auto& addr : addrs) {
-            if (connections_made >= needed) {
-                break;
-            }
+        // PHASE 1: Always ensure ALL seed nodes are connected
+        // This is aggressive - we want to be connected to ALL seeds, not just some
+        auto seeds = m_peer_manager->GetSeedNodes();
+        for (const auto& seed_addr : seeds) {
+            std::string seed_ip = seed_addr.ToStringIP();
 
-            std::string ip_str = addr.ToStringIP();
-
-            // Skip already connected
-            if (connected_ips.count(ip_str)) {
+            // Skip if already connected to this seed
+            if (connected_ips.count(seed_ip)) {
                 continue;
             }
 
-            // Skip non-routable
-            if (!addr.IsRoutable()) {
+            // Skip non-routable (shouldn't happen for seeds)
+            if (!seed_addr.IsRoutable()) {
                 continue;
             }
 
-            // Mark as tried before attempting
-            m_peer_manager->MarkAddressTried(addr);
-
-            // Attempt connection
-            CNode* pnode = ConnectNode(addr);
+            // Attempt connection to seed
+            LogPrintf(NET, INFO, "[CConnman] Reconnecting to seed node %s:%d\n",
+                      seed_ip.c_str(), seed_addr.port);
+            CNode* pnode = ConnectNode(seed_addr);
             if (pnode) {
-                // BUG #139 FIX: Don't send VERSION here - SocketHandler will send it
-                // after connection completes (STATE_CONNECTING -> STATE_CONNECTED)
-                LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: initiated connection to %s (node %d)\n",
-                          ip_str.c_str(), pnode->id);
-                connections_made++;
-                // Mark as good on successful connection
-                m_peer_manager->MarkAddressGood(addr);
+                LogPrintf(NET, INFO, "[CConnman] Connected to seed %s (node %d)\n",
+                          seed_ip.c_str(), pnode->id);
+                connected_ips.insert(seed_ip);  // Update set for phase 2
+                m_peer_manager->MarkAddressGood(seed_addr);
             }
         }
 
-        if (connections_made > 0) {
-            LogPrintf(NET, INFO, "[CConnman] Made %zu new outbound connection(s)\n", connections_made);
+        // PHASE 2: Fill remaining slots from AddrMan
+        size_t outbound_count = m_peer_manager->GetOutboundCount();
+        if (outbound_count < TARGET_OUTBOUND) {
+            size_t needed = TARGET_OUTBOUND - outbound_count;
+
+            // Get addresses from AddrMan
+            auto addrs = m_peer_manager->SelectAddressesToConnect(static_cast<int>(needed * 3));
+
+            size_t connections_made = 0;
+            for (const auto& addr : addrs) {
+                if (connections_made >= needed) {
+                    break;
+                }
+
+                std::string ip_str = addr.ToStringIP();
+
+                // Skip already connected (including seeds we just connected)
+                if (connected_ips.count(ip_str)) {
+                    continue;
+                }
+
+                // Skip non-routable
+                if (!addr.IsRoutable()) {
+                    continue;
+                }
+
+                // Mark as tried before attempting
+                m_peer_manager->MarkAddressTried(addr);
+
+                // Attempt connection
+                CNode* pnode = ConnectNode(addr);
+                if (pnode) {
+                    LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: connected to %s (node %d)\n",
+                              ip_str.c_str(), pnode->id);
+                    connections_made++;
+                    connected_ips.insert(ip_str);
+                    m_peer_manager->MarkAddressGood(addr);
+                }
+            }
+
+            if (connections_made > 0) {
+                LogPrintf(NET, INFO, "[CConnman] Made %zu new outbound connection(s) from AddrMan\n",
+                          connections_made);
+            }
         }
     }
 
