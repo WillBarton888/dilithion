@@ -391,3 +391,64 @@ bool CBanManager::LoadBanList() {
         return false;
     }
 }
+
+bool CBanManager::RecordGenesisFailure(const std::string& ip, const std::string& their_genesis) {
+    std::lock_guard<std::mutex> lock(cs_genesis_failures);
+
+    int64_t now = time(nullptr);
+    auto& entry = m_genesis_failures[ip];
+
+    // Reset window if expired
+    if (entry.first_failure == 0 || (now - entry.first_failure > GENESIS_FAILURE_WINDOW)) {
+        entry.first_failure = now;
+        entry.failure_count = 0;
+    }
+
+    entry.failure_count++;
+    entry.total_failures++;
+    entry.last_genesis = their_genesis;
+
+    // Alert on repeated probing (only once at threshold)
+    if (entry.total_failures == GENESIS_ALERT_THRESHOLD) {
+        std::cerr << "\n[SECURITY-ALERT] ================================================" << std::endl;
+        std::cerr << "[SECURITY-ALERT] REPEATED GENESIS PROBING DETECTED" << std::endl;
+        std::cerr << "[SECURITY-ALERT] IP: " << ip << std::endl;
+        std::cerr << "[SECURITY-ALERT] Total failures: " << entry.total_failures << std::endl;
+        std::cerr << "[SECURITY-ALERT] Their genesis: " << their_genesis << std::endl;
+        std::cerr << "[SECURITY-ALERT] Possible network reconnaissance or outdated node" << std::endl;
+        std::cerr << "[SECURITY-ALERT] ================================================\n" << std::endl;
+    }
+
+    // Check if should ban (exceeded threshold in current window)
+    if (entry.failure_count >= GENESIS_FAILURE_BAN_THRESHOLD) {
+        return true;  // Signal to ban this IP
+    }
+
+    return false;
+}
+
+void CBanManager::CleanupGenesisFailures() {
+    std::lock_guard<std::mutex> lock(cs_genesis_failures);
+
+    int64_t now = time(nullptr);
+    int64_t cleanup_threshold = GENESIS_FAILURE_WINDOW * 2;  // Remove entries older than 2x window
+
+    size_t removed = 0;
+    for (auto it = m_genesis_failures.begin(); it != m_genesis_failures.end(); ) {
+        if (now - it->second.first_failure > cleanup_threshold) {
+            it = m_genesis_failures.erase(it);
+            removed++;
+        } else {
+            ++it;
+        }
+    }
+
+    if (removed > 0) {
+        std::cout << "[BanManager] Cleaned up " << removed << " old genesis failure entries" << std::endl;
+    }
+}
+
+size_t CBanManager::GetGenesisFailureCount() const {
+    std::lock_guard<std::mutex> lock(cs_genesis_failures);
+    return m_genesis_failures.size();
+}

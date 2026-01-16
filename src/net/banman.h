@@ -161,6 +161,26 @@ inline int GetMisbehaviorScore(MisbehaviorType type) {
 }
 
 /**
+ * Genesis mismatch rate limiting constants
+ * Tracks repeated genesis failures by IP to detect probing attacks
+ */
+static const int GENESIS_FAILURE_BAN_THRESHOLD = 3;     // Ban after 3 failures in window
+static const int64_t GENESIS_FAILURE_WINDOW = 300;      // 5-minute window (seconds)
+static const int GENESIS_ALERT_THRESHOLD = 10;          // Alert after 10 failures total
+
+/**
+ * GenesisFailureEntry - Track genesis mismatch failures per IP
+ */
+struct GenesisFailureEntry {
+    int64_t first_failure;      // Timestamp of first failure in current window
+    int failure_count;          // Failures in current window
+    int total_failures;         // Total failures (for alerting)
+    std::string last_genesis;   // Last genesis hash they sent (for logging)
+
+    GenesisFailureEntry() : first_failure(0), failure_count(0), total_failures(0) {}
+};
+
+/**
  * CBanEntry - Ban entry with full metadata (Bitcoin Core compatible)
  */
 struct CBanEntry {
@@ -214,6 +234,10 @@ private:
     std::map<std::string, CBanEntry> m_banned;  // IP -> BanEntry
     std::string m_ban_file_path;                // Path to banlist.dat
     bool m_is_dirty;                            // Needs saving
+
+    // Genesis failure tracking (IP-based rate limiting for probing detection)
+    mutable std::mutex cs_genesis_failures;
+    std::map<std::string, GenesisFailureEntry> m_genesis_failures;
 
 public:
     /**
@@ -319,6 +343,25 @@ public:
      * Get path to banlist.dat
      */
     const std::string& GetBanFilePath() const { return m_ban_file_path; }
+
+    /**
+     * Record a genesis mismatch failure for an IP
+     * @param ip IP address that sent wrong genesis
+     * @param their_genesis The genesis hash they sent (for logging)
+     * @return true if IP should be banned (exceeded threshold)
+     */
+    bool RecordGenesisFailure(const std::string& ip, const std::string& their_genesis);
+
+    /**
+     * Remove old genesis failure entries (call periodically)
+     * Removes entries older than 2x GENESIS_FAILURE_WINDOW
+     */
+    void CleanupGenesisFailures();
+
+    /**
+     * Get count of IPs being tracked for genesis failures
+     */
+    size_t GetGenesisFailureCount() const;
 };
 
 #endif // DILITHION_NET_BANMAN_H

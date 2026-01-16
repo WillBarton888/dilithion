@@ -374,25 +374,39 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
 
             if (msg.genesis_hash != our_genesis) {
                 // Peer is on a different blockchain - likely hasn't updated their binary
-                // Be helpful: explain the issue and how to fix it
-                LogPrintf(NET, WARN, "Peer %d is on a DIFFERENT BLOCKCHAIN (genesis mismatch)", peer_id);
-                std::cout << "\n[P2P] ================================================" << std::endl;
-                std::cout << "[P2P] CONNECTION REJECTED - DIFFERENT BLOCKCHAIN" << std::endl;
-                std::cout << "[P2P] ================================================" << std::endl;
-                std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") is running on a different chain." << std::endl;
-                std::cout << "[P2P] Their genesis: " << msg.genesis_hash.GetHex().substr(0, 16) << "..." << std::endl;
-                std::cout << "[P2P] Our genesis:   " << our_genesis.GetHex().substr(0, 16) << "..." << std::endl;
-                std::cout << "[P2P] " << std::endl;
-                std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
-                std::cout << "[P2P] 1. Download the latest binary: https://github.com/WillBarton888/dilithion/releases" << std::endl;
-                std::cout << "[P2P] 2. Stop your node" << std::endl;
-                std::cout << "[P2P] 3. Delete your data directory (~/.dilithion or %APPDATA%\\.dilithion)" << std::endl;
-                std::cout << "[P2P] 4. Restart with the new binary" << std::endl;
-                std::cout << "[P2P] ================================================\n" << std::endl;
+                // Use IP-based rate limiting to detect and ban probing attacks
+                std::string peer_ip = msg.addr_from.ToStringIP();
+                std::string their_genesis_hex = msg.genesis_hash.GetHex().substr(0, 16);
 
-                // Moderate misbehavior score (20 points) - this could be an innocent mistake
-                // After 5 failed attempts (5 x 20 = 100), peer will be banned
-                peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_GENESIS);
+                // Record failure and check if IP should be banned
+                bool should_ban = peer_manager.GetBanManager().RecordGenesisFailure(peer_ip, their_genesis_hex);
+
+                if (should_ban) {
+                    // Ban this IP for 24 hours (repeated genesis probing)
+                    peer_manager.GetBanManager().Ban(peer_ip, CBanManager::DEFAULT_BAN_TIME,
+                                                      BanReason::NodeMisbehaving,
+                                                      MisbehaviorType::INVALID_GENESIS, 100);
+
+                    std::cout << "[SECURITY] Banned IP " << peer_ip
+                              << " for repeated genesis mismatch (probing detected)" << std::endl;
+                } else {
+                    // First/second failure from this IP - show helpful message
+                    LogPrintf(NET, WARN, "Peer %d is on a DIFFERENT BLOCKCHAIN (genesis mismatch)", peer_id);
+                    std::cout << "\n[P2P] ================================================" << std::endl;
+                    std::cout << "[P2P] CONNECTION REJECTED - DIFFERENT BLOCKCHAIN" << std::endl;
+                    std::cout << "[P2P] ================================================" << std::endl;
+                    std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") from " << peer_ip << std::endl;
+                    std::cout << "[P2P] Their genesis: " << their_genesis_hex << "..." << std::endl;
+                    std::cout << "[P2P] Our genesis:   " << our_genesis.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cout << "[P2P] " << std::endl;
+                    std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
+                    std::cout << "[P2P] 1. Download the latest binary: https://github.com/WillBarton888/dilithion/releases" << std::endl;
+                    std::cout << "[P2P] 2. Stop your node" << std::endl;
+                    std::cout << "[P2P] 3. Delete your data directory (~/.dilithion or %APPDATA%\\.dilithion)" << std::endl;
+                    std::cout << "[P2P] 4. Restart with the new binary" << std::endl;
+                    std::cout << "[P2P] ================================================\n" << std::endl;
+                }
+
                 return false;
             }
         } else {

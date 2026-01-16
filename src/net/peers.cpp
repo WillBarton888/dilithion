@@ -394,6 +394,9 @@ void CPeerManager::DecayMisbehaviorScores() {
 
     // Clean up expired bans using CBanManager
     banman.SweepExpiredBans();
+
+    // Clean up old genesis failure tracking entries
+    banman.CleanupGenesisFailures();
 }
 
 CPeerManager::Stats CPeerManager::GetStats() const {
