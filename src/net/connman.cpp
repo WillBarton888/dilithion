@@ -1005,14 +1005,10 @@ void CConnman::SocketHandler() {
             inet_ntop(AF_INET, &client_addr.sin_addr, ip_str, INET_ADDRSTRLEN);
             uint16_t port = ntohs(client_addr.sin_port);
 
-            // Create address
+            // Create address using SetIPv4 to properly set IPv4-mapped IPv6 format
             NetProtocol::CAddress addr;
-            // Convert IP string to bytes (IPv4-mapped IPv6 format)
-            struct in_addr in;
-            inet_pton(AF_INET, ip_str, &in);
-            // Set IPv4 address in IPv6-mapped format (bytes 12-15)
-            memset(addr.ip, 0, 16);
-            memcpy(&addr.ip[12], &in.s_addr, 4);
+            uint32_t ipv4 = ntohl(client_addr.sin_addr.s_addr);
+            addr.SetIPv4(ipv4);
             addr.port = port;
             addr.services = NetProtocol::NODE_NETWORK;
 
