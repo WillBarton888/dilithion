@@ -1308,16 +1308,18 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
     std::string ip = addr.ToStringIP();
 
     // DEBUG: Log address being registered
-    std::cout << "[RegisterNode] node=" << node_id << " addr=" << ip << ":" << addr.port
+    std::cout << "[RegisterNode] START node=" << node_id << " addr=" << ip << ":" << addr.port
               << " inbound=" << inbound << std::endl;
 
     if (banman.IsBanned(ip)) {
+        std::cout << "[RegisterNode] node=" << node_id << " BANNED - skipping" << std::endl;
         return;
     }
 
     {
         std::lock_guard<std::recursive_mutex> lock(cs_nodes);
         node_refs[node_id] = node;
+        std::cout << "[RegisterNode] node=" << node_id << " added to node_refs (size=" << node_refs.size() << ")" << std::endl;
     }
 
     {
