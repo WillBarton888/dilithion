@@ -133,6 +133,10 @@ std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
         auto node_it = node_refs.find(peer_id);
         if (node_it != node_refs.end() && node_it->second) {
             addr = node_it->second->addr;
+            std::cout << "[AddPeerWithId] peer=" << peer_id << " got addr from node_refs: "
+                      << addr.ToStringIP() << ":" << addr.port << std::endl;
+        } else {
+            std::cout << "[AddPeerWithId] peer=" << peer_id << " node_refs NOT FOUND, addr will be zeroed" << std::endl;
         }
     }
 
@@ -141,8 +145,12 @@ std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
     // Check if peer already exists
     auto it = peers.find(peer_id);
     if (it != peers.end()) {
+        std::cout << "[AddPeerWithId] peer=" << peer_id << " ALREADY EXISTS, current addr="
+                  << it->second->addr.ToStringIP() << ":" << it->second->addr.port << std::endl;
         // BUG FIX: Update address if it was zeroed
         if (it->second->addr.IsNull() && !addr.IsNull()) {
+            std::cout << "[AddPeerWithId] peer=" << peer_id << " updating zeroed addr to "
+                      << addr.ToStringIP() << ":" << addr.port << std::endl;
             it->second->addr = addr;
         }
         if (it->second->connect_time == 0) {
@@ -163,6 +171,8 @@ std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
     }
 
     // Create new peer with the specified ID and address from CNode
+    std::cout << "[AddPeerWithId] CREATING NEW peer=" << peer_id << " with addr="
+              << addr.ToStringIP() << ":" << addr.port << std::endl;
     auto peer = std::make_shared<CPeer>(peer_id, addr);
     peer->state = CPeer::STATE_CONNECTED;
     peers[peer_id] = peer;
