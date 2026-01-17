@@ -1292,6 +1292,10 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
     // Store reference to CConnman's CNode (non-owning)
     std::string ip = addr.ToStringIP();
 
+    // DEBUG: Log address being registered
+    std::cout << "[RegisterNode] node=" << node_id << " addr=" << ip << ":" << addr.port
+              << " inbound=" << inbound << std::endl;
+
     if (banman.IsBanned(ip)) {
         return;
     }
