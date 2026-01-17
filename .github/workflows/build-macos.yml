@@ -20,7 +20,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install leveldb cmake openssl
+        brew install leveldb cmake openssl miniupnpc
 
     - name: Build RandomX
       run: |
