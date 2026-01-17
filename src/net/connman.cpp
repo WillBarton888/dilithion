@@ -395,12 +395,10 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     // Add to m_nodes
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
+        // FIX: Register BEFORE adding to m_nodes to prevent race condition
+        m_peer_manager->RegisterNode(node_id, pnode, addr, false);
         m_nodes.push_back(std::move(node));
     }
-
-    // Register with CPeerManager for state synchronization
-    // FIX Issue 1: Pass CNode pointer so CPeerManager can sync state
-    m_peer_manager->RegisterNode(node_id, pnode, addr, false);
 
     LogPrintf(NET, INFO, "[CConnman] Connecting to %s:%d (node %d)\n",
               ip_str.c_str(), addr.port, pnode->id);
@@ -492,12 +490,10 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
     // Add to m_nodes
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
+        // FIX: Register BEFORE adding to m_nodes to prevent race condition
+        m_peer_manager->RegisterNode(node_id, pnode, addr, true);
         m_nodes.push_back(std::move(node));
     }
-
-    // Register with CPeerManager for state synchronization
-    // FIX Issue 1: Pass CNode pointer so CPeerManager can sync state
-    m_peer_manager->RegisterNode(node_id, pnode, addr, true);
 
     LogPrintf(NET, INFO, "[CConnman] Accepted connection from %s:%d (node %d)\n",
               ip_str.c_str(), addr.port, node_id);
@@ -1088,12 +1084,14 @@ void CConnman::SocketHandler() {
                     continue;  // Skip to next pending connection
                 }
 
+                // FIX: Register with CPeerManager BEFORE adding to m_nodes
+                // This prevents race condition where VERSION handler calls AddPeerWithId
+                // before RegisterNode populates node_refs
+                m_peer_manager->RegisterNode(node_id, pnode, addr, true);
+
                 // Not a duplicate - add to m_nodes (still holding lock)
                 m_nodes.push_back(std::move(node));
             }
-
-            // Register with CPeerManager for state synchronization
-            m_peer_manager->RegisterNode(node_id, pnode, addr, true);
 
             LogPrintf(NET, INFO, "[CConnman] Accepted inbound connection from %s:%d (node %d)\n",
                       ip_str, port, node_id);
