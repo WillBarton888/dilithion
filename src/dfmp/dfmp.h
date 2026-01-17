@@ -5,12 +5,13 @@
 #define DILITHION_DFMP_H
 
 /**
- * Dilithion Fair Mining Protocol (DFMP) v1.3
+ * Dilithion Fair Mining Protocol (DFMP) v1.4
  *
  * Creates diminishing returns for concentrated mining power through:
  * 1. Identity-based tracking (derived from coinbase scriptPubKey)
- * 2. Pending penalty for new identities (5× → 1× over 500 blocks)
- * 3. Heat-based penalty for prolific miners (quadratic scaling)
+ * 2. First-block grace: New identities get ONE block at 1× to establish identity
+ * 3. Pending penalty: After first block, 5× → 1× decay over 500 blocks
+ * 4. Heat-based penalty for prolific miners (quadratic scaling)
  *
  * See: docs/specs/DILITHION-FAIR-MINING-PROTOCOL-SPEC.md
  */
@@ -195,11 +196,13 @@ public:
 /**
  * Calculate pending penalty multiplier (fixed-point)
  *
- * New identities face 5× difficulty that decays linearly to 1× over 500 blocks.
+ * New identities (firstSeenHeight = -1) get ONE free block at 1× difficulty
+ * to establish their identity. After that first block is mined, subsequent
+ * blocks face 5× difficulty that decays linearly to 1× over 500 blocks.
  *
  * @param currentHeight Current block height
  * @param firstSeenHeight Height where identity was first seen (-1 for new identity)
- * @return Pending multiplier × FP_SCALE (e.g., 5000000 for 5.0×)
+ * @return Pending multiplier × FP_SCALE (1000000 for new, up to 5000000 for just-established)
  */
 int64_t CalculatePendingPenaltyFP(int currentHeight, int firstSeenHeight);
 

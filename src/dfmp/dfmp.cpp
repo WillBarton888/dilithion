@@ -183,9 +183,12 @@ size_t CHeatTracker::GetWindowSize() const {
 // ============================================================================
 
 int64_t CalculatePendingPenaltyFP(int currentHeight, int firstSeenHeight) {
-    // New identity (not yet seen) - maximum penalty
+    // New identity (not yet seen) - NO penalty for first block
+    // This allows new miners to establish their identity with one "free" block
+    // After their first block is mined, the identity is registered and subsequent
+    // blocks face the normal 5x→1x decay over MATURITY_BLOCKS (500 blocks)
     if (firstSeenHeight < 0) {
-        return FP_PENDING_START;
+        return FP_PENDING_END;  // 1.0x - no penalty for identity establishment
     }
 
     int blocksSinceFirst = currentHeight - firstSeenHeight;
