@@ -1210,11 +1210,16 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
     auto it = peers.find(peer_id);
     if (it == peers.end()) {
         // Create peer entry if not exists
+        std::cout << "[OnPeerHandshakeComplete] WARNING: Creating NEW peer " << peer_id
+                  << " (not found in peers map!) - this will have zeroed address" << std::endl;
         auto new_peer = std::make_shared<CPeer>();
         new_peer->id = peer_id;
         new_peer->state = CPeer::STATE_CONNECTED;
         peers[peer_id] = new_peer;
         it = peers.find(peer_id);
+    } else {
+        std::cout << "[OnPeerHandshakeComplete] Found existing peer " << peer_id
+                  << " addr=" << it->second->addr.ToStringIP() << ":" << it->second->addr.port << std::endl;
     }
 
     CPeer* peer = it->second.get();
