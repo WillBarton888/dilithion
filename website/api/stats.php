@@ -71,7 +71,8 @@ function fetchNodeStats($ip, $port) {
                 'difficulty' => $data['difficulty'] ?? 0,
                 'totalSupply' => $data['totalSupply'] ?? 0,
                 'blockReward' => $data['blockReward'] ?? 50,
-                'blocksUntilHalving' => $data['blocksUntilHalving'] ?? 210000
+                'blocksUntilHalving' => $data['blocksUntilHalving'] ?? 210000,
+                'lastBlockTime' => $data['lastBlockTime'] ?? 0
             ];
         }
     }
@@ -130,6 +131,9 @@ foreach ($nodes as $nodeData) {
         }
         if (isset($nodeData['blocksUntilHalving'])) {
             $response['blocksUntilHalving'] = $nodeData['blocksUntilHalving'];
+        }
+        if (isset($nodeData['lastBlockTime']) && $nodeData['lastBlockTime'] > 0) {
+            $response['lastBlockTime'] = $nodeData['lastBlockTime'];
         }
         break;
     }

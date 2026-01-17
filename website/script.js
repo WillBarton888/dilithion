@@ -24,10 +24,10 @@ function updateCountdown() {
 
     // If countdown is finished
     if (distance < 0) {
-        // Hide countdown timer and show "LIVE" message
+        // Hide countdown timer and show status message
         const countdownContainer = document.querySelector('.countdown');
         if (countdownContainer) {
-            countdownContainer.innerHTML = '<div class="mainnet-live-banner"><h2>MAINNET IS LIVE!</h2><p>Start mining now - download below</p></div>';
+            countdownContainer.innerHTML = '<div class="mainnet-live-banner" style="background: linear-gradient(135deg, #f59e0b, #d97706);"><h2>MAINNET COMING SOON</h2><p>Network reset in progress - please wait for launch announcement</p></div>';
         }
 
         // Update status to live
@@ -64,9 +64,9 @@ function updateNetworkStatus(live) {
     const mainnetLive = now >= MAINNET_LAUNCH_DATE;
 
     if (mainnetLive) {
-        // Mainnet is live
-        statusDot.classList.add('live');
-        statusText.textContent = 'MAINNET IS LIVE';
+        // Mainnet date passed but network reset in progress
+        statusDot.classList.remove('live');
+        statusText.textContent = 'MAINNET COMING SOON (network reset in progress)';
     } else if (live) {
         // Testnet only
         statusDot.classList.add('live');
@@ -271,24 +271,31 @@ function updateDashboardFromStats(stats) {
             stats.blocksUntilHalving.toLocaleString() + ' blocks';
     }
 
-    // Update last update time
-    if (stats.timestamp) {
-        // Handle both Unix seconds (from API) and ISO strings (from static JSON)
-        const statsTime = typeof stats.timestamp === 'number'
-            ? new Date(stats.timestamp * 1000)
-            : new Date(stats.timestamp);
+    // Update last block time (actual block timestamp, not stats fetch time)
+    if (stats.lastBlockTime && stats.lastBlockTime > 0) {
+        // lastBlockTime is Unix timestamp (seconds since epoch)
+        const blockTime = new Date(stats.lastBlockTime * 1000);
         const now = new Date();
-        const secondsAgo = Math.floor((now - statsTime) / 1000);
+        const secondsAgo = Math.floor((now - blockTime) / 1000);
 
-        let timeAgo = 'Just now';
-        if (secondsAgo > 60) {
+        let timeAgo;
+        if (secondsAgo < 60) {
+            timeAgo = secondsAgo <= 5 ? 'Just now' : secondsAgo + ' sec ago';
+        } else if (secondsAgo < 3600) {
             const minutesAgo = Math.floor(secondsAgo / 60);
             timeAgo = minutesAgo + ' min ago';
-        } else if (secondsAgo > 5) {
-            timeAgo = secondsAgo + ' sec ago';
+        } else if (secondsAgo < 86400) {
+            const hoursAgo = Math.floor(secondsAgo / 3600);
+            timeAgo = hoursAgo + ' hour' + (hoursAgo > 1 ? 's' : '') + ' ago';
+        } else {
+            const daysAgo = Math.floor(secondsAgo / 86400);
+            timeAgo = daysAgo + ' day' + (daysAgo > 1 ? 's' : '') + ' ago';
         }
 
         document.getElementById('last-block-time').textContent = timeAgo;
+    } else if (stats.timestamp) {
+        // Fallback to stats timestamp if lastBlockTime not available
+        document.getElementById('last-block-time').textContent = 'Syncing...';
     }
 
     // Update seed node panels

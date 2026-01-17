@@ -81,6 +81,7 @@ std::string CCachedChainStats::ToJSON(const std::string& network) const {
     int peer_count = m_peer_count.load();
     uint32_t difficulty = m_difficulty.load();
     int64_t cache_time = m_cache_time.load();
+    int64_t last_block_time = m_last_block_time.load();
     bool is_syncing = m_is_syncing.load();
 
     // Calculate derived values
@@ -102,6 +103,7 @@ std::string CCachedChainStats::ToJSON(const std::string& network) const {
     json << "  \"blocksUntilHalving\": " << blocks_until_halving << ",\n";
     json << "  \"peerCount\": " << peer_count << ",\n";
     json << "  \"averageBlockTime\": 240,\n";
+    json << "  \"lastBlockTime\": " << last_block_time << ",\n";
     json << "  \"status\": \"" << (is_syncing ? "syncing" : "live") << "\",\n";
     json << "  \"cacheAge\": " << cache_age << ",\n";
     json << "  \"cached\": true\n";
