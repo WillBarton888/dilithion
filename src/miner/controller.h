@@ -7,6 +7,7 @@
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <uint256.h>
+#include <dfmp/mik.h>
 
 #include <atomic>
 #include <thread>
@@ -15,6 +16,29 @@
 #include <mutex>
 #include <functional>
 #include <optional>
+
+/**
+ * MIK Data for Coinbase - DFMP v2.0
+ *
+ * Contains the MIK information to be embedded in coinbase scriptSig.
+ * Passed from the wallet to the mining controller.
+ */
+struct CMIKCoinbaseData {
+    /** True if MIK data is present */
+    bool hasMIK = false;
+
+    /** True if this is a registration (first block with this MIK) */
+    bool isRegistration = false;
+
+    /** MIK identity (20 bytes) */
+    DFMP::Identity identity;
+
+    /** MIK public key (1952 bytes, only for registration) */
+    std::vector<uint8_t> pubkey;
+
+    /** MIK signature (3309 bytes) */
+    std::vector<uint8_t> signature;
+};
 
 /**
  * Mining statistics tracking
@@ -245,6 +269,7 @@ public:
      * @param nHeight Height of block being mined
      * @param nBits Difficulty target in compact format
      * @param minerAddress Address to receive coinbase reward
+     * @param mikData MIK data for DFMP v2.0 (optional, empty if no MIK)
      * @param error String to store error message on failure
      * @return Optional block template if successful, nullopt on error
      *
@@ -258,6 +283,7 @@ public:
         uint32_t nHeight,
         uint32_t nBits,
         const std::vector<uint8_t>& minerAddress,
+        const CMIKCoinbaseData& mikData,
         std::string& error
     );
 
@@ -296,12 +322,14 @@ private:
      * @param nHeight Block height (for subsidy calculation)
      * @param totalFees Total transaction fees collected
      * @param minerAddress Address to pay coinbase reward to
+     * @param mikData MIK data for DFMP v2.0 (optional)
      * @return Coinbase transaction reference
      */
     CTransactionRef CreateCoinbaseTransaction(
         uint32_t nHeight,
         uint64_t totalFees,
-        const std::vector<uint8_t>& minerAddress
+        const std::vector<uint8_t>& minerAddress,
+        const CMIKCoinbaseData& mikData
     );
 
     /**

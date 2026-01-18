@@ -179,78 +179,69 @@ size_t CHeatTracker::GetWindowSize() const {
 }
 
 // ============================================================================
-// MULTIPLIER CALCULATION (Fixed-Point)
+// MULTIPLIER CALCULATION (Fixed-Point) - DFMP v2.0
 // ============================================================================
 
 int64_t CalculatePendingPenaltyFP(int currentHeight, int firstSeenHeight) {
-    // New identity (not yet seen) - NO penalty for first block
-    // This allows new miners to establish their identity with one "free" block
-    // After their first block is mined, the identity is registered and subsequent
-    // blocks face the normal 5x→1x decay over MATURITY_BLOCKS (500 blocks)
-    if (firstSeenHeight < 0) {
-        return FP_PENDING_END;  // 1.0x - no penalty for identity establishment
-    }
-
-    int blocksSinceFirst = currentHeight - firstSeenHeight;
-
-    // Mature identity - no penalty
-    if (blocksSinceFirst >= MATURITY_BLOCKS) {
-        return FP_PENDING_END;
-    }
-
-    // Linear decay from 5× to 1× over MATURITY_BLOCKS
-    // pending = 5.0 - 4.0 * (blocksSinceFirst / MATURITY_BLOCKS)
+    // DFMP v2.0: NO first-block grace - new identities start at 3.0x
+    // This prevents the address rotation loophole where miners could
+    // always get 1.0x by using a new payout address.
     //
-    // In fixed-point:
-    // pending_fp = 5,000,000 - 4,000,000 * blocksSinceFirst / MATURITY_BLOCKS
+    // Maturity decay: 3.0x → 2.5x → 2.0x → 1.5x → 1.0x in 100-block steps
+    // over 400 blocks total (MATURITY_BLOCKS)
 
-    int64_t decayRange = FP_PENDING_START - FP_PENDING_END;  // 4,000,000
-    int64_t decay = (decayRange * blocksSinceFirst) / MATURITY_BLOCKS;
+    if (firstSeenHeight < 0) {
+        return FP_PENDING_START;  // 3.0x for new identity (v2.0: no grace)
+    }
 
-    return FP_PENDING_START - decay;
+    int age = currentHeight - firstSeenHeight;
+
+    // Step-wise decay over MATURITY_BLOCKS (400 blocks)
+    // Each 100 blocks reduces by 0.5x
+    if (age < 100) return 3000000;   // 3.0x
+    if (age < 200) return 2500000;   // 2.5x
+    if (age < 300) return 2000000;   // 2.0x
+    if (age < 400) return 1500000;   // 1.5x
+    return FP_PENDING_END;           // 1.0x (mature)
 }
 
 int64_t CalculateHeatMultiplierFP(int heat) {
-    // Calculate effective heat (heat above free tier)
-    int effectiveHeat = std::max(0, heat - FREE_TIER_THRESHOLD);
+    // DFMP v2.0 Heat Penalty:
+    // - 0-20 blocks:  Free tier (1.0x)
+    // - 21-25 blocks: Linear zone (1.0x → 1.5x)
+    // - 26+ blocks:   Exponential (1.5 × 1.08^(blocks-25))
 
-    // No penalty if within free tier
-    if (effectiveHeat <= 0) {
-        return FP_SCALE;  // 1.0×
+    // Free tier: no penalty
+    if (heat <= FREE_TIER_THRESHOLD) {  // FREE_TIER_THRESHOLD = 20
+        return FP_SCALE;  // 1.0x
     }
 
-    // heat_multiplier = 1 + 0.046 × effectiveHeat²
-    //
-    // In fixed-point:
-    // multiplier_fp = 1,000,000 + 46,000 × effectiveHeat²
-    //
-    // But we need to be careful: 46,000 × effectiveHeat² could overflow
-    // For effectiveHeat = 86 (heat = 100), 46000 × 86² = 46000 × 7396 = 340,216,000
-    // This fits in int64_t easily.
+    // Linear zone: 21-25 blocks
+    // penalty = 1.0 + 0.1 × (blocks - 20)
+    if (heat <= LINEAR_ZONE_UPPER) {  // LINEAR_ZONE_UPPER = 25
+        int64_t linearPart = FP_LINEAR_INCREMENT * (heat - FREE_TIER_THRESHOLD);
+        return FP_SCALE + linearPart;  // 1.0 + 0.1 per block
+    }
 
-    int64_t heatSquared = static_cast<int64_t>(effectiveHeat) * effectiveHeat;
-    int64_t heatTerm = (FP_HEAT_COEFF * heatSquared) / FP_SCALE;
+    // Exponential zone: 26+ blocks
+    // penalty = 1.5 × 1.08^(blocks - 25)
+    // Using fixed-point: multiply by 108/100 repeatedly
+    int64_t penalty = FP_LINEAR_BASE;  // 1.5 × FP_SCALE
+    int exponent = heat - LINEAR_ZONE_UPPER;  // blocks over 25
 
-    // The formula is: 1 + coefficient × heat²
-    // coefficient = 0.046 = 46000/1000000
-    // So: 1,000,000 + (46000 × heat²) / 1000000 × 1000000
-    //   = 1,000,000 + 46000 × heat² / 1000000 × 1000000
-    // Simplify: 1,000,000 + 46 × heat²
+    for (int i = 0; i < exponent; i++) {
+        penalty = (penalty * 108) / 100;  // × 1.08
+    }
 
-    // Actually let's recalculate properly:
-    // multiplier = 1.0 + 0.046 × h²
-    // multiplier_fp = FP_SCALE + 0.046 × h² × FP_SCALE
-    //               = FP_SCALE + (FP_HEAT_COEFF × h²)
-
-    return FP_SCALE + (FP_HEAT_COEFF * heatSquared) / FP_SCALE;
+    return penalty;
 }
 
 int64_t CalculateTotalMultiplierFP(int currentHeight, int firstSeenHeight, int heat) {
     int64_t pendingFP = CalculatePendingPenaltyFP(currentHeight, firstSeenHeight);
     int64_t heatFP = CalculateHeatMultiplierFP(heat);
 
-    // total = pending × heat
-    // In fixed-point: total_fp = (pending_fp × heat_fp) / FP_SCALE
+    // total = maturity × heat
+    // In fixed-point: total_fp = (maturity_fp × heat_fp) / FP_SCALE
     return (pendingFP * heatFP) / FP_SCALE;
 }
 

@@ -16,6 +16,7 @@
 #include <primitives/transaction.h>
 #include <primitives/block.h>
 #include <amount.h>
+#include <dfmp/mik.h>  // DFMP v2.0: MIK data for coinbase
 
 #include <iostream>
 #include <vector>
@@ -111,9 +112,10 @@ TEST(block_subsidy_calculation) {
 TEST(coinbase_transaction_creation) {
     CMiningController miner(1);
     std::vector<uint8_t> minerAddr = CreateMinerAddress();
+    CMIKCoinbaseData mikData;  // Empty MIK data for tests (DFMP v2.0)
 
     // Create coinbase for block 1 with no fees
-    CTransactionRef coinbase1 = miner.CreateCoinbaseTransaction(1, 0, minerAddr);
+    CTransactionRef coinbase1 = miner.CreateCoinbaseTransaction(1, 0, minerAddr, mikData);
 
     ASSERT(coinbase1 != nullptr, "Coinbase transaction should not be null");
     ASSERT(coinbase1->IsCoinBase(), "Transaction should be coinbase");
@@ -127,7 +129,7 @@ TEST(coinbase_transaction_creation) {
 
     // Create coinbase with fees
     uint64_t fees = 0.5 * COIN;  // 0.5 DIL in fees
-    CTransactionRef coinbase2 = miner.CreateCoinbaseTransaction(1, fees, minerAddr);
+    CTransactionRef coinbase2 = miner.CreateCoinbaseTransaction(1, fees, minerAddr, mikData);
 
     uint64_t expectedValue2 = 50 * COIN + fees;
     ASSERT_EQ(coinbase2->vout[0].nValue, expectedValue2, "Coinbase with fees value incorrect");
@@ -142,9 +144,10 @@ TEST(coinbase_transaction_creation) {
 TEST(merkle_root_calculation) {
     CMiningController miner(1);
     std::vector<uint8_t> minerAddr = CreateMinerAddress();
+    CMIKCoinbaseData mikData;  // Empty MIK data for tests (DFMP v2.0)
 
     // Create a few test transactions
-    CTransactionRef tx1 = miner.CreateCoinbaseTransaction(1, 0, minerAddr);
+    CTransactionRef tx1 = miner.CreateCoinbaseTransaction(1, 0, minerAddr, mikData);
 
     std::vector<CTransactionRef> txs;
     txs.push_back(tx1);
@@ -179,6 +182,7 @@ TEST(block_template_empty_mempool) {
     std::vector<uint8_t> minerAddr = CreateMinerAddress();
     uint256 hashPrevBlock;
     hashPrevBlock.SetHex("0000000000000000000000000000000000000000000000000000000000000001");
+    CMIKCoinbaseData mikData;  // Empty MIK data for tests (DFMP v2.0)
 
     std::string error;
     auto templateOpt = miner.CreateBlockTemplate(
@@ -188,6 +192,7 @@ TEST(block_template_empty_mempool) {
         1,  // height
         0x1f00ffff,  // nBits
         minerAddr,
+        mikData,
         error
     );
 
@@ -253,10 +258,11 @@ TEST(block_validation_no_duplicates) {
     CBlockValidator validator;
     CMiningController miner(1);
     std::vector<uint8_t> minerAddr = CreateMinerAddress();
+    CMIKCoinbaseData mikData;  // Empty MIK data for tests (DFMP v2.0)
 
     // Create two different transactions
-    CTransactionRef tx1 = miner.CreateCoinbaseTransaction(1, 0, minerAddr);
-    CTransactionRef tx2 = miner.CreateCoinbaseTransaction(2, 100000, minerAddr);
+    CTransactionRef tx1 = miner.CreateCoinbaseTransaction(1, 0, minerAddr, mikData);
+    CTransactionRef tx2 = miner.CreateCoinbaseTransaction(2, 100000, minerAddr, mikData);
 
     std::vector<CTransactionRef> txs1;
     txs1.push_back(tx1);

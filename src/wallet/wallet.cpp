@@ -180,7 +180,9 @@ CWallet::CWallet()
       fHDMasterKeyCached(false),  // WL-010: Initialize cache flag
       nHDAccountIndex(0),
       nHDExternalChainIndex(0),
-      nHDInternalChainIndex(0)
+      nHDInternalChainIndex(0),
+      fHasMIK(false),  // MIK: No mining identity key yet
+      fMIKRegistered(false)  // MIK: Not registered on-chain
 {
     vMasterKey.resize(WALLET_CRYPTO_KEY_SIZE);
     // BUG #56 FIX: m_bestBlockHash is default-initialized to null hash
@@ -4409,4 +4411,236 @@ bool CWallet::DecryptMnemonic(std::string& mnemonic) const {
     memory_cleanse(decrypted.data(), decrypted.size());
 
     return true;
+}
+
+// ============================================================================
+// Mining Identity Key (MIK) - DFMP v2.0
+// ============================================================================
+
+bool CWallet::GenerateMIK() {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Check if MIK already exists
+    if (fHasMIK) {
+        std::cout << "[WALLET] MIK already exists for this wallet" << std::endl;
+        return false;
+    }
+
+    // Check if wallet is locked
+    if (masterKey.IsValid() && !fWalletUnlocked) {
+        std::cerr << "[WALLET] Cannot generate MIK - wallet is locked" << std::endl;
+        return false;
+    }
+
+    // Create new MIK
+    m_mik = std::make_unique<DFMP::CMiningIdentityKey>();
+    if (!m_mik->Generate()) {
+        std::cerr << "[WALLET] Failed to generate MIK keypair" << std::endl;
+        m_mik.reset();
+        return false;
+    }
+
+    // Store public key and identity (always needed for coinbase)
+    vchMIKPubKey = m_mik->pubkey;
+    m_mikIdentity = m_mik->identity;
+
+    // If wallet is encrypted, encrypt the MIK private key
+    if (masterKey.IsValid()) {
+        if (!EncryptMIKPrivKey()) {
+            std::cerr << "[WALLET] Failed to encrypt MIK private key" << std::endl;
+            m_mik.reset();
+            vchMIKPubKey.clear();
+            return false;
+        }
+        // Clear the in-memory private key (will be decrypted on demand)
+        m_mik->privkey.clear();
+    }
+
+    fHasMIK = true;
+    fMIKRegistered = false;  // Not yet on-chain
+
+    std::cout << "[WALLET] Generated MIK identity: " << m_mikIdentity.GetHex() << std::endl;
+
+    // Auto-save if enabled
+    if (m_autoSave && !m_walletFile.empty()) {
+        SaveUnlocked();
+    }
+
+    return true;
+}
+
+bool CWallet::EncryptMIKPrivKey() {
+    // Assumes caller holds cs_wallet lock
+    // Assumes m_mik is valid and has private key
+
+    if (!masterKey.IsValid() || !m_mik || !m_mik->HasPrivateKey()) {
+        return false;
+    }
+
+    // Generate unique IV
+    if (!GenerateUniqueIV_Locked(vchMIKPrivKeyIV)) {
+        return false;
+    }
+
+    // Encrypt MIK private key with wallet master key
+    CCrypter crypter;
+    std::vector<uint8_t> vMasterKeyVec(vMasterKey.data_ptr(),
+                                       vMasterKey.data_ptr() + vMasterKey.size());
+
+    if (!crypter.SetKey(vMasterKeyVec, vchMIKPrivKeyIV)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        return false;
+    }
+
+    // Create plaintext from private key
+    std::vector<uint8_t> plaintext(m_mik->privkey.begin(), m_mik->privkey.end());
+
+    if (!crypter.Encrypt(plaintext, vchEncryptedMIKPrivKey)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        memory_cleanse(plaintext.data(), plaintext.size());
+        return false;
+    }
+
+    memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+    memory_cleanse(plaintext.data(), plaintext.size());
+
+    return true;
+}
+
+bool CWallet::DecryptMIKPrivKey(std::vector<uint8_t, SecureAllocator<uint8_t>>& privkeyOut) const {
+    // Assumes caller holds cs_wallet lock
+
+    if (!masterKey.IsValid() || !fWalletUnlocked) {
+        return false;
+    }
+
+    if (vchEncryptedMIKPrivKey.empty() || vchMIKPrivKeyIV.empty()) {
+        return false;
+    }
+
+    CCrypter crypter;
+    std::vector<uint8_t> vMasterKeyVec(vMasterKey.data_ptr(),
+                                       vMasterKey.data_ptr() + vMasterKey.size());
+
+    // Convert SecureAllocator IV to regular vector for SetKey
+    std::vector<uint8_t> iv(vchMIKPrivKeyIV.begin(), vchMIKPrivKeyIV.end());
+
+    if (!crypter.SetKey(vMasterKeyVec, iv)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        return false;
+    }
+
+    std::vector<uint8_t> decrypted;
+    if (!crypter.Decrypt(vchEncryptedMIKPrivKey, decrypted)) {
+        memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+        return false;
+    }
+
+    memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
+
+    // Copy to secure output
+    privkeyOut.assign(decrypted.begin(), decrypted.end());
+    memory_cleanse(decrypted.data(), decrypted.size());
+
+    return true;
+}
+
+bool CWallet::HasMIK() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return fHasMIK;
+}
+
+bool CWallet::GetMIKPubKey(std::vector<uint8_t>& pubkey) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fHasMIK || vchMIKPubKey.empty()) {
+        return false;
+    }
+
+    pubkey = vchMIKPubKey;
+    return true;
+}
+
+DFMP::Identity CWallet::GetMIKIdentity() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fHasMIK) {
+        return DFMP::Identity();  // Null identity
+    }
+
+    return m_mikIdentity;
+}
+
+bool CWallet::SignWithMIK(const uint256& prevHash, int height, uint32_t timestamp,
+                          std::vector<uint8_t>& signature) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fHasMIK) {
+        std::cerr << "[WALLET] Cannot sign - no MIK generated" << std::endl;
+        return false;
+    }
+
+    // If wallet is encrypted, we need to decrypt the private key
+    if (masterKey.IsValid()) {
+        if (!fWalletUnlocked) {
+            std::cerr << "[WALLET] Cannot sign - wallet is locked" << std::endl;
+            return false;
+        }
+
+        // Decrypt private key temporarily
+        std::vector<uint8_t, SecureAllocator<uint8_t>> privkey;
+        if (!DecryptMIKPrivKey(privkey)) {
+            std::cerr << "[WALLET] Failed to decrypt MIK private key" << std::endl;
+            return false;
+        }
+
+        // Create temporary MIK with decrypted private key
+        DFMP::CMiningIdentityKey tempMik;
+        tempMik.pubkey = vchMIKPubKey;
+        tempMik.privkey = std::move(privkey);
+        tempMik.identity = m_mikIdentity;
+
+        // Sign
+        bool result = tempMik.Sign(prevHash, height, timestamp, signature);
+
+        // tempMik destructor will securely wipe the private key
+        return result;
+    } else {
+        // Wallet not encrypted - use in-memory MIK directly
+        if (!m_mik || !m_mik->HasPrivateKey()) {
+            std::cerr << "[WALLET] MIK private key not available" << std::endl;
+            return false;
+        }
+
+        return m_mik->Sign(prevHash, height, timestamp, signature);
+    }
+}
+
+bool CWallet::IsMIKRegistered() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    return fMIKRegistered;
+}
+
+void CWallet::SetMIKRegistered() {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (fHasMIK && !fMIKRegistered) {
+        fMIKRegistered = true;
+        std::cout << "[WALLET] MIK marked as registered on-chain" << std::endl;
+
+        // Auto-save to persist registration status
+        if (m_autoSave && !m_walletFile.empty()) {
+            SaveUnlocked();
+        }
+    }
+}
+
+std::string CWallet::GetMIKIdentityHex() const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    if (!fHasMIK) {
+        return "";
+    }
+
+    return m_mikIdentity.GetHex();
 }

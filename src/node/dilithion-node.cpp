@@ -52,6 +52,7 @@
 #include <consensus/validation.h>  // CRITICAL-3 FIX: For CBlockValidator
 #include <dfmp/dfmp.h>             // DFMP: Fair Mining Protocol
 #include <dfmp/identity_db.h>      // DFMP: Identity persistence
+#include <dfmp/mik.h>              // DFMP v2.0: Mining Identity Key
 #include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
@@ -2920,8 +2921,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "  [OK] Auto-save enabled" << std::endl;
         std::cout.flush();
 
-        // DFMP: Register block connect/disconnect callbacks for fair mining protocol
-        // This updates identity DB (first-seen heights) and heat tracker (blocks per identity)
+        // DFMP v2.0: Register block connect/disconnect callbacks for fair mining protocol
+        // This updates identity DB (first-seen heights, MIK pubkeys) and heat tracker
         g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
             // Get DFMP activation height from chain params
             int activationHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->dfmpActivationHeight : 0;
@@ -2934,13 +2935,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::string error;
 
                 if (validator.DeserializeBlockTransactions(block, transactions, error) && !transactions.empty()) {
-                    // Derive miner identity from coinbase (first transaction)
-                    DFMP::Identity identity = DFMP::DeriveIdentity(*transactions[0]);
+                    // DFMP v2.0: Parse MIK from coinbase scriptSig
+                    const CTransaction& coinbaseTx = *transactions[0];
+                    const std::vector<uint8_t>& scriptSig = coinbaseTx.vin[0].scriptSig;
 
-                    if (!identity.IsNull()) {
+                    DFMP::CMIKScriptData mikData;
+                    if (DFMP::ParseMIKFromScriptSig(scriptSig, mikData) && !mikData.identity.IsNull()) {
+                        DFMP::Identity identity = mikData.identity;
+
                         // Record first-seen height if this is a new identity
                         if (DFMP::g_identityDb && !DFMP::g_identityDb->Exists(identity)) {
                             DFMP::g_identityDb->SetFirstSeen(identity, height);
+                        }
+
+                        // Store MIK public key on registration (first block with this MIK)
+                        if (mikData.isRegistration && DFMP::g_identityDb) {
+                            if (!DFMP::g_identityDb->HasMIKPubKey(identity)) {
+                                DFMP::g_identityDb->SetMIKPubKey(identity, mikData.pubkey);
+                            }
                         }
 
                         // Update heat tracker

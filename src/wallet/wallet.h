@@ -11,6 +11,7 @@
 #include <wallet/crypter.h>
 #include <wallet/hd_derivation.h>
 #include <wallet/mnemonic.h>
+#include <dfmp/mik.h>
 
 #include <string>
 #include <vector>
@@ -36,6 +37,9 @@ static const uint32_t WALLET_FILE_VERSION_3 = 3;
 // v4: Added fCoinbase field to wallet transactions for tracking mining rewards
 static const char WALLET_FILE_MAGIC_V4[] = "DILWLT04";
 static const uint32_t WALLET_FILE_VERSION_4 = 4;
+// v5: Added Mining Identity Key (MIK) for DFMP v2.0
+static const char WALLET_FILE_MAGIC_V5[] = "DILWLT05";
+static const uint32_t WALLET_FILE_VERSION_5 = 5;
 static const size_t WALLET_FILE_HMAC_SIZE = 32;    // HMAC-SHA3-256 output
 static const size_t WALLET_FILE_SALT_SIZE = 32;    // Salt for HMAC
 static const size_t WALLET_FILE_HEADER_SIZE = 8 + 4 + 4 + 32 + 32;  // Magic + Version + Flags + HMAC + Salt = 80 bytes
@@ -304,6 +308,35 @@ private:
     std::map<CHDKeyPath, CDilithiumAddress> mapPathToAddress;  // Derivation path -> address
 
     static const uint32_t HD_GAP_LIMIT = 20;   // BIP44 gap limit
+
+    // ============================================================================
+    // Mining Identity Key (MIK) - DFMP v2.0
+    // ============================================================================
+
+    /** Mining Identity Key (unique_ptr because CMiningIdentityKey is non-copyable) */
+    std::unique_ptr<DFMP::CMiningIdentityKey> m_mik;
+
+    /** Encrypted MIK private key (when wallet is encrypted) */
+    std::vector<uint8_t> vchEncryptedMIKPrivKey;
+
+    /** IV for MIK private key encryption */
+    std::vector<uint8_t, SecureAllocator<uint8_t>> vchMIKPrivKeyIV;
+
+    /** MIK public key (stored even when encrypted, needed for coinbase creation) */
+    std::vector<uint8_t> vchMIKPubKey;
+
+    /** MIK identity (cached, derived from pubkey) */
+    DFMP::Identity m_mikIdentity;
+
+    /** True if MIK has been generated for this wallet */
+    bool fHasMIK;
+
+    /** True if MIK is registered on-chain (has mined at least one block) */
+    bool fMIKRegistered;
+
+    // MIK private helper methods - assume caller holds cs_wallet lock
+    bool EncryptMIKPrivKey();
+    bool DecryptMIKPrivKey(std::vector<uint8_t, SecureAllocator<uint8_t>>& privkeyOut) const;
 
     // Private helper methods - assume caller already holds cs_wallet lock
     bool SaveUnlocked(const std::string& filename = "") const;
@@ -837,6 +870,86 @@ public:
      * @return true if address found and is HD-derived
      */
     bool GetAddressPath(const CDilithiumAddress& address, CHDKeyPath& path_out) const;
+
+    // ============================================================================
+    // Mining Identity Key (MIK) - DFMP v2.0
+    // ============================================================================
+
+    /**
+     * Generate a new Mining Identity Key (MIK)
+     *
+     * Creates a new Dilithium3 keypair for mining identity. The MIK is separate
+     * from payout addresses and persists across address changes, closing the
+     * address rotation loophole in DFMP.
+     *
+     * If the wallet is encrypted, the MIK private key will be encrypted with
+     * the master key. The wallet must be unlocked to generate a new MIK.
+     *
+     * @return true if successful, false if MIK already exists or wallet locked
+     */
+    bool GenerateMIK();
+
+    /**
+     * Check if wallet has a Mining Identity Key
+     *
+     * @return true if MIK has been generated
+     */
+    bool HasMIK() const;
+
+    /**
+     * Get the MIK public key for coinbase creation
+     *
+     * @param pubkey Output buffer for public key (1,952 bytes)
+     * @return true if MIK exists
+     */
+    bool GetMIKPubKey(std::vector<uint8_t>& pubkey) const;
+
+    /**
+     * Get the MIK identity
+     *
+     * @return MIK identity (20 bytes), or null identity if no MIK
+     */
+    DFMP::Identity GetMIKIdentity() const;
+
+    /**
+     * Sign a block commitment with the MIK
+     *
+     * Creates a signature committing to the chain position (prevHash, height, timestamp).
+     * This signature is included in the coinbase scriptSig for DFMP v2.0.
+     *
+     * @param prevHash Previous block hash
+     * @param height Block height being mined
+     * @param timestamp Block timestamp
+     * @param signature Output signature (3,309 bytes)
+     * @return true if successful, false if no MIK or wallet locked
+     */
+    bool SignWithMIK(const uint256& prevHash, int height, uint32_t timestamp,
+                     std::vector<uint8_t>& signature);
+
+    /**
+     * Check if the MIK is registered on-chain
+     *
+     * A MIK is registered after its first block is mined and stored in the
+     * identity database. Subsequent blocks use the shorter reference format.
+     *
+     * @return true if MIK has been registered on-chain
+     */
+    bool IsMIKRegistered() const;
+
+    /**
+     * Mark the MIK as registered on-chain
+     *
+     * Called after successfully mining a block with MIK registration.
+     * Future blocks will use the reference format instead of registration.
+     */
+    void SetMIKRegistered();
+
+    /**
+     * Get MIK identity as hex string (for display/logging)
+     *
+     * @return Hex string (40 chars), or empty string if no MIK
+     */
+    std::string GetMIKIdentityHex() const;
 
     // ============================================================================
     // Persistence

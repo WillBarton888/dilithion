@@ -17,6 +17,9 @@
 #include <consensus/chain.h>
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
+#include <dfmp/dfmp.h>  // DFMP v2.0
+#include <dfmp/mik.h>   // DFMP v2.0: Mining Identity Key
+#include <dfmp/identity_db.h>  // DFMP v2.0: Identity database
 #include <util/strencodings.h>
 #include <util/error_format.h>  // UX: Better error messages
 #include <amount.h>
@@ -3312,7 +3315,44 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
     }
     std::vector<uint8_t> minerAddress = addresses[0].GetData();
 
-    // Create block template
+    // DFMP v2.0: Prepare Mining Identity Key (MIK) data
+    CMIKCoinbaseData mikData;
+
+    // Auto-generate MIK if wallet doesn't have one
+    if (!m_wallet->HasMIK()) {
+        std::cout << "[RPC] Wallet has no MIK - generating one for DFMP v2.0..." << std::endl;
+        if (!m_wallet->GenerateMIK()) {
+            throw std::runtime_error("Failed to generate Mining Identity Key (MIK)");
+        }
+        std::cout << "[RPC] Generated MIK identity: " << m_wallet->GetMIKIdentityHex() << std::endl;
+    }
+
+    // Get MIK data from wallet
+    mikData.hasMIK = true;
+    mikData.identity = m_wallet->GetMIKIdentity();
+
+    // Check if MIK is registered on-chain (first-block vs subsequent)
+    if (DFMP::g_identityDb && DFMP::g_identityDb->HasMIKPubKey(mikData.identity)) {
+        // MIK already registered - use reference format
+        mikData.isRegistration = false;
+        m_wallet->SetMIKRegistered();  // Ensure wallet knows it's registered
+    } else {
+        // First block with this MIK - use registration format
+        mikData.isRegistration = true;
+        if (!m_wallet->GetMIKPubKey(mikData.pubkey)) {
+            throw std::runtime_error("Failed to get MIK public key for registration");
+        }
+        std::cout << "[RPC] MIK not registered - will include full pubkey in coinbase" << std::endl;
+    }
+
+    // Sign with MIK (commits to prevHash, height, timestamp)
+    // Note: We use current time for timestamp - mining may adjust this slightly
+    uint32_t nTime = static_cast<uint32_t>(std::time(nullptr));
+    if (!m_wallet->SignWithMIK(hashPrevBlock, nHeight, nTime, mikData.signature)) {
+        throw std::runtime_error("Failed to sign with MIK");
+    }
+
+    // Create block template with MIK data
     std::string templateError;
     auto templateOpt = m_miner->CreateBlockTemplate(
         *m_mempool,
@@ -3321,6 +3361,7 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         nHeight,
         nBits,
         minerAddress,
+        mikData,
         templateError
     );
 

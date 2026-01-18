@@ -53,9 +53,12 @@ bool CTransactionValidator::CheckTransactionBasic(const CTransaction& tx, std::s
             return false;
         }
 
-        // Coinbase scriptSig size must be between 2 and 100 bytes
-        if (tx.vin[0].scriptSig.size() < 2 || tx.vin[0].scriptSig.size() > 100) {
-            error = "Coinbase scriptSig size must be between 2 and 100 bytes";
+        // Coinbase scriptSig size must be between 2 and 6000 bytes
+        // DFMP v2.0: Increased from 100 to 6000 bytes to accommodate MIK data
+        // MIK registration: marker(1) + type(1) + pubkey(1952) + signature(3309) = 5263 bytes
+        // Plus height encoding (~5 bytes) and extra nonce space (~20 bytes)
+        if (tx.vin[0].scriptSig.size() < 2 || tx.vin[0].scriptSig.size() > 6000) {
+            error = "Coinbase scriptSig size must be between 2 and 6000 bytes";
             return false;
         }
     } else {

@@ -7,11 +7,15 @@
 /**
  * DFMP Identity Database
  *
- * Persistent storage for miner identity first-seen heights.
+ * Persistent storage for miner identity data:
+ * - First-seen heights (v1.x and v2.0)
+ * - MIK public keys (v2.0)
+ *
  * Uses LevelDB for durability across node restarts.
  *
- * Key format: "dfmp:" + identity hex (45 bytes total)
- * Value format: 4-byte little-endian height
+ * Key formats:
+ *   "dfmp:" + identity hex (45 bytes) → 4-byte height (first-seen)
+ *   "mikpk:" + identity hex (46 bytes) → 1952-byte pubkey (MIK public key)
  */
 
 #include <dfmp/dfmp.h>
@@ -47,17 +51,32 @@ private:
     /** Database path */
     std::string m_path;
 
-    /** Key prefix for identity entries */
+    /** Key prefix for identity entries (first-seen height) */
     static const std::string KEY_PREFIX;
+
+    /** Key prefix for MIK public key entries (v2.0) */
+    static const std::string MIK_PUBKEY_PREFIX;
+
+    /** In-memory cache: identity -> MIK public key (v2.0) */
+    mutable std::map<Identity, std::vector<uint8_t>> m_mikPubkeyCache;
+
+    /** Maximum MIK pubkey cache size */
+    static const size_t MAX_MIK_CACHE_SIZE = 1000;
 
     /** Build database key from identity */
     std::string MakeKey(const Identity& identity) const;
+
+    /** Build MIK pubkey database key from identity */
+    std::string MakeMIKPubkeyKey(const Identity& identity) const;
 
     /** Parse identity from database key */
     bool ParseKey(const std::string& key, Identity& identity) const;
 
     /** Evict oldest entries from cache if over limit */
     void EvictCacheIfNeeded() const;
+
+    /** Evict oldest MIK pubkey entries from cache if over limit */
+    void EvictMIKCacheIfNeeded() const;
 
 public:
     CIdentityDB();
@@ -123,6 +142,39 @@ public:
      * Clear all data (for testing)
      */
     void Clear();
+
+    // =========================================================================
+    // MIK Public Key Storage (DFMP v2.0)
+    // =========================================================================
+
+    /**
+     * Store MIK public key for an identity
+     *
+     * Called on block connect when a MIK registration is processed.
+     * Does nothing if pubkey already stored (pubkey is immutable for an identity).
+     *
+     * @param identity MIK identity (must match SHA3-256(pubkey)[:20])
+     * @param pubkey MIK public key (1,952 bytes)
+     * @return true if stored (new MIK), false if already existed or error
+     */
+    bool SetMIKPubKey(const Identity& identity, const std::vector<uint8_t>& pubkey);
+
+    /**
+     * Get MIK public key for an identity
+     *
+     * @param identity MIK identity to query
+     * @param[out] pubkey Output buffer for public key (1,952 bytes)
+     * @return true if found, false if not found
+     */
+    bool GetMIKPubKey(const Identity& identity, std::vector<uint8_t>& pubkey) const;
+
+    /**
+     * Check if MIK public key exists for an identity
+     *
+     * @param identity MIK identity to check
+     * @return true if MIK is registered (pubkey stored)
+     */
+    bool HasMIKPubKey(const Identity& identity) const;
 };
 
 } // namespace DFMP

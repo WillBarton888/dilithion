@@ -28,38 +28,45 @@
 namespace DFMP {
 
 // ============================================================================
-// PROTOCOL CONSTANTS (v1.3)
+// PROTOCOL CONSTANTS (v2.0)
 // ============================================================================
+// v2.0 uses Mining Identity Key (MIK) for persistent identity tracking
+// and updated penalty parameters. See mik.h for full v2.0 spec.
 
-/** Number of blocks in the observation window for heat calculation */
-constexpr int OBSERVATION_WINDOW = 100;
+/** Number of blocks in the observation window for heat calculation (v2.0: 360 blocks = ~24 hours) */
+constexpr int OBSERVATION_WINDOW = 360;
 
-/** Number of free blocks before heat penalty applies */
-constexpr int FREE_TIER_THRESHOLD = 14;
+/** Number of free blocks before heat penalty applies (v2.0: 20 blocks ~5.5%) */
+constexpr int FREE_TIER_THRESHOLD = 20;
 
-/** Number of blocks for pending penalty to fully decay */
-constexpr int MATURITY_BLOCKS = 500;
+/** Number of blocks for maturity penalty to fully decay (v2.0: 400 blocks) */
+constexpr int MATURITY_BLOCKS = 400;
 
-/** Starting pending penalty multiplier for new identities */
-constexpr double PENDING_PENALTY_START = 5.0;
+/** Starting maturity penalty multiplier for new identities (v2.0: 3.0x, no first-block grace) */
+constexpr double PENDING_PENALTY_START = 3.0;
 
-/** Ending pending penalty multiplier (mature identity) */
+/** Ending maturity penalty multiplier (mature identity) */
 constexpr double PENDING_PENALTY_END = 1.0;
 
-/** Heat coefficient for quadratic penalty curve */
-constexpr double HEAT_COEFFICIENT = 0.046;
+/** v2.0: Linear zone upper bound (blocks 21-25 have linear penalty) */
+constexpr int LINEAR_ZONE_UPPER = 25;
 
-/** Heat exponent for penalty curve (quadratic) */
-constexpr double HEAT_EXPONENT = 2.0;
+/** v2.0: Exponential growth rate per block over linear zone (1.08x per block) */
+constexpr double HEAT_GROWTH_RATE = 1.08;
+
+// Legacy v1.3 constants (kept for reference, no longer used)
+// constexpr double HEAT_COEFFICIENT = 0.046;
+// constexpr double HEAT_EXPONENT = 2.0;
 
 // Fixed-point scale for deterministic integer arithmetic
 // All multipliers are stored as (value * FP_SCALE)
 constexpr int64_t FP_SCALE = 1000000;
 
-// Fixed-point versions of constants
-constexpr int64_t FP_PENDING_START = 5000000;   // 5.0 × 1,000,000
+// Fixed-point versions of v2.0 constants
+constexpr int64_t FP_PENDING_START = 3000000;   // 3.0 × 1,000,000 (v2.0 maturity start)
 constexpr int64_t FP_PENDING_END = 1000000;     // 1.0 × 1,000,000
-constexpr int64_t FP_HEAT_COEFF = 46000;        // 0.046 × 1,000,000
+constexpr int64_t FP_LINEAR_INCREMENT = 100000; // 0.1 × 1,000,000 (linear zone step)
+constexpr int64_t FP_LINEAR_BASE = 1500000;     // 1.5 × 1,000,000 (exponential zone start)
 
 // ============================================================================
 // IDENTITY TYPE (20 bytes)

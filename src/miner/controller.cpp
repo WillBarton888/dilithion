@@ -626,7 +626,8 @@ uint64_t CMiningController::CalculateBlockSubsidy(uint32_t nHeight) const {
 CTransactionRef CMiningController::CreateCoinbaseTransaction(
     uint32_t nHeight,
     uint64_t totalFees,
-    const std::vector<uint8_t>& minerAddress
+    const std::vector<uint8_t>& minerAddress,
+    const CMIKCoinbaseData& mikData
 ) {
     // Calculate block subsidy
     uint64_t nSubsidy = CalculateBlockSubsidy(nHeight);
@@ -692,6 +693,25 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
     coinbaseIn.scriptSig.push_back(static_cast<uint8_t>((nHeight >> 24) & 0xFF));
     coinbaseIn.scriptSig.insert(coinbaseIn.scriptSig.end(),
                                  coinbaseMsg.begin(), coinbaseMsg.end());
+
+    // DFMP v2.0: Add MIK data to scriptSig if present
+    if (mikData.hasMIK) {
+        std::vector<uint8_t> mikScriptData;
+        if (mikData.isRegistration) {
+            // Registration format: [marker][type][pubkey][signature]
+            if (!DFMP::BuildMIKScriptSigRegistration(mikData.pubkey, mikData.signature, mikScriptData)) {
+                throw std::runtime_error("Failed to build MIK registration scriptSig data");
+            }
+        } else {
+            // Reference format: [marker][type][identity][signature]
+            if (!DFMP::BuildMIKScriptSigReference(mikData.identity, mikData.signature, mikScriptData)) {
+                throw std::runtime_error("Failed to build MIK reference scriptSig data");
+            }
+        }
+        // Append MIK data to scriptSig
+        coinbaseIn.scriptSig.insert(coinbaseIn.scriptSig.end(),
+                                     mikScriptData.begin(), mikScriptData.end());
+    }
 
     coinbaseIn.nSequence = CTxIn::SEQUENCE_FINAL;
     coinbase.vin.push_back(std::move(coinbaseIn));
@@ -934,6 +954,7 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     uint32_t nHeight,
     uint32_t nBits,
     const std::vector<uint8_t>& minerAddress,
+    const CMIKCoinbaseData& mikData,
     std::string& error
 ) {
     BENCHMARK_START("mining_create_template");
@@ -968,7 +989,7 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
     BENCHMARK_START("mining_create_coinbase");
     CTransactionRef coinbaseTx;
     try {
-        coinbaseTx = CreateCoinbaseTransaction(nHeight, totalFees, minerAddress);
+        coinbaseTx = CreateCoinbaseTransaction(nHeight, totalFees, minerAddress, mikData);
     } catch (const std::runtime_error& e) {
         error = std::string("Coinbase creation failed: ") + e.what();
         (void)BENCHMARK_END("mining_create_coinbase");

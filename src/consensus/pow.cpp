@@ -8,6 +8,7 @@
 #include <util/time.h>
 #include <dfmp/dfmp.h>
 #include <dfmp/identity_db.h>
+#include <dfmp/mik.h>  // DFMP v2.0: Mining Identity Key
 #include <algorithm>
 #include <vector>
 #include <cstring>
@@ -191,12 +192,72 @@ bool CheckProofOfWorkDFMP(
     // Get coinbase transaction (first transaction in block)
     const CTransaction& coinbaseTx = *transactions[0];
 
-    // Derive miner identity from coinbase
-    DFMP::Identity identity = DFMP::DeriveIdentity(coinbaseTx);
-    if (identity.IsNull()) {
-        std::cerr << "[DFMP] Could not derive identity from coinbase" << std::endl;
+    // ========================================================================
+    // DFMP v2.0: Mining Identity Key (MIK) Validation
+    // ========================================================================
+    // MIK is mandatory in all blocks. Parse from coinbase scriptSig and verify.
+    //
+    // MIK provides persistent miner identity that cannot be rotated like
+    // payout addresses. This closes the address rotation loophole in v1.4.
+    // ========================================================================
+
+    DFMP::Identity identity;
+    DFMP::CMIKScriptData mikData;
+
+    // Parse MIK from coinbase scriptSig
+    const std::vector<uint8_t>& scriptSig = coinbaseTx.vin[0].scriptSig;
+
+    if (!DFMP::ParseMIKFromScriptSig(scriptSig, mikData)) {
+        std::cerr << "[DFMP v2.0] Block " << height << ": Missing or malformed MIK data in coinbase" << std::endl;
         return false;
     }
+
+    // Get the MIK public key for signature verification
+    std::vector<uint8_t> pubkey;
+
+    if (mikData.isRegistration) {
+        // Registration: pubkey is embedded in coinbase
+        pubkey = mikData.pubkey;
+
+        // Verify identity = SHA3-256(pubkey)[:20]
+        DFMP::Identity derivedIdentity = DFMP::DeriveIdentityFromMIK(pubkey);
+        if (derivedIdentity != mikData.identity) {
+            std::cerr << "[DFMP v2.0] Block " << height << ": MIK identity mismatch "
+                      << "(derived: " << derivedIdentity.GetHex()
+                      << ", claimed: " << mikData.identity.GetHex() << ")" << std::endl;
+            return false;
+        }
+
+        identity = mikData.identity;
+    } else {
+        // Reference: look up stored pubkey from identity database
+        identity = mikData.identity;
+
+        if (DFMP::g_identityDb == nullptr) {
+            std::cerr << "[DFMP v2.0] Block " << height << ": Identity database not initialized" << std::endl;
+            return false;
+        }
+
+        if (!DFMP::g_identityDb->GetMIKPubKey(identity, pubkey)) {
+            std::cerr << "[DFMP v2.0] Block " << height << ": Unknown MIK identity "
+                      << identity.GetHex() << " (no registration found)" << std::endl;
+            return false;
+        }
+    }
+
+    // Verify MIK signature
+    // Message = SHA3-256(prevBlockHash || height || timestamp || identity)
+    if (!DFMP::VerifyMIKSignature(pubkey, mikData.signature,
+                                   block.hashPrevBlock, height, block.nTime,
+                                   identity)) {
+        std::cerr << "[DFMP v2.0] Block " << height << ": Invalid MIK signature for identity "
+                  << identity.GetHex() << std::endl;
+        return false;
+    }
+
+    // ========================================================================
+    // DFMP v2.0: Penalty Calculations (using MIK identity)
+    // ========================================================================
 
     // Get first-seen height (-1 for new identity)
     int firstSeen = -1;
@@ -204,14 +265,14 @@ bool CheckProofOfWorkDFMP(
         firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
     }
 
-    // Get current heat
-    int heat = 0;
+    // Get blocks by this identity in observation window (360-block window)
+    int blocksInWindow = 0;
     if (DFMP::g_heatTracker != nullptr) {
-        heat = DFMP::g_heatTracker->GetHeat(identity);
+        blocksInWindow = DFMP::g_heatTracker->GetHeat(identity);
     }
 
-    // Calculate total DFMP multiplier (pending × heat)
-    int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(height, firstSeen, heat);
+    // Calculate total DFMP multiplier (maturity × heat) using v2.0 rules
+    int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(height, firstSeen, blocksInWindow);
 
     // Calculate effective target: baseTarget / multiplier
     uint256 effectiveTarget = DFMP::CalculateEffectiveTarget(baseTarget, multiplierFP);
@@ -219,15 +280,16 @@ bool CheckProofOfWorkDFMP(
     // Log DFMP info for debugging (only if multiplier > 1.0)
     double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
     if (multiplier > 1.01) {
-        double pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP(height, firstSeen)) / DFMP::FP_SCALE;
-        double heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP(heat)) / DFMP::FP_SCALE;
+        double maturityMult = DFMP::GetPendingPenalty(height, firstSeen);
+        double heatMult = DFMP::GetHeatMultiplier(blocksInWindow);
 
-        std::cout << "[DFMP] Block " << height << " identity " << identity.GetHex().substr(0, 8) << "..."
+        std::cout << "[DFMP v2.0] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
                   << " firstSeen=" << firstSeen
-                  << " heat=" << heat
-                  << " pending=" << std::fixed << std::setprecision(2) << pendingMult << "x"
-                  << " heatMult=" << heatMult << "x"
-                  << " total=" << multiplier << "x" << std::endl;
+                  << " blocks=" << blocksInWindow
+                  << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
+                  << " heat=" << heatMult << "x"
+                  << " total=" << multiplier << "x"
+                  << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
     }
 
     // Check if hash meets DFMP-adjusted difficulty
