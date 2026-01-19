@@ -163,9 +163,14 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             auto genesisIt = mapHeaders.find(genesisHash);
             if (genesisIt != mapHeaders.end()) {
                 pprev = &genesisIt->second;
+                std::string genesisWorkHex = pprev->chainWork.GetHex();
+                std::cout << "[HeadersManager] Genesis found in mapHeaders, chainWork="
+                          << genesisWorkHex.substr(genesisWorkHex.length() > 16 ? genesisWorkHex.length() - 16 : 0)
+                          << " height=" << pprev->height << std::endl;
             } else {
                 // Genesis not in mapHeaders yet - use nullptr (first block case)
                 pprev = nullptr;
+                std::cout << "[HeadersManager] Genesis NOT found in mapHeaders, pprev=NULL" << std::endl;
             }
         }
         // Direct parent lookup (hashPrevBlock = parent's RandomX hash = parent's storage hash)
