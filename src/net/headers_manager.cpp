@@ -1401,6 +1401,14 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     // This enables reorganization to chains with more work but fewer blocks
     bool hasMoreWork = ChainWorkGreaterThan(it->second.chainWork, bestIt->second.chainWork);
 
+    // DEBUG: Log chain work comparison
+    std::string newWorkHex = it->second.chainWork.GetHex();
+    std::string bestWorkHex = bestIt->second.chainWork.GetHex();
+    std::cout << "[UpdateBestHeader] Comparing heights: " << nBestHeight << " vs " << newHeight
+              << " bestWork=" << bestWorkHex.substr(bestWorkHex.length() > 16 ? bestWorkHex.length() - 16 : 0)
+              << " newWork=" << newWorkHex.substr(newWorkHex.length() > 16 ? newWorkHex.length() - 16 : 0)
+              << " hasMoreWork=" << (hasMoreWork ? "YES" : "NO") << std::endl;
+
     // FALLBACK: If both chainWork values are zero (IBD below checkpoint), use height comparison
     // This ensures proper header chain progression during initial sync
     if (!hasMoreWork && it->second.chainWork.IsNull() && bestIt->second.chainWork.IsNull()) {
