@@ -662,6 +662,16 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     std::vector<uint8_t> mikSignature;
     std::vector<uint8_t> mikData;
 
+    // Generate MIK if wallet doesn't have one
+    if (mikIdentity.IsNull()) {
+        if (wallet.GenerateMIK()) {
+            mikIdentity = wallet.GetMIKIdentity();
+            std::cout << "[Mining] Generated new MIK identity: " << mikIdentity.GetHex() << std::endl;
+        } else {
+            std::cerr << "[Mining] WARNING: Failed to generate MIK" << std::endl;
+        }
+    }
+
     if (!mikIdentity.IsNull()) {
         // Sign with MIK (commits to prevHash, height, timestamp)
         if (wallet.SignWithMIK(hashBestBlock, nHeight, block.nTime, mikSignature)) {
