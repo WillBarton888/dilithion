@@ -631,9 +631,71 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     // Coinbase input (null prevout)
     CTxIn coinbaseIn;
     coinbaseIn.prevout.SetNull();
+
+    // DFMP v2.0: Build coinbase scriptSig with MIK data
+    // Format: [height: 1-4 bytes] [msg: ~30 bytes] [MIK_MARKER] [MIK_TYPE] [MIK_DATA] [signature]
+    std::vector<uint8_t> scriptSig;
+
+    // 1. Height encoding (BIP 34 style)
+    if (nHeight < 17) {
+        scriptSig.push_back(0x50 + nHeight);  // OP_1 through OP_16
+    } else if (nHeight < 128) {
+        scriptSig.push_back(0x01);
+        scriptSig.push_back(static_cast<uint8_t>(nHeight));
+    } else if (nHeight < 32768) {
+        scriptSig.push_back(0x02);
+        scriptSig.push_back(static_cast<uint8_t>(nHeight & 0xFF));
+        scriptSig.push_back(static_cast<uint8_t>((nHeight >> 8) & 0xFF));
+    } else {
+        scriptSig.push_back(0x03);
+        scriptSig.push_back(static_cast<uint8_t>(nHeight & 0xFF));
+        scriptSig.push_back(static_cast<uint8_t>((nHeight >> 8) & 0xFF));
+        scriptSig.push_back(static_cast<uint8_t>((nHeight >> 16) & 0xFF));
+    }
+
+    // 2. Coinbase message
     std::string coinbaseMsg = "Block " + std::to_string(nHeight) + " mined by Dilithion";
-    coinbaseIn.scriptSig.resize(coinbaseMsg.size());
-    memcpy(coinbaseIn.scriptSig.data(), coinbaseMsg.c_str(), coinbaseMsg.size());
+    scriptSig.insert(scriptSig.end(), coinbaseMsg.begin(), coinbaseMsg.end());
+
+    // 3. DFMP v2.0 MIK data
+    DFMP::Identity mikIdentity = wallet.GetMIKIdentity();
+    std::vector<uint8_t> mikSignature;
+    std::vector<uint8_t> mikData;
+
+    if (!mikIdentity.IsNull()) {
+        // Sign with MIK (commits to prevHash, height, timestamp)
+        if (wallet.SignWithMIK(hashBestBlock, nHeight, block.nTime, mikSignature)) {
+            // Check if MIK is already registered
+            bool isRegistered = DFMP::g_identityDb && DFMP::g_identityDb->HasMIKPubKey(mikIdentity);
+
+            if (!isRegistered) {
+                // First block with this MIK - include full pubkey (registration)
+                std::vector<uint8_t> mikPubkey;
+                if (wallet.GetMIKPubKey(mikPubkey)) {
+                    if (DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, mikData)) {
+                        scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
+                        if (verbose) {
+                            std::cout << "  MIK: Registration (first block with this identity)" << std::endl;
+                        }
+                    }
+                }
+            } else {
+                // MIK already registered - use reference format
+                if (DFMP::BuildMIKScriptSigReference(mikIdentity, mikSignature, mikData)) {
+                    scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
+                    if (verbose) {
+                        std::cout << "  MIK: Reference (identity already registered)" << std::endl;
+                    }
+                }
+            }
+        } else {
+            std::cerr << "[Mining] WARNING: Failed to sign with MIK" << std::endl;
+        }
+    } else {
+        std::cerr << "[Mining] WARNING: No MIK identity in wallet" << std::endl;
+    }
+
+    coinbaseIn.scriptSig = scriptSig;
     coinbaseIn.nSequence = 0xffffffff;
     coinbaseTx.vin.push_back(coinbaseIn);
 
