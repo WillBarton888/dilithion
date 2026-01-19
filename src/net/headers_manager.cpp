@@ -33,6 +33,25 @@ CHeadersManager::CHeadersManager()
     // Bug #46 Fix: Initialize minimum chain work to zero (accept all chains initially)
     // Production networks should set this to a reasonable threshold to prevent DoS
     nMinimumChainWork = uint256();
+
+    // BUG FIX: Add genesis to mapHeaders so block 1 can accumulate chain work properly
+    // Without this, block 1's pprev is nullptr and chainWork doesn't include genesis work
+    CBlock genesis = Genesis::CreateGenesisBlock();
+    uint256 genesisHash = genesis.GetHash();
+    uint256 genesisWork = GetBlockWork(genesis.nBits);
+
+    HeaderWithChainWork genesisData(static_cast<CBlockHeader>(genesis), 0);  // height 0
+    genesisData.chainWork = genesisWork;
+    mapHeaders[genesisHash] = genesisData;
+    AddToHeightIndex(genesisHash, 0);
+
+    // Set genesis as initial best header
+    hashBestHeader = genesisHash;
+    nBestHeight = 0;
+
+    std::cout << "[HeadersManager] Genesis added to mapHeaders: " << genesisHash.GetHex().substr(0, 16)
+              << " chainWork=" << genesisWork.GetHex().substr(genesisWork.GetHex().length() > 16 ? genesisWork.GetHex().length() - 16 : 0)
+              << std::endl;
 }
 
 // ============================================================================
