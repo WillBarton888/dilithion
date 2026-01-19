@@ -156,9 +156,17 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         uint256 genesisHash = Genesis::GetGenesisHash();
         if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
             if (i == 0) {
-                std::cout << "[HeadersManager] Parent is genesis block" << std::endl;
+                std::cout << "[HeadersManager] Parent is genesis, startHeight=1" << std::endl;
             }
-            pprev = nullptr;
+            // BUG FIX: Look up genesis in mapHeaders to get cumulative chain work
+            // Previously set pprev = nullptr, causing chainWork to not accumulate
+            auto genesisIt = mapHeaders.find(genesisHash);
+            if (genesisIt != mapHeaders.end()) {
+                pprev = &genesisIt->second;
+            } else {
+                // Genesis not in mapHeaders yet - use nullptr (first block case)
+                pprev = nullptr;
+            }
         }
         // Direct parent lookup (hashPrevBlock = parent's RandomX hash = parent's storage hash)
         else {
