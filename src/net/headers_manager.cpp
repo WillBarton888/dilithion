@@ -182,9 +182,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             // BUG FIX: Look up genesis in mapHeaders to get cumulative chain work
             // Previously set pprev = nullptr, causing chainWork to not accumulate
             std::cout << "[HeadersManager] DEBUG: Looking up genesis " << genesisHash.GetHex().substr(0, 16)
-                      << " in mapHeaders (size=" << mapHeaders.size() << ")" << std::endl;
+                      << " in mapHeaders (size=" << mapHeaders.size() << ")" << std::endl << std::flush;
             auto genesisIt = mapHeaders.find(genesisHash);
-            std::cout << "[HeadersManager] DEBUG: find result = " << (genesisIt != mapHeaders.end() ? "FOUND" : "NOT_FOUND") << std::endl;
+            std::cout << "[HeadersManager] DEBUG: find result = " << (genesisIt != mapHeaders.end() ? "FOUND" : "NOT_FOUND") << std::endl << std::flush;
             if (genesisIt != mapHeaders.end()) {
                 pprev = &genesisIt->second;
                 std::string genesisWorkHex = pprev->chainWork.GetHex();
@@ -2007,7 +2007,19 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             // Find parent for first header in batch
             if (batchStart == 0) {
                 uint256 genesisHash = Genesis::GetGenesisHash();
-                if (headers[0].hashPrevBlock != genesisHash && !headers[0].hashPrevBlock.IsNull()) {
+                if (headers[0].hashPrevBlock == genesisHash || headers[0].hashPrevBlock.IsNull()) {
+                    // BUG FIX: Look up genesis in mapHeaders to get cumulative chain work
+                    // Previously left pprev=nullptr, causing chainWork to not accumulate
+                    auto genesisIt = mapHeaders.find(genesisHash);
+                    if (genesisIt != mapHeaders.end()) {
+                        pprev = &genesisIt->second;
+                        std::cout << "[HeadersManager] Batch 0: Genesis found, chainWork="
+                                  << pprev->chainWork.GetHex().substr(pprev->chainWork.GetHex().length() > 16 ? pprev->chainWork.GetHex().length() - 16 : 0)
+                                  << std::endl;
+                    } else {
+                        std::cout << "[HeadersManager] Batch 0: Genesis not in mapHeaders, pprev=NULL" << std::endl;
+                    }
+                } else {
                     auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
                     if (parentIt != mapHeaders.end()) {
                         pprev = &parentIt->second;
