@@ -13,6 +13,7 @@
 #include <net/block_fetcher.h>
 #include <net/block_tracker.h>  // IBD BOTTLENECK FIX: For CBlockTracker updates
 #include <net/orphan_manager.h>  // IBD HANG FIX #23b: For orphan resolution
+#include <net/headers_manager.h>  // For InvalidateHeader()
 #include <node/block_index.h>  // For CBlockIndex
 #include <primitives/block.h>  // For CBlock
 #include <util/logging.h>
@@ -91,6 +92,12 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         // Use DFMP-aware PoW check
         if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
             std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW (DFMP check failed), rejecting" << std::endl;
+
+            // Invalidate header to prevent re-requesting this block
+            if (g_node_context.headers_manager) {
+                g_node_context.headers_manager->InvalidateHeader(blockHash);
+            }
+
             if (g_node_context.peer_manager) {
                 g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
             }

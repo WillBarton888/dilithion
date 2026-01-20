@@ -153,6 +153,17 @@ BlockProcessResult ProcessNewBlock(
             std::cerr << "[ProcessNewBlock] ERROR: Block has invalid PoW (DFMP check failed)" << std::endl;
             std::cerr << "  Hash must be less than DFMP-adjusted target" << std::endl;
             g_metrics.RecordInvalidBlock();
+
+            // Invalidate header to prevent re-requesting this block
+            if (ctx.headers_manager) {
+                ctx.headers_manager->InvalidateHeader(blockHash);
+            }
+
+            // Ban peer for sending invalid block
+            if (ctx.peer_manager && peer_id >= 0) {
+                ctx.peer_manager->Misbehaving(peer_id, 100);
+            }
+
             return BlockProcessResult::INVALID_POW;
         }
     }

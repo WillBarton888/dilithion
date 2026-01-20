@@ -152,6 +152,13 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // SLOW PATH: Above common ancestor - compute hash for fork detection and work comparison
         uint256 storageHash = header.GetHash();
 
+        // Skip if this hash was previously rejected (block failed validation)
+        if (m_rejectedHashes.count(storageHash)) {
+            std::cout << "[HeadersManager] Skipping rejected header at height " << expectedHeight
+                      << " hash=" << storageHash.GetHex().substr(0, 16) << "..." << std::endl;
+            continue;
+        }
+
         // Skip TRUE duplicates (same hash already exists)
         if (mapHeaders.find(storageHash) != mapHeaders.end()) {
             auto it = mapHeaders.find(storageHash);
@@ -1029,6 +1036,9 @@ void CHeadersManager::Clear()
     m_chainTipsTracker.Clear();
     InvalidateBestChainCache();
 
+    // Clear rejected hashes on full reset
+    m_rejectedHashes.clear();
+
     // Reset request tracking state (critical for resync after fork)
     m_headers_requested_height.store(0);
     m_last_request_hash = uint256();
@@ -1246,6 +1256,127 @@ size_t CHeadersManager::GetOrphanedHeaderCount() const
     }
 
     return orphaned;
+}
+
+// ============================================================================
+// Rejected Hash Tracking (blocks that failed validation)
+// ============================================================================
+
+size_t CHeadersManager::InvalidateHeader(const uint256& hash)
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    // Already rejected?
+    if (m_rejectedHashes.count(hash)) {
+        return 0;
+    }
+
+    size_t removedCount = 0;
+
+    // Find header
+    auto it = mapHeaders.find(hash);
+    if (it != mapHeaders.end()) {
+        int invalidHeight = it->second.height;
+        std::cout << "[HeadersManager] Invalidating header at height " << invalidHeight
+                  << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+
+        // Find all descendants (headers whose hashPrevBlock is this hash or any descendant)
+        std::vector<uint256> toRemove;
+        toRemove.push_back(hash);
+
+        std::set<uint256> removeSet;
+        removeSet.insert(hash);
+
+        bool foundMore = true;
+        while (foundMore) {
+            foundMore = false;
+            for (const auto& pair : mapHeaders) {
+                if (removeSet.count(pair.first)) continue;
+                if (removeSet.count(pair.second.hashPrevBlock)) {
+                    removeSet.insert(pair.first);
+                    toRemove.push_back(pair.first);
+                    foundMore = true;
+                }
+            }
+        }
+
+        // Remove all from mapHeaders and track as rejected
+        for (const auto& h : toRemove) {
+            auto headerIt = mapHeaders.find(h);
+            if (headerIt != mapHeaders.end()) {
+                int height = headerIt->second.height;
+
+                // Remove from height index
+                auto heightIt = mapHeightIndex.find(height);
+                if (heightIt != mapHeightIndex.end()) {
+                    heightIt->second.erase(h);
+                    if (heightIt->second.empty()) {
+                        mapHeightIndex.erase(heightIt);
+                    }
+                }
+
+                // Remove from chain tips
+                setChainTips.erase(h);
+                m_chainTipsTracker.RemoveTip(h);
+
+                // Remove from mapHeaders
+                mapHeaders.erase(headerIt);
+                removedCount++;
+            }
+
+            // Track as rejected
+            m_rejectedHashes.insert(h);
+        }
+
+        // Update best header if needed
+        if (removeSet.count(hashBestHeader)) {
+            hashBestHeader = uint256();
+            nBestHeight = -1;
+            uint256 bestWork;
+
+            for (const auto& pair : mapHeaders) {
+                if (ChainWorkGreaterThan(pair.second.chainWork, bestWork)) {
+                    bestWork = pair.second.chainWork;
+                    hashBestHeader = pair.first;
+                    nBestHeight = pair.second.height;
+                }
+            }
+
+            if (!hashBestHeader.IsNull()) {
+                std::cout << "[HeadersManager] Best header updated after invalidation: height="
+                          << nBestHeight << " hash=" << hashBestHeader.GetHex().substr(0, 16)
+                          << "..." << std::endl;
+            }
+        }
+
+        InvalidateBestChainCache();
+    } else {
+        // Header not in map, just track hash as rejected
+        m_rejectedHashes.insert(hash);
+    }
+
+    std::cout << "[HeadersManager] Removed " << removedCount
+              << " header(s) (rejected " << m_rejectedHashes.size() << " total)" << std::endl;
+
+    return removedCount;
+}
+
+bool CHeadersManager::IsHashRejected(const uint256& hash) const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    return m_rejectedHashes.count(hash) > 0;
+}
+
+size_t CHeadersManager::GetRejectedHashCount() const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    return m_rejectedHashes.size();
+}
+
+void CHeadersManager::ClearRejectedHashes()
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    m_rejectedHashes.clear();
 }
 
 // ============================================================================

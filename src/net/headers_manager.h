@@ -530,6 +530,42 @@ public:
     size_t GetOrphanedHeaderCount() const;
 
     // ========================================================================
+    // Rejected Hash Tracking (for blocks that failed validation)
+    // ========================================================================
+
+    /**
+     * @brief Invalidate a header and all its descendants
+     *
+     * Called when a block fails DFMP/MIK validation. Removes the header
+     * and all descendants from mapHeaders, and tracks the hashes to
+     * prevent re-acceptance if the header is re-received.
+     *
+     * @param hash RandomX hash of the invalid header
+     * @return Number of headers removed (including descendants)
+     */
+    size_t InvalidateHeader(const uint256& hash);
+
+    /**
+     * @brief Check if a hash was previously rejected
+     *
+     * @param hash RandomX hash to check
+     * @return true if hash is in the rejected set
+     */
+    bool IsHashRejected(const uint256& hash) const;
+
+    /**
+     * @brief Get count of rejected hashes
+     *
+     * @return Number of hashes in rejected set
+     */
+    size_t GetRejectedHashCount() const;
+
+    /**
+     * @brief Clear all rejected hashes (for testing/reset)
+     */
+    void ClearRejectedHashes();
+
+    // ========================================================================
     // Fork Recovery Synchronization API
     // ========================================================================
 
@@ -663,6 +699,9 @@ private:
     static constexpr int ORPHAN_HEADER_MIN_WORK_PERCENT = 50;  ///< Keep chains with >=50% of best work
     static constexpr size_t PRUNE_BATCH_SIZE = 1000;           ///< Prune after every N headers processed
     mutable size_t m_headers_since_last_prune{0};              ///< Counter for triggering prune
+
+    // Rejected hash tracking (blocks that failed validation)
+    std::set<uint256> m_rejectedHashes;     ///< Hashes of blocks that failed validation
 
     // Thread safety
     mutable std::mutex cs_headers;          ///< Protects all data members
