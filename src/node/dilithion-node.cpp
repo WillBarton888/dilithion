@@ -958,6 +958,45 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     // Calculate target from nBits (compact format)
     uint256 hashTarget = CompactToBig(block.nBits);
 
+    // DFMP v2.0: Apply difficulty penalty based on MIK identity
+    // New miners get 3.0x penalty that decays over 360 blocks
+    int dfmpActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+    if (nHeight >= static_cast<uint32_t>(dfmpActivationHeight) && !mikIdentity.IsNull()) {
+        // Get first-seen height (-1 for new identity)
+        int firstSeen = -1;
+        if (DFMP::g_identityDb != nullptr) {
+            firstSeen = DFMP::g_identityDb->GetFirstSeen(mikIdentity);
+        }
+
+        // Get current heat from tracker
+        int heat = 0;
+        if (DFMP::g_heatTracker != nullptr) {
+            heat = DFMP::g_heatTracker->GetHeat(mikIdentity);
+        }
+
+        // Calculate total DFMP multiplier (maturity × heat)
+        int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(nHeight, firstSeen, heat);
+
+        // Apply multiplier to get effective target (harder target = smaller value)
+        hashTarget = DFMP::CalculateEffectiveTarget(hashTarget, multiplierFP);
+
+        // Log DFMP info (only if multiplier > 1.0)
+        double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
+        if (multiplier > 1.01) {
+            double maturityMult = DFMP::GetPendingPenalty(nHeight, firstSeen);
+            double heatMult = DFMP::GetHeatMultiplier(heat);
+
+            std::cout << "[Mining] DFMP penalty: MIK " << mikIdentity.GetHex().substr(0, 8) << "..."
+                      << " firstSeen=" << firstSeen
+                      << " heat=" << heat
+                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
+                      << " heatMult=" << heatMult << "x"
+                      << " total=" << multiplier << "x" << std::endl;
+        }
+    }
+
     if (verbose) {
         std::cout << "  Block height: " << nHeight << std::endl;
         std::cout << "  Previous block: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
