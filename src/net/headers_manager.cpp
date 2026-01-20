@@ -175,11 +175,16 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         uint256 genesisHash = Genesis::GetGenesisHash();
         if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
             if (i == 0) {
-                std::cout << "[HeadersManager] Parent is genesis, startHeight=1" << std::endl;
+                std::cout << "[HeadersManager] Parent is genesis, startHeight=1 (prevBlock="
+                          << header.hashPrevBlock.GetHex().substr(0, 16) << ", genesisHash="
+                          << genesisHash.GetHex().substr(0, 16) << ")" << std::endl;
             }
             // BUG FIX: Look up genesis in mapHeaders to get cumulative chain work
             // Previously set pprev = nullptr, causing chainWork to not accumulate
+            std::cout << "[HeadersManager] DEBUG: Looking up genesis " << genesisHash.GetHex().substr(0, 16)
+                      << " in mapHeaders (size=" << mapHeaders.size() << ")" << std::endl;
             auto genesisIt = mapHeaders.find(genesisHash);
+            std::cout << "[HeadersManager] DEBUG: find result = " << (genesisIt != mapHeaders.end() ? "FOUND" : "NOT_FOUND") << std::endl;
             if (genesisIt != mapHeaders.end()) {
                 pprev = &genesisIt->second;
                 std::string genesisWorkHex = pprev->chainWork.GetHex();
