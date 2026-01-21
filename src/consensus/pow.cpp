@@ -229,6 +229,18 @@ bool CheckProofOfWorkDFMP(
         }
 
         identity = mikData.identity;
+
+        // PRE-REGISTER: Store identity during validation (not just on block connection)
+        // This allows subsequent blocks in the same IBD batch to find this identity.
+        // Safe because registration blocks are self-validating:
+        // - Pubkey is embedded in the block
+        // - Identity is derived from pubkey (verified above)
+        // - Signature will be verified below
+        if (DFMP::g_identityDb != nullptr && !DFMP::g_identityDb->HasMIKPubKey(identity)) {
+            DFMP::g_identityDb->SetMIKPubKey(identity, pubkey);
+            std::cout << "[DFMP v2.0] Block " << height << ": Pre-registered MIK identity "
+                      << identity.GetHex().substr(0, 16) << "... during validation" << std::endl;
+        }
     } else {
         // Reference: look up stored pubkey from identity database
         identity = mikData.identity;

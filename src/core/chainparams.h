@@ -82,6 +82,13 @@ public:
     // Mainnet: populated after launch, updated with each software release
     std::vector<CCheckpoint> checkpoints;
 
+    // ASSUME-VALID: Skip DFMP penalty validation below this block (Bitcoin Core pattern)
+    // This is a performance optimization for IBD - blocks still have PoW verified.
+    // Set via --assumevalid CLI parameter or use this default.
+    // Empty string = validate everything (no assumevalid optimization)
+    // Updated with each software release after mainnet has established blocks.
+    std::string defaultAssumeValid;
+
     // Factory methods
     static ChainParams Mainnet();
     static ChainParams Testnet();
