@@ -1,9 +1,9 @@
 # Dilithion: A Post-Quantum Cryptocurrency
 
-**Version 1.0**
-**October 2025**
+**Version 2.0**
+**January 2026**
 
-**Launch Date:** January 1, 2026
+**Launch Date:** January 18, 2026
 
 ---
 
@@ -14,12 +14,13 @@ Dilithion is a decentralized cryptocurrency designed from the ground up for the 
 This whitepaper presents Dilithion's technical architecture, consensus parameters optimized for large post-quantum signatures, economic model, and roadmap for sustainable decentralized currency in the quantum age.
 
 **Key Features:**
-- **Post-quantum security:** CRYSTALS-Dilithium (NIST FIPS 204)
+- **Post-quantum security:** CRYSTALS-Dilithium3 (NIST FIPS 204, Level 3)
 - **ASIC-resistant mining:** RandomX proof-of-work
 - **Optimized consensus:** 4-minute blocks for large signature propagation
+- **Fair mining:** DFMP v2.0 with Mining Identity Keys (MIK)
 - **Fair distribution:** No premine, pure proof-of-work launch
 - **Fixed supply:** 21 million coins
-- **Launch:** January 1, 2026, 00:00:00 UTC
+- **Launch:** January 18, 2026, 00:00:00 UTC
 
 ---
 
@@ -39,6 +40,7 @@ This whitepaper presents Dilithion's technical architecture, consensus parameter
 2. [Post-Quantum Cryptography](#2-post-quantum-cryptography)
 3. [Technical Architecture](#3-technical-architecture)
 4. [Consensus Mechanism](#4-consensus-mechanism)
+   - 4.5 [Dilithion Fair Mining Protocol (DFMP)](#45-dilithion-fair-mining-protocol-dfmp)
 5. [Economic Model](#5-economic-model)
 6. [Network Security](#6-network-security)
 7. [Roadmap](#7-roadmap)
@@ -357,6 +359,105 @@ new_difficulty = clamp(new_difficulty, old_difficulty / 4, old_difficulty * 4)
 - Difficulty adjustment gaming
 - Chain reorganization exploits
 
+### 4.5 Dilithion Fair Mining Protocol (DFMP)
+
+**Version:** 2.0
+**Purpose:** Prevent mining centralization through identity-based difficulty adjustments
+
+#### 4.5.1 Overview
+
+DFMP creates economic incentives for distributed block production by tracking miner identities and applying difficulty multipliers to concentrated mining activity. This discourages any single entity from dominating block production.
+
+#### 4.5.2 Mining Identity Key (MIK)
+
+In DFMP v2.0, each miner is identified by a dedicated **Mining Identity Key (MIK)** - a Dilithium3 keypair separate from payout addresses. This closes the address rotation loophole where miners could bypass DFMP penalties by using a new payout address for each block.
+
+```
+MIK Identity = SHA3-256(MIK_public_key)[:20 bytes]
+```
+
+**MIK Specifications:**
+- **Public key:** 1,952 bytes (Dilithium3)
+- **Private key:** 4,032 bytes (Dilithium3)
+- **Signature:** 3,309 bytes (included in every block)
+- **Identity:** 20 bytes (hash of public key)
+
+**Coinbase Integration:**
+- First block with new MIK: Includes full public key (registration)
+- Subsequent blocks: Includes identity hash only (reference) + signature
+
+#### 4.5.3 Maturity Penalty (No First-Block Grace)
+
+New MIKs face elevated difficulty that decays step-wise over 400 blocks:
+
+```
+penalty = 3.0x → 2.5x → 2.0x → 1.5x → 1.0x (every 100 blocks)
+```
+
+| Blocks Since Registration | Maturity Penalty |
+|---------------------------|------------------|
+| 0-99 | 3.0x |
+| 100-199 | 2.5x |
+| 200-299 | 2.0x |
+| 300-399 | 1.5x |
+| 400+ | 1.0x (mature) |
+
+**Purpose:** New identities must "mature" over 400 blocks before achieving full mining efficiency. Unlike v1.x, there is **no first-block grace** - the penalty applies immediately.
+
+#### 4.5.4 Heat Penalty (Tiered System)
+
+Miners who produce many blocks within the observation window face tiered difficulty scaling:
+
+**Parameters:**
+- Observation window: 360 blocks (~24 hours at 4-minute blocks)
+- Free tier: 20 blocks (~5.5% of window)
+
+**Tiered Formula:**
+```
+0-20 blocks:   Free tier (1.0x penalty)
+21-25 blocks:  Linear zone (1.0x → 1.5x, +0.1x per block)
+26+ blocks:    Exponential zone (1.5x × 1.08^(blocks-25))
+```
+
+| Blocks in Last 360 | Heat Penalty |
+|--------------------|--------------|
+| 0-20 | 1.0x |
+| 21 | 1.1x |
+| 22 | 1.2x |
+| 23 | 1.3x |
+| 24 | 1.4x |
+| 25 | 1.5x |
+| 30 | 2.2x |
+| 40 | 4.8x |
+| 50 | 10.3x |
+| 60 | 22.2x |
+
+**Purpose:** The free tier allows reasonable solo mining (~5.5% of blocks). The linear zone provides a gradual transition. Beyond that, exponential scaling makes dominance progressively more expensive.
+
+#### 4.5.5 Total Difficulty Multiplier
+
+The final difficulty multiplier combines both penalties:
+
+```
+total_multiplier = maturity_penalty × heat_penalty
+effective_difficulty = base_difficulty × total_multiplier
+```
+
+Blocks must meet the DFMP-adjusted difficulty target to be valid.
+
+#### 4.5.6 Consensus Integration
+
+DFMP multipliers are enforced at the consensus level:
+
+1. Parse MIK data from coinbase scriptSig
+2. Verify MIK signature against block commitment
+3. Calculate maturity penalty based on MIK registration height
+4. Calculate heat penalty based on blocks in observation window
+5. Apply combined multiplier to difficulty target
+6. Reject blocks that don't meet adjusted target
+
+**Note:** Blocks that meet base difficulty but fail DFMP-adjusted difficulty are invalid.
+
 ---
 
 ## 5. Economic Model
@@ -559,11 +660,11 @@ fee = MIN_TX_FEE + (transaction_size_bytes × FEE_PER_BYTE)
 
 ## 7. Roadmap
 
-### 7.1 Genesis Launch (January 1, 2026)
+### 7.1 Genesis Launch (January 18, 2026)
 
 **Launch Specifications:**
-- **Genesis timestamp:** January 1, 2026, 00:00:00 UTC
-- **Initial difficulty:** Bitcoin-equivalent (0x1d00ffff)
+- **Genesis timestamp:** January 18, 2026, 00:00:00 UTC
+- **Initial difficulty:** 0x1e01fffe
 - **First halving:** Block 210,000 (~July 2027)
 - **Network:** Mainnet with seed nodes
 
@@ -721,7 +822,7 @@ fee = MIN_TX_FEE + (transaction_size_bytes × FEE_PER_BYTE)
 - ✅ Open-source (MIT license)
 - ✅ Community-driven development
 
-**Everyone starts equal on January 1, 2026.**
+**Everyone starts equal on January 18, 2026.**
 
 ### 8.4 Long-term Vision
 
@@ -738,7 +839,7 @@ Dilithion aims to be:
 ### 8.5 Call to Action
 
 **For Miners:**
-- CPU mining opens January 1, 2026
+- CPU mining opens January 18, 2026
 - Fair distribution, no ASIC advantage
 - Early adoption opportunity
 
@@ -772,10 +873,11 @@ Dilithion aims to be:
 | **Hash Algorithm** | SHA-3-256 (NIST FIPS 202) |
 | **Mining Algorithm** | RandomX (Monero-derived, ASIC-resistant) |
 | **Difficulty Adjustment** | Every 2,016 blocks (~5.6 days) |
+| **Fair Mining Protocol** | DFMP v2.0 (MIK-based penalties) |
 | **Address Format** | Dilithium3 public key hash (SHA-3) |
 | **Transaction Fee** | 0.0005 DIL base + 25 ions/byte |
 | **Confirmations (typical)** | 3-10 blocks (12-40 minutes) |
-| **Genesis Block** | Hardcoded, January 1, 2026 |
+| **Genesis Block** | Hardcoded, January 18, 2026 |
 
 ---
 
@@ -803,11 +905,15 @@ Dilithion aims to be:
 
 **CRYSTALS-Dilithium:** NIST-standardized post-quantum digital signature scheme based on lattice cryptography.
 
+**DFMP (Dilithion Fair Mining Protocol):** MIK-based difficulty adjustment system that prevents mining centralization by applying maturity and heat penalties to concentrated mining activity. Version 2.0 uses Mining Identity Keys (MIK) for persistent identity tracking.
+
 **Halving:** Reduction of block reward by 50%, occurs every 210,000 blocks (~1.6 years for Dilithion).
 
 **Hash Rate:** Measure of mining computational power, typically measured in hashes per second (H/s).
 
 **Lattice Cryptography:** Post-quantum cryptographic approach based on hard mathematical problems in lattice structures.
+
+**MIK (Mining Identity Key):** A dedicated Dilithium3 keypair used in DFMP v2.0 to uniquely identify miners. Closes the address rotation loophole from DFMP v1.x.
 
 **Module-LWE:** Learning With Errors over Module Lattices, the hard problem underlying Dilithium's security.
 
@@ -843,8 +949,8 @@ Dilithion aims to be:
 
 ---
 
-**Dilithion Whitepaper v1.0**
-**October 2025**
+**Dilithion Whitepaper v2.0**
+**January 2026**
 **"Quantum-Safe. Community-Driven. Fair Launch."**
 
 ---

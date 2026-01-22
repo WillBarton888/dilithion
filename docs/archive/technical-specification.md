@@ -1,8 +1,8 @@
 # Dilithion Technical Specification
 
-**Version:** 0.1.0-draft
-**Date:** October 2025
-**Status:** Foundation Phase
+**Version:** 2.0.0
+**Date:** January 2026
+**Status:** Production
 **Authors:** Dilithion Core Team
 
 ---
@@ -37,10 +37,10 @@ Quantum computers pose an existential threat to current cryptocurrencies that re
 ### 1.2 Design Goals
 
 1. **Quantum Resistance:** Secure against quantum computer attacks
-2. **Proven Consensus:** Reuse Bitcoin's battle-tested Nakamoto consensus
-3. **Minimal Changes:** Only modify what's necessary for quantum resistance
+2. **Proven Consensus:** Nakamoto-style proof-of-work consensus
+3. **ASIC Resistance:** RandomX CPU mining for decentralization
 4. **Fair Launch:** No premine, no ICO, complete decentralization
-5. **ASIC Compatibility:** Maintain SHA-256 mining for existing hardware
+5. **Fair Mining:** DFMP v2.0 prevents mining centralization
 
 ### 1.3 Scope
 
@@ -52,10 +52,9 @@ This specification covers:
 - Wallet and address format
 
 This specification does NOT cover:
-- Mining pool protocols (reuse Bitcoin's)
+- Mining pool protocols
 - Exchange integration
 - Future protocol upgrades
-- Economic policy (identical to Bitcoin)
 
 ---
 
@@ -64,31 +63,31 @@ This specification does NOT cover:
 ### 2.1 Digital Signature Scheme
 
 **Algorithm:** CRYSTALS-Dilithium
-**Parameter Set:** Dilithium-2
-**Security Level:** NIST Security Level 2 (equivalent to 128-bit security)
+**Parameter Set:** Dilithium3
+**Security Level:** NIST Security Level 3 (equivalent to AES-192)
 **Standard:** NIST FIPS 204
 
 #### 2.1.1 Parameter Specifications
 
 ```
-DILITHIUM_MODE = 2
+DILITHIUM_MODE = 3
 
 // Key sizes
-PUBLIC_KEY_SIZE = 1312 bytes
-SECRET_KEY_SIZE = 2560 bytes
-SIGNATURE_SIZE = 2420 bytes
+PUBLIC_KEY_SIZE = 1952 bytes
+SECRET_KEY_SIZE = 4032 bytes
+SIGNATURE_SIZE = 3309 bytes
 
-// Dilithium-2 parameters
+// Dilithium3 parameters
 q = 8380417 (prime modulus)
 d = 13 (dropped bits)
-τ = 39 (number of +1/-1 in c)
-γ1 = 2^17 (coefficient range)
-γ2 = (q-1)/88
-k = 4 (dimensions)
-l = 4 (dimensions)
-η = 2 (secret key range)
-β = τ * η = 78
-ω = 80 (max number of 1s in hint h)
+τ = 49 (number of +1/-1 in c)
+γ1 = 2^19 (coefficient range)
+γ2 = (q-1)/32
+k = 6 (dimensions)
+l = 5 (dimensions)
+η = 4 (secret key range)
+β = τ * η = 196
+ω = 55 (max number of 1s in hint h)
 ```
 
 #### 2.1.2 Key Generation
@@ -105,7 +104,7 @@ Algorithm:
 5. Pack sk = (ρ, K, tr, s1, s2, t0)
 6. Return (pk, sk)
 
-Implementation: pqcrystals_dilithium2_ref_keypair()
+Implementation: pqcrystals_dilithium3_ref_keypair()
 ```
 
 #### 2.1.3 Signature Generation
@@ -125,7 +124,7 @@ Algorithm:
 8. If ||z|| too large or ||w - cs2|| too large, restart
 9. Return σ = (z, h, c)
 
-Implementation: pqcrystals_dilithium2_ref_signature()
+Implementation: pqcrystals_dilithium3_ref_signature()
 ```
 
 #### 2.1.4 Signature Verification
@@ -143,26 +142,28 @@ Algorithm:
 6. Check number of 1s in h ≤ ω
 7. Return true if all checks pass
 
-Implementation: pqcrystals_dilithium2_ref_verify()
+Implementation: pqcrystals_dilithium3_ref_verify()
 ```
 
 ### 2.2 Hash Functions
 
-#### 2.2.1 SHA-256 (Unchanged from Bitcoin)
+#### 2.2.1 SHA-3 (Keccak)
 
-**Usage:** Block hashing, Merkle tree, Proof of Work
-**Rationale:** SHA-256 is quantum-resistant (Grover's algorithm only provides quadratic speedup)
-
-#### 2.2.2 BLAKE3
-
-**Usage:** Address generation (hash of public key)
+**Usage:** Address generation, transaction IDs, Merkle tree, internal hashing
 **Output Size:** 256 bits (32 bytes)
-**Rationale:** Modern, fast, secure hash function with 256-bit output (needed for larger public keys)
+**Standard:** NIST FIPS 202
+**Rationale:** Quantum-resistant, different construction than SHA-2 (defense in depth)
 
 ```cpp
 // Address generation
-address_hash = BLAKE3(public_key)
+address_hash = SHA3-256(public_key)
 ```
+
+#### 2.2.2 RandomX (Proof of Work)
+
+**Usage:** Mining proof-of-work
+**Memory:** 2 GB dataset
+**Rationale:** ASIC-resistant CPU mining for decentralization (same algorithm as Monero)
 
 ### 2.3 Random Number Generation
 
@@ -180,9 +181,9 @@ address_hash = BLAKE3(public_key)
 
 Bitcoin uses `RIPEMD160(SHA256(pubkey))` = 20 bytes.
 
-Dilithion uses `BLAKE3(pubkey)` = 32 bytes.
+Dilithion uses `SHA3-256(pubkey)` = 32 bytes.
 
-**Rationale:** Dilithium public keys are 1,312 bytes. Birthday attack resistance requires hash output ≥ 2×security_level. For 128-bit security, need 256-bit hash.
+**Rationale:** Dilithium3 public keys are 1,952 bytes. Birthday attack resistance requires hash output ≥ 2×security_level. For NIST Level 3 (192-bit) security, need 256-bit hash.
 
 ### 3.2 Address Encoding
 
@@ -220,8 +221,8 @@ Q<base58-encoded-address> (35 characters)
 ```cpp
 // From public key to address
 void GenerateAddress(const CPubKey& pubkey, std::string& address) {
-    // 1. Hash public key with BLAKE3
-    uint256 pubkey_hash = BLAKE3(pubkey.data(), pubkey.size());
+    // 1. Hash public key with SHA3-256
+    uint256 pubkey_hash = SHA3_256(pubkey.data(), pubkey.size());
 
     // 2. Encode with Bech32m
     std::vector<uint8_t> data(pubkey_hash.begin(), pubkey_hash.end());
@@ -256,7 +257,7 @@ class CTxIn {
 };
 ```
 
-**Key Difference:** `scriptSig` now contains Dilithium signatures (2,420 bytes) instead of ECDSA signatures (~72 bytes).
+**Key Difference:** `scriptSig` now contains Dilithium3 signatures (3,309 bytes) instead of ECDSA signatures (~72 bytes).
 
 ### 4.3 Script Templates
 
@@ -273,9 +274,9 @@ OP_DUP OP_HASH256 <32-byte-pubkey-hash> OP_EQUALVERIFY OP_CHECKSIG
 ```
 
 **Sizes:**
-- Signature: 2,420 bytes
-- Public key: 1,312 bytes
-- Total scriptSig: ~3,732 bytes (vs Bitcoin's ~107 bytes)
+- Signature: 3,309 bytes
+- Public key: 1,952 bytes
+- Total scriptSig: ~5,261 bytes (vs Bitcoin's ~107 bytes)
 
 #### 4.3.2 Pay-to-Script-Hash (P2SH)
 
@@ -297,11 +298,11 @@ OP_HASH256 <32-byte-script-hash> OP_EQUAL
 
 **Dilithion Average Transaction:**
 - 1 input, 2 outputs
-- ~3,850 bytes (≈15× larger)
+- ~5,500 bytes (≈22× larger)
 
 **Worst Case (10 inputs, 2 outputs):**
 - Bitcoin: ~1,500 bytes
-- Dilithion: ~38,000 bytes (≈25× larger)
+- Dilithion: ~55,000 bytes (≈37× larger)
 
 ### 4.5 Transaction Weight
 
@@ -362,10 +363,10 @@ class CBlockHeader {
 
 ### 5.4 Merkle Tree
 
-**Hash Function:** SHA-256 (unchanged)
-**Construction:** Identical to Bitcoin
+**Hash Function:** SHA-3 (Keccak-256)
+**Construction:** Standard Merkle tree
 
-**Rationale:** SHA-256 is quantum-resistant against Grover's algorithm. No changes needed.
+**Rationale:** SHA-3 is quantum-resistant against Grover's algorithm and provides different internal structure than SHA-2 for defense in depth.
 
 ---
 
@@ -385,7 +386,7 @@ const unsigned int MAX_BLOCK_SIZE = 4000000;  // 4 MB
 
 #### 6.1.2 Transaction Validation
 
-Identical to Bitcoin, except signature verification uses Dilithium:
+Similar to Bitcoin, except signature verification uses Dilithium3:
 
 ```cpp
 bool CheckSig(const vector<unsigned char>& vchSig,
@@ -393,48 +394,44 @@ bool CheckSig(const vector<unsigned char>& vchSig,
               const CScript& scriptCode,
               const CTransaction& txTo, unsigned int nIn) {
 
-    // Verify sizes
-    if (vchPubKey.size() != 1312) return false;
-    if (vchSig.size() != 2420) return false;
+    // Verify sizes (Dilithium3)
+    if (vchPubKey.size() != 1952) return false;
+    if (vchSig.size() != 3309) return false;
 
-    // Compute signature hash (same as Bitcoin)
+    // Compute signature hash
     uint256 sighash = SignatureHash(scriptCode, txTo, nIn, nHashType);
 
-    // Verify with Dilithium
-    return dilithium::Verify(vchSig.data(), vchSig.size(),
-                             sighash.begin(), 32,
-                             vchPubKey.data());
+    // Verify with Dilithium3
+    return dilithium3::Verify(vchSig.data(), vchSig.size(),
+                              sighash.begin(), 32,
+                              vchPubKey.data());
 }
 ```
 
 ### 6.2 Proof of Work
 
-**UNCHANGED from Bitcoin:**
-
-**Algorithm:** SHA-256d (double SHA-256)
-**Target Adjustment:** Every 2,016 blocks
-**Target Block Time:** 10 minutes
-**Target Timespan:** 2 weeks
+**Algorithm:** RandomX (ASIC-resistant CPU mining)
+**Target Adjustment:** Every 2,016 blocks (~5.6 days at 4-minute blocks)
+**Target Block Time:** 4 minutes (240 seconds)
+**Target Timespan:** ~5.6 days
 
 ```cpp
 uint256 CalculateNextWorkRequired(const CBlockIndex* pindexLast,
                                   int64_t nFirstBlockTime,
                                   const Consensus::Params& params) {
-    // IDENTICAL to Bitcoin
-    // No changes needed - SHA-256 is quantum-resistant
+    // Standard difficulty adjustment algorithm
+    // Adjusted for 4-minute block time
 }
 ```
 
-**Rationale:** SHA-256 only gets square-root speedup from Grover's algorithm, which is acceptable. Reusing Bitcoin's PoW allows ASIC compatibility.
+**Rationale:** RandomX is designed for ASIC-resistance, keeping mining decentralized and accessible to anyone with a CPU. Same algorithm used by Monero since 2019.
 
 ### 6.3 Block Reward and Supply
 
-**IDENTICAL to Bitcoin:**
-
-- **Initial Reward:** 50 DILI
-- **Halving Interval:** 210,000 blocks (~4 years)
-- **Total Supply:** 21,000,000 DILI
-- **Smallest Unit:** 0.00000001 DILI (1 satoshi)
+- **Initial Reward:** 50 DIL
+- **Halving Interval:** 210,000 blocks (~1.6 years at 4-minute blocks)
+- **Total Supply:** 21,000,000 DIL
+- **Smallest Unit:** 0.00000001 DIL (1 ion)
 
 ```cpp
 CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams) {
@@ -449,24 +446,22 @@ CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams) {
 
 ### 6.4 Difficulty Adjustment
 
-**IDENTICAL to Bitcoin:**
-
 ```cpp
-// Retarget every 2,016 blocks
-const int64_t nTargetTimespan = 14 * 24 * 60 * 60;  // 2 weeks
-const int64_t nTargetSpacing = 10 * 60;             // 10 minutes
-const int64_t nInterval = nTargetTimespan / nTargetSpacing;  // 2,016 blocks
+// Retarget every 2,016 blocks (~5.6 days)
+const int64_t nTargetTimespan = 2016 * 240;         // 2016 blocks × 4 minutes
+const int64_t nTargetSpacing = 240;                 // 4 minutes (240 seconds)
+const int64_t nInterval = 2016;                     // 2,016 blocks
 ```
 
 ### 6.5 Genesis Block
 
-**Timestamp:** To be determined (launch date)
-**Difficulty:** 0x1d00ffff (same as Bitcoin's genesis)
-**Reward:** 50 DILI
-**Message:** (To be determined - current event headline)
+**Timestamp:** January 18, 2026, 00:00:00 UTC
+**Difficulty:** 0x1e01fffe
+**Reward:** 50 DIL
+**Message:** "Dilithion Mainnet v2.0.0 - Fair Launch Reset - Quantum-Resistant Digital Gold"
 
 ```cpp
-const char* pszTimestamp = "NY Times 01/Jan/2027 Quantum Computer Threatens Bitcoin";
+const char* pszTimestamp = "Dilithion Mainnet v2.0.0 - Fair Launch Reset - Quantum-Resistant Digital Gold";
 ```
 
 ---
@@ -498,9 +493,10 @@ All P2P messages use Bitcoin's existing format:
 
 ### 7.4 Default Ports
 
-**Mainnet:** 8433 (not 8333)
-**Testnet:** 18433 (not 18333)
-**RPC:** 8432 (not 8332)
+**Mainnet P2P:** 8444
+**Mainnet RPC:** 8332
+**Testnet P2P:** 18444
+**Testnet RPC:** 18332
 
 ### 7.5 Message Size Limits
 
@@ -534,15 +530,15 @@ Compact blocks (BIP 152) work with larger transactions. Short transaction IDs re
 **Key Storage:**
 ```cpp
 struct CKey {
-    unsigned char vchPrivKey[2560];  // Dilithium secret key
+    unsigned char vchPrivKey[4032];  // Dilithium3 secret key
     bool fCompressed = false;        // Not used (no compression for Dilithium)
 };
 ```
 
 **Wallet Size Impact:**
 - Bitcoin: 32 bytes per private key
-- Dilithion: 2,560 bytes per private key (80× larger)
-- 1,000 keys: Bitcoin = 32 KB, Dilithion = 2.5 MB
+- Dilithion: 4,032 bytes per private key (126× larger)
+- 1,000 keys: Bitcoin = 32 KB, Dilithion = 4 MB
 
 #### 8.1.2 HD Wallet Derivation
 
@@ -586,18 +582,18 @@ std::map<uint256, CAddressBookData> mapAddressBook;
 **Dilithium Security:** Based on hardness of Module-LWE (Learning With Errors over module lattices).
 
 **Known Attacks:**
-- Best classical attack: 2^128 operations (for Dilithium-2)
-- Best quantum attack: 2^128 operations (Grover's algorithm doesn't help significantly)
+- Best classical attack: 2^192 operations (for Dilithium3)
+- Best quantum attack: 2^192 operations (Grover's algorithm doesn't help significantly)
 
-**Conclusion:** Dilithium-2 provides adequate post-quantum security.
+**Conclusion:** Dilithium3 provides NIST Level 3 post-quantum security (equivalent to AES-192).
 
 #### 9.1.2 Hash Functions
 
-**SHA-256:** Quantum attack via Grover's algorithm reduces security from 256 bits to 128 bits (2^128 operations).
+**SHA-3:** Quantum attack via Grover's algorithm reduces security from 256 bits to 128 bits (2^128 operations).
 
-**Verdict:** Still acceptable for mining and Merkle trees. No change needed.
+**Verdict:** Still acceptable for address hashing and Merkle trees.
 
-**BLAKE3:** Same analysis applies. 256-bit output provides 128-bit quantum security.
+**RandomX:** Memory-hard proof-of-work provides minimal quantum advantage. ASIC-resistant design maintains mining decentralization.
 
 ### 9.2 Side-Channel Resistance
 
@@ -648,17 +644,17 @@ std::map<uint256, CAddressBookData> mapAddressBook;
 
 #### 10.2.1 Signature Verification
 
-**Dilithium-2 Performance:**
-- Key generation: ~0.3 ms
-- Signing: ~1.0 ms
-- Verification: ~0.4 ms
+**Dilithium3 Performance:**
+- Key generation: ~0.4 ms
+- Signing: ~1.5 ms
+- Verification: ~0.5 ms
 
 **Bitcoin (ECDSA) Performance:**
 - Key generation: ~0.05 ms
 - Signing: ~0.05 ms
 - Verification: ~0.2 ms
 
-**Impact:** Signature verification is 2× slower, but still <1ms. Acceptable for consensus validation.
+**Impact:** Signature verification is ~2.5× slower, but still <1ms. Acceptable for consensus validation.
 
 #### 10.2.2 Block Propagation
 
@@ -675,7 +671,7 @@ std::map<uint256, CAddressBookData> mapAddressBook;
 
 **Blockchain Size Growth:**
 - Bitcoin: ~500 GB after 14 years
-- Dilithion: Estimated ~7,500 GB after 14 years (15× larger)
+- Dilithion: Estimated ~10 TB after 14 years (20× larger due to Dilithium3 signatures)
 
 **Mitigation:** Pruning mode, assumevalid, lighter nodes.
 
@@ -694,12 +690,11 @@ std::map<uint256, CAddressBookData> mapAddressBook;
 - Bitcoin addresses
 - Bitcoin wallets
 - Bitcoin block explorers
-- Bitcoin mining pools (without modification)
+- Bitcoin ASIC miners (RandomX is CPU-only)
 
 **Compatible with:**
-- Bitcoin ASIC miners (SHA-256)
-- Bitcoin difficulty adjustment
-- Bitcoin's economic model
+- Nakamoto-style consensus model
+- Standard difficulty adjustment algorithm
 
 ---
 
@@ -729,33 +724,34 @@ std::map<uint256, CAddressBookData> mapAddressBook;
 
 | Feature | Bitcoin | Dilithion |
 |---------|---------|-----------|
-| **Signature Scheme** | ECDSA (secp256k1) | CRYSTALS-Dilithium-2 |
-| **Public Key Size** | 33 bytes | 1,312 bytes |
-| **Signature Size** | ~72 bytes | 2,420 bytes |
+| **Signature Scheme** | ECDSA (secp256k1) | CRYSTALS-Dilithium3 |
+| **Public Key Size** | 33 bytes | 1,952 bytes |
+| **Signature Size** | ~72 bytes | 3,309 bytes |
 | **Address Hash Size** | 20 bytes | 32 bytes |
-| **Average TX Size** | ~250 bytes | ~3,850 bytes |
+| **Average TX Size** | ~250 bytes | ~5,500 bytes |
 | **Block Size Limit** | 1 MB | 4 MB |
-| **Block Time** | 10 minutes | 10 minutes |
-| **Difficulty Adjustment** | 2,016 blocks | 2,016 blocks |
-| **Total Supply** | 21M BTC | 21M DILI |
-| **Mining Algorithm** | SHA-256 | SHA-256 |
+| **Block Time** | 10 minutes | 4 minutes |
+| **Difficulty Adjustment** | 2,016 blocks (~2 weeks) | 2,016 blocks (~5.6 days) |
+| **Total Supply** | 21M BTC | 21M DIL |
+| **Mining Algorithm** | SHA-256 (ASIC) | RandomX (CPU) |
+| **Halving Interval** | ~4 years | ~1.6 years |
 | **Quantum Resistant** | ❌ No | ✅ Yes |
 
 ---
 
 ## Appendix B: Test Vectors
 
-### B.1 Dilithium Test Vector
+### B.1 Dilithium3 Test Vector
 
 ```
 // From NIST test vectors
 seed: 0x00...00 (32 bytes of zeros)
 
-public_key: 0x8e7625... (1312 bytes)
-secret_key: 0x000000... (2560 bytes)
+public_key: 0x8e7625... (1952 bytes)
+secret_key: 0x000000... (4032 bytes)
 
 message: "test message"
-signature: 0xc948ef... (2420 bytes)
+signature: 0xc948ef... (3309 bytes)
 
 verification: PASS
 ```
@@ -764,8 +760,8 @@ verification: PASS
 
 ```
 // Example address generation
-public_key (hex): 8e7625...  (1312 bytes)
-blake3_hash: a3b2c1d4e5f6...  (32 bytes)
+public_key (hex): 8e7625...  (1952 bytes)
+sha3_256_hash: a3b2c1d4e5f6...  (32 bytes)
 bech32m_address: qb1q5we9c85xfwqp...
 
 // Legacy format
@@ -776,6 +772,16 @@ base58check_address: Q1A2B3C4D5E6F7G8H9...
 
 ## Appendix C: Change Log
 
+### Version 2.0.0 (January 2026)
+- Updated to production status
+- Upgraded from Dilithium-2 to Dilithium3 (NIST Level 3 security)
+- Changed mining algorithm from SHA-256 to RandomX (ASIC-resistant)
+- Changed block time from 10 minutes to 4 minutes
+- Updated key sizes: public 1,952 bytes, private 4,032 bytes, signature 3,309 bytes
+- Added DFMP v2.0 (Dilithion Fair Mining Protocol) with MIK
+- Changed hashing from SHA-256/BLAKE3 to SHA-3 throughout
+- Genesis block: January 18, 2026
+
 ### Version 0.1.0-draft (October 2025)
 - Initial draft specification
 - Core cryptographic parameters defined
@@ -784,8 +790,8 @@ base58check_address: Q1A2B3C4D5E6F7G8H9...
 
 ---
 
-**Status:** DRAFT - Subject to change during development
-**Next Review:** After proof-of-concept implementation
+**Status:** PRODUCTION
+**Last Updated:** January 2026
 
 ---
 
