@@ -1674,6 +1674,16 @@ void CConnman::RecordExternalIP(const std::string& ip, int peerId) {
     if (bestScore >= 2 && m_bestExternalIP != previousBest) {
         LogPrintf(NET, INFO, "[CConnman] External IP detected: %s (confirmed by %d peers)\n",
                   m_bestExternalIP.c_str(), bestScore);
+
+        // Add external IP to local addresses for self-connection prevention
+        // This prevents connecting to ourselves when our own address is advertised back to us
+        {
+            std::lock_guard<std::mutex> lock2(cs_localAddresses);
+            if (m_localAddresses.insert(m_bestExternalIP).second) {
+                LogPrintf(NET, INFO, "[CConnman] Added external IP %s to self-connection filter\n",
+                          m_bestExternalIP.c_str());
+            }
+        }
     }
 }
 
@@ -1683,7 +1693,18 @@ std::string CConnman::GetExternalIP() const {
 }
 
 void CConnman::SetExternalIP(const std::string& ip) {
-    std::lock_guard<std::mutex> lock(cs_externalIP);
-    m_bestExternalIP = ip;
+    {
+        std::lock_guard<std::mutex> lock(cs_externalIP);
+        m_bestExternalIP = ip;
+    }
     LogPrintf(NET, INFO, "[CConnman] External IP set manually: %s\n", ip.c_str());
+
+    // Add to local addresses for self-connection prevention
+    {
+        std::lock_guard<std::mutex> lock(cs_localAddresses);
+        if (m_localAddresses.insert(ip).second) {
+            LogPrintf(NET, INFO, "[CConnman] Added external IP %s to self-connection filter\n",
+                      ip.c_str());
+        }
+    }
 }
