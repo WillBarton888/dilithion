@@ -1516,6 +1516,7 @@ void CConnman::InactivityCheck() {
     // Constants for keepalive
     static constexpr int64_t PING_INTERVAL_SECONDS = 60;      // Send ping after 60s of inactivity
     static constexpr int64_t TIMEOUT_SECONDS = 120;           // Disconnect after 120s of no response
+    static constexpr int64_t HANDSHAKE_TIMEOUT_SECONDS = 30;  // Disconnect if handshake not complete after 30s
 
     // Track last ping sent time per node (static to persist across calls)
     static std::map<int, int64_t> last_ping_sent;
@@ -1529,11 +1530,23 @@ void CConnman::InactivityCheck() {
         for (auto& node : m_nodes) {
             if (node->fDisconnect.load()) continue;
 
-            // Skip nodes that haven't completed handshake
-            if (node->state.load() != CNode::STATE_CONNECTED) continue;
+            // Skip nodes that haven't established TCP connection yet
+            if (node->state.load() < CNode::STATE_CONNECTED) continue;
 
             int64_t last_recv = node->nLastRecv.load();
             int node_id = node->id;
+            CNode::State node_state = node->state.load();
+
+            // Check for handshake timeout - disconnect nodes that haven't completed handshake
+            if (node_state < CNode::STATE_HANDSHAKE_COMPLETE) {
+                int64_t connect_time = node->nTimeConnected;
+                if (connect_time > 0 && (now - connect_time) > HANDSHAKE_TIMEOUT_SECONDS) {
+                    LogPrintf(NET, WARN, "[CConnman] Node %d handshake timeout (state=%d, %llds since connect)\n",
+                              node_id, static_cast<int>(node_state), now - connect_time);
+                    nodes_to_disconnect.push_back(node_id);
+                    continue;
+                }
+            }
 
             // If we've never received anything, use connect time
             if (last_recv == 0) {
