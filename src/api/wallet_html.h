@@ -1396,13 +1396,18 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        // Rescan wallet for missing transactions
+        // Rescan wallet for missing transactions (clears old data first for chain resets)
         async function rescanWallet() {
             const btnText = document.getElementById('rescanBtnText');
             const originalText = btnText.textContent;
-            btnText.textContent = 'Scanning...';
+            btnText.textContent = 'Clearing...';
 
             try {
+                // First clear old transaction history (important after chain resets)
+                await rpcCall('clearwallettxs', {});
+                btnText.textContent = 'Scanning...';
+
+                // Then rescan for new transactions
                 const result = await rpcCall('rescanwallet', {});
                 btnText.textContent = 'Done!';
                 console.log('[Wallet] Rescan result:', result);

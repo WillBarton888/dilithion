@@ -3193,6 +3193,9 @@ std::string CRPCServer::RPC_RescanWallet(const std::string& params) {
         throw std::runtime_error("Wallet rescan failed");
     }
 
+    // Save wallet after rescan to persist found UTXOs
+    m_wallet->Save("");
+
     // Get updated balance
     unsigned int currentHeight = m_chainstate ? m_chainstate->GetHeight() : 0;
     CAmount balance = m_wallet->GetAvailableBalance(*m_utxo_set, currentHeight);
