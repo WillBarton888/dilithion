@@ -52,7 +52,7 @@ namespace NetProtocol {
 class CHeadersManager {
 public:
     CHeadersManager();
-    ~CHeadersManager() = default;
+    ~CHeadersManager();  // Explicit destructor for proper cleanup order
 
     // Disable copying
     CHeadersManager(const CHeadersManager&) = delete;

@@ -54,6 +54,29 @@ CHeadersManager::CHeadersManager()
               << std::endl;
 }
 
+CHeadersManager::~CHeadersManager()
+{
+    // Ensure threads are stopped (idempotent - safe to call multiple times)
+    StopValidationThread();
+
+    // Explicitly clear containers in a controlled order to prevent
+    // any potential issues with default destruction order
+    {
+        std::lock_guard<std::mutex> lock(cs_headers);
+        mapHeadersSyncStates.clear();
+        mapHeaders.clear();
+        mapHeightIndex.clear();
+        setChainTips.clear();
+        mapPeerStates.clear();
+        mapPeerStartHeight.clear();
+        m_rejectedHashes.clear();
+        m_bestChainCache.clear();
+    }
+
+    // Clear chain tips tracker
+    m_chainTipsTracker.Clear();
+}
+
 // ============================================================================
 // Public API: Header Processing
 // ============================================================================
