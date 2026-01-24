@@ -3717,16 +3717,26 @@ bool CWallet::InitializeHDWallet(const std::string& mnemonic, const std::string&
     nHDExternalChainIndex = 0;
     nHDInternalChainIndex = 0;
 
-    // Derive first receiving address
+    // BUG #115 FIX: Pre-generate HD_GAP_LIMIT (20) addresses on wallet creation
+    // Without this, only 1 address is generated. When mining in "privacy mode"
+    // generates new addresses, old blocks are never rescanned with those addresses.
+    // By pre-generating 20 addresses, the initial rescan will check all of them.
     CHDKeyPath firstPath = CHDKeyPath::ReceiveAddress(0, 0);
-    if (!DeriveAndCacheHDAddress(firstPath)) {
-        // Rollback on failure
-        fIsHDWallet = false;
-        hdMasterKey.Wipe();
-        memory_cleanse(vchEncryptedMnemonic.data(), vchEncryptedMnemonic.size());
-        vchEncryptedMnemonic.clear();
-        vchMnemonicIV.clear();
-        return false;
+    for (uint32_t i = 0; i < HD_GAP_LIMIT; i++) {
+        CHDKeyPath path = CHDKeyPath::ReceiveAddress(0, i);
+        if (!DeriveAndCacheHDAddress(path)) {
+            if (i == 0) {
+                // Rollback on failure of first address (critical)
+                fIsHDWallet = false;
+                hdMasterKey.Wipe();
+                memory_cleanse(vchEncryptedMnemonic.data(), vchEncryptedMnemonic.size());
+                vchEncryptedMnemonic.clear();
+                vchMnemonicIV.clear();
+                return false;
+            }
+            // Non-critical: proceed with addresses we have
+            break;
+        }
     }
 
     // BUG #100 FIX: Set defaultAddress for HD wallets so GetPubKeyHash() works for mining
@@ -3737,7 +3747,7 @@ bool CWallet::InitializeHDWallet(const std::string& mnemonic, const std::string&
         defaultAddress = it->second;
     }
 
-    nHDExternalChainIndex = 1;  // Next address index
+    nHDExternalChainIndex = HD_GAP_LIMIT;  // Next address index after pre-generated ones
 
     // Auto-save if enabled
     if (m_autoSave && !m_walletFile.empty()) {
