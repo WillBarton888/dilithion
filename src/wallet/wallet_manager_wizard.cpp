@@ -137,109 +137,168 @@ bool CWalletManager::RunFirstTimeSetupWizard() {
     // Display welcome screen
     DisplayWelcomeScreen();
 
-    if (!PromptConfirmation("Are you ready to create your secure Dilithion wallet?")) {
-        PrintWarning("Setup cancelled. You can run the wizard again by deleting wallet.dat");
+    // Ask user whether to create new or restore existing wallet
+    std::cout << COLOR_BOLD << "What would you like to do?" << COLOR_RESET << std::endl;
+    std::cout << std::endl;
+    std::cout << "  " << COLOR_GREEN << "1" << COLOR_RESET << " - Create a NEW wallet" << std::endl;
+    std::cout << "  " << COLOR_YELLOW << "2" << COLOR_RESET << " - RESTORE wallet from recovery phrase" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Enter choice (1 or 2): ";
+
+    std::string choice;
+    std::getline(std::cin, choice);
+
+    bool restore_mode = (choice == "2");
+
+    if (choice != "1" && choice != "2") {
+        PrintWarning("Invalid choice. Setup cancelled.");
         return false;
     }
 
     std::cout << std::endl;
     std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
-    std::cout << COLOR_CYAN << COLOR_BOLD << "STEP 1: Create HD Wallet" << COLOR_RESET << std::endl;
+    std::cout << COLOR_CYAN << COLOR_BOLD << (restore_mode ? "STEP 1: Restore HD Wallet" : "STEP 1: Create HD Wallet") << COLOR_RESET << std::endl;
     std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
     std::cout << std::endl;
 
-    // Create HD wallet using existing interactive method
     std::string mnemonic;
 
-    // Show security warning first
-    PrintMnemonicSecurityWarning();
-
-    if (!PromptConfirmation("Have you read and understood the security warning?")) {
-        PrintWarning("Setup cancelled");
-        return false;
-    }
-
-    std::cout << std::endl;
-    std::cout << COLOR_YELLOW << "Generating secure HD wallet..." << COLOR_RESET << std::endl;
-    std::cout << "  ✓ Generating cryptographically secure random seed..." << std::endl;
-    std::cout << "  ✓ Creating 24-word recovery phrase..." << std::endl;
-    std::cout << "  ✓ Deriving master keys..." << std::endl;
-    std::cout << "  ✓ Generating first addresses..." << std::endl;
-
-    // Generate wallet without passphrase (keep it simple for default setup)
-    if (!m_wallet->GenerateHDWallet(mnemonic, "")) {
-        PrintError("Failed to generate HD wallet");
-        return false;
-    }
-
-    std::cout << std::endl;
-    PrintSuccess("HD Wallet created successfully!");
-    std::cout << std::endl;
-
-    // Step 2: Display and verify mnemonic
-    std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
-    std::cout << COLOR_CYAN << COLOR_BOLD << "STEP 2: Your Recovery Phrase" << COLOR_RESET << std::endl;
-    std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
-    std::cout << std::endl;
-
-    std::cout << COLOR_RED << COLOR_BOLD << "⚠️  THIS IS THE ONLY WAY TO RECOVER YOUR FUNDS" << COLOR_RESET << std::endl;
-    std::cout << std::endl;
-    std::cout << COLOR_YELLOW << "REQUIRED: Write these words on paper RIGHT NOW" << COLOR_RESET << std::endl;
-    std::cout << std::endl;
-
-    // Display mnemonic in a box
-    std::cout << COLOR_RED << COLOR_BOLD << "╔══════════════════════════════════════════════════════════════╗" << COLOR_RESET << std::endl;
-    std::cout << COLOR_RED << COLOR_BOLD << "║             YOUR 24-WORD RECOVERY PHRASE                     ║" << COLOR_RESET << std::endl;
-    std::cout << COLOR_RED << COLOR_BOLD << "╠══════════════════════════════════════════════════════════════╣" << COLOR_RESET << std::endl;
-
-    // Format mnemonic in groups of 6 words per line
-    std::istringstream iss(mnemonic);
-    std::vector<std::string> words;
-    std::string word;
-    while (iss >> word) {
-        words.push_back(word);
-    }
-
-    for (size_t i = 0; i < words.size(); i += 6) {
-        std::cout << COLOR_RED << COLOR_BOLD << "║  ";
-        for (size_t j = i; j < std::min(i + 6, words.size()); ++j) {
-            std::cout << std::setw(2) << (j + 1) << "." << std::setw(10) << std::left << words[j] << " ";
-        }
-        std::cout << std::setw(0) << COLOR_RESET << std::endl;
-    }
-
-    std::cout << COLOR_RED << COLOR_BOLD << "╚══════════════════════════════════════════════════════════════╝" << COLOR_RESET << std::endl;
-    std::cout << std::endl;
-
-    std::cout << COLOR_GREEN << "✓ DO:" << COLOR_RESET << " Write on paper, store in safe" << std::endl;
-    std::cout << COLOR_RED << "✗ DON'T:" << COLOR_RESET << " Screenshot, email, or cloud storage" << std::endl;
-    std::cout << std::endl;
-
-    // Verification - user must type first, middle, and last word
-    std::cout << COLOR_YELLOW << "To verify you wrote it down, please type:" << COLOR_RESET << std::endl;
-    std::cout << std::endl;
-
-    // Verify first word
-    std::cout << "The FIRST word (word #1): ";
-    std::string first_word_confirm;
-    std::getline(std::cin, first_word_confirm);
-
-    if (first_word_confirm != words[0]) {
-        PrintError("Incorrect! Please verify you wrote down the mnemonic correctly.");
-        PrintWarning("The first word is: " + words[0]);
+    if (restore_mode) {
+        // Restore from mnemonic
+        std::cout << COLOR_YELLOW << "Enter your 24-word recovery phrase:" << COLOR_RESET << std::endl;
+        std::cout << "(separate words with spaces)" << std::endl;
         std::cout << std::endl;
+        std::cout << "> ";
+        std::getline(std::cin, mnemonic);
 
-        if (!PromptConfirmation("Did you write down all 24 words correctly?")) {
-            PrintError("Setup cannot continue without verified mnemonic backup");
+        // Trim whitespace
+        size_t start = mnemonic.find_first_not_of(" \t\n\r");
+        size_t end = mnemonic.find_last_not_of(" \t\n\r");
+        if (start != std::string::npos && end != std::string::npos) {
+            mnemonic = mnemonic.substr(start, end - start + 1);
+        }
+
+        // Normalize whitespace (collapse multiple spaces)
+        std::string normalized;
+        bool last_was_space = false;
+        for (char c : mnemonic) {
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                if (!last_was_space && !normalized.empty()) {
+                    normalized += ' ';
+                    last_was_space = true;
+                }
+            } else {
+                normalized += std::tolower(c);
+                last_was_space = false;
+            }
+        }
+        mnemonic = normalized;
+
+        std::cout << std::endl;
+        std::cout << COLOR_YELLOW << "Restoring wallet from recovery phrase..." << COLOR_RESET << std::endl;
+
+        if (!m_wallet->RestoreHDWallet(mnemonic, "")) {
+            PrintError("Failed to restore HD wallet. Please check your recovery phrase.");
             return false;
         }
+
+        std::cout << std::endl;
+        PrintSuccess("HD Wallet restored successfully!");
+        std::cout << std::endl;
     } else {
-        PrintSuccess("Verification successful!");
+        // Create new wallet
+        // Show security warning first
+        PrintMnemonicSecurityWarning();
+
+        if (!PromptConfirmation("Have you read and understood the security warning?")) {
+            PrintWarning("Setup cancelled");
+            return false;
+        }
+
+        std::cout << std::endl;
+        std::cout << COLOR_YELLOW << "Generating secure HD wallet..." << COLOR_RESET << std::endl;
+        std::cout << "  ✓ Generating cryptographically secure random seed..." << std::endl;
+        std::cout << "  ✓ Creating 24-word recovery phrase..." << std::endl;
+        std::cout << "  ✓ Deriving master keys..." << std::endl;
+        std::cout << "  ✓ Generating first addresses..." << std::endl;
+
+        // Generate wallet without passphrase (keep it simple for default setup)
+        if (!m_wallet->GenerateHDWallet(mnemonic, "")) {
+            PrintError("Failed to generate HD wallet");
+            return false;
+        }
+
+        std::cout << std::endl;
+        PrintSuccess("HD Wallet created successfully!");
+        std::cout << std::endl;
     }
 
-    std::cout << std::endl;
+    // Step 2: Display and verify mnemonic (only for new wallets, not restore)
+    if (!restore_mode) {
+        std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
+        std::cout << COLOR_CYAN << COLOR_BOLD << "STEP 2: Your Recovery Phrase" << COLOR_RESET << std::endl;
+        std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
+        std::cout << std::endl;
 
-    // Step 3: Encrypt wallet
+        std::cout << COLOR_RED << COLOR_BOLD << "⚠️  THIS IS THE ONLY WAY TO RECOVER YOUR FUNDS" << COLOR_RESET << std::endl;
+        std::cout << std::endl;
+        std::cout << COLOR_YELLOW << "REQUIRED: Write these words on paper RIGHT NOW" << COLOR_RESET << std::endl;
+        std::cout << std::endl;
+
+        // Display mnemonic in a box
+        std::cout << COLOR_RED << COLOR_BOLD << "╔══════════════════════════════════════════════════════════════╗" << COLOR_RESET << std::endl;
+        std::cout << COLOR_RED << COLOR_BOLD << "║             YOUR 24-WORD RECOVERY PHRASE                     ║" << COLOR_RESET << std::endl;
+        std::cout << COLOR_RED << COLOR_BOLD << "╠══════════════════════════════════════════════════════════════╣" << COLOR_RESET << std::endl;
+
+        // Format mnemonic in groups of 6 words per line
+        std::istringstream iss(mnemonic);
+        std::vector<std::string> words;
+        std::string word;
+        while (iss >> word) {
+            words.push_back(word);
+        }
+
+        for (size_t i = 0; i < words.size(); i += 6) {
+            std::cout << COLOR_RED << COLOR_BOLD << "║  ";
+            for (size_t j = i; j < std::min(i + 6, words.size()); ++j) {
+                std::cout << std::setw(2) << (j + 1) << "." << std::setw(10) << std::left << words[j] << " ";
+            }
+            std::cout << std::setw(0) << COLOR_RESET << std::endl;
+        }
+
+        std::cout << COLOR_RED << COLOR_BOLD << "╚══════════════════════════════════════════════════════════════╝" << COLOR_RESET << std::endl;
+        std::cout << std::endl;
+
+        std::cout << COLOR_GREEN << "✓ DO:" << COLOR_RESET << " Write on paper, store in safe" << std::endl;
+        std::cout << COLOR_RED << "✗ DON'T:" << COLOR_RESET << " Screenshot, email, or cloud storage" << std::endl;
+        std::cout << std::endl;
+
+        // Verification - user must type first, middle, and last word
+        std::cout << COLOR_YELLOW << "To verify you wrote it down, please type:" << COLOR_RESET << std::endl;
+        std::cout << std::endl;
+
+        // Verify first word
+        std::cout << "The FIRST word (word #1): ";
+        std::string first_word_confirm;
+        std::getline(std::cin, first_word_confirm);
+
+        if (first_word_confirm != words[0]) {
+            PrintError("Incorrect! Please verify you wrote down the mnemonic correctly.");
+            PrintWarning("The first word is: " + words[0]);
+            std::cout << std::endl;
+
+            if (!PromptConfirmation("Did you write down all 24 words correctly?")) {
+                PrintError("Setup cannot continue without verified mnemonic backup");
+                return false;
+            }
+        } else {
+            PrintSuccess("Verification successful!");
+        }
+
+        std::cout << std::endl;
+    }
+
+    // Step 3 (or Step 2 in restore mode): Encrypt wallet
     std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
     std::cout << COLOR_CYAN << COLOR_BOLD << "STEP 3: Encrypt Your Wallet" << COLOR_RESET << std::endl;
     std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
