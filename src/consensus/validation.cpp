@@ -342,11 +342,11 @@ bool CBlockValidator::CheckCoinbase(
     }
 
     if (!foundDevFund) {
-        error = "Missing Dev Fund output in coinbase (address: DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC)";
+        error = "Missing Dev Fund output in coinbase (address: DJrywx4AsVQSPLZCKRdg8erZdPMNaRSrKq)";
         return false;
     }
     if (!foundDevReward) {
-        error = "Missing Dev Reward output in coinbase (address: DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR)";
+        error = "Missing Dev Reward output in coinbase (address: DRne9ygVbQJFKma1pyEMPpyRbjmVKNcbWe)";
         return false;
     }
 

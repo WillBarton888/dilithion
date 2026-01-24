@@ -862,7 +862,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
     // MAINNET ONLY: Add dev fund and dev reward outputs
     if (!isTestnet && devFundAmount > 0) {
-        // OUTPUT 1: Dev Fund (1% of subsidy) -> DL7XM8Gd9fa4ta8jaPXoE9zGiKtM1SVnRC
+        // OUTPUT 1: Dev Fund (1% of subsidy) -> DJrywx4AsVQSPLZCKRdg8erZdPMNaRSrKq
         CTxOut devFundOut;
         devFundOut.nValue = devFundAmount;
         std::vector<uint8_t> devFundScript;
@@ -877,7 +877,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         devFundOut.scriptPubKey = devFundScript;
         coinbaseTx.vout.push_back(devFundOut);
 
-        // OUTPUT 2: Dev Reward (1% of subsidy) -> DLcWZkgvyJEC2rGM7KgzJH2KkjN7qfk7MR
+        // OUTPUT 2: Dev Reward (1% of subsidy) -> DRne9ygVbQJFKma1pyEMPpyRbjmVKNcbWe
         CTxOut devRewardOut;
         devRewardOut.nValue = devRewardAmount;
         std::vector<uint8_t> devRewardScript;
@@ -895,8 +895,8 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         std::cout << "[Mining] Coinbase outputs: " << coinbaseTx.vout.size()
                   << " (miner=" << minerAmount/100000000.0
                   << " DIL, devFund=" << devFundAmount/100000000.0
-                  << " DIL -> DL7XM8..., devReward=" << devRewardAmount/100000000.0
-                  << " DIL -> DLcWZk...)" << std::endl;
+                  << " DIL -> DJrywx..., devReward=" << devRewardAmount/100000000.0
+                  << " DIL -> DRne9y...)" << std::endl;
     }
 
     // Store coinbase transaction globally for callback access
