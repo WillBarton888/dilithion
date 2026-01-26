@@ -118,19 +118,58 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
             return false;
         }
 
-        // Set socket options
+        // Set socket options for robust rebinding after crashes
         int reuse = 1;
         setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+#ifndef _WIN32
+        // On Linux/Unix, also set SO_REUSEPORT for faster rebinding
+        setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse));
+#endif
 
-        // Bind to port
+        // Bind to port with retry logic (for production stability)
+        // If previous instance crashed, port may be in TIME_WAIT for up to 60s
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = INADDR_ANY;
         addr.sin_port = htons(m_options.nListenPort);
 
-        if (bind(m_listen_socket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            LogPrintf(NET, ERROR, "[CConnman] Failed to bind listen socket to port %d\n", m_options.nListenPort);
+        const int MAX_BIND_RETRIES = 10;
+        const int BIND_RETRY_DELAY_MS = 3000;  // 3 seconds between retries
+        bool bindSuccess = false;
+
+        for (int attempt = 1; attempt <= MAX_BIND_RETRIES; attempt++) {
+            if (bind(m_listen_socket, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+                bindSuccess = true;
+                if (attempt > 1) {
+                    LogPrintf(NET, INFO, "[CConnman] Bind succeeded on attempt %d\n", attempt);
+                }
+                break;
+            }
+
+            // Get error code for diagnostics
+#ifdef _WIN32
+            int errCode = WSAGetLastError();
+            const char* errMsg = (errCode == WSAEADDRINUSE) ? "Address in use" :
+                                 (errCode == WSAEACCES) ? "Permission denied" : "Unknown";
+#else
+            int errCode = errno;
+            const char* errMsg = (errCode == EADDRINUSE) ? "Address in use" :
+                                 (errCode == EACCES) ? "Permission denied" :
+                                 (errCode == EADDRNOTAVAIL) ? "Address not available" : strerror(errCode);
+#endif
+
+            if (attempt < MAX_BIND_RETRIES) {
+                LogPrintf(NET, WARN, "[CConnman] Bind attempt %d/%d failed on port %d: %s (error %d). Retrying in %dms...\n",
+                         attempt, MAX_BIND_RETRIES, m_options.nListenPort, errMsg, errCode, BIND_RETRY_DELAY_MS);
+                std::this_thread::sleep_for(std::chrono::milliseconds(BIND_RETRY_DELAY_MS));
+            } else {
+                LogPrintf(NET, ERROR, "[CConnman] Failed to bind listen socket to port %d after %d attempts: %s (error %d)\n",
+                         m_options.nListenPort, MAX_BIND_RETRIES, errMsg, errCode);
+            }
+        }
+
+        if (!bindSuccess) {
 #ifdef _WIN32
             closesocket(m_listen_socket);
 #else
@@ -906,13 +945,13 @@ void CConnman::ThreadOpenConnections() {
             }
 
             // Attempt connection to seed
-            LogPrintf(NET, INFO, "[CConnman] Reconnecting to seed node %s:%d\n",
+            LogPrintf(NET, INFO, "[CConnman] Connecting to seed node %s:%d\n",
                       seed_ip.c_str(), seed_addr.port);
             CNode* pnode = ConnectNode(seed_addr);
             if (pnode) {
-                LogPrintf(NET, INFO, "[CConnman] Connected to seed %s (node %d)\n",
-                          seed_ip.c_str(), pnode->id);
-                connected_ips.insert(seed_ip);  // Update set for phase 2
+                // Note: Connection is async - STATE_CONNECTING until TCP handshake completes
+                // Don't mark as "connected" yet - SocketHandler will log when connection succeeds
+                connected_ips.insert(seed_ip);  // Update set for phase 2 to avoid double-attempts
                 m_peer_manager->MarkAddressGood(seed_addr);
             }
         }

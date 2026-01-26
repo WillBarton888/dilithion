@@ -721,15 +721,9 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     std::vector<CTransactionRef> selectedTxs;
     uint64_t totalFees = 0;
 
-    // DEBUG: Log mempool and UTXO set state
-    std::cout << "[BuildMiningTemplate] DEBUG: mempool=" << (mempool ? "valid" : "NULL")
-              << ", utxoSet=" << (utxoSet ? "valid" : "NULL") << std::endl;
-
     if (mempool && utxoSet) {
         // Get transactions ordered by fee rate (highest first)
         std::vector<CTransactionRef> candidateTxs = mempool->GetOrderedTxs();
-
-        std::cout << "[BuildMiningTemplate] DEBUG: candidateTxs.size()=" << candidateTxs.size() << std::endl;
 
         // Limit candidates and set resource limits
         const size_t MAX_CANDIDATES = 50000;
@@ -787,8 +781,6 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             }
 
             if (hasConflict || !allInputsAvailable) {
-                std::cout << "[BuildMiningTemplate] DEBUG: TX " << tx->GetHash().GetHex().substr(0, 16)
-                          << " rejected: " << missingInputInfo << std::endl;
                 continue;
             }
 
@@ -796,8 +788,6 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             std::string validationError;
             CAmount txFee = 0;
             if (!validator.CheckTransaction(*tx, *utxoSet, nHeight, txFee, validationError)) {
-                std::cout << "[BuildMiningTemplate] DEBUG: TX " << tx->GetHash().GetHex().substr(0, 16)
-                          << " FAILED CheckTransaction: " << validationError << std::endl;
                 continue;
             }
 
@@ -809,9 +799,6 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             selectedTxs.push_back(tx);
             currentBlockSize += txSize;
             totalFees += static_cast<uint64_t>(txFee);
-
-            std::cout << "[BuildMiningTemplate] DEBUG: TX " << tx->GetHash().GetHex().substr(0, 16)
-                      << " SELECTED for block (fee=" << txFee << ")" << std::endl;
 
             // Mark inputs as spent
             for (const auto& txin : tx->vin) {
@@ -2825,19 +2812,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         }
 
-        // BUG #138 FIX: Start CConnman AFTER all handlers are registered
-        // This ensures no messages are processed before handlers are in place
-        if (!g_node_context.connman->Start(*g_node_context.peer_manager, message_processor, connman_opts)) {
-            std::cerr << "Failed to start CConnman" << std::endl;
-            return 1;
-        }
-
-        // Set external IP if we have one (for advertising to peers)
-        if (!effectiveExternalIP.empty()) {
-            g_node_context.connman->SetExternalIP(effectiveExternalIP);
-        }
-
-        std::cout << "  [OK] P2P components ready and started" << std::endl;
+        // NOTE: CConnman::Start is DELAYED until after wallet initialization
+        // This ensures interactive prompts happen before network threads start outputting logs
 
         // Phase 3: Initialize mining controller
         std::cout << "Initializing mining controller..." << std::endl;
@@ -2879,12 +2855,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cerr.flush();
             }
         } else {
-            std::cout << "  No existing wallet found, creating new one" << std::endl;
+            std::cout << "  No existing wallet found." << std::endl;
         }
 
         // Generate HD wallet if wallet is empty (new wallet creation) or restore from mnemonic
         if (wallet.GetAddresses().empty()) {
-            // Check if restoring from mnemonic
+            // Check if restoring from mnemonic via command line
             if (!config.restore_mnemonic.empty()) {
                 std::cout << "  Restoring wallet from provided recovery phrase..." << std::endl;
                 if (wallet.InitializeHDWallet(config.restore_mnemonic, "")) {
@@ -2901,6 +2877,112 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     return 1;
                 }
             } else {
+            // Interactive prompt: Create new or restore?
+            // NOTE: Network threads may already be running, but we need user input here
+            // Clear any buffered input before prompting
+            std::cin.clear();
+
+            std::cout << std::endl;
+            std::cout << "+==============================================================================+" << std::endl;
+            std::cout << "|                        WALLET SETUP                                         |" << std::endl;
+            std::cout << "+==============================================================================+" << std::endl;
+            std::cout << "|                                                                              |" << std::endl;
+            std::cout << "|  1 - CREATE a new wallet (generates new 24-word recovery phrase)            |" << std::endl;
+            std::cout << "|  2 - RESTORE wallet from existing recovery phrase                           |" << std::endl;
+            std::cout << "|                                                                              |" << std::endl;
+            std::cout << "+==============================================================================+" << std::endl;
+            std::cout << std::endl;
+
+            std::string wallet_choice;
+            while (true) {
+                std::cout << "Enter choice (1 or 2): ";
+                std::cout.flush();
+                std::getline(std::cin, wallet_choice);
+
+                // Trim whitespace
+                size_t start = wallet_choice.find_first_not_of(" \t\r\n");
+                size_t end = wallet_choice.find_last_not_of(" \t\r\n");
+                if (start != std::string::npos && end != std::string::npos) {
+                    wallet_choice = wallet_choice.substr(start, end - start + 1);
+                } else {
+                    wallet_choice.clear();
+                }
+
+                if (wallet_choice == "1" || wallet_choice == "2") {
+                    break;  // Valid input
+                }
+                std::cout << "  Invalid choice. Please enter 1 or 2." << std::endl;
+            }
+
+            if (wallet_choice == "2") {
+                // Restore from mnemonic
+                std::cout << std::endl;
+                std::cout << "Enter your 24-word recovery phrase (words separated by spaces):" << std::endl;
+                std::cout << std::endl;
+
+                std::string normalized;
+                while (true) {
+                    std::cout << "> ";
+                    std::cout.flush();
+
+                    std::string mnemonic_input;
+                    std::getline(std::cin, mnemonic_input);
+
+                    // Normalize the mnemonic (trim, lowercase, collapse spaces)
+                    normalized.clear();
+                    bool last_was_space = false;
+                    for (char c : mnemonic_input) {
+                        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                            if (!last_was_space && !normalized.empty()) {
+                                normalized += ' ';
+                                last_was_space = true;
+                            }
+                        } else {
+                            normalized += std::tolower(c);
+                            last_was_space = false;
+                        }
+                    }
+                    // Trim trailing space
+                    if (!normalized.empty() && normalized.back() == ' ') {
+                        normalized.pop_back();
+                    }
+
+                    // Count words
+                    int word_count = 0;
+                    if (!normalized.empty()) {
+                        word_count = 1;
+                        for (char c : normalized) {
+                            if (c == ' ') word_count++;
+                        }
+                    }
+
+                    if (word_count == 24) {
+                        break;  // Valid 24-word phrase
+                    }
+
+                    if (normalized.empty()) {
+                        std::cout << "  Please enter your recovery phrase." << std::endl;
+                    } else {
+                        std::cout << "  Invalid: Expected 24 words, got " << word_count << ". Please try again." << std::endl;
+                    }
+                }
+
+                std::cout << std::endl;
+                std::cout << "  Restoring wallet from recovery phrase..." << std::endl;
+
+                if (wallet.InitializeHDWallet(normalized, "")) {
+                    std::cout << "  [OK] Wallet restored successfully!" << std::endl;
+
+                    CDilithiumAddress addr = wallet.GetNewHDAddress();
+                    std::string addrStr = addr.ToString();
+                    std::cout << "  First address: " << addrStr << std::endl;
+                    std::cout << std::endl;
+                } else {
+                    std::cerr << "  ERROR: Failed to restore wallet. Check your recovery phrase." << std::endl;
+                    return 1;
+                }
+            } else {  // wallet_choice == "1"
+            // Create new wallet
             std::cout << "  Generating HD wallet with 24-word recovery phrase..." << std::endl;
             std::string mnemonic;
             if (wallet.GenerateHDWallet(mnemonic, "")) {
@@ -3024,14 +3106,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 CDilithiumAddress addr = wallet.GetNewAddress();
                 std::cout << "  [OK] Initial address (legacy): " << addr.ToString() << std::endl;
             }
-            }  // end else (not restore mode)
+            }  // end else (create new wallet)
+            }  // end else (interactive mode - not command line restore)
         }
 
         // Enable auto-save (CRITICAL: must be done after Load or key generation)
         wallet.SetWalletFile(wallet_path);
         std::cout << "  [OK] Auto-save enabled" << std::endl;
         std::cout.flush();
-
         // DFMP v2.0: Register block connect/disconnect callbacks for fair mining protocol
         // This updates identity DB (first-seen heights, MIK pubkeys) and heat tracker
         g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
@@ -3173,6 +3255,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
         }  // end else (!relay_only)
 
+        // NOW start CConnman (after all interactive wallet prompts are complete)
+        // This runs for BOTH normal mode and relay-only mode
+        // CRITICAL: Must be after wallet init to prevent network log spam during interactive prompts
+        if (!g_node_context.connman->Start(*g_node_context.peer_manager, message_processor, connman_opts)) {
+            std::cerr << "Failed to start CConnman" << std::endl;
+            return 1;
+        }
+
+        // Set external IP if we have one (for advertising to peers)
+        if (!effectiveExternalIP.empty()) {
+            g_node_context.connman->SetExternalIP(effectiveExternalIP);
+        }
+
+        std::cout << "  [OK] P2P networking started" << std::endl;
+
         // Set up block found callback to save mined blocks and credit wallet
         miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
             // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
@@ -3244,13 +3341,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "[Blockchain] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
 
             // Save block index to database
-            std::cout << "[Blockchain] DEBUG: Calling WriteBlockIndex for " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
             if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
                 std::cerr << "[Blockchain] ERROR: Failed to save block index" << std::endl;
                 // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
-            std::cout << "[Blockchain] DEBUG: WriteBlockIndex succeeded" << std::endl;
 
             // Add to chain state memory map (transfer ownership with std::move)
             if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
