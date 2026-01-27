@@ -1427,17 +1427,55 @@
         // Refresh balance
         async function refreshBalance() {
             try {
-                const result = await rpcCall('getbalance');
-                // getbalance returns an object with balance, unconfirmed_balance, immature_balance
-                const balance = result.balance || 0;
-                const unconfirmed = result.unconfirmed_balance || 0;
-                const immature = result.immature_balance || 0;
-                const total = balance + unconfirmed + immature;
+                // Check if we're in light wallet mode
+                const isLightMode = connectionManager && connectionManager.getMode() === 'light';
 
-                document.getElementById('totalBalance').textContent = total.toFixed(8);
-                document.getElementById('matureBalance').textContent = balance.toFixed(8);
-                document.getElementById('immatureBalance').textContent = immature.toFixed(8);
-                document.getElementById('availableForSend').textContent = balance.toFixed(8);
+                if (isLightMode) {
+                    // Light wallet mode: sum balance from all addresses
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        // Wallet not unlocked, show zeros
+                        document.getElementById('totalBalance').textContent = '0.00000000';
+                        document.getElementById('matureBalance').textContent = '0.00000000';
+                        document.getElementById('immatureBalance').textContent = '0.00000000';
+                        document.getElementById('availableForSend').textContent = '0.00000000';
+                        return;
+                    }
+
+                    // Get all addresses from light wallet
+                    const addresses = await localWallet.getAddresses();
+                    let totalBalance = 0;
+                    let unconfirmedBalance = 0;
+
+                    // Sum balance from each address
+                    for (const addr of addresses) {
+                        try {
+                            const balanceInfo = await connectionManager.getBalance(addr.address);
+                            totalBalance += (balanceInfo.confirmed || 0) / 100000000;  // Convert from ions
+                            unconfirmedBalance += (balanceInfo.unconfirmed || 0) / 100000000;
+                        } catch (e) {
+                            console.warn('[Balance] Failed to get balance for', addr.address, e.message);
+                        }
+                    }
+
+                    document.getElementById('totalBalance').textContent = (totalBalance + unconfirmedBalance).toFixed(8);
+                    document.getElementById('matureBalance').textContent = totalBalance.toFixed(8);
+                    document.getElementById('immatureBalance').textContent = '0.00000000';  // No immature in light mode
+                    document.getElementById('availableForSend').textContent = totalBalance.toFixed(8);
+
+                } else {
+                    // Full node mode: use RPC
+                    const result = await rpcCall('getbalance');
+                    // getbalance returns an object with balance, unconfirmed_balance, immature_balance
+                    const balance = result.balance || 0;
+                    const unconfirmed = result.unconfirmed_balance || 0;
+                    const immature = result.immature_balance || 0;
+                    const total = balance + unconfirmed + immature;
+
+                    document.getElementById('totalBalance').textContent = total.toFixed(8);
+                    document.getElementById('matureBalance').textContent = balance.toFixed(8);
+                    document.getElementById('immatureBalance').textContent = immature.toFixed(8);
+                    document.getElementById('availableForSend').textContent = balance.toFixed(8);
+                }
             } catch(e) {
                 console.error('Balance error:', e);
             }
@@ -1446,40 +1484,61 @@
         // Refresh blockchain info
         async function refreshBlockchainInfo() {
             const wait = () => new Promise(r => setTimeout(r, 150));  // 150ms delay between calls
+
+            // Check if we're in light wallet mode
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+
             try {
-                const info = await rpcCall('getblockchaininfo');
+                let info;
+                if (isLightMode) {
+                    // Light wallet mode: use REST API via connectionManager
+                    info = await connectionManager.getBlockchainInfo();
+                } else {
+                    // Full node mode: use RPC
+                    info = await rpcCall('getblockchaininfo');
+                }
+
                 document.getElementById('networkName').textContent = info.chain || 'Unknown';
-                document.getElementById('blockHeight').textContent = info.blocks?.toLocaleString() || '-';
+                document.getElementById('blockHeight').textContent = info.blocks?.toLocaleString() || info.height?.toLocaleString() || '-';
                 document.getElementById('bestBlock').textContent = info.bestblockhash || '-';
                 document.getElementById('difficulty').textContent = info.difficulty?.toFixed(6) || '-';
 
-                await wait();  // Delay before next RPC call
+                if (!isLightMode) {
+                    await wait();  // Delay before next RPC call
 
-                // Peer info
-                try {
-                    const peers = await rpcCall('getpeerinfo');
-                    const inbound = peers.filter(p => p.inbound).length;
-                    const outbound = peers.filter(p => !p.inbound).length;
-                    document.getElementById('peerCount').textContent = peers.length;
-                    document.getElementById('inboundPeers').textContent = inbound;
-                    document.getElementById('outboundPeers').textContent = outbound;
-                } catch(e) {
-                    document.getElementById('peerCount').textContent = '-';
-                }
+                    // Peer info (full node only)
+                    try {
+                        const peers = await rpcCall('getpeerinfo');
+                        const inbound = peers.filter(p => p.inbound).length;
+                        const outbound = peers.filter(p => !p.inbound).length;
+                        document.getElementById('peerCount').textContent = peers.length;
+                        document.getElementById('inboundPeers').textContent = inbound;
+                        document.getElementById('outboundPeers').textContent = outbound;
+                    } catch(e) {
+                        document.getElementById('peerCount').textContent = '-';
+                    }
 
-                await wait();  // Delay before next RPC call
+                    await wait();  // Delay before next RPC call
 
-                // Mining info
-                try {
-                    const mining = await rpcCall('getmininginfo');
-                    document.getElementById('miningActive').textContent = mining.mining ? 'Yes' : 'No';
-                    document.getElementById('hashRate').textContent = mining.hashrate ?
-                        mining.hashrate.toFixed(2) + ' H/s' : '-';
+                    // Mining info (full node only)
+                    try {
+                        const mining = await rpcCall('getmininginfo');
+                        document.getElementById('miningActive').textContent = mining.mining ? 'Yes' : 'No';
+                        document.getElementById('hashRate').textContent = mining.hashrate ?
+                            mining.hashrate.toFixed(2) + ' H/s' : '-';
 
-                    // Update dashboard mining card
-                    updateMiningDashboard(mining, info.difficulty);
-                } catch(e) {
-                    document.getElementById('miningActive').textContent = '-';
+                        // Update dashboard mining card
+                        updateMiningDashboard(mining, info.difficulty);
+                    } catch(e) {
+                        document.getElementById('miningActive').textContent = '-';
+                        document.getElementById('hashRate').textContent = '-';
+                    }
+                } else {
+                    // Light mode: show N/A for node-specific info
+                    document.getElementById('peerCount').textContent = 'N/A';
+                    document.getElementById('inboundPeers').textContent = '-';
+                    document.getElementById('outboundPeers').textContent = '-';
+                    document.getElementById('miningActive').textContent = 'N/A';
                     document.getElementById('hashRate').textContent = '-';
                 }
             } catch(e) {
@@ -1650,6 +1709,36 @@
         let lastTransactions = null;  // Cache last successful transaction load
         let txLoadAttempts = 0;       // Track load attempts
         async function refreshTransactions() {
+            // Check if we're in light wallet mode
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+
+            if (isLightMode) {
+                // Light wallet mode: limited transaction history
+                // For MVP, show a helpful message. Could enhance later to track local TX history.
+                const lightModeMessage = `
+                    <div class="empty-state" style="text-align: center; padding: 24px;">
+                        <div style="font-size: 2rem; margin-bottom: 12px;">📱</div>
+                        <div style="font-weight: 600; margin-bottom: 8px;">Light Wallet Mode</div>
+                        <div style="color: var(--text-muted); font-size: 0.9rem;">
+                            Transaction history is limited in light mode.<br>
+                            Use a block explorer to view full history.
+                        </div>
+                    </div>
+                `;
+                document.getElementById('recentTxList').innerHTML = lightModeMessage;
+                const txListEl = document.getElementById('txList');
+                if (txListEl) {
+                    txListEl.innerHTML = lightModeMessage;
+                }
+
+                // Hide mining stats in light mode
+                const blocksFoundEl = document.getElementById('blocksFound');
+                if (blocksFoundEl) blocksFoundEl.textContent = 'N/A';
+
+                return;
+            }
+
+            // Full node mode: use RPC
             try {
                 console.log('[Wallet] Fetching transactions...');
                 const result = await rpcCall('listtransactions', {});
@@ -1826,7 +1915,32 @@
         // Get receive address
         async function refreshReceiveAddress() {
             try {
-                const address = await rpcCall('getnewaddress');
+                // Check if we're in light wallet mode
+                const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+                let address;
+
+                if (isLightMode) {
+                    // Light wallet mode: get or generate address from local wallet
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        document.getElementById('receiveAddress').textContent = 'Unlock wallet to see address';
+                        return;
+                    }
+
+                    // Get addresses from local wallet
+                    let addresses = await localWallet.getAddresses();
+
+                    // If no addresses exist, generate one
+                    if (addresses.length === 0) {
+                        address = await localWallet.getNewAddress(0);  // Account 0
+                    } else {
+                        // Use the first address (could enhance to show multiple)
+                        address = addresses[0].address;
+                    }
+                } else {
+                    // Full node mode: use RPC
+                    address = await rpcCall('getnewaddress');
+                }
+
                 document.getElementById('receiveAddress').textContent = address;
 
                 // Generate QR code
@@ -1886,7 +2000,39 @@
 
         // Generate new address
         async function generateNewAddress() {
-            await refreshReceiveAddress();
+            // Check if we're in light wallet mode
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+
+            if (isLightMode) {
+                // Light wallet mode: generate a new address
+                if (!localWallet || !localWallet.isWalletUnlocked()) {
+                    showNotification('Please unlock your wallet first', 'error');
+                    return;
+                }
+
+                try {
+                    const newAddress = await localWallet.getNewAddress(0);  // Account 0
+                    document.getElementById('receiveAddress').textContent = newAddress;
+
+                    // Generate QR code
+                    if (typeof QRCode !== 'undefined') {
+                        const canvas = document.getElementById('qrcode');
+                        QRCode.toCanvas(canvas, newAddress, {
+                            width: 200,
+                            margin: 2,
+                            color: { dark: '#000000', light: '#ffffff' }
+                        });
+                    }
+
+                    updateAddressLabelDisplay(newAddress);
+                    showNotification('New address generated', 'success');
+                } catch (e) {
+                    showNotification('Failed to generate address: ' + e.message, 'error');
+                }
+            } else {
+                // Full node mode: use existing RPC call
+                await refreshReceiveAddress();
+            }
         }
 
         // Copy address
@@ -2073,12 +2219,12 @@
         // Handle send
         async function handleSend(event) {
             event.preventDefault();
-            const address = document.getElementById('sendAddress').value;
+            const toAddress = document.getElementById('sendAddress').value;
             const amount = parseFloat(document.getElementById('sendAmount').value);
             const alertDiv = document.getElementById('sendAlert');
             const sendBtn = document.getElementById('sendBtn');
 
-            if (!address || !amount || amount <= 0) {
+            if (!toAddress || !amount || amount <= 0) {
                 alertDiv.innerHTML = '<div class="alert alert-error">Please enter a valid address and amount</div>';
                 return;
             }
@@ -2087,15 +2233,63 @@
             sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
 
             try {
-                const txid = await rpcCall('sendtoaddress', {address: address, amount: parseFloat(amount)});
-                alertDiv.innerHTML = `
-                    <div class="alert alert-success">
-                        Transaction sent successfully!<br>
-                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
-                            TXID: ${txid}
-                        </span>
-                    </div>
-                `;
+                // Check if we're in light wallet mode
+                const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+
+                if (isLightMode) {
+                    // Light wallet mode: use transaction builder
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        throw new Error('Please unlock your wallet first');
+                    }
+                    if (!txBuilder) {
+                        throw new Error('Transaction builder not initialized');
+                    }
+
+                    // Get the first address with balance (from address)
+                    const addresses = await localWallet.getAddresses();
+                    if (addresses.length === 0) {
+                        throw new Error('No addresses in wallet');
+                    }
+
+                    // Find an address with sufficient balance
+                    let fromAddress = null;
+                    for (const addr of addresses) {
+                        const balanceInfo = await connectionManager.getBalance(addr.address);
+                        const balance = (balanceInfo.confirmed || 0) / 100000000;
+                        if (balance >= amount) {
+                            fromAddress = addr.address;
+                            break;
+                        }
+                    }
+
+                    if (!fromAddress) {
+                        throw new Error('Insufficient balance in any address');
+                    }
+
+                    // Send using transaction builder
+                    const result = await txBuilder.send(fromAddress, toAddress, amount);
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            Transaction sent successfully!<br>
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                                TXID: ${result.txid}
+                            </span>
+                            <br><small>Fee: ${result.fee.toFixed(8)} DIL</small>
+                        </div>
+                    `;
+                } else {
+                    // Full node mode: use RPC
+                    const txid = await rpcCall('sendtoaddress', {address: toAddress, amount: parseFloat(amount)});
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            Transaction sent successfully!<br>
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                                TXID: ${txid}
+                            </span>
+                        </div>
+                    `;
+                }
+
                 document.getElementById('sendAddress').value = '';
                 document.getElementById('sendAmount').value = '';
                 await refreshBalance();
