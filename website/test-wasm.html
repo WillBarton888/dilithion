@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dilithium WASM Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/js-sha3@0.9.3/src/sha3.min.js"></script>
+    <script src="js/dilithium.js"></script>
+    <script src="js/dilithium-crypto.js"></script>
+</head>
+<body>
+    <h1>Dilithium WASM Test</h1>
+    <div id="output" style="white-space: pre-wrap; font-family: monospace;"></div>
+
+    <script>
+        const output = document.getElementById('output');
+        function log(msg) {
+            output.textContent += msg + '\n';
+            console.log(msg);
+        }
+
+        async function runTests() {
+            log('=== Dilithium WASM Test ===\n');
+
+            // Initialize
+            log('1. Initializing DilithiumCrypto...');
+            const initResult = await DilithiumCrypto.init();
+            log('   Init result: ' + initResult);
+
+            const status = DilithiumCrypto.getStatus();
+            log('   Status: ' + JSON.stringify(status));
+
+            if (!status.canGenerateKeys) {
+                log('\n!! WASM not loaded - cannot continue test');
+                return;
+            }
+
+            // Generate keypair
+            log('\n2. Generating keypair...');
+            let keypair;
+            try {
+                const startKeygen = performance.now();
+                log('   Calling generateKeypair...');
+                keypair = await DilithiumCrypto.generateKeypair();
+                const keygenTime = (performance.now() - startKeygen).toFixed(2);
+                log('   Public key: ' + keypair.publicKey.length + ' bytes');
+                log('   Private key: ' + keypair.privateKey.length + ' bytes');
+                log('   Time: ' + keygenTime + 'ms');
+            } catch (e) {
+                log('   ERROR: ' + e.message);
+                console.error('Keypair generation error:', e);
+                return;
+            }
+
+            // Derive address
+            log('\n3. Deriving address...');
+            const address = DilithiumCrypto.deriveAddress(keypair.publicKey);
+            log('   Address: ' + address);
+            log('   Valid: ' + DilithiumCrypto.validateAddress(address));
+
+            // Sign a message
+            log('\n4. Signing message...');
+            const message = new TextEncoder().encode('Hello, Dilithion!');
+            const startSign = performance.now();
+            const signature = await DilithiumCrypto.sign(message, keypair.privateKey);
+            const signTime = (performance.now() - startSign).toFixed(2);
+            log('   Message: "Hello, Dilithion!"');
+            log('   Signature: ' + signature.length + ' bytes');
+            log('   Time: ' + signTime + 'ms');
+
+            // Verify signature
+            log('\n5. Verifying signature...');
+            const startVerify = performance.now();
+            const valid = await DilithiumCrypto.verify(signature, message, keypair.publicKey);
+            const verifyTime = (performance.now() - startVerify).toFixed(2);
+            log('   Valid: ' + valid);
+            log('   Time: ' + verifyTime + 'ms');
+
+            // Verify with wrong message
+            log('\n6. Verifying with wrong message...');
+            const wrongMessage = new TextEncoder().encode('Wrong message');
+            const invalid = await DilithiumCrypto.verify(signature, wrongMessage, keypair.publicKey);
+            log('   Valid (should be false): ' + invalid);
+
+            log('\n=== All tests complete! ===');
+        }
+
+        // Run tests when page loads
+        window.onload = runTests;
+    </script>
+</body>
+</html>

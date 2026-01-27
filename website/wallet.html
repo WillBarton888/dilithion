@@ -10,6 +10,15 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <!-- QRCode.js for QR generation -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <!-- SHA3 library for Light Wallet -->
+    <script src="https://cdn.jsdelivr.net/npm/js-sha3@0.9.3/src/sha3.min.js"></script>
+    <!-- Dilithium WASM Module (must load before dilithium-crypto.js) -->
+    <script src="js/dilithium.js"></script>
+    <!-- Light Wallet Modules -->
+    <script src="js/dilithium-crypto.js"></script>
+    <script src="js/connection-manager.js"></script>
+    <script src="js/local-wallet.js"></script>
+    <script src="js/transaction-builder.js"></script>
     <style>
         :root {
             --primary: #6366f1;
@@ -1001,8 +1010,147 @@
                 <p class="page-subtitle">Configure your wallet connection</p>
             </div>
 
-            <div class="card">
-                <div class="card-title">RPC Connection</div>
+            <!-- Connection Mode Selector -->
+            <div class="card" id="connectionModeCard">
+                <div class="card-title">🌐 Connection Mode</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9rem;">
+                    Choose how to connect to the Dilithion network.
+                </p>
+                <div class="form-group">
+                    <label class="form-label">Mode</label>
+                    <select class="form-input" id="connectionMode" onchange="handleModeChange()">
+                        <option value="full">Full Node (localhost) - Uses node's wallet</option>
+                        <option value="light">Light Wallet (seed node) - Keys in browser</option>
+                    </select>
+                </div>
+                <div id="modeDescription" style="padding: 12px; border-radius: 8px; margin-top: 12px;">
+                    <div id="fullModeDesc" style="background: rgba(34, 197, 94, 0.1); padding: 12px; border-radius: 8px;">
+                        <strong style="color: #22c55e;">Full Node Mode</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0 0 0;">
+                            Connect to your local Dilithion node. Private keys are managed by the node.
+                            Best for miners and users running their own node.
+                        </p>
+                    </div>
+                    <div id="lightModeDesc" style="display: none; background: rgba(99, 102, 241, 0.1); padding: 12px; border-radius: 8px;">
+                        <strong style="color: #6366f1;">Light Wallet Mode</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0 0 0;">
+                            Connect to Dilithion seed nodes. Private keys stay in your browser (encrypted).
+                            No node required - perfect for sending and receiving DIL.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Light Wallet Setup (shown in light mode) -->
+            <div class="card" id="lightWalletSetupCard" style="display: none;">
+                <div class="card-title">🔐 Light Wallet</div>
+
+                <!-- No wallet exists -->
+                <div id="lightWalletCreate">
+                    <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                        Create a new light wallet or restore from mnemonic phrase.
+                    </p>
+                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="showCreateLightWallet()">
+                            ➕ Create New Wallet
+                        </button>
+                        <button class="btn" onclick="showRestoreLightWallet()">
+                            📥 Restore from Mnemonic
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Wallet exists, needs unlock -->
+                <div id="lightWalletUnlock" style="display: none;">
+                    <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                        Enter your password to unlock the light wallet.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-input" id="lightWalletPassword"
+                               placeholder="Enter wallet password" onkeypress="if(event.key==='Enter')unlockLightWallet()">
+                    </div>
+                    <button class="btn btn-primary" onclick="unlockLightWallet()">🔓 Unlock Wallet</button>
+                </div>
+
+                <!-- Wallet unlocked -->
+                <div id="lightWalletUnlocked" style="display: none;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                        <span style="font-size: 1.5rem;">🔓</span>
+                        <div>
+                            <div style="font-weight: 600; color: var(--success);">Wallet Unlocked</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted);" id="lightWalletAutoLock">Auto-locks in 5 minutes</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button class="btn" onclick="lockLightWallet()">🔒 Lock Now</button>
+                        <button class="btn" onclick="showBackupMnemonic()">📝 Backup Mnemonic</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Create/Restore Light Wallet Modal -->
+            <div id="lightWalletModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: none; align-items: center; justify-content: center;">
+                <div style="background: var(--bg-card); padding: 32px; border-radius: 16px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto;">
+                    <!-- Create new wallet -->
+                    <div id="createWalletForm">
+                        <h3 style="margin-bottom: 16px;">Create New Light Wallet</h3>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-input" id="newLightPassword" placeholder="Minimum 8 characters">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Confirm Password</label>
+                            <input type="password" class="form-input" id="confirmLightPassword" placeholder="Re-enter password">
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-primary" onclick="createLightWallet()">Create Wallet</button>
+                            <button class="btn" onclick="closeLightWalletModal()">Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- Restore wallet -->
+                    <div id="restoreWalletForm" style="display: none;">
+                        <h3 style="margin-bottom: 16px;">Restore from Mnemonic</h3>
+                        <div class="form-group">
+                            <label class="form-label">24-Word Mnemonic</label>
+                            <textarea class="form-input" id="restoreMnemonic" rows="4"
+                                      placeholder="Enter your 24 words separated by spaces"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">New Password</label>
+                            <input type="password" class="form-input" id="restoreLightPassword" placeholder="Minimum 8 characters">
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-primary" onclick="restoreLightWallet()">Restore Wallet</button>
+                            <button class="btn" onclick="closeLightWalletModal()">Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- Show mnemonic (after creation) -->
+                    <div id="showMnemonicForm" style="display: none;">
+                        <h3 style="margin-bottom: 16px; color: var(--warning);">⚠️ Backup Your Recovery Phrase</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                            Write down these 24 words in order. This is the ONLY way to recover your wallet if you lose access.
+                        </p>
+                        <div id="mnemonicDisplay" style="background: var(--bg-darker); padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; margin-bottom: 16px;">
+                        </div>
+                        <div style="background: rgba(239, 68, 68, 0.1); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                            <strong style="color: #ef4444;">NEVER share these words with anyone!</strong>
+                            <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 4px 0 0 0;">
+                                Anyone with these words can steal your funds.
+                            </p>
+                        </div>
+                        <button class="btn btn-primary" onclick="confirmMnemonicBackup()">I've Written Them Down</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" id="fullNodeSettingsCard">
+                <div class="card-title">🔗 Node Connection</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9rem;">
+                    Connect to your local Dilithion node. Your keys stay on your computer for maximum security.
+                </p>
                 <div class="form-group">
                     <label class="form-label">RPC Host</label>
                     <input type="text" class="form-input" id="rpcHost" value="127.0.0.1">
@@ -1020,7 +1168,84 @@
                     <label class="form-label">RPC Password (optional)</label>
                     <input type="password" class="form-input" id="rpcPass" placeholder="Leave empty if not configured">
                 </div>
-                <button class="btn btn-primary" onclick="saveSettings()">Save & Reconnect</button>
+                <button class="btn btn-primary" onclick="saveSettings()">Save & Connect</button>
+            </div>
+
+            <!-- Wallet Security Section -->
+            <div class="card" id="securityCard">
+                <div class="card-title">🔒 Wallet Security</div>
+
+                <!-- Encryption Status -->
+                <div id="encryptionStatus" style="margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <span id="encryptionIcon" style="font-size: 1.5rem;">⏳</span>
+                        <div>
+                            <div id="encryptionLabel" style="font-weight: 600;">Checking encryption status...</div>
+                            <div id="encryptionDesc" style="font-size: 0.8rem; color: var(--text-muted);">Please wait</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Encrypt Wallet (shown if not encrypted) -->
+                <div id="encryptSection" style="display: none; border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px;">
+                    <div style="background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                        <strong style="color: #ef4444;">⚠️ Your wallet is NOT encrypted!</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0 0 0;">
+                            Anyone with access to your computer can steal your funds. Encrypt your wallet now.
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Create Wallet Password</label>
+                        <input type="password" class="form-input" id="newWalletPassword" placeholder="Minimum 12 characters">
+                        <small style="color: var(--text-muted); font-size: 0.75rem;">Use a strong, unique password. Mix letters, numbers, and symbols.</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm Password</label>
+                        <input type="password" class="form-input" id="confirmWalletPassword" placeholder="Re-enter password">
+                    </div>
+                    <button class="btn btn-primary" onclick="encryptWallet()" style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);">
+                        🔐 Encrypt Wallet Now
+                    </button>
+                </div>
+
+                <!-- Lock/Unlock (shown if encrypted) -->
+                <div id="lockSection" style="display: none; border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px;">
+                    <div id="lockStatus" style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <span id="lockIcon" style="font-size: 1.2rem;">🔒</span>
+                        <span id="lockLabel">Wallet is locked</span>
+                    </div>
+
+                    <!-- Unlock Form -->
+                    <div id="unlockForm">
+                        <div class="form-group">
+                            <label class="form-label">Wallet Password</label>
+                            <input type="password" class="form-input" id="unlockPassword" placeholder="Enter your wallet password">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Unlock Duration (seconds)</label>
+                            <input type="number" class="form-input" id="unlockDuration" value="300" min="1" max="3600">
+                            <small style="color: var(--text-muted); font-size: 0.75rem;">Wallet will auto-lock after this time</small>
+                        </div>
+                        <button class="btn btn-primary" onclick="unlockWallet()">🔓 Unlock Wallet</button>
+                    </div>
+
+                    <!-- Lock Button (shown when unlocked) -->
+                    <div id="lockForm" style="display: none;">
+                        <button class="btn" onclick="lockWallet()" style="background: var(--bg-secondary);">🔒 Lock Wallet Now</button>
+                    </div>
+                </div>
+
+                <!-- Security Tips -->
+                <div style="border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px;">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                        <strong>Security Tips:</strong>
+                        <ul style="margin: 8px 0 0 16px; padding: 0;">
+                            <li>Write down your 24-word recovery phrase on paper</li>
+                            <li>Never share your password or recovery phrase</li>
+                            <li>Lock your wallet when not in use</li>
+                        </ul>
+                    </div>
+                </div>
             </div>
 
             <div class="card">
@@ -1083,6 +1308,7 @@
             rpcConfig.user = document.getElementById('rpcUser').value;
             rpcConfig.pass = document.getElementById('rpcPass').value;
             localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
+            showNotification('Settings saved. Connecting...', 'info');
             connect();
         }
 
@@ -1174,6 +1400,8 @@
                 const info = await rpcCall('getblockchaininfo');
                 setConnectionStatus(true, info.chain === 'testnet' ? 'Testnet' : 'Mainnet');
                 await refreshAll();
+                // Check wallet security status after connection
+                await checkSecurityStatus();
             } catch(e) {
                 setConnectionStatus(false, 'Connection failed');
                 console.error('Connection error:', e);
@@ -1886,6 +2114,149 @@
             `;
         }
 
+        // =====================================================================
+        // Wallet Security Functions
+        // =====================================================================
+
+        let walletEncrypted = false;
+        let walletLocked = true;
+
+        // Check wallet encryption and lock status
+        async function checkSecurityStatus() {
+            if (!connected) {
+                document.getElementById('encryptionIcon').textContent = '❓';
+                document.getElementById('encryptionLabel').textContent = 'Not connected';
+                document.getElementById('encryptionDesc').textContent = 'Connect to node to check security status';
+                return;
+            }
+
+            try {
+                const info = await rpcCall('getwalletinfo');
+
+                // Check if encrypted
+                walletEncrypted = info.encrypted === true;
+
+                if (walletEncrypted) {
+                    document.getElementById('encryptionIcon').textContent = '✅';
+                    document.getElementById('encryptionLabel').textContent = 'Wallet is encrypted';
+                    document.getElementById('encryptionLabel').style.color = '#22c55e';
+                    document.getElementById('encryptionDesc').textContent = 'Your wallet file is protected with a password';
+
+                    // Show lock/unlock section, hide encrypt section
+                    document.getElementById('encryptSection').style.display = 'none';
+                    document.getElementById('lockSection').style.display = 'block';
+
+                    // Check lock status
+                    walletLocked = info.unlocked_until === 0 || info.unlocked_until === undefined;
+                    updateLockUI();
+                } else {
+                    document.getElementById('encryptionIcon').textContent = '⚠️';
+                    document.getElementById('encryptionLabel').textContent = 'Wallet is NOT encrypted';
+                    document.getElementById('encryptionLabel').style.color = '#ef4444';
+                    document.getElementById('encryptionDesc').textContent = 'Your funds are at risk! Encrypt now.';
+
+                    // Show encrypt section, hide lock section
+                    document.getElementById('encryptSection').style.display = 'block';
+                    document.getElementById('lockSection').style.display = 'none';
+                }
+            } catch (e) {
+                console.error('Failed to check security status:', e);
+                document.getElementById('encryptionIcon').textContent = '❓';
+                document.getElementById('encryptionLabel').textContent = 'Unable to check status';
+                document.getElementById('encryptionDesc').textContent = e.message || 'RPC error';
+            }
+        }
+
+        // Update lock/unlock UI
+        function updateLockUI() {
+            if (walletLocked) {
+                document.getElementById('lockIcon').textContent = '🔒';
+                document.getElementById('lockLabel').textContent = 'Wallet is locked';
+                document.getElementById('lockLabel').style.color = '#22c55e';
+                document.getElementById('unlockForm').style.display = 'block';
+                document.getElementById('lockForm').style.display = 'none';
+            } else {
+                document.getElementById('lockIcon').textContent = '🔓';
+                document.getElementById('lockLabel').textContent = 'Wallet is unlocked';
+                document.getElementById('lockLabel').style.color = '#f59e0b';
+                document.getElementById('unlockForm').style.display = 'none';
+                document.getElementById('lockForm').style.display = 'block';
+            }
+        }
+
+        // Encrypt wallet
+        async function encryptWallet() {
+            const password = document.getElementById('newWalletPassword').value;
+            const confirm = document.getElementById('confirmWalletPassword').value;
+
+            // Validate
+            if (password.length < 12) {
+                showNotification('Password must be at least 12 characters', 'error');
+                return;
+            }
+
+            if (password !== confirm) {
+                showNotification('Passwords do not match', 'error');
+                return;
+            }
+
+            // Confirm action
+            if (!window.confirm('⚠️ IMPORTANT: Write down your password somewhere safe!\n\nIf you forget this password, you will need your 24-word recovery phrase to access your funds.\n\nThe node will restart after encryption.\n\nContinue?')) {
+                return;
+            }
+
+            try {
+                showNotification('Encrypting wallet...', 'info');
+                await rpcCall('encryptwallet', { passphrase: password });
+                showNotification('Wallet encrypted successfully! Node is restarting...', 'success');
+
+                // Clear password fields
+                document.getElementById('newWalletPassword').value = '';
+                document.getElementById('confirmWalletPassword').value = '';
+
+                // Node will restart, so we'll lose connection
+                setTimeout(() => {
+                    showNotification('Reconnecting to node...', 'info');
+                    connect();
+                }, 3000);
+            } catch (e) {
+                showNotification('Encryption failed: ' + (e.message || 'Unknown error'), 'error');
+            }
+        }
+
+        // Unlock wallet
+        async function unlockWallet() {
+            const password = document.getElementById('unlockPassword').value;
+            const duration = parseInt(document.getElementById('unlockDuration').value) || 300;
+
+            if (!password) {
+                showNotification('Please enter your wallet password', 'error');
+                return;
+            }
+
+            try {
+                await rpcCall('walletpassphrase', { passphrase: password, timeout: duration });
+                showNotification('Wallet unlocked for ' + duration + ' seconds', 'success');
+                document.getElementById('unlockPassword').value = '';
+                walletLocked = false;
+                updateLockUI();
+            } catch (e) {
+                showNotification('Unlock failed: ' + (e.message || 'Wrong password?'), 'error');
+            }
+        }
+
+        // Lock wallet
+        async function lockWallet() {
+            try {
+                await rpcCall('walletlock');
+                showNotification('Wallet locked', 'success');
+                walletLocked = true;
+                updateLockUI();
+            } catch (e) {
+                showNotification('Lock failed: ' + (e.message || 'Unknown error'), 'error');
+            }
+        }
+
         // Navigation
         function navigateTo(pageName) {
             document.querySelectorAll('.nav-item').forEach(item => {
@@ -1904,6 +2275,279 @@
             if (pageName === 'receive') {
                 refreshReceiveAddress();
             }
+            if (pageName === 'settings') {
+                checkSecurityStatus();
+            }
+        }
+
+        // ========================================================================
+        // Light Wallet Functions
+        // ========================================================================
+
+        let connectionManager = null;
+        let localWallet = null;
+        let txBuilder = null;
+        let currentMnemonic = null;  // Temporary storage during wallet creation
+
+        // Initialize light wallet modules
+        async function initLightWallet() {
+            try {
+                // Initialize crypto module
+                if (window.DilithiumCrypto) {
+                    await window.DilithiumCrypto.init();
+                    console.log('[LightWallet] Crypto module initialized');
+                }
+
+                // Initialize connection manager
+                if (window.ConnectionManager) {
+                    connectionManager = new window.ConnectionManager();
+                    connectionManager.init();
+
+                    // Load saved mode
+                    const savedMode = localStorage.getItem('dilithionWalletMode');
+                    if (savedMode === 'light') {
+                        document.getElementById('connectionMode').value = 'light';
+                        handleModeChange();
+                    }
+                }
+
+                // Initialize local wallet
+                if (window.LocalWallet) {
+                    localWallet = new window.LocalWallet(window.DilithiumCrypto);
+                    await localWallet.init();
+
+                    // Listen for lock events
+                    localWallet.on('lock', () => {
+                        updateLightWalletUI();
+                    });
+                }
+
+                // Initialize transaction builder
+                if (window.TransactionBuilder) {
+                    txBuilder = new window.TransactionBuilder(connectionManager, window.DilithiumCrypto, localWallet);
+                }
+
+                console.log('[LightWallet] All modules initialized');
+            } catch (e) {
+                console.error('[LightWallet] Initialization error:', e);
+            }
+        }
+
+        // Handle mode change
+        async function handleModeChange() {
+            const mode = document.getElementById('connectionMode').value;
+            const fullModeDesc = document.getElementById('fullModeDesc');
+            const lightModeDesc = document.getElementById('lightModeDesc');
+            const lightWalletSetup = document.getElementById('lightWalletSetupCard');
+            const fullNodeSettings = document.getElementById('fullNodeSettingsCard');
+            const securityCard = document.getElementById('securityCard');
+
+            if (mode === 'light') {
+                // Light mode selected
+                fullModeDesc.style.display = 'none';
+                lightModeDesc.style.display = 'block';
+                lightWalletSetup.style.display = 'block';
+                fullNodeSettings.style.display = 'none';
+                if (securityCard) securityCard.style.display = 'none';
+
+                // Save mode
+                localStorage.setItem('dilithionWalletMode', 'light');
+
+                // Set connection manager mode
+                if (connectionManager) {
+                    await connectionManager.setMode('light');
+                }
+
+                // Update light wallet UI
+                await updateLightWalletUI();
+
+            } else {
+                // Full mode selected
+                fullModeDesc.style.display = 'block';
+                lightModeDesc.style.display = 'none';
+                lightWalletSetup.style.display = 'none';
+                fullNodeSettings.style.display = 'block';
+                if (securityCard) securityCard.style.display = 'block';
+
+                // Save mode
+                localStorage.setItem('dilithionWalletMode', 'full');
+
+                // Set connection manager mode
+                if (connectionManager) {
+                    await connectionManager.setMode('full');
+                }
+            }
+        }
+
+        // Update light wallet UI based on wallet state
+        async function updateLightWalletUI() {
+            if (!localWallet) return;
+
+            const hasWallet = await localWallet.hasWallet();
+            const createSection = document.getElementById('lightWalletCreate');
+            const unlockSection = document.getElementById('lightWalletUnlock');
+            const unlockedSection = document.getElementById('lightWalletUnlocked');
+
+            if (!hasWallet) {
+                // No wallet exists
+                createSection.style.display = 'block';
+                unlockSection.style.display = 'none';
+                unlockedSection.style.display = 'none';
+            } else if (!localWallet.isWalletUnlocked()) {
+                // Wallet exists but locked
+                createSection.style.display = 'none';
+                unlockSection.style.display = 'block';
+                unlockedSection.style.display = 'none';
+            } else {
+                // Wallet unlocked
+                createSection.style.display = 'none';
+                unlockSection.style.display = 'none';
+                unlockedSection.style.display = 'block';
+            }
+        }
+
+        // Show create wallet modal
+        function showCreateLightWallet() {
+            document.getElementById('lightWalletModal').style.display = 'flex';
+            document.getElementById('createWalletForm').style.display = 'block';
+            document.getElementById('restoreWalletForm').style.display = 'none';
+            document.getElementById('showMnemonicForm').style.display = 'none';
+        }
+
+        // Show restore wallet modal
+        function showRestoreLightWallet() {
+            document.getElementById('lightWalletModal').style.display = 'flex';
+            document.getElementById('createWalletForm').style.display = 'none';
+            document.getElementById('restoreWalletForm').style.display = 'block';
+            document.getElementById('showMnemonicForm').style.display = 'none';
+        }
+
+        // Close modal
+        function closeLightWalletModal() {
+            document.getElementById('lightWalletModal').style.display = 'none';
+            currentMnemonic = null;
+        }
+
+        // Create new light wallet
+        async function createLightWallet() {
+            const password = document.getElementById('newLightPassword').value;
+            const confirm = document.getElementById('confirmLightPassword').value;
+
+            if (password.length < 8) {
+                showNotification('Password must be at least 8 characters', 'error');
+                return;
+            }
+            if (password !== confirm) {
+                showNotification('Passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                showNotification('Creating wallet...', 'info');
+                const result = await localWallet.createWallet(password);
+
+                // Store mnemonic temporarily
+                currentMnemonic = result.mnemonic;
+
+                // Show mnemonic
+                document.getElementById('createWalletForm').style.display = 'none';
+                document.getElementById('showMnemonicForm').style.display = 'block';
+
+                // Display mnemonic words
+                const display = document.getElementById('mnemonicDisplay');
+                display.innerHTML = result.mnemonic.map((word, i) =>
+                    `<span style="display: inline-block; background: var(--bg-card); padding: 4px 8px; margin: 4px; border-radius: 4px;">${i + 1}. ${word}</span>`
+                ).join('');
+
+                showNotification('Wallet created successfully!', 'success');
+
+            } catch (e) {
+                showNotification('Failed to create wallet: ' + e.message, 'error');
+            }
+        }
+
+        // Confirm mnemonic backup
+        function confirmMnemonicBackup() {
+            currentMnemonic = null;  // Clear from memory
+            closeLightWalletModal();
+            updateLightWalletUI();
+        }
+
+        // Restore light wallet
+        async function restoreLightWallet() {
+            const mnemonicText = document.getElementById('restoreMnemonic').value.trim();
+            const password = document.getElementById('restoreLightPassword').value;
+
+            if (!mnemonicText) {
+                showNotification('Please enter your mnemonic phrase', 'error');
+                return;
+            }
+            if (password.length < 8) {
+                showNotification('Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            const mnemonic = mnemonicText.toLowerCase().split(/\s+/);
+            if (mnemonic.length !== 24) {
+                showNotification('Mnemonic must be 24 words', 'error');
+                return;
+            }
+
+            try {
+                showNotification('Restoring wallet...', 'info');
+                await localWallet.importWallet(password, mnemonic);
+
+                closeLightWalletModal();
+                updateLightWalletUI();
+                showNotification('Wallet restored successfully!', 'success');
+
+            } catch (e) {
+                showNotification('Failed to restore wallet: ' + e.message, 'error');
+            }
+        }
+
+        // Unlock light wallet
+        async function unlockLightWallet() {
+            const password = document.getElementById('lightWalletPassword').value;
+
+            if (!password) {
+                showNotification('Please enter your password', 'error');
+                return;
+            }
+
+            try {
+                await localWallet.unlock(password);
+                document.getElementById('lightWalletPassword').value = '';
+                updateLightWalletUI();
+                showNotification('Wallet unlocked', 'success');
+
+                // Connect to network
+                if (connectionManager) {
+                    try {
+                        await connectionManager.connect();
+                        setConnectionStatus(true, 'Light Wallet');
+                    } catch (e) {
+                        showNotification('Connected to wallet but failed to reach seed node: ' + e.message, 'warning');
+                    }
+                }
+
+            } catch (e) {
+                showNotification('Failed to unlock: ' + e.message, 'error');
+            }
+        }
+
+        // Lock light wallet
+        function lockLightWallet() {
+            if (localWallet) {
+                localWallet.lock();
+                updateLightWalletUI();
+                showNotification('Wallet locked', 'success');
+            }
+        }
+
+        // Show backup mnemonic (placeholder - needs password verification)
+        function showBackupMnemonic() {
+            showNotification('Mnemonic backup requires re-entering your password. Feature coming soon.', 'info');
         }
 
         // Initialize
@@ -1913,8 +2557,15 @@
             });
         });
 
-        loadSettings();
-        connect();
+        // Initialize light wallet modules first
+        initLightWallet().then(() => {
+            loadSettings();
+            // Only auto-connect in full mode
+            const savedMode = localStorage.getItem('dilithionWalletMode');
+            if (savedMode !== 'light') {
+                connect();
+            }
+        });
 
         // BUG #115 FIX: Auto-refresh with serialized requests to prevent connection overload
         let refreshInProgress = false;
