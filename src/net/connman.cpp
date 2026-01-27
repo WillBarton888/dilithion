@@ -1402,8 +1402,8 @@ void CConnman::ExtractMessages(CNode* pnode) {
     // Extract complete messages from receive buffer
     // Loop until no more complete messages can be extracted
     while (true) {
-        std::lock_guard<std::mutex> lock(pnode->GetRecvMutex());
-        auto& buffer = pnode->GetRecvBuffer();
+        // Use thread-safe locked accessor - lock is held for entire scope
+        auto [lock, buffer] = pnode->GetLockedRecvBuffer();
 
         // Need at least 24 bytes for message header
         if (buffer.size() < 24) {

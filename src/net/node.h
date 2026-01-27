@@ -199,8 +199,9 @@ public:
     void AppendRecvBytes(const uint8_t* data, size_t len);
 
     /**
-     * Get receive buffer for processing
-     * Returns reference, caller must hold lock
+     * Get receive buffer for processing (DEPRECATED - use GetLockedRecvBuffer)
+     * Returns reference, caller must hold lock from GetRecvMutex()
+     * @warning This is not thread-safe by itself - use GetLockedRecvBuffer() instead
      */
     std::vector<uint8_t>& GetRecvBuffer();
 
@@ -208,6 +209,16 @@ public:
      * Lock for receive buffer access
      */
     std::mutex& GetRecvMutex() { return cs_vRecv; }
+
+    /**
+     * Thread-safe locked access to receive buffer
+     * Returns a pair of lock guard and buffer reference
+     * Lock is held for the lifetime of the returned lock_guard
+     */
+    std::pair<std::unique_lock<std::mutex>, std::vector<uint8_t>&> GetLockedRecvBuffer() {
+        std::unique_lock<std::mutex> lock(cs_vRecv);
+        return {std::move(lock), vRecvMsg};
+    }
 
     //
     // Message queues
