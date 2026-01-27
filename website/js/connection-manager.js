@@ -250,14 +250,32 @@ class ConnectionManager {
     // ========================================================================
 
     /**
-     * Get balance for address
-     * @param {string} address - Dilithion address (for light mode)
-     * @returns {Promise<Object>} Balance info
+     * Get balance for a specific address
+     * @param {string} address - Dilithion address
+     * @returns {Promise<Object>} Balance info {confirmed, unconfirmed}
      */
     async getBalance(address) {
         if (this.mode === CONNECTION_MODE.FULL) {
-            // Full node: use RPC (gets wallet total balance)
-            return await this.rpcCall('getbalance');
+            // Full node: sum UTXOs for address using listunspent
+            try {
+                const utxos = await this.rpcCall('listunspent', [0, 9999999, [address]]);
+                let confirmed = 0;
+                let unconfirmed = 0;
+                if (Array.isArray(utxos)) {
+                    for (const utxo of utxos) {
+                        const amount = Math.round((utxo.amount || 0) * 100000000);  // Convert to ions
+                        if (utxo.confirmations > 0) {
+                            confirmed += amount;
+                        } else {
+                            unconfirmed += amount;
+                        }
+                    }
+                }
+                return { confirmed, unconfirmed };
+            } catch (e) {
+                console.warn('[ConnectionManager] listunspent failed:', e.message);
+                return { confirmed: 0, unconfirmed: 0 };
+            }
         } else {
             // Light wallet: use REST API
             return await this.restCall(`/api/v1/balance/${address}`);

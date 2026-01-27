@@ -1010,45 +1010,17 @@
                 <p class="page-subtitle">Configure your wallet connection</p>
             </div>
 
-            <!-- Connection Mode Selector -->
-            <div class="card" id="connectionModeCard">
-                <div class="card-title">🌐 Connection Mode</div>
+            <!-- Wallet Setup (always shown - keys always in browser) -->
+            <div class="card" id="walletSetupCard">
+                <div class="card-title">🔐 Your Wallet</div>
                 <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9rem;">
-                    Choose how to connect to the Dilithion network.
+                    Your private keys are stored securely in your browser. Same wallet works in both connection modes.
                 </p>
-                <div class="form-group">
-                    <label class="form-label">Mode</label>
-                    <select class="form-input" id="connectionMode" onchange="handleModeChange()">
-                        <option value="full">Full Node (localhost) - Uses node's wallet</option>
-                        <option value="light">Light Wallet (seed node) - Keys in browser</option>
-                    </select>
-                </div>
-                <div id="modeDescription" style="padding: 12px; border-radius: 8px; margin-top: 12px;">
-                    <div id="fullModeDesc" style="background: rgba(34, 197, 94, 0.1); padding: 12px; border-radius: 8px;">
-                        <strong style="color: #22c55e;">Full Node Mode</strong>
-                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0 0 0;">
-                            Connect to your local Dilithion node. Private keys are managed by the node.
-                            Best for miners and users running their own node.
-                        </p>
-                    </div>
-                    <div id="lightModeDesc" style="display: none; background: rgba(99, 102, 241, 0.1); padding: 12px; border-radius: 8px;">
-                        <strong style="color: #6366f1;">Light Wallet Mode</strong>
-                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0 0 0;">
-                            Connect to Dilithion seed nodes. Private keys stay in your browser (encrypted).
-                            No node required - perfect for sending and receiving DIL.
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Light Wallet Setup (shown in light mode) -->
-            <div class="card" id="lightWalletSetupCard" style="display: none;">
-                <div class="card-title">🔐 Light Wallet</div>
 
                 <!-- No wallet exists -->
                 <div id="lightWalletCreate">
                     <p style="color: var(--text-secondary); margin-bottom: 16px;">
-                        Create a new light wallet or restore from mnemonic phrase.
+                        Create a new wallet or restore from your 24-word recovery phrase.
                     </p>
                     <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                         <button class="btn btn-primary" onclick="showCreateLightWallet()">
@@ -1063,7 +1035,7 @@
                 <!-- Wallet exists, needs unlock -->
                 <div id="lightWalletUnlock" style="display: none;">
                     <p style="color: var(--text-secondary); margin-bottom: 16px;">
-                        Enter your password to unlock the light wallet.
+                        Enter your password to unlock your wallet.
                     </p>
                     <div class="form-group">
                         <label class="form-label">Password</label>
@@ -1085,6 +1057,37 @@
                     <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                         <button class="btn" onclick="lockLightWallet()">🔒 Lock Now</button>
                         <button class="btn" onclick="showBackupMnemonic()">📝 Backup Mnemonic</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Connection Mode Selector -->
+            <div class="card" id="connectionModeCard">
+                <div class="card-title">🌐 Connection Mode</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9rem;">
+                    Choose how to connect to the Dilithion network. Your wallet works the same in both modes.
+                </p>
+                <div class="form-group">
+                    <label class="form-label">Mode</label>
+                    <select class="form-input" id="connectionMode" onchange="handleModeChange()">
+                        <option value="full">Full Node (localhost) - Faster, private, can mine</option>
+                        <option value="light">Light Mode (seed nodes) - No node required</option>
+                    </select>
+                </div>
+                <div id="modeDescription" style="padding: 12px; border-radius: 8px; margin-top: 12px;">
+                    <div id="fullModeDesc" style="background: rgba(34, 197, 94, 0.1); padding: 12px; border-radius: 8px;">
+                        <strong style="color: #22c55e;">Full Node Mode</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0 0 0;">
+                            Connect to your local Dilithion node for faster queries and mining support.
+                            Your keys stay in the browser - the node only provides blockchain data.
+                        </p>
+                    </div>
+                    <div id="lightModeDesc" style="display: none; background: rgba(99, 102, 241, 0.1); padding: 12px; border-radius: 8px;">
+                        <strong style="color: #6366f1;">Light Mode</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0 0 0;">
+                            Connect to Dilithion seed nodes. No local node required.
+                            Perfect for checking balance and sending DIL on the go.
+                        </p>
                     </div>
                 </div>
             </div>
@@ -1427,55 +1430,37 @@
         // Refresh balance
         async function refreshBalance() {
             try {
-                // Check if we're in light wallet mode
-                const isLightMode = connectionManager && connectionManager.getMode() === 'light';
-
-                if (isLightMode) {
-                    // Light wallet mode: sum balance from all addresses
-                    if (!localWallet || !localWallet.isWalletUnlocked()) {
-                        // Wallet not unlocked, show zeros
-                        document.getElementById('totalBalance').textContent = '0.00000000';
-                        document.getElementById('matureBalance').textContent = '0.00000000';
-                        document.getElementById('immatureBalance').textContent = '0.00000000';
-                        document.getElementById('availableForSend').textContent = '0.00000000';
-                        return;
-                    }
-
-                    // Get all addresses from light wallet
-                    const addresses = await localWallet.getAddresses();
-                    let totalBalance = 0;
-                    let unconfirmedBalance = 0;
-
-                    // Sum balance from each address
-                    for (const addr of addresses) {
-                        try {
-                            const balanceInfo = await connectionManager.getBalance(addr.address);
-                            totalBalance += (balanceInfo.confirmed || 0) / 100000000;  // Convert from ions
-                            unconfirmedBalance += (balanceInfo.unconfirmed || 0) / 100000000;
-                        } catch (e) {
-                            console.warn('[Balance] Failed to get balance for', addr.address, e.message);
-                        }
-                    }
-
-                    document.getElementById('totalBalance').textContent = (totalBalance + unconfirmedBalance).toFixed(8);
-                    document.getElementById('matureBalance').textContent = totalBalance.toFixed(8);
-                    document.getElementById('immatureBalance').textContent = '0.00000000';  // No immature in light mode
-                    document.getElementById('availableForSend').textContent = totalBalance.toFixed(8);
-
-                } else {
-                    // Full node mode: use RPC
-                    const result = await rpcCall('getbalance');
-                    // getbalance returns an object with balance, unconfirmed_balance, immature_balance
-                    const balance = result.balance || 0;
-                    const unconfirmed = result.unconfirmed_balance || 0;
-                    const immature = result.immature_balance || 0;
-                    const total = balance + unconfirmed + immature;
-
-                    document.getElementById('totalBalance').textContent = total.toFixed(8);
-                    document.getElementById('matureBalance').textContent = balance.toFixed(8);
-                    document.getElementById('immatureBalance').textContent = immature.toFixed(8);
-                    document.getElementById('availableForSend').textContent = balance.toFixed(8);
+                // Always use browser wallet for balance (unified wallet architecture)
+                if (!localWallet || !localWallet.isWalletUnlocked()) {
+                    // Wallet not unlocked, show zeros
+                    document.getElementById('totalBalance').textContent = '0.00000000';
+                    document.getElementById('matureBalance').textContent = '0.00000000';
+                    document.getElementById('immatureBalance').textContent = '0.00000000';
+                    document.getElementById('availableForSend').textContent = '0.00000000';
+                    return;
                 }
+
+                // Get all addresses from browser wallet
+                const addresses = await localWallet.getAddresses();
+                let confirmedBalance = 0;
+                let unconfirmedBalance = 0;
+
+                // Sum balance from each address via connectionManager
+                for (const addr of addresses) {
+                    try {
+                        const balanceInfo = await connectionManager.getBalance(addr.address);
+                        confirmedBalance += (balanceInfo.confirmed || 0) / 100000000;  // Convert from ions
+                        unconfirmedBalance += (balanceInfo.unconfirmed || 0) / 100000000;
+                    } catch (e) {
+                        console.warn('[Balance] Failed to get balance for', addr.address, e.message);
+                    }
+                }
+
+                const total = confirmedBalance + unconfirmedBalance;
+                document.getElementById('totalBalance').textContent = total.toFixed(8);
+                document.getElementById('matureBalance').textContent = confirmedBalance.toFixed(8);
+                document.getElementById('immatureBalance').textContent = '0.00000000';  // Immature only for mining
+                document.getElementById('availableForSend').textContent = confirmedBalance.toFixed(8);
             } catch(e) {
                 console.error('Balance error:', e);
             }
@@ -1709,70 +1694,27 @@
         let lastTransactions = null;  // Cache last successful transaction load
         let txLoadAttempts = 0;       // Track load attempts
         async function refreshTransactions() {
-            // Check if we're in light wallet mode
-            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
-
-            if (isLightMode) {
-                // Light wallet mode: limited transaction history
-                // For MVP, show a helpful message. Could enhance later to track local TX history.
-                const lightModeMessage = `
-                    <div class="empty-state" style="text-align: center; padding: 24px;">
-                        <div style="font-size: 2rem; margin-bottom: 12px;">📱</div>
-                        <div style="font-weight: 600; margin-bottom: 8px;">Light Wallet Mode</div>
-                        <div style="color: var(--text-muted); font-size: 0.9rem;">
-                            Transaction history is limited in light mode.<br>
-                            Use a block explorer to view full history.
-                        </div>
+            // Unified wallet: browser holds keys, so node doesn't have TX history for our addresses
+            // For MVP, show a helpful message. Later could track local TX history.
+            const browserWalletMessage = `
+                <div class="empty-state" style="text-align: center; padding: 24px;">
+                    <div style="font-size: 2rem; margin-bottom: 12px;">🔐</div>
+                    <div style="font-weight: 600; margin-bottom: 8px;">Browser Wallet</div>
+                    <div style="color: var(--text-muted); font-size: 0.9rem;">
+                        Your keys are stored securely in your browser.<br>
+                        Use a block explorer to view transaction history.
                     </div>
-                `;
-                document.getElementById('recentTxList').innerHTML = lightModeMessage;
-                const txListEl = document.getElementById('txList');
-                if (txListEl) {
-                    txListEl.innerHTML = lightModeMessage;
-                }
-
-                // Hide mining stats in light mode
-                const blocksFoundEl = document.getElementById('blocksFound');
-                if (blocksFoundEl) blocksFoundEl.textContent = 'N/A';
-
-                return;
+                </div>
+            `;
+            document.getElementById('recentTxList').innerHTML = browserWalletMessage;
+            const txListEl = document.getElementById('txList');
+            if (txListEl) {
+                txListEl.innerHTML = browserWalletMessage;
             }
 
-            // Full node mode: use RPC
-            try {
-                console.log('[Wallet] Fetching transactions...');
-                const result = await rpcCall('listtransactions', {});
-                console.log('[Wallet] RPC result:', result);
-                const transactions = result.transactions || [];
-                console.log('[Wallet] Transactions count:', transactions.length);
-                lastTransactions = transactions;  // Cache successful result
-                txLoadAttempts = 0;  // Reset on success
-
-                // Count blocks mined (unique coinbase txids with 'generated' flag)
-                const generatedTxids = new Set(
-                    transactions.filter(t => t.generated === true).map(t => t.txid)
-                );
-                totalBlocksMined = generatedTxids.size;
-                console.log('[Wallet] Blocks mined:', totalBlocksMined, 'unique coinbase txids');
-                const blocksFoundEl = document.getElementById('blocksFound');
-                if (blocksFoundEl) blocksFoundEl.textContent = totalBlocksMined;
-
-                renderTransactions(transactions);
-            } catch(e) {
-                console.error('Transaction refresh error:', e);
-                txLoadAttempts++;
-                // Only show error after multiple failed attempts AND if we never had data
-                // This prevents "Unable to load" flash on page refresh
-                if (!lastTransactions && txLoadAttempts >= 3) {
-                    document.getElementById('recentTxList').innerHTML =
-                        '<div class="empty-state">Unable to load transactions</div>';
-                    const txListEl = document.getElementById('txList');
-                    if (txListEl) {
-                        txListEl.innerHTML = '<div class="empty-state">Unable to load transactions</div>';
-                    }
-                }
-                // If we had transactions before, keep showing them (don't overwrite on refresh failure)
-            }
+            // Mining stats not tracked for browser wallet
+            const blocksFoundEl = document.getElementById('blocksFound');
+            if (blocksFoundEl) blocksFoundEl.textContent = 'N/A';
         }
 
         // Format timestamp for display - shows both relative and absolute time
@@ -1915,30 +1857,22 @@
         // Get receive address
         async function refreshReceiveAddress() {
             try {
-                // Check if we're in light wallet mode
-                const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+                // Always use browser wallet for addresses (unified wallet architecture)
+                if (!localWallet || !localWallet.isWalletUnlocked()) {
+                    document.getElementById('receiveAddress').textContent = 'Unlock wallet to see address (Settings → Wallet Setup)';
+                    return;
+                }
+
+                // Get addresses from browser wallet
+                let addresses = await localWallet.getAddresses();
                 let address;
 
-                if (isLightMode) {
-                    // Light wallet mode: get or generate address from local wallet
-                    if (!localWallet || !localWallet.isWalletUnlocked()) {
-                        document.getElementById('receiveAddress').textContent = 'Unlock wallet to see address';
-                        return;
-                    }
-
-                    // Get addresses from local wallet
-                    let addresses = await localWallet.getAddresses();
-
-                    // If no addresses exist, generate one
-                    if (addresses.length === 0) {
-                        address = await localWallet.getNewAddress(0);  // Account 0
-                    } else {
-                        // Use the first address (could enhance to show multiple)
-                        address = addresses[0].address;
-                    }
+                // If no addresses exist, generate one
+                if (addresses.length === 0) {
+                    address = await localWallet.getNewAddress(0);  // Account 0
                 } else {
-                    // Full node mode: use RPC
-                    address = await rpcCall('getnewaddress');
+                    // Use the first address (could enhance to show multiple)
+                    address = addresses[0].address;
                 }
 
                 document.getElementById('receiveAddress').textContent = address;
@@ -1998,40 +1932,31 @@
             }
         }
 
-        // Generate new address
+        // Generate new address (always uses browser wallet)
         async function generateNewAddress() {
-            // Check if we're in light wallet mode
-            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+            if (!localWallet || !localWallet.isWalletUnlocked()) {
+                showNotification('Please unlock your wallet first (Settings → Wallet Setup)', 'error');
+                return;
+            }
 
-            if (isLightMode) {
-                // Light wallet mode: generate a new address
-                if (!localWallet || !localWallet.isWalletUnlocked()) {
-                    showNotification('Please unlock your wallet first', 'error');
-                    return;
+            try {
+                const newAddress = await localWallet.getNewAddress(0);  // Account 0
+                document.getElementById('receiveAddress').textContent = newAddress;
+
+                // Generate QR code
+                if (typeof QRCode !== 'undefined') {
+                    const canvas = document.getElementById('qrcode');
+                    QRCode.toCanvas(canvas, newAddress, {
+                        width: 200,
+                        margin: 2,
+                        color: { dark: '#000000', light: '#ffffff' }
+                    });
                 }
 
-                try {
-                    const newAddress = await localWallet.getNewAddress(0);  // Account 0
-                    document.getElementById('receiveAddress').textContent = newAddress;
-
-                    // Generate QR code
-                    if (typeof QRCode !== 'undefined') {
-                        const canvas = document.getElementById('qrcode');
-                        QRCode.toCanvas(canvas, newAddress, {
-                            width: 200,
-                            margin: 2,
-                            color: { dark: '#000000', light: '#ffffff' }
-                        });
-                    }
-
-                    updateAddressLabelDisplay(newAddress);
-                    showNotification('New address generated', 'success');
-                } catch (e) {
-                    showNotification('Failed to generate address: ' + e.message, 'error');
-                }
-            } else {
-                // Full node mode: use existing RPC call
-                await refreshReceiveAddress();
+                updateAddressLabelDisplay(newAddress);
+                showNotification('New address generated', 'success');
+            } catch (e) {
+                showNotification('Failed to generate address: ' + e.message, 'error');
             }
         }
 
@@ -2233,62 +2158,47 @@
             sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
 
             try {
-                // Check if we're in light wallet mode
-                const isLightMode = connectionManager && connectionManager.getMode() === 'light';
-
-                if (isLightMode) {
-                    // Light wallet mode: use transaction builder
-                    if (!localWallet || !localWallet.isWalletUnlocked()) {
-                        throw new Error('Please unlock your wallet first');
-                    }
-                    if (!txBuilder) {
-                        throw new Error('Transaction builder not initialized');
-                    }
-
-                    // Get the first address with balance (from address)
-                    const addresses = await localWallet.getAddresses();
-                    if (addresses.length === 0) {
-                        throw new Error('No addresses in wallet');
-                    }
-
-                    // Find an address with sufficient balance
-                    let fromAddress = null;
-                    for (const addr of addresses) {
-                        const balanceInfo = await connectionManager.getBalance(addr.address);
-                        const balance = (balanceInfo.confirmed || 0) / 100000000;
-                        if (balance >= amount) {
-                            fromAddress = addr.address;
-                            break;
-                        }
-                    }
-
-                    if (!fromAddress) {
-                        throw new Error('Insufficient balance in any address');
-                    }
-
-                    // Send using transaction builder
-                    const result = await txBuilder.send(fromAddress, toAddress, amount);
-                    alertDiv.innerHTML = `
-                        <div class="alert alert-success">
-                            Transaction sent successfully!<br>
-                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
-                                TXID: ${result.txid}
-                            </span>
-                            <br><small>Fee: ${result.fee.toFixed(8)} DIL</small>
-                        </div>
-                    `;
-                } else {
-                    // Full node mode: use RPC
-                    const txid = await rpcCall('sendtoaddress', {address: toAddress, amount: parseFloat(amount)});
-                    alertDiv.innerHTML = `
-                        <div class="alert alert-success">
-                            Transaction sent successfully!<br>
-                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
-                                TXID: ${txid}
-                            </span>
-                        </div>
-                    `;
+                // Always use browser wallet for sending (unified wallet architecture)
+                if (!localWallet || !localWallet.isWalletUnlocked()) {
+                    throw new Error('Please unlock your wallet first (Settings → Wallet Setup)');
                 }
+                if (!txBuilder) {
+                    throw new Error('Transaction builder not initialized');
+                }
+
+                // Get addresses from browser wallet
+                const addresses = await localWallet.getAddresses();
+                if (addresses.length === 0) {
+                    throw new Error('No addresses in wallet. Generate an address first.');
+                }
+
+                // Find an address with sufficient balance
+                let fromAddress = null;
+                let totalBalance = 0;
+                for (const addr of addresses) {
+                    const balanceInfo = await connectionManager.getBalance(addr.address);
+                    const balance = (balanceInfo.confirmed || 0) / 100000000;
+                    totalBalance += balance;
+                    if (balance >= amount && !fromAddress) {
+                        fromAddress = addr.address;
+                    }
+                }
+
+                if (!fromAddress) {
+                    throw new Error(`Insufficient balance. You have ${totalBalance.toFixed(8)} DIL but need ${amount} DIL`);
+                }
+
+                // Send using transaction builder (signs locally, broadcasts via node/seed)
+                const result = await txBuilder.send(fromAddress, toAddress, amount);
+                alertDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        Transaction sent successfully!<br>
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                            TXID: ${result.txid}
+                        </span>
+                        <br><small>Fee: ${result.fee.toFixed(8)} DIL</small>
+                    </div>
+                `;
 
                 document.getElementById('sendAddress').value = '';
                 document.getElementById('sendAmount').value = '';
@@ -2505,7 +2415,7 @@
                     }
                 }
 
-                // Initialize local wallet
+                // Initialize local wallet (always used in unified wallet architecture)
                 if (window.LocalWallet) {
                     localWallet = new window.LocalWallet(window.DilithiumCrypto);
                     await localWallet.init();
@@ -2514,6 +2424,9 @@
                     localWallet.on('lock', () => {
                         updateLightWalletUI();
                     });
+
+                    // Update wallet UI to show current state
+                    await updateLightWalletUI();
                 }
 
                 // Initialize transaction builder
@@ -2527,50 +2440,39 @@
             }
         }
 
-        // Handle mode change
+        // Handle mode change (unified wallet - mode only affects connection, not keys)
         async function handleModeChange() {
             const mode = document.getElementById('connectionMode').value;
             const fullModeDesc = document.getElementById('fullModeDesc');
             const lightModeDesc = document.getElementById('lightModeDesc');
-            const lightWalletSetup = document.getElementById('lightWalletSetupCard');
             const fullNodeSettings = document.getElementById('fullNodeSettingsCard');
-            const securityCard = document.getElementById('securityCard');
 
+            // Toggle mode-specific descriptions
             if (mode === 'light') {
-                // Light mode selected
                 fullModeDesc.style.display = 'none';
                 lightModeDesc.style.display = 'block';
-                lightWalletSetup.style.display = 'block';
-                fullNodeSettings.style.display = 'none';
-                if (securityCard) securityCard.style.display = 'none';
-
-                // Save mode
-                localStorage.setItem('dilithionWalletMode', 'light');
-
-                // Set connection manager mode
-                if (connectionManager) {
-                    await connectionManager.setMode('light');
-                }
-
-                // Update light wallet UI
-                await updateLightWalletUI();
-
+                // Hide RPC settings in light mode (not needed)
+                if (fullNodeSettings) fullNodeSettings.style.display = 'none';
             } else {
-                // Full mode selected
                 fullModeDesc.style.display = 'block';
                 lightModeDesc.style.display = 'none';
-                lightWalletSetup.style.display = 'none';
-                fullNodeSettings.style.display = 'block';
-                if (securityCard) securityCard.style.display = 'block';
-
-                // Save mode
-                localStorage.setItem('dilithionWalletMode', 'full');
-
-                // Set connection manager mode
-                if (connectionManager) {
-                    await connectionManager.setMode('full');
-                }
+                // Show RPC settings in full mode (for advanced users)
+                if (fullNodeSettings) fullNodeSettings.style.display = 'block';
             }
+
+            // Save mode preference
+            localStorage.setItem('dilithionWalletMode', mode);
+
+            // Update connection manager
+            if (connectionManager) {
+                await connectionManager.setMode(mode);
+            }
+
+            // Update wallet UI (same wallet, just different connection)
+            await updateLightWalletUI();
+
+            // Refresh data with new connection
+            await refreshAll();
         }
 
         // Update light wallet UI based on wallet state
