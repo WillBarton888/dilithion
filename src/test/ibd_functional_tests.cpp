@@ -45,13 +45,15 @@ BOOST_AUTO_TEST_CASE(test_ibd_coordinator_integration) {
     node_context.peer_manager = std::make_unique<CPeerManager>("");
     node_context.headers_manager = std::make_unique<CHeadersManager>();
     node_context.orphan_manager = std::make_unique<COrphanManager>();
+    node_context.block_tracker = std::make_unique<CBlockTracker>();
     node_context.block_fetcher = std::make_unique<CBlockFetcher>(node_context.peer_manager.get());
 
     CIbdCoordinator coordinator(chainstate, node_context);
 
     // Verify initial state
     BOOST_CHECK_EQUAL(chainstate.GetHeight(), -1);  // No blocks yet
-    BOOST_CHECK_EQUAL(node_context.headers_manager->GetBestHeight(), -1);  // No headers yet (-1 = uninitialized)
+    // Note: HeadersManager now auto-adds genesis block, so best height is 0
+    BOOST_CHECK_EQUAL(node_context.headers_manager->GetBestHeight(), 0);  // Genesis added by constructor
     BOOST_CHECK_EQUAL(node_context.block_fetcher->GetInFlightCount(), 0);  // No blocks in flight
     BOOST_CHECK_EQUAL(node_context.peer_manager->GetConnectionCount(), 0);  // No peers
 
@@ -65,6 +67,11 @@ BOOST_AUTO_TEST_CASE(test_block_fetcher_request_tracking) {
     // Test that block fetcher correctly tracks block requests by height
     CPeerManager peer_manager("");
     CBlockFetcher fetcher(&peer_manager);
+
+    // Set up g_node_context.block_tracker (required by RequestBlockFromPeer)
+    auto block_tracker = std::make_unique<CBlockTracker>();
+    auto old_tracker = std::move(g_node_context.block_tracker);
+    g_node_context.block_tracker = std::move(block_tracker);
 
     // Initially no blocks in flight
     BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 0);
@@ -93,12 +100,20 @@ BOOST_AUTO_TEST_CASE(test_block_fetcher_request_tracking) {
     // Verify per-peer count
     BOOST_CHECK_EQUAL(fetcher.GetPeerBlocksInFlight(peer_id), 3);
     BOOST_CHECK_EQUAL(fetcher.GetPeerBlocksInFlight(999), 0);  // Unknown peer
+
+    // Restore previous tracker
+    g_node_context.block_tracker = std::move(old_tracker);
 }
 
 BOOST_AUTO_TEST_CASE(test_block_fetcher_deduplication) {
     // Test that block fetcher doesn't track duplicate heights
     CPeerManager peer_manager("");
     CBlockFetcher fetcher(&peer_manager);
+
+    // Set up g_node_context.block_tracker (required by RequestBlockFromPeer)
+    auto block_tracker = std::make_unique<CBlockTracker>();
+    auto old_tracker = std::move(g_node_context.block_tracker);
+    g_node_context.block_tracker = std::move(block_tracker);
 
     uint256 hash;
     hash.data[0] = 42;
@@ -112,12 +127,20 @@ BOOST_AUTO_TEST_CASE(test_block_fetcher_deduplication) {
     // Should only be tracked once
     BOOST_CHECK(fetcher.IsHeightInFlight(100));
     BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 1);
+
+    // Restore previous tracker
+    g_node_context.block_tracker = std::move(old_tracker);
 }
 
 BOOST_AUTO_TEST_CASE(test_block_fetcher_receive) {
     // Test marking blocks as received
     CPeerManager peer_manager("");
     CBlockFetcher fetcher(&peer_manager);
+
+    // Set up g_node_context.block_tracker (required by RequestBlockFromPeer/OnBlockReceived)
+    auto block_tracker = std::make_unique<CBlockTracker>();
+    auto old_tracker = std::move(g_node_context.block_tracker);
+    g_node_context.block_tracker = std::move(block_tracker);
 
     uint256 hash1, hash2;
     hash1.data[0] = 1;
@@ -139,14 +162,17 @@ BOOST_AUTO_TEST_CASE(test_block_fetcher_receive) {
     // Receive second block
     BOOST_CHECK(fetcher.OnBlockReceived(peer_id, 101));
     BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 0);
+
+    // Restore previous tracker
+    g_node_context.block_tracker = std::move(old_tracker);
 }
 
 BOOST_AUTO_TEST_CASE(test_headers_manager_basic) {
     // Test basic headers manager functionality
     CHeadersManager manager;
 
-    // Initially no headers (-1 = uninitialized, 0 would mean genesis processed)
-    BOOST_CHECK_EQUAL(manager.GetBestHeight(), -1);
+    // HeadersManager now auto-adds genesis in constructor, so best height is 0
+    BOOST_CHECK_EQUAL(manager.GetBestHeight(), 0);
 
     // Create a test header
     CBlockHeader header;
@@ -161,7 +187,7 @@ BOOST_AUTO_TEST_CASE(test_headers_manager_basic) {
 
     // Note: Full processing requires proper parent linkage
     // This test verifies the manager can be instantiated and queried
-    BOOST_CHECK_EQUAL(manager.GetBestHeight(), -1);  // Still -1 until headers properly processed
+    BOOST_CHECK_EQUAL(manager.GetBestHeight(), 0);  // Still 0 until more headers processed
 }
 
 BOOST_AUTO_TEST_CASE(test_peer_manager_misbehavior) {
@@ -226,6 +252,11 @@ BOOST_AUTO_TEST_CASE(test_get_next_blocks_to_request) {
     CPeerManager peer_manager("");
     CBlockFetcher fetcher(&peer_manager);
 
+    // Set up g_node_context.block_tracker (required by GetNextBlocksToRequest)
+    auto block_tracker = std::make_unique<CBlockTracker>();
+    auto old_tracker = std::move(g_node_context.block_tracker);
+    g_node_context.block_tracker = std::move(block_tracker);
+
     // With chain at height 10 and headers at height 20, should request blocks 11-20
     auto blocks = fetcher.GetNextBlocksToRequest(5, 10, 20);
     BOOST_CHECK_EQUAL(blocks.size(), 5);
@@ -234,12 +265,20 @@ BOOST_AUTO_TEST_CASE(test_get_next_blocks_to_request) {
     if (!blocks.empty()) {
         BOOST_CHECK_EQUAL(blocks[0], 11);
     }
+
+    // Restore previous tracker
+    g_node_context.block_tracker = std::move(old_tracker);
 }
 
 BOOST_AUTO_TEST_CASE(test_clear_above_height) {
     // Test fork recovery by clearing blocks above a fork point
     CPeerManager peer_manager("");
     CBlockFetcher fetcher(&peer_manager);
+
+    // Set up g_node_context.block_tracker (required by RequestBlockFromPeer/ClearAboveHeight)
+    auto block_tracker = std::make_unique<CBlockTracker>();
+    auto old_tracker = std::move(g_node_context.block_tracker);
+    g_node_context.block_tracker = std::move(block_tracker);
 
     uint256 hash;
     hash.data[0] = 1;
@@ -262,6 +301,9 @@ BOOST_AUTO_TEST_CASE(test_clear_above_height) {
     BOOST_CHECK(fetcher.IsHeightInFlight(101));
     BOOST_CHECK(fetcher.IsHeightInFlight(102));
     BOOST_CHECK(!fetcher.IsHeightInFlight(103));
+
+    // Restore previous tracker
+    g_node_context.block_tracker = std::move(old_tracker);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
