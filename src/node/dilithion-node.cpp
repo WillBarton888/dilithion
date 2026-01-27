@@ -4142,9 +4142,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                          << "Total hashes: " << stats.nHashesComputed << std::endl;
 
                 // Update mining metrics for Prometheus
-                g_metrics.mining_active = miner.IsMining() ? 1 : 0;
-                g_metrics.hashrate = miner.GetHashRate();
-                g_metrics.hashes_total = stats.nHashesComputed;
+                g_metrics.mining_active.store(miner.IsMining() ? 1 : 0);
+                g_metrics.hashrate.store(miner.GetHashRate());
+                g_metrics.hashes_total.store(stats.nHashesComputed);
 
                 // ========================================================================
                 // BUG #109 FIX: Periodic template refresh to include mempool transactions
