@@ -792,7 +792,12 @@ FUZZ_COMMON_OBJECTS := $(OBJ_DIR)/crypto/sha3.o \
 FUZZ_CONSENSUS_OBJECTS := $(OBJ_DIR)/consensus/pow.o \
                           $(OBJ_DIR)/consensus/fees.o \
                           $(OBJ_DIR)/consensus/tx_validation.o \
-                          $(OBJ_DIR)/consensus/validation.o
+                          $(OBJ_DIR)/consensus/validation.o \
+                          $(OBJ_DIR)/consensus/signature_batch_verifier.o
+
+FUZZ_DFMP_OBJECTS := $(OBJ_DIR)/dfmp/dfmp.o \
+                     $(OBJ_DIR)/dfmp/identity_db.o \
+                     $(OBJ_DIR)/dfmp/mik.o
 
 FUZZ_NODE_OBJECTS := $(OBJ_DIR)/node/utxo_set.o
 
@@ -883,20 +888,20 @@ fuzz_subsidy: $(FUZZ_SUBSIDY_OBJ) $(DILITHIUM_OBJECTS)
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-# fuzz_merkle: Full consensus + UTXO for CBlockValidator::BuildMerkleRoot
-fuzz_merkle: $(FUZZ_MERKLE_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+# fuzz_merkle: Full consensus + UTXO + DFMP for CBlockValidator::BuildMerkleRoot
+fuzz_merkle: $(FUZZ_MERKLE_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (7 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-# fuzz_tx_validation: Full consensus + UTXO dependencies
-fuzz_tx_validation: $(FUZZ_TX_VALIDATION_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+# fuzz_tx_validation: Full consensus + UTXO + DFMP dependencies
+fuzz_tx_validation: $(FUZZ_TX_VALIDATION_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-# fuzz_utxo: Full consensus + UTXO dependencies
-fuzz_utxo: $(FUZZ_UTXO_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+# fuzz_utxo: Full consensus + UTXO + DFMP dependencies
+fuzz_utxo: $(FUZZ_UTXO_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
