@@ -2066,10 +2066,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             if (g_node_context.peer_manager) {
-                auto peer_stats = g_node_context.peer_manager->GetStats();
-                g_metrics.peer_count = peer_stats.connected_peers;
-                g_metrics.inbound_peers = peer_stats.inbound_connections;
-                g_metrics.outbound_peers = peer_stats.outbound_connections;
+                // Use the simpler, safer GetConnectedPeers() instead of GetStats()
+                // to avoid potential thread safety issues with ban manager
+                auto connected = g_node_context.peer_manager->GetConnectedPeers();
+                g_metrics.peer_count = connected.size();
+                // For now, just report total peers - inbound/outbound requires more work
+                g_metrics.inbound_peers = 0;
+                g_metrics.outbound_peers = connected.size();
             }
 
             // Return Prometheus-format metrics
