@@ -876,10 +876,10 @@ fuzz_address: $(FUZZ_ADDRESS_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/util/base5
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
-# fuzz_difficulty: Consensus + DFMP dependencies (pow.o uses DFMP)
-fuzz_difficulty: $(FUZZ_DIFFICULTY_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(DILITHIUM_OBJECTS)
+# fuzz_difficulty: Full consensus + UTXO + DFMP dependencies (pow.o and tx_validation.o use DFMP and UTXO)
+fuzz_difficulty: $(FUZZ_DIFFICULTY_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (6 targets)"
-	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lrandomx -lpthread
+	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_subsidy: No external dependencies
