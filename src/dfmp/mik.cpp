@@ -3,6 +3,7 @@
 
 #include <dfmp/mik.h>
 #include <crypto/sha3.h>
+#include <wallet/crypter.h>  // For memory_cleanse()
 
 #include <cstring>
 #include <algorithm>
@@ -19,9 +20,6 @@ extern "C" {
                                          const uint8_t *ctx, size_t ctxlen,
                                          const uint8_t *pk);
 }
-
-// Secure memory wiping (from crypter.h)
-extern void memory_cleanse(void* ptr, size_t len);
 
 namespace DFMP {
 
