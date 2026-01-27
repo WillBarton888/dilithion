@@ -238,30 +238,8 @@ public:
         out << "# TYPE dilithion_peer_count gauge\n";
         out << "dilithion_peer_count{" << net_label << "} " << peer_count.load() << "\n\n";
 
-        // Inbound peers
-        out << "# HELP dilithion_inbound_peers Number of inbound peer connections\n";
-        out << "# TYPE dilithion_inbound_peers gauge\n";
-        out << "dilithion_inbound_peers{" << net_label << "} " << inbound_peers.load() << "\n\n";
-
-        // Outbound peers
-        out << "# HELP dilithion_outbound_peers Number of outbound peer connections\n";
-        out << "# TYPE dilithion_outbound_peers gauge\n";
-        out << "dilithion_outbound_peers{" << net_label << "} " << outbound_peers.load() << "\n\n";
-
-        // Mining active
-        out << "# HELP dilithion_mining_active Mining status (1=active, 0=inactive)\n";
-        out << "# TYPE dilithion_mining_active gauge\n";
-        out << "dilithion_mining_active{" << net_label << "} " << mining_active.load() << "\n\n";
-
-        // Hashrate
-        out << "# HELP dilithion_hashrate Current mining hashrate in H/s\n";
-        out << "# TYPE dilithion_hashrate gauge\n";
-        out << "dilithion_hashrate{" << net_label << "} " << hashrate.load() << "\n\n";
-
-        // Blocks mined
-        out << "# HELP dilithion_blocks_mined Total blocks mined by this node\n";
-        out << "# TYPE dilithion_blocks_mined counter\n";
-        out << "dilithion_blocks_mined{" << net_label << "} " << blocks_mined.load() << "\n\n";
+        // Note: inbound_peers, outbound_peers, and mining metrics are defined in struct
+        // but not output yet - fields are reserved for future use
 
         // Mempool
         out << "# HELP dilithion_mempool_size Number of transactions in mempool\n";
