@@ -240,9 +240,30 @@ bool CWalletManager::RunFirstTimeSetupWizard() {
         std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
         std::cout << std::endl;
 
+        // SECURITY: Pre-display confirmation - ensure user is ready
+        std::cout << COLOR_RED << COLOR_BOLD << "⚠️  CRITICAL SECURITY STEP" << COLOR_RESET << std::endl;
+        std::cout << std::endl;
+        std::cout << "Your 24-word recovery phrase is the ONLY way to recover your funds." << std::endl;
+        std::cout << "It will be shown ONCE on screen. You MUST write it on paper." << std::endl;
+        std::cout << std::endl;
+        std::cout << COLOR_YELLOW << "Before continuing:" << COLOR_RESET << std::endl;
+        std::cout << "  1. Get paper and pen ready" << std::endl;
+        std::cout << "  2. Ensure no one is watching your screen" << std::endl;
+        std::cout << "  3. Do NOT take a screenshot or photo" << std::endl;
+        std::cout << std::endl;
+
+        if (!PromptConfirmation("I have paper and pen ready. Show my recovery phrase?")) {
+            PrintError("Setup cannot continue without viewing the recovery phrase");
+            // Securely wipe mnemonic from memory before returning
+            memory_cleanse(&mnemonic[0], mnemonic.size());
+            mnemonic.clear();
+            return false;
+        }
+
+        std::cout << std::endl;
         std::cout << COLOR_RED << COLOR_BOLD << "⚠️  THIS IS THE ONLY WAY TO RECOVER YOUR FUNDS" << COLOR_RESET << std::endl;
         std::cout << std::endl;
-        std::cout << COLOR_YELLOW << "REQUIRED: Write these words on paper RIGHT NOW" << COLOR_RESET << std::endl;
+        std::cout << COLOR_YELLOW << "WRITE THESE WORDS ON PAPER NOW" << COLOR_RESET << std::endl;
         std::cout << std::endl;
 
         // Display mnemonic in a box
@@ -273,7 +294,7 @@ bool CWalletManager::RunFirstTimeSetupWizard() {
         std::cout << COLOR_RED << "✗ DON'T:" << COLOR_RESET << " Screenshot, email, or cloud storage" << std::endl;
         std::cout << std::endl;
 
-        // Verification - user must type first, middle, and last word
+        // Verification - user must type first word to prove they wrote it down
         std::cout << COLOR_YELLOW << "To verify you wrote it down, please type:" << COLOR_RESET << std::endl;
         std::cout << std::endl;
 
@@ -289,13 +310,38 @@ bool CWalletManager::RunFirstTimeSetupWizard() {
 
             if (!PromptConfirmation("Did you write down all 24 words correctly?")) {
                 PrintError("Setup cannot continue without verified mnemonic backup");
+                // Securely wipe mnemonic from memory
+                memory_cleanse(&mnemonic[0], mnemonic.size());
+                mnemonic.clear();
                 return false;
             }
         } else {
-            PrintSuccess("Verification successful!");
+            PrintSuccess("First word verified!");
         }
 
         std::cout << std::endl;
+
+        // Final confirmation - user must explicitly confirm they have the backup
+        std::cout << COLOR_RED << COLOR_BOLD << "FINAL CONFIRMATION" << COLOR_RESET << std::endl;
+        std::cout << std::endl;
+        std::cout << "Your recovery phrase will NOT be shown again." << std::endl;
+        std::cout << "It is NOT saved to any file on this computer." << std::endl;
+        std::cout << std::endl;
+
+        if (!PromptConfirmation("I have written down all 24 words and stored them securely?")) {
+            PrintError("Setup cannot continue without confirming your backup");
+            // Securely wipe mnemonic from memory
+            memory_cleanse(&mnemonic[0], mnemonic.size());
+            mnemonic.clear();
+            return false;
+        }
+
+        PrintSuccess("Recovery phrase backup confirmed!");
+        std::cout << std::endl;
+
+        // SECURITY: Securely wipe mnemonic from memory - it's no longer needed
+        memory_cleanse(&mnemonic[0], mnemonic.size());
+        mnemonic.clear();
     }
 
     // Step 3 (or Step 2 in restore mode): Encrypt wallet
@@ -311,35 +357,9 @@ bool CWalletManager::RunFirstTimeSetupWizard() {
 
     std::cout << std::endl;
 
-    // Step 4: Setup auto-backup
-    std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
-    std::cout << COLOR_CYAN << COLOR_BOLD << "STEP 4: Create Automatic Backups" << COLOR_RESET << std::endl;
-    std::cout << COLOR_CYAN << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
-    std::cout << std::endl;
-
-    // Create backup directory
-    std::string backup_dir = GetDataDir() + "/backups";
-    mkdir(backup_dir.c_str(), 0700);
-
-    // Enable auto-backup (daily)
-    EnableAutoBackup(backup_dir, 1440); // 24 hours
-
-    // Create initial backup
-    std::string backup_path;
-    if (CreateBackup("initial", backup_path)) {
-        std::cout << std::endl;
-        PrintSuccess("Initial backup created:");
-        std::cout << "  " << backup_path << std::endl;
-        std::cout << std::endl;
-        PrintWarning("IMPORTANT: Store this backup file in a secure location!");
-        std::cout << "  • Copy to USB drive" << std::endl;
-        std::cout << "  • Keep USB drive in safe" << std::endl;
-        std::cout << "  • Make 2-3 copies" << std::endl;
-    }
-
-    std::cout << std::endl;
-    PrintSuccess("Auto-backup enabled (daily backups)");
-    std::cout << std::endl;
+    // SECURITY: No automatic backup of mnemonic to file
+    // The user's paper backup is the ONLY backup - this is intentional for security
+    // Step 4 removed - plaintext mnemonic backups are a security risk
 
     // Setup complete!
     std::cout << COLOR_GREEN << COLOR_BOLD << "═══════════════════════════════════════════════════════════════" << COLOR_RESET << std::endl;
@@ -437,31 +457,26 @@ bool CWalletManager::PromptAndEncryptWallet() {
 int CWalletManager::CalculateSecurityScore() const {
     int score = 0;
 
-    // HD wallet (20 points)
+    // HD wallet (25 points)
     if (m_wallet && m_wallet->IsHDWallet()) {
-        score += 20;
-    }
-
-    // Encrypted (30 points)
-    if (m_wallet && m_wallet->IsCrypted()) {
-        score += 30;
-    }
-
-    // Auto-backup enabled (25 points)
-    if (m_auto_backup_enabled) {
         score += 25;
     }
 
-    // Wallet locked (15 points)
-    if (m_wallet && m_wallet->IsLocked()) {
-        score += 15;
+    // Encrypted (35 points)
+    if (m_wallet && m_wallet->IsCrypted()) {
+        score += 35;
     }
 
-    // Backup exists (10 points)
+    // Wallet locked (20 points)
+    if (m_wallet && m_wallet->IsLocked()) {
+        score += 20;
+    }
+
+    // Data backup directory exists (20 points)
     std::string backup_dir = GetDataDir() + "/backups";
     struct stat info;
     if (stat(backup_dir.c_str(), &info) == 0 && (info.st_mode & S_IFDIR)) {
-        score += 10;
+        score += 20;
     }
 
     return score;
@@ -515,13 +530,14 @@ void CWalletManager::DisplaySecurityScore() const {
         std::cout << "  " << COLOR_RED << "✗" << COLOR_RESET << " Wallet not encrypted" << std::endl;
     }
 
-    if (m_auto_backup_enabled) {
-        std::cout << "  " << COLOR_GREEN << "✓" << COLOR_RESET << " Auto-backup enabled" << std::endl;
+    if (m_wallet && m_wallet->IsLocked()) {
+        std::cout << "  " << COLOR_GREEN << "✓" << COLOR_RESET << " Wallet locked when not in use" << std::endl;
     } else {
-        std::cout << "  " << COLOR_YELLOW << "⚠" << COLOR_RESET << " Auto-backup disabled" << std::endl;
+        std::cout << "  " << COLOR_YELLOW << "⚠" << COLOR_RESET << " Wallet unlocked - lock when done" << std::endl;
     }
 
-    std::cout << "  " << COLOR_YELLOW << "⚠" << COLOR_RESET << " Recovery phrase written on paper (manual check)" << std::endl;
+    // Paper backup is the ONLY backup - this is by design for security
+    std::cout << "  " << COLOR_CYAN << "ℹ" << COLOR_RESET << " Recovery phrase: paper backup only (by design)" << std::endl;
 }
 
 bool CWalletManager::WarnLargeTransaction(double amount, const std::string& address) const {

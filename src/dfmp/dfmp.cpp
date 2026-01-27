@@ -305,8 +305,8 @@ uint256 CalculateEffectiveTarget(const uint256& baseTarget, int64_t multiplierFP
     // We have a 256-bit number and want to divide by a 64-bit number.
 
     // Approach: Process 64 bits at a time from MSB
+    // Note: multiplierFP is guaranteed >= FP_SCALE (clamped above), so divisor is never 0
     uint64_t divisor = static_cast<uint64_t>(multiplierFP);
-    if (divisor == 0) divisor = FP_SCALE;  // Safety
 
     // We want: result = baseTarget × FP_SCALE / divisor
     // First, we multiply baseTarget by FP_SCALE (this may overflow 256 bits slightly

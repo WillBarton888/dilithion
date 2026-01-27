@@ -93,61 +93,50 @@ void CleanupPeerRateLimitState(int peer_id) {
 }
 
 /**
+ * NET-013 FIX: Helper to clean stale entries from a timestamp map
+ * CWE-662 FIX: Extracted to separate function to make synchronization explicit for static analysis
+ */
+static void CleanupTimestampMap(std::map<int, std::vector<int64_t>>& map,
+                                 std::mutex& mutex,
+                                 int64_t now,
+                                 int64_t max_age_seconds) {
+    std::lock_guard<std::mutex> lock(mutex);
+    for (auto it = map.begin(); it != map.end(); ) {
+        auto& timestamps = it->second;
+        timestamps.erase(
+            std::remove_if(timestamps.begin(), timestamps.end(),
+                [now, max_age_seconds](int64_t ts) { return now - ts > max_age_seconds; }),
+            timestamps.end());
+
+        if (timestamps.empty()) {
+            it = map.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // If map is still too large, remove oldest entries (LRU eviction)
+    while (map.size() > MAX_RATE_LIMIT_MAP_SIZE) {
+        map.erase(map.begin());
+    }
+}
+
+/**
  * NET-013 FIX: Periodic cleanup of stale rate limit entries
  * Call this periodically (e.g., every 60 seconds) to prevent memory growth
  */
 void PeriodicRateLimitCleanup() {
-    int64_t now = GetTime();
+    const int64_t now = GetTime();
 
-    {
-        std::lock_guard<std::mutex> lock(cs_getdata_rate);
-        // Remove entries with no recent activity (older than 60 seconds)
-        for (auto it = g_peer_getdata_timestamps.begin(); it != g_peer_getdata_timestamps.end(); ) {
-            // Remove timestamps older than 60 seconds
-            auto& timestamps = it->second;
-            timestamps.erase(
-                std::remove_if(timestamps.begin(), timestamps.end(),
-                    [now](int64_t ts) { return now - ts > 60; }),
-                timestamps.end());
+    // Clean up GETDATA rate limit entries (stale after 60 seconds)
+    CleanupTimestampMap(g_peer_getdata_timestamps, cs_getdata_rate, now, 60);
 
-            // If no timestamps left, remove the entry entirely
-            if (timestamps.empty()) {
-                it = g_peer_getdata_timestamps.erase(it);
-            } else {
-                ++it;
-            }
-        }
+    // Clean up HEADERS rate limit entries (stale after 60 seconds)
+    CleanupTimestampMap(g_peer_headers_timestamps, cs_headers_rate, now, 60);
 
-        // If map is still too large, remove oldest entries (LRU eviction)
-        while (g_peer_getdata_timestamps.size() > MAX_RATE_LIMIT_MAP_SIZE) {
-            g_peer_getdata_timestamps.erase(g_peer_getdata_timestamps.begin());
-        }
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(cs_headers_rate);
-        for (auto it = g_peer_headers_timestamps.begin(); it != g_peer_headers_timestamps.end(); ) {
-            auto& timestamps = it->second;
-            timestamps.erase(
-                std::remove_if(timestamps.begin(), timestamps.end(),
-                    [now](int64_t ts) { return now - ts > 60; }),
-                timestamps.end());
-
-            if (timestamps.empty()) {
-                it = g_peer_headers_timestamps.erase(it);
-            } else {
-                ++it;
-            }
-        }
-
-        while (g_peer_headers_timestamps.size() > MAX_RATE_LIMIT_MAP_SIZE) {
-            g_peer_headers_timestamps.erase(g_peer_headers_timestamps.begin());
-        }
-    }
-
+    // Clean up connection cooldown entries (stale after 5 minutes)
     {
         std::lock_guard<std::mutex> lock(cs_connection_cooldown);
-        // Clean up old connection cooldown entries (older than 5 minutes)
         for (auto it = g_last_connection_attempt.begin(); it != g_last_connection_attempt.end(); ) {
             if (now - it->second > 300) {  // 5 minutes
                 it = g_last_connection_attempt.erase(it);
@@ -1026,17 +1015,19 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         tx.nVersion = stream.ReadInt32();
 
         // Read inputs
-        uint64_t vin_size = stream.ReadCompactSize();
+        const uint64_t vin_size_raw = stream.ReadCompactSize();
 
         // NET-003 FIX: Validate size before resize to prevent integer overflow
-        if (vin_size > MAX_TX_INPUTS) {
+        if (vin_size_raw > MAX_TX_INPUTS) {
             // NET-011 FIX: Penalize peer for sending invalid transaction
             peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
             throw std::runtime_error("Transaction input count exceeds limit");
         }
 
+        // Create validated const bound for loop (CWE-606 fix: explicit trusted bound)
+        const size_t vin_size = static_cast<size_t>(vin_size_raw);
         tx.vin.resize(vin_size);
-        for (uint64_t i = 0; i < vin_size; i++) {
+        for (size_t i = 0; i < vin_size; i++) {
             tx.vin[i].prevout.hash = stream.ReadUint256();
             tx.vin[i].prevout.n = stream.ReadUint32();
 
@@ -1056,15 +1047,17 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         }
 
         // Read outputs
-        uint64_t vout_size = stream.ReadCompactSize();
+        const uint64_t vout_size_raw = stream.ReadCompactSize();
 
         // NET-003 FIX: Validate size before resize to prevent integer overflow
-        if (vout_size > MAX_TX_OUTPUTS) {
+        if (vout_size_raw > MAX_TX_OUTPUTS) {
             throw std::runtime_error("Transaction output count exceeds limit");
         }
 
+        // Create validated const bound for loop (CWE-606 fix: explicit trusted bound)
+        const size_t vout_size = static_cast<size_t>(vout_size_raw);
         tx.vout.resize(vout_size);
-        for (uint64_t i = 0; i < vout_size; i++) {
+        for (size_t i = 0; i < vout_size; i++) {
             tx.vout[i].nValue = stream.ReadUint64();
 
             uint64_t script_size = stream.ReadCompactSize();

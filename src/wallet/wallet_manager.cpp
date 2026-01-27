@@ -173,6 +173,10 @@ bool CWalletManager::ValidatePassphraseStrength(const std::string& passphrase, s
 }
 
 bool CWalletManager::CreateBackup(const std::string& backup_name, std::string& backup_path) {
+    // SECURITY: This function only backs up wallet STATE (address indices), NOT the mnemonic.
+    // The mnemonic should ONLY exist on paper - never stored digitally.
+    // This is intentional to prevent seed phrase theft from compromised systems.
+
     if (!m_wallet->IsHDWallet()) {
         PrintError("Not an HD wallet");
         return false;
@@ -193,25 +197,17 @@ bool CWalletManager::CreateBackup(const std::string& backup_name, std::string& b
     strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &tm_now);
 
     // Create backup filename
-    std::string backup_filename = "wallet_backup_" + backup_name + "_" + std::string(timestamp) + ".txt";
+    std::string backup_filename = "wallet_state_" + backup_name + "_" + std::string(timestamp) + ".txt";
     backup_path = m_backup_directory + "/" + backup_filename;
 
-    // Export mnemonic
-    std::string mnemonic;
-    if (!m_wallet->ExportMnemonic(mnemonic)) {
-        PrintError("Failed to export mnemonic (wallet may be locked)");
-        return false;
-    }
-
-    // Get wallet info
+    // Get wallet info (state only - NOT the mnemonic)
     uint32_t account, external_idx, internal_idx;
     if (!m_wallet->GetHDWalletInfo(account, external_idx, internal_idx)) {
         PrintError("Failed to get wallet info");
         return false;
     }
 
-    // FIX-003 (PERSIST-005): Create backup file with secure permissions
-    // Backup contains plaintext mnemonic - must be owner-only from the start
+    // Create backup file with secure permissions
     #ifndef _WIN32
         mode_t old_umask = umask(0077);  // Remove all group/other permissions
     #endif
@@ -220,7 +216,6 @@ bool CWalletManager::CreateBackup(const std::string& backup_name, std::string& b
 
     #ifndef _WIN32
         umask(old_umask);  // Restore original umask
-        // Double-check permissions (eliminates race window)
         if (backup_file.is_open()) {
             chmod(backup_path.c_str(), S_IRUSR | S_IWUSR);  // 0600: owner read/write only
         }
@@ -231,22 +226,16 @@ bool CWalletManager::CreateBackup(const std::string& backup_name, std::string& b
         return false;
     }
 
-    // Write backup
+    // Write backup - STATE ONLY, no mnemonic
     backup_file << "╔══════════════════════════════════════════════════════════════╗" << std::endl;
-    backup_file << "║          DILITHION HD WALLET BACKUP                          ║" << std::endl;
+    backup_file << "║          DILITHION WALLET STATE BACKUP                       ║" << std::endl;
     backup_file << "╚══════════════════════════════════════════════════════════════╝" << std::endl;
     backup_file << std::endl;
-    backup_file << "CRITICAL: Keep this file secure! Anyone with this mnemonic" << std::endl;
-    backup_file << "can access your funds." << std::endl;
+    backup_file << "NOTE: This file contains wallet STATE only (address indices)." << std::endl;
+    backup_file << "Your recovery phrase is NOT stored here - it should be on paper." << std::endl;
     backup_file << std::endl;
     backup_file << "Backup Date: " << timestamp << std::endl;
     backup_file << "Wallet Type: HD (Hierarchical Deterministic)" << std::endl;
-    backup_file << std::endl;
-    backup_file << "════════════════════════════════════════════════════════════════" << std::endl;
-    backup_file << "RECOVERY PHRASE (24 WORDS)" << std::endl;
-    backup_file << "════════════════════════════════════════════════════════════════" << std::endl;
-    backup_file << std::endl;
-    backup_file << mnemonic << std::endl;
     backup_file << std::endl;
     backup_file << "════════════════════════════════════════════════════════════════" << std::endl;
     backup_file << "WALLET STATE" << std::endl;
@@ -260,10 +249,11 @@ bool CWalletManager::CreateBackup(const std::string& backup_name, std::string& b
     backup_file << "RESTORATION INSTRUCTIONS" << std::endl;
     backup_file << "════════════════════════════════════════════════════════════════" << std::endl;
     backup_file << std::endl;
-    backup_file << "1. Install Dilithion wallet software" << std::endl;
-    backup_file << "2. Run: dilithion-cli restorehdwallet '{\"mnemonic\":\"<24 words>\"}'" << std::endl;
-    backup_file << "3. If you used a passphrase, add: \"passphrase\":\"<your passphrase>\"" << std::endl;
-    backup_file << "4. Verify addresses match by comparing first receive address" << std::endl;
+    backup_file << "1. Get your 24-word recovery phrase from your paper backup" << std::endl;
+    backup_file << "2. Install Dilithion wallet software" << std::endl;
+    backup_file << "3. Run: dilithion-cli restorehdwallet '{\"mnemonic\":\"<24 words>\"}'" << std::endl;
+    backup_file << "4. If you used a passphrase, add: \"passphrase\":\"<your passphrase>\"" << std::endl;
+    backup_file << "5. Generate addresses up to the indices shown above" << std::endl;
     backup_file << std::endl;
 
     backup_file.close();

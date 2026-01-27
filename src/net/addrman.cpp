@@ -501,9 +501,7 @@ std::pair<CNetworkAddr, int64_t> CAddrMan::Select(bool newOnly) const {
         // Max iterations reached - return empty to prevent infinite loop
         return std::make_pair(CNetworkAddr(), 0);
     }
-
-    // BUG #145 FIX: Now unreachable since both branches explicitly return after max iterations
-    return std::make_pair(CNetworkAddr(), 0);
+    // Note: Both if/else branches return explicitly, no fallthrough return needed (CWE-561 fix)
 }
 
 std::vector<CNetworkAddr> CAddrMan::GetAddr(size_t maxAddresses, size_t maxPct) const {

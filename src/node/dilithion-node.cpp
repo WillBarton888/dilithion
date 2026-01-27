@@ -307,6 +307,7 @@ struct NodeConfig {
     bool upnp_enabled = false;      // Enable UPnP automatic port mapping
     bool upnp_prompted = false;     // True if user was already prompted or used explicit flag
     std::string external_ip = "";   // --externalip: Manual external IP (for manual port forwarding)
+    bool public_api = false;        // --public-api: Enable public REST API for light wallets (seed nodes only)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -430,6 +431,10 @@ struct NodeConfig {
                 // Relay-only mode: skip wallet creation (for seed nodes)
                 relay_only = true;
             }
+            else if (arg == "--public-api") {
+                // Public REST API: bind to 0.0.0.0 for light wallet access (seed nodes only)
+                public_api = true;
+            }
             else if (arg == "--upnp") {
                 // Enable UPnP automatic port mapping
                 upnp_enabled = true;
@@ -482,6 +487,7 @@ struct NodeConfig {
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --relay-only          Relay-only mode: skip wallet (for seed nodes)" << std::endl;
+        std::cout << "  --public-api          Enable public REST API for light wallets (seed nodes)" << std::endl;
         std::cout << "  --upnp                Enable automatic port mapping (UPnP)" << std::endl;
         std::cout << "  --no-upnp             Disable UPnP (don't prompt)" << std::endl;
         std::cout << "  --externalip=<ip>     Your public IP (for manual port forwarding)" << std::endl;
@@ -3839,6 +3845,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterMempool(&mempool);
         rpc_server.RegisterUTXOSet(&utxo_set);
         rpc_server.SetTestnet(config.testnet);
+        rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
 
         // Phase 1: Initialize authentication and permissions
         std::string rpcuser = config_parser.GetString("rpcuser", "");

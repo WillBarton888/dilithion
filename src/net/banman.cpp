@@ -295,7 +295,8 @@ bool CBanManager::SaveBanList() {
 
     } catch (const std::exception& e) {
         std::cerr << "[BanManager] Exception saving ban list: " << e.what() << std::endl;
-        std::remove(temp_path.c_str());
+        // CWE-252 fix: Cast to void to acknowledge intentionally ignored return value
+        (void)std::remove(temp_path.c_str());
         return false;
     }
 }
@@ -378,7 +379,7 @@ bool CBanManager::LoadBanList() {
 
             // Only add non-expired entries
             if (!entry.IsExpired()) {
-                m_banned[ip] = entry;
+                m_banned[std::move(ip)] = std::move(entry);
                 loaded++;
             }
         }

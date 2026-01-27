@@ -31,26 +31,31 @@ CReorgWAL::CReorgWAL(const std::string& dataDir)
     std::string walDir = dataDir + "/wal";
 
 #ifdef _WIN32
-    // Windows: Just create directory (no mode support)
-    mkdir(walDir.c_str(), 0);
+    // Windows: Create directory and check return value (CWE-252 fix)
+    // Note: Windows mkdir doesn't support mode parameter, but we still check for errors
+    if (mkdir(walDir.c_str(), 0) != 0 && errno != EEXIST) {
+        std::cerr << "[WAL] WARNING: Failed to create WAL directory: "
+                  << walDir << " (" << strerror(errno) << ")" << std::endl;
+    }
 #else
-    // Unix: Check if directory exists first
-    struct stat dirStat;
-    if (stat(walDir.c_str(), &dirStat) != 0) {
-        // Directory doesn't exist - create with secure permissions
-        if (mkdir(walDir.c_str(), 0700) != 0 && errno != EEXIST) {
-            std::cerr << "[WAL] WARNING: Failed to create WAL directory: "
-                      << walDir << " (" << strerror(errno) << ")" << std::endl;
-        }
+    // Unix: Try mkdir directly to avoid TOCTOU race (CWE-367 fix)
+    // mkdir() is atomic - either creates or fails with EEXIST
+    int mkdirResult = mkdir(walDir.c_str(), 0700);
+    if (mkdirResult != 0 && errno != EEXIST) {
+        std::cerr << "[WAL] WARNING: Failed to create WAL directory: "
+                  << walDir << " (" << strerror(errno) << ")" << std::endl;
     } else {
-        // Directory exists - verify it's actually a directory and check permissions
-        if (!S_ISDIR(dirStat.st_mode)) {
-            std::cerr << "[WAL] ERROR: " << walDir << " exists but is not a directory" << std::endl;
-        } else if ((dirStat.st_mode & 077) != 0) {
-            // Warn if group/others have any permissions
-            std::cerr << "[WAL] WARNING: WAL directory has insecure permissions (mode "
-                      << std::oct << (dirStat.st_mode & 0777) << std::dec << ")" << std::endl;
-            std::cerr << "[WAL] Consider: chmod 700 " << walDir << std::endl;
+        // Directory created or already exists - check permissions (informational only)
+        struct stat dirStat;
+        if (stat(walDir.c_str(), &dirStat) == 0) {
+            if (!S_ISDIR(dirStat.st_mode)) {
+                std::cerr << "[WAL] ERROR: " << walDir << " exists but is not a directory" << std::endl;
+            } else if ((dirStat.st_mode & 077) != 0) {
+                // Warn if group/others have any permissions
+                std::cerr << "[WAL] WARNING: WAL directory has insecure permissions (mode "
+                          << std::oct << (dirStat.st_mode & 0777) << std::dec << ")" << std::endl;
+                std::cerr << "[WAL] Consider: chmod 700 " << walDir << std::endl;
+            }
         }
     }
 #endif

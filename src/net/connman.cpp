@@ -21,6 +21,7 @@
 #include <cstring>
 #include <iostream>  // For std::cout
 #include <map>       // For std::map in InactivityCheck
+#include <random>    // For std::random_device (CWE-676 fix: replaces unsafe rand())
 #include <thread>  // For std::this_thread
 
 #ifdef _WIN32
@@ -84,9 +85,10 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
                 for (p = res; p != nullptr; p = p->ai_next) {
                     struct sockaddr_in* ipv4 = (struct sockaddr_in*)p->ai_addr;
                     char ip_str[INET_ADDRSTRLEN];
-                    inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str));
-                    m_localAddresses.insert(ip_str);
-                    LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                    if (inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str)) != nullptr) {
+                        m_localAddresses.insert(ip_str);
+                        LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                    }
                 }
                 freeaddrinfo(res);
             }
@@ -100,9 +102,10 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
                 if (ifa->ifa_addr->sa_family == AF_INET) {
                     struct sockaddr_in* ipv4 = (struct sockaddr_in*)ifa->ifa_addr;
                     char ip_str[INET_ADDRSTRLEN];
-                    inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str));
-                    m_localAddresses.insert(ip_str);
-                    LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                    if (inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str)) != nullptr) {
+                        m_localAddresses.insert(ip_str);
+                        LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                    }
                 }
             }
             freeifaddrs(ifaddr);
@@ -120,10 +123,14 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
 
         // Set socket options for robust rebinding after crashes
         int reuse = 1;
-        setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+        if (setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) != 0) {
+            LogPrintf(NET, WARN, "[CConnman] Failed to set SO_REUSEADDR (non-fatal)\n");
+        }
 #ifndef _WIN32
         // On Linux/Unix, also set SO_REUSEPORT for faster rebinding
-        setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse));
+        if (setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse)) != 0) {
+            LogPrintf(NET, WARN, "[CConnman] Failed to set SO_REUSEPORT (non-fatal)\n");
+        }
 #endif
 
         // Bind to port with retry logic (for production stability)
@@ -194,10 +201,26 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
         // Set non-blocking
 #ifdef _WIN32
         u_long mode = 1;
-        ioctlsocket(m_listen_socket, FIONBIO, &mode);
+        if (ioctlsocket(m_listen_socket, FIONBIO, &mode) == SOCKET_ERROR) {
+            LogPrintf(NET, ERROR, "[CConnman] Start: ioctlsocket failed to set non-blocking on listen socket\n");
+            closesocket(m_listen_socket);
+            m_listen_socket = -1;
+            return false;
+        }
 #else
         int flags = fcntl(m_listen_socket, F_GETFL, 0);
-        fcntl(m_listen_socket, F_SETFL, flags | O_NONBLOCK);
+        if (flags == -1) {
+            LogPrintf(NET, ERROR, "[CConnman] Start: fcntl F_GETFL failed on listen socket\n");
+            close(m_listen_socket);
+            m_listen_socket = -1;
+            return false;
+        }
+        if (fcntl(m_listen_socket, F_SETFL, flags | O_NONBLOCK) == -1) {
+            LogPrintf(NET, ERROR, "[CConnman] Start: fcntl F_SETFL failed on listen socket\n");
+            close(m_listen_socket);
+            m_listen_socket = -1;
+            return false;
+        }
 #endif
 
         LogPrintf(NET, INFO, "[CConnman] Listening on port %d\n", m_options.nListenPort);
@@ -391,10 +414,26 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     // Set non-blocking
 #ifdef _WIN32
     u_long mode = 1;
-    ioctlsocket(sock, FIONBIO, &mode);
+    if (ioctlsocket(sock, FIONBIO, &mode) == SOCKET_ERROR) {
+        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: ioctlsocket failed to set non-blocking for %s:%d\n",
+                  ip_str.c_str(), addr.port);
+        closesocket(sock);
+        return nullptr;
+    }
 #else
     int flags = fcntl(sock, F_GETFL, 0);
-    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+    if (flags == -1) {
+        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: fcntl F_GETFL failed for %s:%d\n",
+                  ip_str.c_str(), addr.port);
+        close(sock);
+        return nullptr;
+    }
+    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) == -1) {
+        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: fcntl F_SETFL failed for %s:%d\n",
+                  ip_str.c_str(), addr.port);
+        close(sock);
+        return nullptr;
+    }
 #endif
 
     // Connect
@@ -514,10 +553,23 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
     // Set non-blocking
 #ifdef _WIN32
     u_long mode = 1;
-    ioctlsocket(sock_fd, FIONBIO, &mode);
+    if (ioctlsocket(sock_fd, FIONBIO, &mode) == SOCKET_ERROR) {
+        LogPrintf(NET, ERROR, "[CConnman] AcceptConnection: ioctlsocket failed to set non-blocking mode\n");
+        closesocket(sock_fd);
+        return false;
+    }
 #else
     int flags = fcntl(sock_fd, F_GETFL, 0);
-    fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK);
+    if (flags == -1) {
+        LogPrintf(NET, ERROR, "[CConnman] AcceptConnection: fcntl F_GETFL failed\n");
+        close(sock_fd);
+        return false;
+    }
+    if (fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        LogPrintf(NET, ERROR, "[CConnman] AcceptConnection: fcntl F_SETFL failed to set non-blocking mode\n");
+        close(sock_fd);
+        return false;
+    }
 #endif
 
     pnode->SetSocket(sock_fd);
@@ -951,7 +1003,7 @@ void CConnman::ThreadOpenConnections() {
             if (pnode) {
                 // Note: Connection is async - STATE_CONNECTING until TCP handshake completes
                 // Don't mark as "connected" yet - SocketHandler will log when connection succeeds
-                connected_ips.insert(seed_ip);  // Update set for phase 2 to avoid double-attempts
+                connected_ips.insert(std::move(seed_ip));  // Move instead of copy (perf fix)
                 m_peer_manager->MarkAddressGood(seed_addr);
             }
         }
@@ -991,7 +1043,7 @@ void CConnman::ThreadOpenConnections() {
                     LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections: connected to %s (node %d)\n",
                               ip_str.c_str(), pnode->id);
                     connections_made++;
-                    connected_ips.insert(ip_str);
+                    connected_ips.insert(std::move(ip_str));  // Move instead of copy (perf fix)
                     m_peer_manager->MarkAddressGood(addr);
                 }
             }
@@ -1075,10 +1127,23 @@ void CConnman::SocketHandler() {
             // Set non-blocking
 #ifdef _WIN32
             u_long mode = 1;
-            ioctlsocket(client_fd, FIONBIO, &mode);
+            if (ioctlsocket(client_fd, FIONBIO, &mode) == SOCKET_ERROR) {
+                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: ioctlsocket failed to set non-blocking\n");
+                closesocket(client_fd);
+                continue;  // Skip this connection, try next
+            }
 #else
             int flags = fcntl(client_fd, F_GETFL, 0);
-            fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+            if (flags == -1) {
+                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: fcntl F_GETFL failed\n");
+                close(client_fd);
+                continue;  // Skip this connection, try next
+            }
+            if (fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: fcntl F_SETFL failed\n");
+                close(client_fd);
+                continue;  // Skip this connection, try next
+            }
 #endif
 
             // Extract address
@@ -1616,8 +1681,9 @@ void CConnman::InactivityCheck() {
                                    (now - it->second > PING_INTERVAL_SECONDS);
 
                 if (should_ping && m_msg_processor) {
-                    // Generate random nonce for ping
-                    uint64_t nonce = ((uint64_t)rand() << 32) | rand();
+                    // Generate random nonce for ping (CWE-676 fix: use std::random_device instead of rand())
+                    static thread_local std::random_device rd;
+                    uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) | rd();
                     CNetMessage ping_msg = m_msg_processor->CreatePingMessage(nonce);
                     PushMessage(node.get(), ping_msg);
                     last_ping_sent[node_id] = now;

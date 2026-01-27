@@ -21,6 +21,7 @@
 #include <set>
 #include <mutex>
 #include <memory>
+#include <atomic>
 #include <chrono>
 
 // Forward declaration
@@ -208,7 +209,7 @@ private:
     // Replaces simple banned_ips map with structured ban entries
     CBanManager banman;
 
-    int next_peer_id;
+    std::atomic<int> next_peer_id;
 
     // DNS seeds for peer discovery
     std::vector<std::string> dns_seeds;

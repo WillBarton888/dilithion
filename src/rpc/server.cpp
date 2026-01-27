@@ -139,7 +139,8 @@ CRPCServer::CRPCServer(uint16_t port)
     : m_port(port), m_threadPoolSize(8), m_wallet(nullptr), m_miner(nullptr), m_mempool(nullptr),
       m_blockchain(nullptr), m_utxo_set(nullptr), m_chainstate(nullptr),
       m_serverSocket(INVALID_SOCKET), m_permissions(nullptr), m_logger(nullptr),
-      m_ssl_wrapper(nullptr), m_ssl_enabled(false), m_websocket_server(nullptr)
+      m_ssl_wrapper(nullptr), m_ssl_enabled(false), m_websocket_server(nullptr),
+      m_restAPI(std::make_unique<CRestAPI>()), m_publicAPI(false)
 {
     // Register RPC handlers - Wallet information
     m_handlers["getnewaddress"] = [this](const std::string& p) { return RPC_GetNewAddress(p); };
@@ -233,7 +234,7 @@ bool CRPCServer::Start() {
     int opt = 1;
     (void)setsockopt(m_serverSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
 
-    // RPC-001 FIX: Bind to localhost only for security
+    // RPC-001 FIX: Bind to localhost only for security (by default)
     // SECURITY: RPC server binds to 127.0.0.1 (localhost) only by default
     // This prevents remote network access and mitigates the risk of credential
     // interception, as HTTP Basic Auth transmits credentials in Base64 (not encrypted).
@@ -241,11 +242,20 @@ bool CRPCServer::Start() {
     // IMPORTANT: For remote access, use SSH tunneling:
     //   ssh -L 8332:127.0.0.1:8332 user@remote-host
     //
-    // WARNING: Do NOT change INADDR_LOOPBACK to INADDR_ANY without implementing TLS/HTTPS
+    // PUBLIC API MODE (--public-api flag):
+    // When m_publicAPI is true, binds to 0.0.0.0 to allow light wallet clients
+    // to connect from any IP. Only the REST API endpoints (/api/v1/*) are accessible
+    // without authentication. JSON-RPC endpoints still require auth.
+    // SECURITY: Only enable on seed nodes, not home mining nodes.
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1 localhost only
+    if (m_publicAPI) {
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);  // 0.0.0.0 - public access for light wallets
+        std::cout << "[RPC] Public API mode enabled - binding to 0.0.0.0:" << m_port << std::endl;
+    } else {
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1 localhost only
+    }
     addr.sin_port = htons(m_port);
 
     if (bind(m_serverSocket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
@@ -274,6 +284,16 @@ bool CRPCServer::Start() {
         closesocket(m_serverSocket);
         m_serverSocket = INVALID_SOCKET;
         return false;
+    }
+
+    // Initialize REST API with component references
+    if (m_restAPI) {
+        m_restAPI->RegisterMempool(m_mempool);
+        m_restAPI->RegisterBlockchain(m_blockchain);
+        m_restAPI->RegisterUTXOSet(m_utxo_set);
+        m_restAPI->RegisterChainState(m_chainstate);
+        m_restAPI->RegisterRateLimiter(&m_rateLimiter);
+        std::cout << "[RPC] REST API initialized for light wallet support" << std::endl;
     }
 
     // Start server thread
@@ -724,12 +744,12 @@ void CRPCServer::HandleClient(int clientSocket) {
         return;
     }
 
-    // CORS: Handle OPTIONS preflight requests for web wallet
+    // CORS: Handle OPTIONS preflight requests for web wallet and REST API
     // Browsers send OPTIONS before cross-origin requests with custom headers
     if (request.find("OPTIONS ") == 0) {
         std::string response = "HTTP/1.1 204 No Content\r\n"
                                "Access-Control-Allow-Origin: *\r\n"
-                               "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
+                               "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
                                "Access-Control-Allow-Headers: Content-Type, Authorization, X-Dilithion-RPC\r\n"
                                "Access-Control-Max-Age: 86400\r\n"
                                "Content-Length: 0\r\n"
@@ -737,6 +757,39 @@ void CRPCServer::HandleClient(int clientSocket) {
                                "\r\n";
         send_response_and_cleanup(response);
         return;
+    }
+
+    // REST API: Handle /api/v1/* endpoints for light wallet clients
+    // These endpoints don't require authentication or CSRF headers (public read + broadcast)
+    // Rate limiting is handled internally by the REST API handler
+    if (m_restAPI) {
+        // Extract path from HTTP request
+        std::string method;
+        std::string path;
+        size_t methodEnd = request.find(' ');
+        if (methodEnd != std::string::npos) {
+            method = request.substr(0, methodEnd);
+            size_t pathStart = methodEnd + 1;
+            size_t pathEnd = request.find(' ', pathStart);
+            if (pathEnd != std::string::npos) {
+                path = request.substr(pathStart, pathEnd - pathStart);
+            }
+        }
+
+        // Check if this is a REST API request
+        if (CRestAPI::IsRESTRequest(path)) {
+            // Extract body for POST requests
+            std::string body;
+            size_t bodyStart = request.find("\r\n\r\n");
+            if (bodyStart != std::string::npos) {
+                body = request.substr(bodyStart + 4);
+            }
+
+            // Handle the REST request
+            std::string response = m_restAPI->HandleRequest(method, path, body, clientIP);
+            send_response_and_cleanup(response);
+            return;
+        }
     }
 
     // RPC-004 FIX: CSRF Protection via Custom Header

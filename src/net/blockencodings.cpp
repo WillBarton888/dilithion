@@ -656,12 +656,9 @@ bool BlockTransactionsRequest::Deserialize(const uint8_t* data, size_t len)
     if (count > MAX_INDEX_COUNT) {
         return false;  // Reject maliciously large count values
     }
-
-    // CID 1675261 FIX: Check for integer overflow in calculation before using count
-    // Check that count * 2 doesn't overflow size_t, and that offset + count * 2 doesn't overflow
-    if (count > SIZE_MAX / 2 || offset > SIZE_MAX - static_cast<size_t>(count) * 2) {
-        return false;  // Integer overflow would occur
-    }
+    // Note: No SIZE_MAX overflow check needed - count is uint16_t (max 65535) and
+    // validated <= 10000 above. count*2 is at most 20000, which can't overflow.
+    // (CWE-1025 fix: removed always-false check that had no effect)
 
     if (offset + static_cast<size_t>(count) * 2 > len) {
         return false;
@@ -734,12 +731,8 @@ bool BlockTransactions::Deserialize(const uint8_t* data, size_t len)
     if (count > MAX_TX_COUNT) {
         return false;  // Reject maliciously large count values
     }
-
-    // CID 1675268 FIX: Check for integer overflow in calculation before using count
-    // Although count is uint16_t (max 65535), we still check for safety and consistency
-    if (count > SIZE_MAX / 2) {
-        return false;  // Integer overflow would occur (defensive check)
-    }
+    // Note: No need for SIZE_MAX overflow check - count is uint16_t (max 65535)
+    // and already validated <= 10000 above (CWE-561 fix: removed dead code)
 
     // Transactions
     txn.resize(count);

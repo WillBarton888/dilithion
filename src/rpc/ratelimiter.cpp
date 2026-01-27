@@ -54,6 +54,15 @@ const std::map<std::string, CRateLimiter::MethodRateLimit> CRateLimiter::METHOD_
     {"getrawtransaction",      {500.0, 8.33, 1.0}},  // 500/min
     {"decoderawtransaction",   {500.0, 8.33, 1.0}},  // 500/min
 
+    // === REST API Endpoints (Light Wallet API) ===
+    // These are public endpoints for light wallet clients
+    {"api_balance",            {500.0, 8.33, 1.0}},   // 500/min - address balance lookup
+    {"api_utxos",              {200.0, 3.33, 1.0}},   // 200/min - UTXO iteration (CPU intensive)
+    {"api_tx",                 {500.0, 8.33, 1.0}},   // 500/min - transaction lookup
+    {"api_broadcast",          {10.0,  0.167, 1.0}},  // 10/min - CRITICAL (same as sendrawtransaction)
+    {"api_info",               {1000.0, 16.67, 1.0}}, // 1000/min - lightweight read
+    {"api_fee",                {1000.0, 16.67, 1.0}}, // 1000/min - lightweight read
+
     // === LOW: Read-Only Info (default 1000/min applies to unconfigured methods) ===
     // getbalance, getblockchaininfo, getblockcount, etc. - use DEFAULT_METHOD_LIMIT
 };

@@ -210,7 +210,8 @@ RPC_SOURCES := src/rpc/server.cpp \
                src/rpc/permissions.cpp \
                src/rpc/logger.cpp \
                src/rpc/ssl_wrapper.cpp \
-               src/rpc/websocket.cpp
+               src/rpc/websocket.cpp \
+               src/rpc/rest_api.cpp
 
 API_SOURCES := src/api/http_server.cpp \
                src/api/cached_stats.cpp

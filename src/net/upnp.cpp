@@ -6,9 +6,25 @@
 #include <net/upnp.h>
 #include <util/logging.h>
 
+// Coverity static analysis: provide stubs when miniupnpc headers unavailable
+#if defined(__COVERITY__) && !defined(MINIUPNPC_API_VERSION)
+// Minimal stubs for Coverity to parse this file
+struct UPNPDev { struct UPNPDev* pNext; };
+struct UPNPUrls { char* controlURL; };
+struct IGDdatas { struct { char servicetype[256]; } first; };
+inline UPNPDev* upnpDiscover(int, const char*, const char*, int, int, int, int*) { return nullptr; }
+inline int UPNP_GetValidIGD(UPNPDev*, UPNPUrls*, IGDdatas*, char*, int, char*, int) { return 0; }
+inline int UPNP_GetExternalIPAddress(const char*, const char*, char*) { return 0; }
+inline int UPNP_AddPortMapping(const char*, const char*, const char*, const char*, const char*, const char*, const char*, const char*, const char*) { return 0; }
+inline int UPNP_DeletePortMapping(const char*, const char*, const char*, const char*, const char*) { return 0; }
+inline void FreeUPNPUrls(UPNPUrls*) {}
+inline void freeUPNPDevlist(UPNPDev*) {}
+inline const char* strupnperror(int) { return ""; }
+#else
 #include <miniupnpc/miniupnpc.h>
 #include <miniupnpc/upnpcommands.h>
 #include <miniupnpc/upnperrors.h>
+#endif
 
 #include <cstdio>
 #include <cstring>

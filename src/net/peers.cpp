@@ -167,9 +167,12 @@ std::shared_ptr<CPeer> CPeerManager::AddPeerWithId(int peer_id) {
     peer->state = CPeer::STATE_CONNECTED;
     peers[peer_id] = peer;
 
-    // Update next_peer_id if needed to avoid ID collisions
-    if (peer_id >= next_peer_id) {
-        next_peer_id = peer_id + 1;
+    // Update next_peer_id if needed to avoid ID collisions (atomic CAS loop)
+    int expected = next_peer_id.load();
+    while (peer_id >= expected) {
+        if (next_peer_id.compare_exchange_weak(expected, peer_id + 1)) {
+            break;
+        }
     }
 
     return peer;
@@ -665,7 +668,7 @@ std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int co
         if (seen_ips.count(ip_str)) {
             continue;  // Skip duplicate
         }
-        seen_ips.insert(ip_str);
+        seen_ips.insert(std::move(ip_str));
 
         // Convert CAddress (which inherits from CService/CNetAddr) back to NetProtocol::CAddress
         NetProtocol::CAddress addr;
@@ -1213,7 +1216,7 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
         auto new_peer = std::make_shared<CPeer>();
         new_peer->id = peer_id;
         new_peer->state = CPeer::STATE_CONNECTED;
-        peers[peer_id] = new_peer;
+        peers[peer_id] = std::move(new_peer);
         it = peers.find(peer_id);
     }
 
@@ -1281,7 +1284,7 @@ CNode* CPeerManager::AddNode(const NetProtocol::CAddress& addr, bool inbound) {
         if (peers.find(node_id) == peers.end()) {
             auto peer = std::make_shared<CPeer>(node_id, addr);
             peer->state = inbound ? CPeer::STATE_CONNECTED : CPeer::STATE_CONNECTING;
-            peers[node_id] = peer;
+            peers[node_id] = std::move(peer);
         }
     }
 
@@ -1308,7 +1311,7 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
             // Create new peer
             auto peer = std::make_shared<CPeer>(node_id, addr);
             peer->state = inbound ? CPeer::STATE_CONNECTED : CPeer::STATE_CONNECTING;
-            peers[node_id] = peer;
+            peers[node_id] = std::move(peer);
         } else {
             // BUG FIX: Update existing peer's address (may have been created by AddPeerWithId
             // with zeroed address due to race condition)
@@ -1319,8 +1322,12 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
         }
     }
 
-    if (node_id >= next_peer_id) {
-        next_peer_id = node_id + 1;
+    // Update next_peer_id if needed to avoid ID collisions (atomic CAS loop)
+    int expected = next_peer_id.load();
+    while (node_id >= expected) {
+        if (next_peer_id.compare_exchange_weak(expected, node_id + 1)) {
+            break;
+        }
     }
 }
 

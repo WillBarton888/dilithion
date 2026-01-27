@@ -12,6 +12,7 @@
 #include <rpc/logger.h>
 #include <rpc/ssl_wrapper.h>
 #include <rpc/websocket.h>
+#include <rpc/rest_api.h>
 
 #include <string>
 #include <sstream>
@@ -158,6 +159,10 @@ private:
 
     // Phase 4: WebSocket server
     std::unique_ptr<class CWebSocketServer> m_websocket_server;
+
+    // Phase 5: REST API for light wallets
+    std::unique_ptr<CRestAPI> m_restAPI;
+    bool m_publicAPI{false};  // --public-api flag: bind to 0.0.0.0 instead of 127.0.0.1
 
     // Server socket
     int m_serverSocket;
@@ -373,6 +378,19 @@ public:
      * Set testnet mode
      */
     void SetTestnet(bool testnet) { m_testnet = testnet; }
+
+    /**
+     * Set public API mode (--public-api flag)
+     * When enabled, RPC server binds to 0.0.0.0 instead of 127.0.0.1
+     * allowing light wallet clients to connect from any IP.
+     * SECURITY: Only enable on seed nodes, not home mining nodes.
+     */
+    void SetPublicAPI(bool publicAPI) { m_publicAPI = publicAPI; }
+
+    /**
+     * Check if public API mode is enabled
+     */
+    bool IsPublicAPI() const { return m_publicAPI; }
 
     /**
      * Register network manager instance

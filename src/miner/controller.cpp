@@ -288,7 +288,7 @@ void CMiningController::UpdateTemplate(const CBlockTemplate& blockTemplate) {
 
 void CMiningController::SetBlockFoundCallback(std::function<void(const CBlock&)> callback) {
     std::lock_guard<std::mutex> lock(m_callbackMutex);
-    m_blockFoundCallback = callback;
+    m_blockFoundCallback = std::move(callback);
 }
 
 bool CMiningController::CheckProofOfWork(const uint256& hash, const uint256& target) const {
@@ -740,7 +740,7 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
     minerScript.insert(minerScript.end(), minerAddress.begin() + 1, minerAddress.begin() + 21);
     minerScript.push_back(0x88);  // OP_EQUALVERIFY
     minerScript.push_back(0xac);  // OP_CHECKSIG
-    minerOut.scriptPubKey = minerScript;
+    minerOut.scriptPubKey = std::move(minerScript);  // Move instead of copy (CWE-1098 perf fix)
     coinbase.vout.push_back(std::move(minerOut));
 
     // MAINNET ONLY: Add Dev Fund and Dev Reward outputs

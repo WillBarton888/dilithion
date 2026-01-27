@@ -285,7 +285,7 @@ bool CIdentityDB::SetMIKPubKey(const Identity& identity, const std::vector<uint8
         // Already exists in DB, add to cache
         std::vector<uint8_t> cachedPubkey(existingValue.begin(), existingValue.end());
         EvictMIKCacheIfNeeded();
-        m_mikPubkeyCache[identity] = cachedPubkey;
+        m_mikPubkeyCache[identity] = std::move(cachedPubkey);  // Move instead of copy (perf fix)
         return false;  // Already exists
     }
 

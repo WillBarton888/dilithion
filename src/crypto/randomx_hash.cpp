@@ -179,7 +179,7 @@ extern "C" void randomx_init_for_hashing(const void* key, size_t key_len, int li
         }
     }
 
-    g_current_key = new_key;
+    g_current_key = std::move(new_key);
     g_is_light_mode = light_mode;
     g_randomx_ready = true;  // Mark as ready for thread VM creation
 }
@@ -269,8 +269,8 @@ extern "C" void randomx_init_async(const void* key, size_t key_len, int light_mo
     // Copy key data for thread safety
     std::vector<uint8_t> key_copy((const uint8_t*)key, (const uint8_t*)key + key_len);
 
-    // Launch async initialization thread
-    g_randomx_init_thread = std::thread([key_copy, light_mode]() {
+    // Launch async initialization thread (move key_copy into lambda to avoid copy)
+    g_randomx_init_thread = std::thread([key_copy = std::move(key_copy), light_mode]() {
         try {
             std::cout << "  [ASYNC] RandomX initialization started in background thread" << std::endl;
             std::cout << "  [ASYNC] Mode: " << (light_mode ? "LIGHT" : "FULL") << std::endl;
@@ -446,7 +446,7 @@ extern "C" void randomx_init_validation_mode(const void* key, size_t key_len) {
         throw std::runtime_error("Failed to create RandomX validation VM");
     }
 
-    g_validation_key = new_key;
+    g_validation_key = std::move(new_key);
     g_validation_ready = true;
 
     auto end_time = std::chrono::steady_clock::now();
@@ -475,8 +475,8 @@ extern "C" void randomx_init_mining_mode_async(const void* key, size_t key_len) 
     // Copy key for thread safety
     std::vector<uint8_t> key_copy((const uint8_t*)key, (const uint8_t*)key + key_len);
 
-    // Launch async initialization thread
-    g_mining_init_thread = std::thread([key_copy]() {
+    // Launch async initialization thread (move key_copy into lambda to avoid copy)
+    g_mining_init_thread = std::thread([key_copy = std::move(key_copy)]() {
         try {
             auto start_time = std::chrono::steady_clock::now();
 
