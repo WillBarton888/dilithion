@@ -617,9 +617,11 @@ BOOST_AUTO_TEST_CASE(block_nonce_range) {
 
     // Test nonce at boundaries
     header.nNonce = 0;
+    header.InvalidateCache();  // Clear hash cache before computing hash
     uint256 hash1 = header.GetHash();
 
     header.nNonce = 0xFFFFFFFF;
+    header.InvalidateCache();  // Clear hash cache after changing nonce
     uint256 hash2 = header.GetHash();
 
     // Different nonces should produce different hashes
@@ -636,9 +638,11 @@ BOOST_AUTO_TEST_CASE(block_merkle_root_variations) {
     memset(merkle2.data, 0xBB, 32);
 
     header.hashMerkleRoot = merkle1;
+    header.InvalidateCache();  // Clear hash cache before computing hash
     uint256 hash1 = header.GetHash();
 
     header.hashMerkleRoot = merkle2;
+    header.InvalidateCache();  // Clear hash cache after changing merkle root
     uint256 hash2 = header.GetHash();
 
     // Different merkle roots should produce different block hashes
