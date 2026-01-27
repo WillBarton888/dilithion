@@ -2066,7 +2066,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             if (g_node_context.peer_manager) {
-                g_metrics.peer_count = g_node_context.peer_manager->GetConnectedPeers().size();
+                auto peer_stats = g_node_context.peer_manager->GetStats();
+                g_metrics.peer_count = peer_stats.connected_peers;
+                g_metrics.inbound_peers = peer_stats.inbound_connections;
+                g_metrics.outbound_peers = peer_stats.outbound_connections;
             }
 
             // Return Prometheus-format metrics
@@ -4137,6 +4140,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 auto stats = miner.GetStats();
                 std::cout << "[Mining] Hash rate: " << miner.GetHashRate() << " H/s, "
                          << "Total hashes: " << stats.nHashesComputed << std::endl;
+
+                // Update mining metrics for Prometheus
+                g_metrics.mining_active = miner.IsMining() ? 1 : 0;
+                g_metrics.hashrate = miner.GetHashRate();
+                g_metrics.hashes_total = stats.nHashesComputed;
 
                 // ========================================================================
                 // BUG #109 FIX: Periodic template refresh to include mempool transactions

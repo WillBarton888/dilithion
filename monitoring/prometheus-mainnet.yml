@@ -1,0 +1,156 @@
+# Dilithion Mainnet Monitoring - Prometheus Configuration
+# Monitors 4 mainnet seed nodes: NYC, London, Singapore, Sydney
+# Copyright (c) 2025 The Dilithion Core developers
+# Distributed under the MIT software license
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+  external_labels:
+    cluster: 'dilithion-mainnet'
+    network: 'mainnet'
+    environment: 'production'
+
+# ==============================================================================
+# Scrape Configurations
+# ==============================================================================
+scrape_configs:
+
+  # --------------------------------------------------------------------------
+  # Prometheus Self-Monitoring
+  # --------------------------------------------------------------------------
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          instance: 'prometheus'
+          component: 'monitoring'
+
+  # --------------------------------------------------------------------------
+  # NYC Node - Dilithion Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-nyc-dilithion'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['138.197.68.128:8334']
+        labels:
+          instance: 'mainnet-nyc'
+          location: 'New York'
+          network: 'mainnet'
+          node_type: 'seed-node'
+
+  # --------------------------------------------------------------------------
+  # London Node - Dilithion Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-london-dilithion'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['167.172.56.119:8334']
+        labels:
+          instance: 'mainnet-london'
+          location: 'London'
+          network: 'mainnet'
+          node_type: 'seed-node'
+
+  # --------------------------------------------------------------------------
+  # Singapore Node - Dilithion Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-singapore-dilithion'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['165.22.103.114:8334']
+        labels:
+          instance: 'mainnet-singapore'
+          location: 'Singapore'
+          network: 'mainnet'
+          node_type: 'seed-node'
+
+  # --------------------------------------------------------------------------
+  # Sydney Node - Dilithion Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-sydney-dilithion'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['134.199.159.83:8334']
+        labels:
+          instance: 'mainnet-sydney'
+          location: 'Sydney'
+          network: 'mainnet'
+          node_type: 'seed-node'
+
+# ==============================================================================
+# Dilithion Metrics Available (from /metrics endpoint on port 8334)
+# ==============================================================================
+#
+# BLOCKCHAIN METRICS:
+#   - dilithion_block_height           Current blockchain height
+#   - dilithion_headers_height         Current headers chain height
+#   - dilithion_difficulty             Current mining difficulty
+#   - dilithion_network_hashrate       Estimated network hashrate
+#
+# NETWORK METRICS:
+#   - dilithion_peer_count             Number of connected peers
+#   - dilithion_inbound_peers          Number of inbound connections
+#   - dilithion_outbound_peers         Number of outbound connections
+#
+# MINING METRICS:
+#   - dilithion_mining_active          1 if mining, 0 if not
+#   - dilithion_hashrate               Local mining hashrate
+#
+# MEMPOOL METRICS:
+#   - dilithion_mempool_size           Transactions in mempool
+#
+# FORK DETECTION:
+#   - dilithion_fork_detected          1 if fork detected, 0 otherwise
+#   - dilithion_fork_depth             Depth of detected fork
+#   - dilithion_fork_point_height      Height where fork occurred
+#
+# NODE INFO:
+#   - dilithion_info                   Node version and network info
+#   - dilithion_uptime_seconds         Node uptime in seconds
+#
+# ==============================================================================
+# Setup Instructions
+# ==============================================================================
+#
+# 1. COPY THIS FILE TO NYC MAINNET NODE:
+#    scp monitoring/prometheus-mainnet.yml root@138.197.68.128:/root/dilithion/
+#
+# 2. INSTALL DOCKER ON NYC NODE:
+#    curl -fsSL https://get.docker.com -o get-docker.sh
+#    sh get-docker.sh
+#
+# 3. START PROMETHEUS:
+#    docker run -d \
+#      --name prometheus \
+#      --restart unless-stopped \
+#      -p 9090:9090 \
+#      -v /root/dilithion/prometheus-mainnet.yml:/etc/prometheus/prometheus.yml:ro \
+#      prom/prometheus
+#
+# 4. START GRAFANA:
+#    docker run -d \
+#      --name grafana \
+#      --restart unless-stopped \
+#      -p 3000:3000 \
+#      -e GF_SECURITY_ADMIN_PASSWORD=dilithion2025 \
+#      grafana/grafana
+#
+# 5. ACCESS GRAFANA:
+#    http://138.197.68.128:3000
+#    Username: admin
+#    Password: dilithion2025
+#
+# 6. ADD PROMETHEUS DATA SOURCE:
+#    - Go to Configuration > Data Sources
+#    - Add Prometheus
+#    - URL: http://138.197.68.128:9090
+#    - Save & Test
+#
+# 7. IMPORT DASHBOARD:
+#    - Go to Dashboards > Import
+#    - Upload grafana-dashboard-2025-11-07.json
+#    - Select Prometheus data source
+#

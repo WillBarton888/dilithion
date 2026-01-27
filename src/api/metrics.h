@@ -35,9 +35,19 @@ public:
     std::atomic<int64_t> block_height{0};
     std::atomic<int64_t> headers_height{0};
     std::atomic<int64_t> peer_count{0};
+    std::atomic<int64_t> inbound_peers{0};
+    std::atomic<int64_t> outbound_peers{0};
     std::atomic<int64_t> mempool_size{0};
     std::atomic<int64_t> mempool_bytes{0};
     std::chrono::steady_clock::time_point start_time;
+
+    // ============================================
+    // Mining Metrics
+    // ============================================
+    std::atomic<int64_t> mining_active{0};      // 1 if mining, 0 if not
+    std::atomic<uint64_t> hashrate{0};          // Current hashrate in H/s
+    std::atomic<uint64_t> hashes_total{0};      // Total hashes computed
+    std::atomic<uint64_t> blocks_mined{0};      // Total blocks mined by this node
 
     // ============================================
     // Network Activity Counters
@@ -227,6 +237,31 @@ public:
         out << "# HELP dilithion_peer_count Number of connected peers\n";
         out << "# TYPE dilithion_peer_count gauge\n";
         out << "dilithion_peer_count{" << net_label << "} " << peer_count.load() << "\n\n";
+
+        // Inbound peers
+        out << "# HELP dilithion_inbound_peers Number of inbound peer connections\n";
+        out << "# TYPE dilithion_inbound_peers gauge\n";
+        out << "dilithion_inbound_peers{" << net_label << "} " << inbound_peers.load() << "\n\n";
+
+        // Outbound peers
+        out << "# HELP dilithion_outbound_peers Number of outbound peer connections\n";
+        out << "# TYPE dilithion_outbound_peers gauge\n";
+        out << "dilithion_outbound_peers{" << net_label << "} " << outbound_peers.load() << "\n\n";
+
+        // Mining active
+        out << "# HELP dilithion_mining_active Mining status (1=active, 0=inactive)\n";
+        out << "# TYPE dilithion_mining_active gauge\n";
+        out << "dilithion_mining_active{" << net_label << "} " << mining_active.load() << "\n\n";
+
+        // Hashrate
+        out << "# HELP dilithion_hashrate Current mining hashrate in H/s\n";
+        out << "# TYPE dilithion_hashrate gauge\n";
+        out << "dilithion_hashrate{" << net_label << "} " << hashrate.load() << "\n\n";
+
+        // Blocks mined
+        out << "# HELP dilithion_blocks_mined Total blocks mined by this node\n";
+        out << "# TYPE dilithion_blocks_mined counter\n";
+        out << "dilithion_blocks_mined{" << net_label << "} " << blocks_mined.load() << "\n\n";
 
         // Mempool
         out << "# HELP dilithion_mempool_size Number of transactions in mempool\n";
