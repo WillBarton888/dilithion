@@ -35,7 +35,7 @@ jobs:
   # Tier 1: Consensus-critical fuzzers (6 hours each)
   fuzz-difficulty:
     name: "Difficulty Adjustment (Tier 1)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360  # 6 hours
 
     steps:
@@ -47,13 +47,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
           # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+          cd ../../..
+          # Build Dilithium library
+          cd depends/dilithium/ref
+          if [ ! -f Makefile ]; then
+            echo 'CC ?= /usr/bin/cc' > Makefile
+            echo 'CFLAGS += -Wall -O3 -fomit-frame-pointer' >> Makefile
+            echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> Makefile
+            echo '.PHONY: all clean' >> Makefile
+            echo 'all:' >> Makefile
+            printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> Makefile
+            echo 'clean:' >> Makefile
+            printf '\trm -f *.o\n' >> Makefile
+          fi
+          make clean || true
+          make -j$(nproc)
 
       - name: Build fuzz_difficulty
         run: |
@@ -100,7 +115,7 @@ jobs:
 
   fuzz-tx-validation:
     name: "Transaction Validation (Tier 1)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
@@ -112,13 +127,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
           # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+          cd ../../..
+          # Build Dilithium library
+          cd depends/dilithium/ref
+          if [ ! -f Makefile ]; then
+            echo 'CC ?= /usr/bin/cc' > Makefile
+            echo 'CFLAGS += -Wall -O3 -fomit-frame-pointer' >> Makefile
+            echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> Makefile
+            echo '.PHONY: all clean' >> Makefile
+            echo 'all:' >> Makefile
+            printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> Makefile
+            echo 'clean:' >> Makefile
+            printf '\trm -f *.o\n' >> Makefile
+          fi
+          make clean || true
+          make -j$(nproc)
 
       - name: Build fuzz_tx_validation
         run: |
@@ -165,7 +195,7 @@ jobs:
 
   fuzz-utxo:
     name: "UTXO Management (Tier 1)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
@@ -177,13 +207,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
           # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+          cd ../../..
+          # Build Dilithium library
+          cd depends/dilithium/ref
+          if [ ! -f Makefile ]; then
+            echo 'CC ?= /usr/bin/cc' > Makefile
+            echo 'CFLAGS += -Wall -O3 -fomit-frame-pointer' >> Makefile
+            echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> Makefile
+            echo '.PHONY: all clean' >> Makefile
+            echo 'all:' >> Makefile
+            printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> Makefile
+            echo 'clean:' >> Makefile
+            printf '\trm -f *.o\n' >> Makefile
+          fi
+          make clean || true
+          make -j$(nproc)
 
       - name: Build fuzz_utxo
         run: |
@@ -231,7 +276,7 @@ jobs:
   # Tier 2: High-priority fuzzers (4 hours each)
   fuzz-block:
     name: "Block Headers (Tier 2)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240  # 4 hours
 
     steps:
@@ -243,13 +288,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
           # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+          cd ../../..
+          # Build Dilithium library
+          cd depends/dilithium/ref
+          if [ ! -f Makefile ]; then
+            echo 'CC ?= /usr/bin/cc' > Makefile
+            echo 'CFLAGS += -Wall -O3 -fomit-frame-pointer' >> Makefile
+            echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> Makefile
+            echo '.PHONY: all clean' >> Makefile
+            echo 'all:' >> Makefile
+            printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> Makefile
+            echo 'clean:' >> Makefile
+            printf '\trm -f *.o\n' >> Makefile
+          fi
+          make clean || true
+          make -j$(nproc)
 
       - name: Build and run fuzzer
         run: |
@@ -288,7 +348,7 @@ jobs:
 
   fuzz-merkle:
     name: "Merkle Trees (Tier 2)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
 
     steps:
@@ -300,13 +360,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
           # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+          cd ../../..
+          # Build Dilithium library
+          cd depends/dilithium/ref
+          if [ ! -f Makefile ]; then
+            echo 'CC ?= /usr/bin/cc' > Makefile
+            echo 'CFLAGS += -Wall -O3 -fomit-frame-pointer' >> Makefile
+            echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> Makefile
+            echo '.PHONY: all clean' >> Makefile
+            echo 'all:' >> Makefile
+            printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> Makefile
+            echo 'clean:' >> Makefile
+            printf '\trm -f *.o\n' >> Makefile
+          fi
+          make clean || true
+          make -j$(nproc)
 
       - name: Build and run fuzzer
         run: |
@@ -345,7 +420,7 @@ jobs:
 
   fuzz-transaction:
     name: "Transaction Parsing (Tier 2)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
 
     steps:
@@ -357,13 +432,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev cmake build-essential libleveldb-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev cmake build-essential libleveldb-dev
 
       - name: Build dependencies
         run: |
           # Build RandomX library
           cd depends/randomx && mkdir -p build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+          cd ../../..
+          # Build Dilithium library
+          cd depends/dilithium/ref
+          if [ ! -f Makefile ]; then
+            echo 'CC ?= /usr/bin/cc' > Makefile
+            echo 'CFLAGS += -Wall -O3 -fomit-frame-pointer' >> Makefile
+            echo 'SOURCES = sign.c packing.c polyvec.c poly.c ntt.c reduce.c rounding.c fips202.c symmetric-shake.c randombytes.c' >> Makefile
+            echo '.PHONY: all clean' >> Makefile
+            echo 'all:' >> Makefile
+            printf '\t$(CC) $(CFLAGS) -DDILITHIUM_MODE=3 -c $(SOURCES)\n' >> Makefile
+            echo 'clean:' >> Makefile
+            printf '\trm -f *.o\n' >> Makefile
+          fi
+          make clean || true
+          make -j$(nproc)
 
       - name: Build and run fuzzer
         run: |
@@ -403,7 +493,7 @@ jobs:
   # Tier 3: Fast fuzzers (2 hours each)
   fuzz-subsidy:
     name: "Block Subsidy (Tier 3)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
 
     steps:
@@ -415,7 +505,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev
 
       - name: Build and run fuzzer
         run: |
@@ -454,7 +544,7 @@ jobs:
 
   fuzz-compactsize:
     name: "CompactSize Encoding (Tier 3)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
 
     steps:
@@ -466,7 +556,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev
 
       - name: Build and run fuzzer
         run: |
@@ -505,7 +595,7 @@ jobs:
 
   fuzz-sha3:
     name: "SHA3-256 (Tier 3)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
 
     steps:
@@ -517,7 +607,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 libfuzzer-14-dev
+          sudo apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev
 
       - name: Build and run fuzzer
         run: |
