@@ -15,18 +15,18 @@ const CONNECTION_MODE = {
     LIGHT: 'light'
 };
 
-// Default seed nodes (mainnet)
+// Default seed nodes (mainnet) - REST API on port 8334
 const DEFAULT_SEED_NODES = [
-    { host: 'seed1.dilithion.org', port: 8332, region: 'US' },
-    { host: 'seed2.dilithion.org', port: 8332, region: 'EU' },
-    { host: 'seed3.dilithion.org', port: 8332, region: 'APAC' }
+    { host: '138.197.68.128', port: 8334, region: 'US' },      // NYC
+    { host: '167.172.56.119', port: 8334, region: 'EU' },      // London
+    { host: '165.22.103.114', port: 8334, region: 'APAC' }     // Singapore
 ];
 
-// Testnet seed nodes
+// Testnet seed nodes - REST API on port 18334
 const TESTNET_SEED_NODES = [
-    { host: '134.122.4.164', port: 18332, region: 'US' },
-    { host: '188.166.255.63', port: 18332, region: 'APAC' },
-    { host: '209.97.177.197', port: 18332, region: 'EU' }
+    { host: '134.122.4.164', port: 18334, region: 'US' },
+    { host: '188.166.255.63', port: 18334, region: 'APAC' },
+    { host: '209.97.177.197', port: 18334, region: 'EU' }
 ];
 
 /**

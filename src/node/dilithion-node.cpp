@@ -46,6 +46,7 @@
 #include <miner/controller.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
+#include <rpc/rest_api.h>  // REST API for light wallet
 #include <core/chainparams.h>
 #include <consensus/pow.h>
 #include <consensus/chain.h>
@@ -2082,6 +2083,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Return Prometheus-format metrics
             return g_metrics.ToPrometheus();
         });
+
+        // Set up REST API handler for light wallet support (/api/v1/*)
+        // This allows light wallets to query balance, UTXOs, and broadcast transactions
+        static CRestAPI rest_api;
+        rest_api.RegisterMempool(&mempool);
+        rest_api.RegisterBlockchain(&blockchain);
+        rest_api.RegisterUTXOSet(&utxo_set);
+        rest_api.RegisterChainState(&g_chainstate);
+        // Note: Rate limiter is optional for HTTP server (RPC server has its own)
+
+        http_server.SetRestApiHandler([](const std::string& method,
+                                         const std::string& path,
+                                         const std::string& body,
+                                         const std::string& clientIP) -> std::string {
+            return rest_api.HandleRequest(method, path, body, clientIP);
+        });
+        std::cout << "[HttpServer] REST API enabled for light wallet support" << std::endl;
 
         // BUG #140 FIX: Make HTTP server failure non-fatal
         // The stats endpoint is optional - core P2P functionality should continue

@@ -52,6 +52,11 @@ void CHttpServer::SetMetricsHandler(MetricsHandler handler) {
     m_metrics_handler = handler;
 }
 
+// Set REST API handler function for /api/v1/* endpoints
+void CHttpServer::SetRestApiHandler(RestApiHandler handler) {
+    m_rest_api_handler = handler;
+}
+
 // Start the HTTP server
 bool CHttpServer::Start() {
     if (m_running.load()) {
@@ -279,6 +284,41 @@ void CHttpServer::HandleRequest(SOCKET client_socket) {
     // This endpoint is always available, even during high load
     if (method == "GET" && path == "/api/health") {
         SendResponse(client_socket, 200, "application/json", R"({"status":"ok"})");
+        return;
+    }
+
+    // Handle REST API requests for light wallet (/api/v1/*)
+    if (path.rfind("/api/v1/", 0) == 0) {
+        if (m_rest_api_handler) {
+            try {
+                // Extract request body for POST requests
+                std::string body;
+                if (method == "POST") {
+                    // Find body after headers (double CRLF)
+                    size_t body_start = request.find("\r\n\r\n");
+                    if (body_start != std::string::npos) {
+                        body = request.substr(body_start + 4);
+                    }
+                }
+
+                // Call REST API handler (returns full HTTP response)
+                std::string response = m_rest_api_handler(method, path, body, "0.0.0.0");
+
+                // Send raw response (handler builds complete HTTP response)
+#ifdef _WIN32
+                send(client_socket, response.c_str(), static_cast<int>(response.size()), 0);
+#else
+                send(client_socket, response.c_str(), response.size(), 0);
+#endif
+            } catch (const std::exception& e) {
+                std::cerr << "[HttpServer] REST API error: " << e.what() << std::endl;
+                Send500(client_socket);
+            }
+        } else {
+            // REST API not configured
+            SendResponse(client_socket, 503, "application/json",
+                R"({"error":"REST API not available"})");
+        }
         return;
     }
 

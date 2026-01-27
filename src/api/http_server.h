@@ -140,6 +140,15 @@ public:
     using MetricsHandler = std::function<std::string()>;
 
     /**
+     * REST API handler function type
+     * Takes method, path, body, clientIP and returns HTTP response
+     */
+    using RestApiHandler = std::function<std::string(const std::string& method,
+                                                      const std::string& path,
+                                                      const std::string& body,
+                                                      const std::string& clientIP)>;
+
+    /**
      * Constructor
      * @param port Port to listen on (default: 8334 for testnet)
      */
@@ -165,6 +174,12 @@ public:
      * @param handler Function that returns Prometheus metrics string
      */
     void SetMetricsHandler(MetricsHandler handler);
+
+    /**
+     * Set REST API handler function for /api/v1/* endpoints
+     * @param handler Function that handles REST API requests
+     */
+    void SetRestApiHandler(RestApiHandler handler);
 
     /**
      * Start the HTTP server
@@ -251,6 +266,7 @@ private:
     int m_num_threads;                     // Number of worker threads
     StatsHandler m_stats_handler;          // Stats handler function
     MetricsHandler m_metrics_handler;      // Prometheus metrics handler
+    RestApiHandler m_rest_api_handler;     // REST API handler for light wallet
 
     // Server state - STRESS TEST FIX: Thread pool pattern
     std::thread m_accept_thread;           // Accept thread (listens for connections)
