@@ -164,7 +164,7 @@ FUZZ_TARGET(utxo)
                             block.hashMerkleRoot = validator.BuildMerkleRoot(transactions);
 
                             uint32_t height = fuzzed_data.ConsumeIntegralInRange<uint32_t>(1, 1000000);
-                            if (utxo.ApplyBlock(block, height)) {
+                            if (utxo.ApplyBlock(block, height, block.GetHash())) {
                                 applied_blocks.push_back(block);
                                 available_outpoints.push_back(COutPoint(coinbase.GetHash(), 0));
                             }
@@ -321,7 +321,7 @@ FUZZ_TARGET(utxo)
                     CBlockValidator validator;
                     block.hashMerkleRoot = validator.BuildMerkleRoot(transactions);
 
-                    if (utxo.ApplyBlock(block, i + 1)) {
+                    if (utxo.ApplyBlock(block, i + 1, block.GetHash())) {
                         blocks.push_back(block);
                     }
                 }
