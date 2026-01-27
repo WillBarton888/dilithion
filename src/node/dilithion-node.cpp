@@ -2066,8 +2066,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             if (g_node_context.peer_manager) {
-                // DEBUG TEST: Use original working code to isolate crash
-                g_metrics.peer_count = g_node_context.peer_manager->GetConnectedPeers().size();
+                auto peers = g_node_context.peer_manager->GetConnectedPeers();
+                g_metrics.peer_count = peers.size();
+                // TODO: Track inbound/outbound separately when CConnman tracks this
+                g_metrics.inbound_peers = 0;
+                g_metrics.outbound_peers = peers.size();
             }
 
             // Return Prometheus-format metrics

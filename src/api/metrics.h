@@ -238,8 +238,15 @@ public:
         out << "# TYPE dilithion_peer_count gauge\n";
         out << "dilithion_peer_count{" << net_label << "} " << peer_count.load() << "\n\n";
 
-        // Note: inbound_peers, outbound_peers, and mining metrics are defined in struct
-        // but not output yet - fields are reserved for future use
+        // Inbound peers
+        out << "# HELP dilithion_inbound_peers Number of inbound peer connections\n";
+        out << "# TYPE dilithion_inbound_peers gauge\n";
+        out << "dilithion_inbound_peers{" << net_label << "} " << inbound_peers.load() << "\n\n";
+
+        // Outbound peers
+        out << "# HELP dilithion_outbound_peers Number of outbound peer connections\n";
+        out << "# TYPE dilithion_outbound_peers gauge\n";
+        out << "dilithion_outbound_peers{" << net_label << "} " << outbound_peers.load() << "\n\n";
 
         // Mempool
         out << "# HELP dilithion_mempool_size Number of transactions in mempool\n";
