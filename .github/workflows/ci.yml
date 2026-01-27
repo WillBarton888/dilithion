@@ -33,6 +33,7 @@ jobs:
           libleveldb-dev \
           libssl-dev \
           libboost-test-dev \
+          libminiupnpc-dev \
           ccache \
           clang-format \
           cppcheck \
@@ -120,6 +121,7 @@ jobs:
           libleveldb-dev \
           libssl-dev \
           libboost-test-dev \
+          libminiupnpc-dev \
           clang
 
     - name: Set up compiler with ASan
@@ -193,6 +195,7 @@ jobs:
           libleveldb-dev \
           libssl-dev \
           libboost-test-dev \
+          libminiupnpc-dev \
           clang
 
     - name: Set up compiler with UBSan
@@ -266,6 +269,7 @@ jobs:
           libleveldb-dev \
           libssl-dev \
           libboost-test-dev \
+          libminiupnpc-dev \
           clang
 
     - name: Set up compiler with TSan
@@ -397,6 +401,7 @@ jobs:
           libleveldb-dev \
           libssl-dev \
           libboost-test-dev \
+          libminiupnpc-dev \
           lcov \
           gcovr
 
@@ -522,7 +527,8 @@ jobs:
           build-essential \
           cmake \
           libleveldb-dev \
-          libssl-dev
+          libssl-dev \
+          libminiupnpc-dev
 
     - name: Build Dilithion node
       run: |
@@ -584,7 +590,8 @@ jobs:
           clang \
           cmake \
           libleveldb-dev \
-          libssl-dev
+          libssl-dev \
+          libminiupnpc-dev
 
     - name: Build Dilithium library for fuzzing
       run: |
@@ -705,6 +712,7 @@ jobs:
           libleveldb-dev \
           libssl-dev \
           libboost-test-dev \
+          libminiupnpc-dev \
           curl \
           tar
 
