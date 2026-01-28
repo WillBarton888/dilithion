@@ -2463,9 +2463,26 @@
             // Save mode preference
             localStorage.setItem('dilithionWalletMode', mode);
 
-            // Update connection manager
+            // Update connection manager and reconnect
             if (connectionManager) {
+                setConnectionStatus(false, 'Connecting...');
                 await connectionManager.setMode(mode);
+
+                // Actually connect with new mode
+                try {
+                    if (mode === 'light') {
+                        // Light mode: connect to seed node
+                        await connectionManager.connect();
+                        setConnectionStatus(true, 'Light Wallet');
+                    } else {
+                        // Full mode: will use RPC connect
+                        connect();  // This handles full node connection
+                        return;     // connect() calls refreshAll() on success
+                    }
+                } catch (e) {
+                    setConnectionStatus(false, 'Connection failed');
+                    showNotification('Failed to connect: ' + e.message, 'warning');
+                }
             }
 
             // Update wallet UI (same wallet, just different connection)
@@ -2620,9 +2637,13 @@
                 // Connect to network
                 if (connectionManager) {
                     try {
+                        setConnectionStatus(false, 'Connecting...');
                         await connectionManager.connect();
                         setConnectionStatus(true, 'Light Wallet');
+                        // Refresh data immediately after connection
+                        await refreshAll();
                     } catch (e) {
+                        setConnectionStatus(false, 'Connection failed');
                         showNotification('Connected to wallet but failed to reach seed node: ' + e.message, 'warning');
                     }
                 }
