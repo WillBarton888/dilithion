@@ -287,6 +287,28 @@ void CHttpServer::HandleRequest(SOCKET client_socket) {
         return;
     }
 
+    // Handle OPTIONS preflight requests for CORS (browsers send this before cross-origin requests)
+    // Must be handled BEFORE REST API routing to allow light wallet browser access
+    if (method == "OPTIONS") {
+        // Build response with comprehensive CORS headers
+        std::ostringstream response;
+        response << "HTTP/1.1 204 No Content\r\n";
+        response << "Access-Control-Allow-Origin: *\r\n";
+        response << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n";
+        response << "Access-Control-Allow-Headers: Content-Type, Accept\r\n";
+        response << "Access-Control-Max-Age: 86400\r\n";  // Cache preflight for 24 hours
+        response << "Content-Length: 0\r\n";
+        response << "Connection: close\r\n";
+        response << "\r\n";
+        std::string response_str = response.str();
+#ifdef _WIN32
+        send(client_socket, response_str.c_str(), static_cast<int>(response_str.size()), 0);
+#else
+        send(client_socket, response_str.c_str(), response_str.size(), 0);
+#endif
+        return;
+    }
+
     // Handle REST API requests for light wallet (/api/v1/*)
     if (path.rfind("/api/v1/", 0) == 0) {
         if (m_rest_api_handler) {
@@ -365,12 +387,6 @@ void CHttpServer::HandleRequest(SOCKET client_socket) {
             std::cerr << "[HttpServer] Error generating metrics: " << e.what() << std::endl;
             Send500(client_socket);
         }
-        return;
-    }
-
-    // Handle OPTIONS (for CORS preflight)
-    if (method == "OPTIONS") {
-        SendResponse(client_socket, 200, "text/plain", "");
         return;
     }
 
