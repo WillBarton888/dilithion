@@ -48,8 +48,11 @@ struct NodeState {
     std::atomic<bool> running;
     std::atomic<bool> new_block_found;
     std::atomic<bool> mining_enabled;
+    std::atomic<uint64_t> template_version{0};
+    std::string mining_address_override;  // setminingaddress RPC sets this
     void* rpc_server;
     void* miner;
+    void* wallet;
     void* p2p_socket;
     void* http_server;
 };
@@ -184,6 +187,8 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getmininginfo"] = [this](const std::string& p) { return RPC_GetMiningInfo(p); };
     m_handlers["startmining"] = [this](const std::string& p) { return RPC_StartMining(p); };
     m_handlers["stopmining"] = [this](const std::string& p) { return RPC_StopMining(p); };
+    m_handlers["setminingaddress"] = [this](const std::string& p) { return RPC_SetMiningAddress(p); };
+    m_handlers["getminingaddress"] = [this](const std::string& p) { return RPC_GetMiningAddress(p); };
 
     // Network and general
     m_handlers["getnetworkinfo"] = [this](const std::string& p) { return RPC_GetNetworkInfo(p); };
@@ -3447,6 +3452,47 @@ std::string CRPCServer::RPC_StopMining(const std::string& params) {
     g_node_state.mining_enabled = false;
 
     return "true";
+}
+
+std::string CRPCServer::RPC_SetMiningAddress(const std::string& params) {
+    // Parse the address from params
+    // Expected format: ["Dxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]
+    std::string address;
+
+    // Simple JSON array parsing
+    size_t start = params.find('"');
+    size_t end = params.rfind('"');
+    if (start != std::string::npos && end != std::string::npos && end > start) {
+        address = params.substr(start + 1, end - start - 1);
+    }
+
+    if (address.empty()) {
+        throw std::runtime_error("Missing address parameter. Usage: setminingaddress \"Dxxx...\"");
+    }
+
+    // Validate address format
+    CDilithiumAddress testAddr;
+    if (!testAddr.SetString(address)) {
+        throw std::runtime_error("Invalid address format: " + address);
+    }
+
+    // Set the mining address override
+    g_node_state.mining_address_override = address;
+
+    std::cout << "[RPC] Mining address set to: " << address << std::endl;
+
+    std::ostringstream oss;
+    oss << "{\"address\":\"" << address << "\",\"success\":true}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetMiningAddress(const std::string& params) {
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"address\":\"" << g_node_state.mining_address_override << "\",";
+    oss << "\"is_set\":" << (g_node_state.mining_address_override.empty() ? "false" : "true");
+    oss << "}";
+    return oss.str();
 }
 
 std::string CRPCServer::RPC_GetNetworkInfo(const std::string& params) {

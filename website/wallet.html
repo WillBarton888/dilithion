@@ -1402,12 +1402,60 @@
             try {
                 const info = await rpcCall('getblockchaininfo');
                 setConnectionStatus(true, info.chain === 'testnet' ? 'Testnet' : 'Mainnet');
+
+                // Auto-set mining address from browser wallet (if unlocked)
+                await autoSetMiningAddress();
+
                 await refreshAll();
                 // Check wallet security status after connection
                 await checkSecurityStatus();
             } catch(e) {
                 setConnectionStatus(false, 'Connection failed');
                 console.error('Connection error:', e);
+            }
+        }
+
+        // Auto-configure mining to send rewards to browser wallet address
+        async function autoSetMiningAddress() {
+            // Only in full node mode
+            if (connectionManager && connectionManager.getMode() === 'light') {
+                return;  // Light mode doesn't need this
+            }
+
+            // Check if browser wallet is unlocked
+            if (!localWallet || !localWallet.isWalletUnlocked()) {
+                console.log('[Mining] Browser wallet not unlocked, skipping auto mining address');
+                return;
+            }
+
+            try {
+                // Get first address from browser wallet
+                const addresses = await localWallet.getAddresses();
+                if (!addresses || addresses.length === 0) {
+                    console.log('[Mining] No addresses in browser wallet');
+                    return;
+                }
+
+                const myAddress = addresses[0].address;
+
+                // Check if already set
+                try {
+                    const current = await rpcCall('getminingaddress');
+                    if (current.address === myAddress) {
+                        console.log('[Mining] Mining address already set to:', myAddress);
+                        return;
+                    }
+                } catch (e) {
+                    // getminingaddress might not exist on older nodes
+                }
+
+                // Set mining address via RPC
+                await rpcCall('setminingaddress', [myAddress]);
+                console.log('[Mining] Auto-set mining address to:', myAddress);
+                showNotification('Mining rewards will go to your wallet', 'success');
+            } catch (e) {
+                console.warn('[Mining] Failed to auto-set mining address:', e.message);
+                // Don't show error - node might not support this RPC yet
             }
         }
 
