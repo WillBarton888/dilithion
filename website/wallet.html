@@ -1061,6 +1061,65 @@
                 </div>
             </div>
 
+            <!-- Node Wallet Security (Full Node mode only) -->
+            <div class="card" id="nodeWalletSecurityCard" style="display: none;">
+                <div class="card-title">🔐 Node Wallet Security</div>
+                <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9rem;">
+                    Manage encryption for your node's wallet file. This is separate from your browser wallet.
+                </p>
+
+                <!-- Not encrypted -->
+                <div id="nodeWalletNotEncrypted">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 12px; background: rgba(239, 68, 68, 0.1); border-radius: 8px;">
+                        <span style="font-size: 1.2rem;">⚠️</span>
+                        <div>
+                            <div style="font-weight: 600; color: var(--error);">Wallet Not Encrypted</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted);">Your node wallet file is not password protected</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Password (min 8 characters)</label>
+                        <input type="password" class="form-input" id="encryptWalletPassword" placeholder="Enter password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm Password</label>
+                        <input type="password" class="form-input" id="encryptWalletPasswordConfirm" placeholder="Confirm password">
+                    </div>
+                    <button class="btn btn-primary" onclick="encryptNodeWallet()">🔒 Encrypt Wallet</button>
+                </div>
+
+                <!-- Encrypted -->
+                <div id="nodeWalletEncrypted" style="display: none;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border-radius: 8px;">
+                        <span style="font-size: 1.2rem;">✅</span>
+                        <div>
+                            <div style="font-weight: 600; color: var(--success);">Wallet Encrypted</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted);" id="nodeWalletLockStatus">Locked</div>
+                        </div>
+                    </div>
+
+                    <!-- Change password section -->
+                    <details style="margin-top: 16px;">
+                        <summary style="cursor: pointer; color: var(--primary); font-weight: 500;">Change Password</summary>
+                        <div style="padding: 16px 0;">
+                            <div class="form-group">
+                                <label class="form-label">Current Password</label>
+                                <input type="password" class="form-input" id="oldNodePassword" placeholder="Current password">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">New Password (min 8 characters)</label>
+                                <input type="password" class="form-input" id="newNodePassword" placeholder="New password">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Confirm New Password</label>
+                                <input type="password" class="form-input" id="confirmNewNodePassword" placeholder="Confirm new password">
+                            </div>
+                            <button class="btn btn-primary" onclick="changeNodeWalletPassword()">Change Password</button>
+                        </div>
+                    </details>
+                </div>
+            </div>
+
             <!-- Connection Mode Selector -->
             <div class="card" id="connectionModeCard">
                 <div class="card-title">🌐 Connection Mode</div>
@@ -1409,6 +1468,8 @@
                 await refreshAll();
                 // Check wallet security status after connection
                 await checkSecurityStatus();
+                // Update node wallet security UI in settings
+                await checkNodeWalletEncryption();
             } catch(e) {
                 setConnectionStatus(false, 'Connection failed');
                 console.error('Connection error:', e);
@@ -2533,6 +2594,9 @@
                 }
             }
 
+            // Update node wallet security card visibility
+            await checkNodeWalletEncryption();
+
             // Update wallet UI (same wallet, just different connection)
             await updateLightWalletUI();
 
@@ -2713,6 +2777,110 @@
         // Show backup mnemonic (placeholder - needs password verification)
         function showBackupMnemonic() {
             showNotification('Mnemonic backup requires re-entering your password. Feature coming soon.', 'info');
+        }
+
+        // ============================================================
+        // Node Wallet Encryption Functions
+        // ============================================================
+
+        // Check node wallet encryption status
+        async function checkNodeWalletEncryption() {
+            // Only show in full node mode
+            const mode = connectionManager ? connectionManager.getMode() : 'full';
+            const card = document.getElementById('nodeWalletSecurityCard');
+
+            if (mode !== 'full' || !connected) {
+                card.style.display = 'none';
+                return;
+            }
+
+            card.style.display = 'block';
+
+            try {
+                // Try to get wallet info to check if encrypted
+                const walletInfo = await rpcCall('getwalletinfo');
+                const isEncrypted = walletInfo.encrypted === true;
+
+                document.getElementById('nodeWalletNotEncrypted').style.display = isEncrypted ? 'none' : 'block';
+                document.getElementById('nodeWalletEncrypted').style.display = isEncrypted ? 'block' : 'none';
+
+                if (isEncrypted) {
+                    const lockStatus = document.getElementById('nodeWalletLockStatus');
+                    lockStatus.textContent = walletInfo.unlocked_until > 0 ? 'Unlocked' : 'Locked';
+                }
+            } catch (e) {
+                // If getwalletinfo fails, assume not encrypted
+                console.log('[Wallet] Could not check encryption status:', e.message);
+                document.getElementById('nodeWalletNotEncrypted').style.display = 'block';
+                document.getElementById('nodeWalletEncrypted').style.display = 'none';
+            }
+        }
+
+        // Encrypt node wallet
+        async function encryptNodeWallet() {
+            const password = document.getElementById('encryptWalletPassword').value;
+            const confirmPassword = document.getElementById('encryptWalletPasswordConfirm').value;
+
+            if (!password || password.length < 8) {
+                showNotification('Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showNotification('Passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                showNotification('Encrypting wallet...', 'info');
+                await rpcCall('encryptwallet', [password]);
+
+                // Clear password fields
+                document.getElementById('encryptWalletPassword').value = '';
+                document.getElementById('encryptWalletPasswordConfirm').value = '';
+
+                showNotification('Wallet encrypted successfully! The node may restart.', 'success');
+
+                // Refresh encryption status
+                setTimeout(() => checkNodeWalletEncryption(), 2000);
+            } catch (e) {
+                showNotification('Failed to encrypt wallet: ' + e.message, 'error');
+            }
+        }
+
+        // Change node wallet password
+        async function changeNodeWalletPassword() {
+            const oldPassword = document.getElementById('oldNodePassword').value;
+            const newPassword = document.getElementById('newNodePassword').value;
+            const confirmPassword = document.getElementById('confirmNewNodePassword').value;
+
+            if (!oldPassword) {
+                showNotification('Please enter your current password', 'error');
+                return;
+            }
+
+            if (!newPassword || newPassword.length < 8) {
+                showNotification('New password must be at least 8 characters', 'error');
+                return;
+            }
+
+            if (newPassword !== confirmPassword) {
+                showNotification('New passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                await rpcCall('walletpassphrasechange', [oldPassword, newPassword]);
+
+                // Clear password fields
+                document.getElementById('oldNodePassword').value = '';
+                document.getElementById('newNodePassword').value = '';
+                document.getElementById('confirmNewNodePassword').value = '';
+
+                showNotification('Password changed successfully!', 'success');
+            } catch (e) {
+                showNotification('Failed to change password: ' + e.message, 'error');
+            }
         }
 
         // Initialize

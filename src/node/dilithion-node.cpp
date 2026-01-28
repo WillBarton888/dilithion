@@ -3005,6 +3005,60 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::string addrStr = addr.ToString();
                     std::cout << "  First address: " << addrStr << std::endl;
                     std::cout << std::endl;
+
+                    // Prompt for wallet encryption
+                    std::cout << "+==============================================================================+" << std::endl;
+                    std::cout << "|                    WALLET ENCRYPTION (RECOMMENDED)                           |" << std::endl;
+                    std::cout << "+==============================================================================+" << std::endl;
+                    std::cout << "|  Encrypting your wallet adds an extra layer of security.                     |" << std::endl;
+                    std::cout << "|  You will need to enter a password to unlock the wallet for transactions.    |" << std::endl;
+                    std::cout << "+------------------------------------------------------------------------------+" << std::endl;
+                    std::cout << std::endl;
+
+                    std::string encrypt_choice;
+                    std::cout << "  Encrypt wallet with password? [Y/n]: ";
+                    std::cout.flush();
+                    std::getline(std::cin, encrypt_choice);
+
+                    if (encrypt_choice.empty() || encrypt_choice == "Y" || encrypt_choice == "y" ||
+                        encrypt_choice == "yes" || encrypt_choice == "YES") {
+                        // Prompt for password
+                        std::string password1, password2;
+                        while (true) {
+                            std::cout << std::endl;
+                            std::cout << "  Enter encryption password (min 8 characters): ";
+                            std::cout.flush();
+                            std::getline(std::cin, password1);
+
+                            if (password1.length() < 8) {
+                                std::cout << "  Password too short. Please use at least 8 characters." << std::endl;
+                                continue;
+                            }
+
+                            std::cout << "  Confirm password: ";
+                            std::cout.flush();
+                            std::getline(std::cin, password2);
+
+                            if (password1 != password2) {
+                                std::cout << "  Passwords do not match. Please try again." << std::endl;
+                                continue;
+                            }
+                            break;
+                        }
+
+                        std::cout << std::endl;
+                        std::cout << "  Encrypting wallet..." << std::endl;
+                        if (wallet.EncryptWallet(password1)) {
+                            std::cout << "  [OK] Wallet encrypted successfully!" << std::endl;
+                            std::cout << "       You will need this password to unlock the wallet." << std::endl;
+                        } else {
+                            std::cout << "  [WARN] Failed to encrypt wallet. Continuing without encryption." << std::endl;
+                        }
+                        std::cout << std::endl;
+                    } else {
+                        std::cout << "  [INFO] Wallet not encrypted. You can encrypt later with 'encryptwallet' RPC." << std::endl;
+                        std::cout << std::endl;
+                    }
                 } else {
                     std::cerr << "  ERROR: Failed to restore wallet. Check your recovery phrase." << std::endl;
                     return 1;
@@ -3125,6 +3179,61 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "  Please type 'Y' to confirm. Your recovery phrase is critical!" << std::endl;
                 }
                 std::cout << std::endl;
+
+                // Prompt for wallet encryption
+                std::cout << "+==============================================================================+" << std::endl;
+                std::cout << "|                    WALLET ENCRYPTION (RECOMMENDED)                           |" << std::endl;
+                std::cout << "+==============================================================================+" << std::endl;
+                std::cout << "|  Encrypting your wallet adds an extra layer of security.                     |" << std::endl;
+                std::cout << "|  You will need to enter a password to unlock the wallet for transactions.    |" << std::endl;
+                std::cout << "+------------------------------------------------------------------------------+" << std::endl;
+                std::cout << std::endl;
+
+                std::string encrypt_choice;
+                std::cout << "  Encrypt wallet with password? [Y/n]: ";
+                std::cout.flush();
+                std::getline(std::cin, encrypt_choice);
+
+                if (encrypt_choice.empty() || encrypt_choice == "Y" || encrypt_choice == "y" ||
+                    encrypt_choice == "yes" || encrypt_choice == "YES") {
+                    // Prompt for password
+                    std::string password1, password2;
+                    while (true) {
+                        std::cout << std::endl;
+                        std::cout << "  Enter encryption password (min 8 characters): ";
+                        std::cout.flush();
+                        std::getline(std::cin, password1);
+
+                        if (password1.length() < 8) {
+                            std::cout << "  Password too short. Please use at least 8 characters." << std::endl;
+                            continue;
+                        }
+
+                        std::cout << "  Confirm password: ";
+                        std::cout.flush();
+                        std::getline(std::cin, password2);
+
+                        if (password1 != password2) {
+                            std::cout << "  Passwords do not match. Please try again." << std::endl;
+                            continue;
+                        }
+                        break;
+                    }
+
+                    std::cout << std::endl;
+                    std::cout << "  Encrypting wallet..." << std::endl;
+                    if (wallet.EncryptWallet(password1)) {
+                        std::cout << "  [OK] Wallet encrypted successfully!" << std::endl;
+                        std::cout << "       You will need this password to unlock the wallet." << std::endl;
+                    } else {
+                        std::cout << "  [WARN] Failed to encrypt wallet. Continuing without encryption." << std::endl;
+                    }
+                    std::cout << std::endl;
+                } else {
+                    std::cout << "  [INFO] Wallet not encrypted. You can encrypt later with 'encryptwallet' RPC." << std::endl;
+                    std::cout << std::endl;
+                }
+
                 std::cout << "  [OK] Continuing with node startup..." << std::endl;
                 std::cout << std::endl;
             } else {
