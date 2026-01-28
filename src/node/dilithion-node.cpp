@@ -3390,6 +3390,72 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cerr << "  WARNING: Failed to save new wallet" << std::endl;
             }
         }
+
+        // MAINNET FIX: If mining enabled with encrypted wallet, unlock NOW before threads start
+        // Must happen BEFORE CConnman starts to avoid log spam during password entry
+        if (config.start_mining && wallet.IsCrypted() && wallet.IsLocked()) {
+            std::cout << std::endl;
+            std::cout << "========================================================================" << std::endl;
+            std::cout << "========================================================================" << std::endl;
+            std::cout << std::endl;
+            std::cout << "+----------------------------------------------------------------------+" << std::endl;
+            std::cout << "| WALLET UNLOCK REQUIRED                                               |" << std::endl;
+            std::cout << "+----------------------------------------------------------------------+" << std::endl;
+            std::cout << std::endl;
+            std::cout << "  Your wallet is encrypted. Mining requires wallet access to sign" << std::endl;
+            std::cout << "  blocks with your Mining Identity Key (MIK)." << std::endl;
+            std::cout << std::endl;
+            std::cout << "  NOTE: Password will be visible as you type." << std::endl;
+            std::cout << std::endl;
+
+            // Try up to 3 times
+            bool unlocked = false;
+            for (int attempt = 1; attempt <= 3 && !unlocked; ++attempt) {
+                std::cout << "  >>> Enter wallet password (attempt " << attempt << "/3): ";
+                std::cout.flush();
+
+                std::string password;
+                std::getline(std::cin, password);
+
+                // Trim whitespace
+                size_t start = password.find_first_not_of(" \t\r\n");
+                size_t end = password.find_last_not_of(" \t\r\n");
+                if (start != std::string::npos && end != std::string::npos) {
+                    password = password.substr(start, end - start + 1);
+                } else {
+                    password.clear();
+                }
+
+                if (password.empty()) {
+                    std::cout << "  Password cannot be empty." << std::endl;
+                    continue;
+                }
+
+                // Try to unlock (0 timeout = unlock until node stops)
+                if (wallet.Unlock(password, 0)) {
+                    unlocked = true;
+                    std::cout << "  [OK] Wallet unlocked for mining session" << std::endl;
+                    std::cout << std::endl;
+                } else {
+                    std::cout << "  Incorrect password." << std::endl;
+                }
+            }
+
+            if (!unlocked) {
+                std::cerr << std::endl;
+                std::cerr << "  ERROR: Failed to unlock wallet after 3 attempts." << std::endl;
+                std::cerr << "  Mining requires wallet access for MIK signing." << std::endl;
+                std::cerr << "  Options:" << std::endl;
+                std::cerr << "    1. Restart node and enter correct password" << std::endl;
+                std::cerr << "    2. Unlock via RPC: walletpassphrase <password> <timeout>" << std::endl;
+                std::cerr << "    3. Run without --mine flag and unlock later" << std::endl;
+                std::cerr << std::endl;
+                std::cerr << "  Continuing without mining..." << std::endl;
+                config.start_mining = false;
+                g_node_state.mining_enabled = false;
+            }
+        }
+
         }  // end else (!relay_only)
 
         // NOW start CConnman (after all interactive wallet prompts are complete)
@@ -4052,12 +4118,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // BUG #52 FIX: Check IBD before starting mining (Bitcoin pattern)
             // This prevents fresh nodes from mining on their own chain before syncing
             // BUG #54 FIX: Don't BLOCK here - just defer mining and let main loop run
-            if (IsInitialBlockDownload()) {
+            // Note: config.start_mining may have been set to false above if wallet unlock failed
+            if (config.start_mining && IsInitialBlockDownload()) {
                 std::cout << "  [IBD] Node is syncing - mining will start after sync" << std::endl;
                 std::cout << "  [IBD] Main loop will handle block downloads, mining deferred..." << std::endl;
                 mining_deferred_for_ibd = true;
                 // DO NOT block here - main loop needs to run for block downloads!
-            } else {
+            } else if (config.start_mining) {
                 std::cout << "  [OK] Already synced with network" << std::endl;
 
                 // BUG #72 FIX: Wait for FULL mode before starting mining threads
