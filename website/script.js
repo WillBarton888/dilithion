@@ -5,7 +5,7 @@
 
 // Configuration
 const TESTNET_LAUNCH_DATE = 1762041600000; // Nov 2, 2025 00:00:00 UTC
-const MAINNET_LAUNCH_DATE = 1768435200000; // Jan 15, 2026 00:00:00 UTC
+const MAINNET_LAUNCH_DATE = 1769558400000; // Jan 28, 2026 00:00:00 UTC
 const RPC_ENDPOINT = 'http://localhost:8332';
 const API_ENDPOINT = '/api/stats.php'; // PHP proxy to backend nodes
 const STATS_JSON_URL = 'https://dilithion.org/network-stats.json';
@@ -27,7 +27,7 @@ function updateCountdown() {
         // Hide countdown timer and show status message
         const countdownContainer = document.querySelector('.countdown');
         if (countdownContainer) {
-            countdownContainer.innerHTML = '<div class="mainnet-live-banner" style="background: linear-gradient(135deg, #f59e0b, #d97706);"><h2>MAINNET COMING SOON</h2><p>Network reset in progress - please wait for launch announcement</p></div>';
+            countdownContainer.innerHTML = '<div class="mainnet-live-banner" style="background: linear-gradient(135deg, #22c55e, #16a34a);"><h2>MAINNET IS LIVE!</h2><p>Download v2.0.5 and start mining real DIL coins today!</p></div>';
         }
 
         // Update status to live
@@ -64,13 +64,13 @@ function updateNetworkStatus(live) {
     const mainnetLive = now >= MAINNET_LAUNCH_DATE;
 
     if (mainnetLive) {
-        // Mainnet date passed but network reset in progress
-        statusDot.classList.remove('live');
-        statusText.textContent = 'MAINNET COMING SOON (network reset in progress)';
-    } else if (live) {
-        // Testnet only
+        // Mainnet is LIVE
         statusDot.classList.add('live');
-        statusText.textContent = 'Testnet: LIVE | Mainnet: January 15, 2026';
+        statusText.textContent = 'MAINNET LIVE since January 28, 2026';
+    } else if (live) {
+        // Pre-launch
+        statusDot.classList.add('live');
+        statusText.textContent = 'Launching January 28, 2026';
     } else {
         statusDot.classList.remove('live');
         statusText.textContent = 'Coming Soon';
