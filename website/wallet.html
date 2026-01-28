@@ -1079,11 +1079,17 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">New Password (min 8 characters)</label>
-                        <input type="password" class="form-input" id="encryptWalletPassword" placeholder="Enter password">
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="encryptWalletPassword" placeholder="Enter password" style="padding-right: 50px;">
+                            <button type="button" onclick="togglePasswordVisibility('encryptWalletPassword', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Confirm Password</label>
-                        <input type="password" class="form-input" id="encryptWalletPasswordConfirm" placeholder="Confirm password">
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="encryptWalletPasswordConfirm" placeholder="Confirm password" style="padding-right: 50px;">
+                            <button type="button" onclick="togglePasswordVisibility('encryptWalletPasswordConfirm', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                        </div>
                     </div>
                     <button class="btn btn-primary" onclick="encryptNodeWallet()">🔒 Encrypt Wallet</button>
                 </div>
@@ -1104,15 +1110,24 @@
                         <div style="padding: 16px 0;">
                             <div class="form-group">
                                 <label class="form-label">Current Password</label>
-                                <input type="password" class="form-input" id="oldNodePassword" placeholder="Current password">
+                                <div style="position: relative;">
+                                    <input type="password" class="form-input" id="oldNodePassword" placeholder="Current password" style="padding-right: 50px;">
+                                    <button type="button" onclick="togglePasswordVisibility('oldNodePassword', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">New Password (min 8 characters)</label>
-                                <input type="password" class="form-input" id="newNodePassword" placeholder="New password">
+                                <div style="position: relative;">
+                                    <input type="password" class="form-input" id="newNodePassword" placeholder="New password" style="padding-right: 50px;">
+                                    <button type="button" onclick="togglePasswordVisibility('newNodePassword', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Confirm New Password</label>
-                                <input type="password" class="form-input" id="confirmNewNodePassword" placeholder="Confirm new password">
+                                <div style="position: relative;">
+                                    <input type="password" class="form-input" id="confirmNewNodePassword" placeholder="Confirm new password" style="padding-right: 50px;">
+                                    <button type="button" onclick="togglePasswordVisibility('confirmNewNodePassword', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                                </div>
                             </div>
                             <button class="btn btn-primary" onclick="changeNodeWalletPassword()">Change Password</button>
                         </div>
@@ -1517,6 +1532,18 @@
             }
         `;
         document.head.appendChild(notificationStyles);
+
+        // Toggle password visibility
+        function togglePasswordVisibility(inputId, button) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                button.textContent = 'Hide';
+            } else {
+                input.type = 'password';
+                button.textContent = 'Show';
+            }
+        }
 
         // Connect to node
         async function connect() {
@@ -2896,7 +2923,7 @@
 
             try {
                 showNotification('Encrypting wallet...', 'info');
-                await rpcCall('encryptwallet', [password]);
+                await rpcCall('encryptwallet', {passphrase: password});
 
                 // Clear password fields
                 document.getElementById('encryptWalletPassword').value = '';
@@ -2933,7 +2960,7 @@
             }
 
             try {
-                await rpcCall('walletpassphrasechange', [oldPassword, newPassword]);
+                await rpcCall('walletpassphrasechange', {oldpassphrase: oldPassword, newpassphrase: newPassword});
 
                 // Clear password fields
                 document.getElementById('oldNodePassword').value = '';
