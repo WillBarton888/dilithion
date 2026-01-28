@@ -1455,6 +1455,69 @@
             }
         }
 
+        // Show toast notification
+        function showNotification(message, type = 'info') {
+            // Remove any existing notification
+            const existing = document.getElementById('toast-notification');
+            if (existing) existing.remove();
+
+            // Create notification element
+            const toast = document.createElement('div');
+            toast.id = 'toast-notification';
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 16px 24px;
+                border-radius: 8px;
+                color: white;
+                font-weight: 500;
+                z-index: 10000;
+                animation: slideIn 0.3s ease-out;
+                max-width: 400px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            `;
+
+            // Set background color based on type
+            switch (type) {
+                case 'success':
+                    toast.style.background = 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)';
+                    break;
+                case 'error':
+                    toast.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                    break;
+                case 'warning':
+                    toast.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+                    break;
+                default:
+                    toast.style.background = 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)';
+            }
+
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            // Auto-remove after 5 seconds (longer for errors)
+            const duration = type === 'error' ? 7000 : 5000;
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
+        }
+
+        // Add animation styles for notifications
+        const notificationStyles = document.createElement('style');
+        notificationStyles.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+            }
+        `;
+        document.head.appendChild(notificationStyles);
+
         // Connect to node
         async function connect() {
             setConnectionStatus(false, 'Connecting...');
