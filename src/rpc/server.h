@@ -272,6 +272,7 @@ private:
     std::string RPC_CheckChain(const std::string& params);
 
     // Wallet encryption methods
+    std::string RPC_GetWalletInfo(const std::string& params);
     std::string RPC_EncryptWallet(const std::string& params);
     std::string RPC_WalletPassphrase(const std::string& params);
     std::string RPC_WalletLock(const std::string& params);

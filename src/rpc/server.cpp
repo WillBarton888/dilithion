@@ -169,6 +169,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["checkchain"] = [this](const std::string& p) { return RPC_CheckChain(p); };
 
     // Wallet encryption
+    m_handlers["getwalletinfo"] = [this](const std::string& p) { return RPC_GetWalletInfo(p); };
     m_handlers["encryptwallet"] = [this](const std::string& p) { return RPC_EncryptWallet(p); };
     m_handlers["walletpassphrase"] = [this](const std::string& p) { return RPC_WalletPassphrase(p); };
     m_handlers["walletlock"] = [this](const std::string& p) { return RPC_WalletLock(p); };
@@ -2818,6 +2819,24 @@ std::string CRPCServer::RPC_GetTxOut(const std::string& params) {
     oss << "},";
     oss << "\"coinbase\":" << (entry.fCoinBase ? "true" : "false");
     oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetWalletInfo(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    bool isEncrypted = m_wallet->IsCrypted();
+    bool isLocked = isEncrypted && m_wallet->IsLocked();
+
+    std::ostringstream oss;
+    oss << "{"
+        << "\"encrypted\":" << (isEncrypted ? "true" : "false") << ","
+        << "\"locked\":" << (isLocked ? "true" : "false") << ","
+        << "\"unlocked_until\":" << (isLocked ? 0 : 1)  // 0 if locked, 1 if unlocked
+        << "}";
+
     return oss.str();
 }
 
