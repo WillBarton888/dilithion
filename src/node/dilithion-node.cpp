@@ -100,6 +100,50 @@
     #ifdef SendMessage
         #undef SendMessage  // Windows defines this as SendMessageA/SendMessageW
     #endif
+
+// CRASH HANDLER: Log crash info to file before terminating
+static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* pExceptionInfo) {
+    // Get data directory for crash log
+    std::string crashLogPath = "dilithion_crash.log";
+    char* appdata = std::getenv("APPDATA");
+    if (appdata) {
+        crashLogPath = std::string(appdata) + "\\.dilithion\\crash.log";
+    }
+
+    std::ofstream crashLog(crashLogPath, std::ios::app);
+    if (crashLog) {
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+
+        crashLog << "\n========== CRASH REPORT ==========" << std::endl;
+        crashLog << "Time: " << std::ctime(&time_t_now);
+        crashLog << "Exception Code: 0x" << std::hex << pExceptionInfo->ExceptionRecord->ExceptionCode << std::dec << std::endl;
+        crashLog << "Exception Address: 0x" << std::hex << (uintptr_t)pExceptionInfo->ExceptionRecord->ExceptionAddress << std::dec << std::endl;
+
+        // Decode common exception codes
+        switch (pExceptionInfo->ExceptionRecord->ExceptionCode) {
+            case 0xC0000005: crashLog << "Type: ACCESS_VIOLATION (segfault)" << std::endl; break;
+            case 0xC00000FD: crashLog << "Type: STACK_OVERFLOW" << std::endl; break;
+            case 0xC0000094: crashLog << "Type: INTEGER_DIVIDE_BY_ZERO" << std::endl; break;
+            case 0xC000001D: crashLog << "Type: ILLEGAL_INSTRUCTION" << std::endl; break;
+            case 0xC0000409: crashLog << "Type: STACK_BUFFER_OVERRUN" << std::endl; break;
+            default: crashLog << "Type: Unknown" << std::endl; break;
+        }
+
+        // Log register state
+        CONTEXT* ctx = pExceptionInfo->ContextRecord;
+        crashLog << "Registers: RIP=0x" << std::hex << ctx->Rip
+                 << " RSP=0x" << ctx->Rsp
+                 << " RBP=0x" << ctx->Rbp << std::dec << std::endl;
+
+        crashLog << "===================================" << std::endl;
+        crashLog.close();
+
+        std::cerr << "\n[CRASH] Fatal exception occurred. Details written to: " << crashLogPath << std::endl;
+    }
+
+    return EXCEPTION_CONTINUE_SEARCH;  // Let default handler terminate
+}
 #endif
 
 // Global chain state (defined in src/core/globals.cpp)
@@ -1012,6 +1056,11 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    // Register crash handler to log crash info before terminating
+    SetUnhandledExceptionFilter(CrashHandler);
+#endif
+
     // Quick Start Mode: If no arguments provided, use beginner-friendly defaults
     bool quick_start_mode = (argc == 1);
 
