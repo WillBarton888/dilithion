@@ -7,6 +7,7 @@
 
 #include <util/config_validator.h>
 #include <util/config.h>
+#include <consensus/params.h>
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
@@ -99,10 +100,10 @@ ConfigValidationResult CConfigValidator::ValidateMiningThreads(int64_t threads) 
         result.error_message = "Mining threads must be at least 1";
         result.suggestions.push_back("Set threads to 1 or more");
         result.suggestions.push_back("Recommended: number of CPU cores");
-    } else if (threads > 128) {
+    } else if (threads > Consensus::MAX_MINING_THREADS) {
         result.valid = false;
-        result.error_message = "Mining threads cannot exceed 128";
-        result.suggestions.push_back("Reduce thread count to 128 or less");
+        result.error_message = "Mining threads cannot exceed " + std::to_string(Consensus::MAX_MINING_THREADS);
+        result.suggestions.push_back("Reduce thread count to " + std::to_string(Consensus::MAX_MINING_THREADS) + " or less");
         result.suggestions.push_back("Recommended: number of CPU cores");
     }
     
