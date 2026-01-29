@@ -86,6 +86,7 @@
       "targets": [
         {
           "expr": "max(dilithion_block_height{network=\"$network\"})",
+          "instant": true,
           "legendFormat": "",
           "refId": "A"
         }
@@ -145,6 +146,7 @@
       "targets": [
         {
           "expr": "count(dilithion_info{network=\"$network\"})",
+          "instant": true,
           "legendFormat": "",
           "refId": "A"
         }
@@ -204,6 +206,7 @@
       "targets": [
         {
           "expr": "sum(dilithion_peer_count{network=\"$network\"})",
+          "instant": true,
           "legendFormat": "",
           "refId": "A"
         }
@@ -267,6 +270,7 @@
       "targets": [
         {
           "expr": "max(dilithion_fork_detected{network=\"$network\"})",
+          "instant": true,
           "legendFormat": "",
           "refId": "A"
         }
@@ -334,6 +338,7 @@
       "targets": [
         {
           "expr": "sum(dilithion_invalid_blocks_total{network=\"$network\"})",
+          "instant": true,
           "legendFormat": "",
           "refId": "A"
         }
@@ -401,6 +406,7 @@
       "targets": [
         {
           "expr": "sum(dilithion_peer_bans_total{network=\"$network\"})",
+          "instant": true,
           "legendFormat": "",
           "refId": "A"
         }

@@ -1245,7 +1245,7 @@
                         <p style="color: var(--text-secondary); margin-bottom: 16px;">
                             Write down these 24 words in order. This is the ONLY way to recover your wallet if you lose access.
                         </p>
-                        <div id="mnemonicDisplay" style="background: var(--bg-darker); padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; margin-bottom: 16px;">
+                        <div id="lightWalletMnemonicDisplay" style="background: var(--bg-darker); padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; margin-bottom: 16px;">
                         </div>
                         <div style="background: rgba(239, 68, 68, 0.1); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                             <strong style="color: #ef4444;">NEVER share these words with anyone!</strong>
@@ -2986,7 +2986,7 @@
                 document.getElementById('showMnemonicForm').style.display = 'block';
 
                 // Display mnemonic words
-                const display = document.getElementById('mnemonicDisplay');
+                const display = document.getElementById('lightWalletMnemonicDisplay');
                 display.innerHTML = result.mnemonic.map((word, i) =>
                     `<span style="display: inline-block; background: var(--bg-card); padding: 4px 8px; margin: 4px; border-radius: 4px;">${i + 1}. ${word}</span>`
                 ).join('');
