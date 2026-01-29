@@ -566,7 +566,10 @@ void CAddrMan::Unserialize(Stream& s) {
         mapInfo[nId] = info;
         mapAddr[info] = nId;
 
-        info.nRandomPos = static_cast<int>(vRandom.size());
+        // FIX: Set nRandomPos on mapInfo entry, not the local copy
+        // The local 'info' was already copied to mapInfo, so we must update mapInfo directly
+        // Otherwise mapInfo[nId].nRandomPos remains -1, causing heap corruption in Delete()
+        mapInfo[nId].nRandomPos = static_cast<int>(vRandom.size());
         vRandom.push_back(nId);
     }
 
