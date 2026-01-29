@@ -17,6 +17,8 @@
 #include <consensus/chain.h>
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
+#include <consensus/validation.h>  // For DeserializeBlockTransactions
+#include <util/base58.h>           // For EncodeBase58Check
 #include <dfmp/dfmp.h>  // DFMP v2.0
 #include <dfmp/mik.h>   // DFMP v2.0: Mining Identity Key
 #include <dfmp/identity_db.h>  // DFMP v2.0: Identity database
@@ -2662,6 +2664,28 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
         height = blockIndex.nHeight;
     }
 
+    // Extract miner address from coinbase transaction (first output = miner reward)
+    std::string minerAddress = "";
+    if (!block.vtx.empty()) {
+        // Deserialize transactions from raw bytes
+        CBlockValidator validator;
+        std::vector<CTransactionRef> transactions;
+        std::string deserializeError;
+        if (validator.DeserializeBlockTransactions(block, transactions, deserializeError) &&
+            !transactions.empty() && !transactions[0]->vout.empty()) {
+            const auto& scriptPubKey = transactions[0]->vout[0].scriptPubKey;
+            // P2PKH format: 76 a9 14 [20-byte hash] 88 ac
+            if (scriptPubKey.size() == 25 && scriptPubKey[0] == 0x76 &&
+                scriptPubKey[1] == 0xa9 && scriptPubKey[2] == 0x14) {
+                // Extract pubkey hash (bytes 3-22) and create address
+                std::vector<uint8_t> addrData;
+                addrData.push_back(0x1E);  // Dilithion version byte ('D' prefix)
+                addrData.insert(addrData.end(), scriptPubKey.begin() + 3, scriptPubKey.begin() + 23);
+                minerAddress = EncodeBase58Check(addrData);
+            }
+        }
+    }
+
     std::ostringstream oss;
     oss << "{";
     oss << "\"hash\":\"" << hash.GetHex() << "\",";
@@ -2672,7 +2696,8 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
     oss << "\"time\":" << block.nTime << ",";
     oss << "\"bits\":\"0x" << std::hex << block.nBits << std::dec << "\",";
     oss << "\"nonce\":" << block.nNonce << ",";
-    oss << "\"tx_count\":" << (block.vtx.size() > 0 ? 1 : 0);  // Simplified
+    oss << "\"tx_count\":" << block.vtx.size() << ",";
+    oss << "\"miner\":\"" << minerAddress << "\"";
     oss << "}";
     return oss.str();
 }
