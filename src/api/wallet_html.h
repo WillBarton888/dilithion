@@ -730,7 +730,7 @@ inline const std::string& GetWalletHTML() {
                             <option value="max">Maximum</option>
                             <option value="custom">Custom...</option>
                         </select>
-                        <input type="number" id="customThreads" class="form-input" style="width: 70px; padding: 8px 12px; display: none;" min="1" max="64" placeholder="#">
+                        <input type="number" id="customThreads" class="form-input" style="width: 70px; padding: 8px 12px; display: none;" min="1" max="256" placeholder="#">
                     </div>
                     <div class="info-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         <div class="info-item">
@@ -1833,7 +1833,7 @@ inline const std::string& GetWalletHTML() {
                 return navigator.hardwareConcurrency || 4;
             } else if (select.value === 'custom') {
                 const custom = parseInt(customInput.value);
-                return (custom > 0 && custom <= 64) ? custom : 4;
+                return (custom > 0 && custom <= 256) ? custom : 4;
             } else {
                 return parseInt(select.value) || 4;
             }

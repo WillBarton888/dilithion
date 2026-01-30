@@ -129,8 +129,8 @@ CMiningController::CMiningController(uint32_t nThreads, const std::string& rando
         }
     }
 
-    // Limit to reasonable number of threads (max 64)
-    m_nThreads = std::min(m_nThreads.load(), 64u);
+    // Limit to consensus max threads
+    m_nThreads = std::min(m_nThreads.load(), static_cast<uint32_t>(Consensus::MAX_MINING_THREADS));
 }
 
 CMiningController::~CMiningController() {
