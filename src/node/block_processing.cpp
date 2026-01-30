@@ -149,7 +149,8 @@ BlockProcessResult ProcessNewBlock(
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
         // Use DFMP-aware PoW check (applies identity-based difficulty multipliers)
-        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
+        // IBD FIX: Pass pParent and db for deterministic chain-based validation
+        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight, pParent, &db)) {
             std::cerr << "[ProcessNewBlock] ERROR: Block has invalid PoW (DFMP check failed)" << std::endl;
             std::cerr << "  Hash must be less than DFMP-adjusted target" << std::endl;
             g_metrics.RecordInvalidBlock();

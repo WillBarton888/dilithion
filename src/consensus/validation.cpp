@@ -524,12 +524,14 @@ bool CBlockValidator::CheckBlock(
 
     // DFMP enforcement: Re-check PoW with DFMP difficulty adjustment
     // Note: This is defense-in-depth - primary enforcement is in block_processing.cpp
+    // IBD FIX: Pass nullptr for chain access (uses in-memory state fallback)
+    // This is acceptable here since primary validation uses chain-scanning.
     {
         uint256 blockHash = block.GetHash();
         int dfmpActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
-        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, nHeight, dfmpActivationHeight)) {
+        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, nHeight, dfmpActivationHeight, nullptr, nullptr)) {
             error = "Block fails DFMP difficulty check";
             return false;
         }

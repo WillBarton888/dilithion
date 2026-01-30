@@ -3,7 +3,11 @@
 
 #include <dfmp/dfmp.h>
 #include <dfmp/identity_db.h>
+#include <dfmp/mik.h>
 #include <crypto/sha3.h>
+#include <node/block_index.h>
+#include <node/blockchain_storage.h>
+#include <consensus/validation.h>
 
 #include <cstring>
 #include <algorithm>
@@ -411,6 +415,124 @@ void ShutdownDFMP() {
 
 bool IsDFMPReady() {
     return g_heatTracker != nullptr && g_identityDb != nullptr;
+}
+
+// ============================================================================
+// DETERMINISTIC CHAIN-BASED VALIDATION (IBD-safe)
+// ============================================================================
+
+bool ExtractIdentityFromBlock(const CBlock& block, Identity& identity) {
+    // A valid block must have at least one transaction (the coinbase)
+    if (block.vtx.empty()) {
+        return false;
+    }
+
+    const CTransaction& coinbase = block.vtx[0];
+
+    // Coinbase must have at least one input with scriptSig
+    if (coinbase.vin.empty() || coinbase.vin[0].scriptSig.empty()) {
+        return false;
+    }
+
+    // Try to parse MIK data from coinbase scriptSig (DFMP v2.0)
+    CMIKScriptData mikData;
+    if (ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData)) {
+        if (mikData.IsValid()) {
+            identity = mikData.identity;
+            return true;
+        }
+    }
+
+    // Fallback: Derive identity from coinbase output scriptPubKey (v1.x compatibility)
+    if (!coinbase.vout.empty()) {
+        identity = DeriveIdentityFromScript(coinbase.vout[0].scriptPubKey);
+        return !identity.IsNull();
+    }
+
+    return false;
+}
+
+void BuildIdentityCache(CDFMPValidationContext& ctx) {
+    if (ctx.cacheBuilt) {
+        return;  // Already built
+    }
+
+    ctx.firstSeenCache.clear();
+    ctx.heatCache.clear();
+
+    if (ctx.pindexPrev == nullptr || ctx.pdb == nullptr) {
+        ctx.cacheBuilt = true;
+        return;
+    }
+
+    // Scan range: need to go back far enough to find first-seen for any identity
+    // and to count blocks in the observation window.
+    // Total range = MATURITY_BLOCKS + OBSERVATION_WINDOW = 400 + 360 = 760 blocks
+    const int scanDepth = MATURITY_BLOCKS + OBSERVATION_WINDOW;
+    const int currentHeight = ctx.pindexPrev->nHeight + 1;  // The block being validated
+    const int windowStart = currentHeight - OBSERVATION_WINDOW;
+
+    // Walk backwards through the chain
+    CBlockIndex* pindex = const_cast<CBlockIndex*>(ctx.pindexPrev);
+    int blocksScanned = 0;
+
+    while (pindex != nullptr && blocksScanned < scanDepth) {
+        // Load block from database
+        CBlock block;
+        uint256 blockHash = pindex->GetBlockHash();
+
+        if (ctx.pdb->ReadBlock(blockHash, block)) {
+            Identity blockIdentity;
+            if (ExtractIdentityFromBlock(block, blockIdentity)) {
+                // Track first-seen height.
+                // We're walking backwards (high->low height), so the last value we
+                // write for each identity is the earliest (lowest) height = first-seen.
+                ctx.firstSeenCache[blockIdentity] = pindex->nHeight;
+
+                // Count blocks in observation window (for heat calculation)
+                if (pindex->nHeight >= windowStart) {
+                    ctx.heatCache[blockIdentity]++;
+                }
+            }
+        }
+
+        pindex = pindex->pprev;
+        blocksScanned++;
+    }
+
+    ctx.cacheBuilt = true;
+}
+
+int ScanChainForFirstSeen(CDFMPValidationContext& ctx, const Identity& identity) {
+    // Build cache if not already done
+    if (!ctx.cacheBuilt) {
+        BuildIdentityCache(ctx);
+    }
+
+    // Look up in cache
+    auto it = ctx.firstSeenCache.find(identity);
+    if (it != ctx.firstSeenCache.end()) {
+        return it->second;
+    }
+
+    // Not found in scanned range - this is a new identity
+    return -1;
+}
+
+int CountBlocksInWindow(CDFMPValidationContext& ctx, const Identity& identity) {
+    // Build cache if not already done
+    if (!ctx.cacheBuilt) {
+        BuildIdentityCache(ctx);
+    }
+
+    // Look up in cache
+    auto it = ctx.heatCache.find(identity);
+    if (it != ctx.heatCache.end()) {
+        return it->second;
+    }
+
+    // Not found - no blocks by this identity in the window
+    return 0;
 }
 
 } // namespace DFMP

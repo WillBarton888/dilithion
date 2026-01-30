@@ -4,6 +4,7 @@
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // DFMP: For DeserializeBlockTransactions
 #include <node/block_index.h>
+#include <node/blockchain_storage.h>  // DFMP IBD fix: For chain-based validation
 #include <core/chainparams.h>
 #include <util/time.h>
 #include <dfmp/dfmp.h>
@@ -147,7 +148,9 @@ bool CheckProofOfWorkDFMP(
     const uint256& hash,
     uint32_t nBits,
     int height,
-    int activationHeight)
+    int activationHeight,
+    const CBlockIndex* pindexPrev,
+    CBlockchainDB* pdb)
 {
     // Convert compact difficulty to full target
     uint256 baseTarget = CompactToBig(nBits);
@@ -270,17 +273,33 @@ bool CheckProofOfWorkDFMP(
     // ========================================================================
     // DFMP v2.0: Penalty Calculations (using MIK identity)
     // ========================================================================
+    // IBD FIX: When chain access is provided, derive penalty values from chain
+    // data instead of in-memory state. This ensures deterministic validation
+    // during Initial Block Download (IBD) when in-memory trackers aren't
+    // populated yet.
+    // ========================================================================
 
-    // Get first-seen height (-1 for new identity)
     int firstSeen = -1;
-    if (DFMP::g_identityDb != nullptr) {
-        firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
-    }
-
-    // Get blocks by this identity in observation window (360-block window)
     int blocksInWindow = 0;
-    if (DFMP::g_heatTracker != nullptr) {
-        blocksInWindow = DFMP::g_heatTracker->GetHeat(identity);
+
+    if (pindexPrev != nullptr && pdb != nullptr) {
+        // IBD-SAFE PATH: Use deterministic chain scanning
+        // This path is used during IBD when in-memory state may not match
+        // the state when blocks were originally mined.
+        DFMP::CDFMPValidationContext ctx(pindexPrev, pdb);
+        DFMP::BuildIdentityCache(ctx);
+        firstSeen = DFMP::ScanChainForFirstSeen(ctx, identity);
+        blocksInWindow = DFMP::CountBlocksInWindow(ctx, identity);
+    } else {
+        // FAST PATH: Use in-memory state (for live mining/relay validation)
+        // This path is used when blocks are received one at a time and
+        // in-memory trackers are kept up to date.
+        if (DFMP::g_identityDb != nullptr) {
+            firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
+        }
+        if (DFMP::g_heatTracker != nullptr) {
+            blocksInWindow = DFMP::g_heatTracker->GetHeat(identity);
+        }
     }
 
     // Calculate total DFMP multiplier (maturity × heat) using v2.0 rules

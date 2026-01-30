@@ -13,6 +13,9 @@ namespace DFMP {
     class CIdentityDB;
 }
 
+// Forward declaration for chain access
+class CBlockchainDB;
+
 /**
  * Consensus Parameters
  */
@@ -40,14 +43,22 @@ bool CheckProofOfWork(uint256 hash, uint32_t nBits);
  * @param nBits Compact difficulty target
  * @param height Block height
  * @param activationHeight DFMP activation height (0 = always active)
+ * @param pindexPrev Previous block index (for chain-based validation during IBD)
+ * @param pdb Blockchain database (for loading blocks during IBD)
  * @return true if PoW meets DFMP-adjusted difficulty
+ *
+ * NOTE: When pindexPrev and pdb are provided, DFMP penalty calculations use
+ * deterministic chain-scanning instead of in-memory state. This ensures
+ * consistent validation during Initial Block Download (IBD).
  */
 bool CheckProofOfWorkDFMP(
     const CBlock& block,
     const uint256& hash,
     uint32_t nBits,
     int height,
-    int activationHeight = 0
+    int activationHeight,
+    const CBlockIndex* pindexPrev,
+    CBlockchainDB* pdb
 );
 
 /** Get target from compact difficulty representation */

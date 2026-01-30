@@ -89,8 +89,11 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         int dfmpActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
+        // IBD FIX: Get parent block index for deterministic chain-based validation
+        CBlockIndex* pParent = m_chainstate.GetBlockIndex(block.hashPrevBlock);
+
         // Use DFMP-aware PoW check
-        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
+        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight, pParent, &m_db)) {
             std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW (DFMP check failed), rejecting" << std::endl;
 
             // Invalidate header to prevent re-requesting this block

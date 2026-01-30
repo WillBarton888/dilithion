@@ -296,6 +296,72 @@ void ShutdownDFMP();
  */
 bool IsDFMPReady();
 
+// ============================================================================
+// DETERMINISTIC CHAIN-BASED VALIDATION (IBD-safe)
+// ============================================================================
+// These functions derive DFMP state directly from on-chain data rather than
+// in-memory trackers, ensuring deterministic validation during IBD.
+
+// Forward declarations for chain access
+class CBlockIndex;
+class CBlockchainDB;
+
+/**
+ * Validation context for deterministic chain-based DFMP calculations
+ *
+ * Provides chain access and caching for efficient penalty computation.
+ * Create one context per block validation; cache is populated lazily.
+ */
+struct CDFMPValidationContext {
+    const CBlockIndex* pindexPrev;  ///< Parent block index (chain access)
+    CBlockchainDB* pdb;             ///< Database for loading block data
+
+    // Caches populated by BuildIdentityCache()
+    mutable std::map<Identity, int> firstSeenCache;  ///< identity -> first-seen height
+    mutable std::map<Identity, int> heatCache;       ///< identity -> blocks in window
+    mutable bool cacheBuilt;                         ///< true after BuildIdentityCache()
+
+    CDFMPValidationContext(const CBlockIndex* prev, CBlockchainDB* db)
+        : pindexPrev(prev), pdb(db), cacheBuilt(false) {}
+};
+
+/**
+ * Build identity cache from chain in a single pass
+ *
+ * Scans backwards from pindexPrev for (MATURITY_BLOCKS + OBSERVATION_WINDOW)
+ * blocks, populating both firstSeenCache and heatCache.
+ *
+ * @param ctx Validation context to populate
+ */
+void BuildIdentityCache(CDFMPValidationContext& ctx);
+
+/**
+ * Get first-seen height for an identity from chain data
+ *
+ * @param ctx Validation context with chain access
+ * @param identity MIK identity to look up
+ * @return First-seen height, or -1 if not found in scanned range
+ */
+int ScanChainForFirstSeen(CDFMPValidationContext& ctx, const Identity& identity);
+
+/**
+ * Count blocks by identity in observation window from chain data
+ *
+ * @param ctx Validation context with chain access
+ * @param identity MIK identity to count
+ * @return Number of blocks by this identity in last OBSERVATION_WINDOW blocks
+ */
+int CountBlocksInWindow(CDFMPValidationContext& ctx, const Identity& identity);
+
+/**
+ * Extract MIK identity from a block's coinbase transaction
+ *
+ * @param block Block to extract identity from
+ * @param[out] identity Extracted identity (set if return is true)
+ * @return true if identity successfully extracted, false otherwise
+ */
+bool ExtractIdentityFromBlock(const CBlock& block, Identity& identity);
+
 } // namespace DFMP
 
 #endif // DILITHION_DFMP_H
