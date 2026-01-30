@@ -321,6 +321,7 @@ struct CDFMPValidationContext {
     // Caches populated by BuildIdentityCache()
     mutable std::map<Identity, int> firstSeenCache;  ///< identity -> first-seen height
     mutable std::map<Identity, int> heatCache;       ///< identity -> blocks in window
+    mutable std::map<Identity, std::vector<uint8_t>> mikPubkeyCache;  ///< identity -> MIK pubkey (for IBD)
     mutable bool cacheBuilt;                         ///< true after BuildIdentityCache()
 
     CDFMPValidationContext(const ::CBlockIndex* prev, ::CBlockchainDB* db)
@@ -363,6 +364,20 @@ int CountBlocksInWindow(CDFMPValidationContext& ctx, const Identity& identity);
  * @return true if identity successfully extracted, false otherwise
  */
 bool ExtractIdentityFromBlock(const CBlock& block, Identity& identity);
+
+/**
+ * Scan chain backwards to find MIK registration and retrieve pubkey
+ *
+ * Used during IBD when the identity database isn't populated yet.
+ * Scans backwards from pindexPrev to find a block where this identity
+ * registered (isRegistration=true) and extracts the embedded pubkey.
+ *
+ * @param ctx Validation context with chain access (caches result)
+ * @param identity MIK identity to look up
+ * @param[out] pubkey Retrieved public key if found
+ * @return true if registration found and pubkey retrieved, false otherwise
+ */
+bool ScanChainForMIKPubKey(CDFMPValidationContext& ctx, const Identity& identity, std::vector<uint8_t>& pubkey);
 
 } // namespace DFMP
 

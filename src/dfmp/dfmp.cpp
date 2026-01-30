@@ -547,4 +547,76 @@ int CountBlocksInWindow(CDFMPValidationContext& ctx, const Identity& identity) {
     return 0;
 }
 
+bool ScanChainForMIKPubKey(CDFMPValidationContext& ctx, const Identity& identity, std::vector<uint8_t>& pubkey) {
+    // Check cache first
+    auto cacheIt = ctx.mikPubkeyCache.find(identity);
+    if (cacheIt != ctx.mikPubkeyCache.end()) {
+        pubkey = cacheIt->second;
+        return true;
+    }
+
+    if (ctx.pindexPrev == nullptr || ctx.pdb == nullptr) {
+        return false;
+    }
+
+    // Scan backwards through the chain to find the registration block
+    // Registration blocks embed the full pubkey, so we need to find where
+    // this identity first appeared with isRegistration=true
+    //
+    // We scan up to MATURITY_BLOCKS + OBSERVATION_WINDOW blocks back,
+    // which should cover any identity that could affect the current block.
+    const int scanDepth = MATURITY_BLOCKS + OBSERVATION_WINDOW;
+    CBlockIndex* pindex = const_cast<CBlockIndex*>(ctx.pindexPrev);
+    int blocksScanned = 0;
+
+    while (pindex != nullptr && blocksScanned < scanDepth) {
+        // Load block from database
+        CBlock block;
+        uint256 blockHash = pindex->GetBlockHash();
+
+        if (ctx.pdb->ReadBlock(blockHash, block)) {
+            // Deserialize block transactions
+            CBlockValidator validator;
+            std::vector<CTransactionRef> transactions;
+            std::string deserializeError;
+
+            if (validator.DeserializeBlockTransactions(block, transactions, deserializeError) &&
+                !transactions.empty()) {
+
+                const CTransaction& coinbase = *transactions[0];
+
+                // Check if coinbase has MIK data
+                if (!coinbase.vin.empty() && !coinbase.vin[0].scriptSig.empty()) {
+                    CMIKScriptData mikData;
+                    if (ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData)) {
+                        // Found MIK data - check if it's a registration for our identity
+                        if (mikData.isRegistration && mikData.identity == identity) {
+                            // Found the registration block - extract pubkey
+                            pubkey = mikData.pubkey;
+
+                            // Cache for future lookups
+                            ctx.mikPubkeyCache[identity] = pubkey;
+
+                            return true;
+                        }
+
+                        // Also cache any registrations we encounter for other identities
+                        // This helps if we need to validate multiple reference blocks
+                        if (mikData.isRegistration &&
+                            ctx.mikPubkeyCache.find(mikData.identity) == ctx.mikPubkeyCache.end()) {
+                            ctx.mikPubkeyCache[mikData.identity] = mikData.pubkey;
+                        }
+                    }
+                }
+            }
+        }
+
+        pindex = pindex->pprev;
+        blocksScanned++;
+    }
+
+    // Registration not found in scanned range
+    return false;
+}
+
 } // namespace DFMP

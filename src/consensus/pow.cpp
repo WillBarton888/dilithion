@@ -245,18 +245,36 @@ bool CheckProofOfWorkDFMP(
                       << identity.GetHex().substr(0, 16) << "... during validation" << std::endl;
         }
     } else {
-        // Reference: look up stored pubkey from identity database
+        // Reference: look up stored pubkey from registration block
         identity = mikData.identity;
 
-        if (DFMP::g_identityDb == nullptr) {
-            std::cerr << "[DFMP v2.0] Block " << height << ": Identity database not initialized" << std::endl;
-            return false;
-        }
+        bool foundPubkey = false;
 
-        if (!DFMP::g_identityDb->GetMIKPubKey(identity, pubkey)) {
-            std::cerr << "[DFMP v2.0] Block " << height << ": Unknown MIK identity "
-                      << identity.GetHex() << " (no registration found)" << std::endl;
-            return false;
+        // IBD-SAFE PATH: When chain access is provided, scan chain for registration
+        // This ensures we can validate reference blocks even when the identity
+        // database hasn't been populated yet (during Initial Block Download)
+        if (pindexPrev != nullptr && pdb != nullptr) {
+            DFMP::CDFMPValidationContext ctx(pindexPrev, pdb);
+            foundPubkey = DFMP::ScanChainForMIKPubKey(ctx, identity, pubkey);
+
+            if (!foundPubkey) {
+                std::cerr << "[DFMP v2.0] Block " << height << ": Unknown MIK identity "
+                          << identity.GetHex() << " (registration not found in chain scan)" << std::endl;
+                return false;
+            }
+        } else {
+            // FAST PATH: Use in-memory identity database (for live validation)
+            if (DFMP::g_identityDb == nullptr) {
+                std::cerr << "[DFMP v2.0] Block " << height << ": Identity database not initialized" << std::endl;
+                return false;
+            }
+
+            if (!DFMP::g_identityDb->GetMIKPubKey(identity, pubkey)) {
+                std::cerr << "[DFMP v2.0] Block " << height << ": Unknown MIK identity "
+                          << identity.GetHex() << " (no registration found)" << std::endl;
+                return false;
+            }
+            foundPubkey = true;
         }
     }
 
