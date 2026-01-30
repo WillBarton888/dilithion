@@ -43,7 +43,8 @@ chmod +x "${RELEASE_DIR}/check-wallet-balance"
 # Copy required shared libraries
 echo "[3/5] Copying required shared libraries..."
 # Copy non-standard libraries that users might not have
-for lib in libleveldb.so.1d libminiupnpc.so.17 libsnappy.so.1; do
+# Including OpenSSL 3 for systems that only have OpenSSL 1.1
+for lib in libleveldb.so.1d libminiupnpc.so.17 libsnappy.so.1 libssl.so.3 libcrypto.so.3; do
     if [ -f "/lib/x86_64-linux-gnu/$lib" ]; then
         cp "/lib/x86_64-linux-gnu/$lib" "${RELEASE_DIR}/lib/"
         echo "  - $lib"
