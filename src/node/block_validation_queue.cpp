@@ -82,15 +82,17 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
     bool skipPoWCheck = (checkpointHeight > 0 && currentChainHeight < checkpointHeight);
 
     if (!skipPoWCheck) {
-        // Get block height for DFMP (use expected_height if valid, else estimate)
-        int blockHeight = (expected_height > 0) ? expected_height : (currentChainHeight + 1);
+        // IBD FIX: Get parent block index first for deterministic height calculation
+        CBlockIndex* pParent = m_chainstate.GetBlockIndex(block.hashPrevBlock);
+
+        // Get block height for DFMP - MUST use pParent->nHeight + 1 for correct signature verification
+        // The MIK signature is created with this exact height, so validation must match
+        int blockHeight = (pParent != nullptr) ? (pParent->nHeight + 1) :
+                          ((expected_height > 0) ? expected_height : (currentChainHeight + 1));
 
         // Get DFMP activation height
         int dfmpActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
-
-        // IBD FIX: Get parent block index for deterministic chain-based validation
-        CBlockIndex* pParent = m_chainstate.GetBlockIndex(block.hashPrevBlock);
 
         // Use DFMP-aware PoW check
         if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight, pParent, &m_db)) {
@@ -111,7 +113,10 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
     // Coinbase tax validation (mainnet only)
     bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
     if (!isTestnet && !skipPoWCheck) {
-        int blockHeight = (expected_height > 0) ? expected_height : (currentChainHeight + 1);
+        // Get pParent if not already obtained above (in case skipPoWCheck changed)
+        CBlockIndex* pParentTax = m_chainstate.GetBlockIndex(block.hashPrevBlock);
+        int blockHeight = (pParentTax != nullptr) ? (pParentTax->nHeight + 1) :
+                          ((expected_height > 0) ? expected_height : (currentChainHeight + 1));
 
         CBlockValidator validator;
         std::vector<CTransactionRef> transactions;

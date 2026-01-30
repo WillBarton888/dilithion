@@ -285,6 +285,11 @@ bool CheckProofOfWorkDFMP(
                                    identity)) {
         std::cerr << "[DFMP v2.0] Block " << height << ": Invalid MIK signature for identity "
                   << identity.GetHex() << std::endl;
+        std::cerr << "  DEBUG: prevHash=" << block.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                  << " height=" << height << " nTime=" << block.nTime
+                  << " isReg=" << mikData.isRegistration
+                  << " pubkey_len=" << pubkey.size()
+                  << " sig_len=" << mikData.signature.size() << std::endl;
         return false;
     }
 
