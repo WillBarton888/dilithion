@@ -427,7 +427,19 @@ bool ExtractIdentityFromBlock(const CBlock& block, Identity& identity) {
         return false;
     }
 
-    const CTransaction& coinbase = block.vtx[0];
+    // Deserialize block transactions (vtx is raw bytes, need to convert to CTransaction)
+    CBlockValidator validator;
+    std::vector<CTransactionRef> transactions;
+    std::string deserializeError;
+    if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
+        return false;
+    }
+
+    if (transactions.empty()) {
+        return false;
+    }
+
+    const CTransaction& coinbase = *transactions[0];
 
     // Coinbase must have at least one input with scriptSig
     if (coinbase.vin.empty() || coinbase.vin[0].scriptSig.empty()) {
