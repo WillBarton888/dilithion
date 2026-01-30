@@ -25,6 +25,10 @@
 #include <mutex>
 #include <string>
 
+// Forward declarations for chain access (used by CDFMPValidationContext)
+class CBlockIndex;
+class CBlockchainDB;
+
 namespace DFMP {
 
 // ============================================================================
@@ -302,9 +306,7 @@ bool IsDFMPReady();
 // These functions derive DFMP state directly from on-chain data rather than
 // in-memory trackers, ensuring deterministic validation during IBD.
 
-// Forward declarations for chain access
-class CBlockIndex;
-class CBlockchainDB;
+// Note: CBlockIndex and CBlockchainDB are in global namespace (forward declared below)
 
 /**
  * Validation context for deterministic chain-based DFMP calculations
@@ -313,15 +315,15 @@ class CBlockchainDB;
  * Create one context per block validation; cache is populated lazily.
  */
 struct CDFMPValidationContext {
-    const CBlockIndex* pindexPrev;  ///< Parent block index (chain access)
-    CBlockchainDB* pdb;             ///< Database for loading block data
+    const ::CBlockIndex* pindexPrev;  ///< Parent block index (chain access)
+    ::CBlockchainDB* pdb;             ///< Database for loading block data
 
     // Caches populated by BuildIdentityCache()
     mutable std::map<Identity, int> firstSeenCache;  ///< identity -> first-seen height
     mutable std::map<Identity, int> heatCache;       ///< identity -> blocks in window
     mutable bool cacheBuilt;                         ///< true after BuildIdentityCache()
 
-    CDFMPValidationContext(const CBlockIndex* prev, CBlockchainDB* db)
+    CDFMPValidationContext(const ::CBlockIndex* prev, ::CBlockchainDB* db)
         : pindexPrev(prev), pdb(db), cacheBuilt(false) {}
 };
 
