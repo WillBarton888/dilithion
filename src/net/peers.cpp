@@ -1332,14 +1332,18 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
 }
 
 void CPeerManager::RemoveNode(int node_id) {
-    {
-        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
-        node_refs.erase(node_id);
-    }
-
+    // RACE FIX: Remove peer FIRST, then node.
+    // This ensures ProcessVerackMessage's GetPeer() fails before GetNode() can be called,
+    // preventing the state where peer exists but node doesn't.
+    // Previously: node removed first → GetPeer succeeds, GetNode fails → CNode::state not updated
     {
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
         peers.erase(node_id);
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
+        node_refs.erase(node_id);
     }
 }
 
