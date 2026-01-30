@@ -256,11 +256,20 @@ bool CheckProofOfWorkDFMP(
         identity = mikData.identity;
 
         if (DFMP::g_identityDb == nullptr) {
+            // DFMP Assume-Valid: Skip MIK lookup for historical blocks during IBD
+            if (skipDFMPPenalty) {
+                return HashLessThan(hash, baseTarget);
+            }
             std::cerr << "[DFMP v2.0] Block " << height << ": Identity database not initialized" << std::endl;
             return false;
         }
 
         if (!DFMP::g_identityDb->GetMIKPubKey(identity, pubkey)) {
+            // DFMP Assume-Valid: Skip MIK lookup for historical blocks during IBD
+            // This handles the case where identity was registered in blocks not yet synced
+            if (skipDFMPPenalty) {
+                return HashLessThan(hash, baseTarget);
+            }
             std::cerr << "[DFMP v2.0] Block " << height << ": Unknown MIK identity "
                       << identity.GetHex() << " (no registration found)" << std::endl;
             return false;
@@ -272,6 +281,11 @@ bool CheckProofOfWorkDFMP(
     if (!DFMP::VerifyMIKSignature(pubkey, mikData.signature,
                                    block.hashPrevBlock, height, block.nTime,
                                    identity)) {
+        // DFMP Assume-Valid: Skip MIK signature verification for historical blocks
+        // This handles potential signature format changes or corrupt bootstrap data
+        if (skipDFMPPenalty) {
+            return HashLessThan(hash, baseTarget);
+        }
         std::cerr << "[DFMP v2.0] Block " << height << ": Invalid MIK signature for identity "
                   << identity.GetHex() << std::endl;
         return false;
