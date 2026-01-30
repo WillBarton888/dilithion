@@ -1332,19 +1332,22 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
 }
 
 void CPeerManager::RemoveNode(int node_id) {
-    // RACE FIX: Remove peer FIRST, then node.
-    // This ensures ProcessVerackMessage's GetPeer() fails before GetNode() can be called,
-    // preventing the state where peer exists but node doesn't.
-    // Previously: node removed first → GetPeer succeeds, GetNode fails → CNode::state not updated
-    {
-        std::lock_guard<std::recursive_mutex> lock(cs_peers);
-        peers.erase(node_id);
-    }
+    // RACE FIX v2: Hold BOTH locks atomically using std::scoped_lock
+    // This prevents ProcessVerackMessage from seeing partial state during removal.
+    //
+    // Previous fix (remove peer first, then node) still had a race window:
+    //   T1: ThreadMessageHandler calls GetPeer() - succeeds
+    //   T2: ThreadSocketHandler acquires cs_peers, erases peer
+    //   T2: ThreadSocketHandler releases cs_peers  <-- RACE WINDOW
+    //   T1: ThreadMessageHandler calls GetNode() - FAILS (node_refs not yet erased)
+    //   T2: ThreadSocketHandler acquires cs_nodes, erases node_refs
+    //
+    // With std::scoped_lock, both maps are protected for the entire operation.
+    // std::scoped_lock uses deadlock-avoidance algorithm (std::lock) internally.
+    std::scoped_lock lock(cs_peers, cs_nodes);
 
-    {
-        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
-        node_refs.erase(node_id);
-    }
+    peers.erase(node_id);
+    node_refs.erase(node_id);
 }
 
 CNode* CPeerManager::GetNode(int node_id) {

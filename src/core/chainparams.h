@@ -77,6 +77,15 @@ public:
     // Testnet: Activate from genesis (0) for testing
     int dfmpActivationHeight;
 
+    // DFMP Assume-Valid Height (IBD optimization)
+    // Blocks at or below this height skip DFMP penalty multiplier verification.
+    // PoW and MIK signature are STILL verified - only penalty calculation is skipped.
+    // This fixes IBD where in-memory state (identity DB, heat tracker) differs from
+    // when blocks were originally mined.
+    // Updated with each release as chain grows.
+    // 0 = validate everything (no optimization)
+    int dfmpAssumeValidHeight;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release

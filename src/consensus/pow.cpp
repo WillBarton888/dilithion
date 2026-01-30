@@ -169,6 +169,16 @@ bool CheckProofOfWorkDFMP(
         return HashLessThan(hash, baseTarget);
     }
 
+    // DFMP Assume-Valid: Skip penalty calculation during IBD for historical blocks
+    // This fixes IBD where in-memory state (identity DB, heat tracker) differs from
+    // the state when blocks were originally mined.
+    // PoW is STILL verified (hash < baseTarget) - only penalty multiplier is skipped.
+    // MIK signature is STILL verified below.
+    int dfmpAssumeValidHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
+
+    bool skipDFMPPenalty = (dfmpAssumeValidHeight > 0 && height <= dfmpAssumeValidHeight);
+
     // Ensure block has transactions (coinbase required)
     if (block.vtx.empty()) {
         std::cerr << "[DFMP] Block has no transactions" << std::endl;
@@ -265,6 +275,14 @@ bool CheckProofOfWorkDFMP(
         std::cerr << "[DFMP v2.0] Block " << height << ": Invalid MIK signature for identity "
                   << identity.GetHex() << std::endl;
         return false;
+    }
+
+    // DFMP Assume-Valid: Skip penalty calculation for historical blocks during IBD
+    // MIK signature was verified above - only skip the penalty multiplier
+    if (skipDFMPPenalty) {
+        // Standard PoW check without DFMP penalty multiplier
+        // This allows IBD to proceed when in-memory state differs from mining state
+        return HashLessThan(hash, baseTarget);
     }
 
     // ========================================================================

@@ -52,6 +52,13 @@ ChainParams ChainParams::Mainnet() {
     // This prevents early mining dominance before DFMP can take effect
     params.dfmpActivationHeight = 0;
 
+    // DFMP Assume-Valid Height (IBD fix)
+    // Skip DFMP penalty validation for blocks at or below this height.
+    // PoW and MIK signature are STILL verified - only penalty multiplier skipped.
+    // This fixes IBD where in-memory state differs from original mining state.
+    // v2.0.13: Set to 600 (buffer above current chain tip ~580)
+    params.dfmpAssumeValidHeight = 600;
+
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
     //
@@ -115,6 +122,10 @@ ChainParams ChainParams::Testnet() {
     // DFMP (Fair Mining Protocol) activation
     // Active from genesis for testing fair mining protocol
     params.dfmpActivationHeight = 0;
+
+    // DFMP Assume-Valid Height (IBD optimization)
+    // Testnet: 0 = validate everything (testnet has different consensus testing needs)
+    params.dfmpAssumeValidHeight = 0;
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint
