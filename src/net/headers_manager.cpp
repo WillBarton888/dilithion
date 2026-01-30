@@ -277,6 +277,17 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         int height = pprev ? (pprev->height + 1) : 1;
         uint256 chainWork = CalculateChainWork(header, pprev);
 
+        // CHECKPOINT VALIDATION: Reject headers that don't match checkpoint hashes
+        // This prevents syncing to fork chains during IBD
+        if (Dilithion::g_chainParams != nullptr) {
+            if (!Dilithion::g_chainParams->CheckpointCheck(height, storageHash)) {
+                std::cerr << "[HeadersManager] CHECKPOINT MISMATCH at height " << height
+                          << " - expected checkpoint hash, got " << storageHash.GetHex().substr(0, 16) << "..."
+                          << " - rejecting fork chain" << std::endl;
+                return false;
+            }
+        }
+
         // Store header
         HeaderWithChainWork headerData(header, height);
         headerData.chainWork = chainWork;

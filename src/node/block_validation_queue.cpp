@@ -98,13 +98,23 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight, pParent, &m_db)) {
             std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW (DFMP check failed), rejecting" << std::endl;
 
-            // Invalidate header to prevent re-requesting this block
-            if (g_node_context.headers_manager) {
-                g_node_context.headers_manager->InvalidateHeader(blockHash);
-            }
-
-            if (g_node_context.peer_manager) {
-                g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+            // IBD ORPHAN FIX: When parent is not in our chain (orphan block), don't ban peer
+            // or invalidate headers. The block might be from a competing fork that we can't
+            // validate because we don't have its parent chain. The peer isn't necessarily
+            // malicious - they might just have blocks from a stale fork.
+            if (pParent != nullptr) {
+                // Parent IS in our chain - this block claims to extend our chain but has invalid PoW
+                // This is a clear protocol violation, so ban the peer and invalidate header
+                if (g_node_context.headers_manager) {
+                    g_node_context.headers_manager->InvalidateHeader(blockHash);
+                }
+                if (g_node_context.peer_manager) {
+                    g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+                }
+            } else {
+                // Parent NOT in our chain - this is an orphan block from a different fork
+                // Don't ban peer, don't invalidate headers - just reject silently
+                std::cout << "[ValidationQueue] Orphan block rejected (parent not in chain)" << std::endl;
             }
             return false;
         }

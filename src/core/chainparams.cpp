@@ -59,8 +59,8 @@ ChainParams ChainParams::Mainnet() {
     //   params.checkpoints.emplace_back(10000, uint256S("0000..."));
     //   params.checkpoints.emplace_back(20000, uint256S("0000..."));
     //
-    // For now, only genesis is checkpointed (will be updated after mining)
-    // params.checkpoints.emplace_back(0, uint256S(params.genesisHash));
+    // IBD FIX: Checkpoint at block 400 to prevent syncing to fork headers
+    params.checkpoints.emplace_back(400, uint256S("000000a890c9b7fa6420acd0f5c4e0c69329af6c05fb89725ee9d3d07b947591"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)

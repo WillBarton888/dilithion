@@ -155,14 +155,23 @@ BlockProcessResult ProcessNewBlock(
             std::cerr << "  Hash must be less than DFMP-adjusted target" << std::endl;
             g_metrics.RecordInvalidBlock();
 
-            // Invalidate header to prevent re-requesting this block
-            if (ctx.headers_manager) {
-                ctx.headers_manager->InvalidateHeader(blockHash);
-            }
-
-            // Ban peer for sending invalid block
-            if (ctx.peer_manager && peer_id >= 0) {
-                ctx.peer_manager->Misbehaving(peer_id, 100);
+            // IBD ORPHAN FIX: When parent is not in our chain (orphan block), don't ban peer
+            // or invalidate headers. The block might be from a competing fork that we can't
+            // validate because we don't have its parent chain. The peer isn't necessarily
+            // malicious - they might just have blocks from a stale fork.
+            if (pParent != nullptr) {
+                // Parent IS in our chain - this block claims to extend our chain but has invalid PoW
+                // This is a clear protocol violation, so ban the peer and invalidate header
+                if (ctx.headers_manager) {
+                    ctx.headers_manager->InvalidateHeader(blockHash);
+                }
+                if (ctx.peer_manager && peer_id >= 0) {
+                    ctx.peer_manager->Misbehaving(peer_id, 100);
+                }
+            } else {
+                // Parent NOT in our chain - this is an orphan block from a different fork
+                // Don't ban peer, don't invalidate headers - just reject silently
+                std::cout << "[ProcessNewBlock] Orphan block rejected (parent not in chain)" << std::endl;
             }
 
             return BlockProcessResult::INVALID_POW;

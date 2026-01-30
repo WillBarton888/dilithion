@@ -7,6 +7,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <iostream>
 
 // Dilithium3 reference implementation
 extern "C" {
@@ -221,6 +222,8 @@ bool VerifyMIKSignature(
     // Verify identity matches pubkey
     Identity derivedIdentity = DeriveIdentityFromMIK(pubkey);
     if (derivedIdentity != identity) {
+        std::cerr << "[MIK-DEBUG] Identity mismatch: derived=" << derivedIdentity.GetHex()
+                  << " claimed=" << identity.GetHex() << std::endl;
         return false;
     }
 
@@ -234,6 +237,12 @@ bool VerifyMIKSignature(
         nullptr, 0,  // No context
         pubkey.data()
     );
+
+    if (result != 0) {
+        std::cerr << "[MIK-DEBUG] Crypto verify failed: result=" << result
+                  << " prevHash=" << prevHash.GetHex().substr(0, 16) << "..."
+                  << " height=" << height << " timestamp=" << timestamp << std::endl;
+    }
 
     return result == 0;
 }
