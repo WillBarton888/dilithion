@@ -13,7 +13,8 @@ namespace DFMP {
     class CIdentityDB;
 }
 
-// Forward declaration for chain access
+// Forward declarations for chain access
+class CBlockIndex;
 class CBlockchainDB;
 
 /**
