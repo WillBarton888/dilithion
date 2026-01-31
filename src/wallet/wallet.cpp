@@ -1367,14 +1367,14 @@ bool CWallet::Load(const std::string& filename) {
     std::string magic_str(magic, 8);
     // FIX-011 (PERSIST-001): Support DILWLT03 format with file integrity HMAC
     // v4: Added fCoinbase field to track mining rewards
-    if (magic_str != "DILWLT01" && magic_str != "DILWLT02" && magic_str != "DILWLT03" && magic_str != "DILWLT04") {
+    if (magic_str != "DILWLT01" && magic_str != "DILWLT02" && magic_str != "DILWLT03" && magic_str != "DILWLT04" && magic_str != "DILWLT05") {
         return false;  // Invalid file format
     }
 
     uint32_t version;
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
     if (!file.good()) return false;  // SEC-001: Check I/O error
-    if (version != 1 && version != 2 && version != 3 && version != 4) {
+    if (version != 1 && version != 2 && version != 3 && version != 4 && version != 5) {
         return false;  // Unsupported version
     }
 
@@ -1796,6 +1796,70 @@ bool CWallet::Load(const std::string& filename) {
         }
     }
 
+    // DFMP v2.0: Read MIK (Mining Identity Key) data (v5+ format)
+    // For backwards compatibility, treat read failure as no MIK
+    bool temp_fHasMIK = false;
+    bool temp_fMIKRegistered = false;
+    std::vector<uint8_t> temp_vchMIKPubKey;
+    std::vector<uint8_t> temp_vchEncryptedMIKPrivKey;
+    std::vector<uint8_t, SecureAllocator<uint8_t>> temp_vchMIKPrivKeyIV;
+    std::vector<uint8_t, SecureAllocator<uint8_t>> temp_vchMIKPrivKey;
+
+    if (file.good() && version >= 5) {
+        uint8_t hasMIK = 0;
+        file.read(reinterpret_cast<char*>(&hasMIK), 1);
+        if (file.good() && hasMIK) {
+            temp_fHasMIK = true;
+
+            // Read MIK public key
+            uint32_t pubkeyLen = 0;
+            file.read(reinterpret_cast<char*>(&pubkeyLen), sizeof(pubkeyLen));
+            if (file.good() && pubkeyLen > 0 && pubkeyLen <= 2000) {
+                temp_vchMIKPubKey.resize(pubkeyLen);
+                file.read(reinterpret_cast<char*>(temp_vchMIKPubKey.data()), pubkeyLen);
+            }
+
+            // Read encrypted MIK private key
+            uint32_t encPrivKeyLen = 0;
+            file.read(reinterpret_cast<char*>(&encPrivKeyLen), sizeof(encPrivKeyLen));
+            if (file.good() && encPrivKeyLen > 0 && encPrivKeyLen <= 5000) {
+                temp_vchEncryptedMIKPrivKey.resize(encPrivKeyLen);
+                file.read(reinterpret_cast<char*>(temp_vchEncryptedMIKPrivKey.data()), encPrivKeyLen);
+            }
+
+            // Read MIK private key IV
+            uint32_t ivLen = 0;
+            file.read(reinterpret_cast<char*>(&ivLen), sizeof(ivLen));
+            if (file.good() && ivLen > 0 && ivLen <= 32) {
+                temp_vchMIKPrivKeyIV.resize(ivLen);
+                file.read(reinterpret_cast<char*>(temp_vchMIKPrivKeyIV.data()), ivLen);
+            }
+
+            // Read MIK registered flag
+            uint8_t mikRegistered = 0;
+            file.read(reinterpret_cast<char*>(&mikRegistered), 1);
+            if (file.good()) {
+                temp_fMIKRegistered = (mikRegistered != 0);
+            }
+
+            // Read unencrypted MIK private key (if present)
+            uint8_t hasUnencryptedMIK = 0;
+            file.read(reinterpret_cast<char*>(&hasUnencryptedMIK), 1);
+            if (file.good() && hasUnencryptedMIK) {
+                uint32_t privkeyLen = 0;
+                file.read(reinterpret_cast<char*>(&privkeyLen), sizeof(privkeyLen));
+                if (file.good() && privkeyLen > 0 && privkeyLen <= 5000) {
+                    temp_vchMIKPrivKey.resize(privkeyLen);
+                    file.read(reinterpret_cast<char*>(temp_vchMIKPrivKey.data()), privkeyLen);
+                }
+            }
+        }
+        // Clear EOF state for backwards compatibility
+        if (file.eof()) {
+            file.clear();
+        }
+    }
+
     // SEC-001 FIX: Only if ALL data loaded successfully, swap into wallet
     // This ensures atomic load - either everything loads or nothing changes
     if (!file.good()) {
@@ -1939,6 +2003,30 @@ bool CWallet::Load(const std::string& filename) {
         m_bestBlockHash = temp_bestBlockHash;
         m_bestBlockHeight = temp_bestBlockHeight;
 
+        // DFMP v2.0: Copy MIK data
+        fHasMIK = temp_fHasMIK;
+        fMIKRegistered = temp_fMIKRegistered;
+        vchMIKPubKey = std::move(temp_vchMIKPubKey);
+        vchEncryptedMIKPrivKey = std::move(temp_vchEncryptedMIKPrivKey);
+        vchMIKPrivKeyIV = std::move(temp_vchMIKPrivKeyIV);
+
+        if (temp_fHasMIK) {
+            // Reconstruct m_mik from loaded data
+            if (!temp_vchMIKPrivKey.empty()) {
+                // Unencrypted wallet - restore full MIK
+                m_mik = std::make_unique<DFMP::CMiningIdentityKey>();
+                m_mik->pubkey = vchMIKPubKey;
+                m_mik->privkey.assign(temp_vchMIKPrivKey.begin(), temp_vchMIKPrivKey.end());
+                m_mik->identity = DFMP::DeriveIdentityFromMIK(vchMIKPubKey);
+                m_mikIdentity = m_mik->identity;
+            } else {
+                // Encrypted wallet - just set the identity from pubkey
+                // m_mik will be reconstructed when wallet is unlocked
+                m_mikIdentity = DFMP::DeriveIdentityFromMIK(vchMIKPubKey);
+            }
+            std::cout << "[WALLET] Loaded MIK identity: " << m_mikIdentity.GetHex() << std::endl;
+        }
+
         m_walletFile = filename;  // Set wallet file path only on successful load
     }
 
@@ -1991,10 +2079,10 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
 
     // FIX-011 (PERSIST-001): Write header with file integrity HMAC (v3 format)
     // Format: [Magic][Version][Flags][HMAC-placeholder][Salt][Data...]
-    file.write(WALLET_FILE_MAGIC_V4, 8);  // "DILWLT04" - v4 adds fCoinbase field
+    file.write(WALLET_FILE_MAGIC_V5, 8);  // "DILWLT05" - v5 adds MIK persistence
     if (!file.good()) return false;
 
-    uint32_t version = WALLET_FILE_VERSION_4;
+    uint32_t version = WALLET_FILE_VERSION_5;
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
     if (!file.good()) return false;
 
@@ -2232,6 +2320,62 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
     if (!file.good()) return false;
     file.write(reinterpret_cast<const char*>(&m_bestBlockHeight), sizeof(m_bestBlockHeight));
     if (!file.good()) return false;
+
+    // DFMP v2.0: Write MIK (Mining Identity Key) data
+    uint8_t hasMIK = fHasMIK ? 1 : 0;
+    file.write(reinterpret_cast<const char*>(&hasMIK), 1);
+    if (!file.good()) return false;
+
+    if (fHasMIK) {
+        // Write MIK public key
+        uint32_t pubkeyLen = static_cast<uint32_t>(vchMIKPubKey.size());
+        file.write(reinterpret_cast<const char*>(&pubkeyLen), sizeof(pubkeyLen));
+        if (!file.good()) return false;
+        if (pubkeyLen > 0) {
+            file.write(reinterpret_cast<const char*>(vchMIKPubKey.data()), pubkeyLen);
+            if (!file.good()) return false;
+        }
+
+        // Write encrypted MIK private key (if wallet is encrypted)
+        uint32_t encPrivKeyLen = static_cast<uint32_t>(vchEncryptedMIKPrivKey.size());
+        file.write(reinterpret_cast<const char*>(&encPrivKeyLen), sizeof(encPrivKeyLen));
+        if (!file.good()) return false;
+        if (encPrivKeyLen > 0) {
+            file.write(reinterpret_cast<const char*>(vchEncryptedMIKPrivKey.data()), encPrivKeyLen);
+            if (!file.good()) return false;
+        }
+
+        // Write MIK private key IV
+        uint32_t ivLen = static_cast<uint32_t>(vchMIKPrivKeyIV.size());
+        file.write(reinterpret_cast<const char*>(&ivLen), sizeof(ivLen));
+        if (!file.good()) return false;
+        if (ivLen > 0) {
+            file.write(reinterpret_cast<const char*>(vchMIKPrivKeyIV.data()), ivLen);
+            if (!file.good()) return false;
+        }
+
+        // Write MIK registered flag
+        uint8_t mikRegistered = fMIKRegistered ? 1 : 0;
+        file.write(reinterpret_cast<const char*>(&mikRegistered), 1);
+        if (!file.good()) return false;
+
+        // Write unencrypted MIK private key (if wallet is NOT encrypted)
+        if (m_mik && !masterKey.IsValid()) {
+            uint8_t hasUnencryptedMIK = 1;
+            file.write(reinterpret_cast<const char*>(&hasUnencryptedMIK), 1);
+            if (!file.good()) return false;
+
+            uint32_t privkeyLen = static_cast<uint32_t>(m_mik->privkey.size());
+            file.write(reinterpret_cast<const char*>(&privkeyLen), sizeof(privkeyLen));
+            if (!file.good()) return false;
+            file.write(reinterpret_cast<const char*>(m_mik->privkey.data()), privkeyLen);
+            if (!file.good()) return false;
+        } else {
+            uint8_t hasUnencryptedMIK = 0;
+            file.write(reinterpret_cast<const char*>(&hasUnencryptedMIK), 1);
+            if (!file.good()) return false;
+        }
+    }
 
     // FIX-011 (PERSIST-001): Compute and write file integrity HMAC
     // HMAC covers all data from HMAC field onwards (includes salt and all wallet data)

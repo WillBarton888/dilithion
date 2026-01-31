@@ -293,6 +293,7 @@ private:
     std::string RPC_StopMining(const std::string& params);
     std::string RPC_SetMiningAddress(const std::string& params);
     std::string RPC_GetMiningAddress(const std::string& params);
+    std::string RPC_GetDFMPInfo(const std::string& params);
 
     // Network methods
     std::string RPC_GetNetworkInfo(const std::string& params);

@@ -22,6 +22,7 @@
 #include <dfmp/dfmp.h>  // DFMP v2.0
 #include <dfmp/mik.h>   // DFMP v2.0: Mining Identity Key
 #include <dfmp/identity_db.h>  // DFMP v2.0: Identity database
+#include <core/chainparams.h>  // For Dilithion::g_chainParams
 #include <util/strencodings.h>
 #include <util/error_format.h>  // UX: Better error messages
 #include <amount.h>
@@ -192,6 +193,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["stopmining"] = [this](const std::string& p) { return RPC_StopMining(p); };
     m_handlers["setminingaddress"] = [this](const std::string& p) { return RPC_SetMiningAddress(p); };
     m_handlers["getminingaddress"] = [this](const std::string& p) { return RPC_GetMiningAddress(p); };
+    m_handlers["getdfmpinfo"] = [this](const std::string& p) { return RPC_GetDFMPInfo(p); };
 
     // Network and general
     m_handlers["getnetworkinfo"] = [this](const std::string& p) { return RPC_GetNetworkInfo(p); };
@@ -3545,6 +3547,66 @@ std::string CRPCServer::RPC_GetMiningAddress(const std::string& params) {
     return oss.str();
 }
 
+std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
+    std::ostringstream oss;
+    oss << "{";
+
+    // Get wallet MIK info
+    bool hasMIK = m_wallet && m_wallet->HasMIK();
+    std::string mikIdentity = hasMIK ? m_wallet->GetMIKIdentityHex() : "";
+
+    oss << "\"has_mik\":" << (hasMIK ? "true" : "false") << ",";
+    oss << "\"mik_identity\":\"" << mikIdentity << "\",";
+
+    // Get DFMP status
+    int currentHeight = m_chainstate ? static_cast<int>(m_chainstate->GetHeight()) : 0;
+    int dfmpActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpActivationHeight : 500;
+    int assumeValidHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
+
+    oss << "\"current_height\":" << currentHeight << ",";
+    oss << "\"dfmp_activation_height\":" << dfmpActivationHeight << ",";
+    oss << "\"dfmp_assume_valid_height\":" << assumeValidHeight << ",";
+    oss << "\"dfmp_active\":" << (currentHeight >= dfmpActivationHeight ? "true" : "false") << ",";
+
+    // Get penalty info for this identity
+    int firstSeen = -1;
+    int heat = 0;
+    bool isRegistered = false;
+
+    if (hasMIK) {
+        DFMP::Identity identity = m_wallet->GetMIKIdentity();
+
+        if (DFMP::g_identityDb) {
+            firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
+            isRegistered = DFMP::g_identityDb->HasMIKPubKey(identity);
+        }
+
+        if (DFMP::g_heatTracker) {
+            heat = DFMP::g_heatTracker->GetHeat(identity);
+        }
+    }
+
+    oss << "\"is_registered\":" << (isRegistered ? "true" : "false") << ",";
+    oss << "\"first_seen\":" << firstSeen << ",";
+    oss << "\"heat\":" << heat << ",";
+    oss << "\"maturity_blocks\":" << DFMP::MATURITY_BLOCKS << ",";
+
+    // Calculate penalty using actual DFMP functions
+    double maturityPenalty = DFMP::GetPendingPenalty(currentHeight, firstSeen);
+    double heatPenalty = DFMP::GetHeatPenalty_V2(heat);
+    double totalPenalty = maturityPenalty * heatPenalty;
+
+    oss << std::fixed << std::setprecision(2);
+    oss << "\"maturity_penalty\":" << maturityPenalty << ",";
+    oss << "\"heat_penalty\":" << heatPenalty << ",";
+    oss << "\"total_penalty\":" << totalPenalty;
+
+    oss << "}";
+    return oss.str();
+}
+
 std::string CRPCServer::RPC_GetNetworkInfo(const std::string& params) {
     std::ostringstream oss;
     oss << "{";
@@ -3651,6 +3713,7 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getmininginfo - Get mining status and hashrate\",";
     oss << "\"startmining - Start mining (not fully implemented)\",";
     oss << "\"stopmining - Stop mining\",";
+    oss << "\"getdfmpinfo - Get DFMP status, MIK identity, and penalty info\",";
 
     // Network and general
     oss << "\"getnetworkinfo - Get network information\",";
