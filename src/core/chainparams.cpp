@@ -54,10 +54,10 @@ ChainParams ChainParams::Mainnet() {
 
     // DFMP Assume-Valid Height (IBD fix)
     // Skip DFMP penalty validation for blocks at or below this height.
-    // PoW and MIK signature are STILL verified - only penalty multiplier skipped.
-    // This fixes IBD where in-memory state differs from original mining state.
-    // v2.0.13: Set to 600 (buffer above current chain tip ~580)
-    params.dfmpAssumeValidHeight = 600;
+    // PoW and MIK signature verification skipped for historical blocks during IBD.
+    // This fixes IBD where identity database is empty/incomplete.
+    // v2.0.13: Set to 1000 (buffer above current chain tip ~634)
+    params.dfmpAssumeValidHeight = 1000;
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
