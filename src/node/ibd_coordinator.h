@@ -172,6 +172,8 @@ private:
 
     // Blocks sync peer tracking (single peer for block download, different from headers peer)
     int m_blocks_sync_peer{-1};                                     // NodeId of block sync peer (-1 = none)
+    int m_blocks_sync_peer_consecutive_timeouts{0};                 // Consecutive 60s timeout cycles without delivery
+    static constexpr int MAX_PEER_CONSECUTIVE_TIMEOUTS = 3;         // Force reselection after N consecutive timeouts
 
     // Backoff state
     int m_last_header_height{0};

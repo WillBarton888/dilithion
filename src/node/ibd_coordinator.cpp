@@ -742,10 +742,33 @@ bool CIbdCoordinator::FetchBlocks() {
             // Without this check, we'd be stuck requesting from a peer that can't serve us
             int peer_height = peer->best_known_height;
             if (peer_height == 0) peer_height = peer->start_height;
+
+            // BUG FIX #2: Also reselect if current peer is far below header height
+            // This helps when better peers connect while we're stuck on a lower-height peer
+            bool should_reselect = false;
             if (peer_height <= chain_height) {
                 std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
                           << " height (" << peer_height << ") too low (need > " << chain_height
                           << "), reselecting" << std::endl;
+                should_reselect = true;
+            } else if (peer_height < header_height && (header_height - peer_height) > 10) {
+                // Current peer can't serve all headers - check if better peer exists
+                auto all_peers = m_node_context.peer_manager->GetConnectedPeers();
+                for (const auto& p : all_peers) {
+                    if (!p || p->id == m_blocks_sync_peer) continue;
+                    int ph = p->best_known_height;
+                    if (ph == 0) ph = p->start_height;
+                    if (ph > peer_height + 5) {  // Better peer exists with >5 blocks advantage
+                        std::cout << "[IBD] Found better peer " << p->id << " (height=" << ph
+                                  << ") vs current sync peer " << m_blocks_sync_peer
+                                  << " (height=" << peer_height << "), reselecting" << std::endl;
+                        should_reselect = true;
+                        break;
+                    }
+                }
+            }
+
+            if (should_reselect) {
                 m_blocks_sync_peer = -1;
             }
         }
@@ -785,6 +808,7 @@ bool CIbdCoordinator::FetchBlocks() {
 
         if (best_peer != -1) {
             m_blocks_sync_peer = best_peer;
+            m_blocks_sync_peer_consecutive_timeouts = 0;  // Reset timeout counter for new peer
             std::cout << "[IBD] Selected blocks sync peer " << m_blocks_sync_peer
                       << " (height=" << best_height << ")" << std::endl;
         } else {
@@ -895,13 +919,30 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
 
     if (!very_stalled.empty()) {
         int removed = 0;
+        bool current_peer_timed_out = false;
         for (const auto& [height, peer] : very_stalled) {
             m_node_context.block_fetcher->RequeueBlock(height);
             removed++;
+            // Track if current blocks sync peer had timeouts
+            if (peer == m_blocks_sync_peer) {
+                current_peer_timed_out = true;
+            }
         }
         if (removed > 0) {
             std::cout << "[PerBlock] Removed " << removed << " blocks stuck >" << HARD_TIMEOUT_SECONDS
                       << "s from tracker (will re-request)" << std::endl;
+        }
+
+        // BAD PEER DETECTION: If current sync peer has consecutive timeout cycles, rotate to new peer
+        if (current_peer_timed_out && m_blocks_sync_peer != -1) {
+            m_blocks_sync_peer_consecutive_timeouts++;
+            if (m_blocks_sync_peer_consecutive_timeouts >= MAX_PEER_CONSECUTIVE_TIMEOUTS) {
+                std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
+                          << " not delivering blocks (" << m_blocks_sync_peer_consecutive_timeouts
+                          << " consecutive timeout cycles), forcing reselection" << std::endl;
+                m_blocks_sync_peer = -1;
+                m_blocks_sync_peer_consecutive_timeouts = 0;
+            }
         }
     }
 
