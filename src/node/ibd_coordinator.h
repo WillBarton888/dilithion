@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <set>
 #include <string>
 
 // Forward declarations
@@ -169,6 +170,9 @@ private:
     bool m_headers_in_flight{false};                                // True while awaiting headers from sync peer
     static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 45;       // 45 sec base timeout (faster failover)
     static constexpr int HEADERS_SYNC_TIMEOUT_PER_HEADER_MS = 1;    // +1ms per missing header
+    std::set<int> m_headers_bad_peers;                              // Peers that have repeatedly failed to deliver headers
+    int m_headers_sync_peer_consecutive_stalls{0};                  // Consecutive stalls for current peer
+    static constexpr int MAX_HEADERS_CONSECUTIVE_STALLS = 3;        // Ban peer after N consecutive stalls
 
     // Blocks sync peer tracking (single peer for block download, different from headers peer)
     int m_blocks_sync_peer{-1};                                     // NodeId of block sync peer (-1 = none)

@@ -1270,6 +1270,10 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
 
     for (const auto& peer : peers) {
         if (!peer) continue;
+        // Skip peers that have been marked as bad (repeatedly failed to deliver headers)
+        if (m_headers_bad_peers.count(peer->id) > 0) {
+            continue;
+        }
         // BUG FIX: Use best_known_height (dynamic) instead of GetPeerStartHeight (static)
         int peer_height = peer->best_known_height;
         if (peer_height == 0) peer_height = peer->start_height;
@@ -1281,6 +1285,7 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
 
     if (best_peer != -1) {
         m_headers_sync_peer = best_peer;
+        m_headers_sync_peer_consecutive_stalls = 0;  // Reset stall counter for new peer
         m_headers_sync_last_height = m_node_context.headers_manager->GetBestHeight();
 
         // Calculate timeout: base + 1ms per missing header (Bitcoin Core style)
@@ -1350,9 +1355,20 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
 
 void CIbdCoordinator::SwitchHeadersSyncPeer() {
     int old_peer = m_headers_sync_peer;
-    m_headers_sync_peer = -1;  // Force reselection
 
-    // TODO: Could ban or deprioritize the old peer here
+    // BAD PEER TRACKING: Track consecutive stalls for this peer
+    if (old_peer != -1) {
+        m_headers_sync_peer_consecutive_stalls++;
+        if (m_headers_sync_peer_consecutive_stalls >= MAX_HEADERS_CONSECUTIVE_STALLS) {
+            std::cout << "[IBD] Headers sync peer " << old_peer
+                      << " repeatedly failed to deliver headers (" << m_headers_sync_peer_consecutive_stalls
+                      << " stalls), marking as bad peer" << std::endl;
+            m_headers_bad_peers.insert(old_peer);
+            m_headers_sync_peer_consecutive_stalls = 0;
+        }
+    }
+
+    m_headers_sync_peer = -1;  // Force reselection
 
     SelectHeadersSyncPeer();
 
