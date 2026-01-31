@@ -236,6 +236,17 @@ BlockProcessResult ProcessNewBlock(
                   << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
                   << std::endl;
 
+        // BUG #243 FIX: Ensure block data is saved to database before activation
+        // HaveData() flag may be stale if block was deleted during fork recovery
+        if (!db.BlockExists(blockHash)) {
+            std::cout << "[ProcessNewBlock] Block not in database - saving before activation" << std::endl;
+            if (!db.WriteBlock(blockHash, block)) {
+                std::cerr << "[ProcessNewBlock] ERROR: Failed to save block to database" << std::endl;
+                return BlockProcessResult::DB_ERROR;
+            }
+            std::cout << "[ProcessNewBlock] Block saved to database" << std::endl;
+        }
+
         bool reorgOccurred = false;
         if (g_chainstate.ActivateBestChain(pindex, block, reorgOccurred)) {
             std::cout << "[ProcessNewBlock] Successfully activated previously stuck block at height "
