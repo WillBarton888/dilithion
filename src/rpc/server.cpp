@@ -219,6 +219,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["repairblocks"] = [this](const std::string& p) { return RPC_RepairBlocks(p); };
     m_handlers["checkblockdb"] = [this](const std::string& p) { return RPC_CheckBlockDB(p); };
     m_handlers["scanblockdb"] = [this](const std::string& p) { return RPC_ScanBlockDB(p); };
+    m_handlers["requestblocks"] = [this](const std::string& p) { return RPC_RequestBlocks(p); };
 }
 
 CRPCServer::~CRPCServer() {
@@ -4553,6 +4554,135 @@ std::string CRPCServer::RPC_ScanBlockDB(const std::string& params) {
     oss << "\"hash_mismatches\":" << hash_mismatches << "}";
 
     std::cout << "[SCAN] Complete. Orphans=" << orphans << ", Hash mismatches=" << hash_mismatches << std::endl;
+
+    return oss.str();
+}
+
+/**
+ * RPC_RequestBlocks - Request specific blocks from ALL connected peers
+ *
+ * This broadcasts GETDATA requests to every connected peer for the specified blocks.
+ * Useful for recovering missing blocks if any peer on the network has them.
+ *
+ * Usage: requestblocks {"heights": [243, 244]}
+ * Or:    requestblocks {"hashes": ["0000000138b95d1e..."]}
+ */
+std::string CRPCServer::RPC_RequestBlocks(const std::string& params) {
+    extern NodeContext g_node_context;
+
+    if (!g_node_context.connman || !g_node_context.message_processor || !g_node_context.peer_manager) {
+        throw std::runtime_error("Network not initialized");
+    }
+
+    std::vector<uint256> hashes_to_request;
+
+    // Parse heights array if provided
+    size_t heights_pos = params.find("\"heights\"");
+    if (heights_pos != std::string::npos && m_chainstate) {
+        // Extract heights array
+        size_t bracket_start = params.find("[", heights_pos);
+        size_t bracket_end = params.find("]", bracket_start);
+        if (bracket_start != std::string::npos && bracket_end != std::string::npos) {
+            std::string heights_str = params.substr(bracket_start + 1, bracket_end - bracket_start - 1);
+            // Parse comma-separated heights
+            std::string num_str;
+            for (char c : heights_str) {
+                if (std::isdigit(c)) {
+                    num_str += c;
+                } else if (!num_str.empty()) {
+                    int height = std::stoi(num_str);
+                    // Get hash for this height from chainstate
+                    CBlockIndex* pindex = m_chainstate->GetTip();
+                    while (pindex && pindex->nHeight > height) {
+                        pindex = pindex->pprev;
+                    }
+                    if (pindex && pindex->nHeight == height) {
+                        hashes_to_request.push_back(pindex->GetBlockHash());
+                        std::cout << "[REQUEST] Height " << height << " -> hash "
+                                  << pindex->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+                    } else {
+                        std::cout << "[REQUEST] Height " << height << " not in chainstate" << std::endl;
+                    }
+                    num_str.clear();
+                }
+            }
+            if (!num_str.empty()) {
+                int height = std::stoi(num_str);
+                CBlockIndex* pindex = m_chainstate->GetTip();
+                while (pindex && pindex->nHeight > height) {
+                    pindex = pindex->pprev;
+                }
+                if (pindex && pindex->nHeight == height) {
+                    hashes_to_request.push_back(pindex->GetBlockHash());
+                    std::cout << "[REQUEST] Height " << height << " -> hash "
+                              << pindex->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+                }
+            }
+        }
+    }
+
+    // Parse hashes array if provided
+    size_t hashes_pos = params.find("\"hashes\"");
+    if (hashes_pos != std::string::npos) {
+        size_t bracket_start = params.find("[", hashes_pos);
+        size_t bracket_end = params.find("]", bracket_start);
+        if (bracket_start != std::string::npos && bracket_end != std::string::npos) {
+            std::string hashes_str = params.substr(bracket_start + 1, bracket_end - bracket_start - 1);
+            // Parse comma-separated hashes (in quotes)
+            size_t pos = 0;
+            while ((pos = hashes_str.find("\"", pos)) != std::string::npos) {
+                size_t end = hashes_str.find("\"", pos + 1);
+                if (end != std::string::npos) {
+                    std::string hash_hex = hashes_str.substr(pos + 1, end - pos - 1);
+                    uint256 hash;
+                    hash.SetHex(hash_hex);
+                    if (!hash.IsNull()) {
+                        hashes_to_request.push_back(hash);
+                        std::cout << "[REQUEST] Hash " << hash_hex.substr(0, 16) << "..." << std::endl;
+                    }
+                    pos = end + 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (hashes_to_request.empty()) {
+        throw std::runtime_error("No blocks to request. Use {\"heights\": [243, 244]} or {\"hashes\": [\"...\"]}");
+    }
+
+    // Build GETDATA message
+    std::vector<NetProtocol::CInv> getdata;
+    for (const auto& hash : hashes_to_request) {
+        getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
+    }
+
+    CNetMessage msg = g_node_context.message_processor->CreateGetDataMessage(getdata);
+
+    // Send to ALL connected peers
+    auto peers = g_node_context.peer_manager->GetConnectedPeers();
+    int sent_count = 0;
+
+    std::cout << "[REQUEST] Sending GETDATA for " << hashes_to_request.size()
+              << " blocks to " << peers.size() << " peers..." << std::endl;
+
+    for (const auto& peer : peers) {
+        if (!peer) continue;
+        g_node_context.connman->PushMessage(peer->id, msg);
+        sent_count++;
+        std::cout << "[REQUEST] Sent to peer " << peer->id << std::endl;
+    }
+
+    std::ostringstream oss;
+    oss << "{\"blocks_requested\":" << hashes_to_request.size() << ",";
+    oss << "\"peers_contacted\":" << sent_count << ",";
+    oss << "\"hashes\":[";
+    for (size_t i = 0; i < hashes_to_request.size(); i++) {
+        if (i > 0) oss << ",";
+        oss << "\"" << hashes_to_request[i].GetHex().substr(0, 16) << "...\"";
+    }
+    oss << "]}";
 
     return oss.str();
 }

@@ -330,6 +330,7 @@ private:
     std::string RPC_RepairBlocks(const std::string& params);
     std::string RPC_CheckBlockDB(const std::string& params);
     std::string RPC_ScanBlockDB(const std::string& params);
+    std::string RPC_RequestBlocks(const std::string& params);
 
     // Helper functions
     std::string FormatAmount(CAmount amount) const;
