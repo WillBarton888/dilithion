@@ -56,7 +56,7 @@ ChainParams ChainParams::Mainnet() {
     // Skip DFMP penalty validation for blocks at or below this height.
     // PoW and MIK signature verification skipped for historical blocks during IBD.
     // This fixes IBD where identity database is empty/incomplete.
-    // v2.0.13: Set to 1000 (buffer above current chain tip ~634)
+    // NOTE: Chain built with MIK bypassed - cannot be removed, only raised
     params.dfmpAssumeValidHeight = 1000;
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
@@ -66,8 +66,8 @@ ChainParams ChainParams::Mainnet() {
     //   params.checkpoints.emplace_back(10000, uint256S("0000..."));
     //   params.checkpoints.emplace_back(20000, uint256S("0000..."));
     //
-    // For now, only genesis is checkpointed (will be updated after mining)
-    // params.checkpoints.emplace_back(0, uint256S(params.genesisHash));
+    // Checkpoint at height 1000 - locks in chain before DFMP enforcement
+    params.checkpoints.emplace_back(1000, uint256S("000000006c282edbcc0f2eee5b0f8c8feb62c73d3787137037e589db99cab59f"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)
