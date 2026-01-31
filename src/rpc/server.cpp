@@ -214,6 +214,11 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["setban"] = [this](const std::string& p) { return RPC_SetBan(p); };
     m_handlers["listbanned"] = [this](const std::string& p) { return RPC_ListBanned(p); };
     m_handlers["clearbanned"] = [this](const std::string& p) { return RPC_ClearBanned(p); };
+
+    // Block repair commands
+    m_handlers["repairblocks"] = [this](const std::string& p) { return RPC_RepairBlocks(p); };
+    m_handlers["checkblockdb"] = [this](const std::string& p) { return RPC_CheckBlockDB(p); };
+    m_handlers["scanblockdb"] = [this](const std::string& p) { return RPC_ScanBlockDB(p); };
 }
 
 CRPCServer::~CRPCServer() {
@@ -3632,6 +3637,8 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getblockhash - Get block hash by height\",";
     oss << "\"gettxout - Get UTXO information\",";
     oss << "\"checkchain - Verify your chain matches official checkpoints (detect forks)\",";
+    oss << "\"checkblockdb - Check for missing blocks in database (diagnostic)\",";
+    oss << "\"repairblocks - Repair blocks stored under wrong hashes (Bug #243 fix)\",";
 
     // Wallet encryption
     oss << "\"encryptwallet - Encrypt wallet with passphrase\",";
@@ -4253,4 +4260,299 @@ bool CRPCServer::InitializeWebSocket(uint16_t port) {
     
     std::cout << "[RPC-WEBSOCKET] WebSocket server started on port " << port << std::endl;
     return true;
+}
+
+// ============================================================================
+// BLOCK REPAIR COMMANDS (Bug #243 Fix - IBD stuck at height 242)
+// ============================================================================
+
+/**
+ * RPC_CheckBlockDB - Check for missing or mismatched blocks in database
+ *
+ * Compares chainstate (height -> hash) with block database (hash -> block data)
+ * to find blocks that are in chainstate but missing from the database.
+ *
+ * Usage: checkblockdb {}
+ * Optional: checkblockdb {"start_height": 240, "end_height": 250}
+ */
+std::string CRPCServer::RPC_CheckBlockDB(const std::string& params) {
+    if (!m_blockchain || !m_chainstate) {
+        throw std::runtime_error("Blockchain or chainstate not initialized");
+    }
+
+    // Parse optional height range
+    int start_height = 0;
+    int end_height = m_chainstate->GetHeight();
+
+    // Parse start_height if provided
+    size_t start_pos = params.find("\"start_height\"");
+    if (start_pos != std::string::npos) {
+        size_t colon = params.find(":", start_pos);
+        if (colon != std::string::npos) {
+            std::string num_str;
+            for (size_t i = colon + 1; i < params.size(); i++) {
+                char c = params[i];
+                if (std::isdigit(c)) num_str += c;
+                else if (!num_str.empty()) break;
+            }
+            if (!num_str.empty()) start_height = std::stoi(num_str);
+        }
+    }
+
+    // Parse end_height if provided
+    size_t end_pos = params.find("\"end_height\"");
+    if (end_pos != std::string::npos) {
+        size_t colon = params.find(":", end_pos);
+        if (colon != std::string::npos) {
+            std::string num_str;
+            for (size_t i = colon + 1; i < params.size(); i++) {
+                char c = params[i];
+                if (std::isdigit(c)) num_str += c;
+                else if (!num_str.empty()) break;
+            }
+            if (!num_str.empty()) end_height = std::stoi(num_str);
+        }
+    }
+
+    std::ostringstream oss;
+    oss << "{\"chain_height\":" << m_chainstate->GetHeight() << ",";
+    oss << "\"start_height\":" << start_height << ",";
+    oss << "\"end_height\":" << end_height << ",";
+    oss << "\"missing_blocks\":[";
+
+    std::vector<int> missing_heights;
+
+    // Walk the chain from tip backwards to find blocks at each height
+    CBlockIndex* pindex = m_chainstate->GetTip();
+    while (pindex && pindex->nHeight >= start_height) {
+        if (pindex->nHeight <= end_height) {
+            uint256 hash = pindex->GetBlockHash();
+            CBlock block;
+
+            if (!m_blockchain->ReadBlock(hash, block)) {
+                // Block is in chainstate but NOT in block database
+                missing_heights.push_back(pindex->nHeight);
+            }
+        }
+        pindex = pindex->pprev;
+    }
+
+    // Sort heights in ascending order for output
+    std::sort(missing_heights.begin(), missing_heights.end());
+
+    for (size_t i = 0; i < missing_heights.size(); i++) {
+        if (i > 0) oss << ",";
+        oss << missing_heights[i];
+    }
+
+    oss << "],\"missing_count\":" << missing_heights.size() << "}";
+    return oss.str();
+}
+
+/**
+ * RPC_RepairBlocks - Find blocks stored under wrong hashes and re-store them
+ *
+ * This repairs the block database after fork recovery left blocks under wrong hashes.
+ * For each block in the database:
+ * 1. Read the block data
+ * 2. Compute its canonical RandomX hash
+ * 3. If not stored under the canonical hash, write it under the canonical hash
+ *
+ * Usage: repairblocks {}
+ * Optional: repairblocks {"dry_run": true} to just report without fixing
+ */
+std::string CRPCServer::RPC_RepairBlocks(const std::string& params) {
+    if (!m_blockchain) {
+        throw std::runtime_error("Blockchain not initialized");
+    }
+
+    // Parse dry_run option
+    bool dry_run = false;
+    if (params.find("\"dry_run\"") != std::string::npos &&
+        params.find("true") != std::string::npos) {
+        dry_run = true;
+    }
+
+    std::cout << "[REPAIR] Starting block database repair (dry_run=" << dry_run << ")..." << std::endl;
+
+    // Get all blocks currently in database
+    std::vector<uint256> db_hashes;
+    if (!m_blockchain->GetAllBlockHashes(db_hashes)) {
+        throw std::runtime_error("Failed to enumerate blocks in database");
+    }
+
+    std::cout << "[REPAIR] Found " << db_hashes.size() << " blocks in database" << std::endl;
+
+    int repaired = 0;
+    int already_correct = 0;
+    int errors = 0;
+    std::vector<std::pair<int, std::string>> repairs;  // height, old_hash
+
+    for (const auto& stored_hash : db_hashes) {
+        CBlock block;
+        if (!m_blockchain->ReadBlock(stored_hash, block)) {
+            errors++;
+            continue;
+        }
+
+        // Compute the canonical RandomX hash
+        uint256 canonical_hash = block.GetHash();
+
+        if (canonical_hash == stored_hash) {
+            already_correct++;
+            continue;  // Block is stored under correct hash
+        }
+
+        // Block is stored under wrong hash!
+        // Try to figure out the height by checking chainstate
+        int height = -1;
+        if (m_chainstate) {
+            CBlockIndex* pindex = m_chainstate->GetBlockIndex(canonical_hash);
+            if (pindex) {
+                height = pindex->nHeight;
+            }
+        }
+
+        std::cout << "[REPAIR] Block at height " << height
+                  << " stored under " << stored_hash.GetHex().substr(0, 16) << "..."
+                  << " but canonical hash is " << canonical_hash.GetHex().substr(0, 16) << "..."
+                  << std::endl;
+
+        if (!dry_run) {
+            // Write block under canonical hash
+            if (m_blockchain->WriteBlock(canonical_hash, block)) {
+                repaired++;
+                repairs.push_back({height, stored_hash.GetHex().substr(0, 16)});
+                std::cout << "[REPAIR] SUCCESS: Re-stored block at height " << height
+                          << " under canonical hash" << std::endl;
+            } else {
+                errors++;
+                std::cout << "[REPAIR] ERROR: Failed to write block at height " << height << std::endl;
+            }
+        } else {
+            repairs.push_back({height, stored_hash.GetHex().substr(0, 16)});
+        }
+    }
+
+    std::ostringstream oss;
+    oss << "{\"dry_run\":" << (dry_run ? "true" : "false") << ",";
+    oss << "\"total_blocks\":" << db_hashes.size() << ",";
+    oss << "\"already_correct\":" << already_correct << ",";
+    oss << "\"repaired\":" << (dry_run ? 0 : repaired) << ",";
+    oss << "\"would_repair\":" << repairs.size() << ",";
+    oss << "\"errors\":" << errors << ",";
+    oss << "\"repairs\":[";
+
+    for (size_t i = 0; i < repairs.size() && i < 20; i++) {  // Limit to first 20
+        if (i > 0) oss << ",";
+        oss << "{\"height\":" << repairs[i].first << ",\"old_hash\":\"" << repairs[i].second << "...\"}";
+    }
+    if (repairs.size() > 20) {
+        oss << ",{\"note\":\"..." << (repairs.size() - 20) << " more...\"}";
+    }
+
+    oss << "]}";
+    return oss.str();
+}
+
+/**
+ * RPC_ScanBlockDB - Scan all blocks in database and show their properties
+ *
+ * This helps diagnose blocks stored under wrong hashes by showing:
+ * - The hash under which each block is stored (DB key)
+ * - The block's computed RandomX hash
+ * - The block's previousblockhash (to determine chain position)
+ * - Whether the block is orphaned (not in chainstate)
+ *
+ * Usage: scanblockdb {}
+ * Optional: scanblockdb {"limit": 50} to limit results
+ */
+std::string CRPCServer::RPC_ScanBlockDB(const std::string& params) {
+    if (!m_blockchain) {
+        throw std::runtime_error("Blockchain not initialized");
+    }
+
+    // Parse limit option (default 100)
+    int limit = 100;
+    size_t limit_pos = params.find("\"limit\"");
+    if (limit_pos != std::string::npos) {
+        size_t colon = params.find(":", limit_pos);
+        if (colon != std::string::npos) {
+            std::string num_str;
+            for (size_t i = colon + 1; i < params.size(); i++) {
+                char c = params[i];
+                if (std::isdigit(c)) num_str += c;
+                else if (!num_str.empty()) break;
+            }
+            if (!num_str.empty()) limit = std::stoi(num_str);
+        }
+    }
+
+    std::cout << "[SCAN] Scanning block database (limit=" << limit << ")..." << std::endl;
+
+    // Get all blocks in database
+    std::vector<uint256> db_hashes;
+    if (!m_blockchain->GetAllBlockHashes(db_hashes)) {
+        throw std::runtime_error("Failed to enumerate blocks in database");
+    }
+
+    std::cout << "[SCAN] Found " << db_hashes.size() << " blocks in database" << std::endl;
+
+    std::ostringstream oss;
+    oss << "{\"total_in_db\":" << db_hashes.size() << ",";
+    oss << "\"scanned\":" << std::min((int)db_hashes.size(), limit) << ",";
+    oss << "\"blocks\":[";
+
+    int count = 0;
+    int orphans = 0;
+    int hash_mismatches = 0;
+
+    for (const auto& stored_hash : db_hashes) {
+        if (count >= limit) break;
+
+        CBlock block;
+        if (!m_blockchain->ReadBlock(stored_hash, block)) {
+            continue;
+        }
+
+        // Compute canonical hash
+        uint256 canonical_hash = block.GetHash();
+        bool hash_matches = (canonical_hash == stored_hash);
+
+        // Check if block is in chainstate
+        bool in_chainstate = false;
+        int chainstate_height = -1;
+        if (m_chainstate) {
+            CBlockIndex* pindex = m_chainstate->GetBlockIndex(canonical_hash);
+            if (pindex) {
+                in_chainstate = true;
+                chainstate_height = pindex->nHeight;
+            }
+        }
+
+        if (!in_chainstate) orphans++;
+        if (!hash_matches) hash_mismatches++;
+
+        if (count > 0) oss << ",";
+        oss << "{";
+        oss << "\"stored_hash\":\"" << stored_hash.GetHex().substr(0, 16) << "...\",";
+        oss << "\"canonical_hash\":\"" << canonical_hash.GetHex().substr(0, 16) << "...\",";
+        oss << "\"prev_hash\":\"" << block.hashPrevBlock.GetHex().substr(0, 16) << "...\",";
+        oss << "\"hash_matches\":" << (hash_matches ? "true" : "false") << ",";
+        oss << "\"in_chainstate\":" << (in_chainstate ? "true" : "false");
+        if (in_chainstate) {
+            oss << ",\"height\":" << chainstate_height;
+        }
+        oss << "}";
+
+        count++;
+    }
+
+    oss << "],";
+    oss << "\"orphans\":" << orphans << ",";
+    oss << "\"hash_mismatches\":" << hash_mismatches << "}";
+
+    std::cout << "[SCAN] Complete. Orphans=" << orphans << ", Hash mismatches=" << hash_mismatches << std::endl;
+
+    return oss.str();
 }
