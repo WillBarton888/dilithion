@@ -1379,9 +1379,13 @@ void CIbdCoordinator::SwitchHeadersSyncPeer() {
 
     SelectHeadersSyncPeer();
 
-    if (m_headers_sync_peer != -1 && m_headers_sync_peer != old_peer) {
-        std::cout << "[IBD] Switched headers sync peer: " << old_peer
-                  << " -> " << m_headers_sync_peer << std::endl;
+    if (m_headers_sync_peer != -1) {
+        if (m_headers_sync_peer != old_peer) {
+            std::cout << "[IBD] Switched headers sync peer: " << old_peer
+                      << " -> " << m_headers_sync_peer << std::endl;
+        } else {
+            std::cout << "[IBD] Retrying headers sync with same peer " << m_headers_sync_peer << std::endl;
+        }
 
         // BUG #195 FIX: Clear pending sync state when switching peers after a stall.
         // This ensures the new request uses our validated tip (hashBestHeader) instead of
