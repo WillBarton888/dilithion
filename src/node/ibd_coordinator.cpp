@@ -754,17 +754,24 @@ bool CIbdCoordinator::FetchBlocks() {
             } else if (peer_height < header_height && (header_height - peer_height) > 10) {
                 // Current peer can't serve all headers - check if better peer exists
                 auto all_peers = m_node_context.peer_manager->GetConnectedPeers();
+                int better_peer_id = -1;
+                int better_peer_height = peer_height;
                 for (const auto& p : all_peers) {
                     if (!p || p->id == m_blocks_sync_peer) continue;
                     int ph = p->best_known_height;
                     if (ph == 0) ph = p->start_height;
-                    if (ph > peer_height + 5) {  // Better peer exists with >5 blocks advantage
-                        std::cout << "[IBD] Found better peer " << p->id << " (height=" << ph
-                                  << ") vs current sync peer " << m_blocks_sync_peer
-                                  << " (height=" << peer_height << "), reselecting" << std::endl;
-                        should_reselect = true;
-                        break;
+                    if (ph > better_peer_height + 5) {  // Better peer with >5 blocks advantage
+                        better_peer_id = p->id;
+                        better_peer_height = ph;
                     }
+                }
+                if (better_peer_id != -1) {
+                    std::cout << "[IBD] Found better peer " << better_peer_id << " (height=" << better_peer_height
+                              << ") vs current sync peer " << m_blocks_sync_peer
+                              << " (height=" << peer_height << "), switching directly" << std::endl;
+                    m_blocks_sync_peer = better_peer_id;
+                    m_blocks_sync_peer_consecutive_timeouts = 0;
+                    should_reselect = false;  // Already switched
                 }
             }
 
