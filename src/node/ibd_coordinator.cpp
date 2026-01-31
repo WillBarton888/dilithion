@@ -861,6 +861,7 @@ bool CIbdCoordinator::FetchBlocks() {
     std::vector<NetProtocol::CInv> getdata;
     getdata.reserve(blocks_to_request.size());
 
+    // DEBUG: Track heights around 243 to diagnose the issue
     for (int h : blocks_to_request) {
         // Re-check capacity before each request
         int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
@@ -869,10 +870,26 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // Validate height range
-        if (h > header_height || h <= chain_height || h > peer_height) continue;
+        if (h > header_height || h <= chain_height || h > peer_height) {
+            if (h >= 240 && h <= 250) {
+                std::cout << "[DEBUG-IBD] height=" << h << " SKIPPED by range check"
+                          << " (h>header=" << (h > header_height)
+                          << " h<=chain=" << (h <= chain_height)
+                          << " h>peer=" << (h > peer_height) << ")" << std::endl;
+            }
+            continue;
+        }
 
         uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-        if (hash.IsNull()) continue;
+        if (hash.IsNull()) {
+            if (h >= 240 && h <= 250) {
+                std::cout << "[DEBUG-IBD] height=" << h << " HASH IS NULL from headers_manager" << std::endl;
+            }
+            continue;
+        }
+        if (h >= 240 && h <= 250) {
+            std::cout << "[DEBUG-IBD] height=" << h << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+        }
 
         // Check if already connected
         CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
@@ -1185,6 +1202,8 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
                                               << hash.GetHex().substr(0, 16) << "..." << std::endl;
 
                                     if (m_node_context.blockchain_db->EraseBlock(hash)) {
+                                        // BUG #243 FIX: Clear BLOCK_HAVE_DATA flag to prevent stale HaveData()
+                                        pBlockIndex->nStatus &= ~CBlockIndex::BLOCK_HAVE_DATA;
                                         total_deleted++;
                                         found_orphan = true;
                                     }
@@ -1200,6 +1219,7 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
                                               << hash.GetHex().substr(0, 16) << "..." << std::endl;
 
                                     if (m_node_context.blockchain_db->EraseBlock(hash)) {
+                                        // Note: No pBlockIndex here (unindexed), so no flag to clear
                                         total_deleted++;
                                         found_orphan = true;
                                     }
