@@ -1091,9 +1091,9 @@ bool CIbdCoordinator::FetchBlocks() {
             }
 
             // Skip headers sync peer in first pass - prefer other peers for block download
-            // BUG #249: During active fork, we MUST skip headers_sync_peer - they're on our chain
-            // and don't have fork blocks
-            if (peer->id == m_headers_sync_peer) {
+            // EXCEPT during active fork: the headers_sync_peer sent us the fork headers,
+            // so they HAVE the fork blocks. Other peers on our chain don't have them.
+            if (peer->id == m_headers_sync_peer && !has_active_fork) {
                 continue;
             }
 
@@ -1104,12 +1104,13 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // If no other peer found, use headers sync peer for blocks too
-        // BUG #249 FIX: During active fork, DON'T fall back to headers_sync_peer
-        // They're on our chain and don't have the fork blocks we need
+        // BUG #249b FIX: During active fork, we SHOULD use headers_sync_peer as fallback
+        // because they sent us the fork headers and therefore have the fork blocks.
+        // Other peers on our chain don't have these blocks.
         // BUG FIX: Use header_height from headers manager (authoritative) instead of
         // peer->best_known_height which may be stale due to async header processing.
         // The headers sync peer sent us headers up to header_height, so they have those blocks.
-        if (best_peer == -1 && m_headers_sync_peer != -1 && header_height > chain_height && !has_active_fork) {
+        if (best_peer == -1 && m_headers_sync_peer != -1 && header_height > chain_height) {
             best_peer = m_headers_sync_peer;
             best_height = header_height;
 
