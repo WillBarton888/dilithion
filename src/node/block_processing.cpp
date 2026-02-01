@@ -5,6 +5,7 @@
 #include <node/blockchain_storage.h>
 #include <node/block_index.h>
 #include <node/block_validation_queue.h>
+#include <node/fork_manager.h>
 #include <consensus/chain.h>
 #include <consensus/pow.h>
 #include <consensus/validation.h>
@@ -133,6 +134,86 @@ BlockProcessResult ProcessNewBlock(
     std::cout << "[ProcessNewBlock] Processing block: " << blockHash.GetHex().substr(0, 16) << "..."
               << " (chainHeight=" << currentChainHeight << ", checkpoint=" << checkpointHeight
               << ", skipPoWCheck=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
+
+    // =========================================================================
+    // PHASE 1.5: FORK BLOCK PRE-VALIDATION (Validate-Before-Disconnect)
+    // If a fork is being validated, pre-validate blocks before normal processing.
+    // Blocks still go through normal processing to create CBlockIndex entries,
+    // but we skip ActivateBestChain until all fork blocks are ready.
+    // =========================================================================
+    bool isForkBlock = false;
+    int blockHeight = -1;  // Will be calculated if needed
+    {
+        ForkManager& forkMgr = ForkManager::GetInstance();
+
+        if (forkMgr.HasActiveFork()) {
+            // Calculate block height
+            blockHeight = currentChainHeight + 1;
+            CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+            if (pParent) {
+                blockHeight = pParent->nHeight + 1;
+            } else if (ctx.headers_manager) {
+                int parentHeight = ctx.headers_manager->GetHeightForHash(block.hashPrevBlock);
+                if (parentHeight >= 0) {
+                    blockHeight = parentHeight + 1;
+                }
+            }
+
+            auto fork = forkMgr.GetActiveFork();
+            if (fork) {
+                int32_t forkPoint = fork->GetForkPointHeight();
+                int32_t forkTip = fork->GetExpectedTipHeight();
+
+                // Check if this block belongs to the fork using hash verification
+                // IsExpectedBlock checks both height range AND hash match (if expected hashes available)
+                if (fork->IsExpectedBlock(blockHash, blockHeight)) {
+                    isForkBlock = true;
+
+                    if (fork->HasExpectedHashes()) {
+                        std::cout << "[ProcessNewBlock] Block VERIFIED as fork member (height "
+                                  << blockHeight << ", hash matches expected)" << std::endl;
+                    } else {
+                        std::cout << "[ProcessNewBlock] Block in fork range (height "
+                                  << blockHeight << " in " << (forkPoint + 1) << "-" << forkTip
+                                  << ", no hash verification available)" << std::endl;
+                    }
+
+                    // Add block to fork tracking
+                    forkMgr.AddBlockToFork(block, blockHash, blockHeight);
+
+                    // Pre-validate this fork block (PoW + MIK) BEFORE normal processing
+                    ForkBlock* forkBlock = fork->GetBlockAtHeight(blockHeight);
+                    if (forkBlock && forkBlock->status == ForkBlockStatus::PENDING) {
+                        if (!forkMgr.PreValidateBlock(*forkBlock, db)) {
+                            std::cerr << "[ProcessNewBlock] Fork block FAILED pre-validation: "
+                                      << forkBlock->invalidReason << std::endl;
+
+                            // Cancel the fork - invalid block detected!
+                            int cancelForkPoint = fork->GetForkPointHeight();
+                            forkMgr.CancelFork("Block failed pre-validation: " + forkBlock->invalidReason);
+                            forkMgr.ClearInFlightState(ctx, cancelForkPoint);
+                            g_node_context.fork_detected.store(false);
+
+                            // Invalidate the header
+                            if (ctx.headers_manager) {
+                                ctx.headers_manager->InvalidateHeader(blockHash);
+                            }
+
+                            // Ban the peer for sending invalid block
+                            if (ctx.peer_manager && peer_id >= 0) {
+                                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_BLOCK_POW);
+                            }
+
+                            return BlockProcessResult::INVALID_POW;
+                        }
+                        std::cout << "[ProcessNewBlock] Fork block pre-validated successfully" << std::endl;
+                    }
+                }
+            }
+        }
+    }
+    // Note: Fork blocks continue through normal processing below to create CBlockIndex.
+    // We will skip ActivateBestChain in Phase 7 if isForkBlock is true.
 
     // =========================================================================
     // PHASE 2: PROOF-OF-WORK VALIDATION (with DFMP enforcement)
@@ -492,7 +573,9 @@ BlockProcessResult ProcessNewBlock(
         int blocks_behind = header_height - currentChainHeight;
 
         // Use async validation if we're more than 10 blocks behind (active IBD)
-        useAsyncValidation = (blocks_behind > 10);
+        // FORK BLOCK FIX: Never use async validation for fork blocks
+        // Fork blocks must go through Phase 7 for proper staging/activation
+        useAsyncValidation = (blocks_behind > 10) && !isForkBlock;
     }
 
     if (useAsyncValidation) {
@@ -517,6 +600,61 @@ BlockProcessResult ProcessNewBlock(
     // =========================================================================
     // PHASE 7: SYNCHRONOUS BLOCK ACTIVATION + MINING UPDATE + RELAY
     // =========================================================================
+
+    // FORK BLOCK HANDLING: Skip normal ActivateBestChain for fork blocks
+    // Fork blocks are staged and only activated via TriggerChainSwitch when all are ready
+    if (isForkBlock) {
+        ForkManager& forkMgr = ForkManager::GetInstance();
+        auto fork = forkMgr.GetActiveFork();
+
+        if (fork) {
+            std::cout << "[ProcessNewBlock] Fork block stored with index, checking if all blocks ready..." << std::endl;
+
+            // Check if all fork blocks are now received and pre-validated
+            if (fork->HasAllBlocks() && fork->AllBlocksPrevalidated()) {
+                std::cout << "[ProcessNewBlock] All fork blocks received and pre-validated!" << std::endl;
+                std::cout << "[ProcessNewBlock] Triggering chain switch via ActivateBestChain..." << std::endl;
+
+                // Trigger chain switch - this uses ActivateBestChain with the fork tip
+                if (forkMgr.TriggerChainSwitch(ctx, db)) {
+                    std::cout << "[ProcessNewBlock] Fork chain switch SUCCESSFUL!" << std::endl;
+                    g_node_context.fork_detected.store(false);
+
+                    // Mark block as received
+                    if (ctx.block_fetcher) {
+                        ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                        ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
+                    }
+
+                    auto handler_end = std::chrono::steady_clock::now();
+                    auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
+                    std::cout << "[ProcessNewBlock] EXIT (fork switch) total=" << handler_ms << "ms" << std::endl;
+                    return BlockProcessResult::ACCEPTED;
+                } else {
+                    std::cerr << "[ProcessNewBlock] Fork chain switch FAILED!" << std::endl;
+                    // Fork manager already cleared state
+                    return BlockProcessResult::VALIDATION_ERROR;
+                }
+            } else {
+                // Not all blocks ready yet - skip ActivateBestChain
+                std::cout << "[ProcessNewBlock] Fork block staged, waiting for more blocks..."
+                          << " (stats: " << fork->GetStats() << ")" << std::endl;
+
+                // Mark block as received
+                if (ctx.block_fetcher) {
+                    ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                    ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
+                }
+
+                auto handler_end = std::chrono::steady_clock::now();
+                auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
+                std::cout << "[ProcessNewBlock] EXIT (fork staging) total=" << handler_ms << "ms" << std::endl;
+                return BlockProcessResult::ACCEPTED_ASYNC;
+            }
+        }
+    }
+
+    // Normal block processing (non-fork blocks)
     std::cout << "[ProcessNewBlock] Calling ActivateBestChain synchronously..." << std::endl;
     std::cout.flush();
     auto activate_start = std::chrono::steady_clock::now();

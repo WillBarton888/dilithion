@@ -13,6 +13,7 @@
 #include <util/logging.h>  // For g_verbose flag
 #include <node/genesis.h>
 #include <node/ibd_coordinator.h>  // Phase 1: IsSynced() check
+#include <node/fork_manager.h>     // Validate-before-disconnect fork handling
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <api/metrics.h>  // Fork detection metrics
@@ -1166,6 +1167,66 @@ std::string CHeadersManager::GetForkDebugInfo() const
     return m_chainTipsTracker.GetDebugInfo();
 }
 
+bool CHeadersManager::GetParentHash(const uint256& hash, uint256& parentHash) const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    auto it = mapHeaders.find(hash);
+    if (it == mapHeaders.end()) {
+        return false;
+    }
+
+    parentHash = it->second.hashPrevBlock;
+    return !parentHash.IsNull();
+}
+
+bool CHeadersManager::BuildForkAncestryHashes(const uint256& tipHash, int32_t forkPointHeight,
+                                               std::map<int32_t, uint256>& ancestryHashes) const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    ancestryHashes.clear();
+
+    // Walk from tip back to fork point
+    uint256 currentHash = tipHash;
+
+    while (!currentHash.IsNull()) {
+        auto it = mapHeaders.find(currentHash);
+        if (it == mapHeaders.end()) {
+            // Hash not found - broken chain
+            std::cerr << "[HeadersManager] BuildForkAncestryHashes: hash not found "
+                      << currentHash.GetHex().substr(0, 16) << "..." << std::endl;
+            return false;
+        }
+
+        int32_t height = it->second.height;
+
+        // Stop if we've reached or passed the fork point
+        if (height <= forkPointHeight) {
+            break;
+        }
+
+        // Add this hash to the ancestry map
+        ancestryHashes[height] = currentHash;
+
+        // Move to parent
+        currentHash = it->second.hashPrevBlock;
+    }
+
+    if (ancestryHashes.empty()) {
+        std::cerr << "[HeadersManager] BuildForkAncestryHashes: no ancestry found "
+                  << "(tip=" << tipHash.GetHex().substr(0, 16)
+                  << ", forkPoint=" << forkPointHeight << ")" << std::endl;
+        return false;
+    }
+
+    std::cout << "[HeadersManager] BuildForkAncestryHashes: built " << ancestryHashes.size()
+              << " hashes from height " << forkPointHeight + 1
+              << " to " << ancestryHashes.rbegin()->first << std::endl;
+
+    return true;
+}
+
 size_t CHeadersManager::PruneOrphanedHeaders()
 {
     std::lock_guard<std::mutex> lock(cs_headers);
@@ -1373,6 +1434,24 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
         }
 
         InvalidateBestChainCache();
+
+        // VALIDATE-BEFORE-DISCONNECT: Cancel active fork if this header is part of it
+        // This ensures fork state is cleaned up when blocks fail validation
+        ForkManager& forkMgr = ForkManager::GetInstance();
+        if (forkMgr.HasActiveFork()) {
+            auto fork = forkMgr.GetActiveFork();
+            if (fork) {
+                // Check if the invalidated height falls within the fork range
+                int forkPoint = fork->GetForkPointHeight();
+                int forkTip = fork->GetExpectedTipHeight();
+                if (invalidHeight > forkPoint && invalidHeight <= forkTip) {
+                    std::cout << "[HeadersManager] Invalidated header is part of active fork, canceling fork" << std::endl;
+                    forkMgr.CancelFork("Header invalidated: " + hash.GetHex().substr(0, 16));
+                    forkMgr.ClearInFlightState(g_node_context, forkPoint);
+                    g_node_context.fork_detected.store(false);  // Clear fork flag
+                }
+            }
+        }
     } else {
         // Header not in map, just track hash as rejected
         m_rejectedHashes.insert(hash);

@@ -193,6 +193,7 @@ NET_SOURCES := src/net/protocol.cpp \
 NODE_SOURCES := src/node/block_index.cpp \
                 src/node/blockchain_storage.cpp \
                 src/node/block_processing.cpp \
+                src/node/fork_manager.cpp \
                 src/node/mempool.cpp \
                 src/node/genesis.cpp \
                 src/node/utxo_set.cpp \

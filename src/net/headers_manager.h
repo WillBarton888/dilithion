@@ -509,6 +509,30 @@ public:
     const CChainTipsTracker& GetChainTipsTracker() const { return m_chainTipsTracker; }
 
     /**
+     * @brief Build a map of storage hashes for a fork's ancestry
+     *
+     * Walks from tipHash down to (but not including) forkPointHeight,
+     * returning the storage hash at each height. Used for fork membership
+     * verification - blocks can check if their hash matches expected.
+     *
+     * @param tipHash       Storage hash of the fork tip (from competing tips)
+     * @param forkPointHeight Height where fork diverges (exclusive - not included)
+     * @param[out] ancestryHashes Map of height -> storage hash
+     * @return true if ancestry walk succeeded, false if hash not found or broken chain
+     */
+    bool BuildForkAncestryHashes(const uint256& tipHash, int32_t forkPointHeight,
+                                  std::map<int32_t, uint256>& ancestryHashes) const;
+
+    /**
+     * @brief Get the parent hash of a header (storage hash domain)
+     *
+     * @param hash Storage hash of the header
+     * @param[out] parentHash Storage hash of the parent
+     * @return true if header found and has a parent, false otherwise
+     */
+    bool GetParentHash(const uint256& hash, uint256& parentHash) const;
+
+    /**
      * @brief Prune orphaned headers to bound memory usage
      *
      * Removes headers that are:

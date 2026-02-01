@@ -30,6 +30,7 @@
 #include <net/peers.h>
 #include <net/protocol.h>
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
+#include <node/fork_manager.h>  // Validate-before-disconnect fork handling
 #include <net/orphan_manager.h>  // IBD STUCK FIX #3: Periodic orphan scan
 #include <util/logging.h>
 #include <util/bench.h>  // Performance: Benchmarking
@@ -567,9 +568,100 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     return;  // Don't proceed with downloads until reindex
                 }
 
-                HandleForkScenario(fork_point, chain_height);
+                // VALIDATE-BEFORE-DISCONNECT: Use ForkManager staging approach
+                // Instead of immediately disconnecting (HandleForkScenario), we:
+                // 1. Create a ForkCandidate to stage incoming blocks
+                // 2. Pre-validate all fork blocks (PoW + MIK) before any chain changes
+                // 3. Only switch chains via ActivateBestChain after all blocks validated
+
+                ForkManager& forkMgr = ForkManager::GetInstance();
+
+                // Check if we already have an active fork
+                if (forkMgr.HasActiveFork()) {
+                    if (forkMgr.CheckTimeout()) {
+                        std::cout << "[FORK-DETECT] Existing fork timed out, canceling and starting new" << std::endl;
+                        forkMgr.CancelFork("Timeout - 60s without blocks");
+                        forkMgr.ClearInFlightState(m_node_context, fork_point);
+                        // Clear fork detection flags so node can continue normally
+                        m_fork_detected.store(false);
+                        g_node_context.fork_detected.store(false);
+                        m_fork_point.store(-1);
+                    } else {
+                        std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;
+                        std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
+                        return;
+                    }
+                }
+
+                // Get the expected fork tip height from headers manager
+                int headerTipHeight = header_height;
+                if (m_node_context.headers_manager) {
+                    headerTipHeight = m_node_context.headers_manager->GetBestHeight();
+                }
+
+                // Get fork tip from competing tips (storage hash domain)
+                // This is critical: we need storage hashes, not RandomX hashes
+                uint256 forkTipHash;
+                std::map<int32_t, uint256> expectedHashes;
+
+                if (m_node_context.headers_manager) {
+                    const auto& tipsTracker = m_node_context.headers_manager->GetChainTipsTracker();
+                    auto competingTips = tipsTracker.GetCompetingTips();
+
+                    // Find a competing tip that's not on our current chain
+                    // The best tip should be the fork tip we want
+                    for (const auto& tip : competingTips) {
+                        if (tip.height == headerTipHeight) {
+                            forkTipHash = tip.hash;  // Storage hash from tracker
+                            std::cout << "[FORK-DETECT] Found fork tip from competing tips: "
+                                      << forkTipHash.GetHex().substr(0, 16)
+                                      << "... at height " << tip.height << std::endl;
+                            break;
+                        }
+                    }
+
+                    // Build ancestry hashes if we found a fork tip
+                    if (!forkTipHash.IsNull()) {
+                        if (!m_node_context.headers_manager->BuildForkAncestryHashes(
+                                forkTipHash, fork_point, expectedHashes)) {
+                            std::cerr << "[FORK-DETECT] Failed to build fork ancestry, proceeding with height-only checks" << std::endl;
+                            // Continue with empty expectedHashes - will fall back to height-only checks
+                        }
+                    } else {
+                        // Fallback: use RandomX hash (less reliable but better than nothing)
+                        forkTipHash = m_node_context.headers_manager->GetRandomXHashAtHeight(headerTipHeight);
+                        std::cerr << "[FORK-DETECT] Warning: Could not find fork tip in competing tips, using RandomX hash" << std::endl;
+                    }
+                }
+
+                std::cout << "[FORK-DETECT] Creating fork staging candidate..." << std::endl;
+                std::cout << "[FORK-DETECT] Fork point=" << fork_point
+                          << " chain=" << chain_height
+                          << " expected_tip=" << headerTipHeight
+                          << " expected_hashes=" << expectedHashes.size() << std::endl;
+
+                // Create fork candidate for staging with expected hashes
+                auto forkCandidate = forkMgr.CreateForkCandidate(
+                    forkTipHash,
+                    fork_point,
+                    headerTipHeight,
+                    expectedHashes
+                );
+
+                if (forkCandidate) {
+                    // Set fork detection flags (for mining pause, etc.)
+                    m_fork_detected.store(true);
+                    g_node_context.fork_detected.store(true);
+                    m_fork_point.store(fork_point);
+
+                    std::cout << "[FORK-DETECT] Fork candidate created, blocks will be staged for pre-validation" << std::endl;
+                    std::cout << "[FORK-DETECT] Original chain remains ACTIVE until fork is fully validated" << std::endl;
+                } else {
+                    std::cerr << "[FORK-DETECT] Failed to create fork candidate" << std::endl;
+                }
+
                 std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
-                return;  // Let next tick handle downloads after fork recovery
+                return;  // Let next tick handle downloads
             } else {
                 std::cout << "[FORK-DETECT] Could not find fork point (fork_point=" << fork_point << ")" << std::endl;
                 std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
@@ -643,19 +735,113 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
                     }
 
-                    // Only disconnect if header chain has MORE work
+                    // Only proceed if header chain has MORE work
                     if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
-                        std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT disconnecting" << std::endl;
+                        std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT switching" << std::endl;
                         std::cout << "[FORK-DETECT] Local work=" << localChainWork.GetHex().substr(0, 16)
                                   << " Header work=" << headerChainWork.GetHex().substr(0, 16) << std::endl;
                         m_fork_stall_cycles.store(0);  // Reset stall counter
                     } else {
-                        std::cout << "[FORK-DETECT] Fork detected! Local chain diverged at height " << fork_point
-                                  << " (chain=" << chain_height << ", fork_depth=" << fork_depth << ")" << std::endl;
-                        HandleForkScenario(fork_point, chain_height);
+                        // VALIDATE-BEFORE-DISCONNECT: Use ForkManager staging approach
+                        // Instead of immediately disconnecting (HandleForkScenario), we:
+                        // 1. Create a ForkCandidate to stage incoming blocks
+                        // 2. Pre-validate all fork blocks (PoW + MIK) before any chain changes
+                        // 3. Only switch chains via ActivateBestChain after all blocks validated
+                        // This prevents losing the valid chain if fork blocks fail MIK validation.
+
+                        ForkManager& forkMgr = ForkManager::GetInstance();
+
+                        // Check if we already have an active fork
+                        if (forkMgr.HasActiveFork()) {
+                            // Check for timeout on existing fork
+                            if (forkMgr.CheckTimeout()) {
+                                std::cout << "[FORK-DETECT] Existing fork timed out, canceling and starting new" << std::endl;
+                                forkMgr.CancelFork("Timeout - 60s without blocks");
+                                forkMgr.ClearInFlightState(m_node_context, fork_point);
+                                // Clear fork detection flags so node can continue normally
+                                m_fork_detected.store(false);
+                                g_node_context.fork_detected.store(false);
+                                m_fork_point.store(-1);
+                            } else {
+                                std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;
+                                m_fork_stall_cycles.store(0);
+                                // Let block processing continue - blocks will be routed to ForkManager
+                                // Skip creating a new fork
+                                return;
+                            }
+                        }
+
+                        // Get the expected fork tip height from headers manager
+                        int headerTipHeight = header_height;
+                        if (m_node_context.headers_manager) {
+                            headerTipHeight = m_node_context.headers_manager->GetBestHeight();
+                        }
+
+                        // Get fork tip from competing tips (storage hash domain)
+                        uint256 forkTipHash;
+                        std::map<int32_t, uint256> expectedHashes;
+
+                        if (m_node_context.headers_manager) {
+                            const auto& tipsTracker = m_node_context.headers_manager->GetChainTipsTracker();
+                            auto competingTips = tipsTracker.GetCompetingTips();
+
+                            // Find a competing tip at the expected height
+                            for (const auto& tip : competingTips) {
+                                if (tip.height == headerTipHeight) {
+                                    forkTipHash = tip.hash;  // Storage hash from tracker
+                                    std::cout << "[FORK-DETECT] Found fork tip from competing tips: "
+                                              << forkTipHash.GetHex().substr(0, 16)
+                                              << "... at height " << tip.height << std::endl;
+                                    break;
+                                }
+                            }
+
+                            // Build ancestry hashes if we found a fork tip
+                            if (!forkTipHash.IsNull()) {
+                                if (!m_node_context.headers_manager->BuildForkAncestryHashes(
+                                        forkTipHash, fork_point, expectedHashes)) {
+                                    std::cerr << "[FORK-DETECT] Failed to build fork ancestry" << std::endl;
+                                }
+                            } else {
+                                // Fallback
+                                forkTipHash = m_node_context.headers_manager->GetRandomXHashAtHeight(headerTipHeight);
+                                std::cerr << "[FORK-DETECT] Warning: Using RandomX hash fallback" << std::endl;
+                            }
+                        }
+
+                        std::cout << "[FORK-DETECT] Fork detected! Creating staging candidate..." << std::endl;
+                        std::cout << "[FORK-DETECT] Fork point=" << fork_point
+                                  << " chain=" << chain_height
+                                  << " expected_tip=" << headerTipHeight
+                                  << " expected_hashes=" << expectedHashes.size() << std::endl;
+
+                        // Create fork candidate for staging with expected hashes
+                        auto forkCandidate = forkMgr.CreateForkCandidate(
+                            forkTipHash,
+                            fork_point,
+                            headerTipHeight,
+                            expectedHashes
+                        );
+
+                        if (forkCandidate) {
+                            // Set fork detection flags (for mining pause, etc.)
+                            m_fork_detected.store(true);
+                            g_node_context.fork_detected.store(true);
+                            m_fork_point.store(fork_point);
+
+                            std::cout << "[FORK-DETECT] Fork candidate created, blocks will be staged for pre-validation" << std::endl;
+                            std::cout << "[FORK-DETECT] Original chain remains ACTIVE until fork is fully validated" << std::endl;
+
+                            // Note: We do NOT call HandleForkScenario or disconnect any blocks!
+                            // Blocks will be routed to ForkManager in ProcessNewBlock.
+                            // When all blocks are received and pre-validated, TriggerChainSwitch
+                            // will call ActivateBestChain to safely switch chains.
+                        } else {
+                            std::cerr << "[FORK-DETECT] Failed to create fork candidate" << std::endl;
+                        }
+
                         m_fork_stall_cycles.store(0);
                         m_last_checked_chain_height = -1;  // Reset to allow fresh tracking
-                        // Continue with normal IBD - window has been reset to fork point
                     }
                 } else if (fork_point == 0) {
                     // No common ancestor found - unusual, just reset counter
