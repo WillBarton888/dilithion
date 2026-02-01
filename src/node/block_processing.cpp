@@ -255,11 +255,22 @@ BlockProcessResult ProcessNewBlock(
             g_node_context.headers_chain_invalid.store(true);
             std::cout << "[ProcessNewBlock] Headers chain invalid - will resync from different peer" << std::endl;
 
-            // BUG #250 FIX: Reduced from 100 to 20 points.
-            // MIK failures during forks are usually chain mismatch, not malicious.
-            // 100 = instant ban (prevents recovery), 20 = ban after 5 failures.
-            if (ctx.peer_manager && peer_id >= 0) {
-                ctx.peer_manager->Misbehaving(peer_id, 20, MisbehaviorType::INVALID_BLOCK_POW);
+            // BUG #246 FIX: NO misbehavior for MIK failures.
+            // MIK failures are almost always chain mismatch (peer on different fork),
+            // not malicious behavior. Banning peers for being on a different chain
+            // causes network partitioning and prevents fork resolution.
+            // The block is already rejected - that's sufficient protection.
+            // if (ctx.peer_manager && peer_id >= 0) {
+            //     ctx.peer_manager->Misbehaving(peer_id, 20, MisbehaviorType::INVALID_BLOCK_POW);
+            // }
+
+            // BUG #246b FIX: Mark block as received even when validation fails.
+            // Without this, failed blocks stay in-flight forever, causing
+            // "all peers at capacity" stalls. We still reject the block, but
+            // we clear it from tracking so new blocks can be requested.
+            if (ctx.block_fetcher) {
+                ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                ctx.block_fetcher->OnBlockReceived(peer_id, blockHeight);
             }
 
             return BlockProcessResult::INVALID_POW;
