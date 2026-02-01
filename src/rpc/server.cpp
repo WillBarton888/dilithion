@@ -32,6 +32,7 @@
 #include <net/protocol.h>  // For NetProtocol::CAddress
 #include <net/connman.h>  // Phase 5: For CConnman methods
 #include <net/banman.h>   // For CBanManager
+#include <net/block_tracker.h>  // For block tracker diagnostics
 
 #include <sstream>
 #include <cstring>
@@ -166,6 +167,7 @@ CRPCServer::CRPCServer(uint16_t port)
 
     // Blockchain query
     m_handlers["getblockchaininfo"] = [this](const std::string& p) { return RPC_GetBlockchainInfo(p); };
+    m_handlers["getblocktrackerinfo"] = [this](const std::string& p) { return RPC_GetBlockTrackerInfo(p); };
     m_handlers["getblock"] = [this](const std::string& p) { return RPC_GetBlock(p); };
     m_handlers["getblockhash"] = [this](const std::string& p) { return RPC_GetBlockHash(p); };
     m_handlers["gettxout"] = [this](const std::string& p) { return RPC_GetTxOut(p); };
@@ -2543,6 +2545,67 @@ std::string CRPCServer::RPC_GetBlockchainInfo(const std::string& params) {
     oss << "\"difficulty\":" << std::fixed << std::setprecision(8) << difficulty << ",";
     oss << "\"mediantime\":" << mediantime << ",";
     oss << "\"chainwork\":\"" << m_chainstate->GetChainWork().GetHex() << "\"";
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetBlockTrackerInfo(const std::string& params) {
+    // Diagnostic RPC to show block tracker state for debugging sync issues
+    extern NodeContext g_node_context;
+
+    std::ostringstream oss;
+    oss << "{";
+
+    if (!g_node_context.block_tracker) {
+        oss << "\"error\":\"block tracker not initialized\"";
+        oss << "}";
+        return oss.str();
+    }
+
+    // Get total in-flight
+    int total_in_flight = g_node_context.block_tracker->GetTotalInFlight();
+    oss << "\"total_in_flight\":" << total_in_flight << ",";
+
+    // Get tracker status
+    std::string status = g_node_context.block_tracker->GetStatus();
+    oss << "\"status\":\"" << status << "\",";
+
+    // Get tracked heights (up to 50 for display)
+    oss << "\"tracked_heights\":[";
+
+    // We need to iterate through the heights - let's use CheckTimeouts with 0 seconds
+    // to get all tracked blocks
+    auto all_tracked = g_node_context.block_tracker->CheckTimeouts(0);
+    bool first = true;
+    int count = 0;
+    for (const auto& [height, peer] : all_tracked) {
+        if (count >= 50) {
+            break;
+        }
+        if (!first) oss << ",";
+        first = false;
+        oss << "{\"height\":" << height << ",\"peer\":" << peer << "}";
+        count++;
+    }
+    oss << "],";
+
+    // Get per-peer counts
+    oss << "\"per_peer\":{";
+    if (g_node_context.peer_manager) {
+        auto peers = g_node_context.peer_manager->GetConnectedPeers();
+        bool first_peer = true;
+        for (const auto& peer : peers) {
+            if (!peer) continue;
+            int peer_count = g_node_context.block_tracker->GetPeerInFlightCount(peer->id);
+            if (peer_count > 0) {
+                if (!first_peer) oss << ",";
+                first_peer = false;
+                oss << "\"" << peer->id << "\":" << peer_count;
+            }
+        }
+    }
+    oss << "}";
+
     oss << "}";
     return oss.str();
 }

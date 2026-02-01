@@ -266,6 +266,7 @@ private:
 
     // Blockchain query methods
     std::string RPC_GetBlockchainInfo(const std::string& params);
+    std::string RPC_GetBlockTrackerInfo(const std::string& params);
     std::string RPC_GetBlock(const std::string& params);
     std::string RPC_GetBlockHash(const std::string& params);
     std::string RPC_GetTxOut(const std::string& params);
