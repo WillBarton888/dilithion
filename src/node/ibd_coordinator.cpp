@@ -1051,6 +1051,11 @@ bool CIbdCoordinator::FetchBlocks() {
         if (best_peer == -1 && m_headers_sync_peer != -1 && header_height > chain_height) {
             best_peer = m_headers_sync_peer;
             best_height = header_height;
+
+            // BUG FIX: Also update the peer's best_known_height so subsequent checks
+            // don't reselect based on stale start_height. The headers sync peer must
+            // have blocks up to header_height since they sent us those headers.
+            m_node_context.peer_manager->UpdatePeerBestKnownHeight(m_headers_sync_peer, header_height);
         }
 
         if (best_peer != -1) {
