@@ -646,8 +646,8 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
         int dfmpActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
-        // Only validate MIK for post-DFMP blocks
-        if (pindex->nHeight >= dfmpActivationHeight) {
+        // Only validate MIK for post-DFMP blocks (skip genesis - it predates any mining identity)
+        if (pindex->nHeight > 0 && pindex->nHeight >= dfmpActivationHeight) {
             if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, pindex->nHeight, dfmpActivationHeight)) {
                 std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
                           << " failed MIK validation at connection time" << std::endl;
