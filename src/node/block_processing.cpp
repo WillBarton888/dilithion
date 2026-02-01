@@ -228,10 +228,34 @@ BlockProcessResult ProcessNewBlock(
     // If pre-validation wasn't run (race condition), fall through to DFMP check.
     if (!skipPoWCheck && !forkPreValidated) {
         // Get block height for DFMP calculation
+        // BUG FIX: Use headers_manager for correct height when blocks arrive out of order
         int blockHeight = currentChainHeight + 1;  // Default: next block
         CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
         if (pParent) {
             blockHeight = pParent->nHeight + 1;
+        } else if (ctx.headers_manager) {
+            // Parent not in chain yet - get height from headers manager
+            int parentHeight = ctx.headers_manager->GetHeightForHash(block.hashPrevBlock);
+            if (parentHeight >= 0) {
+                blockHeight = parentHeight + 1;
+            }
+        }
+
+        // BUG #246c FIX: Skip DFMP validation for orphan blocks (parent not connected)
+        // MIK validation requires registration blocks to be processed first.
+        // If parent isn't in chainstate, this is an orphan - defer MIK validation
+        // until the orphan is reprocessed after its parent connects.
+        // Basic PoW check still runs; full MIK validation happens on reconnect.
+        bool isOrphanBlock = (!pParent && blockHeight > currentChainHeight + 1);
+        if (isOrphanBlock) {
+            // Orphan block - do basic PoW check only (no MIK/DFMP)
+            if (!CheckProofOfWork(blockHash, block.nBits)) {
+                std::cerr << "[ProcessNewBlock] ERROR: Orphan block has invalid basic PoW" << std::endl;
+                return BlockProcessResult::INVALID_POW;
+            }
+            std::cout << "[ProcessNewBlock] Orphan block at height " << blockHeight
+                      << " - deferring MIK validation until parent connects" << std::endl;
+            // Skip DFMP check - will run when orphan is reprocessed after parent connects
         }
 
         // Get DFMP activation height
@@ -239,7 +263,8 @@ BlockProcessResult ProcessNewBlock(
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
         // Use DFMP-aware PoW check (applies identity-based difficulty multipliers)
-        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
+        // Skip for orphan blocks - MIK validation deferred until parent connects
+        if (!isOrphanBlock && !CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
             std::cerr << "[ProcessNewBlock] ERROR: Block has invalid PoW (DFMP check failed)" << std::endl;
             std::cerr << "  Hash must be less than DFMP-adjusted target" << std::endl;
             g_metrics.RecordInvalidBlock();
