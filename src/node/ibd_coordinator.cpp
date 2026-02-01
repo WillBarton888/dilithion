@@ -1061,13 +1061,30 @@ bool CIbdCoordinator::FetchBlocks() {
         int best_peer = -1;
         int best_height = chain_height;
 
+        // BUG #249: Check if we have an active fork - if so, we need peers on the fork chain
+        ForkManager& forkMgr = ForkManager::GetInstance();
+        bool has_active_fork = forkMgr.HasActiveFork();
+
+        // BUG #249 DEBUG: Log available peers during fork
+        if (has_active_fork) {
+            std::cout << "[IBD-FORK] Selecting fork block peer (chain=" << chain_height << " peers=" << peers.size() << ")" << std::endl;
+        }
+
         for (const auto& peer : peers) {
             if (!peer) continue;
 
             int peer_height = peer->best_known_height;
             if (peer_height == 0) peer_height = peer->start_height;
 
+            // BUG #249 DEBUG: Log peer heights during fork
+            if (has_active_fork && peer_height > chain_height) {
+                std::cout << "[IBD-FORK]   peer=" << peer->id << " height=" << peer_height
+                          << " (best_known=" << peer->best_known_height << " start=" << peer->start_height << ")" << std::endl;
+            }
+
             // Skip headers sync peer in first pass - prefer other peers for block download
+            // BUG #249: During active fork, we MUST skip headers_sync_peer - they're on our chain
+            // and don't have fork blocks
             if (peer->id == m_headers_sync_peer) {
                 continue;
             }
@@ -1079,10 +1096,12 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // If no other peer found, use headers sync peer for blocks too
+        // BUG #249 FIX: During active fork, DON'T fall back to headers_sync_peer
+        // They're on our chain and don't have the fork blocks we need
         // BUG FIX: Use header_height from headers manager (authoritative) instead of
         // peer->best_known_height which may be stale due to async header processing.
         // The headers sync peer sent us headers up to header_height, so they have those blocks.
-        if (best_peer == -1 && m_headers_sync_peer != -1 && header_height > chain_height) {
+        if (best_peer == -1 && m_headers_sync_peer != -1 && header_height > chain_height && !has_active_fork) {
             best_peer = m_headers_sync_peer;
             best_height = header_height;
 
