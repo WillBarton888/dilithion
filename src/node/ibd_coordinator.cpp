@@ -54,6 +54,40 @@ void CIbdCoordinator::Tick() {
     // Phase 5.1: Update state machine
     UpdateState();
 
+    // BUG #248: Check if block validation signaled that we're syncing to a wrong chain.
+    // When blocks fail MIK validation, it means we got headers from a peer on a different
+    // chain. We need to switch to a different headers sync peer.
+    if (g_node_context.headers_chain_invalid.exchange(false)) {
+        std::cout << "[IBD] Headers chain invalid flag set - switching headers sync peer" << std::endl;
+
+        // Mark current sync peer as bad - they sent us headers leading to invalid blocks
+        if (m_headers_sync_peer != -1) {
+            std::cout << "[IBD] Marking peer " << m_headers_sync_peer << " as bad (sent invalid chain headers)" << std::endl;
+            m_headers_bad_peers.insert(m_headers_sync_peer);
+        }
+
+        // Clear headers above current chain height - they led to invalid blocks
+        int chain_height = m_chainstate.GetHeight();
+        if (m_node_context.headers_manager) {
+            // Get the hash at chain_height to use as preferred (matches our valid chain)
+            uint256 chainTipHash;
+            CBlockIndex* pTip = m_chainstate.GetTip();
+            if (pTip) {
+                chainTipHash = pTip->GetBlockHash();
+            }
+            m_node_context.headers_manager->ClearAboveHeight(chain_height, chainTipHash);
+        }
+
+        // Reset sync state and switch to a different peer
+        m_headers_sync_peer = -1;
+        m_headers_sync_peer_consecutive_stalls = 0;
+        m_initial_request_done = false;
+        m_headers_in_flight = false;
+
+        // SwitchHeadersSyncPeer will select a new peer (excluding bad peers) and request headers
+        SwitchHeadersSyncPeer();
+    }
+
     // Check if IBD components are available
     if (!m_node_context.headers_manager || !m_node_context.block_fetcher) {
         // IBD DEBUG: Log why we're returning early

@@ -249,6 +249,12 @@ BlockProcessResult ProcessNewBlock(
                 ctx.headers_manager->InvalidateHeader(blockHash);
             }
 
+            // BUG #248 FIX: Signal IBD coordinator to resync headers from a different peer.
+            // This block failed MIK validation, meaning we're syncing to a wrong chain.
+            // The IBD coordinator will see this flag and switch headers sync peers.
+            g_node_context.headers_chain_invalid.store(true);
+            std::cout << "[ProcessNewBlock] Headers chain invalid - will resync from different peer" << std::endl;
+
             // Ban peer for sending invalid block - immediate disconnect
             if (ctx.peer_manager && peer_id >= 0) {
                 ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_BLOCK_POW);

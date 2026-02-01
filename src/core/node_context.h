@@ -79,6 +79,7 @@ struct NodeContext {
     std::atomic<bool> new_block_found{false};
     std::atomic<bool> mining_enabled{false};
     std::atomic<bool> fork_detected{false};  // Fork handling: pause mining during fork resolution
+    std::atomic<bool> headers_chain_invalid{false};  // BUG #248: Signal to resync headers from different peer
 
     // BIP 152: Compact block reconstruction state
     // Maps block hash -> (sender_peer_id, partial_block)
