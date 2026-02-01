@@ -1168,7 +1168,20 @@ bool CIbdCoordinator::FetchBlocks() {
     std::vector<NetProtocol::CInv> getdata;
     getdata.reserve(blocks_to_request.size());
 
-    // DEBUG: Track heights around 243 to diagnose the issue
+    // BUG #247 FIX: During fork recovery, use fork_point as the lower bound
+    // instead of chain_height. This ensures block 1068 is requested when
+    // fork_point=1067 and chain_height=1068.
+    int effective_lower_bound = chain_height;
+    {
+        ForkManager& forkMgr = ForkManager::GetInstance();
+        if (forkMgr.HasActiveFork()) {
+            auto fork = forkMgr.GetActiveFork();
+            if (fork) {
+                effective_lower_bound = fork->GetForkPointHeight();
+            }
+        }
+    }
+
     for (int h : blocks_to_request) {
         // Re-check capacity before each request
         int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
@@ -1177,25 +1190,35 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         // Validate height range
-        if (h > header_height || h <= chain_height || h > peer_height) {
-            if (h >= 240 && h <= 250) {
-                std::cout << "[DEBUG-IBD] height=" << h << " SKIPPED by range check"
-                          << " (h>header=" << (h > header_height)
-                          << " h<=chain=" << (h <= chain_height)
-                          << " h>peer=" << (h > peer_height) << ")" << std::endl;
-            }
+        // BUG #247 FIX: Use effective_lower_bound (fork_point during fork, chain_height otherwise)
+        if (h > header_height || h <= effective_lower_bound || h > peer_height) {
             continue;
         }
 
-        uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
-        if (hash.IsNull()) {
-            if (h >= 240 && h <= 250) {
-                std::cout << "[DEBUG-IBD] height=" << h << " HASH IS NULL from headers_manager" << std::endl;
+        // BUG #247 FIX: During fork recovery, use the ForkCandidate's expected hashes
+        // to ensure we request the FORK chain's blocks, not our (wrong) chain's blocks.
+        uint256 hash;
+        {
+            ForkManager& forkMgr = ForkManager::GetInstance();
+            if (forkMgr.HasActiveFork()) {
+                auto fork = forkMgr.GetActiveFork();
+                if (fork) {
+                    hash = fork->GetExpectedHashAtHeight(h);
+                    if (!hash.IsNull()) {
+                        std::cout << "[IBD] Fork recovery: requesting block " << h
+                                  << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                    }
+                }
             }
-            continue;
         }
-        if (h >= 240 && h <= 250) {
-            std::cout << "[DEBUG-IBD] height=" << h << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+
+        // Fall back to headers manager if not in fork mode or no expected hash
+        if (hash.IsNull()) {
+            hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+        }
+
+        if (hash.IsNull()) {
+            continue;
         }
 
         // Check if already connected
