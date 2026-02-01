@@ -11,6 +11,7 @@
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <net/peers.h>
+#include <net/banman.h>
 #include <net/block_fetcher.h>
 #include <net/block_tracker.h>
 #include <net/orphan_manager.h>
@@ -159,9 +160,9 @@ BlockProcessResult ProcessNewBlock(
                 ctx.headers_manager->InvalidateHeader(blockHash);
             }
 
-            // Ban peer for sending invalid block
+            // Ban peer for sending invalid block - immediate disconnect
             if (ctx.peer_manager && peer_id >= 0) {
-                ctx.peer_manager->Misbehaving(peer_id, 100);
+                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_BLOCK_POW);
             }
 
             return BlockProcessResult::INVALID_POW;

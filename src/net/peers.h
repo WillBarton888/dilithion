@@ -236,7 +236,7 @@ private:
 public:
     // DoS protection thresholds (public so CPeer can access)
     static const int BAN_THRESHOLD = 100;
-    static const int64_t DEFAULT_BAN_TIME = 24 * 60 * 60;  // 24 hours
+    static const int64_t DEFAULT_BAN_TIME = 1 * 60 * 60;  // 1 hour (temporary during DFMP transition)
 
     // Constructor takes data directory for peers.dat persistence
     explicit CPeerManager(const std::string& datadir = "");

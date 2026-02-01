@@ -227,7 +227,7 @@ public:
 
     // Limits
     static const size_t MAX_BANNED_IPS = 10000;
-    static const int64_t DEFAULT_BAN_TIME = 24 * 60 * 60;  // 24 hours
+    static const int64_t DEFAULT_BAN_TIME = 1 * 60 * 60;  // 1 hour (temporary during DFMP transition)
 
 private:
     mutable std::mutex cs_banned;

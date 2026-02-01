@@ -397,6 +397,21 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
         std::string ip = peer->addr.ToStringIP();
         banman.Ban(ip, DEFAULT_BAN_TIME, BanReason::NodeMisbehaving,
                    type, peer->misbehavior_score);
+
+        // BUG #246 FIX: Immediately disconnect banned peer
+        // Mark the CNode for disconnect so CConnman removes it on next iteration
+        {
+            std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
+            auto it = node_refs.find(peer_id);
+            if (it != node_refs.end() && it->second) {
+                it->second->MarkDisconnect();
+            }
+        }
+
+        std::cout << "[BAN] Peer " << peer_id << " (" << ip
+                  << ") banned for " << (DEFAULT_BAN_TIME / 3600) << "h - "
+                  << MisbehaviorTypeToString(type)
+                  << " (score: " << peer->misbehavior_score << ")" << std::endl;
     }
 }
 
