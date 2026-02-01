@@ -173,6 +173,26 @@ public:
      */
     uint256 GetExpectedHashAtHeight(int32_t height) const;
 
+    /**
+     * @brief Add a MIK identity registration to the temporary fork cache
+     *
+     * Called when pre-validating a registration block. Later reference blocks
+     * can look up this identity even though it's not in the main database.
+     *
+     * @param identity The 20-byte identity
+     * @param pubkey   The public key for this identity
+     */
+    void AddForkIdentity(const std::vector<uint8_t>& identity, const std::vector<uint8_t>& pubkey);
+
+    /**
+     * @brief Look up a MIK identity in the temporary fork cache
+     *
+     * @param identity The 20-byte identity to look up
+     * @param pubkey   Output: the public key if found
+     * @return true if identity was found in fork cache
+     */
+    bool GetForkIdentity(const std::vector<uint8_t>& identity, std::vector<uint8_t>& pubkey) const;
+
 private:
     uint256 m_forkId;                  // Storage hash of fork tip (unique identifier)
     int32_t m_forkPointHeight;         // Height where fork diverges
@@ -182,6 +202,10 @@ private:
     std::map<int32_t, ForkBlock> m_blocks;  // height -> ForkBlock
 
     std::map<int32_t, uint256> m_expectedHashes;  // height -> expected storage hash
+
+    // Temporary identity cache for fork pre-validation
+    // Captures MIK registrations from earlier fork blocks so later blocks can reference them
+    std::map<std::vector<uint8_t>, std::vector<uint8_t>> m_forkIdentities;  // identity bytes -> pubkey
 
     std::atomic<bool> m_validationFailed{false};  // Any block failed?
 

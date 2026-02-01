@@ -159,6 +159,27 @@ void ForkCandidate::TouchLastBlockTime()
     m_lastBlockTime = std::chrono::steady_clock::now();
 }
 
+void ForkCandidate::AddForkIdentity(const std::vector<uint8_t>& identity, const std::vector<uint8_t>& pubkey)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_forkIdentities[identity] = pubkey;
+    std::cout << "[ForkCandidate] Cached fork identity: "
+              << (identity.size() >= 8 ?
+                  (std::to_string(identity[0]) + std::to_string(identity[1]) + "...") : "?")
+              << std::endl;
+}
+
+bool ForkCandidate::GetForkIdentity(const std::vector<uint8_t>& identity, std::vector<uint8_t>& pubkey) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_forkIdentities.find(identity);
+    if (it != m_forkIdentities.end()) {
+        pubkey = it->second;
+        return true;
+    }
+    return false;
+}
+
 std::vector<std::pair<int32_t, ForkBlock*>> ForkCandidate::GetBlocksInOrder()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -334,8 +355,9 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
 
     forkBlock.status = ForkBlockStatus::POW_VALID;
 
-    // Step 3: Validate MIK/DFMP
-    if (!ValidateMIK(forkBlock.block, forkBlock.height, db)) {
+    // Step 3: Validate MIK/DFMP (using fork's temporary identity cache)
+    ForkCandidate* fork = m_activeFork.get();
+    if (!ValidateMIK(forkBlock.block, forkBlock.height, fork)) {
         forkBlock.status = ForkBlockStatus::INVALID;
         forkBlock.invalidReason = "Invalid MIK signature";
         std::cerr << "[ForkManager] Block " << forkBlock.height << " failed MIK check" << std::endl;
@@ -354,7 +376,7 @@ bool ForkManager::ValidatePoW(const CBlock& block, const uint256& hash)
     return CheckProofOfWork(hash, block.nBits);
 }
 
-bool ForkManager::ValidateMIK(const CBlock& block, int32_t height, CBlockchainDB& db)
+bool ForkManager::ValidateMIK(const CBlock& block, int32_t height, ForkCandidate* fork)
 {
     // Get DFMP activation height
     int dfmpActivationHeight = Dilithion::g_chainParams ?
@@ -370,9 +392,10 @@ bool ForkManager::ValidateMIK(const CBlock& block, int32_t height, CBlockchainDB
     // We must ALWAYS validate MIK for fork blocks to catch invalid miners.
     //
     // This implements the "Hybrid Approach" from the plan:
-    // 1. Try identity database lookup first
-    // 2. If found in DB -> validate signature using DB pubkey
-    // 3. If NOT found in DB:
+    // 1. Check fork's temporary identity cache first (for registrations from earlier fork blocks)
+    // 2. Then try main identity database lookup
+    // 3. If found -> validate signature using found pubkey
+    // 4. If NOT found anywhere:
     //    - If block has embedded pubkey (registration) -> validate using embedded pubkey
     //    - If block does NOT have embedded pubkey -> REJECT as invalid
 
@@ -421,24 +444,42 @@ bool ForkManager::ValidateMIK(const CBlock& block, int32_t height, CBlockchainDB
 
         identity = mikData.identity;
         std::cout << "[ForkManager] Block " << height << ": MIK registration - validating embedded pubkey" << std::endl;
+
+        // Add this registration to the fork's temporary identity cache
+        // so later fork blocks can reference this identity
+        if (fork) {
+            std::vector<uint8_t> identityBytes(identity.data, identity.data + 20);
+            fork->AddForkIdentity(identityBytes, pubkey);
+        }
     } else {
-        // Reference: look up stored pubkey from identity database
+        // Reference: look up stored pubkey
         identity = mikData.identity;
+        std::vector<uint8_t> identityBytes(identity.data, identity.data + 20);
+        bool foundInForkCache = false;
 
-        if (DFMP::g_identityDb == nullptr) {
-            std::cerr << "[ForkManager] Block " << height << ": Identity database not initialized" << std::endl;
-            return false;
+        // Step 1: Check fork's temporary identity cache first
+        // (for registrations from earlier fork blocks that aren't in the main DB yet)
+        if (fork && fork->GetForkIdentity(identityBytes, pubkey)) {
+            foundInForkCache = true;
+            std::cout << "[ForkManager] Block " << height << ": MIK reference - found pubkey in fork cache" << std::endl;
         }
 
-        if (!DFMP::g_identityDb->GetMIKPubKey(identity, pubkey)) {
-            // Unknown identity AND no embedded pubkey - REJECT
-            // This is the key fix: unknown identities MUST provide embedded pubkey
-            std::cerr << "[ForkManager] Block " << height << ": Unknown MIK identity "
-                      << identity.GetHex().substr(0, 16) << "... (no registration found, no embedded pubkey)" << std::endl;
-            return false;
-        }
+        // Step 2: If not in fork cache, check main identity database
+        if (!foundInForkCache) {
+            if (DFMP::g_identityDb == nullptr) {
+                std::cerr << "[ForkManager] Block " << height << ": Identity database not initialized" << std::endl;
+                return false;
+            }
 
-        std::cout << "[ForkManager] Block " << height << ": MIK reference - found pubkey in DB" << std::endl;
+            if (!DFMP::g_identityDb->GetMIKPubKey(identity, pubkey)) {
+                // Unknown identity in both fork cache AND main DB - REJECT
+                std::cerr << "[ForkManager] Block " << height << ": Unknown MIK identity "
+                          << identity.GetHex().substr(0, 16) << "... (not in fork cache or main DB)" << std::endl;
+                return false;
+            }
+
+            std::cout << "[ForkManager] Block " << height << ": MIK reference - found pubkey in main DB" << std::endl;
+        }
     }
 
     // Verify MIK signature

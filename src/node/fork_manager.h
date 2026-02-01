@@ -184,7 +184,7 @@ private:
 
     // Validation helpers
     bool ValidatePoW(const CBlock& block, const uint256& hash);
-    bool ValidateMIK(const CBlock& block, int32_t height, CBlockchainDB& db);
+    bool ValidateMIK(const CBlock& block, int32_t height, ForkCandidate* fork);
     bool ValidateBlockStructure(const CBlock& block);
 };
 
