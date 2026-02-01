@@ -5,6 +5,7 @@
 #include <consensus/validation.h>  // DFMP: For DeserializeBlockTransactions
 #include <node/block_index.h>
 #include <core/chainparams.h>
+#include <core/node_context.h>  // For g_node_context.fork_detected
 #include <util/time.h>
 #include <dfmp/dfmp.h>
 #include <dfmp/identity_db.h>
@@ -240,11 +241,19 @@ bool CheckProofOfWorkDFMP(
 
         identity = mikData.identity;
 
-        // Note: Identity registration happens ONLY in block connect callback (dilithion-node.cpp).
-        // We do NOT write to the global identity DB during validation.
-        // - Fork blocks use ForkManager's staging cache (m_forkIdentities)
-        // - Normal blocks register via RegisterBlockConnectCallback when connected
-        // This ensures identity DB stays consistent with chain state.
+        // PRE-REGISTER: Store identity during validation for all blocks.
+        // This allows subsequent blocks in the same IBD batch to find this identity.
+        // Registration blocks are self-validating:
+        // - Pubkey is embedded in the block
+        // - Identity = SHA3(pubkey)[:20] is verified above
+        // - Signature is verified below
+        // So pre-registration is safe regardless of fork_detected state.
+        // If block ends up on orphaned chain, identity can be cleaned up on reorg.
+        if (DFMP::g_identityDb != nullptr && !DFMP::g_identityDb->HasMIKPubKey(identity)) {
+            DFMP::g_identityDb->SetMIKPubKey(identity, pubkey);
+            std::cout << "[DFMP v2.0] Block " << height << ": Pre-registered MIK identity "
+                      << identity.GetHex().substr(0, 16) << "... during validation" << std::endl;
+        }
     } else {
         // Reference: look up stored pubkey from identity database
         identity = mikData.identity;
