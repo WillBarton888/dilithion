@@ -731,7 +731,8 @@ bool CIbdCoordinator::FetchBlocks() {
     // Check if current block sync peer is still valid AND has blocks we need
     if (m_blocks_sync_peer != -1) {
         auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
-        if (!peer) {
+        // BUG FIX: Also check IsConnected() - GetPeer returns stale objects
+        if (!peer || !peer->IsConnected()) {
             std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer << " disconnected" << std::endl;
             // BUG FIX: Clear in-flight blocks from disconnected peer
             if (g_node_context.block_tracker) {
@@ -854,7 +855,8 @@ bool CIbdCoordinator::FetchBlocks() {
 
     // ============ REQUEST BLOCKS FROM SINGLE PEER ============
     auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
-    if (!peer) {
+    // BUG FIX: Also check IsConnected() - GetPeer returns stale objects
+    if (!peer || !peer->IsConnected()) {
         // BUG FIX: Clear in-flight blocks from disconnected peer
         if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
             auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
