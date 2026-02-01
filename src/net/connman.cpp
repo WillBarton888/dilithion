@@ -474,7 +474,12 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
         // FIX: Register BEFORE adding to m_nodes to prevent race condition
-        m_peer_manager->RegisterNode(node_id, pnode, addr, false);
+        // BUG #148 ROOT CAUSE FIX: Check return value (banned IP check)
+        if (!m_peer_manager->RegisterNode(node_id, pnode, addr, false)) {
+            LogPrintf(NET, WARN, "[CConnman] Not connecting to banned IP %s\n", ip_str.c_str());
+            // node destructor closes socket
+            return nullptr;
+        }
         m_nodes.push_back(std::move(node));
     }
 
@@ -582,7 +587,12 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
         // FIX: Register BEFORE adding to m_nodes to prevent race condition
-        m_peer_manager->RegisterNode(node_id, pnode, addr, true);
+        // BUG #148 ROOT CAUSE FIX: Check return value (banned IP check)
+        if (!m_peer_manager->RegisterNode(node_id, pnode, addr, true)) {
+            LogPrintf(NET, WARN, "[CConnman] Rejecting banned inbound from %s\n", ip_str.c_str());
+            // node destructor closes socket
+            return false;
+        }
         m_nodes.push_back(std::move(node));
     }
 
@@ -1191,9 +1201,17 @@ void CConnman::SocketHandler() {
                 // FIX: Register with CPeerManager BEFORE adding to m_nodes
                 // This prevents race condition where VERSION handler calls AddPeerWithId
                 // before RegisterNode populates node_refs
-                m_peer_manager->RegisterNode(node_id, pnode, addr, true);
+                //
+                // BUG #148 ROOT CAUSE FIX: Check return value!
+                // If RegisterNode returns false (banned IP), do NOT add to m_nodes
+                // Otherwise GetNode() will return nullptr during handshake
+                if (!m_peer_manager->RegisterNode(node_id, pnode, addr, true)) {
+                    LogPrintf(NET, WARN, "[CConnman] Rejecting banned inbound from %s\n", ip_str);
+                    // Node destructor will close socket
+                    continue;  // Skip to next pending connection
+                }
 
-                // Not a duplicate - add to m_nodes (still holding lock)
+                // Not a duplicate and not banned - add to m_nodes (still holding lock)
                 m_nodes.push_back(std::move(node));
             }
 
