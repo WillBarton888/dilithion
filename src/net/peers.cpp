@@ -394,9 +394,9 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
         int64_t ban_until = GetTime() + DEFAULT_BAN_TIME;
         peer->Ban(ban_until);
 
+        // BUG FIX: Get IP from peer first, fall back to CNode if peer's addr is null
+        // (race condition can cause peer->addr to be zeroed if AddPeerWithId runs before RegisterNode)
         std::string ip = peer->addr.ToStringIP();
-        banman.Ban(ip, DEFAULT_BAN_TIME, BanReason::NodeMisbehaving,
-                   type, peer->misbehavior_score);
 
         // BUG #246 FIX: Immediately disconnect banned peer
         // Mark the CNode for disconnect so CConnman removes it on next iteration
@@ -404,9 +404,16 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
             std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
             auto it = node_refs.find(peer_id);
             if (it != node_refs.end() && it->second) {
+                // BUG FIX: If peer's IP is null/zeroed, get it from CNode
+                if (peer->addr.IsNull() && !it->second->addr.IsNull()) {
+                    ip = it->second->addr.ToStringIP();
+                }
                 it->second->MarkDisconnect();
             }
         }
+
+        banman.Ban(ip, DEFAULT_BAN_TIME, BanReason::NodeMisbehaving,
+                   type, peer->misbehavior_score);
 
         std::cout << "[BAN] Peer " << peer_id << " (" << ip
                   << ") banned for " << (DEFAULT_BAN_TIME / 3600) << "h - "
@@ -1306,12 +1313,17 @@ CNode* CPeerManager::AddNode(const NetProtocol::CAddress& addr, bool inbound) {
     return node_ptr;
 }
 
-void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAddress& addr, bool inbound) {
+bool CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAddress& addr, bool inbound) {
     // Store reference to CConnman's CNode (non-owning)
     std::string ip = addr.ToStringIP();
 
+    // BUG #148 ROOT CAUSE FIX: Return false if IP is banned
+    // Caller MUST check return value and NOT add to m_nodes if false
+    // Otherwise, CNode exists in m_nodes but not in node_refs, causing
+    // GetNode() to return nullptr during handshake
     if (banman.IsBanned(ip)) {
-        return;
+        LogPrintf(NET, WARN, "[CPeerManager] RegisterNode: IP %s is banned, rejecting connection\n", ip.c_str());
+        return false;
     }
 
     {
@@ -1344,6 +1356,8 @@ void CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
             break;
         }
     }
+
+    return true;  // Registration successful
 }
 
 void CPeerManager::RemoveNode(int node_id) {

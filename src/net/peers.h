@@ -256,7 +256,8 @@ public:
     // Phase 1: CNode management (event-driven networking)
     // CNode objects are owned by CConnman. These methods manage references only.
     CNode* AddNode(const NetProtocol::CAddress& addr, bool inbound = false);
-    void RegisterNode(int node_id, CNode* node, const NetProtocol::CAddress& addr, bool inbound);
+    // Returns false if IP is banned (caller should NOT add to m_nodes in this case)
+    bool RegisterNode(int node_id, CNode* node, const NetProtocol::CAddress& addr, bool inbound);
     void RemoveNode(int node_id);
     CNode* GetNode(int node_id);
     std::vector<CNode*> GetAllNodes();
