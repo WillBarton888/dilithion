@@ -64,14 +64,16 @@ public:
      * Called when a fork is detected (header hash mismatch).
      * Only one fork can be active at a time.
      *
-     * @param forkTipHash      Storage hash of the fork's tip block (from competing tips)
-     * @param forkPointHeight  Height where fork diverges from main chain
+     * @param forkTipHash       Storage hash of the fork's tip block (from competing tips)
+     * @param currentChainHeight Current chain height (for reorg depth check)
+     * @param forkPointHeight   Height where fork diverges from main chain
      * @param expectedTipHeight Expected height of fork tip
-     * @param expectedHashes   Map of height -> storage hash for fork ancestry
+     * @param expectedHashes    Map of height -> storage hash for fork ancestry
      * @return Shared pointer to the fork candidate, or nullptr if already active
      */
     std::shared_ptr<ForkCandidate> CreateForkCandidate(
         const uint256& forkTipHash,
+        int32_t currentChainHeight,
         int32_t forkPointHeight,
         int32_t expectedTipHeight,
         const std::map<int32_t, uint256>& expectedHashes = {}

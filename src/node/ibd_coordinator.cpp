@@ -643,6 +643,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 // Create fork candidate for staging with expected hashes
                 auto forkCandidate = forkMgr.CreateForkCandidate(
                     forkTipHash,
+                    chain_height,  // Current chain height for reorg depth check
                     fork_point,
                     headerTipHeight,
                     expectedHashes
@@ -818,6 +819,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         // Create fork candidate for staging with expected hashes
                         auto forkCandidate = forkMgr.CreateForkCandidate(
                             forkTipHash,
+                            chain_height,  // Current chain height for reorg depth check
                             fork_point,
                             headerTipHeight,
                             expectedHashes

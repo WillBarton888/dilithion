@@ -212,6 +212,7 @@ ForkManager& ForkManager::GetInstance()
 
 std::shared_ptr<ForkCandidate> ForkManager::CreateForkCandidate(
     const uint256& forkTipHash,
+    int32_t currentChainHeight,
     int32_t forkPointHeight,
     int32_t expectedTipHeight,
     const std::map<int32_t, uint256>& expectedHashes)
@@ -233,9 +234,11 @@ std::shared_ptr<ForkCandidate> ForkManager::CreateForkCandidate(
     }
 
     // Check reorg depth limit (MAX_REORG_DEPTH = 100 in ActivateBestChain)
-    int reorgDepth = expectedTipHeight - forkPointHeight;
-    if (reorgDepth > 100) {
-        std::cerr << "[ForkManager] Fork too deep (" << reorgDepth << " blocks), max is 100" << std::endl;
+    // IMPORTANT: Reorg depth is how many blocks we need to DISCONNECT from current chain,
+    // NOT the number of blocks on the fork chain to connect.
+    int disconnectDepth = currentChainHeight - forkPointHeight;
+    if (disconnectDepth > 100) {
+        std::cerr << "[ForkManager] Reorg too deep (" << disconnectDepth << " blocks to disconnect), max is 100" << std::endl;
         return nullptr;
     }
 
