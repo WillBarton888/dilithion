@@ -1171,81 +1171,20 @@ void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
 
         std::cout << "[FORK-RECOVERY] Disconnected " << disconnected << " forked block(s)" << std::endl;
 
-        // BUG #159 FIX: Delete orphan blocks from DB that were built on the forked chain
-        // These blocks have their prevBlockHash pointing to disconnected blocks
-        // NOTE: Wrapped in try-catch to prevent crash during fork recovery
-        try {
-        if (m_node_context.blockchain_db && disconnected > 0) {
-            // Get all blocks from DB and find orphans (blocks above fork_point not on main chain)
-            std::vector<uint256> all_block_hashes;
-            if (m_node_context.blockchain_db->GetAllBlockHashes(all_block_hashes)) {
-                int total_deleted = 0;
-                bool found_orphan = true;
-
-                // Iterate until no more orphans found (handles chains of orphans)
-                while (found_orphan && total_deleted < 1000) {  // Safety limit
-                    found_orphan = false;
-
-                    for (const auto& hash : all_block_hashes) {
-                        CBlock block;
-                        if (m_node_context.blockchain_db->ReadBlock(hash, block)) {
-                            // Check if this block's parent is one of the forked blocks
-                            // or is a block at height > fork_point that's not on main chain
-                            CBlockIndex* pBlockIndex = m_chainstate.GetBlockIndex(hash);
-                            if (pBlockIndex) {
-                                // Block is in our index
-                                if (pBlockIndex->nHeight > fork_point &&
-                                    !(pBlockIndex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                                    // This is an orphan - not on main chain and above fork point
-                                    std::cout << "[FORK-RECOVERY] Deleting orphan block at height "
-                                              << pBlockIndex->nHeight << " hash="
-                                              << hash.GetHex().substr(0, 16) << "..." << std::endl;
-
-                                    if (m_node_context.blockchain_db->EraseBlock(hash)) {
-                                        // BUG #243 FIX: Clear BLOCK_HAVE_DATA flag to prevent stale HaveData()
-                                        pBlockIndex->nStatus &= ~CBlockIndex::BLOCK_HAVE_DATA;
-                                        total_deleted++;
-                                        found_orphan = true;
-                                    }
-                                }
-                            } else {
-                                // Block not in index but in DB - could be orphan from failed sync
-                                // Check if its prevBlockHash points to a disconnected block
-                                // LOGIC FIX #26: Only delete if parent is FOUND and above fork_point
-                                // If parent is nullptr, we don't know if block is valid - keep it
-                                CBlockIndex* pPrevIndex = m_chainstate.GetBlockIndex(block.hashPrevBlock);
-                                if (pPrevIndex && pPrevIndex->nHeight > fork_point) {
-                                    std::cout << "[FORK-RECOVERY] Deleting unindexed orphan block hash="
-                                              << hash.GetHex().substr(0, 16) << "..." << std::endl;
-
-                                    if (m_node_context.blockchain_db->EraseBlock(hash)) {
-                                        // Note: No pBlockIndex here (unindexed), so no flag to clear
-                                        total_deleted++;
-                                        found_orphan = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Refresh block list for next iteration
-                    if (found_orphan) {
-                        all_block_hashes.clear();
-                        m_node_context.blockchain_db->GetAllBlockHashes(all_block_hashes);
-                    }
-                }
-
-                if (total_deleted > 0) {
-                    std::cout << "[FORK-RECOVERY] Deleted " << total_deleted
-                              << " orphan block(s) from database" << std::endl;
-                }
-            }
-        }
-        } catch (const std::exception& e) {
-            std::cerr << "[FORK-RECOVERY] Exception during orphan cleanup: " << e.what() << std::endl;
-        } catch (...) {
-            std::cerr << "[FORK-RECOVERY] Unknown exception during orphan cleanup" << std::endl;
-        }
+        // FORK SAFETY FIX: Do NOT delete orphan blocks from database
+        // Keep disconnected blocks in DB so they can be re-activated if they become best chain.
+        // This prevents the corruption issue where nodes end up on different forks after restart
+        // if block data was deleted before the replacement chain was fully downloaded.
+        //
+        // The blocks are:
+        // - Disconnected from chain (UTXO undone, pnext cleared, BLOCK_VALID_CHAIN cleared)
+        // - Still have BLOCK_HAVE_DATA set (data exists in DB)
+        // - Can be re-activated by ActivateBestChain if they become best chain
+        // - Will be pruned later by deferred cleanup (optional)
+        //
+        // This matches Bitcoin Core's approach: keep fork blocks, let chain work decide.
+        std::cout << "[FORK-RECOVERY] Keeping " << disconnected
+                  << " disconnected block(s) in database for safety" << std::endl;
     }
 
     // Clear in-flight tracking above fork point
