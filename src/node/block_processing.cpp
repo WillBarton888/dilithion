@@ -181,7 +181,8 @@ BlockProcessResult ProcessNewBlock(
                     // Add block to fork tracking
                     forkMgr.AddBlockToFork(block, blockHash, blockHeight);
 
-                    // Pre-validate this fork block (PoW + MIK) BEFORE normal processing
+                    // Pre-validate this fork block (PoW only) BEFORE normal processing
+                    // Note: MIK validation is deferred to ConnectTip when chain state is correct
                     ForkBlock* forkBlock = fork->GetBlockAtHeight(blockHeight);
                     if (forkBlock && forkBlock->status == ForkBlockStatus::PENDING) {
                         if (!forkMgr.PreValidateBlock(*forkBlock, db)) {
@@ -199,10 +200,11 @@ BlockProcessResult ProcessNewBlock(
                                 ctx.headers_manager->InvalidateHeader(blockHash);
                             }
 
-                            // Ban the peer for sending invalid block
-                            if (ctx.peer_manager && peer_id >= 0) {
-                                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_BLOCK_POW);
-                            }
+                            // FORK FIX: Do NOT ban peer on fork pre-validation failure
+                            // Fork blocks may appear invalid due to our incorrect chain state.
+                            // Banning prevents the peer from helping us recover.
+                            // Just cancel the fork and let the node try again.
+                            std::cout << "[ProcessNewBlock] Fork cancelled, NOT banning peer (fork recovery mode)" << std::endl;
 
                             return BlockProcessResult::INVALID_POW;
                         }
@@ -218,7 +220,13 @@ BlockProcessResult ProcessNewBlock(
     // =========================================================================
     // PHASE 2: PROOF-OF-WORK VALIDATION (with DFMP enforcement)
     // =========================================================================
-    if (!skipPoWCheck) {
+    // FORK FIX: Skip DFMP check for fork blocks
+    // Fork blocks have already passed PoW-only pre-validation in Phase 1.5.
+    // Full MIK validation will happen at ConnectTip when the identity DB
+    // reflects the correct fork chain state. This prevents false-positive
+    // MIK failures (and peer bans) when our identity DB doesn't have
+    // identities that exist on the fork chain.
+    if (!skipPoWCheck && !isForkBlock) {
         // Get block height for DFMP calculation
         int blockHeight = currentChainHeight + 1;  // Default: next block
         CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
@@ -248,6 +256,8 @@ BlockProcessResult ProcessNewBlock(
 
             return BlockProcessResult::INVALID_POW;
         }
+    } else if (isForkBlock) {
+        std::cout << "[ProcessNewBlock] Fork block - skipping DFMP check (MIK validated at ConnectTip)" << std::endl;
     }
 
     // =========================================================================

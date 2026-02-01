@@ -629,6 +629,34 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // IBD OPTIMIZATION: Get cached hash once and reuse throughout
     const uint256& blockHash = pindex->GetBlockHash();
 
+    // ============================================================================
+    // FORK FIX: Validate MIK at connection time (not arrival time)
+    // ============================================================================
+    // MIK validation depends on the identity DB state. During fork recovery,
+    // blocks may arrive before we have the correct identity DB state (our chain
+    // is different from the fork chain). By validating at connection time:
+    // 1. Identity DB reflects all blocks up to the parent (correct state)
+    // 2. MIK can be validated against the correct identity registrations
+    // 3. Fork blocks that passed PoW-only pre-validation get full MIK check here
+    //
+    // This allows fork recovery while maintaining MIK security:
+    // - Fork pre-validation only checks PoW + hash match
+    // - ConnectTip validates MIK when we have correct chain state
+    {
+        int dfmpActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+        // Only validate MIK for post-DFMP blocks
+        if (pindex->nHeight >= dfmpActivationHeight) {
+            if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, pindex->nHeight, dfmpActivationHeight)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " failed MIK validation at connection time" << std::endl;
+                std::cerr << "[Chain] Hash: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+                return false;
+            }
+        }
+    }
+
     // Step 1: Update UTXO set (CS-004)
     if (pUTXOSet != nullptr) {
         if (!pUTXOSet->ApplyBlock(block, pindex->nHeight, blockHash)) {

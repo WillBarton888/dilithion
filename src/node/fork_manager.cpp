@@ -355,14 +355,26 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
 
     forkBlock.status = ForkBlockStatus::POW_VALID;
 
-    // Step 3: Validate MIK/DFMP (using fork's temporary identity cache)
-    ForkCandidate* fork = m_activeFork.get();
-    if (!ValidateMIK(forkBlock.block, forkBlock.height, fork)) {
-        forkBlock.status = ForkBlockStatus::INVALID;
-        forkBlock.invalidReason = "Invalid MIK signature";
-        std::cerr << "[ForkManager] Block " << forkBlock.height << " failed MIK check" << std::endl;
-        return false;
-    }
+    // Step 3: SKIP MIK validation during fork pre-validation
+    // =========================================================================
+    // FORK FIX: MIK validation is deferred to ConnectTip
+    // =========================================================================
+    // During fork recovery, we cannot validate MIK because:
+    // 1. Our identity DB reflects our current (wrong) chain
+    // 2. The fork chain may have different identity registrations
+    // 3. Identities registered on the fork chain before fork_point are unknown to us
+    //
+    // Instead, we only validate PoW + hash match during pre-validation.
+    // Full MIK validation happens in ConnectTip when:
+    // 1. The chain is being switched via ActivateBestChain
+    // 2. Identity DB reflects the correct fork chain state
+    // 3. Each block's MIK is validated as it's connected
+    //
+    // This maintains security: invalid MIK blocks can't become part of the chain.
+    // The block hash match from headers already proves the block is from the
+    // validated header chain.
+    std::cout << "[ForkManager] Block " << forkBlock.height
+              << " PoW valid, MIK deferred to ConnectTip" << std::endl;
 
     forkBlock.status = ForkBlockStatus::PREVALIDATED;
     std::cout << "[ForkManager] Block " << forkBlock.height << " pre-validated successfully" << std::endl;
