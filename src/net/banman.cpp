@@ -97,13 +97,30 @@ void CBanManager::Ban(const std::string& ip, int64_t duration_seconds,
 }
 
 void CBanManager::Unban(const std::string& ip) {
-    std::lock_guard<std::mutex> lock(cs_banned);
-    auto it = m_banned.find(ip);
-    if (it != m_banned.end()) {
-        m_banned.erase(it);
-        m_is_dirty = true;
-        std::cout << "[BanManager] Unbanned IP: " << ip << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(cs_banned);
+        auto it = m_banned.find(ip);
+        if (it != m_banned.end()) {
+            m_banned.erase(it);
+            m_is_dirty = true;
+            std::cout << "[BanManager] Unbanned IP: " << ip << " (was in ban list)" << std::endl;
+        } else {
+            std::cout << "[BanManager] Unban request for " << ip << " - IP was not in ban list" << std::endl;
+            // Debug: show what IPs ARE in the list
+            if (!m_banned.empty()) {
+                std::cout << "[BanManager] Current banned IPs (" << m_banned.size() << "): ";
+                int count = 0;
+                for (const auto& [banned_ip, entry] : m_banned) {
+                    if (count++ < 5) std::cout << banned_ip << " ";
+                }
+                if (m_banned.size() > 5) std::cout << "...";
+                std::cout << std::endl;
+            }
+            return;  // Nothing to save
+        }
     }
+    // Persist immediately to prevent bans reappearing after restart
+    SaveBanList();
 }
 
 bool CBanManager::IsBanned(const std::string& ip) const {

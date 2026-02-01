@@ -4203,8 +4203,24 @@ std::string CRPCServer::RPC_SetBan(const std::string& params) {
 
     } else if (command == "remove") {
         // Unban the IP
+        std::cout << "[RPC] setban remove: attempting to unban IP '" << ip_str << "'" << std::endl;
+
+        // Debug: Check if IP is currently banned
+        if (banman.IsBanned(ip_str)) {
+            std::cout << "[RPC] setban remove: IP " << ip_str << " is currently banned, calling Unban()" << std::endl;
+        } else {
+            std::cout << "[RPC] setban remove: IP " << ip_str << " is NOT currently banned!" << std::endl;
+        }
+
         banman.Unban(ip_str);
-        std::cout << "[RPC] setban: Unbanned " << ip_str << std::endl;
+
+        // Verify unban worked
+        if (banman.IsBanned(ip_str)) {
+            std::cerr << "[RPC] setban remove: ERROR - IP " << ip_str << " is STILL banned after Unban()!" << std::endl;
+        } else {
+            std::cout << "[RPC] setban remove: Success - IP " << ip_str << " is now unbanned" << std::endl;
+        }
+
         return "null";
 
     } else {

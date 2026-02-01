@@ -1064,6 +1064,34 @@ bool CIbdCoordinator::FetchBlocks() {
             std::cout << "[IBD] Selected blocks sync peer " << m_blocks_sync_peer
                       << " (height=" << best_height << ")" << std::endl;
         } else {
+            // BUG #246b FIX: Before giving up, check for stale in-flight blocks from
+            // disconnected peers. This can happen when a peer disconnects after being
+            // selected but before blocks are delivered, and m_blocks_sync_peer was reset.
+            if (g_node_context.block_tracker) {
+                int total_in_flight = g_node_context.block_tracker->GetTotalInFlight();
+                if (total_in_flight > 0) {
+                    // There are in-flight blocks but no peers - they must be from disconnected peers
+                    // Get the peers that have blocks assigned
+                    auto tracked = g_node_context.block_tracker->GetTrackedHeights();
+                    std::set<NodeId> peers_with_blocks;
+                    for (const auto& [height, peer_id] : tracked) {
+                        peers_with_blocks.insert(peer_id);
+                    }
+
+                    // Check each peer and clear if disconnected
+                    for (NodeId peer_id : peers_with_blocks) {
+                        auto peer = m_node_context.peer_manager->GetPeer(peer_id);
+                        if (!peer || !peer->IsConnected()) {
+                            auto cleared = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
+                            if (!cleared.empty()) {
+                                std::cout << "[IBD] Cleared " << cleared.size()
+                                          << " stale in-flight blocks from orphaned peer " << peer_id << std::endl;
+                            }
+                        }
+                    }
+                }
+            }
+
             m_ibd_no_peer_cycles++;
             m_last_hang_cause = HangCause::NO_PEERS_AVAILABLE;
             return false;
@@ -1108,6 +1136,31 @@ bool CIbdCoordinator::FetchBlocks() {
     std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(
         peer_capacity, chain_height, header_height);
     if (blocks_to_request.empty()) {
+        // BUG #246b FIX: If no blocks to request, check if in-flight blocks are from
+        // disconnected peers. This can cause "stuck" scenarios where we have blocks
+        // in-flight from a peer that no longer exists.
+        if (g_node_context.block_tracker) {
+            int total_in_flight = g_node_context.block_tracker->GetTotalInFlight();
+            if (total_in_flight > 0 && header_height > chain_height) {
+                // Blocks in-flight but none to request - check for stale peer assignments
+                auto tracked = g_node_context.block_tracker->GetTrackedHeights();
+                std::set<NodeId> peers_with_blocks;
+                for (const auto& [height, peer_id] : tracked) {
+                    peers_with_blocks.insert(peer_id);
+                }
+
+                for (NodeId peer_id : peers_with_blocks) {
+                    auto peer = m_node_context.peer_manager->GetPeer(peer_id);
+                    if (!peer || !peer->IsConnected()) {
+                        auto cleared = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
+                        if (!cleared.empty()) {
+                            std::cout << "[IBD] Cleared " << cleared.size()
+                                      << " stale in-flight blocks from dead peer " << peer_id << std::endl;
+                        }
+                    }
+                }
+            }
+        }
         return false;  // All blocks either connected or in-flight
     }
 

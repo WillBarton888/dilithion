@@ -247,6 +247,20 @@ public:
     }
 
     /**
+     * @brief Get all tracked heights with their assigned peers
+     * BUG #246b FIX: Used to identify stale in-flight blocks from disconnected peers
+     * @return Map of height -> peer_id for all in-flight blocks
+     */
+    std::map<int, NodeId> GetTrackedHeights() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        std::map<int, NodeId> result;
+        for (const auto& [height, info] : m_heights) {
+            result[height] = info.peer;
+        }
+        return result;
+    }
+
+    /**
      * @brief Get heights that have timed out
      * @param timeout_seconds Custom timeout (default: TIMEOUT_SECONDS)
      */
