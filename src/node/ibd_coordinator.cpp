@@ -733,6 +733,14 @@ bool CIbdCoordinator::FetchBlocks() {
         auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
         if (!peer) {
             std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer << " disconnected" << std::endl;
+            // BUG FIX: Clear in-flight blocks from disconnected peer
+            if (g_node_context.block_tracker) {
+                auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+                if (!cleared.empty()) {
+                    std::cout << "[IBD] Cleared " << cleared.size()
+                              << " stale in-flight blocks from disconnected peer " << m_blocks_sync_peer << std::endl;
+                }
+            }
             m_blocks_sync_peer = -1;
         } else {
             // BUG FIX: Re-select peer if their height is too low for blocks we need
@@ -770,6 +778,16 @@ bool CIbdCoordinator::FetchBlocks() {
                     std::cout << "[IBD] Found better peer " << better_peer_id << " (height=" << better_peer_height
                               << ") vs current sync peer " << m_blocks_sync_peer
                               << " (height=" << peer_height << "), switching directly" << std::endl;
+
+                    // BUG FIX: Clear in-flight blocks from old peer before switching
+                    if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
+                        auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+                        if (!cleared.empty()) {
+                            std::cout << "[IBD] Cleared " << cleared.size()
+                                      << " stale in-flight blocks from old peer " << m_blocks_sync_peer << std::endl;
+                        }
+                    }
+
                     m_blocks_sync_peer = better_peer_id;
                     m_blocks_sync_peer_consecutive_timeouts = 0;
                     should_reselect = false;  // Already switched
@@ -777,6 +795,14 @@ bool CIbdCoordinator::FetchBlocks() {
             }
 
             if (should_reselect) {
+                // BUG FIX: Clear in-flight blocks from old peer before reselecting
+                if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
+                    auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+                    if (!cleared.empty()) {
+                        std::cout << "[IBD] Cleared " << cleared.size()
+                                  << " stale in-flight blocks from reselected peer " << m_blocks_sync_peer << std::endl;
+                    }
+                }
                 m_blocks_sync_peer = -1;
             }
         }
@@ -829,6 +855,14 @@ bool CIbdCoordinator::FetchBlocks() {
     // ============ REQUEST BLOCKS FROM SINGLE PEER ============
     auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
     if (!peer) {
+        // BUG FIX: Clear in-flight blocks from disconnected peer
+        if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
+            auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+            if (!cleared.empty()) {
+                std::cout << "[IBD] Cleared " << cleared.size()
+                          << " stale in-flight blocks from gone peer " << m_blocks_sync_peer << std::endl;
+            }
+        }
         m_blocks_sync_peer = -1;
         return false;
     }
@@ -909,10 +943,13 @@ bool CIbdCoordinator::FetchBlocks() {
         CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(getdata);
         bool sent = m_node_context.connman->PushMessage(m_blocks_sync_peer, msg);
         if (!sent) {
-            for (const auto& inv : getdata) {
-                int height = m_node_context.headers_manager->GetHeightForHash(inv.hash);
-                if (height > 0) {
-                    m_node_context.block_fetcher->RequeueBlock(height);
+            // BUG FIX: Clear ALL in-flight blocks from this peer, not just the ones we tried to send
+            // The peer might have other blocks tracked from a previous batch
+            if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
+                auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+                if (!cleared.empty()) {
+                    std::cout << "[IBD] Cleared " << cleared.size()
+                              << " stale in-flight blocks from failed send peer " << m_blocks_sync_peer << std::endl;
                 }
             }
             m_blocks_sync_peer = -1;  // Force peer reselection on next call
