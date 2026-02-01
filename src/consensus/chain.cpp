@@ -9,6 +9,8 @@
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
 #include <node/mempool.h>         // BUG #109 FIX: RemoveConfirmedTxs
+#include <dfmp/identity_db.h>     // Identity undo during reorg
+#include <dfmp/mik.h>             // MIK parsing for identity undo
 #include <util/assert.h>
 #include <iostream>
 #include <algorithm>
@@ -771,6 +773,35 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
         } else if (force_skip_utxo) {
             std::cout << "[Chain] Skipping UTXO undo for height " << pindex->nHeight
                       << " (force_skip_utxo=true)" << std::endl;
+        }
+
+        // Step 2.5: Undo identity DB changes (MIK registrations)
+        // Only remove identities that were FIRST SEEN at this block height.
+        // Identities introduced earlier remain valid on the remaining chain.
+        if (block_loaded && DFMP::g_identityDb) {
+            CBlockValidator validator;
+            std::vector<CTransactionRef> txs;
+            std::string err;
+            if (validator.DeserializeBlockTransactions(block, txs, err) && !txs.empty()) {
+                if (!txs[0]->vin.empty()) {
+                    DFMP::CMIKScriptData mikData;
+                    if (DFMP::ParseMIKFromScriptSig(txs[0]->vin[0].scriptSig, mikData)) {
+                        DFMP::Identity identity = mikData.identity;
+                        if (!identity.IsNull()) {
+                            int firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
+                            if (firstSeen == pindex->nHeight) {
+                                // Identity was introduced at this height - safe to remove
+                                if (DFMP::g_identityDb->RemoveMIKPubKey(identity)) {
+                                    std::cout << "[Chain] Removed MIK identity (undo): "
+                                              << identity.GetHex() << " (first-seen=" << firstSeen << ")" << std::endl;
+                                }
+                                DFMP::g_identityDb->RemoveFirstSeen(identity);
+                            }
+                            // If firstSeen != height, identity was introduced earlier - keep it
+                        }
+                    }
+                }
+            }
         }
 
         // Step 3: Clear pnext pointer on parent

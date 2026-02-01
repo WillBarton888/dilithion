@@ -370,4 +370,76 @@ bool CIdentityDB::HasMIKPubKey(const Identity& identity) const {
     return status.ok();
 }
 
+// ============================================================================
+// Identity Removal (for chain reorganization undo)
+// ============================================================================
+
+bool CIdentityDB::RemoveMIKPubKey(const Identity& identity) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (!m_db) {
+        return false;
+    }
+
+    std::string key = MakeMIKPubkeyKey(identity);
+
+    // Check if exists first
+    std::string value;
+    leveldb::Status status = m_db->Get(leveldb::ReadOptions(), key, &value);
+    if (!status.ok()) {
+        // Not found - nothing to remove
+        return false;
+    }
+
+    // Remove from database
+    leveldb::WriteOptions writeOpts;
+    writeOpts.sync = true;
+
+    status = m_db->Delete(writeOpts, key);
+    if (!status.ok()) {
+        std::cerr << "[DFMP] Failed to remove MIK pubkey: " << status.ToString() << std::endl;
+        return false;
+    }
+
+    // Remove from cache
+    m_mikPubkeyCache.erase(identity);
+
+    std::cout << "[DFMP] Removed MIK identity (undo): " << identity.GetHex() << std::endl;
+    return true;
+}
+
+bool CIdentityDB::RemoveFirstSeen(const Identity& identity) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (!m_db) {
+        return false;
+    }
+
+    std::string key = MakeKey(identity);
+
+    // Check if exists first
+    std::string value;
+    leveldb::Status status = m_db->Get(leveldb::ReadOptions(), key, &value);
+    if (!status.ok()) {
+        // Not found - nothing to remove
+        return false;
+    }
+
+    // Remove from database
+    leveldb::WriteOptions writeOpts;
+    writeOpts.sync = true;
+
+    status = m_db->Delete(writeOpts, key);
+    if (!status.ok()) {
+        std::cerr << "[DFMP] Failed to remove first-seen: " << status.ToString() << std::endl;
+        return false;
+    }
+
+    // Remove from cache
+    m_cache.erase(identity);
+
+    std::cout << "[DFMP] Removed first-seen (undo): " << identity.GetHex() << std::endl;
+    return true;
+}
+
 } // namespace DFMP

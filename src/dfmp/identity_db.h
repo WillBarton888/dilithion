@@ -175,6 +175,31 @@ public:
      * @return true if MIK is registered (pubkey stored)
      */
     bool HasMIKPubKey(const Identity& identity) const;
+
+    // =========================================================================
+    // Identity Removal (for chain reorganization undo)
+    // =========================================================================
+
+    /**
+     * Remove MIK public key for an identity (undo registration)
+     *
+     * Called during DisconnectTip to undo identity registrations when
+     * blocks are disconnected during a chain reorganization.
+     *
+     * @param identity MIK identity to remove
+     * @return true if removed, false if not found or error
+     */
+    bool RemoveMIKPubKey(const Identity& identity);
+
+    /**
+     * Remove first-seen height for an identity (undo first appearance)
+     *
+     * Called during DisconnectTip to undo identity first-seen records.
+     *
+     * @param identity Miner identity to remove
+     * @return true if removed, false if not found or error
+     */
+    bool RemoveFirstSeen(const Identity& identity);
 };
 
 } // namespace DFMP

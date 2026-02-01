@@ -355,29 +355,30 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
 
     forkBlock.status = ForkBlockStatus::POW_VALID;
 
-    // Step 3: SKIP MIK validation during fork pre-validation
+    // Step 3: Validate MIK using fork identity cache
     // =========================================================================
-    // FORK FIX: MIK validation is deferred to ConnectTip
+    // The fork cache allows MIK validation during staging:
+    // 1. Registration blocks: validate embedded pubkey, add to fork cache
+    // 2. Reference blocks: check fork cache first, then main DB
+    // 3. Unknown identities not in cache or DB: REJECT
+    //
+    // This ensures MIK is enforced before blocks are accepted into the fork.
     // =========================================================================
-    // During fork recovery, we cannot validate MIK because:
-    // 1. Our identity DB reflects our current (wrong) chain
-    // 2. The fork chain may have different identity registrations
-    // 3. Identities registered on the fork chain before fork_point are unknown to us
-    //
-    // Instead, we only validate PoW + hash match during pre-validation.
-    // Full MIK validation happens in ConnectTip when:
-    // 1. The chain is being switched via ActivateBestChain
-    // 2. Identity DB reflects the correct fork chain state
-    // 3. Each block's MIK is validated as it's connected
-    //
-    // This maintains security: invalid MIK blocks can't become part of the chain.
-    // The block hash match from headers already proves the block is from the
-    // validated header chain.
-    std::cout << "[ForkManager] Block " << forkBlock.height
-              << " PoW valid, MIK deferred to ConnectTip" << std::endl;
+    std::shared_ptr<ForkCandidate> fork;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        fork = m_activeFork;
+    }
+
+    if (!ValidateMIK(forkBlock.block, forkBlock.height, fork.get())) {
+        forkBlock.status = ForkBlockStatus::INVALID;
+        forkBlock.invalidReason = "Invalid MIK signature";
+        std::cerr << "[ForkManager] Block " << forkBlock.height << " failed MIK validation" << std::endl;
+        return false;
+    }
 
     forkBlock.status = ForkBlockStatus::PREVALIDATED;
-    std::cout << "[ForkManager] Block " << forkBlock.height << " pre-validated successfully" << std::endl;
+    std::cout << "[ForkManager] Block " << forkBlock.height << " pre-validated successfully (PoW + MIK)" << std::endl;
 
     return true;
 }

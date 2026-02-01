@@ -142,6 +142,7 @@ BlockProcessResult ProcessNewBlock(
     // but we skip ActivateBestChain until all fork blocks are ready.
     // =========================================================================
     bool isForkBlock = false;
+    bool forkPreValidated = false;  // Track if fork block actually passed pre-validation
     int blockHeight = -1;  // Will be calculated if needed
     {
         ForkManager& forkMgr = ForkManager::GetInstance();
@@ -181,8 +182,8 @@ BlockProcessResult ProcessNewBlock(
                     // Add block to fork tracking
                     forkMgr.AddBlockToFork(block, blockHash, blockHeight);
 
-                    // Pre-validate this fork block (PoW only) BEFORE normal processing
-                    // Note: MIK validation is deferred to ConnectTip when chain state is correct
+                    // Pre-validate this fork block (PoW + MIK) BEFORE normal processing
+                    // MIK validation uses fork identity cache + main DB
                     ForkBlock* forkBlock = fork->GetBlockAtHeight(blockHeight);
                     if (forkBlock && forkBlock->status == ForkBlockStatus::PENDING) {
                         if (!forkMgr.PreValidateBlock(*forkBlock, db)) {
@@ -208,7 +209,8 @@ BlockProcessResult ProcessNewBlock(
 
                             return BlockProcessResult::INVALID_POW;
                         }
-                        std::cout << "[ProcessNewBlock] Fork block pre-validated successfully" << std::endl;
+                        forkPreValidated = true;  // Track successful pre-validation
+                        std::cout << "[ProcessNewBlock] Fork block pre-validated successfully (PoW + MIK)" << std::endl;
                     }
                 }
             }
@@ -220,13 +222,11 @@ BlockProcessResult ProcessNewBlock(
     // =========================================================================
     // PHASE 2: PROOF-OF-WORK VALIDATION (with DFMP enforcement)
     // =========================================================================
-    // FORK FIX: Skip DFMP check for fork blocks
-    // Fork blocks have already passed PoW-only pre-validation in Phase 1.5.
-    // Full MIK validation will happen at ConnectTip when the identity DB
-    // reflects the correct fork chain state. This prevents false-positive
-    // MIK failures (and peer bans) when our identity DB doesn't have
-    // identities that exist on the fork chain.
-    if (!skipPoWCheck && !isForkBlock) {
+    // FORK FIX: Skip DFMP check for fork blocks that passed pre-validation
+    // Fork blocks are MIK-validated during PreValidateBlock using the fork
+    // identity cache. Only skip DFMP if pre-validation actually succeeded.
+    // If pre-validation wasn't run (race condition), fall through to DFMP check.
+    if (!skipPoWCheck && !forkPreValidated) {
         // Get block height for DFMP calculation
         int blockHeight = currentChainHeight + 1;  // Default: next block
         CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
@@ -255,15 +255,17 @@ BlockProcessResult ProcessNewBlock(
             g_node_context.headers_chain_invalid.store(true);
             std::cout << "[ProcessNewBlock] Headers chain invalid - will resync from different peer" << std::endl;
 
-            // Ban peer for sending invalid block - immediate disconnect
+            // BUG #250 FIX: Reduced from 100 to 20 points.
+            // MIK failures during forks are usually chain mismatch, not malicious.
+            // 100 = instant ban (prevents recovery), 20 = ban after 5 failures.
             if (ctx.peer_manager && peer_id >= 0) {
-                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_BLOCK_POW);
+                ctx.peer_manager->Misbehaving(peer_id, 20, MisbehaviorType::INVALID_BLOCK_POW);
             }
 
             return BlockProcessResult::INVALID_POW;
         }
-    } else if (isForkBlock) {
-        std::cout << "[ProcessNewBlock] Fork block - skipping DFMP check (MIK validated at ConnectTip)" << std::endl;
+    } else if (forkPreValidated) {
+        std::cout << "[ProcessNewBlock] Fork block - skipping DFMP check (MIK validated in PreValidateBlock)" << std::endl;
     }
 
     // =========================================================================

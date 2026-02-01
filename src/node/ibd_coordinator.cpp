@@ -440,7 +440,15 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // ============================================================================
     // This catches the case where we're on a stale fork IMMEDIATELY, without
     // waiting for stall detection. Critical for nodes that synced to a fork.
-    if (chain_height > 0 && m_node_context.headers_manager && !m_fork_detected.load()) {
+    //
+    // BUG #250 FIX: Only run Layer 1 when near tip (same guard as Layer 3).
+    // During bulk IBD, fresh nodes are thousands of blocks behind and will
+    // always have mismatched hashes. This causes false-positive fork detection.
+    // Checkpoints + PoW validation are sufficient protection during IBD.
+    static constexpr int LAYER1_TIP_THRESHOLD = 100;  // Same as Layer 3
+    bool layer1_near_tip = (header_height - chain_height) < LAYER1_TIP_THRESHOLD;
+
+    if (layer1_near_tip && chain_height > 0 && m_node_context.headers_manager && !m_fork_detected.load()) {
         CBlockIndex* tip = m_chainstate.GetTip();
         if (tip) {  // Only check if we have a valid tip
             uint256 our_tip_hash = tip->GetBlockHash();
