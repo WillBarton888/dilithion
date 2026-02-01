@@ -1235,8 +1235,16 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
     auto it = peers.find(peer_id);
     if (it == peers.end()) {
         // Create peer entry if not exists
-        auto new_peer = std::make_shared<CPeer>();
-        new_peer->id = peer_id;
+        // BUG FIX: Get address from CNode to avoid null addr
+        NetProtocol::CAddress addr;
+        {
+            std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
+            auto node_it = node_refs.find(peer_id);
+            if (node_it != node_refs.end() && node_it->second) {
+                addr = node_it->second->addr;
+            }
+        }
+        auto new_peer = std::make_shared<CPeer>(peer_id, addr);
         new_peer->state = CPeer::STATE_CONNECTED;
         peers[peer_id] = std::move(new_peer);
         it = peers.find(peer_id);
