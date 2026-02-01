@@ -1620,7 +1620,8 @@ void CConnman::InactivityCheck() {
     // Constants for keepalive
     static constexpr int64_t PING_INTERVAL_SECONDS = 60;      // Send ping after 60s of inactivity
     static constexpr int64_t TIMEOUT_SECONDS = 120;           // Disconnect after 120s of no response
-    static constexpr int64_t HANDSHAKE_TIMEOUT_SECONDS = 30;  // Disconnect if handshake not complete after 30s
+    static constexpr int64_t HANDSHAKE_TIMEOUT_SECONDS = 30;  // Disconnect if no VERSION exchange after 30s
+    static constexpr int64_t VERACK_TIMEOUT_SECONDS = 60;     // Disconnect if VERSION sent but no VERACK after 60s
 
     // Track last ping sent time per node (static to persist across calls)
     static std::map<int, int64_t> last_ping_sent;
@@ -1641,12 +1642,30 @@ void CConnman::InactivityCheck() {
             int node_id = node->id;
             CNode::State node_state = node->state.load();
 
-            // Check for handshake timeout - disconnect nodes that haven't completed handshake
-            if (node_state < CNode::STATE_HANDSHAKE_COMPLETE) {
+            // BUG #148 FIX: Check for handshake timeout
+            // Only timeout nodes stuck in STATE_CONNECTED (no VERSION exchange at all)
+            // Don't timeout STATE_VERSION_SENT - they've made progress and VERACK should follow
+            // The old code timed out VERSION_SENT nodes, causing a race condition where:
+            //   1. Node in VERSION_SENT receives VERACK and queues it for processing
+            //   2. InactivityCheck sees node_state < HANDSHAKE_COMPLETE, marks for disconnect
+            //   3. Node removed from node_refs before VERACK is processed
+            //   4. ProcessVerackMessage can't find node, CNode::state never updated
+            //   5. Node excluded from block downloads (GetValidPeersForDownload checks CNode::state)
+            if (node_state == CNode::STATE_CONNECTED) {
                 int64_t connect_time = node->nTimeConnected;
                 if (connect_time > 0 && (now - connect_time) > HANDSHAKE_TIMEOUT_SECONDS) {
-                    LogPrintf(NET, WARN, "[CConnman] Node %d handshake timeout (state=%d, %llds since connect)\n",
+                    LogPrintf(NET, WARN, "[CConnman] Node %d handshake timeout (state=%d, no VERSION exchange in %llds)\n",
                               node_id, static_cast<int>(node_state), now - connect_time);
+                    nodes_to_disconnect.push_back(node_id);
+                    continue;
+                }
+            } else if (node_state == CNode::STATE_VERSION_SENT) {
+                // VERSION exchanged but no VERACK yet - use longer timeout
+                // This catches peers that send VERSION but never complete handshake
+                int64_t connect_time = node->nTimeConnected;
+                if (connect_time > 0 && (now - connect_time) > VERACK_TIMEOUT_SECONDS) {
+                    LogPrintf(NET, WARN, "[CConnman] Node %d VERACK timeout (VERSION sent but no VERACK in %llds)\n",
+                              node_id, now - connect_time);
                     nodes_to_disconnect.push_back(node_id);
                     continue;
                 }
