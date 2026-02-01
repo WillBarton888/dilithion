@@ -230,16 +230,23 @@ BlockProcessResult ProcessNewBlock(
         // Get block height for DFMP calculation
         // BUG FIX: Use headers_manager for correct height when blocks arrive out of order
         int blockHeight = currentChainHeight + 1;  // Default: next block
+        std::string heightSource = "default";
         CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
         if (pParent) {
             blockHeight = pParent->nHeight + 1;
+            heightSource = "pParent";
         } else if (ctx.headers_manager) {
             // Parent not in chain yet - get height from headers manager
             int parentHeight = ctx.headers_manager->GetHeightForHash(block.hashPrevBlock);
             if (parentHeight >= 0) {
                 blockHeight = parentHeight + 1;
+                heightSource = "headers_manager";
             }
         }
+
+        // Debug: Show height derivation
+        std::cout << "[ProcessNewBlock] DFMP height=" << blockHeight
+                  << " (source=" << heightSource << ", chainHeight=" << currentChainHeight << ")" << std::endl;
 
         // BUG #246c FIX: Skip DFMP validation for orphan blocks (parent not connected)
         // MIK validation requires registration blocks to be processed first.
@@ -274,11 +281,17 @@ BlockProcessResult ProcessNewBlock(
                 ctx.headers_manager->InvalidateHeader(blockHash);
             }
 
-            // BUG #248 FIX: Signal IBD coordinator to resync headers from a different peer.
-            // This block failed MIK validation, meaning we're syncing to a wrong chain.
-            // The IBD coordinator will see this flag and switch headers sync peers.
-            g_node_context.headers_chain_invalid.store(true);
-            std::cout << "[ProcessNewBlock] Headers chain invalid - will resync from different peer" << std::endl;
+            // BUG #248 FIX: Only reset headers if parent IS in block index.
+            // If parent is known but MIK fails, we're likely on a wrong chain.
+            // If parent is NOT known (orphan), this is just a local validation issue
+            // (identity not in DB yet) - don't nuke headers, just reject block.
+            if (pParent != nullptr) {
+                g_node_context.headers_chain_invalid.store(true);
+                std::cout << "[ProcessNewBlock] Headers chain invalid (parent known) - will resync from different peer" << std::endl;
+            } else {
+                std::cout << "[ProcessNewBlock] MIK validation failed for orphan block at height " << blockHeight
+                          << " (chainHeight=" << currentChainHeight << ") - NOT resetting headers" << std::endl;
+            }
 
             // BUG #246 FIX: NO misbehavior for MIK failures.
             // MIK failures are almost always chain mismatch (peer on different fork),
