@@ -5,6 +5,7 @@
 #include <net/peers.h>
 #include <net/block_tracker.h>
 #include <core/node_context.h>
+#include <node/fork_manager.h>  // BUG #246c FIX: For fork-aware block requesting
 
 // Forward declaration
 extern NodeContext g_node_context;
@@ -94,8 +95,36 @@ std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks, int chain
     int available_slots = CBlockTracker::MAX_TOTAL - total_in_flight;
     int blocks_to_get = std::min(max_blocks, available_slots);
 
-    // Pure per-block: iterate from chain_height+1, skip tracked heights
-    for (int h = chain_height + 1; h <= header_height && static_cast<int>(result.size()) < blocks_to_get; h++) {
+    // BUG #246c FIX: During a fork, we need to request blocks starting from
+    // fork_point+1, not chain_height+1. This is because:
+    // - We already have block chain_height (e.g., 1068) on our chain
+    // - But the fork has a DIFFERENT block at that height
+    // - GetNextBlocksToRequest was skipping the fork's version of that block!
+    //
+    // Example: fork_point=1067, chain_height=1068
+    // - Old code: requested 1069+ (skipped fork's 1068!)
+    // - New code: if fork active, request from fork_point+1=1068
+    int start_height = chain_height + 1;
+
+    // Check if there's an active fork that starts earlier
+    ForkManager& forkMgr = ForkManager::GetInstance();
+    if (forkMgr.HasActiveFork()) {
+        auto fork = forkMgr.GetActiveFork();
+        if (fork) {
+            int fork_point = fork->GetForkPointHeight();
+            // During fork, we need blocks from fork_point+1 onwards
+            // This includes the block at chain_height if fork_point < chain_height
+            if (fork_point < chain_height) {
+                start_height = fork_point + 1;
+                std::cout << "[BlockFetcher] Fork active: requesting from height " << start_height
+                          << " (fork_point=" << fork_point << ", chain_height=" << chain_height << ")"
+                          << std::endl;
+            }
+        }
+    }
+
+    // Pure per-block: iterate from start_height, skip tracked heights
+    for (int h = start_height; h <= header_height && static_cast<int>(result.size()) < blocks_to_get; h++) {
         if (!g_node_context.block_tracker->IsTracked(h)) {
             result.push_back(h);
         }
