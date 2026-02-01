@@ -22,6 +22,7 @@
 #include <node/blockchain_storage.h>  // BUG #159: Orphan block deletion
 #include <core/node_context.h>
 #include <net/block_fetcher.h>
+#include <net/block_tracker.h>  // BUG FIX: Clear in-flight blocks on peer rotation
 #include <net/headers_manager.h>
 #include <net/net.h>  // CNetMessageProcessor
 #include <net/connman.h>  // Phase 5: CConnman
@@ -964,6 +965,18 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
                 std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
                           << " not delivering blocks (" << m_blocks_sync_peer_consecutive_timeouts
                           << " consecutive timeout cycles), forcing reselection" << std::endl;
+
+                // BUG FIX: Clear in-flight blocks from this peer before reselecting
+                // Without this, blocks would stay tracked until 60s timeout, causing
+                // "all peers at capacity" errors when we accumulate stale entries
+                if (g_node_context.block_tracker) {
+                    auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+                    if (!cleared.empty()) {
+                        std::cout << "[IBD] Cleared " << cleared.size()
+                                  << " stale in-flight blocks from bad peer " << m_blocks_sync_peer << std::endl;
+                    }
+                }
+
                 m_blocks_sync_peer = -1;
                 m_blocks_sync_peer_consecutive_timeouts = 0;
             }
