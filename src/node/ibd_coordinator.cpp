@@ -17,6 +17,7 @@
 #endif
 
 #include <consensus/chain.h>
+#include <consensus/pow.h>  // BUG #245: ChainWorkGreaterThan for fork work comparison
 #include <core/chainparams.h>  // Initial header request needs genesis hash
 #include <node/genesis.h>      // Genesis::GetGenesisHash()
 #include <node/blockchain_storage.h>  // BUG #159: Orphan block deletion
@@ -627,12 +628,35 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 // BUG #189 FIX: Allow fork_point up to chain_height + 1 to handle race conditions
                 if (fork_point > 0 && fork_point <= chain_height + 1) {
                     int fork_depth = std::max(0, chain_height - fork_point);
-                    std::cout << "[FORK-DETECT] Fork detected! Local chain diverged at height " << fork_point
-                              << " (chain=" << chain_height << ", fork_depth=" << fork_depth << ")" << std::endl;
-                    HandleForkScenario(fork_point, chain_height);
-                    m_fork_stall_cycles.store(0);
-                    m_last_checked_chain_height = -1;  // Reset to allow fresh tracking
-                    // Continue with normal IBD - window has been reset to fork point
+
+                    // BUG #245 FIX: Only fork recover if incoming chain has MORE work than ours
+                    // Get our local chain work
+                    uint256 localChainWork;
+                    CBlockIndex* pTip = m_chainstate.GetTip();
+                    if (pTip) {
+                        localChainWork = pTip->nChainWork;
+                    }
+
+                    // Get best header chain work
+                    uint256 headerChainWork;
+                    if (m_node_context.headers_manager) {
+                        headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
+                    }
+
+                    // Only disconnect if header chain has MORE work
+                    if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
+                        std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT disconnecting" << std::endl;
+                        std::cout << "[FORK-DETECT] Local work=" << localChainWork.GetHex().substr(0, 16)
+                                  << " Header work=" << headerChainWork.GetHex().substr(0, 16) << std::endl;
+                        m_fork_stall_cycles.store(0);  // Reset stall counter
+                    } else {
+                        std::cout << "[FORK-DETECT] Fork detected! Local chain diverged at height " << fork_point
+                                  << " (chain=" << chain_height << ", fork_depth=" << fork_depth << ")" << std::endl;
+                        HandleForkScenario(fork_point, chain_height);
+                        m_fork_stall_cycles.store(0);
+                        m_last_checked_chain_height = -1;  // Reset to allow fresh tracking
+                        // Continue with normal IBD - window has been reset to fork point
+                    }
                 } else if (fork_point == 0) {
                     // No common ancestor found - unusual, just reset counter
                     std::cout << "[FORK-DETECT] No common ancestor found" << std::endl;
