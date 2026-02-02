@@ -2053,13 +2053,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (config.max_connections <= 8) {
                 connman_opts.nMaxOutbound = config.max_connections;
                 connman_opts.nMaxInbound = 0;  // No inbound if very limited
+                connman_opts.fListen = false;  // Disable listen socket entirely for single-peer mode
             } else {
                 connman_opts.nMaxOutbound = std::min(8, config.max_connections / 2);
                 connman_opts.nMaxInbound = config.max_connections - connman_opts.nMaxOutbound;
             }
             std::cout << "  [INFO] Max connections limited to " << config.max_connections
                       << " (outbound=" << connman_opts.nMaxOutbound
-                      << ", inbound=" << connman_opts.nMaxInbound << ")" << std::endl;
+                      << ", inbound=" << connman_opts.nMaxInbound
+                      << ", listen=" << (connman_opts.fListen ? "yes" : "no") << ")" << std::endl;
         }
 
         // BUG #138 FIX: Set g_node_context pointers BEFORE starting threads
