@@ -3334,57 +3334,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         wallet.SetWalletFile(wallet_path);
         std::cout << "  [OK] Auto-save enabled" << std::endl;
         std::cout.flush();
-        // DFMP v2.0: Register block connect/disconnect callbacks for fair mining protocol
-        // This updates identity DB (first-seen heights, MIK pubkeys) and heat tracker
-        g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
-            // Get DFMP activation height from chain params
-            int activationHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->dfmpActivationHeight : 0;
-
-            // Only process blocks after DFMP activation
-            if (height >= activationHeight && !block.vtx.empty()) {
-                // Deserialize block transactions to get coinbase
-                CBlockValidator validator;
-                std::vector<CTransactionRef> transactions;
-                std::string error;
-
-                if (validator.DeserializeBlockTransactions(block, transactions, error) && !transactions.empty()) {
-                    // DFMP v2.0: Parse MIK from coinbase scriptSig
-                    const CTransaction& coinbaseTx = *transactions[0];
-                    const std::vector<uint8_t>& scriptSig = coinbaseTx.vin[0].scriptSig;
-
-                    DFMP::CMIKScriptData mikData;
-                    if (DFMP::ParseMIKFromScriptSig(scriptSig, mikData) && !mikData.identity.IsNull()) {
-                        DFMP::Identity identity = mikData.identity;
-
-                        // Record first-seen height if this is a new identity
-                        if (DFMP::g_identityDb && !DFMP::g_identityDb->Exists(identity)) {
-                            DFMP::g_identityDb->SetFirstSeen(identity, height);
-                        }
-
-                        // Store MIK public key on registration (first block with this MIK)
-                        if (mikData.isRegistration && DFMP::g_identityDb) {
-                            if (!DFMP::g_identityDb->HasMIKPubKey(identity)) {
-                                DFMP::g_identityDb->SetMIKPubKey(identity, mikData.pubkey);
-                            }
-                        }
-
-                        // Update heat tracker
-                        if (DFMP::g_heatTracker) {
-                            DFMP::g_heatTracker->OnBlockConnected(height, identity);
-                        }
-                    }
-                }
-            }
-        });
-
-        g_chainstate.RegisterBlockDisconnectCallback([](const CBlock& block, int height, const uint256& hash) {
-            // Update heat tracker on disconnect (reorg)
-            // Note: We do NOT remove from identity DB - once seen, always seen
-            if (DFMP::g_heatTracker) {
-                DFMP::g_heatTracker->OnBlockDisconnected(height);
-            }
-        });
-        std::cout << "  [OK] DFMP chain notification callbacks registered" << std::endl;
 
         // BUG #56 FIX: Register wallet callbacks with chain state (Bitcoin Core pattern)
         // Wallet will receive blockConnected/blockDisconnected notifications automatically
@@ -3540,6 +3489,65 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
 
         }  // end else (!relay_only)
+
+        // =========================================================================
+        // DFMP v2.0: Register block connect/disconnect callbacks for fair mining protocol
+        // CRITICAL: Must run for ALL modes (including relay-only) because:
+        //   1. Relay-only nodes still validate blocks
+        //   2. Block validation requires MIK identity lookup
+        //   3. Identity DB must be populated during ConnectTip
+        // Previously this was inside the wallet block, causing relay-only nodes to fail
+        // MIK validation after checkpoint (Bug #251)
+        // =========================================================================
+        g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
+            // Get DFMP activation height from chain params
+            int activationHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+            // Only process blocks after DFMP activation
+            if (height >= activationHeight && !block.vtx.empty()) {
+                // Deserialize block transactions to get coinbase
+                CBlockValidator validator;
+                std::vector<CTransactionRef> transactions;
+                std::string error;
+
+                if (validator.DeserializeBlockTransactions(block, transactions, error) && !transactions.empty()) {
+                    // DFMP v2.0: Parse MIK from coinbase scriptSig
+                    const CTransaction& coinbaseTx = *transactions[0];
+                    const std::vector<uint8_t>& scriptSig = coinbaseTx.vin[0].scriptSig;
+
+                    DFMP::CMIKScriptData mikData;
+                    if (DFMP::ParseMIKFromScriptSig(scriptSig, mikData) && !mikData.identity.IsNull()) {
+                        DFMP::Identity identity = mikData.identity;
+
+                        // Record first-seen height if this is a new identity
+                        if (DFMP::g_identityDb && !DFMP::g_identityDb->Exists(identity)) {
+                            DFMP::g_identityDb->SetFirstSeen(identity, height);
+                        }
+
+                        // Store MIK public key on registration (first block with this MIK)
+                        if (mikData.isRegistration && DFMP::g_identityDb) {
+                            if (!DFMP::g_identityDb->HasMIKPubKey(identity)) {
+                                DFMP::g_identityDb->SetMIKPubKey(identity, mikData.pubkey);
+                            }
+                        }
+
+                        // Update heat tracker
+                        if (DFMP::g_heatTracker) {
+                            DFMP::g_heatTracker->OnBlockConnected(height, identity);
+                        }
+                    }
+                }
+            }
+        });
+
+        g_chainstate.RegisterBlockDisconnectCallback([](const CBlock& block, int height, const uint256& hash) {
+            // Update heat tracker on disconnect (reorg)
+            // Note: Identity DB removal happens in chain.cpp DisconnectTip (first-seen gated)
+            if (DFMP::g_heatTracker) {
+                DFMP::g_heatTracker->OnBlockDisconnected(height);
+            }
+        });
+        std::cout << "  [OK] DFMP chain notification callbacks registered" << std::endl;
 
         // NOW start CConnman (after all interactive wallet prompts are complete)
         // This runs for BOTH normal mode and relay-only mode
