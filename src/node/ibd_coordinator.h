@@ -178,6 +178,10 @@ private:
     int m_blocks_sync_peer{-1};                                     // NodeId of block sync peer (-1 = none)
     int m_blocks_sync_peer_consecutive_timeouts{0};                 // Consecutive 60s timeout cycles without delivery
     static constexpr int MAX_PEER_CONSECUTIVE_TIMEOUTS = 3;         // Force reselection after N consecutive timeouts
+    // BUG #256: Track timed-out peers to avoid re-selecting them immediately
+    int m_timed_out_peer{-1};                                       // Peer that timed out (excluded from selection)
+    std::chrono::steady_clock::time_point m_timed_out_peer_time;    // When the peer timed out
+    static constexpr int TIMED_OUT_PEER_COOLDOWN_SEC = 3600;        // 1 hour cooldown (Bitcoin-style penalty)
 
     // Backoff state
     int m_last_header_height{0};

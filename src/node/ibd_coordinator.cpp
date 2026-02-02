@@ -1022,6 +1022,13 @@ bool CIbdCoordinator::FetchBlocks() {
                 int better_peer_height = peer_height;
                 for (const auto& p : all_peers) {
                     if (!p || p->id == m_blocks_sync_peer) continue;
+                    // BUG #256: Skip timed-out peer during cooldown
+                    if (p->id == m_timed_out_peer && m_timed_out_peer != -1) {
+                        auto elapsed = std::chrono::steady_clock::now() - m_timed_out_peer_time;
+                        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < TIMED_OUT_PEER_COOLDOWN_SEC) {
+                            continue;
+                        }
+                    }
                     int ph = p->best_known_height;
                     if (ph == 0) ph = p->start_height;
                     if (ph > better_peer_height + 5) {  // Better peer with >5 blocks advantage
@@ -1080,6 +1087,20 @@ bool CIbdCoordinator::FetchBlocks() {
 
         for (const auto& peer : peers) {
             if (!peer) continue;
+
+            // BUG #256: Skip timed-out peer during cooldown period
+            if (peer->id == m_timed_out_peer && m_timed_out_peer != -1) {
+                auto elapsed = std::chrono::steady_clock::now() - m_timed_out_peer_time;
+                auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+                if (elapsed_sec < TIMED_OUT_PEER_COOLDOWN_SEC) {
+                    continue;  // Still in cooldown, skip this peer
+                } else {
+                    // Cooldown expired, clear the timed-out peer tracking
+                    std::cout << "[IBD] Peer " << m_timed_out_peer << " cooldown expired after "
+                              << elapsed_sec << " seconds, eligible for selection again" << std::endl;
+                    m_timed_out_peer = -1;
+                }
+            }
 
             int peer_height = peer->best_known_height;
             if (peer_height == 0) peer_height = peer->start_height;
@@ -1378,6 +1399,12 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
                 std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
                           << " not delivering blocks (" << m_blocks_sync_peer_consecutive_timeouts
                           << " consecutive timeout cycles), forcing reselection" << std::endl;
+
+                // BUG #256: Track this peer to avoid re-selecting it for 1 hour
+                m_timed_out_peer = m_blocks_sync_peer;
+                m_timed_out_peer_time = std::chrono::steady_clock::now();
+                std::cout << "[IBD] Peer " << m_timed_out_peer << " excluded from selection for "
+                          << TIMED_OUT_PEER_COOLDOWN_SEC << " seconds" << std::endl;
 
                 // BUG FIX: Clear in-flight blocks from this peer before reselecting
                 // Without this, blocks would stay tracked until 60s timeout, causing
