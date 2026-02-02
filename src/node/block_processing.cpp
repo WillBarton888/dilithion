@@ -311,6 +311,18 @@ BlockProcessResult ProcessNewBlock(
             if (parentOnActiveChain) {
                 g_node_context.headers_chain_invalid.store(true);
                 std::cout << "[ProcessNewBlock] Headers chain invalid (parent on active chain, MIK failed) - will resync from different peer" << std::endl;
+
+                // BUG #255 FIX: Mark block as permanently failed (authoritative validation)
+                // Parent is on active chain, so chain state is correct. DFMP failure is definitive.
+                CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
+                if (pindex) {
+                    pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                    std::cerr << "[ProcessNewBlock] Block marked BLOCK_FAILED_VALID - will not retry" << std::endl;
+                    // Persist to disk
+                    if (ctx.blockchain_db) {
+                        ctx.blockchain_db->WriteBlockIndex(blockHash, *pindex);
+                    }
+                }
             } else {
                 std::cout << "[ProcessNewBlock] MIK validation failed but parent not on active chain at height " << blockHeight
                           << " (chainHeight=" << currentChainHeight << ") - NOT resetting headers (chain mismatch expected)" << std::endl;
