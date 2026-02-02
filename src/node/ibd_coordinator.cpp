@@ -1283,10 +1283,29 @@ bool CIbdCoordinator::FetchBlocks() {
             continue;
         }
 
-        // Check if already connected
+        // Check if already connected or marked as failed
         CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
-        if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-            continue;
+        if (pindex) {
+            // Skip already connected blocks
+            if (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN) {
+                continue;
+            }
+            // BUG #255: Skip blocks marked as permanently failed
+            // These failed authoritative validation in ConnectTip - no point retrying
+            if (pindex->IsInvalid()) {
+                std::cout << "[IBD] Skipping failed block at height " << h
+                          << " (status=" << pindex->nStatus << ")" << std::endl;
+                continue;
+            }
+            // BUG #255: Skip blocks whose parent is marked failed (BLOCK_FAILED_CHILD logic)
+            // If parent failed, this block can never connect - don't waste bandwidth
+            if (pindex->pprev && pindex->pprev->IsInvalid()) {
+                std::cout << "[IBD] Skipping block at height " << h
+                          << " - parent is marked failed" << std::endl;
+                // Mark this block as failed child
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
+                continue;
+            }
         }
 
         // Request block from our single sync peer

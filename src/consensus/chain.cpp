@@ -654,6 +654,18 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
                 std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
                           << " failed MIK validation at connection time" << std::endl;
                 std::cerr << "[Chain] Hash: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+
+                // BUG #255: Mark block as permanently failed (authoritative validation)
+                // This is ConnectTip with parent on active chain - failure is definitive.
+                // Prevents infinite retry loops for invalid blocks.
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                std::cerr << "[Chain] Block marked BLOCK_FAILED_VALID - will not retry" << std::endl;
+
+                // Persist the failed status to disk so it survives restart
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
+
                 return false;
             }
         }
@@ -664,6 +676,16 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
         if (!pUTXOSet->ApplyBlock(block, pindex->nHeight, blockHash)) {
             std::cerr << "[Chain] ERROR: Failed to apply block to UTXO set at height "
                       << pindex->nHeight << std::endl;
+
+            // BUG #255: Mark block as permanently failed (authoritative validation)
+            pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+            std::cerr << "[Chain] Block marked BLOCK_FAILED_VALID - will not retry" << std::endl;
+
+            // Persist the failed status to disk so it survives restart
+            if (pdb != nullptr) {
+                pdb->WriteBlockIndex(blockHash, *pindex);
+            }
+
             return false;
         }
     }

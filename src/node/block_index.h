@@ -78,7 +78,19 @@ public:
         BLOCK_VALID_MASK         = 31,
         BLOCK_HAVE_DATA          = 8,
         BLOCK_HAVE_UNDO          = 16,
+
+        // BUG #255: Failed block tracking (Bitcoin-style)
+        // These flags prevent infinite retry loops for invalid blocks.
+        // IMPORTANT: Only set during authoritative validation (ConnectTip)
+        // where parent is on active chain and state is correct.
+        // NEVER set during ProcessNewBlock, async queue, or fork staging.
+        BLOCK_FAILED_VALID       = 32,   // Block failed validation in ConnectTip
+        BLOCK_FAILED_CHILD       = 64,   // Descends from a BLOCK_FAILED_VALID block
+        BLOCK_FAILED_MASK        = BLOCK_FAILED_VALID | BLOCK_FAILED_CHILD,
     };
+
+    //! Check if this block or an ancestor failed validation
+    bool IsInvalid() const { return (nStatus & BLOCK_FAILED_MASK) != 0; }
 };
 
 #endif

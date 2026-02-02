@@ -161,6 +161,13 @@ bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
         // Update stats
         nBlocksReceivedTotal++;
         lastBlockReceived = std::chrono::steady_clock::now();
+
+        // BUG #254 FIX: Update peer's best known height (Bitcoin-style tracking)
+        // When a peer sends us a block at height N, they have blocks up to N.
+        // This ensures ibd_coordinator's peer_height check stays current.
+        if (m_peer_manager && peer_id >= 0) {
+            m_peer_manager->UpdatePeerBestKnownHeight(peer_id, height);
+        }
     }
 
     return found;
