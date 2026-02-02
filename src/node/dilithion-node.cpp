@@ -353,6 +353,7 @@ struct NodeConfig {
     bool upnp_prompted = false;     // True if user was already prompted or used explicit flag
     std::string external_ip = "";   // --externalip: Manual external IP (for manual port forwarding)
     bool public_api = false;        // --public-api: Enable public REST API for light wallets (seed nodes only)
+    int max_connections = 0;         // --maxconnections: Maximum peer connections (0 = default 125)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -495,6 +496,20 @@ struct NodeConfig {
                 external_ip = arg.substr(13);
                 upnp_prompted = true;  // Don't prompt for UPnP if using manual IP
             }
+            else if (arg.find("--maxconnections=") == 0) {
+                // Maximum peer connections (for limiting connections during sync)
+                try {
+                    int maxconn = std::stoi(arg.substr(17));
+                    if (maxconn < 1 || maxconn > 1000) {
+                        std::cerr << "Error: Invalid maxconnections (must be 1-1000): " << arg << std::endl;
+                        return false;
+                    }
+                    max_connections = maxconn;
+                } catch (const std::exception& e) {
+                    std::cerr << "Error: Invalid maxconnections format: " << arg << std::endl;
+                    return false;
+                }
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -536,6 +551,7 @@ struct NodeConfig {
         std::cout << "  --upnp                Enable automatic port mapping (UPnP)" << std::endl;
         std::cout << "  --no-upnp             Disable UPnP (don't prompt)" << std::endl;
         std::cout << "  --externalip=<ip>     Your public IP (for manual port forwarding)" << std::endl;
+        std::cout << "  --maxconnections=<n>  Maximum peer connections (default: 125)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -2029,6 +2045,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         connman_opts.nMaxInbound = 117;
         connman_opts.nMaxTotal = 125;
         connman_opts.upnp_enabled = config.upnp_enabled;  // UPnP automatic port mapping
+
+        // Apply --maxconnections override if specified
+        if (config.max_connections > 0) {
+            connman_opts.nMaxTotal = config.max_connections;
+            // Adjust inbound/outbound proportionally
+            if (config.max_connections <= 8) {
+                connman_opts.nMaxOutbound = config.max_connections;
+                connman_opts.nMaxInbound = 0;  // No inbound if very limited
+            } else {
+                connman_opts.nMaxOutbound = std::min(8, config.max_connections / 2);
+                connman_opts.nMaxInbound = config.max_connections - connman_opts.nMaxOutbound;
+            }
+            std::cout << "  [INFO] Max connections limited to " << config.max_connections
+                      << " (outbound=" << connman_opts.nMaxOutbound
+                      << ", inbound=" << connman_opts.nMaxInbound << ")" << std::endl;
+        }
 
         // BUG #138 FIX: Set g_node_context pointers BEFORE starting threads
         // This allows handlers to access connman immediately when messages arrive
