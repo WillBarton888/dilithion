@@ -2033,6 +2033,114 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         }
 
+        // =========================================================================
+        // BUG #252 FIX: Populate heat tracker from existing chain on startup
+        // =========================================================================
+        // Without this, nodes loading existing chain data have empty heat trackers,
+        // while nodes syncing fresh have fully populated heat trackers. This causes
+        // DFMP penalty calculation to differ between nodes, leading to consensus
+        // failures where one node rejects valid blocks due to wrong penalty calculation.
+        //
+        // Solution: On startup, scan the last OBSERVATION_WINDOW blocks and
+        // populate the heat tracker by calling OnBlockConnected for each block.
+        //
+        // CRITICAL: All blocks in the window MUST be readable and parseable for
+        // deterministic consensus. Missing or corrupt blocks cause divergent penalties.
+        // =========================================================================
+        if (DFMP::g_heatTracker != nullptr) {
+            CBlockIndex* pindexTip = g_chainstate.GetTip();
+            if (pindexTip != nullptr && pindexTip->nHeight > 0) {
+                std::cout << "Populating heat tracker from existing chain..." << std::endl;
+
+                // CURSOR FIX #2: Use canonical constant instead of hardcoded value
+                const int windowSize = DFMP::OBSERVATION_WINDOW;
+                std::vector<CBlockIndex*> recentBlocks;
+                CBlockIndex* pindex = pindexTip;
+                int startHeight = std::max(1, pindexTip->nHeight - windowSize + 1);
+
+                // Walk back to start height
+                while (pindex != nullptr && pindex->nHeight >= startHeight) {
+                    recentBlocks.push_back(pindex);
+                    pindex = pindex->pprev;
+                }
+
+                // CURSOR FIX #3: Clear heat tracker before population to avoid accumulation
+                // This ensures deterministic state even if startup flow changes
+                DFMP::g_heatTracker->Clear();
+
+                // Process from oldest to newest to maintain proper window ordering
+                int populated = 0;
+                int readFailed = 0;
+                int parseFailed = 0;
+                int dfmpActivationHeight = Dilithion::g_chainParams ?
+                    Dilithion::g_chainParams->dfmpActivationHeight : 0;
+
+                for (auto it = recentBlocks.rbegin(); it != recentBlocks.rend(); ++it) {
+                    CBlockIndex* blockIndex = *it;
+
+                    // Only process blocks after DFMP activation
+                    if (blockIndex->nHeight < dfmpActivationHeight) {
+                        continue;
+                    }
+
+                    // Read block data to extract miner identity
+                    CBlock block;
+                    if (!blockchain.ReadBlock(blockIndex->GetBlockHash(), block) || block.vtx.empty()) {
+                        // CURSOR FIX #1: Log when ReadBlock fails - this causes divergent heat!
+                        std::cerr << "[DFMP] WARNING: Cannot read block " << blockIndex->nHeight
+                                  << " for heat tracker - consensus may diverge!" << std::endl;
+                        readFailed++;
+                        continue;
+                    }
+
+                    CBlockValidator validator;
+                    std::vector<CTransactionRef> transactions;
+                    std::string error;
+
+                    if (!validator.DeserializeBlockTransactions(block, transactions, error) ||
+                        transactions.empty() || transactions[0]->vin.empty()) {
+                        // CURSOR FIX #4: Log when deserialization fails
+                        std::cerr << "[DFMP] WARNING: Cannot deserialize block " << blockIndex->nHeight
+                                  << " for heat tracker: " << error << std::endl;
+                        parseFailed++;
+                        continue;
+                    }
+
+                    DFMP::CMIKScriptData mikData;
+                    if (!DFMP::ParseMIKFromScriptSig(transactions[0]->vin[0].scriptSig, mikData) ||
+                        mikData.identity.IsNull()) {
+                        // CURSOR FIX #4: Log when MIK parsing fails
+                        std::cerr << "[DFMP] WARNING: Cannot parse MIK from block " << blockIndex->nHeight
+                                  << " for heat tracker" << std::endl;
+                        parseFailed++;
+                        continue;
+                    }
+
+                    DFMP::g_heatTracker->OnBlockConnected(blockIndex->nHeight, mikData.identity);
+                    populated++;
+                }
+
+                // Report results with failure counts for debugging
+                std::cout << "  [OK] Populated heat tracker with " << populated
+                          << " block(s) from height " << startHeight
+                          << " to " << pindexTip->nHeight;
+                if (readFailed > 0 || parseFailed > 0) {
+                    std::cout << " (WARNING: " << readFailed << " read failures, "
+                              << parseFailed << " parse failures)";
+                }
+                std::cout << std::endl;
+
+                // CRITICAL: If any blocks failed, heat tracker may be incomplete
+                if (readFailed > 0) {
+                    std::cerr << "[DFMP] CRITICAL: " << readFailed << " blocks could not be read!"
+                              << " Heat tracker is INCOMPLETE - consensus WILL diverge!" << std::endl;
+                    std::cerr << "[DFMP] Consider running with -reindex to rebuild block database." << std::endl;
+                }
+            } else {
+                std::cout << "  [INFO] No existing chain - heat tracker will populate during sync" << std::endl;
+            }
+        }
+
         // Create message processor and connection manager (local, using NodeContext peer manager)
         CNetMessageProcessor message_processor(*g_node_context.peer_manager);
         

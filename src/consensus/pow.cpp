@@ -241,24 +241,11 @@ bool CheckProofOfWorkDFMP(
 
         identity = mikData.identity;
 
-        // PRE-REGISTER: Store identity AND first-seen height during validation.
-        // This allows subsequent blocks in the same IBD batch to:
-        // 1. Find this identity's pubkey for signature verification
-        // 2. Use correct first-seen height for DFMP penalty calculation
-        //
-        // Registration blocks are self-validating:
-        // - Pubkey is embedded in the block
-        // - Identity = SHA3(pubkey)[:20] is verified above
-        // - Signature is verified below
-        //
-        // Both pubkey AND firstSeen must be stored because later blocks' penalty
-        // calculations depend on knowing when identities were registered.
-        if (DFMP::g_identityDb != nullptr && !DFMP::g_identityDb->HasMIKPubKey(identity)) {
-            DFMP::g_identityDb->SetMIKPubKey(identity, pubkey);
-            DFMP::g_identityDb->SetFirstSeen(identity, height);
-            std::cout << "[DFMP v2.0] Block " << height << ": Pre-registered MIK identity "
-                      << identity.GetHex().substr(0, 16) << "... during validation" << std::endl;
-        }
+        // Note: Identity registration happens ONLY in block connect callback
+        // (dilithion-node.cpp RegisterBlockConnectCallback). This ensures identity
+        // DB stays consistent with chain state - like UTXO, identities only exist
+        // for the active chain. Fork blocks use ForkManager's staging cache
+        // (m_forkIdentities) for MIK validation during pre-validation.
     } else {
         // Reference: look up stored pubkey from identity database
         identity = mikData.identity;

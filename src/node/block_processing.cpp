@@ -248,21 +248,44 @@ BlockProcessResult ProcessNewBlock(
         std::cout << "[ProcessNewBlock] DFMP height=" << blockHeight
                   << " (source=" << heightSource << ", chainHeight=" << currentChainHeight << ")" << std::endl;
 
-        // BUG #246c FIX: Skip DFMP validation for orphan blocks (parent not connected)
+        // BUG #246c/248 FIX: Skip DFMP validation when parent not connected
         // MIK validation requires registration blocks to be processed first.
-        // If parent isn't in chainstate, this is an orphan - defer MIK validation
-        // until the orphan is reprocessed after its parent connects.
+        // If parent isn't in chainstate, we can't trust that the identity database
+        // has all necessary MIK registrations. Defer MIK validation until the
+        // parent connects and this block is reprocessed.
         // Basic PoW check still runs; full MIK validation happens on reconnect.
-        bool isOrphanBlock = (!pParent && blockHeight > currentChainHeight + 1);
-        if (isOrphanBlock) {
-            // Orphan block - do basic PoW check only (no MIK/DFMP)
+        //
+        // CRITICAL: The old condition was:
+        //   isOrphanBlock = (!pParent && blockHeight > currentChainHeight + 1)
+        // This failed for blocks exactly 1 ahead (e.g., block 1001 when chain at 1000).
+        // Those blocks would run MIK validation before their parent connected,
+        // causing signature failure if the height was derived wrong or identity
+        // wasn't registered yet.
+        //
+        // BUG #250 FIX: Only run DFMP when parent is on ACTIVE chain.
+        // The identity DB only contains identities from the active chain (connect-only writes).
+        // If parent exists but is on a competing chain, identity lookups will fail incorrectly.
+        // Treat such blocks like orphans: basic PoW only, defer MIK until parent is on active chain.
+        //
+        // BLOCK_VALID_CHAIN is set in ConnectTip and cleared in DisconnectTip,
+        // so it reliably indicates "block is part of current active chain."
+        bool parentOnActiveChain = (pParent != nullptr) && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN);
+        bool shouldSkipDFMP = !parentOnActiveChain;
+
+        if (shouldSkipDFMP) {
+            // Parent missing OR parent on competing chain - do basic PoW check only (no MIK/DFMP)
             if (!CheckProofOfWork(blockHash, block.nBits)) {
-                std::cerr << "[ProcessNewBlock] ERROR: Orphan block has invalid basic PoW" << std::endl;
+                std::cerr << "[ProcessNewBlock] ERROR: Block has invalid basic PoW (parent not on active chain)" << std::endl;
                 return BlockProcessResult::INVALID_POW;
             }
-            std::cout << "[ProcessNewBlock] Orphan block at height " << blockHeight
-                      << " - deferring MIK validation until parent connects" << std::endl;
-            // Skip DFMP check - will run when orphan is reprocessed after parent connects
+            if (pParent == nullptr) {
+                std::cout << "[ProcessNewBlock] Orphan block at height " << blockHeight
+                          << " (chainHeight=" << currentChainHeight << ") - deferring MIK validation until parent connects" << std::endl;
+            } else {
+                std::cout << "[ProcessNewBlock] Block at height " << blockHeight
+                          << " has parent on competing chain - deferring MIK validation" << std::endl;
+            }
+            // Skip DFMP check - will run when block is reprocessed after parent is on active chain
         }
 
         // Get DFMP activation height
@@ -270,8 +293,8 @@ BlockProcessResult ProcessNewBlock(
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
         // Use DFMP-aware PoW check (applies identity-based difficulty multipliers)
-        // Skip for orphan blocks - MIK validation deferred until parent connects
-        if (!isOrphanBlock && !CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
+        // Skip when parent is not on active chain - MIK validation deferred
+        if (!shouldSkipDFMP && !CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
             std::cerr << "[ProcessNewBlock] ERROR: Block has invalid PoW (DFMP check failed)" << std::endl;
             std::cerr << "  Hash must be less than DFMP-adjusted target" << std::endl;
             g_metrics.RecordInvalidBlock();
@@ -281,16 +304,16 @@ BlockProcessResult ProcessNewBlock(
                 ctx.headers_manager->InvalidateHeader(blockHash);
             }
 
-            // BUG #248 FIX: Only reset headers if parent IS in block index.
-            // If parent is known but MIK fails, we're likely on a wrong chain.
-            // If parent is NOT known (orphan), this is just a local validation issue
-            // (identity not in DB yet) - don't nuke headers, just reject block.
-            if (pParent != nullptr) {
+            // BUG #250 FIX: Only reset headers if parent IS on active chain.
+            // If parent is on active chain and MIK fails, block is truly invalid.
+            // If parent is NOT on active chain, identity DB may not have the identity
+            // (since we only write on connect) - don't invalidate headers for chain mismatch.
+            if (parentOnActiveChain) {
                 g_node_context.headers_chain_invalid.store(true);
-                std::cout << "[ProcessNewBlock] Headers chain invalid (parent known) - will resync from different peer" << std::endl;
+                std::cout << "[ProcessNewBlock] Headers chain invalid (parent on active chain, MIK failed) - will resync from different peer" << std::endl;
             } else {
-                std::cout << "[ProcessNewBlock] MIK validation failed for orphan block at height " << blockHeight
-                          << " (chainHeight=" << currentChainHeight << ") - NOT resetting headers" << std::endl;
+                std::cout << "[ProcessNewBlock] MIK validation failed but parent not on active chain at height " << blockHeight
+                          << " (chainHeight=" << currentChainHeight << ") - NOT resetting headers (chain mismatch expected)" << std::endl;
             }
 
             // BUG #246 FIX: NO misbehavior for MIK failures.

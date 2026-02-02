@@ -81,34 +81,55 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
     bool skipPoWCheck = (checkpointHeight > 0 && currentChainHeight < checkpointHeight);
 
+    // BUG #250 FIX: Only run DFMP/Coinbase when parent is on ACTIVE chain.
+    // Height-dependent validation (DFMP identity lookup, coinbase rules) can only be
+    // authoritative when parent is on active chain. Otherwise, defer to ActivateBestChain.
+    CBlockIndex* pParent = m_chainstate.GetBlockIndex(block.hashPrevBlock);
+    bool parentOnActiveChain = (pParent != nullptr) && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN);
+
     if (!skipPoWCheck) {
         // Get block height for DFMP (use expected_height if valid, else estimate)
         int blockHeight = (expected_height > 0) ? expected_height : (currentChainHeight + 1);
 
-        // Get DFMP activation height
-        int dfmpActivationHeight = Dilithion::g_chainParams ?
-            Dilithion::g_chainParams->dfmpActivationHeight : 0;
-
-        // Use DFMP-aware PoW check
-        if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
-            std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW (DFMP check failed), rejecting" << std::endl;
-
-            // Invalidate header to prevent re-requesting this block
-            if (g_node_context.headers_manager) {
-                g_node_context.headers_manager->InvalidateHeader(blockHash);
+        if (!parentOnActiveChain) {
+            // Parent missing or on competing chain - do basic PoW check only
+            if (!CheckProofOfWork(blockHash, block.nBits)) {
+                std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid basic PoW, rejecting" << std::endl;
+                if (g_node_context.peer_manager) {
+                    g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+                }
+                return false;
             }
+            // Basic PoW passed - queue for processing (full DFMP + coinbase check happens during chain activation)
+        } else {
+            // Parent is on active chain - safe to run full DFMP check
+            int dfmpActivationHeight = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
-            if (g_node_context.peer_manager) {
-                g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+            if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
+                std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW (DFMP check failed), rejecting" << std::endl;
+
+                // Invalidate header to prevent re-requesting this block
+                if (g_node_context.headers_manager) {
+                    g_node_context.headers_manager->InvalidateHeader(blockHash);
+                }
+
+                if (g_node_context.peer_manager) {
+                    g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+                }
+                return false;
             }
-            return false;
         }
     }
 
     // Coinbase tax validation (mainnet only)
+    // BUG #250 FIX: Only run coinbase validation when parent is on active chain.
+    // Coinbase rules depend on block height, which is only authoritative when parent is active.
+    // Coinbase will be enforced later in ActivateBestChain → ConnectTip → CheckBlock.
     bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
-    if (!isTestnet && !skipPoWCheck) {
-        int blockHeight = (expected_height > 0) ? expected_height : (currentChainHeight + 1);
+    if (!isTestnet && !skipPoWCheck && parentOnActiveChain) {
+        int blockHeight = (pParent != nullptr) ? (pParent->nHeight + 1) :
+                          ((expected_height > 0) ? expected_height : (currentChainHeight + 1));
 
         CBlockValidator validator;
         std::vector<CTransactionRef> transactions;
