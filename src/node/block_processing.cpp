@@ -165,8 +165,14 @@ BlockProcessResult ProcessNewBlock(
                 int32_t forkPoint = fork->GetForkPointHeight();
                 int32_t forkTip = fork->GetExpectedTipHeight();
 
+                // BUG #256 DEBUG: Log height calculation for fork block matching
+                std::cout << "[ProcessNewBlock] Fork check: blockHeight=" << blockHeight
+                          << " forkRange=[" << (forkPoint + 1) << "," << forkTip << "]"
+                          << " hash=" << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+
                 // Check if this block belongs to the fork using hash verification
                 // IsExpectedBlock checks both height range AND hash match (if expected hashes available)
+                bool inForkRange = (blockHeight > forkPoint && blockHeight <= forkTip);
                 if (fork->IsExpectedBlock(blockHash, blockHeight)) {
                     isForkBlock = true;
 
@@ -212,6 +218,21 @@ BlockProcessResult ProcessNewBlock(
                         forkPreValidated = true;  // Track successful pre-validation
                         std::cout << "[ProcessNewBlock] Fork block pre-validated successfully (PoW + MIK)" << std::endl;
                     }
+                } else if (inForkRange) {
+                    // BUG #256 FIX: Block is in fork height range but hash doesn't match expected
+                    // This could be:
+                    // 1. A block from a DIFFERENT chain (e.g., valid chain from NYC)
+                    // 2. Peer sent wrong block
+                    // Log for debugging and try to validate it through normal path
+                    uint256 expectedHash = fork->GetExpectedHashAtHeight(blockHeight);
+                    std::cout << "[ProcessNewBlock] Block in fork range but HASH MISMATCH at height " << blockHeight
+                              << "\n  Expected: " << expectedHash.GetHex().substr(0, 16) << "..."
+                              << "\n  Got:      " << blockHash.GetHex().substr(0, 16) << "..."
+                              << "\n  prevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+
+                    // This block might be from the CORRECT chain (not the fork we're tracking)
+                    // Don't invalidate - let it go through normal orphan handling
+                    // If the fork we're tracking is wrong, we'll eventually time out and try the other chain
                 }
             }
         }
