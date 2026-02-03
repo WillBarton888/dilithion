@@ -2093,6 +2093,19 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 prevHash = headers[0].hashPrevBlock;
                 std::cout << "[HeadersManager] Parent found at height " << parentIt->second.height
                           << ", startHeight=" << startHeight << std::endl;
+
+                // BUG FIX: Skip stale fork header batches below last checkpoint
+                // Headers below checkpoints are guaranteed by checkpoint validation.
+                // Processing them wastes time on expensive RandomX hash computation.
+                int lastCheckpointHeight = Dilithion::g_chainParams ?
+                    Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
+                int chainstateHeight = g_chainstate.GetHeight();
+                if (lastCheckpointHeight > 0 && startHeight < lastCheckpointHeight &&
+                    chainstateHeight >= lastCheckpointHeight) {
+                    std::cout << "[HeadersManager] Skipping stale fork header batch starting at height "
+                              << startHeight << " (below checkpoint " << lastCheckpointHeight << ")" << std::endl;
+                    return true;  // Not an error, just nothing useful to process
+                }
             } else {
                 // DEBUG: Check what heights we have and their hashes
                 std::cerr << "[HeadersManager] ORPHAN: Parent " << headers[0].hashPrevBlock.GetHex().substr(0, 16)

@@ -660,7 +660,14 @@ BlockProcessResult ProcessNewBlock(
                 // BUG #186 FIX: Only request headers if we're not already syncing.
                 // During fork sync, every compact block triggers this code, but FAST PATH
                 // is already requesting headers efficiently. Avoid redundant requests.
-                if (ctx.headers_manager && !ctx.headers_manager->IsHeaderSyncInProgress()) {
+                //
+                // BUG FIX: During IBD below checkpoints, orphan blocks with unknown
+                // parents are EXPECTED (tip blocks arriving via compact relay while
+                // we're catching up). Don't trigger fork detection below checkpoints.
+                bool below_checkpoint = (currentChainHeight < checkpointHeight && blockHeight > checkpointHeight);
+                if (below_checkpoint) {
+                    // Normal IBD - parent unknown because we haven't synced past checkpoints yet
+                } else if (ctx.headers_manager && !ctx.headers_manager->IsHeaderSyncInProgress()) {
                     std::cout << "[ProcessNewBlock] Competing fork detected (parent "
                               << block.hashPrevBlock.GetHex().substr(0, 16) << " unknown) - requesting headers" << std::endl;
 
