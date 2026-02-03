@@ -6,6 +6,7 @@
 #include <node/block_index.h>
 #include <node/block_validation_queue.h>
 #include <node/fork_manager.h>
+#include <node/ibd_coordinator.h>
 #include <consensus/chain.h>
 #include <consensus/pow.h>
 #include <consensus/validation.h>
@@ -544,6 +545,10 @@ BlockProcessResult ProcessNewBlock(
                 }
 
                 std::cout << "[ProcessNewBlock] Block in DB but parent still missing, skipping" << std::endl;
+                // Notify IBD coordinator of orphan block for Layer 2 fork detection
+                if (g_node_context.ibd_coordinator) {
+                    g_node_context.ibd_coordinator->OnOrphanBlockReceived();
+                }
                 return BlockProcessResult::ORPHAN;
             }
         } else {
@@ -678,6 +683,11 @@ BlockProcessResult ProcessNewBlock(
         // BUG #148 FIX: Mark block as received even when storing as orphan
         if (ctx.block_fetcher) {
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+        }
+
+        // Notify IBD coordinator of orphan block for Layer 2 fork detection
+        if (g_node_context.ibd_coordinator) {
+            g_node_context.ibd_coordinator->OnOrphanBlockReceived();
         }
 
         return BlockProcessResult::ORPHAN;
