@@ -293,6 +293,28 @@ BlockProcessResult ProcessNewBlock(
         bool parentOnActiveChain = (pParent != nullptr) && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN);
         bool shouldSkipDFMP = !parentOnActiveChain;
 
+        // =========================================================================
+        // CRITICAL FIX: Validate nBits matches expected difficulty
+        // =========================================================================
+        // Without this check, miners can use ANY difficulty (including genesis difficulty)
+        // forever, bypassing the difficulty adjustment algorithm entirely.
+        // This was causing blocks to be accepted with easy difficulty after block 2016.
+        //
+        // Only validate when parent is on active chain (we need full chain history
+        // to calculate expected difficulty). For orphan blocks, nBits validation
+        // is deferred until the parent connects (same as DFMP validation).
+        if (parentOnActiveChain) {
+            uint32_t expectedNBits = GetNextWorkRequired(pParent);
+            if (block.nBits != expectedNBits) {
+                std::cerr << "[ProcessNewBlock] ERROR: Block has wrong difficulty" << std::endl;
+                std::cerr << "  Block nBits:    0x" << std::hex << block.nBits << std::endl;
+                std::cerr << "  Expected nBits: 0x" << expectedNBits << std::dec << std::endl;
+                std::cerr << "  Parent height:  " << pParent->nHeight << std::endl;
+                g_metrics.RecordInvalidBlock();
+                return BlockProcessResult::INVALID_POW;
+            }
+        }
+
         if (shouldSkipDFMP) {
             // Parent missing OR parent on competing chain - do basic PoW check only (no MIK/DFMP)
             if (!CheckProofOfWork(blockHash, block.nBits)) {

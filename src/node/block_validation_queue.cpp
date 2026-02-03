@@ -102,7 +102,19 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
             }
             // Basic PoW passed - queue for processing (full DFMP + coinbase check happens during chain activation)
         } else {
-            // Parent is on active chain - safe to run full DFMP check
+            // Parent is on active chain - safe to run full validation
+
+            // CRITICAL FIX: Validate nBits matches expected difficulty
+            // Without this check, miners can use ANY difficulty forever.
+            uint32_t expectedNBits = GetNextWorkRequired(pParent);
+            if (block.nBits != expectedNBits) {
+                std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has wrong difficulty" << std::endl;
+                std::cerr << "  Block nBits:    0x" << std::hex << block.nBits << std::endl;
+                std::cerr << "  Expected nBits: 0x" << expectedNBits << std::dec << std::endl;
+                return false;
+            }
+
+            // Run full DFMP check
             int dfmpActivationHeight = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
