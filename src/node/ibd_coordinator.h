@@ -137,6 +137,14 @@ private:
     int FindForkPoint(int chain_height);
     void HandleForkScenario(int fork_point, int chain_height);
 
+    /**
+     * @brief Attempt fork recovery: find fork point, validate chainwork, create ForkCandidate
+     *
+     * Shared logic used by both Layer 2 (orphan detection) and Layer 3 (stall detection).
+     * Returns true if a fork candidate was created or is already active.
+     */
+    bool AttemptForkRecovery(int chain_height, int header_height);
+
     // Headers sync peer management (Bitcoin Core style)
     void SelectHeadersSyncPeer();           // Pick a sync peer if none selected
     bool CheckHeadersSyncProgress();        // Check if sync peer is making progress
