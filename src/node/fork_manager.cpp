@@ -147,6 +147,41 @@ bool ForkCandidate::AllBlocksPrevalidated() const
     return true;
 }
 
+bool ForkCandidate::AllReceivedBlocksPrevalidated() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (m_blocks.empty()) {
+        return false;  // No blocks received yet
+    }
+
+    for (const auto& [height, forkBlock] : m_blocks) {
+        if (forkBlock.status != ForkBlockStatus::PREVALIDATED) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int32_t ForkCandidate::GetHighestPrevalidatedHeight() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    int32_t highest = -1;
+    for (const auto& [height, forkBlock] : m_blocks) {
+        if (forkBlock.status == ForkBlockStatus::PREVALIDATED && height > highest) {
+            highest = height;
+        }
+    }
+    return highest;
+}
+
+int32_t ForkCandidate::GetReceivedBlockCount() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return static_cast<int32_t>(m_blocks.size());
+}
+
 bool ForkCandidate::IsTimedOut() const
 {
     auto now = std::chrono::steady_clock::now();
@@ -554,17 +589,23 @@ bool ForkManager::TriggerChainSwitch(NodeContext& ctx, CBlockchainDB& db)
         return false;
     }
 
-    // Verify all blocks are pre-validated
-    if (!fork->AllBlocksPrevalidated()) {
-        std::cerr << "[ForkManager] Cannot switch - not all blocks pre-validated" << std::endl;
+    // Verify all RECEIVED blocks are pre-validated (not all expected blocks)
+    // This enables early switching when fork has more work
+    if (!fork->AllReceivedBlocksPrevalidated()) {
+        std::cerr << "[ForkManager] Cannot switch - not all received blocks pre-validated" << std::endl;
         std::cerr << "[ForkManager] Fork stats: " << fork->GetStats() << std::endl;
         return false;
     }
 
-    std::cout << "[ForkManager] All fork blocks pre-validated, triggering chain switch via ActivateBestChain" << std::endl;
+    // Use highest prevalidated height (enables early switch before all blocks received)
+    int32_t tipHeight = fork->GetHighestPrevalidatedHeight();
+    if (tipHeight < 0) {
+        std::cerr << "[ForkManager] No prevalidated blocks in fork" << std::endl;
+        return false;
+    }
 
-    // Get the fork tip block index
-    int32_t tipHeight = fork->GetExpectedTipHeight();
+    std::cout << "[ForkManager] Triggering chain switch via ActivateBestChain (tip height " << tipHeight << ")" << std::endl;
+
     ForkBlock* tipBlock = fork->GetBlockAtHeight(tipHeight);
     if (!tipBlock) {
         std::cerr << "[ForkManager] Cannot find fork tip block at height " << tipHeight << std::endl;

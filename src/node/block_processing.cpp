@@ -753,12 +753,36 @@ BlockProcessResult ProcessNewBlock(
         auto fork = forkMgr.GetActiveFork();
 
         if (fork) {
-            std::cout << "[ProcessNewBlock] Fork block stored with index, checking if all blocks ready..." << std::endl;
+            std::cout << "[ProcessNewBlock] Fork block stored with index, checking if ready to switch..." << std::endl;
 
-            // Check if all fork blocks are now received and pre-validated
-            if (fork->HasAllBlocks() && fork->AllBlocksPrevalidated()) {
-                std::cout << "[ProcessNewBlock] All fork blocks received and pre-validated!" << std::endl;
-                std::cout << "[ProcessNewBlock] Triggering chain switch via ActivateBestChain..." << std::endl;
+            // ROBUST FIX: Switch when fork has more work, not when ALL blocks received
+            // This prevents the race condition where fast blocks cause the fork to never complete
+            bool allReceivedPrevalidated = fork->AllReceivedBlocksPrevalidated();
+            int32_t highestPrevalidated = fork->GetHighestPrevalidatedHeight();
+
+            // Get chainwork comparison - switch if fork has more work than current chain
+            bool forkHasMoreWork = false;
+            if (highestPrevalidated > 0) {
+                // Get the block index for our highest prevalidated fork block
+                ForkBlock* highestBlock = fork->GetBlockAtHeight(highestPrevalidated);
+                if (highestBlock) {
+                    CBlockIndex* forkIndex = g_chainstate.GetBlockIndex(highestBlock->hash);
+                    CBlockIndex* currentTip = g_chainstate.GetTip();
+
+                    if (forkIndex && currentTip) {
+                        forkHasMoreWork = (currentTip->nChainWork < forkIndex->nChainWork);
+                        std::cout << "[ProcessNewBlock] Chainwork comparison: fork="
+                                  << forkIndex->nChainWork.GetHex().substr(0, 16) << " current="
+                                  << currentTip->nChainWork.GetHex().substr(0, 16)
+                                  << " forkHasMore=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
+                    }
+                }
+            }
+
+            // Switch if: all received blocks are prevalidated AND fork has more chainwork
+            if (allReceivedPrevalidated && forkHasMoreWork) {
+                std::cout << "[ProcessNewBlock] Fork has more work and all received blocks prevalidated!" << std::endl;
+                std::cout << "[ProcessNewBlock] Triggering early chain switch (height " << highestPrevalidated << ")..." << std::endl;
 
                 // Trigger chain switch - this uses ActivateBestChain with the fork tip
                 if (forkMgr.TriggerChainSwitch(ctx, db)) {
@@ -781,9 +805,11 @@ BlockProcessResult ProcessNewBlock(
                     return BlockProcessResult::VALIDATION_ERROR;
                 }
             } else {
-                // Not all blocks ready yet - skip ActivateBestChain
-                std::cout << "[ProcessNewBlock] Fork block staged, waiting for more blocks..."
-                          << " (stats: " << fork->GetStats() << ")" << std::endl;
+                // Not ready to switch yet
+                std::cout << "[ProcessNewBlock] Fork block staged, waiting for more work..."
+                          << " (stats: " << fork->GetStats() << ")"
+                          << " allPrevalidated=" << (allReceivedPrevalidated ? "yes" : "no")
+                          << " forkHasMoreWork=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
 
                 // Mark block as received
                 if (ctx.block_fetcher) {

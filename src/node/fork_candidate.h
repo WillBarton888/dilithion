@@ -114,9 +114,29 @@ public:
     bool HasAllBlocks() const;
 
     /**
-     * @brief Check if all received blocks are pre-validated
+     * @brief Check if all received blocks are pre-validated (requires HasAllBlocks)
      */
     bool AllBlocksPrevalidated() const;
+
+    /**
+     * @brief Check if all RECEIVED blocks are pre-validated (doesn't require all blocks)
+     *
+     * This is used for early chain switching - we can switch as soon as we have
+     * enough prevalidated blocks to beat the current chain, even if more blocks
+     * are still coming.
+     */
+    bool AllReceivedBlocksPrevalidated() const;
+
+    /**
+     * @brief Get the highest height block that is prevalidated
+     * @return The highest prevalidated height, or -1 if none
+     */
+    int32_t GetHighestPrevalidatedHeight() const;
+
+    /**
+     * @brief Get the number of blocks currently received
+     */
+    int32_t GetReceivedBlockCount() const;
 
     /**
      * @brief Check if any block has failed validation
