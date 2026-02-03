@@ -376,8 +376,10 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                 // Record failure and check if IP should be banned
                 bool should_ban = peer_manager.GetBanManager().RecordGenesisFailure(peer_ip, their_genesis_hex);
 
-                if (should_ban) {
+                if (should_ban && !peer_manager.IsSeedNode(peer_ip)) {
                     // Ban this IP for 24 hours (repeated genesis probing)
+                    // Seed nodes are exempt - genesis mismatch from a seed indicates
+                    // a temporary chain fork, not an attack
                     peer_manager.GetBanManager().Ban(peer_ip, CBanManager::DEFAULT_BAN_TIME,
                                                       BanReason::NodeMisbehaving,
                                                       MisbehaviorType::INVALID_GENESIS, 100);

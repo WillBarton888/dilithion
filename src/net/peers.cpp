@@ -385,6 +385,23 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
     auto peer = GetPeer(peer_id);
     if (!peer) return;
 
+    // Seed node protection: never ban seed nodes for misbehavior.
+    // Seed nodes are trusted infrastructure - banning them causes total network isolation.
+    // Get peer IP to check against seed list.
+    std::string peer_ip = peer->addr.ToStringIP();
+    if (peer->addr.IsNull()) {
+        std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
+        auto it = node_refs.find(peer_id);
+        if (it != node_refs.end() && it->second && !it->second->addr.IsNull()) {
+            peer_ip = it->second->addr.ToStringIP();
+        }
+    }
+    if (IsSeedNode(peer_ip)) {
+        LogPrintf(NET, WARN, "[CPeerManager] Ignoring misbehavior score for seed node %s (peer %d, type=%s, score=%d)\n",
+                  peer_ip.c_str(), peer_id, MisbehaviorTypeToString(type), howmuch);
+        return;
+    }
+
     // Use default score from MisbehaviorType if howmuch is 0
     int score = howmuch > 0 ? howmuch : GetMisbehaviorScore(type);
 
@@ -610,6 +627,15 @@ void CPeerManager::InitializeSeedNodes() {
     // - Latest Dilithion node software
     //
     // Users can also manually configure peers using --addnode command line parameter.
+}
+
+bool CPeerManager::IsSeedNode(const std::string& ip) const {
+    for (const auto& seed : seed_nodes) {
+        if (seed.ToStringIP() == ip) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Address database management (NW-003 - now uses Bitcoin Core CAddrMan)
@@ -1329,9 +1355,15 @@ bool CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
     // Caller MUST check return value and NOT add to m_nodes if false
     // Otherwise, CNode exists in m_nodes but not in node_refs, causing
     // GetNode() to return nullptr during handshake
+    // Seed node exemption: never reject seed nodes even if banned
     if (banman.IsBanned(ip)) {
-        LogPrintf(NET, WARN, "[CPeerManager] RegisterNode: IP %s is banned, rejecting connection\n", ip.c_str());
-        return false;
+        if (IsSeedNode(ip)) {
+            LogPrintf(NET, WARN, "[CPeerManager] RegisterNode: Seed node %s is banned but allowing connection (seed exemption)\n", ip.c_str());
+            banman.Unban(ip);
+        } else {
+            LogPrintf(NET, WARN, "[CPeerManager] RegisterNode: IP %s is banned, rejecting connection\n", ip.c_str());
+            return false;
+        }
     }
 
     {

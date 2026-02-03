@@ -429,6 +429,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     std::cerr << "[Chain] CRITICAL: No database during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  Failed at block: " << pindexReconnect->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
 
@@ -438,6 +439,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     std::cerr << "  Height: " << pindexReconnect->nHeight << std::endl;
                     std::cerr << "  This should be impossible - block passed pre-validation!" << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
 
@@ -446,6 +448,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     std::cerr << "  Block: " << pindexReconnect->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  Height: " << pindexReconnect->nHeight << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
             }
@@ -499,6 +502,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             for (int j = static_cast<int>(connectedCount) - 1; j >= 0; --j) {
                 if (!DisconnectTip(connectBlocks[j])) {
                     std::cerr << "[Chain] CRITICAL: Rollback failed during disconnect! Chain state corrupted!" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
             }
@@ -511,6 +515,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                 if (pdb == nullptr) {
                     std::cerr << "[Chain] CRITICAL: No database during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
 
@@ -519,6 +524,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  This should be impossible - block passed pre-validation!" << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
 
@@ -526,6 +532,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
             }
@@ -547,6 +554,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             for (int j = static_cast<int>(connectedCount) - 1; j >= 0; --j) {
                 if (!DisconnectTip(connectBlocks[j])) {
                     std::cerr << "[Chain] CRITICAL: Rollback failed during disconnect! Chain state corrupted!" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
             }
@@ -559,6 +567,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                 if (pdb == nullptr) {
                     std::cerr << "[Chain] CRITICAL: No database during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
 
@@ -567,6 +576,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  This should be impossible - block passed pre-validation!" << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
 
@@ -574,6 +584,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
+                    if (m_reorgWAL) { m_reorgWAL->AbortReorg(); }
                     return false;
                 }
             }

@@ -310,6 +310,7 @@ public:
     // Seed nodes
     void InitializeSeedNodes();
     std::vector<NetProtocol::CAddress> GetSeedNodes() const { return seed_nodes; }
+    bool IsSeedNode(const std::string& ip) const;
 
     // Address database management (NW-003)
     void MarkAddressGood(const NetProtocol::CAddress& addr);  // Mark successful connection

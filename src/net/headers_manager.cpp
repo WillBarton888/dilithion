@@ -136,27 +136,42 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
     int highestCheckpoint = Dilithion::g_chainParams ?
         Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
 
+    // Independent height tracker: headers in GETHEADERS responses are sequential,
+    // so we can track height even when pprev can't advance (e.g. below-checkpoint
+    // headers where mapHeightIndex is missing entries from compact block sync).
+    int sequentialHeight = (commonAncestorHeight >= 0) ? (commonAncestorHeight + 1) : 1;
+
     for (size_t i = 0; i < headers.size(); i++) {
         const CBlockHeader& header = headers[i];
 
-        // Calculate expected height
-        int expectedHeight = pprev ? (pprev->height + 1) : 1;
+        // Calculate expected height - use pprev when available, fall back to sequential tracker
+        int expectedHeight = pprev ? (pprev->height + 1) : sequentialHeight;
+        sequentialHeight = expectedHeight + 1;  // Always advance for next iteration
 
         auto heightIt = mapHeightIndex.find(expectedHeight);
         bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-        // FAST PATH 1: Below checkpoint, if height exists, skip entirely (no hash computation)
-        // Checkpoints are hardcoded guarantees of the canonical chain
-        if (expectedHeight <= highestCheckpoint && heightHasHeaders) {
-            uint256 existingHash = *heightIt->second.begin();
-            auto existingIt = mapHeaders.find(existingHash);
-            if (existingIt != mapHeaders.end()) {
-                pprev = &existingIt->second;
-                prevHash = existingHash;
-                heightStart = existingIt->second.height;
-                UpdateBestHeader(existingHash);
-                continue;  // Skip without computing hash
+        // FAST PATH 1: Below checkpoint - skip hash computation entirely.
+        // Checkpoints are hardcoded guarantees of the canonical chain.
+        // No competing header below a checkpoint can ever produce a valid reorg,
+        // so there's no reason to compute expensive RandomX hashes for them.
+        if (expectedHeight <= highestCheckpoint) {
+            if (heightHasHeaders) {
+                // We have our canonical header at this height - use it as pprev
+                uint256 existingHash = *heightIt->second.begin();
+                auto existingIt = mapHeaders.find(existingHash);
+                if (existingIt != mapHeaders.end()) {
+                    pprev = &existingIt->second;
+                    prevHash = existingHash;
+                    heightStart = existingIt->second.height;
+                    continue;  // Skip without computing hash
+                }
             }
+            // No canonical header in index (e.g. synced via compact blocks).
+            // Skip hash computation - checkpoint guarantees this height is settled.
+            // pprev stays unchanged; sequentialHeight tracks correct position.
+            pprev = nullptr;
+            continue;
         }
 
         // FAST PATH 2: Below common ancestor height, headers are identical on both chains
@@ -235,6 +250,22 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                 pprev = &parentIt->second;
             } else {
                 // FORK DETECTED: Parent not found - this is a competing chain
+
+                // STALE FORK FILTER: If the expected height is far below our chain tip,
+                // this fork can never trigger an automatic reorg (MAX_AUTO_REORG_DEPTH=100).
+                // Skip fork detection to avoid log noise, unnecessary GETHEADERS, and
+                // wasted CPU on obviously-stale competing chains.
+                static const int STALE_FORK_THRESHOLD = 100;
+                if (chainstateHeightPreFetched > 0 && expectedHeight > 0 &&
+                    (chainstateHeightPreFetched - expectedHeight) > STALE_FORK_THRESHOLD) {
+                    if (g_verbose.load(std::memory_order_relaxed)) {
+                        std::cout << "[HeadersManager] Ignoring stale fork header at height " << expectedHeight
+                                  << " (chain at " << chainstateHeightPreFetched << ", depth="
+                                  << (chainstateHeightPreFetched - expectedHeight) << ")" << std::endl;
+                    }
+                    continue;
+                }
+
                 // Check if we already requested this parent (avoid duplicate requests)
                 if (m_pendingParentRequests.find(header.hashPrevBlock) == m_pendingParentRequests.end()) {
                     std::cout << "[HeadersManager] FORK: Parent " << header.hashPrevBlock.GetHex().substr(0, 16)
@@ -1676,13 +1707,18 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     // This enables reorganization to chains with more work but fewer blocks
     bool hasMoreWork = ChainWorkGreaterThan(it->second.chainWork, bestIt->second.chainWork);
 
-    // DEBUG: Log chain work comparison
-    std::string newWorkHex = it->second.chainWork.GetHex();
-    std::string bestWorkHex = bestIt->second.chainWork.GetHex();
-    std::cout << "[UpdateBestHeader] Comparing heights: " << nBestHeight << " vs " << newHeight
-              << " bestWork=" << bestWorkHex.substr(bestWorkHex.length() > 16 ? bestWorkHex.length() - 16 : 0)
-              << " newWork=" << newWorkHex.substr(newWorkHex.length() > 16 ? newWorkHex.length() - 16 : 0)
-              << " hasMoreWork=" << (hasMoreWork ? "YES" : "NO") << std::endl;
+    // Log chain work comparison only when relevant (competitive heights or verbose mode)
+    // Suppress log noise from obviously-stale headers (e.g. height 25 vs 3600)
+    bool isCompetitive = hasMoreWork || (newHeight > 0 && nBestHeight > 0 &&
+                          (nBestHeight - newHeight) < 200);
+    if (isCompetitive || g_verbose.load(std::memory_order_relaxed)) {
+        std::string newWorkHex = it->second.chainWork.GetHex();
+        std::string bestWorkHex = bestIt->second.chainWork.GetHex();
+        std::cout << "[UpdateBestHeader] Comparing heights: " << nBestHeight << " vs " << newHeight
+                  << " bestWork=" << bestWorkHex.substr(bestWorkHex.length() > 16 ? bestWorkHex.length() - 16 : 0)
+                  << " newWork=" << newWorkHex.substr(newWorkHex.length() > 16 ? newWorkHex.length() - 16 : 0)
+                  << " hasMoreWork=" << (hasMoreWork ? "YES" : "NO") << std::endl;
+    }
 
     // FALLBACK: If both chainWork values are zero (IBD below checkpoint), use height comparison
     // This ensures proper header chain progression during initial sync
