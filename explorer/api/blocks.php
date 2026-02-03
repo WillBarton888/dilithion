@@ -60,11 +60,11 @@ if ($height !== null) {
 }
 
 // Latest blocks list with pagination
-// Try cache first
+// Try cache first (skip if nocache=1, used by cache update service)
 $cacheFile = __DIR__ . '/../cache/latest-blocks.json';
-$useCache = false;
+$noCache = isset($_GET['nocache']) && $_GET['nocache'] === '1';
 
-if ($page === 1 && file_exists($cacheFile)) {
+if (!$noCache && $page === 1 && file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
     if ($cacheAge < 30) {
         $cached = json_decode(file_get_contents($cacheFile), true);
