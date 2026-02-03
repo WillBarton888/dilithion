@@ -196,6 +196,8 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["setminingaddress"] = [this](const std::string& p) { return RPC_SetMiningAddress(p); };
     m_handlers["getminingaddress"] = [this](const std::string& p) { return RPC_GetMiningAddress(p); };
     m_handlers["getdfmpinfo"] = [this](const std::string& p) { return RPC_GetDFMPInfo(p); };
+    m_handlers["getmikdistribution"] = [this](const std::string& p) { return RPC_GetMIKDistribution(p); };
+    m_handlers["getfullmikdistribution"] = [this](const std::string& p) { return RPC_GetFullMIKDistribution(p); };
 
     // Network and general
     m_handlers["getnetworkinfo"] = [this](const std::string& p) { return RPC_GetNetworkInfo(p); };
@@ -3667,6 +3669,109 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
     oss << "\"total_penalty\":" << totalPenalty;
 
     oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetMIKDistribution(const std::string& params) {
+    // Get all MIK identities and their block counts from heat tracker
+    if (!DFMP::g_heatTracker) {
+        throw std::runtime_error("Heat tracker not initialized");
+    }
+
+    std::map<DFMP::Identity, int> heatData = DFMP::g_heatTracker->GetAllHeat();
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"window_size\":" << DFMP::g_heatTracker->GetWindowSize() << ",";
+    oss << "\"unique_miners\":" << heatData.size() << ",";
+    oss << "\"distribution\":[";
+
+    bool first = true;
+    for (const auto& [identity, blockCount] : heatData) {
+        if (!first) oss << ",";
+        first = false;
+        oss << "{\"mik\":\"" << identity.GetHex() << "\",\"blocks\":" << blockCount << "}";
+    }
+
+    oss << "]}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
+    // Scan all blocks and extract MIK identities from coinbase transactions
+    if (!m_blockchain || !m_chainstate) {
+        throw std::runtime_error("Blockchain not initialized");
+    }
+
+    int currentHeight = static_cast<int>(m_chainstate->GetHeight());
+    std::map<std::string, int> mikBlockCounts;  // MIK identity hex -> block count
+    int blocksWithMIK = 0;
+    int blocksWithoutMIK = 0;
+
+    CBlockValidator validator;
+
+    for (int height = 1; height <= currentHeight; height++) {
+        // Get block hash for this height using chainstate
+        std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(height);
+        if (hashes.empty()) continue;
+
+        uint256 blockHash = hashes[0];  // Use first (canonical) block at this height
+
+        // Read the block
+        CBlock block;
+        if (!m_blockchain->ReadBlock(blockHash, block)) {
+            continue;
+        }
+
+        // Deserialize transactions
+        std::vector<CTransactionRef> transactions;
+        std::string deserializeError;
+        if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
+            continue;
+        }
+
+        if (transactions.empty()) continue;
+
+        // Get coinbase transaction (first tx)
+        const auto& coinbaseTx = transactions[0];
+        if (coinbaseTx->vin.empty()) continue;
+
+        // Parse MIK from coinbase scriptSig
+        const std::vector<uint8_t>& scriptSig = coinbaseTx->vin[0].scriptSig;
+        DFMP::CMIKScriptData mikData;
+
+        if (DFMP::ParseMIKFromScriptSig(scriptSig, mikData)) {
+            std::string mikHex = mikData.identity.GetHex();
+            mikBlockCounts[mikHex]++;
+            blocksWithMIK++;
+        } else {
+            blocksWithoutMIK++;
+        }
+    }
+
+    // Sort by block count (descending)
+    std::vector<std::pair<std::string, int>> sorted(mikBlockCounts.begin(), mikBlockCounts.end());
+    std::sort(sorted.begin(), sorted.end(),
+        [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"total_blocks\":" << currentHeight << ",";
+    oss << "\"blocks_with_mik\":" << blocksWithMIK << ",";
+    oss << "\"blocks_without_mik\":" << blocksWithoutMIK << ",";
+    oss << "\"unique_miners\":" << mikBlockCounts.size() << ",";
+    oss << "\"distribution\":[";
+
+    bool first = true;
+    for (const auto& [mikHex, blockCount] : sorted) {
+        if (!first) oss << ",";
+        first = false;
+        double percentage = (currentHeight > 0) ? (blockCount * 100.0 / currentHeight) : 0;
+        oss << "{\"mik\":\"" << mikHex << "\",\"blocks\":" << blockCount
+            << ",\"percent\":" << std::fixed << std::setprecision(2) << percentage << "}";
+    }
+
+    oss << "]}";
     return oss.str();
 }
 

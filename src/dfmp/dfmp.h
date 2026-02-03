@@ -194,6 +194,12 @@ public:
      * Get current window size (for debugging)
      */
     size_t GetWindowSize() const;
+
+    /**
+     * Get all identities and their block counts in the current window
+     * (for distribution analysis)
+     */
+    std::map<Identity, int> GetAllHeat() const;
 };
 
 // ============================================================================

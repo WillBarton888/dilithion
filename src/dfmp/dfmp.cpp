@@ -178,6 +178,11 @@ size_t CHeatTracker::GetWindowSize() const {
     return m_window.size();
 }
 
+std::map<Identity, int> CHeatTracker::GetAllHeat() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_heatCache;  // Return a copy
+}
+
 // ============================================================================
 // MULTIPLIER CALCULATION (Fixed-Point) - DFMP v2.0
 // ============================================================================
