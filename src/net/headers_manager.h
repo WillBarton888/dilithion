@@ -692,6 +692,8 @@ private:
     std::atomic<int> m_headers_requested_height{0};  ///< Highest height we've REQUESTED (not yet received)
     uint256 m_last_request_hash;                     ///< Hash of last RECEIVED header (for locator) - protected by cs_headers
     uint256 m_last_sent_locator_hash;                ///< Hash we last SENT request for (for dedup) - protected by cs_headers
+    std::chrono::steady_clock::time_point m_last_header_request_time;  ///< When last header request was sent
+    static constexpr int HEADER_SYNC_STALE_SECS = 30;                 ///< Header sync considered stale after 30s with no response
 
     // Bug #46 Fix: Track multiple chain tips for competing chains
     std::set<uint256> setChainTips;         ///< All known chain tips (leaves in tree)

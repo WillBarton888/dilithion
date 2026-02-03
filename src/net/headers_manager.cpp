@@ -565,6 +565,10 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
         NetProtocol::CGetHeadersMessage msg(locator, uint256());
         CNetMessage getheaders = msg_proc->CreateGetHeadersMessage(msg);
         connman->PushMessage(peer, getheaders);
+        {
+            std::lock_guard<std::mutex> lock(cs_headers);
+            m_last_header_request_time = std::chrono::steady_clock::now();
+        }
         std::cout << "[IBD] RequestHeaders: Sent GETHEADERS to peer " << peer << std::endl;
     }
 }
@@ -884,7 +888,15 @@ int CHeadersManager::GetBestHeight() const
 bool CHeadersManager::IsHeaderSyncInProgress() const
 {
     std::lock_guard<std::mutex> lock(cs_headers);
-    return !m_last_request_hash.IsNull();
+    if (m_last_request_hash.IsNull()) return false;
+
+    // Check if the last header request is stale (no response in HEADER_SYNC_STALE_SECS)
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_header_request_time).count();
+    if (elapsed > HEADER_SYNC_STALE_SECS) {
+        return false;  // Stale - allow new requests
+    }
+    return true;
 }
 
 void CHeadersManager::ClearPendingSync()
@@ -1141,6 +1153,7 @@ void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredH
     InvalidateBestChainCache();
 
     // Reset request tracking to continue from the new best header
+    // Note: Do NOT update m_last_header_request_time here - this is initialization, not an active request
     m_headers_requested_height.store(nBestHeight);
     m_last_request_hash = hashBestHeader;
 
@@ -2163,6 +2176,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         {
             std::lock_guard<std::mutex> lock(cs_headers);
             m_last_request_hash = storedHashAtEndHeight;
+            m_last_header_request_time = std::chrono::steady_clock::now();
             std::cout << "[HeadersManager] FAST PATH: Updated m_last_request_hash to stored hash at height "
                       << endHeight << " (" << storedHashAtEndHeight.GetHex().substr(0, 16) << "...)" << std::endl;
         }
@@ -2403,6 +2417,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     if (!prevHash.IsNull()) {
         std::lock_guard<std::mutex> lock(cs_headers);
         m_last_request_hash = prevHash;
+        m_last_header_request_time = std::chrono::steady_clock::now();
         std::cout << "[HeadersManager] Updated m_last_request_hash to last stored hash: "
                   << prevHash.GetHex().substr(0, 16) << "..." << std::endl;
     }
