@@ -527,17 +527,23 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
         return false;
     }
 
-    // FIX: Check for duplicate connection (already connected to this IP)
-    // This prevents A→B and B→A connections from both succeeding
+    // Per-IP connection limit (NAT support: multiple nodes behind one router)
+    // Bitcoin Core has no per-IP limit, but we add a soft limit for DoS protection
+    static constexpr int MAX_INBOUND_PER_IP = 4;
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
+        int ip_count = 0;
         for (const auto& node : m_nodes) {
             if (node && !node->fDisconnect.load()) {
                 if (node->addr.ToStringIP() == ip_str) {
-                    LogPrintf(NET, WARN, "[CConnman] Rejecting duplicate inbound from %s (already connected)\n", ip_str.c_str());
-                    return false;
+                    ++ip_count;
                 }
             }
+        }
+        if (ip_count >= MAX_INBOUND_PER_IP) {
+            LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d connections, max %d per IP)\n",
+                      ip_str.c_str(), ip_count, MAX_INBOUND_PER_IP);
+            return false;
         }
     }
 
@@ -1176,24 +1182,24 @@ void CConnman::SocketHandler() {
             pnode->SetSocket(client_fd);
             pnode->state.store(CNode::STATE_CONNECTED);
 
-            // FIX: Check for duplicate AND add in ONE atomic operation
-            // Only ONE connection per peer allowed (regardless of direction)
+            // Per-IP connection limit (NAT support: multiple nodes behind one router)
+            static constexpr int MAX_INBOUND_PER_IP = 4;
             {
                 std::lock_guard<std::mutex> lock(cs_vNodes);
 
-                // Check for duplicate
-                bool is_duplicate = false;
+                // Count existing connections from this IP
+                int ip_count = 0;
                 for (const auto& existing_node : m_nodes) {
                     if (existing_node && !existing_node->fDisconnect.load()) {
                         if (existing_node->addr.ToStringIP() == std::string(ip_str)) {
-                            is_duplicate = true;
-                            break;
+                            ++ip_count;
                         }
                     }
                 }
 
-                if (is_duplicate) {
-                    LogPrintf(NET, WARN, "[CConnman] Rejecting duplicate inbound from %s (already connected)\n", ip_str);
+                if (ip_count >= MAX_INBOUND_PER_IP) {
+                    LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d connections, max %d per IP)\n",
+                              ip_str, ip_count, MAX_INBOUND_PER_IP);
                     // Node destructor will close socket
                     continue;  // Skip to next pending connection
                 }
