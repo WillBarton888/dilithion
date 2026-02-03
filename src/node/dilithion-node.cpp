@@ -2645,31 +2645,47 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::vector<CBlockHeader> headers;
             CBlockIndex* pindex = g_chainstate.GetBlockIndex(hashStart);
 
-            // DEBUG: Check pnext chain
-            if (g_verbose.load(std::memory_order_relaxed)) {
-                if (pindex) {
-                    std::cout << "[IBD-DEBUG] Found start block at height " << pindex->nHeight
-                              << " pnext=" << (pindex->pnext ? "SET" : "NULL") << std::endl;
-                } else {
-                    std::cout << "[IBD-DEBUG] Start block NOT FOUND: " << hashStart.GetHex().substr(0,16) << "..." << std::endl;
-                }
-            }
-
             if (pindex) {
-                pindex = pindex->pnext;  // Start from next block (may be NULL if at tip)
-
-                while (pindex && headers.size() < 2000) {
-                    // BUG #70 DEBUG: Log merkle root of each header being sent
-                    if (g_verbose.load(std::memory_order_relaxed))
-                        std::cerr << "[BUG70-DEBUG] Sending header height=" << pindex->nHeight
-                                  << " merkle=" << pindex->header.hashMerkleRoot.GetHex().substr(0,16)
-                                  << "..." << std::endl;
-                    headers.push_back(pindex->header);
-                    pindex = pindex->pnext;
-
-                    // Stop if we reach the stop hash
-                    if (!msg.hashStop.IsNull() && pindex && pindex->GetBlockHash() == msg.hashStop) {
-                        break;
+                // BUG FIX: Check if common block is on the active chain.
+                // If it's on a fork, pnext will be NULL and we'd send 0 headers.
+                // Instead, find the fork point and send active chain headers.
+                CBlockIndex* pTip = g_chainstate.GetTip();
+                if (pTip) {
+                    CBlockIndex* pActiveAtHeight = pTip->GetAncestor(pindex->nHeight);
+                    if (pActiveAtHeight && pActiveAtHeight->GetBlockHash() != pindex->GetBlockHash()) {
+                        // Common block is on a fork - walk back to find fork point
+                        int forkHeight = pindex->nHeight;
+                        CBlockIndex* pForkWalk = pindex;
+                        while (forkHeight > 0 && pForkWalk && pForkWalk->pprev) {
+                            forkHeight--;
+                            pForkWalk = pForkWalk->pprev;
+                            CBlockIndex* pActiveCheck = pTip->GetAncestor(forkHeight);
+                            if (pActiveCheck && pActiveCheck->GetBlockHash() == pForkWalk->GetBlockHash()) {
+                                // Found the fork point
+                                break;
+                            }
+                        }
+                        std::cout << "[IBD] Common block at height " << pindex->nHeight
+                                  << " is on a fork, fork point at height " << forkHeight << std::endl;
+                        // Send headers from active chain starting after fork point
+                        for (int h = forkHeight + 1; h <= pTip->nHeight && headers.size() < 2000; h++) {
+                            CBlockIndex* pBlock = pTip->GetAncestor(h);
+                            if (pBlock) {
+                                headers.push_back(pBlock->header);
+                            }
+                        }
+                    } else {
+                        // Common block is on active chain - walk forward via active chain
+                        for (int h = pindex->nHeight + 1; h <= pTip->nHeight && headers.size() < 2000; h++) {
+                            CBlockIndex* pBlock = pTip->GetAncestor(h);
+                            if (pBlock) {
+                                headers.push_back(pBlock->header);
+                            }
+                            // Stop if we reach the stop hash
+                            if (!msg.hashStop.IsNull() && pBlock && pBlock->GetBlockHash() == msg.hashStop) {
+                                break;
+                            }
+                        }
                     }
                 }
             }

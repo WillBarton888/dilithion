@@ -234,12 +234,36 @@ bool CAsyncBroadcaster::BroadcastBlock(const uint256& hash, const CBlock& block,
         if (pnode && !pnode->fDisconnect.load()) {
             if (pnode->fSupportsCompactBlocks.load() && pnode->fHighBandwidth.load()) {
                 cmpctblock_peers.push_back(peer_id);
-            } else if (pnode->fPreferHeaders.load()) {
+            } else if (pnode->fPreferHeaders.load() || pnode->fSupportsCompactBlocks.load()) {
                 headers_peers.push_back(peer_id);
             } else {
                 inv_peers.push_back(peer_id);
             }
         }
+    }
+
+    // Diagnostic: log peer routing breakdown (rate-limited to avoid spam)
+    static int relay_log_count = 0;
+    int null_nodes = 0;
+    int disconnecting = 0;
+    int supports_cmpct = 0;
+    int high_bw = 0;
+    for (int pid : peer_ids) {
+        CNode* pn = m_connman->GetNode(pid);
+        if (!pn) { null_nodes++; continue; }
+        if (pn->fDisconnect.load()) { disconnecting++; continue; }
+        if (pn->fSupportsCompactBlocks.load()) supports_cmpct++;
+        if (pn->fHighBandwidth.load()) high_bw++;
+    }
+    if (relay_log_count++ < 20 || relay_log_count % 100 == 0) {
+        std::cout << "[BIP152-DIAG] Block relay routing: total=" << peer_ids.size()
+                  << " cmpctblock=" << cmpctblock_peers.size()
+                  << " headers=" << headers_peers.size()
+                  << " inv=" << inv_peers.size()
+                  << " null_node=" << null_nodes
+                  << " disconnecting=" << disconnecting
+                  << " supports_cmpct=" << supports_cmpct
+                  << " high_bw=" << high_bw << std::endl;
     }
 
     bool success = true;

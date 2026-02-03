@@ -710,6 +710,14 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
         if (header.hashPrevBlock.IsNull()) {
             height = 0;  // Genesis block
         } else {
+            // Parent not in mapHeaders (compact block arrived without header pipeline).
+            // Look up actual height from chainstate block index.
+            // Safe: cs_main is already held (called from ConnectTip→NotifyTipUpdate),
+            // and cs_main is a recursive_mutex.
+            CBlockIndex* pindex = g_chainstate.GetBlockIndex(hash);
+            if (pindex) {
+                height = pindex->nHeight;
+            }
         }
     }
 

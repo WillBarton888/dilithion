@@ -2789,12 +2789,15 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
         minerAddress = DecodeScriptPubKeyToAddress(transactions[0]->vout[0].scriptPubKey);
     }
 
-    // Get next block hash if available
+    // Get next block hash if available (use active chain, not any fork)
     std::string nextBlockHash = "";
     if (height >= 0 && m_chainstate) {
-        std::vector<uint256> nextHashes = m_chainstate->GetBlocksAtHeight(height + 1);
-        if (!nextHashes.empty()) {
-            nextBlockHash = nextHashes[0].GetHex();
+        CBlockIndex* pTip = m_chainstate->GetTip();
+        if (pTip && height + 1 <= pTip->nHeight) {
+            CBlockIndex* pNext = pTip->GetAncestor(height + 1);
+            if (pNext) {
+                nextBlockHash = pNext->GetBlockHash().GetHex();
+            }
         }
     }
 
@@ -2912,15 +2915,27 @@ std::string CRPCServer::RPC_GetBlockHash(const std::string& params) {
         throw std::runtime_error("Height parameter out of range");
     }
 
-    // Get blocks at this height
-    std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(height);
-    if (hashes.empty()) {
+    // Get block hash from active chain (walk back from tip)
+    CBlockIndex* pTip = m_chainstate->GetTip();
+    if (!pTip || height > pTip->nHeight) {
+        // Fallback to GetBlocksAtHeight for blocks beyond tip
+        std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(height);
+        if (hashes.empty()) {
+            throw std::runtime_error("No block found at height " + std::to_string(height));
+        }
+        std::ostringstream oss;
+        oss << "{\"blockhash\":\"" << hashes[0].GetHex() << "\"}";
+        return oss.str();
+    }
+
+    // Use GetAncestor to walk active chain - guaranteed to return main chain block
+    CBlockIndex* pBlock = pTip->GetAncestor(height);
+    if (!pBlock) {
         throw std::runtime_error("No block found at height " + std::to_string(height));
     }
 
-    // Return first block (on main chain)
     std::ostringstream oss;
-    oss << "{\"blockhash\":\"" << hashes[0].GetHex() << "\"}";
+    oss << "{\"blockhash\":\"" << pBlock->GetBlockHash().GetHex() << "\"}";
     return oss.str();
 }
 
