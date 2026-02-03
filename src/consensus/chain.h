@@ -198,6 +198,21 @@ public:
     std::vector<uint256> GetBlocksAtHeight(int height) const;
 
     /**
+     * Get all chain tips (blocks with no children in the block index)
+     * Used by block explorer to show fork visibility
+     *
+     * Returns vector of tuples: (height, hash, branchlen, status)
+     * Status: "active" = main chain tip, "valid-fork" = valid alternative, "headers-only" = no block data
+     */
+    struct ChainTip {
+        int height;
+        uint256 hash;
+        int branchlen;
+        std::string status;
+    };
+    std::vector<ChainTip> GetChainTips() const;
+
+    /**
      * Clean up in-memory index
      * Deletes all CBlockIndex pointers
      */

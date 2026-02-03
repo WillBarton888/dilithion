@@ -14,6 +14,7 @@
 #include <util/assert.h>
 #include <iostream>
 #include <algorithm>
+#include <set>
 
 CChainState::CChainState() : pindexTip(nullptr), pdb(nullptr), pUTXOSet(nullptr) {
 }
@@ -873,6 +874,74 @@ std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {
 
     // P5-LOW FIX: Return without std::move to allow RVO
     return result;
+}
+
+// Block explorer: Find all chain tips (blocks with no children)
+std::vector<CChainState::ChainTip> CChainState::GetChainTips() const {
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    std::vector<ChainTip> tips;
+    if (!pindexTip) return tips;
+
+    // Build set of blocks that have children (i.e., are referenced as pprev)
+    std::set<const CBlockIndex*> hasChildren;
+    for (const auto& pair : mapBlockIndex) {
+        if (pair.second->pprev) {
+            hasChildren.insert(pair.second->pprev);
+        }
+    }
+
+    // Any block NOT in hasChildren set is a tip
+    for (const auto& pair : mapBlockIndex) {
+        const CBlockIndex* pindex = pair.second.get();
+        if (hasChildren.count(pindex) == 0) {
+            ChainTip tip;
+            tip.height = pindex->nHeight;
+            tip.hash = pair.first;
+
+            // Determine status and branch length
+            if (pindex == pindexTip) {
+                tip.status = "active";
+                tip.branchlen = 0;
+            } else {
+                // Find fork point with main chain
+                const CBlockIndex* pWalk = pindex;
+                int branchlen = 0;
+                // Walk back to find where this tip diverges from main chain
+                // A block is on the main chain if walking from tip backwards reaches it
+                while (pWalk && pWalk->nHeight > 0) {
+                    // Check if this block is on the main chain by comparing with main chain at same height
+                    bool onMainChain = false;
+                    if (pWalk->nHeight <= pindexTip->nHeight) {
+                        // Walk main chain to this height
+                        const CBlockIndex* pMain = pindexTip;
+                        while (pMain && pMain->nHeight > pWalk->nHeight) {
+                            pMain = pMain->pprev;
+                        }
+                        if (pMain && pMain->GetBlockHash() == pWalk->GetBlockHash()) {
+                            onMainChain = true;
+                        }
+                    }
+                    if (onMainChain) break;
+                    branchlen++;
+                    pWalk = pWalk->pprev;
+                }
+                tip.branchlen = branchlen;
+                tip.status = "valid-fork";
+            }
+
+            tips.push_back(tip);
+        }
+    }
+
+    // Sort by height descending (active tip first)
+    std::sort(tips.begin(), tips.end(), [](const ChainTip& a, const ChainTip& b) {
+        if (a.status == "active") return true;
+        if (b.status == "active") return false;
+        return a.height > b.height;
+    });
+
+    return tips;
 }
 
 // RACE CONDITION FIX: Thread-safe chain snapshot for fork detection

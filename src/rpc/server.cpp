@@ -2187,6 +2187,20 @@ std::string CRPCServer::RPC_SendRawTransaction(const std::string& params) {
 // Transaction Query RPCs
 // ----------------------------------------------------------------------------
 
+// Helper: Decode scriptPubKey to Dilithion address (P2PKH format)
+static std::string DecodeScriptPubKeyToAddress(const std::vector<uint8_t>& scriptPubKey) {
+    // P2PKH format: 76 a9 14 [20-byte hash] 88 ac
+    if (scriptPubKey.size() == 25 && scriptPubKey[0] == 0x76 &&
+        scriptPubKey[1] == 0xa9 && scriptPubKey[2] == 0x14 &&
+        scriptPubKey[23] == 0x88 && scriptPubKey[24] == 0xac) {
+        std::vector<uint8_t> addrData;
+        addrData.push_back(0x1E);  // Dilithion version byte ('D' prefix)
+        addrData.insert(addrData.end(), scriptPubKey.begin() + 3, scriptPubKey.begin() + 23);
+        return EncodeBase58Check(addrData);
+    }
+    return "";
+}
+
 std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
     if (!m_mempool) {
         throw std::runtime_error("Mempool not initialized");
@@ -2236,8 +2250,8 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
     }
 
     // Walk backwards through chain looking for transaction
-    // Limit search to last 1000 blocks for performance
-    const int MAX_BLOCKS_TO_SEARCH = 1000;
+    // Search entire chain (chain is still young enough for full scan)
+    const int MAX_BLOCKS_TO_SEARCH = pTip->nHeight + 1;  // Search all blocks
     int blocksSearched = 0;
 
     CBlockIndex* pCurrent = pTip;
@@ -2297,10 +2311,14 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                     if (i > 0) oss << ",";
                     const CTxIn& txin = tx.vin[i];
                     oss << "{";
-                    oss << "\"txid\":\"" << txin.prevout.hash.GetHex() << "\",";
-                    oss << "\"vout\":" << txin.prevout.n << ",";
-                    oss << "\"scriptSig\":\"" << HexStr(txin.scriptSig) << "\",";
-                    oss << "\"sequence\":" << txin.nSequence;
+                    if (txin.prevout.hash.IsNull()) {
+                        oss << "\"coinbase\":true";
+                    } else {
+                        oss << "\"txid\":\"" << txin.prevout.hash.GetHex() << "\",";
+                        oss << "\"vout\":" << txin.prevout.n << ",";
+                        oss << "\"scriptSig\":\"" << HexStr(txin.scriptSig) << "\",";
+                        oss << "\"sequence\":" << txin.nSequence;
+                    }
                     oss << "}";
                 }
                 oss << "],";
@@ -2310,9 +2328,13 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                 for (size_t i = 0; i < tx.vout.size(); i++) {
                     if (i > 0) oss << ",";
                     const CTxOut& txout = tx.vout[i];
+                    std::string addr = DecodeScriptPubKeyToAddress(txout.scriptPubKey);
                     oss << "{";
                     oss << "\"value\":" << txout.nValue << ",";
                     oss << "\"n\":" << i << ",";
+                    if (!addr.empty()) {
+                        oss << "\"address\":\"" << addr << "\",";
+                    }
                     oss << "\"scriptPubKey\":\"" << HexStr(txout.scriptPubKey) << "\"";
                     oss << "}";
                 }
@@ -2726,6 +2748,21 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
     uint256 hash;
     hash.SetHex(hash_str);
 
+    // Parse optional verbosity parameter (default 0)
+    // 0 = header + tx_count + miner (existing behavior)
+    // 1 = header + txid array
+    // 2 = header + full decoded transactions
+    int verbosity = 0;
+    size_t verb_pos = params.find("\"verbosity\"");
+    if (verb_pos != std::string::npos) {
+        size_t verb_colon = params.find(":", verb_pos);
+        size_t num_start = verb_colon + 1;
+        while (num_start < params.length() && isspace(params[num_start])) num_start++;
+        if (num_start < params.length() && params[num_start] >= '0' && params[num_start] <= '9') {
+            verbosity = params[num_start] - '0';
+        }
+    }
+
     CBlock block;
     if (!m_blockchain->ReadBlock(hash, block)) {
         throw std::runtime_error("Block not found");
@@ -2737,25 +2774,27 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
         height = blockIndex.nHeight;
     }
 
-    // Extract miner address from coinbase transaction (first output = miner reward)
-    std::string minerAddress = "";
+    // Deserialize transactions (needed for miner address and verbosity >= 1)
+    CBlockValidator validator;
+    std::vector<CTransactionRef> transactions;
+    std::string deserializeError;
+    bool hasTxs = false;
     if (!block.vtx.empty()) {
-        // Deserialize transactions from raw bytes
-        CBlockValidator validator;
-        std::vector<CTransactionRef> transactions;
-        std::string deserializeError;
-        if (validator.DeserializeBlockTransactions(block, transactions, deserializeError) &&
-            !transactions.empty() && !transactions[0]->vout.empty()) {
-            const auto& scriptPubKey = transactions[0]->vout[0].scriptPubKey;
-            // P2PKH format: 76 a9 14 [20-byte hash] 88 ac
-            if (scriptPubKey.size() == 25 && scriptPubKey[0] == 0x76 &&
-                scriptPubKey[1] == 0xa9 && scriptPubKey[2] == 0x14) {
-                // Extract pubkey hash (bytes 3-22) and create address
-                std::vector<uint8_t> addrData;
-                addrData.push_back(0x1E);  // Dilithion version byte ('D' prefix)
-                addrData.insert(addrData.end(), scriptPubKey.begin() + 3, scriptPubKey.begin() + 23);
-                minerAddress = EncodeBase58Check(addrData);
-            }
+        hasTxs = validator.DeserializeBlockTransactions(block, transactions, deserializeError);
+    }
+
+    // Extract miner address from coinbase transaction
+    std::string minerAddress = "";
+    if (hasTxs && !transactions.empty() && !transactions[0]->vout.empty()) {
+        minerAddress = DecodeScriptPubKeyToAddress(transactions[0]->vout[0].scriptPubKey);
+    }
+
+    // Get next block hash if available
+    std::string nextBlockHash = "";
+    if (height >= 0 && m_chainstate) {
+        std::vector<uint256> nextHashes = m_chainstate->GetBlocksAtHeight(height + 1);
+        if (!nextHashes.empty()) {
+            nextBlockHash = nextHashes[0].GetHex();
         }
     }
 
@@ -2765,12 +2804,73 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
     oss << "\"height\":" << height << ",";
     oss << "\"version\":" << block.nVersion << ",";
     oss << "\"previousblockhash\":\"" << block.hashPrevBlock.GetHex() << "\",";
+    if (!nextBlockHash.empty()) {
+        oss << "\"nextblockhash\":\"" << nextBlockHash << "\",";
+    }
     oss << "\"merkleroot\":\"" << block.hashMerkleRoot.GetHex() << "\",";
     oss << "\"time\":" << block.nTime << ",";
     oss << "\"bits\":\"0x" << std::hex << block.nBits << std::dec << "\",";
     oss << "\"nonce\":" << block.nNonce << ",";
-    oss << "\"tx_count\":" << block.vtx.size() << ",";
+    oss << "\"size\":" << block.vtx.size() << ",";  // Raw block data size in bytes
+    oss << "\"tx_count\":" << (hasTxs ? transactions.size() : 0) << ",";
     oss << "\"miner\":\"" << minerAddress << "\"";
+
+    // Verbosity 1: Add txid array
+    if (verbosity >= 1 && hasTxs) {
+        oss << ",\"tx\":[";
+        for (size_t i = 0; i < transactions.size(); i++) {
+            if (i > 0) oss << ",";
+            if (verbosity == 1) {
+                // Just txids
+                oss << "\"" << transactions[i]->GetHash().GetHex() << "\"";
+            } else {
+                // Verbosity 2: Full decoded transactions
+                const auto& tx = transactions[i];
+                oss << "{";
+                oss << "\"txid\":\"" << tx->GetHash().GetHex() << "\",";
+                oss << "\"version\":" << tx->nVersion << ",";
+
+                // Inputs
+                oss << "\"vin\":[";
+                for (size_t j = 0; j < tx->vin.size(); j++) {
+                    if (j > 0) oss << ",";
+                    const CTxIn& txin = tx->vin[j];
+                    oss << "{";
+                    if (txin.prevout.hash.IsNull()) {
+                        // Coinbase transaction
+                        oss << "\"coinbase\":true";
+                    } else {
+                        oss << "\"txid\":\"" << txin.prevout.hash.GetHex() << "\",";
+                        oss << "\"vout\":" << txin.prevout.n;
+                    }
+                    oss << "}";
+                }
+                oss << "],";
+
+                // Outputs
+                oss << "\"vout\":[";
+                for (size_t j = 0; j < tx->vout.size(); j++) {
+                    if (j > 0) oss << ",";
+                    const CTxOut& txout = tx->vout[j];
+                    std::string addr = DecodeScriptPubKeyToAddress(txout.scriptPubKey);
+                    oss << "{";
+                    oss << "\"value\":" << txout.nValue << ",";
+                    oss << "\"n\":" << j << ",";
+                    if (!addr.empty()) {
+                        oss << "\"address\":\"" << addr << "\",";
+                    }
+                    oss << "\"scriptPubKey\":\"" << HexStr(txout.scriptPubKey) << "\"";
+                    oss << "}";
+                }
+                oss << "],";
+
+                oss << "\"locktime\":" << tx->nLockTime;
+                oss << "}";
+            }
+        }
+        oss << "]";
+    }
+
     oss << "}";
     return oss.str();
 }
@@ -3962,21 +4062,24 @@ std::string CRPCServer::RPC_GetChainTips(const std::string& params) {
         throw std::runtime_error("Chain state not initialized");
     }
 
-    // Get current tip
-    CBlockIndex* pTip = m_chainstate->GetTip();
-    if (!pTip) {
+    // Get all chain tips (active chain + any forks)
+    auto tips = m_chainstate->GetChainTips();
+    if (tips.empty()) {
         return "[]";
     }
 
-    // For now, return single tip (active chain)
-    // Future: Scan for all chain tips (fork detection)
     std::ostringstream oss;
-    oss << "[{";
-    oss << "\"height\":" << pTip->nHeight << ",";
-    oss << "\"hash\":\"" << pTip->GetBlockHash().GetHex() << "\",";
-    oss << "\"branchlen\":0,";
-    oss << "\"status\":\"active\"";
-    oss << "}]";
+    oss << "[";
+    for (size_t i = 0; i < tips.size(); i++) {
+        if (i > 0) oss << ",";
+        oss << "{";
+        oss << "\"height\":" << tips[i].height << ",";
+        oss << "\"hash\":\"" << tips[i].hash.GetHex() << "\",";
+        oss << "\"branchlen\":" << tips[i].branchlen << ",";
+        oss << "\"status\":\"" << tips[i].status << "\"";
+        oss << "}";
+    }
+    oss << "]";
     return oss.str();
 }
 
