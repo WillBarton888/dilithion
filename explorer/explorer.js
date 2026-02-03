@@ -6,7 +6,7 @@
 
 // --- Configuration ---
 const API_BASE = '/api';
-const REFRESH_INTERVAL = 10000;
+const REFRESH_INTERVAL = 30000;
 const ITEMS_PER_PAGE = 20;
 const IONS_PER_DIL = 100000000;
 
@@ -299,15 +299,50 @@ async function renderHome() {
 
         getApp().innerHTML = html;
 
-        // Auto-refresh
+        // Auto-refresh (silent - no loading spinner)
         refreshTimer = setInterval(async () => {
             if (currentRoute !== '#/' && currentRoute !== '#/home') return;
             try {
-                const fresh = await apiFetch('/blocks.php?limit=15');
-                const freshBlocks = fresh.blocks || [];
-                if (freshBlocks.length > 0 && blocks.length > 0 &&
-                    freshBlocks[0].height !== blocks[0].height) {
-                    renderHome();
+                const [freshStats, freshBlocks] = await Promise.all([
+                    apiFetch('/stats.php'),
+                    apiFetch('/blocks.php?limit=15'),
+                ]);
+                const newBlocks = freshBlocks.blocks || [];
+                if (newBlocks.length > 0 && blocks.length > 0 &&
+                    newBlocks[0].height !== blocks[0].height) {
+                    // Re-render without showing loading spinner
+                    blocks = newBlocks;
+                    const statsData = freshStats;
+                    const s = statsData;
+                    // Update stats bar
+                    const statsEl = document.querySelector('.stats-bar');
+                    if (statsEl) {
+                        statsEl.innerHTML = statCard('Block Height', s.blocks?.toLocaleString() || 'N/A') +
+                            statCard('Hashrate', formatHashrate(s.networkhashps)) +
+                            statCard('Difficulty', s.difficulty != null ? formatDifficulty(s.difficulty) : 'N/A') +
+                            statCard('Supply', (s.supply != null ? Number(s.supply).toLocaleString() : 'N/A') + ' DIL') +
+                            statCard('Avg Block Time', s.avgBlockTime != null ? s.avgBlockTime.toFixed(0) + 's' : 'N/A') +
+                            statCard('Peers', s.connections ?? 'N/A');
+                    }
+                    // Update blocks table body
+                    const tbody = document.querySelector('.blocks-table tbody');
+                    if (tbody) {
+                        let rows = '';
+                        for (const block of newBlocks) {
+                            const miner = extractMiner(block);
+                            const reward = extractReward(block);
+                            const txCount = block.tx_count || block.nTx || (block.tx ? block.tx.length : 0);
+                            rows += '<tr>';
+                            rows += `<td><a href="#/block/${block.height}">${block.height.toLocaleString()}</a></td>`;
+                            rows += `<td class="mono"><a href="#/block/${block.hash}">${truncateHash(block.hash)}</a></td>`;
+                            rows += `<td>${timeAgo(block.time)}</td>`;
+                            rows += `<td class="mono">${miner ? `<a href="#/address/${miner}">${truncateHash(miner)}</a>` : 'Unknown'}</td>`;
+                            rows += `<td>${txCount}</td>`;
+                            rows += `<td class="mono">${formatAmount(reward)} DIL</td>`;
+                            rows += '</tr>';
+                        }
+                        tbody.innerHTML = rows;
+                    }
                 }
             } catch (e) {
                 // Silent fail on refresh
