@@ -297,7 +297,7 @@ bool CRPCServer::Start() {
     std::cout << "[RPC] SECURITY: For remote access, use SSH tunneling" << std::endl;
 
     // Listen
-    if (listen(m_serverSocket, 10) == SOCKET_ERROR) {
+    if (listen(m_serverSocket, 128) == SOCKET_ERROR) {
         ErrorMessage error = CErrorFormatter::NetworkError("listen RPC server", 
             "Failed to listen on socket");
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;

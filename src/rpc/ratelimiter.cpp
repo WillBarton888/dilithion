@@ -68,6 +68,11 @@ const std::map<std::string, CRateLimiter::MethodRateLimit> CRateLimiter::METHOD_
 };
 
 bool CRateLimiter::AllowRequest(const std::string& ipAddress) {
+    // Exempt localhost from rate limiting (local services like block explorer)
+    if (ipAddress == "127.0.0.1" || ipAddress == "::1") {
+        return true;
+    }
+
     std::lock_guard<std::mutex> lock(m_mutex);
 
     // Get or create record for this IP
@@ -107,6 +112,11 @@ bool CRateLimiter::AllowRequest(const std::string& ipAddress) {
 }
 
 bool CRateLimiter::AllowMethodRequest(const std::string& ipAddress, const std::string& method) {
+    // Exempt localhost from rate limiting (local services like block explorer)
+    if (ipAddress == "127.0.0.1" || ipAddress == "::1") {
+        return true;
+    }
+
     std::lock_guard<std::mutex> lock(m_mutex);
 
     // Get or create record for this IP
