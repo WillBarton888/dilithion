@@ -1575,12 +1575,27 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height) {
         headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
     }
 
-    if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
-        std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT switching" << std::endl;
-        std::cout << "[FORK-DETECT] Local work=" << localChainWork.GetHex().substr(0, 16)
-                  << " Header work=" << headerChainWork.GetHex().substr(0, 16) << std::endl;
-        m_fork_stall_cycles.store(0);
-        return false;
+    // If chainwork data is available for both sides, use it for the comparison.
+    // If either is null (chain tips tracker may not track chainwork for competing
+    // tips after a partial fork switch), skip the check - we already know we're
+    // on a stale fork because we're receiving consecutive orphan blocks.
+    if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
+        if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
+            std::string localHex = localChainWork.GetHex();
+            std::string headerHex = headerChainWork.GetHex();
+            std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT switching" << std::endl;
+            std::cout << "[FORK-DETECT] Local work=..." << localHex.substr(localHex.length() > 16 ? localHex.length() - 16 : 0)
+                      << " Header work=..." << headerHex.substr(headerHex.length() > 16 ? headerHex.length() - 16 : 0) << std::endl;
+            m_fork_stall_cycles.store(0);
+            return false;
+        }
+    } else {
+        // Chainwork unavailable - proceed with fork recovery anyway.
+        // Layer 2's 10+ consecutive orphan blocks is strong evidence of a stale fork.
+        std::cout << "[FORK-DETECT] ChainWork unavailable (local="
+                  << (localChainWork.IsNull() ? "null" : "set")
+                  << " header=" << (headerChainWork.IsNull() ? "null" : "set")
+                  << ") - proceeding based on orphan block evidence" << std::endl;
     }
 
     // VALIDATE-BEFORE-DISCONNECT: Use ForkManager staging approach
