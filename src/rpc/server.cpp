@@ -2267,29 +2267,22 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
             continue;
         }
 
-        // Parse transactions from block.vtx
-        // block.vtx contains multiple serialized transactions concatenated together
-        const uint8_t* ptr = block.vtx.data();
-        const uint8_t* end = block.vtx.data() + block.vtx.size();
+        // Deserialize transactions using the same function as getblock
+        // block.vtx starts with a compact-size tx count prefix
+        CBlockValidator validator;
+        std::vector<CTransactionRef> transactions;
+        std::string deserializeError;
 
-        while (ptr < end) {
-            // Deserialize one transaction
-            CTransaction tx;
-            size_t bytesConsumed = 0;
-            std::string deserializeError;
+        if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
+            std::cerr << "[RPC] Warning: Failed to deserialize transactions in block "
+                      << blockHash.GetHex() << ": " << deserializeError << std::endl;
+            pCurrent = pCurrent->pprev;
+            blocksSearched++;
+            continue;
+        }
 
-            if (!tx.Deserialize(ptr, end - ptr, &deserializeError, &bytesConsumed)) {
-                // Failed to parse transaction - skip rest of this block
-                std::cerr << "[RPC] Warning: Failed to parse transaction in block "
-                          << blockHash.GetHex() << ": " << deserializeError << std::endl;
-                break;
-            }
-
-            // Move pointer forward
-            ptr += bytesConsumed;
-
-            // Check if this transaction matches
-            uint256 foundTxid = tx.GetHash();
+        for (const auto& tx : transactions) {
+            uint256 foundTxid = tx->GetHash();
             if (foundTxid == txid) {
                 // Found it! Calculate confirmations
                 int confirmations = (pTip->nHeight - pCurrent->nHeight) + 1;
@@ -2303,13 +2296,13 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                 std::ostringstream oss;
                 oss << "{";
                 oss << "\"txid\":\"" << foundTxid.GetHex() << "\",";
-                oss << "\"version\":" << tx.nVersion << ",";
+                oss << "\"version\":" << tx->nVersion << ",";
 
                 // Inputs
                 oss << "\"vin\":[";
-                for (size_t i = 0; i < tx.vin.size(); i++) {
+                for (size_t i = 0; i < tx->vin.size(); i++) {
                     if (i > 0) oss << ",";
-                    const CTxIn& txin = tx.vin[i];
+                    const CTxIn& txin = tx->vin[i];
                     oss << "{";
                     if (txin.prevout.hash.IsNull()) {
                         oss << "\"coinbase\":true";
@@ -2325,9 +2318,9 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
 
                 // Outputs
                 oss << "\"vout\":[";
-                for (size_t i = 0; i < tx.vout.size(); i++) {
+                for (size_t i = 0; i < tx->vout.size(); i++) {
                     if (i > 0) oss << ",";
-                    const CTxOut& txout = tx.vout[i];
+                    const CTxOut& txout = tx->vout[i];
                     std::string addr = DecodeScriptPubKeyToAddress(txout.scriptPubKey);
                     oss << "{";
                     oss << "\"value\":" << txout.nValue << ",";
@@ -2340,7 +2333,7 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                 }
                 oss << "],";
 
-                oss << "\"locktime\":" << tx.nLockTime << ",";
+                oss << "\"locktime\":" << tx->nLockTime << ",";
                 oss << "\"blockhash\":\"" << blockHash.GetHex() << "\",";
                 oss << "\"blockheight\":" << pCurrent->nHeight << ",";
                 oss << "\"confirmations\":" << confirmations << ",";
@@ -2816,6 +2809,15 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
     oss << "\"nonce\":" << block.nNonce << ",";
     oss << "\"size\":" << block.vtx.size() << ",";  // Raw block data size in bytes
     oss << "\"tx_count\":" << (hasTxs ? transactions.size() : 0) << ",";
+
+    // Confirmations (tip height - block height + 1)
+    if (height >= 0 && m_chainstate) {
+        CBlockIndex* pTipConf = m_chainstate->GetTip();
+        if (pTipConf) {
+            oss << "\"confirmations\":" << (pTipConf->nHeight - height + 1) << ",";
+        }
+    }
+
     oss << "\"miner\":\"" << minerAddress << "\"";
 
     // Verbosity 1: Add txid array

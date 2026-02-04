@@ -317,15 +317,15 @@ async function renderHome() {
                     // Update stats bar
                     const statsEl = document.querySelector('.stats-bar');
                     if (statsEl) {
-                        statsEl.innerHTML = statCard('Block Height', s.blocks?.toLocaleString() || 'N/A') +
-                            statCard('Hashrate', formatHashrate(s.networkhashps)) +
-                            statCard('Difficulty', s.difficulty != null ? formatDifficulty(s.difficulty) : 'N/A') +
-                            statCard('Supply', (s.supply != null ? Number(s.supply).toLocaleString() : 'N/A') + ' DIL') +
+                        statsEl.innerHTML = statCard('Block Height', formatNumber(s.blocks || freshBlocks.totalHeight || 0)) +
+                            statCard('Hashrate', formatHashRate(s.networkhashps)) +
+                            statCard('Difficulty', s.difficulty ? Number(s.difficulty).toFixed(4) : 'N/A') +
+                            statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' DIL' : 'N/A') +
                             statCard('Avg Block Time', s.avgBlockTime != null ? s.avgBlockTime.toFixed(0) + 's' : 'N/A') +
-                            statCard('Peers', s.connections ?? 'N/A');
+                            statCard('Peers', s.connections != null ? formatNumber(s.connections) : 'N/A');
                     }
                     // Update blocks table body
-                    const tbody = document.querySelector('.blocks-table tbody');
+                    const tbody = document.querySelector('.data-table tbody');
                     if (tbody) {
                         let rows = '';
                         for (const block of newBlocks) {
@@ -333,12 +333,12 @@ async function renderHome() {
                             const reward = extractReward(block);
                             const txCount = block.tx_count || block.nTx || (block.tx ? block.tx.length : 0);
                             rows += '<tr>';
-                            rows += `<td><a href="#/block/${block.height}">${block.height.toLocaleString()}</a></td>`;
-                            rows += `<td class="mono"><a href="#/block/${block.hash}">${truncateHash(block.hash)}</a></td>`;
-                            rows += `<td>${timeAgo(block.time)}</td>`;
-                            rows += `<td class="mono">${miner ? `<a href="#/address/${miner}">${truncateHash(miner)}</a>` : 'Unknown'}</td>`;
-                            rows += `<td>${txCount}</td>`;
-                            rows += `<td class="mono">${formatAmount(reward)} DIL</td>`;
+                            rows += `<td><a href="#/block/${block.height}">${formatNumber(block.height)}</a></td>`;
+                            rows += `<td><a href="#/block/${escapeHtml(block.hash)}" class="hash">${escapeHtml(formatHash(block.hash, 10))}</a></td>`;
+                            rows += `<td title="${escapeHtml(formatAbsoluteTime(block.time))}">${escapeHtml(formatTime(block.time))}</td>`;
+                            rows += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 8))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
+                            rows += `<td class="center">${txCount}</td>`;
+                            rows += `<td class="right amount">${escapeHtml(formatAmount(reward))} DIL</td>`;
                             rows += '</tr>';
                         }
                         tbody.innerHTML = rows;
@@ -367,7 +367,7 @@ function extractMiner(block) {
         const coinbase = block.tx[0];
         if (typeof coinbase === 'object' && coinbase.vout) {
             for (const out of coinbase.vout) {
-                const addr = out.scriptPubKey?.address || out.scriptPubKey?.addresses?.[0];
+                const addr = out.address || out.scriptPubKey?.address || out.scriptPubKey?.addresses?.[0];
                 if (addr && addr.startsWith('D')) return addr;
             }
         }
@@ -509,7 +509,7 @@ async function renderBlock(id) {
                 const addrs = [];
                 for (const vout of tx.vout) {
                     totalOut += vout.value || 0;
-                    const addr = vout.scriptPubKey?.address || vout.scriptPubKey?.addresses?.[0];
+                    const addr = vout.address || vout.scriptPubKey?.address || vout.scriptPubKey?.addresses?.[0];
                     if (addr && !addrs.includes(addr)) addrs.push(addr);
                 }
                 toHtml = addrs.slice(0, 3).map(a =>
@@ -633,7 +633,7 @@ async function renderTransaction(txid) {
         let totalOut = 0;
         if (tx.vout) {
             for (const vout of tx.vout) {
-                const addr = vout.scriptPubKey?.address || vout.scriptPubKey?.addresses?.[0] || null;
+                const addr = vout.address || vout.scriptPubKey?.address || vout.scriptPubKey?.addresses?.[0] || null;
                 const val = vout.value || 0;
                 totalOut += val;
                 html += '<div class="tx-io-item">';
