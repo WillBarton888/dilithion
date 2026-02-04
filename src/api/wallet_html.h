@@ -24,13 +24,9 @@ inline const std::string& GetWalletHTML() {
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <!-- SHA3 library for Light Wallet -->
     <script src="https://cdn.jsdelivr.net/npm/js-sha3@0.9.3/src/sha3.min.js"></script>
-    <!-- Dilithium WASM Module (must load before dilithium-crypto.js) -->
-    <script src="js/dilithium.js"></script>
-    <!-- Light Wallet Modules -->
-    <script src="js/dilithium-crypto.js"></script>
-    <script src="js/connection-manager.js"></script>
-    <script src="js/local-wallet.js"></script>
-    <script src="js/transaction-builder.js"></script>
+    <!-- Light Wallet Modules: only loaded when served from a full web server (not embedded RPC) -->
+    <!-- The RPC server only serves wallet.html at the root path; JS files require a web server -->
+    <!-- These modules are NOT loaded in embedded RPC mode - the wallet falls back to direct RPC calls -->
     <style>
         :root {
             --primary: #6366f1;
@@ -668,7 +664,7 @@ inline const std::string& GetWalletHTML() {
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Connecting...</span>
             </div>
-            <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); connect();">Reconnect</button>
+            <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); reconnectAttempts = 0; connect();">Reconnect</button>
         </div>
     </nav>
 
@@ -1675,11 +1671,8 @@ inline const std::string& GetWalletHTML() {
                         document.getElementById('immatureBalance').textContent = immature.toFixed(8);
                         document.getElementById('availableForSend').textContent = balance.toFixed(8);
                     } catch (e) {
-                        // RPC not available, show zeros
-                        document.getElementById('totalBalance').textContent = '0.00000000';
-                        document.getElementById('matureBalance').textContent = '0.00000000';
-                        document.getElementById('immatureBalance').textContent = '0.00000000';
-                        document.getElementById('availableForSend').textContent = '0.00000000';
+                        // RPC error - keep last known balance displayed (don't zero out on temporary failures)
+                        console.warn('[Balance] RPC error, keeping last known balance:', e.message);
                     }
                 }
             } catch(e) {
@@ -3014,23 +3007,48 @@ inline const std::string& GetWalletHTML() {
 
         // BUG #115 FIX: Auto-refresh with serialized requests to prevent connection overload
         let refreshInProgress = false;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 3;
         const wait200 = () => new Promise(r => setTimeout(r, 200));
 
         setInterval(async () => {
-            if (connected && !refreshInProgress) {
-                refreshInProgress = true;
-                try {
-                    // Serialize requests with 200ms delays to prevent server socket issues
-                    await refreshBalance();
-                    await wait200();
-                    await refreshBlockchainInfo();
-                    await wait200();
-                    await refreshTransactions();
-                } catch (e) {
-                    console.warn('[Wallet] Refresh cycle error:', e.message);
-                } finally {
-                    refreshInProgress = false;
+            if (refreshInProgress) return;
+
+            // Auto-reconnect if disconnected
+            if (!connected) {
+                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    reconnectAttempts++;
+                    console.log('[Wallet] Auto-reconnect attempt', reconnectAttempts);
+                    try {
+                        await connect();
+                        reconnectAttempts = 0;  // Reset on success
+                    } catch (e) {
+                        console.warn('[Wallet] Auto-reconnect failed:', e.message);
+                    }
                 }
+                return;
+            }
+
+            refreshInProgress = true;
+            try {
+                // Serialize requests with 200ms delays to prevent server socket issues
+                await refreshBalance();
+                await wait200();
+                await refreshBlockchainInfo();
+                await wait200();
+                await refreshTransactions();
+                reconnectAttempts = 0;  // Reset on successful refresh
+            } catch (e) {
+                console.warn('[Wallet] Refresh cycle error:', e.message);
+                // Check if connection is actually down
+                try {
+                    await rpcCall('getblockchaininfo');
+                } catch (e2) {
+                    console.warn('[Wallet] Connection lost, will auto-reconnect');
+                    setConnectionStatus(false, 'Connection lost');
+                }
+            } finally {
+                refreshInProgress = false;
             }
         }, 10000);  // Refresh every 10 seconds
     </script>

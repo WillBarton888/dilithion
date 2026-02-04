@@ -37,10 +37,10 @@ class ConnectionManager {
         // Current mode
         this.mode = CONNECTION_MODE.FULL;
 
-        // Full node settings
+        // Full node settings (auto-detect host/port from page URL for same-origin)
         this.rpcConfig = {
-            host: '127.0.0.1',
-            port: 8332,
+            host: window.location.hostname || '127.0.0.1',
+            port: parseInt(window.location.port) || 8332,
             user: '',
             pass: ''
         };
