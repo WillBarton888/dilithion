@@ -6,7 +6,7 @@
 
 // --- Configuration ---
 const API_BASE = '/api';
-const REFRESH_INTERVAL = 30000;
+const REFRESH_INTERVAL = 10000;
 const ITEMS_PER_PAGE = 20;
 const IONS_PER_DIL = 100000000;
 
@@ -255,7 +255,7 @@ async function renderHome() {
         ]);
 
         const stats = statsRes;
-        const blocks = blocksRes.blocks || [];
+        let blocks = blocksRes.blocks || [];
 
         let html = '';
 
@@ -307,24 +307,22 @@ async function renderHome() {
                     apiFetch('/stats.php'),
                     apiFetch('/blocks.php?limit=15'),
                 ]);
+                const s = freshStats;
+                // Always update stats bar
+                const statsEl = document.querySelector('.stats-bar');
+                if (statsEl) {
+                    statsEl.innerHTML = statCard('Block Height', formatNumber(s.blocks || freshBlocks.totalHeight || 0)) +
+                        statCard('Hashrate', formatHashRate(s.networkhashps)) +
+                        statCard('Difficulty', s.difficulty ? Number(s.difficulty).toFixed(4) : 'N/A') +
+                        statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' DIL' : 'N/A') +
+                        statCard('Avg Block Time', s.avgBlockTime != null ? s.avgBlockTime.toFixed(0) + 's' : 'N/A') +
+                        statCard('Peers', s.connections != null ? formatNumber(s.connections) : 'N/A');
+                }
+                // Update blocks table when new block arrives
                 const newBlocks = freshBlocks.blocks || [];
                 if (newBlocks.length > 0 && blocks.length > 0 &&
                     newBlocks[0].height !== blocks[0].height) {
-                    // Re-render without showing loading spinner
                     blocks = newBlocks;
-                    const statsData = freshStats;
-                    const s = statsData;
-                    // Update stats bar
-                    const statsEl = document.querySelector('.stats-bar');
-                    if (statsEl) {
-                        statsEl.innerHTML = statCard('Block Height', formatNumber(s.blocks || freshBlocks.totalHeight || 0)) +
-                            statCard('Hashrate', formatHashRate(s.networkhashps)) +
-                            statCard('Difficulty', s.difficulty ? Number(s.difficulty).toFixed(4) : 'N/A') +
-                            statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' DIL' : 'N/A') +
-                            statCard('Avg Block Time', s.avgBlockTime != null ? s.avgBlockTime.toFixed(0) + 's' : 'N/A') +
-                            statCard('Peers', s.connections != null ? formatNumber(s.connections) : 'N/A');
-                    }
-                    // Update blocks table body
                     const tbody = document.querySelector('.data-table tbody');
                     if (tbody) {
                         let rows = '';
