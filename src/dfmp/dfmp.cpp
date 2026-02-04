@@ -18,6 +18,7 @@ namespace DFMP {
 // ============================================================================
 
 CHeatTracker* g_heatTracker = nullptr;
+CHeatTracker* g_payoutHeatTracker = nullptr;
 CIdentityDB* g_identityDb = nullptr;
 
 // ============================================================================
@@ -188,51 +189,47 @@ std::map<Identity, int> CHeatTracker::GetAllHeat() const {
 // ============================================================================
 
 int64_t CalculatePendingPenaltyFP(int currentHeight, int firstSeenHeight) {
-    // DFMP v2.0: NO first-block grace - new identities start at 3.0x
-    // This prevents the address rotation loophole where miners could
-    // always get 1.0x by using a new payout address.
-    //
-    // Maturity decay: 3.0x → 2.5x → 2.0x → 1.5x → 1.0x in 100-block steps
-    // over 400 blocks total (MATURITY_BLOCKS)
+    // DFMP v3.0: NO first-block grace - new identities start at 5.0x
+    // Step-wise decay: 5.0x → 4.0x → 3.0x → 2.0x → 1.5x → 1.0x in 160-block steps
+    // over 800 blocks total (MATURITY_BLOCKS)
 
     if (firstSeenHeight < 0) {
-        return FP_PENDING_START;  // 3.0x for new identity (v2.0: no grace)
+        return FP_PENDING_START;  // 5.0x for new identity
     }
 
     int age = currentHeight - firstSeenHeight;
 
-    // Step-wise decay over MATURITY_BLOCKS (400 blocks)
-    // Each 100 blocks reduces by 0.5x
-    if (age < 100) return 3000000;   // 3.0x
-    if (age < 200) return 2500000;   // 2.5x
-    if (age < 300) return 2000000;   // 2.0x
-    if (age < 400) return 1500000;   // 1.5x
+    if (age < 160) return 5000000;   // 5.0x
+    if (age < 320) return 4000000;   // 4.0x
+    if (age < 480) return 3000000;   // 3.0x
+    if (age < 640) return 2000000;   // 2.0x
+    if (age < 800) return 1500000;   // 1.5x
     return FP_PENDING_END;           // 1.0x (mature)
 }
 
 int64_t CalculateHeatMultiplierFP(int heat) {
-    // DFMP v2.0 Heat Penalty:
-    // - 0-20 blocks:  Free tier (1.0x)
-    // - 21-25 blocks: Linear zone (1.0x → 1.5x)
-    // - 26+ blocks:   Exponential (1.5 × 1.08^(blocks-25))
+    // DFMP v3.0 Heat Penalty:
+    // - 0-5 blocks:   Free tier (1.0x)
+    // - 6-10 blocks:  Linear zone (1.0x → 1.5x)
+    // - 11+ blocks:   Exponential (1.5 × 1.08^(blocks-10))
 
     // Free tier: no penalty
-    if (heat <= FREE_TIER_THRESHOLD) {  // FREE_TIER_THRESHOLD = 20
+    if (heat <= FREE_TIER_THRESHOLD) {  // FREE_TIER_THRESHOLD = 5
         return FP_SCALE;  // 1.0x
     }
 
-    // Linear zone: 21-25 blocks
-    // penalty = 1.0 + 0.1 × (blocks - 20)
-    if (heat <= LINEAR_ZONE_UPPER) {  // LINEAR_ZONE_UPPER = 25
+    // Linear zone: 6-10 blocks
+    // penalty = 1.0 + 0.1 × (blocks - 5)
+    if (heat <= LINEAR_ZONE_UPPER) {  // LINEAR_ZONE_UPPER = 10
         int64_t linearPart = FP_LINEAR_INCREMENT * (heat - FREE_TIER_THRESHOLD);
         return FP_SCALE + linearPart;  // 1.0 + 0.1 per block
     }
 
-    // Exponential zone: 26+ blocks
-    // penalty = 1.5 × 1.08^(blocks - 25)
+    // Exponential zone: 11+ blocks
+    // penalty = 1.5 × 1.08^(blocks - 10)
     // Using fixed-point: multiply by 108/100 repeatedly
     int64_t penalty = FP_LINEAR_BASE;  // 1.5 × FP_SCALE
-    int exponent = heat - LINEAR_ZONE_UPPER;  // blocks over 25
+    int exponent = heat - LINEAR_ZONE_UPPER;  // blocks over 10
 
     for (int i = 0; i < exponent; i++) {
         penalty = (penalty * 108) / 100;  // × 1.08
@@ -387,6 +384,7 @@ double GetTotalMultiplier(int currentHeight, int firstSeenHeight, int heat) {
 bool InitializeDFMP(const std::string& dataDir) {
     // Create heat tracker
     g_heatTracker = new CHeatTracker();
+    g_payoutHeatTracker = new CHeatTracker();
 
     // Create and open identity database
     g_identityDb = new CIdentityDB();
@@ -408,6 +406,11 @@ void ShutdownDFMP() {
         g_identityDb = nullptr;
     }
 
+    if (g_payoutHeatTracker) {
+        delete g_payoutHeatTracker;
+        g_payoutHeatTracker = nullptr;
+    }
+
     if (g_heatTracker) {
         delete g_heatTracker;
         g_heatTracker = nullptr;
@@ -415,7 +418,7 @@ void ShutdownDFMP() {
 }
 
 bool IsDFMPReady() {
-    return g_heatTracker != nullptr && g_identityDb != nullptr;
+    return g_heatTracker != nullptr && g_payoutHeatTracker != nullptr && g_identityDb != nullptr;
 }
 
 } // namespace DFMP

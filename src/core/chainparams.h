@@ -86,6 +86,12 @@ public:
     // 0 = validate everything (no optimization)
     int dfmpAssumeValidHeight;
 
+    // DFMP v3.0 Activation Height
+    // Before this height: DFMP v2.0 rules (20-block free tier, 3.0x maturity, no payout heat)
+    // After this height: DFMP v3.0 rules (5-block free tier, 5.0x maturity, payout heat, dormancy, registration PoW)
+    // This is a consensus-critical change - all nodes must upgrade before this height
+    int dfmpV3ActivationHeight;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release

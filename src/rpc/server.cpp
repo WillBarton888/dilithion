@@ -3761,9 +3761,19 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
     oss << "\"dfmp_assume_valid_height\":" << assumeValidHeight << ",";
     oss << "\"dfmp_active\":" << (currentHeight >= dfmpActivationHeight ? "true" : "false") << ",";
 
+    // DFMP v3.0 activation
+    int dfmpV3ActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpV3ActivationHeight : 0;
+    bool isV3Active = currentHeight >= dfmpV3ActivationHeight;
+
+    oss << "\"dfmp_v3_activation_height\":" << dfmpV3ActivationHeight << ",";
+    oss << "\"dfmp_v3_active\":" << (isV3Active ? "true" : "false") << ",";
+
     // Get penalty info for this identity
     int firstSeen = -1;
     int heat = 0;
+    int payoutHeat = 0;
+    int lastMined = -1;
     bool isRegistered = false;
 
     if (hasMIK) {
@@ -3772,6 +3782,7 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
         if (DFMP::g_identityDb) {
             firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
             isRegistered = DFMP::g_identityDb->HasMIKPubKey(identity);
+            lastMined = DFMP::g_identityDb->GetLastMined(identity);
         }
 
         if (DFMP::g_heatTracker) {
@@ -3779,19 +3790,55 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
         }
     }
 
+    // DFMP v3.0: Get payout address heat from wallet's payout address
+    if (DFMP::g_payoutHeatTracker && m_wallet) {
+        std::vector<uint8_t> pubKeyHash = m_wallet->GetPubKeyHash();
+        if (!pubKeyHash.empty()) {
+            std::vector<uint8_t> payoutScript = WalletCrypto::CreateScriptPubKey(pubKeyHash);
+            DFMP::Identity payoutId = DFMP::DeriveIdentityFromScript(payoutScript);
+            payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutId);
+        }
+    }
+
     oss << "\"is_registered\":" << (isRegistered ? "true" : "false") << ",";
     oss << "\"first_seen\":" << firstSeen << ",";
     oss << "\"heat\":" << heat << ",";
-    oss << "\"maturity_blocks\":" << DFMP::MATURITY_BLOCKS << ",";
+    oss << "\"payout_heat\":" << payoutHeat << ",";
+    oss << "\"last_mined\":" << lastMined << ",";
 
-    // Calculate penalty using actual DFMP functions
-    double maturityPenalty = DFMP::GetPendingPenalty(currentHeight, firstSeen);
-    double heatPenalty = DFMP::GetHeatPenalty_V2(heat);
-    double totalPenalty = maturityPenalty * heatPenalty;
+    // Dormancy info (v3.0)
+    bool isDormant = false;
+    int dormancyBlocks = 0;
+    if (lastMined >= 0) {
+        dormancyBlocks = currentHeight - lastMined;
+        isDormant = dormancyBlocks > DFMP::DORMANCY_THRESHOLD;
+    }
+    oss << "\"dormant\":" << (isDormant ? "true" : "false") << ",";
+    oss << "\"dormancy_blocks\":" << dormancyBlocks << ",";
+
+    oss << "\"maturity_blocks\":" << DFMP::MATURITY_BLOCKS << ",";
+    oss << "\"free_tier_threshold\":" << DFMP::FREE_TIER_THRESHOLD << ",";
+    oss << "\"registration_pow_bits\":" << DFMP::REGISTRATION_POW_BITS << ",";
+
+    // Calculate penalty using actual DFMP functions (version-aware)
+    int effectiveFirstSeen = firstSeen;
+    if (isV3Active && isDormant && firstSeen >= 0) {
+        effectiveFirstSeen = currentHeight - DFMP::DORMANCY_DECAY_BLOCKS;
+    }
+
+    double maturityPenalty = DFMP::GetPendingPenalty(currentHeight, effectiveFirstSeen);
+    double heatPenalty = isV3Active ?
+        DFMP::GetHeatMultiplier(heat) : DFMP::GetHeatPenalty_V2(heat);
+    double payoutHeatPenalty = isV3Active ?
+        DFMP::GetHeatMultiplier(payoutHeat) : 1.0;
+    double effectiveHeatPenalty = std::max(heatPenalty, payoutHeatPenalty);
+    double totalPenalty = maturityPenalty * effectiveHeatPenalty;
 
     oss << std::fixed << std::setprecision(2);
     oss << "\"maturity_penalty\":" << maturityPenalty << ",";
     oss << "\"heat_penalty\":" << heatPenalty << ",";
+    oss << "\"payout_heat_penalty\":" << payoutHeatPenalty << ",";
+    oss << "\"effective_heat_penalty\":" << effectiveHeatPenalty << ",";
     oss << "\"total_penalty\":" << totalPenalty;
 
     oss << "}";

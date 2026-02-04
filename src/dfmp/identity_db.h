@@ -63,11 +63,20 @@ private:
     /** Maximum MIK pubkey cache size */
     static const size_t MAX_MIK_CACHE_SIZE = 1000;
 
+    /** Key prefix for last-mined height entries (v3.0 dormancy) */
+    static const std::string LAST_MINED_PREFIX;
+
+    /** In-memory cache: identity -> last-mined height (v3.0) */
+    mutable std::map<Identity, int> m_lastMinedCache;
+
     /** Build database key from identity */
     std::string MakeKey(const Identity& identity) const;
 
     /** Build MIK pubkey database key from identity */
     std::string MakeMIKPubkeyKey(const Identity& identity) const;
+
+    /** Build last-mined database key from identity */
+    std::string MakeLastMinedKey(const Identity& identity) const;
 
     /** Parse identity from database key */
     bool ParseKey(const std::string& key, Identity& identity) const;
@@ -200,6 +209,29 @@ public:
      * @return true if removed, false if not found or error
      */
     bool RemoveFirstSeen(const Identity& identity);
+
+    // =========================================================================
+    // Dormancy Tracking (DFMP v3.0)
+    // =========================================================================
+
+    /**
+     * Update last-mined height for an identity
+     *
+     * Called on block connect to track when an identity last mined.
+     * Used for dormancy decay: if idle > 720 blocks, maturity partially resets.
+     *
+     * @param identity MIK identity
+     * @param height Block height where identity mined
+     */
+    void SetLastMined(const Identity& identity, int height);
+
+    /**
+     * Get last-mined height for an identity
+     *
+     * @param identity MIK identity to query
+     * @return Last block height where this identity mined, or -1 if never
+     */
+    int GetLastMined(const Identity& identity) const;
 };
 
 } // namespace DFMP

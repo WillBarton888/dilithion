@@ -75,8 +75,11 @@ constexpr uint8_t MIK_TYPE_REFERENCE = 0x02;
 /** Minimum size for MIK reference: marker(1) + type(1) + identity(20) + sig(3309) */
 constexpr size_t MIK_REFERENCE_MIN_SIZE = 1 + 1 + 20 + 3309;
 
-/** Size for MIK registration: marker(1) + type(1) + pubkey(1952) + sig(3309) */
-constexpr size_t MIK_REGISTRATION_SIZE = 1 + 1 + 1952 + 3309;
+/** Size for MIK registration (v2.0, no nonce): marker(1) + type(1) + pubkey(1952) + sig(3309) */
+constexpr size_t MIK_REGISTRATION_SIZE_V2 = 1 + 1 + 1952 + 3309;
+
+/** Size for MIK registration: marker(1) + type(1) + pubkey(1952) + sig(3309) + nonce(8) [v3.0] */
+constexpr size_t MIK_REGISTRATION_SIZE = 1 + 1 + 1952 + 3309 + 8;
 
 // ============================================================================
 // MINING IDENTITY KEY
@@ -234,7 +237,10 @@ struct CMIKScriptData {
     /** Signature (3,309 bytes) */
     std::vector<uint8_t> signature;
 
-    CMIKScriptData() : isRegistration(false) {}
+    /** v3.0: PoW nonce for registration */
+    uint64_t registrationNonce = 0;
+
+    CMIKScriptData() : isRegistration(false), registrationNonce(0) {}
 
     bool IsValid() const {
         return !identity.IsNull() && signature.size() == MIK_SIGNATURE_SIZE;
@@ -287,6 +293,49 @@ bool BuildMIKScriptSigReference(
     const Identity& identity,
     const std::vector<uint8_t>& signature,
     std::vector<uint8_t>& data);
+
+/**
+ * Build MIK scriptSig data for registration with PoW nonce (DFMP v3.0)
+ *
+ * Format: [MIK_MARKER] [MIK_TYPE_REGISTRATION] [pubkey: 1952] [signature: 3309] [nonce: 8]
+ *
+ * @param pubkey Public key
+ * @param signature Signature
+ * @param registrationNonce PoW nonce
+ * @param[out] data Output buffer
+ * @return true if successful
+ */
+bool BuildMIKScriptSigRegistration(
+    const std::vector<uint8_t>& pubkey,
+    const std::vector<uint8_t>& signature,
+    uint64_t registrationNonce,
+    std::vector<uint8_t>& data);
+
+/**
+ * Verify registration proof-of-work (DFMP v3.0)
+ *
+ * Registration PoW prevents mass MIK identity generation.
+ * SHA3-256(pubkey || nonce) must have >= requiredBits leading zero bits.
+ *
+ * @param pubkey MIK public key (1,952 bytes)
+ * @param nonce Registration nonce
+ * @param requiredBits Number of leading zero bits required (default: REGISTRATION_POW_BITS = 28)
+ * @return true if PoW is valid
+ */
+bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, int requiredBits);
+
+/**
+ * Mine registration proof-of-work nonce (DFMP v3.0)
+ *
+ * Finds a nonce such that SHA3-256(pubkey || nonce) has >= requiredBits leading zero bits.
+ * This is computationally expensive (~5 seconds for 28 bits).
+ *
+ * @param pubkey MIK public key (1,952 bytes)
+ * @param requiredBits Number of leading zero bits required
+ * @param[out] nonce Output nonce that satisfies the PoW requirement
+ * @return true if nonce found
+ */
+bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce);
 
 // ============================================================================
 // DFMP V2.0 CONSTANTS

@@ -59,6 +59,9 @@ ChainParams ChainParams::Mainnet() {
     // NOTE: Chain built with MIK bypassed - cannot be removed, only raised
     params.dfmpAssumeValidHeight = 1000;
 
+    // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
+    params.dfmpV3ActivationHeight = 7000;
+
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
     //
@@ -130,6 +133,11 @@ ChainParams ChainParams::Testnet() {
     // DFMP Assume-Valid Height (IBD optimization)
     // Testnet: 0 = validate everything (testnet has different consensus testing needs)
     params.dfmpAssumeValidHeight = 0;
+
+    // DFMP v3.0 activation - set above existing testnet chain height
+    // Testnet tip was ~86,829 when v3.0 was implemented
+    // Activation at 87,500 gives ~670 blocks buffer for upgrade
+    params.dfmpV3ActivationHeight = 87500;
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint

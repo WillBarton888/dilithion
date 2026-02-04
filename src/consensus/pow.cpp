@@ -180,6 +180,10 @@ bool CheckProofOfWorkDFMP(
 
     bool skipDFMPPenalty = (dfmpAssumeValidHeight > 0 && height <= dfmpAssumeValidHeight);
 
+    // DFMP v3.0 activation height (used for registration PoW and multi-layer penalty)
+    int dfmpV3ActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpV3ActivationHeight : 0;
+
     // Ensure block has transactions (coinbase required)
     if (block.vtx.empty()) {
         std::cerr << "[DFMP] Block has no transactions" << std::endl;
@@ -286,6 +290,21 @@ bool CheckProofOfWorkDFMP(
         return false;
     }
 
+    // ========================================================================
+    // DFMP v3.0: Registration PoW Check
+    // ========================================================================
+    // New MIK registrations after v3.0 activation must include a valid
+    // proof-of-work nonce to prevent mass identity generation.
+    if (height >= dfmpV3ActivationHeight && mikData.isRegistration) {
+        if (!DFMP::VerifyRegistrationPoW(mikData.pubkey, mikData.registrationNonce,
+                                          DFMP::REGISTRATION_POW_BITS)) {
+            std::cerr << "[DFMP v3.0] Block " << height
+                      << ": Registration PoW invalid for MIK " << identity.GetHex().substr(0, 8) << "..."
+                      << " (nonce=" << mikData.registrationNonce << ")" << std::endl;
+            return false;
+        }
+    }
+
     // DFMP Assume-Valid: Skip penalty calculation for historical blocks during IBD
     // MIK signature was verified above - only skip the penalty multiplier
     if (skipDFMPPenalty) {
@@ -295,7 +314,7 @@ bool CheckProofOfWorkDFMP(
     }
 
     // ========================================================================
-    // DFMP v2.0: Penalty Calculations (using MIK identity)
+    // DFMP Penalty Calculations (v2.0/v3.0 depending on activation height)
     // ========================================================================
 
     // Get first-seen height (-1 for new identity)
@@ -304,14 +323,55 @@ bool CheckProofOfWorkDFMP(
         firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
     }
 
-    // Get blocks by this identity in observation window (360-block window)
+    // Determine effective first-seen for dormancy (v3.0)
+    int effectiveFirstSeen = firstSeen;
+    if (height >= dfmpV3ActivationHeight && DFMP::g_identityDb && firstSeen >= 0) {
+        int lastMined = DFMP::g_identityDb->GetLastMined(identity);
+        if (lastMined >= 0 && (height - lastMined) > DFMP::DORMANCY_THRESHOLD) {
+            // Dormant identity: partially reset maturity
+            effectiveFirstSeen = height - DFMP::DORMANCY_DECAY_BLOCKS;
+        }
+    }
+
+    // Get MIK identity heat (blocks in observation window)
     int blocksInWindow = 0;
     if (DFMP::g_heatTracker != nullptr) {
         blocksInWindow = DFMP::g_heatTracker->GetHeat(identity);
     }
 
-    // Calculate total DFMP multiplier (maturity × heat) using v2.0 rules
-    int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(height, firstSeen, blocksInWindow);
+    int64_t multiplierFP;
+
+    if (height >= dfmpV3ActivationHeight) {
+        // ====================================================================
+        // DFMP v3.0: Multi-layer penalty (payout heat + dormancy + reduced thresholds)
+        // ====================================================================
+
+        // MIK identity heat penalty
+        int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP(blocksInWindow);
+
+        // Payout address heat penalty (closes primary exploit)
+        int64_t payoutHeatPenalty = DFMP::FP_SCALE;  // 1.0x default
+        if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+            DFMP::Identity payoutIdentity = DFMP::DeriveIdentityFromScript(
+                coinbaseTx.vout[0].scriptPubKey);
+            int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutIdentity);
+            payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP(payoutHeat);
+        }
+
+        // Effective heat = max(MIK heat, payout heat)
+        int64_t effectiveHeatPenalty = std::max(mikHeatPenalty, payoutHeatPenalty);
+
+        // Maturity penalty (using effective first-seen for dormancy)
+        int64_t maturityPenalty = DFMP::CalculatePendingPenaltyFP(height, effectiveFirstSeen);
+
+        // Total = maturity x heat
+        multiplierFP = (maturityPenalty * effectiveHeatPenalty) / DFMP::FP_SCALE;
+    } else {
+        // ====================================================================
+        // DFMP v2.0: Standard penalty (MIK heat only, original thresholds)
+        // ====================================================================
+        multiplierFP = DFMP::CalculateTotalMultiplierFP_V2(height, firstSeen, blocksInWindow);
+    }
 
     // Calculate effective target: baseTarget / multiplier
     uint256 effectiveTarget = DFMP::CalculateEffectiveTarget(baseTarget, multiplierFP);
@@ -319,16 +379,39 @@ bool CheckProofOfWorkDFMP(
     // Log DFMP info for debugging (only if multiplier > 1.0)
     double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
     if (multiplier > 1.01) {
-        double maturityMult = DFMP::GetPendingPenalty(height, firstSeen);
-        double heatMult = DFMP::GetHeatMultiplier(blocksInWindow);
+        if (height >= dfmpV3ActivationHeight) {
+            double maturityMult = DFMP::GetPendingPenalty(height, effectiveFirstSeen);
+            double heatMult = DFMP::GetHeatMultiplier(blocksInWindow);
 
-        std::cout << "[DFMP v2.0] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
-                  << " firstSeen=" << firstSeen
-                  << " blocks=" << blocksInWindow
-                  << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
-                  << " heat=" << heatMult << "x"
-                  << " total=" << multiplier << "x"
-                  << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            // Get payout heat for logging
+            double payoutHeatMult = 1.0;
+            if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+                DFMP::Identity payoutId = DFMP::DeriveIdentityFromScript(coinbaseTx.vout[0].scriptPubKey);
+                int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutId);
+                payoutHeatMult = DFMP::GetHeatMultiplier(payoutHeat);
+            }
+
+            std::cout << "[DFMP v3.0] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
+                      << " firstSeen=" << firstSeen
+                      << " effFirstSeen=" << effectiveFirstSeen
+                      << " mikBlocks=" << blocksInWindow
+                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
+                      << " mikHeat=" << heatMult << "x"
+                      << " payoutHeat=" << payoutHeatMult << "x"
+                      << " total=" << multiplier << "x"
+                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+        } else {
+            double maturityMult = DFMP::GetMaturityPenalty_V2(height, firstSeen);
+            double heatMult = DFMP::GetHeatPenalty_V2(blocksInWindow);
+
+            std::cout << "[DFMP v2.0] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
+                      << " firstSeen=" << firstSeen
+                      << " blocks=" << blocksInWindow
+                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
+                      << " heat=" << heatMult << "x"
+                      << " total=" << multiplier << "x"
+                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+        }
     }
 
     // Check if hash meets DFMP-adjusted difficulty

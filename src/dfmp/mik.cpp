@@ -7,6 +7,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <iostream>
 
 // Dilithium3 reference implementation
 extern "C" {
@@ -318,6 +319,18 @@ bool ParseMIKFromScriptSig(
                     scriptSig.begin() + pos,
                     scriptSig.begin() + pos + MIK_SIGNATURE_SIZE
                 );
+                pos += MIK_SIGNATURE_SIZE;
+
+                // v3.0: Parse registration nonce if present (8 bytes after signature)
+                if (pos + 8 <= scriptSig.size()) {
+                    mikData.registrationNonce = 0;
+                    for (int i = 0; i < 8; i++) {
+                        mikData.registrationNonce |= static_cast<uint64_t>(scriptSig[pos + i]) << (i * 8);
+                    }
+                    pos += 8;
+                } else {
+                    mikData.registrationNonce = 0;  // Pre-v3.0 registration (no nonce)
+                }
 
                 return true;
 
@@ -400,6 +413,130 @@ bool BuildMIKScriptSigReference(
     data.insert(data.end(), signature.begin(), signature.end());
 
     return true;
+}
+
+bool BuildMIKScriptSigRegistration(
+    const std::vector<uint8_t>& pubkey,
+    const std::vector<uint8_t>& signature,
+    uint64_t registrationNonce,
+    std::vector<uint8_t>& data) {
+    if (pubkey.size() != MIK_PUBKEY_SIZE) return false;
+    if (signature.size() != MIK_SIGNATURE_SIZE) return false;
+
+    // Format: [MIK_MARKER] [MIK_TYPE_REGISTRATION] [pubkey] [signature] [nonce:8]
+    data.clear();
+    data.reserve(MIK_REGISTRATION_SIZE);
+
+    data.push_back(MIK_MARKER);
+    data.push_back(MIK_TYPE_REGISTRATION);
+    data.insert(data.end(), pubkey.begin(), pubkey.end());
+    data.insert(data.end(), signature.begin(), signature.end());
+
+    // Append nonce as 8 bytes little-endian
+    for (int i = 0; i < 8; i++) {
+        data.push_back(static_cast<uint8_t>((registrationNonce >> (i * 8)) & 0xFF));
+    }
+
+    return true;
+}
+
+// ============================================================================
+// REGISTRATION PROOF-OF-WORK (DFMP v3.0)
+// ============================================================================
+
+bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, int requiredBits) {
+    if (pubkey.size() != MIK_PUBKEY_SIZE || requiredBits <= 0 || requiredBits > 256) {
+        return false;
+    }
+
+    // Build preimage: pubkey || nonce (little-endian)
+    std::vector<uint8_t> preimage;
+    preimage.reserve(MIK_PUBKEY_SIZE + 8);
+    preimage.insert(preimage.end(), pubkey.begin(), pubkey.end());
+
+    // Append nonce as 8 bytes little-endian
+    for (int i = 0; i < 8; i++) {
+        preimage.push_back(static_cast<uint8_t>((nonce >> (i * 8)) & 0xFF));
+    }
+
+    // Hash with SHA3-256
+    uint8_t hash[32];
+    SHA3_256(preimage.data(), preimage.size(), hash);
+
+    // Check leading zero bits (hash is big-endian: hash[0] is MSB)
+    int zeroBits = 0;
+    for (int i = 0; i < 32 && zeroBits < requiredBits; i++) {
+        if (hash[i] == 0) {
+            zeroBits += 8;
+        } else {
+            // Count leading zeros in this byte
+            uint8_t b = hash[i];
+            while ((b & 0x80) == 0 && zeroBits < requiredBits) {
+                zeroBits++;
+                b <<= 1;
+            }
+            break;
+        }
+    }
+
+    return zeroBits >= requiredBits;
+}
+
+bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce) {
+    if (pubkey.size() != MIK_PUBKEY_SIZE || requiredBits <= 0) {
+        return false;
+    }
+
+    // Build base preimage (pubkey only, nonce appended in loop)
+    std::vector<uint8_t> preimage;
+    preimage.reserve(MIK_PUBKEY_SIZE + 8);
+    preimage.insert(preimage.end(), pubkey.begin(), pubkey.end());
+    preimage.resize(MIK_PUBKEY_SIZE + 8);  // Reserve space for nonce
+
+    uint8_t hash[32];
+
+    for (uint64_t n = 0; n < UINT64_MAX; n++) {
+        // Write nonce bytes (little-endian)
+        for (int i = 0; i < 8; i++) {
+            preimage[MIK_PUBKEY_SIZE + i] = static_cast<uint8_t>((n >> (i * 8)) & 0xFF);
+        }
+
+        // Hash
+        SHA3_256(preimage.data(), preimage.size(), hash);
+
+        // Check leading zero bits
+        int zeroBits = 0;
+        bool found = true;
+        for (int i = 0; i < 32 && zeroBits < requiredBits; i++) {
+            if (hash[i] == 0) {
+                zeroBits += 8;
+            } else {
+                uint8_t b = hash[i];
+                while ((b & 0x80) == 0 && zeroBits < requiredBits) {
+                    zeroBits++;
+                    b <<= 1;
+                }
+                if (zeroBits < requiredBits) {
+                    found = false;
+                }
+                break;
+            }
+        }
+
+        if (found && zeroBits >= requiredBits) {
+            nonce = n;
+            std::cout << "[DFMP v3.0] Registration PoW found: nonce=" << n
+                      << " (" << zeroBits << " zero bits)" << std::endl;
+            return true;
+        }
+
+        // Log progress every 10M iterations
+        if (n % 10000000 == 0 && n > 0) {
+            std::cout << "[DFMP v3.0] Registration PoW mining... " << n << " hashes tried" << std::endl;
+        }
+    }
+
+    return false;  // Should never reach here
 }
 
 // ============================================================================

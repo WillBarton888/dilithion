@@ -529,7 +529,7 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
 
     // Per-IP connection limit (NAT support: multiple nodes behind one router)
     // Bitcoin Core has no per-IP limit, but we add a soft limit for DoS protection
-    static constexpr int MAX_INBOUND_PER_IP = 4;
+    static constexpr int MAX_INBOUND_PER_IP = 2;
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
         int ip_count = 0;
@@ -1183,7 +1183,7 @@ void CConnman::SocketHandler() {
             pnode->state.store(CNode::STATE_CONNECTED);
 
             // Per-IP connection limit (NAT support: multiple nodes behind one router)
-            static constexpr int MAX_INBOUND_PER_IP = 4;
+            static constexpr int MAX_INBOUND_PER_IP = 2;
             {
                 std::lock_guard<std::mutex> lock(cs_vNodes);
 

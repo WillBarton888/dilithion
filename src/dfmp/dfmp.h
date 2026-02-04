@@ -5,7 +5,7 @@
 #define DILITHION_DFMP_H
 
 /**
- * Dilithion Fair Mining Protocol (DFMP) v1.4
+ * Dilithion Fair Mining Protocol (DFMP) v3.0
  *
  * Creates diminishing returns for concentrated mining power through:
  * 1. Identity-based tracking (derived from coinbase scriptPubKey)
@@ -28,7 +28,7 @@
 namespace DFMP {
 
 // ============================================================================
-// PROTOCOL CONSTANTS (v2.0)
+// PROTOCOL CONSTANTS (v3.0)
 // ============================================================================
 // v2.0 uses Mining Identity Key (MIK) for persistent identity tracking
 // and updated penalty parameters. See mik.h for full v2.0 spec.
@@ -37,19 +37,19 @@ namespace DFMP {
 constexpr int OBSERVATION_WINDOW = 360;
 
 /** Number of free blocks before heat penalty applies (v2.0: 20 blocks ~5.5%) */
-constexpr int FREE_TIER_THRESHOLD = 20;
+constexpr int FREE_TIER_THRESHOLD = 5;
 
 /** Number of blocks for maturity penalty to fully decay (v2.0: 400 blocks) */
-constexpr int MATURITY_BLOCKS = 400;
+constexpr int MATURITY_BLOCKS = 800;
 
 /** Starting maturity penalty multiplier for new identities (v2.0: 3.0x, no first-block grace) */
-constexpr double PENDING_PENALTY_START = 3.0;
+constexpr double PENDING_PENALTY_START = 5.0;
 
 /** Ending maturity penalty multiplier (mature identity) */
 constexpr double PENDING_PENALTY_END = 1.0;
 
 /** v2.0: Linear zone upper bound (blocks 21-25 have linear penalty) */
-constexpr int LINEAR_ZONE_UPPER = 25;
+constexpr int LINEAR_ZONE_UPPER = 10;
 
 /** v2.0: Exponential growth rate per block over linear zone (1.08x per block) */
 constexpr double HEAT_GROWTH_RATE = 1.08;
@@ -63,10 +63,18 @@ constexpr double HEAT_GROWTH_RATE = 1.08;
 constexpr int64_t FP_SCALE = 1000000;
 
 // Fixed-point versions of v2.0 constants
-constexpr int64_t FP_PENDING_START = 3000000;   // 3.0 × 1,000,000 (v2.0 maturity start)
+constexpr int64_t FP_PENDING_START = 5000000;   // 5.0 × 1,000,000 (v3.0 maturity start)
 constexpr int64_t FP_PENDING_END = 1000000;     // 1.0 × 1,000,000
 constexpr int64_t FP_LINEAR_INCREMENT = 100000; // 0.1 × 1,000,000 (linear zone step)
 constexpr int64_t FP_LINEAR_BASE = 1500000;     // 1.5 × 1,000,000 (exponential zone start)
+
+// DFMP v3.0: Dormancy decay constants
+constexpr int DORMANCY_THRESHOLD = 720;           // Blocks of inactivity before maturity resets
+constexpr int DORMANCY_DECAY_BLOCKS = 400;         // Decay duration after dormancy reset
+constexpr int64_t FP_DORMANCY_PENALTY = 2500000;   // 2.5 × 1,000,000 (dormancy reset penalty)
+
+// DFMP v3.0: Registration PoW - computational cost per new MIK identity
+constexpr int REGISTRATION_POW_BITS = 28;          // Leading zero bits required (~5s CPU)
 
 // ============================================================================
 // IDENTITY TYPE (20 bytes)
@@ -280,6 +288,9 @@ class CIdentityDB;
 
 /** Global heat tracker instance */
 extern CHeatTracker* g_heatTracker;
+
+/** Global payout address heat tracker (v3.0) */
+extern CHeatTracker* g_payoutHeatTracker;
 
 /** Global identity database instance */
 extern CIdentityDB* g_identityDb;

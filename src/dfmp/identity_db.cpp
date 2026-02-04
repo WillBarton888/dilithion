@@ -16,6 +16,9 @@ const std::string CIdentityDB::KEY_PREFIX = "dfmp:";
 // Key prefix for MIK public key entries (v2.0)
 const std::string CIdentityDB::MIK_PUBKEY_PREFIX = "mikpk:";
 
+// Key prefix for last-mined height entries (v3.0 dormancy)
+const std::string CIdentityDB::LAST_MINED_PREFIX = "dfmplm:";
+
 CIdentityDB::CIdentityDB() : m_db(nullptr) {}
 
 CIdentityDB::~CIdentityDB() {
@@ -50,6 +53,10 @@ void CIdentityDB::EvictCacheIfNeeded() const {
 
 std::string CIdentityDB::MakeMIKPubkeyKey(const Identity& identity) const {
     return MIK_PUBKEY_PREFIX + identity.GetHex();
+}
+
+std::string CIdentityDB::MakeLastMinedKey(const Identity& identity) const {
+    return LAST_MINED_PREFIX + identity.GetHex();
 }
 
 void CIdentityDB::EvictMIKCacheIfNeeded() const {
@@ -102,6 +109,7 @@ void CIdentityDB::Close() {
         m_db.reset();
         m_cache.clear();
         m_mikPubkeyCache.clear();
+        m_lastMinedCache.clear();
         std::cout << "[DFMP] Identity database closed" << std::endl;
     }
 }
@@ -236,7 +244,8 @@ void CIdentityDB::Clear() {
     for (it->SeekToFirst(); it->Valid(); it->Next()) {
         std::string key = it->key().ToString();
         if (key.substr(0, KEY_PREFIX.size()) == KEY_PREFIX ||
-            key.substr(0, MIK_PUBKEY_PREFIX.size()) == MIK_PUBKEY_PREFIX) {
+            key.substr(0, MIK_PUBKEY_PREFIX.size()) == MIK_PUBKEY_PREFIX ||
+            key.substr(0, LAST_MINED_PREFIX.size()) == LAST_MINED_PREFIX) {
             batch.Delete(key);
         }
     }
@@ -244,6 +253,7 @@ void CIdentityDB::Clear() {
     m_db->Write(leveldb::WriteOptions(), &batch);
     m_cache.clear();
     m_mikPubkeyCache.clear();
+    m_lastMinedCache.clear();
 }
 
 // ============================================================================
@@ -440,6 +450,70 @@ bool CIdentityDB::RemoveFirstSeen(const Identity& identity) {
 
     std::cout << "[DFMP] Removed first-seen (undo): " << identity.GetHex() << std::endl;
     return true;
+}
+
+// ============================================================================
+// Dormancy Tracking (DFMP v3.0)
+// ============================================================================
+
+void CIdentityDB::SetLastMined(const Identity& identity, int height) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (!m_db) return;
+
+    // Always update (last-mined is mutable, unlike first-seen)
+    std::string key = LAST_MINED_PREFIX + identity.GetHex();
+
+    // Store height as 4 bytes (little-endian)
+    char value[4];
+    value[0] = static_cast<char>(height & 0xFF);
+    value[1] = static_cast<char>((height >> 8) & 0xFF);
+    value[2] = static_cast<char>((height >> 16) & 0xFF);
+    value[3] = static_cast<char>((height >> 24) & 0xFF);
+
+    leveldb::Status status = m_db->Put(
+        leveldb::WriteOptions(),
+        key,
+        leveldb::Slice(value, 4));
+
+    if (status.ok()) {
+        m_lastMinedCache[identity] = height;
+    }
+}
+
+int CIdentityDB::GetLastMined(const Identity& identity) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // Check cache first
+    auto it = m_lastMinedCache.find(identity);
+    if (it != m_lastMinedCache.end()) {
+        return it->second;
+    }
+
+    if (!m_db) return -1;
+
+    // Lookup from database
+    std::string key = LAST_MINED_PREFIX + identity.GetHex();
+    std::string value;
+    leveldb::Status status = m_db->Get(
+        leveldb::ReadOptions(),
+        key,
+        &value);
+
+    if (!status.ok() || value.size() != 4) {
+        return -1;
+    }
+
+    // Parse height from 4 bytes (little-endian)
+    int height = static_cast<uint8_t>(value[0]) |
+                 (static_cast<uint8_t>(value[1]) << 8) |
+                 (static_cast<uint8_t>(value[2]) << 16) |
+                 (static_cast<uint8_t>(value[3]) << 24);
+
+    // Cache the result
+    m_lastMinedCache[identity] = height;
+
+    return height;
 }
 
 } // namespace DFMP

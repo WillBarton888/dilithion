@@ -768,7 +768,17 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 // First block with this MIK - include full pubkey (registration)
                 std::vector<uint8_t> mikPubkey;
                 if (wallet.GetMIKPubKey(mikPubkey)) {
-                    if (DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, mikData)) {
+                    // DFMP v3.0: Mine registration PoW nonce
+                    uint64_t regNonce = 0;
+                    if (Dilithion::g_chainParams && nHeight >= Dilithion::g_chainParams->dfmpV3ActivationHeight) {
+                        std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
+                        if (!DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce)) {
+                            std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
+                            // Continue without nonce - block will be invalid post-v3.0
+                        }
+                    }
+
+                    if (DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, regNonce, mikData)) {
                         scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
                         if (verbose) {
                             std::cout << "  MIK: Registration (first block with this identity)" << std::endl;
@@ -2088,6 +2098,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // This ensures deterministic state even if startup flow changes
                 DFMP::g_heatTracker->Clear();
 
+                // DFMP v3.0: Clear payout heat tracker alongside MIK heat tracker
+                if (DFMP::g_payoutHeatTracker) {
+                    DFMP::g_payoutHeatTracker->Clear();
+                }
+
                 // Process from oldest to newest to maintain proper window ordering
                 int populated = 0;
                 int readFailed = 0;
@@ -2137,6 +2152,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
 
                     DFMP::g_heatTracker->OnBlockConnected(blockIndex->nHeight, mikData.identity);
+
+                    // DFMP v3.0: Rebuild payout heat tracker
+                    if (DFMP::g_payoutHeatTracker && !transactions[0]->vout.empty()) {
+                        DFMP::Identity payoutId = DFMP::DeriveIdentityFromScript(
+                            transactions[0]->vout[0].scriptPubKey);
+                        DFMP::g_payoutHeatTracker->OnBlockConnected(blockIndex->nHeight, payoutId);
+                    }
+
+                    // DFMP v3.0: Rebuild last-mined heights for dormancy
+                    if (DFMP::g_identityDb) {
+                        DFMP::g_identityDb->SetLastMined(mikData.identity, blockIndex->nHeight);
+                    }
+
                     populated++;
                 }
 
@@ -3683,6 +3711,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (DFMP::g_heatTracker) {
                             DFMP::g_heatTracker->OnBlockConnected(height, identity);
                         }
+
+                        // DFMP v3.0: Track payout address heat
+                        if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+                            DFMP::Identity payoutId = DFMP::DeriveIdentityFromScript(
+                                coinbaseTx.vout[0].scriptPubKey);
+                            DFMP::g_payoutHeatTracker->OnBlockConnected(height, payoutId);
+                        }
+
+                        // DFMP v3.0: Track last-mined height for dormancy
+                        if (DFMP::g_identityDb) {
+                            DFMP::g_identityDb->SetLastMined(mikData.identity, height);
+                        }
                     }
                 }
             }
@@ -3693,6 +3733,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Note: Identity DB removal happens in chain.cpp DisconnectTip (first-seen gated)
             if (DFMP::g_heatTracker) {
                 DFMP::g_heatTracker->OnBlockDisconnected(height);
+            }
+
+            // DFMP v3.0: Disconnect payout address heat
+            if (DFMP::g_payoutHeatTracker) {
+                DFMP::g_payoutHeatTracker->OnBlockDisconnected(height);
             }
         });
         std::cout << "  [OK] DFMP chain notification callbacks registered" << std::endl;
