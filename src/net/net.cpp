@@ -1147,7 +1147,11 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
             return true;
         }
 
-        // If global pointers not set, just call handler
+        // If global pointers not set, log warning and drop
+        std::cout << "[P2P] WARNING: Cannot validate tx " << txid.GetHex().substr(0, 16)
+                  << "... - missing subsystems (validator=" << (tx_validator ? "yes" : "NO")
+                  << " utxo=" << (utxo_set ? "yes" : "NO")
+                  << " mempool=" << (mempool ? "yes" : "NO") << ")" << std::endl;
         on_tx(peer_id, tx);
         return true;
     } catch (const std::out_of_range& e) {

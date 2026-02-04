@@ -2013,7 +2013,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // BUG #32 FIX: Register callback for mining template updates on chain tip change
         SetChainTipUpdateCallback([&blockchain](CBlockchainDB& db, int new_height, bool is_reorg) {
             // Only update if mining is enabled and not in IBD
-            if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
+            if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
                 std::cout << "[Mining] " << (is_reorg ? "Reorg" : "New tip")
                           << " detected - updating template immediately..." << std::endl;
                 auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false, g_node_state.mining_address_override);
@@ -4636,7 +4636,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // 3. We're not in IBD
                 //
                 // This is similar to Bitcoin Core's getblocktemplate behavior.
-                if (miner.IsMining() && !IsInitialBlockDownload()) {
+                if (miner.IsMining()) {
                     CTxMemPool* mempool = g_mempool.load();
                     if (mempool && mempool->Size() > 0) {
                         std::cout << "[Mining] BUG #109: Mempool has " << mempool->Size()
