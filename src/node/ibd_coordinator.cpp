@@ -627,6 +627,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         // Clear fork detection flags so node can continue normally
                         m_fork_detected.store(false);
                         g_node_context.fork_detected.store(false);
+                        g_metrics.ClearForkDetected();
                         m_fork_point.store(-1);
                     } else {
                         std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;
@@ -1609,6 +1610,7 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height) {
             forkMgr.ClearInFlightState(m_node_context, fork_point);
             m_fork_detected.store(false);
             g_node_context.fork_detected.store(false);
+            g_metrics.ClearForkDetected();
             m_fork_point.store(-1);
         } else {
             std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;

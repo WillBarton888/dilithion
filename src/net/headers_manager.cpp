@@ -1501,6 +1501,7 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
                     forkMgr.CancelFork("Header invalidated: " + hash.GetHex().substr(0, 16));
                     forkMgr.ClearInFlightState(g_node_context, forkPoint);
                     g_node_context.fork_detected.store(false);  // Clear fork flag
+                    g_metrics.ClearForkDetected();
                 }
             }
         }

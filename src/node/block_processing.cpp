@@ -202,6 +202,7 @@ BlockProcessResult ProcessNewBlock(
                             forkMgr.CancelFork("Block failed pre-validation: " + forkBlock->invalidReason);
                             forkMgr.ClearInFlightState(ctx, cancelForkPoint);
                             g_node_context.fork_detected.store(false);
+                            g_metrics.ClearForkDetected();
 
                             // Invalidate the header
                             if (ctx.headers_manager) {
@@ -805,6 +806,7 @@ BlockProcessResult ProcessNewBlock(
                 if (forkMgr.TriggerChainSwitch(ctx, db)) {
                     std::cout << "[ProcessNewBlock] Fork chain switch SUCCESSFUL!" << std::endl;
                     g_node_context.fork_detected.store(false);
+                    g_metrics.ClearForkDetected();
 
                     // Mark block as received
                     if (ctx.block_fetcher) {
