@@ -1242,7 +1242,7 @@ inline const std::string& GetWalletHTML() {
                 </p>
                 <div class="form-group">
                     <label class="form-label">RPC Host</label>
-                    <input type="text" class="form-input" id="rpcHost" value="127.0.0.1">
+                    <input type="text" class="form-input" id="rpcHost" value="">
                 </div>
                 <div class="form-group">
                     <label class="form-label">RPC Port</label>
@@ -1370,8 +1370,8 @@ inline const std::string& GetWalletHTML() {
         // Wallet State
         let connected = false;
         let rpcConfig = {
-            host: '127.0.0.1',
-            port: 8332,  // Mainnet RPC port (testnet: 18332)
+            host: window.location.hostname || '127.0.0.1',
+            port: parseInt(window.location.port) || 8332,  // Auto-detect from URL
             user: '',
             pass: ''
         };
@@ -1382,12 +1382,13 @@ inline const std::string& GetWalletHTML() {
             if (saved) {
                 try {
                     rpcConfig = JSON.parse(saved);
-                    document.getElementById('rpcHost').value = rpcConfig.host;
-                    document.getElementById('rpcPort').value = rpcConfig.port;
-                    document.getElementById('rpcUser').value = rpcConfig.user || '';
-                    document.getElementById('rpcPass').value = rpcConfig.pass || '';
                 } catch(e) {}
             }
+            // Always show current config in UI
+            document.getElementById('rpcHost').value = rpcConfig.host;
+            document.getElementById('rpcPort').value = rpcConfig.port;
+            document.getElementById('rpcUser').value = rpcConfig.user || '';
+            document.getElementById('rpcPass').value = rpcConfig.pass || '';
         }
 
         // Save settings
