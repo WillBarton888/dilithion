@@ -14,9 +14,11 @@ $blockchainInfo = dilithionRPC('getblockchaininfo');
 $connectionCount = dilithionRPC('getconnectioncount');
 $chainTips = dilithionRPC('getchaintips');
 
-// getmininginfo may fail on relay-only nodes (no miner initialized)
-$miningInfo = dilithionRPC('getmininginfo');
-$networkHashps = ($miningInfo !== null && isset($miningInfo['hashrate'])) ? $miningInfo['hashrate'] : null;
+// Estimate network hashrate from difficulty and block time
+// Formula: hashrate = difficulty * (2^32 / max_mantissa) / avg_block_time
+// max_target compact = 0x1f060000, mantissa = 0x060000 = 393216
+// 2^32 / 393216 = 10922.667
+$networkHashps = null;
 
 if ($blockchainInfo === null) {
     sendError('Failed to connect to node.', 503);
@@ -55,9 +57,16 @@ if ($height >= 10) {
     }
 }
 
+// Estimate network hashrate from difficulty and average block time
+$difficulty = $blockchainInfo['difficulty'] ?? 0;
+if ($difficulty > 0 && $avgBlockTime !== null && $avgBlockTime > 0) {
+    // hashrate = difficulty * (2^32 / max_mantissa) / avg_block_time
+    $networkHashps = $difficulty * 10922.667 / $avgBlockTime;
+}
+
 sendJSON([
     'blocks' => $height,
-    'difficulty' => $blockchainInfo['difficulty'] ?? null,
+    'difficulty' => $difficulty,
     'networkhashps' => $networkHashps,
     'supply' => $supply,
     'connections' => $connectionCount,

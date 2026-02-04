@@ -18,6 +18,7 @@
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For DeserializeBlockTransactions
+#include <cmath>  // For pow()
 #include <util/base58.h>           // For EncodeBase58Check
 #include <dfmp/dfmp.h>  // DFMP v2.0
 #include <dfmp/mik.h>   // DFMP v2.0: Mining Identity Key
@@ -2511,25 +2512,22 @@ std::string CRPCServer::RPC_GetBlockchainInfo(const std::string& params) {
     }
 
     // Calculate difficulty from best block's nBits
+    // difficulty = max_target / current_target, computed directly from compact format
+    // compact format: [exponent byte][3 mantissa bytes], target = mantissa * 256^(exponent-3)
     double difficulty = 0.0;
     CBlock bestBlock;
     if (m_blockchain->ReadBlock(bestBlockHash, bestBlock)) {
-        // difficulty = max_target / current_target
-        // For Dilithion, max target is 0x1f060000 (testnet-friendly)
-        uint256 maxTarget = CompactToBig(0x1f060000);
-        uint256 currentTarget = CompactToBig(bestBlock.nBits);
+        const uint32_t maxBits = 0x1f060000;  // Dilithion max target
+        int maxExp = maxBits >> 24;            // 0x1f = 31
+        uint32_t maxMantissa = maxBits & 0x007fffff;  // 0x060000 = 393216
 
-        // Calculate difficulty as double: max_target / current_target
-        // Simplified: we compare the compact representations
-        if (bestBlock.nBits != 0) {
-            uint64_t maxMantissa = maxTarget.data[0] | (uint64_t(maxTarget.data[1]) << 8) |
-                                  (uint64_t(maxTarget.data[2]) << 16) | (uint64_t(maxTarget.data[3]) << 24);
-            uint64_t curMantissa = currentTarget.data[0] | (uint64_t(currentTarget.data[1]) << 8) |
-                                  (uint64_t(currentTarget.data[2]) << 16) | (uint64_t(currentTarget.data[3]) << 24);
+        int curExp = bestBlock.nBits >> 24;
+        uint32_t curMantissa = bestBlock.nBits & 0x007fffff;
 
-            if (curMantissa > 0) {
-                difficulty = double(maxMantissa) / double(curMantissa);
-            }
+        if (curMantissa > 0) {
+            // difficulty = (maxMantissa * 256^(maxExp-3)) / (curMantissa * 256^(curExp-3))
+            //            = (maxMantissa / curMantissa) * 256^(maxExp - curExp)
+            difficulty = double(maxMantissa) / double(curMantissa) * pow(256.0, maxExp - curExp);
         }
     }
 
