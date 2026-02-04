@@ -363,7 +363,9 @@ constexpr int MATURITY_STEP_V2 = 100;
 constexpr double MATURITY_PENALTY_START_V2 = 3.0;
 
 // Fixed-point versions for deterministic calculation
-// Note: FP_SCALE, FP_LINEAR_INCREMENT, FP_LINEAR_BASE are defined in dfmp.h
+// Note: FP_SCALE is defined in dfmp.h
+constexpr int64_t FP_LINEAR_INCREMENT_V2 = 100000;    // 0.1 × FP_SCALE (v2.0 linear zone step)
+constexpr int64_t FP_LINEAR_BASE_V2 = 1500000;        // 1.5 × FP_SCALE (v2.0 exponential zone start)
 constexpr int64_t FP_MATURITY_START_V2 = 3000000;     // 3.0 × FP_SCALE
 constexpr int64_t FP_MATURITY_STEP_25 = 2500000;      // 2.5 × FP_SCALE
 constexpr int64_t FP_MATURITY_STEP_20 = 2000000;      // 2.0 × FP_SCALE

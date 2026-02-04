@@ -577,7 +577,7 @@ int64_t CalculateHeatPenaltyFP_V2(int blocksInWindow) {
     // Linear zone: 21-25 blocks → 1.0x to 1.5x
     // Formula: 1.0 + 0.1 × (blocks - 20)
     if (blocksInWindow <= LINEAR_ZONE_UPPER_V2) {
-        int64_t linearPart = FP_LINEAR_INCREMENT * (blocksInWindow - FREE_TIER_THRESHOLD_V2);
+        int64_t linearPart = FP_LINEAR_INCREMENT_V2 * (blocksInWindow - FREE_TIER_THRESHOLD_V2);
         return FP_SCALE + linearPart;  // 1.1x to 1.5x
     }
 

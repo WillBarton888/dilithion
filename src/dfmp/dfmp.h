@@ -36,8 +36,8 @@ namespace DFMP {
 /** Number of blocks in the observation window for heat calculation (v2.0: 360 blocks = ~24 hours) */
 constexpr int OBSERVATION_WINDOW = 360;
 
-/** Number of free blocks before heat penalty applies (v2.0: 20 blocks ~5.5%) */
-constexpr int FREE_TIER_THRESHOLD = 5;
+/** Number of free blocks before heat penalty applies (v3.0: 12 blocks ~3.3%) */
+constexpr int FREE_TIER_THRESHOLD = 12;
 
 /** Number of blocks for maturity penalty to fully decay (v2.0: 400 blocks) */
 constexpr int MATURITY_BLOCKS = 800;
@@ -48,11 +48,11 @@ constexpr double PENDING_PENALTY_START = 5.0;
 /** Ending maturity penalty multiplier (mature identity) */
 constexpr double PENDING_PENALTY_END = 1.0;
 
-/** v2.0: Linear zone upper bound (blocks 21-25 have linear penalty) */
-constexpr int LINEAR_ZONE_UPPER = 10;
+/** v3.0: Cliff penalty at FREE_TIER_THRESHOLD + 1 (2.0x immediate jump) */
+constexpr double HEAT_CLIFF_PENALTY = 2.0;
 
-/** v2.0: Exponential growth rate per block over linear zone (1.08x per block) */
-constexpr double HEAT_GROWTH_RATE = 1.08;
+/** v3.0: Exponential growth rate per block above free tier (1.58x per block) */
+constexpr double HEAT_GROWTH_RATE = 1.58;
 
 // Legacy v1.3 constants (kept for reference, no longer used)
 // constexpr double HEAT_COEFFICIENT = 0.046;
@@ -65,8 +65,8 @@ constexpr int64_t FP_SCALE = 1000000;
 // Fixed-point versions of v2.0 constants
 constexpr int64_t FP_PENDING_START = 5000000;   // 5.0 × 1,000,000 (v3.0 maturity start)
 constexpr int64_t FP_PENDING_END = 1000000;     // 1.0 × 1,000,000
-constexpr int64_t FP_LINEAR_INCREMENT = 100000; // 0.1 × 1,000,000 (linear zone step)
-constexpr int64_t FP_LINEAR_BASE = 1500000;     // 1.5 × 1,000,000 (exponential zone start)
+constexpr int64_t FP_HEAT_CLIFF = 2000000;      // 2.0 × 1,000,000 (cliff at free tier + 1)
+constexpr int64_t FP_HEAT_GROWTH = 158;          // 1.58x per block (multiply by 158, divide by 100)
 
 // DFMP v3.0: Dormancy decay constants
 constexpr int DORMANCY_THRESHOLD = 720;           // Blocks of inactivity before maturity resets

@@ -209,30 +209,23 @@ int64_t CalculatePendingPenaltyFP(int currentHeight, int firstSeenHeight) {
 
 int64_t CalculateHeatMultiplierFP(int heat) {
     // DFMP v3.0 Heat Penalty:
-    // - 0-5 blocks:   Free tier (1.0x)
-    // - 6-10 blocks:  Linear zone (1.0x → 1.5x)
-    // - 11+ blocks:   Exponential (1.5 × 1.08^(blocks-10))
+    // - 0-12 blocks:  Free tier (1.0x)
+    // - 13+ blocks:   2.0x cliff, then ×1.58 per additional block
+    //                 Block 13 = 2.0x, 14 = 3.16x, 15 = 5.0x, 20 = 49x
 
     // Free tier: no penalty
-    if (heat <= FREE_TIER_THRESHOLD) {  // FREE_TIER_THRESHOLD = 5
+    if (heat <= FREE_TIER_THRESHOLD) {  // FREE_TIER_THRESHOLD = 12
         return FP_SCALE;  // 1.0x
     }
 
-    // Linear zone: 6-10 blocks
-    // penalty = 1.0 + 0.1 × (blocks - 5)
-    if (heat <= LINEAR_ZONE_UPPER) {  // LINEAR_ZONE_UPPER = 10
-        int64_t linearPart = FP_LINEAR_INCREMENT * (heat - FREE_TIER_THRESHOLD);
-        return FP_SCALE + linearPart;  // 1.0 + 0.1 per block
-    }
-
-    // Exponential zone: 11+ blocks
-    // penalty = 1.5 × 1.08^(blocks - 10)
-    // Using fixed-point: multiply by 108/100 repeatedly
-    int64_t penalty = FP_LINEAR_BASE;  // 1.5 × FP_SCALE
-    int exponent = heat - LINEAR_ZONE_UPPER;  // blocks over 10
+    // Cliff + exponential: 13+ blocks
+    // penalty = 2.0 × 1.58^(blocks - 13)
+    // Using fixed-point: start at 2.0x, multiply by 158/100 per block
+    int64_t penalty = FP_HEAT_CLIFF;  // 2.0 × FP_SCALE
+    int exponent = heat - FREE_TIER_THRESHOLD - 1;  // blocks over 13
 
     for (int i = 0; i < exponent; i++) {
-        penalty = (penalty * 108) / 100;  // × 1.08
+        penalty = (penalty * FP_HEAT_GROWTH) / 100;  // × 1.58
     }
 
     return penalty;

@@ -368,9 +368,8 @@ TEST(constants_verification) {
 
     // Verify v2.0 constants
     ASSERT_EQ(DFMP::OBSERVATION_WINDOW, 360, "Observation window should be 360");
-    ASSERT_EQ(DFMP::FREE_TIER_THRESHOLD, 20, "Free tier should be 20");
-    ASSERT_EQ(DFMP::MATURITY_BLOCKS, 400, "Maturity blocks should be 400");
-    ASSERT_EQ(DFMP::LINEAR_ZONE_UPPER, 25, "Linear zone upper should be 25");
+    ASSERT_EQ(DFMP::FREE_TIER_THRESHOLD, 12, "Free tier should be 12");
+    ASSERT_EQ(DFMP::MATURITY_BLOCKS, 800, "Maturity blocks should be 800");
 
     std::cout << "    All constants verified" << std::endl;
 }
