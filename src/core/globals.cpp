@@ -27,7 +27,8 @@ struct NodeState {
     std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
     std::atomic<bool> mining_enabled{false};   // Whether user requested --mine
     std::atomic<uint64_t> template_version{0}; // BUG #109 FIX: Template version counter for race detection
-    std::string mining_address_override;       // --mining-address=Dxxx (empty = privacy mode)
+    std::string mining_address_override;       // --mining-address=Dxxx (empty = use wallet default)
+    bool rotate_mining_address{false};         // --rotate-mining-address (new HD address per block)
     class CRPCServer* rpc_server = nullptr;
     class CMiningController* miner = nullptr;
     class CWallet* wallet = nullptr;

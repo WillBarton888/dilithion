@@ -870,6 +870,12 @@ BlockProcessResult ProcessNewBlock(
             std::cout << "[ProcessNewBlock] Block activated successfully" << std::endl;
             g_metrics.blocks_accepted_total++;
 
+            // Clear stale fork detection when active chain advances normally
+            if (g_node_context.fork_detected.load()) {
+                g_node_context.fork_detected.store(false);
+                g_metrics.ClearForkDetected();
+            }
+
             // Phase 2.2: Mark this block as received if it was a pending parent request
             if (ctx.orphan_manager) {
                 ctx.orphan_manager->MarkParentReceived(blockHash);

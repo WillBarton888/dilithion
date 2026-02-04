@@ -177,7 +177,8 @@ struct NodeState {
     std::atomic<bool> new_block_found{false};  // Signals main loop to update mining template
     std::atomic<bool> mining_enabled{false};   // Whether user requested --mine
     std::atomic<uint64_t> template_version{0}; // BUG #109 FIX: Template version counter for race detection
-    std::string mining_address_override;       // --mining-address=Dxxx (empty = privacy mode)
+    std::string mining_address_override;       // --mining-address=Dxxx (empty = use wallet default)
+    bool rotate_mining_address{false};         // --rotate-mining-address (new HD address per block)
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
     CWallet* wallet = nullptr;
@@ -342,6 +343,7 @@ struct NodeConfig {
     bool start_mining = false;
     int mining_threads = 0;         // 0 = auto-detect
     std::string mining_address_override = "";  // --mining-address=Dxxx (empty = use wallet)
+    bool rotate_mining_address = false;        // --rotate-mining-address (new HD address per block)
     std::string restore_mnemonic = "";        // --restore-mnemonic="word1 word2..." (restore wallet from seed)
     std::vector<std::string> connect_nodes;  // --connect nodes (exclusive)
     std::vector<std::string> add_nodes;      // --addnode nodes (additional)
@@ -447,6 +449,9 @@ struct NodeConfig {
                     return false;
                 }
             }
+            else if (arg == "--rotate-mining-address") {
+                rotate_mining_address = true;
+            }
             else if (arg.find("--restore-mnemonic=") == 0) {
                 restore_mnemonic = arg.substr(19);
                 // Basic validation: should have 24 words
@@ -543,6 +548,7 @@ struct NodeConfig {
         std::cout << "  --mine                Start mining automatically" << std::endl;
         std::cout << "  --threads=<n|auto>    Mining threads (number or 'auto' to detect)" << std::endl;
         std::cout << "  --mining-address=<addr> Send mining rewards to this address" << std::endl;
+        std::cout << "  --rotate-mining-address Use a new HD address for each mined block" << std::endl;
         std::cout << "  --restore-mnemonic=\"words\" Restore wallet from 24-word recovery phrase" << std::endl;
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
@@ -675,8 +681,21 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         if (addrData.size() >= 21) {
             minerPubKeyHash.assign(addrData.begin() + 1, addrData.begin() + 21);
         }
+    } else if (g_node_state.rotate_mining_address && wallet.IsHDWallet()) {
+        // Rotating address mode: derive a new HD address for each block
+        minerAddress = wallet.GetNewHDAddress();
+        if (!minerAddress.IsValid()) {
+            // Fallback to default if HD derivation fails (e.g. wallet locked)
+            minerAddress = wallet.GetNewAddress();
+            minerPubKeyHash = wallet.GetPubKeyHash();
+        } else {
+            std::vector<uint8_t> addrData = minerAddress.GetData();
+            if (addrData.size() >= 21) {
+                minerPubKeyHash.assign(addrData.begin() + 1, addrData.begin() + 21);
+            }
+        }
     } else {
-        // Privacy mode: use a new address from wallet
+        // Default: use wallet's default address (same address every block)
         minerAddress = wallet.GetNewAddress();
         minerPubKeyHash = wallet.GetPubKeyHash();
     }
@@ -1341,8 +1360,9 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "  [OK] PID file lock acquired" << std::endl;
 
-        // Store mining address override in global state for callbacks to access
+        // Store mining config in global state for callbacks to access
         g_node_state.mining_address_override = config.mining_address_override;
+        g_node_state.rotate_mining_address = config.rotate_mining_address;
 
         // Phase 1: Initialize blockchain storage and mempool
         std::cerr.flush();
@@ -4314,21 +4334,29 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             // Display mining mode info
             if (!config.mining_address_override.empty()) {
-                // Fixed address mode
+                // Explicit address mode
                 std::cout << "+----------------------------------------------------------------------+" << std::endl;
                 std::cout << "| Mining Mode: FIXED ADDRESS                                          |" << std::endl;
                 std::cout << "+----------------------------------------------------------------------+" << std::endl;
                 std::cout << "  Mining to: " << config.mining_address_override << std::endl;
-                std::cout << "  WARNING: All rewards visible at this address (less private)" << std::endl;
                 std::cout << std::endl;
-            } else {
-                // Privacy mode (default)
+            } else if (config.rotate_mining_address) {
+                // Rotating address mode (privacy)
                 std::cout << "+----------------------------------------------------------------------+" << std::endl;
-                std::cout << "| Mining Mode: PRIVACY (new address per block)                        |" << std::endl;
+                std::cout << "| Mining Mode: ROTATING ADDRESS (new HD address per block)             |" << std::endl;
                 std::cout << "+----------------------------------------------------------------------+" << std::endl;
                 std::cout << "  Rewards go to your wallet (seed phrase controls all addresses)" << std::endl;
                 std::cout << "  Check balance: 'getbalance' RPC or wallet.html" << std::endl;
                 std::cout << "  For fixed address: restart with --mining-address=Dxxx" << std::endl;
+                std::cout << std::endl;
+            } else {
+                // Default: wallet's default address
+                std::cout << "+----------------------------------------------------------------------+" << std::endl;
+                std::cout << "| Mining Mode: WALLET DEFAULT ADDRESS                                  |" << std::endl;
+                std::cout << "+----------------------------------------------------------------------+" << std::endl;
+                std::cout << "  All rewards go to your wallet's default address" << std::endl;
+                std::cout << "  For privacy: restart with --rotate-mining-address" << std::endl;
+                std::cout << "  For explicit: restart with --mining-address=Dxxx" << std::endl;
                 std::cout << std::endl;
             }
 
@@ -4412,6 +4440,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_node_context.ibd_coordinator = &ibd_coordinator;  // Register for IsSynced() access
         LogPrintf(IBD, INFO, "IBD Coordinator initialized");
 
+        // Solo mining prevention state - declared before new_block_found handler
+        // so that the handler can check mining_paused_no_peers before restarting
+        static int counter = 0;
+        static auto no_peers_since = std::chrono::steady_clock::time_point{};  // When peers dropped to 0
+        static bool mining_paused_no_peers = false;  // Whether we auto-paused mining
+        static bool mining_paused_fork = false;  // Whether we auto-paused for fork resolution
+        static int last_remaining_logged = -1;  // For countdown logging
+        static constexpr int SOLO_MINING_GRACE_PERIOD_SECONDS = 120;  // 2 minute grace period
+
         // Main loop
         while (g_node_state.running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -4442,7 +4479,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
                 // Build new template for next block (only if mining was requested)
-                if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
+                // Skip restart if mining is paused due to no peers or fork resolution
+                if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()
+                    && !mining_paused_no_peers && !mining_paused_fork) {
                     // BUG #65 FIX: Retry template build up to 3 times with delays
                     // This handles the race condition where database write hasn't fully synced
                     std::optional<CBlockTemplate> templateOpt;
@@ -4549,14 +4588,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Print mining stats every 10 seconds if mining
-            // BUG #49 + BUG #180: Solo mining prevention with 120s grace period
-            static int counter = 0;
-            static auto no_peers_since = std::chrono::steady_clock::time_point{};  // When peers dropped to 0
-            static bool mining_paused_no_peers = false;  // Whether we auto-paused mining
-            static bool mining_paused_fork = false;  // Whether we auto-paused for fork resolution
-            static int last_remaining_logged = -1;  // For countdown logging
-            static constexpr int SOLO_MINING_GRACE_PERIOD_SECONDS = 120;  // 2 minute grace period
-
             if (config.start_mining && ++counter % 10 == 0) {
                 auto stats = miner.GetStats();
                 std::cout << "[Mining] Hash rate: " << miner.GetHashRate() << " H/s, "
