@@ -4219,6 +4219,31 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         g_node_context.peer_manager->PeriodicMaintenance();
                     }
 
+                    // Periodic transaction rebroadcast (every 60 seconds)
+                    // Only rebroadcast txs older than 2 minutes (already had a chance to propagate).
+                    // Cap at 100 per cycle to avoid flooding large mempools.
+                    {
+                        static auto last_tx_rebroadcast = std::chrono::steady_clock::now();
+                        auto now = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_tx_rebroadcast).count();
+                        if (elapsed >= 60) {
+                            last_tx_rebroadcast = now;
+                            auto* mempool = g_mempool.load();
+                            if (mempool) {
+                                auto txs = mempool->GetUnconfirmedOlderThan(120);
+                                if (!txs.empty()) {
+                                    size_t count = 0;
+                                    for (const auto& tx : txs) {
+                                        AnnounceTransactionToPeers(tx->GetHash(), -1, true);
+                                        if (++count >= 100) break;
+                                    }
+                                    std::cout << "[TX-RELAY] Rebroadcast " << count
+                                              << " unconfirmed mempool transaction(s)" << std::endl;
+                                }
+                            }
+                        }
+                    }
+
                     // Process feeler connections (Bitcoin Core-style eclipse attack protection)
                     // Feeler connections test addresses we haven't tried recently
                     // Phase 5: Re-enabled after CFeelerManager migration to CConnman

@@ -323,6 +323,8 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         return ProcessGetBlockTxnMessage(peer_id, stream);  // BIP 152
     } else if (command == "blocktxn") {
         return ProcessBlockTxnMessage(peer_id, stream);  // BIP 152
+    } else if (command == "mempool") {
+        return ProcessMempoolMessage(peer_id);
     }
 
     // Unknown message type
@@ -2033,6 +2035,65 @@ std::vector<uint8_t> CNetMessageProcessor::SerializeInvMessage(
 // ============================================================================
 
 /**
+ * ProcessMempoolMessage
+ *
+ * Handle "mempool" P2P message from a peer requesting our mempool contents.
+ * Responds with INV messages for all transactions in our mempool.
+ * Rate-limited to prevent DoS.
+ */
+bool CNetMessageProcessor::ProcessMempoolMessage(int peer_id) {
+    // Rate limit: track last mempool response per peer
+    static std::map<int, std::chrono::steady_clock::time_point> last_mempool_response;
+    static std::mutex mempool_rate_mutex;
+
+    {
+        std::lock_guard<std::mutex> lock(mempool_rate_mutex);
+        auto now = std::chrono::steady_clock::now();
+        auto it = last_mempool_response.find(peer_id);
+        if (it != last_mempool_response.end()) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count();
+            if (elapsed < 60) {
+                return true;  // Rate limited - ignore
+            }
+        }
+        last_mempool_response[peer_id] = now;
+    }
+
+    auto* mempool = g_mempool.load();
+    if (!mempool) return true;
+
+    extern NodeContext g_node_context;
+    if (!g_node_context.connman || !g_node_context.message_processor) return true;
+
+    auto txs = mempool->GetOrderedTxs();
+    if (txs.empty()) return true;
+
+    // Send INV for all mempool transactions (batched, max 1000 per message)
+    std::vector<NetProtocol::CInv> inv_vec;
+    inv_vec.reserve(std::min(txs.size(), (size_t)1000));
+
+    for (const auto& tx : txs) {
+        inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, tx->GetHash()));
+        if (inv_vec.size() >= 1000) {
+            CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
+            g_node_context.connman->PushMessage(peer_id, inv_msg);
+            inv_vec.clear();
+        }
+    }
+
+    // Send remaining
+    if (!inv_vec.empty()) {
+        CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
+        g_node_context.connman->PushMessage(peer_id, inv_msg);
+    }
+
+    std::cout << "[P2P] Sent " << txs.size() << " mempool tx INV(s) to peer "
+              << peer_id << " (mempool request)" << std::endl;
+
+    return true;
+}
+
+/**
  * AnnounceTransactionToPeers
  *
  * Announce a transaction to all connected peers via INV message.
@@ -2043,7 +2104,7 @@ std::vector<uint8_t> CNetMessageProcessor::SerializeInvMessage(
  * @param txid Transaction hash to announce
  * @param exclude_peer Peer ID to exclude (e.g., originating peer), -1 for none
  */
-void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
+void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer, bool force_reannounce) {
     // Check if networking infrastructure is initialized
     // Phase 1.2: Use NodeContext for peer manager
     // P0-5 FIX: Load atomic pointer
@@ -2085,8 +2146,8 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer) {
             continue;
         }
 
-        // Check if we should announce to this peer
-        if (!tx_relay->ShouldAnnounce(peer->id, txid)) {
+        // Check if we should announce to this peer (skip for rebroadcast)
+        if (!force_reannounce && !tx_relay->ShouldAnnounce(peer->id, txid)) {
             skipped_count++;
             continue;
         }

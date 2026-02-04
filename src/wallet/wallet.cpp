@@ -3768,7 +3768,7 @@ bool CWallet::SendTransaction(const CTransactionRef& tx,
     const uint256 txid = tx->GetHash();
 
     // Forward declaration from net/net.h
-    extern void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer);
+    extern void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer, bool force_reannounce = false);
 
     // Announce to all peers (-1 = no excluding peer)
     AnnounceTransactionToPeers(txid, -1);

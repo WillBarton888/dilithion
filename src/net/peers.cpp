@@ -7,6 +7,10 @@
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <node/block_index.h>
+#include <node/mempool.h>
+#include <net/net.h>
+#include <net/connman.h>
+#include <net/protocol.h>
 #include <util/strencodings.h>
 #include <util/logging.h>
 #include <algorithm>
@@ -1291,6 +1295,38 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
     peer->m_last_block_announcement = now;
     peer->lastSuccessTime = now;
     peer->lastStallTime = now;
+
+    // Send mempool INV to newly connected peer so they learn about pending transactions.
+    // Without this, peers that connect after a tx was broadcast never learn about it.
+    // Batches INV messages (max 1000 per message) to handle large mempools.
+    {
+        extern std::atomic<CTxMemPool*> g_mempool;
+        auto* mempool = g_mempool.load();
+        if (mempool && g_node_context.connman && g_node_context.message_processor) {
+            auto txs = mempool->GetOrderedTxs();
+            if (!txs.empty()) {
+                size_t total_sent = 0;
+                std::vector<NetProtocol::CInv> inv_vec;
+                inv_vec.reserve(std::min(txs.size(), (size_t)1000));
+                for (const auto& tx : txs) {
+                    inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, tx->GetHash()));
+                    if (inv_vec.size() >= 1000) {
+                        CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
+                        g_node_context.connman->PushMessage(peer_id, inv_msg);
+                        total_sent += inv_vec.size();
+                        inv_vec.clear();
+                    }
+                }
+                if (!inv_vec.empty()) {
+                    CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
+                    g_node_context.connman->PushMessage(peer_id, inv_msg);
+                    total_sent += inv_vec.size();
+                }
+                std::cout << "[TX-RELAY] Sent " << total_sent
+                          << " mempool tx INV(s) to new peer " << peer_id << std::endl;
+            }
+        }
+    }
 
     return true;
 }

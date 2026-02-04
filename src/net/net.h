@@ -139,6 +139,8 @@ private:
     bool ProcessCmpctBlockMessage(int peer_id, CDataStream& stream);
     bool ProcessGetBlockTxnMessage(int peer_id, CDataStream& stream);
     bool ProcessBlockTxnMessage(int peer_id, CDataStream& stream);
+    // Mempool request handler
+    bool ProcessMempoolMessage(int peer_id);
 
     // Serialization helpers
     std::vector<uint8_t> SerializeVersionMessage(const NetProtocol::CVersionMessage& msg);
@@ -202,7 +204,8 @@ extern std::atomic<CNetMessageProcessor*> g_message_processor;
  * Announce a transaction to all connected peers (Phase 5.3)
  * @param txid Transaction hash to announce
  * @param exclude_peer Peer ID to exclude (e.g., originating peer), -1 for none
+ * @param force_reannounce If true, skip "already announced" check (for periodic rebroadcast)
  */
-void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer);
+void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer, bool force_reannounce = false);
 
 #endif // DILITHION_NET_NET_H
