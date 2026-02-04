@@ -3598,13 +3598,6 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
             return false;
         }
 
-        // Get wallet's public key
-        std::vector<uint8_t> wallet_pubkey = GetPublicKeyUnlocked();
-        if (wallet_pubkey.empty()) {
-            error = "Failed to get wallet public key";
-            return false;
-        }
-
         // Check chain params before loop
         if (Dilithion::g_chainParams == nullptr) {
             error = "Chain parameters not initialized";
@@ -3628,15 +3621,6 @@ bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string&
             std::vector<uint8_t> required_hash = WalletCrypto::ExtractPubKeyHash(utxo_entry.out.scriptPubKey);
             if (required_hash.empty()) {
                 error = "Failed to extract public key hash from scriptPubKey for input " + std::to_string(i);
-                return false;
-            }
-
-            // Compute hash of our public key
-            std::vector<uint8_t> our_hash = WalletCrypto::HashPubKey(wallet_pubkey);
-
-            // Verify we can spend this output
-            if (our_hash != required_hash) {
-                error = "Cannot spend input " + std::to_string(i) + " - public key mismatch";
                 return false;
             }
 
