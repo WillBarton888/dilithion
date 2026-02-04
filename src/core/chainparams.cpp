@@ -136,8 +136,8 @@ ChainParams ChainParams::Testnet() {
 
     // DFMP v3.0 activation - set above existing testnet chain height
     // Testnet tip was ~86,829 when v3.0 was implemented
-    // Activation at 87,500 gives ~670 blocks buffer for upgrade
-    params.dfmpV3ActivationHeight = 87500;
+    // Activation at 87,000 gives ~170 blocks buffer for upgrade
+    params.dfmpV3ActivationHeight = 87000;
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint
