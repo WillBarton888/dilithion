@@ -3472,7 +3472,18 @@ std::string CRPCServer::RPC_RescanWallet(const std::string& params) {
         throw std::runtime_error("UTXO set not initialized");
     }
 
-    // Get number of addresses before rescan
+    // For HD wallets: discover addresses beyond the pre-derived gap limit
+    // This is critical after wallet restore - privacy mode mining generates
+    // new addresses per block, which may exceed the initial 20 pre-derived ones.
+    // ScanHDChains uses the BIP44 gap limit algorithm to find them.
+    if (m_wallet->IsHDWallet()) {
+        size_t discovered = m_wallet->ScanHDChains(*m_utxo_set);
+        if (discovered > 0) {
+            std::cout << "[RPC] HD chain scan discovered " << discovered << " additional address(es) with UTXOs" << std::endl;
+        }
+    }
+
+    // Get number of addresses after HD chain discovery
     size_t numAddresses = m_wallet->GetAddresses().size();
 
     // Perform UTXO scan for all wallet addresses
