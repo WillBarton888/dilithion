@@ -2271,6 +2271,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_metrics.outbound_peers = peers.size();
             }
 
+            // Sync bandwidth metrics from g_network_stats
+            g_metrics.bytes_received_total.store(g_network_stats.bytes_recv);
+            g_metrics.bytes_sent_total.store(g_network_stats.bytes_sent);
+
             // Return Prometheus-format metrics
             return g_metrics.ToPrometheus();
         });
