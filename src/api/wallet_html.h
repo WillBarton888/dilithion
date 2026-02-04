@@ -1641,37 +1641,46 @@ inline const std::string& GetWalletHTML() {
         // Refresh balance
         async function refreshBalance() {
             try {
-                // Always use browser wallet for balance (unified wallet architecture)
-                if (!localWallet || !localWallet.isWalletUnlocked()) {
-                    // Wallet not unlocked, show zeros
-                    document.getElementById('totalBalance').textContent = '0.00000000';
-                    document.getElementById('matureBalance').textContent = '0.00000000';
-                    document.getElementById('immatureBalance').textContent = '0.00000000';
-                    document.getElementById('availableForSend').textContent = '0.00000000';
-                    return;
-                }
+                if (localWallet && localWallet.isWalletUnlocked()) {
+                    // Browser wallet unlocked: query per-address via connectionManager
+                    const addresses = await localWallet.getAddresses();
+                    let confirmedBalance = 0;
+                    let unconfirmedBalance = 0;
 
-                // Get all addresses from browser wallet
-                const addresses = await localWallet.getAddresses();
-                let confirmedBalance = 0;
-                let unconfirmedBalance = 0;
+                    for (const addr of addresses) {
+                        try {
+                            const balanceInfo = await connectionManager.getBalance(addr.address);
+                            confirmedBalance += (balanceInfo.confirmed || 0) / 100000000;
+                            unconfirmedBalance += (balanceInfo.unconfirmed || 0) / 100000000;
+                        } catch (e) {
+                            console.warn('[Balance] Failed to get balance for', addr.address, e.message);
+                        }
+                    }
 
-                // Sum balance from each address via connectionManager
-                for (const addr of addresses) {
+                    const total = confirmedBalance + unconfirmedBalance;
+                    document.getElementById('totalBalance').textContent = total.toFixed(8);
+                    document.getElementById('matureBalance').textContent = confirmedBalance.toFixed(8);
+                    document.getElementById('immatureBalance').textContent = unconfirmedBalance.toFixed(8);
+                    document.getElementById('availableForSend').textContent = confirmedBalance.toFixed(8);
+                } else {
+                    // Browser wallet not unlocked: fall back to server wallet via getbalance RPC
                     try {
-                        const balanceInfo = await connectionManager.getBalance(addr.address);
-                        confirmedBalance += (balanceInfo.confirmed || 0) / 100000000;  // Convert from ions
-                        unconfirmedBalance += (balanceInfo.unconfirmed || 0) / 100000000;
+                        const result = await rpcCall('getbalance', []);
+                        const balance = result.balance || 0;
+                        const immature = result.immature_balance || 0;
+                        const total = balance + immature;
+                        document.getElementById('totalBalance').textContent = total.toFixed(8);
+                        document.getElementById('matureBalance').textContent = balance.toFixed(8);
+                        document.getElementById('immatureBalance').textContent = immature.toFixed(8);
+                        document.getElementById('availableForSend').textContent = balance.toFixed(8);
                     } catch (e) {
-                        console.warn('[Balance] Failed to get balance for', addr.address, e.message);
+                        // RPC not available, show zeros
+                        document.getElementById('totalBalance').textContent = '0.00000000';
+                        document.getElementById('matureBalance').textContent = '0.00000000';
+                        document.getElementById('immatureBalance').textContent = '0.00000000';
+                        document.getElementById('availableForSend').textContent = '0.00000000';
                     }
                 }
-
-                const total = confirmedBalance + unconfirmedBalance;
-                document.getElementById('totalBalance').textContent = total.toFixed(8);
-                document.getElementById('matureBalance').textContent = confirmedBalance.toFixed(8);
-                document.getElementById('immatureBalance').textContent = '0.00000000';  // Immature only for mining
-                document.getElementById('availableForSend').textContent = confirmedBalance.toFixed(8);
             } catch(e) {
                 console.error('Balance error:', e);
             }
