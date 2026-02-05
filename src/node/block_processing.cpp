@@ -7,9 +7,11 @@
 #include <node/block_validation_queue.h>
 #include <node/fork_manager.h>
 #include <node/ibd_coordinator.h>
+#include <node/utxo_set.h>
 #include <consensus/chain.h>
 #include <consensus/pow.h>
 #include <consensus/validation.h>
+#include <consensus/tx_validation.h>
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <net/peers.h>
@@ -428,11 +430,31 @@ BlockProcessResult ProcessNewBlock(
             return BlockProcessResult::VALIDATION_ERROR;
         }
 
+        // BUG #260 FIX: Calculate transaction fees before validating coinbase
+        // Previously passed fees=0, which rejected blocks with any transaction fees
+        uint64_t totalFees = 0;
+        CUTXOSet* utxoSet = g_utxo_set.load();
+
+        if (utxoSet && transactions.size() > 1) {
+            // Calculate fees from non-coinbase transactions
+            CTransactionValidator txValidator;
+            for (size_t i = 1; i < transactions.size(); i++) {
+                CAmount txFee = 0;
+                std::string txError;
+                if (txValidator.CheckTransactionInputs(*transactions[i], *utxoSet, blockHeight, txFee, txError)) {
+                    if (txFee > 0) {
+                        totalFees += static_cast<uint64_t>(txFee);
+                    }
+                }
+                // Note: Don't fail on individual tx validation here - CheckCoinbase just needs fee estimate
+                // Full tx validation happens during block connect
+            }
+        }
+
         // CheckCoinbase validates:
         // - Coinbase value doesn't exceed subsidy + fees
         // - Required Dev Fund and Dev Reward outputs are present with correct amounts
-        // Note: We pass 0 for fees since tax is calculated from subsidy only
-        if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), 0, validationError)) {
+        if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), totalFees, validationError)) {
             std::cerr << "[ProcessNewBlock] ERROR: Coinbase validation failed: " << validationError << std::endl;
             if (ctx.peer_manager) {
                 ctx.peer_manager->Misbehaving(peer_id, 100);  // Ban peer for invalid coinbase
