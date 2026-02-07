@@ -290,9 +290,16 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                         std::cout << "[HeadersManager] FORK: Sent GETHEADERS to peer " << peer << std::endl;
                     }
 
-                    // Signal fork detected for mining pause
-                    g_node_context.fork_detected.store(true);
-                    g_metrics.SetForkDetected(true, 0, 0);  // Depth will be set by IBD coordinator
+                    // BUG #261 FIX: Only signal fork if IBD coordinator is synced
+                    // During startup/IBD, missing parents are normal (catching up).
+                    // False fork detection here causes mining to pause indefinitely.
+                    bool is_synced = g_node_context.ibd_coordinator &&
+                                     g_node_context.ibd_coordinator->IsSynced();
+                    if (is_synced) {
+                        // Signal fork detected for mining pause
+                        g_node_context.fork_detected.store(true);
+                        g_metrics.SetForkDetected(true, 0, 0);  // Depth will be set by IBD coordinator
+                    }
                 }
 
                 // Continue - remaining headers will also fail to connect, that's expected

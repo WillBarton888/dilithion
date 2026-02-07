@@ -235,6 +235,14 @@ private:
     // Issue #7 FIX: Orphan scan frequency control
     std::chrono::steady_clock::time_point m_last_orphan_scan;
     static constexpr int ORPHAN_SCAN_INTERVAL_SECS = 30;      // Scan orphans every 30 seconds (was 10)
+
+    // BUG #261 FIX: Startup grace period for fork detection
+    // Skip fork detection during first N seconds after creation to allow:
+    // - Header population from local blockchain to complete
+    // - Peer connections to stabilize
+    // - Headers chain to be fully indexed
+    std::chrono::steady_clock::time_point m_creation_time;
+    static constexpr int STARTUP_GRACE_PERIOD_SECS = 10;      // Skip fork detection for 10 seconds on startup
 };
 
 #endif // DILITHION_NODE_IBD_COORDINATOR_H

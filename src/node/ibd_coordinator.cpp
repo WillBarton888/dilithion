@@ -42,7 +42,8 @@ extern NodeContext g_node_context;
 CIbdCoordinator::CIbdCoordinator(CChainState& chainstate, NodeContext& node_context)
     : m_chainstate(chainstate),
       m_node_context(node_context),
-      m_last_ibd_attempt(std::chrono::steady_clock::time_point()) {}
+      m_last_ibd_attempt(std::chrono::steady_clock::time_point()),
+      m_creation_time(std::chrono::steady_clock::now()) {}
 
 void CIbdCoordinator::Tick() {
     // IBD DEBUG: Confirm Tick() is being called
@@ -445,10 +446,26 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // During bulk IBD, fresh nodes are thousands of blocks behind and will
     // always have mismatched hashes. This causes false-positive fork detection.
     // Checkpoints + PoW validation are sufficient protection during IBD.
+    //
+    // BUG #261 FIX: Skip Layer 1 during startup grace period.
+    // During the first 10 seconds after coordinator creation, headers from the
+    // local blockchain may not be fully indexed. This causes false fork detection
+    // when GetRandomXHashAtHeight() returns the wrong hash.
     static constexpr int LAYER1_TIP_THRESHOLD = 100;  // Same as Layer 3
     bool layer1_near_tip = (header_height - chain_height) < LAYER1_TIP_THRESHOLD;
 
-    if (layer1_near_tip && chain_height > 0 && m_node_context.headers_manager && !m_fork_detected.load()) {
+    // BUG #261: Check if we're still in the startup grace period
+    auto elapsed_secs = std::chrono::duration_cast<std::chrono::seconds>(now - m_creation_time).count();
+    bool past_startup_grace = (elapsed_secs >= STARTUP_GRACE_PERIOD_SECS);
+
+    // BUG #261 FIX (Part 2): Only run Layer 1 when EXACTLY synced
+    // If headers are ahead of chain (even by 1 block), the headers manager's
+    // "best chain" might include blocks we don't have yet. This causes false
+    // fork detection when GetRandomXHashAtHeight returns a hash from a peer's
+    // chain that diverges from ours at the tip. Wait until we're fully synced.
+    bool exactly_synced = (header_height == chain_height);
+
+    if (past_startup_grace && exactly_synced && layer1_near_tip && chain_height > 0 && m_node_context.headers_manager && !m_fork_detected.load()) {
         CBlockIndex* tip = m_chainstate.GetTip();
         if (tip) {  // Only check if we have a valid tip
             uint256 our_tip_hash = tip->GetBlockHash();

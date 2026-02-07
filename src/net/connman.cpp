@@ -1618,6 +1618,15 @@ void CConnman::DisconnectNodes() {
                 int node_id = (*it)->id;
                 nodes_to_remove.push_back(node_id);
 
+                // BUG #262 FIX (Memory Leak): Call OnPeerDisconnected BEFORE RemoveNode
+                // OnPeerDisconnected calls GetAndClearPeerBlocks which needs the peer
+                // to exist in the peers map to clean up mapBlocksInFlight entries.
+                // If RemoveNode is called first, GetAndClearPeerBlocks bails early
+                // and mapBlocksInFlight entries are never cleaned up = memory leak.
+                if (m_peer_manager) {
+                    m_peer_manager->OnPeerDisconnected(node_id);
+                }
+
                 // BUG #153 FIX: Remove from CPeerManager BEFORE destroying CNode
                 // This ensures node_refs is cleared while CNode still exists
                 if (m_peer_manager) {
@@ -1629,13 +1638,6 @@ void CConnman::DisconnectNodes() {
             } else {
                 ++it;
             }
-        }
-    }
-
-    // Notify disconnection AFTER erase (safe since peer already removed)
-    if (m_peer_manager) {
-        for (int node_id : nodes_to_remove) {
-            m_peer_manager->OnPeerDisconnected(node_id);
         }
     }
 }
