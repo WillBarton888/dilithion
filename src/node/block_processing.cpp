@@ -696,9 +696,16 @@ BlockProcessResult ProcessNewBlock(
 
                     // Use pure locator from our tip to find common ancestor
                     ctx.headers_manager->RequestHeaders(peer_id, uint256());  // null = use our tip's locator
-                    // Signal fork detected for mining pause
-                    g_node_context.fork_detected.store(true);
-                    g_metrics.SetForkDetected(true, 0, 0);  // Depth will be set by IBD coordinator
+
+                    // BUG #261 FIX: Only signal fork if node is synced
+                    // During startup, blocks can arrive with "unknown" parents due to timing.
+                    // This is normal startup behavior, not a real fork.
+                    bool is_synced = g_node_context.ibd_coordinator &&
+                                     g_node_context.ibd_coordinator->IsSynced();
+                    if (is_synced) {
+                        g_node_context.fork_detected.store(true);
+                        g_metrics.SetForkDetected(true, 0, 0);
+                    }
                 } else {
                     // Header sync already in progress - skip redundant request
                     std::cout << "[ProcessNewBlock] Fork header sync already in progress - skipping redundant request" << std::endl;

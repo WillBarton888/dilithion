@@ -242,7 +242,7 @@ private:
     // - Peer connections to stabilize
     // - Headers chain to be fully indexed
     std::chrono::steady_clock::time_point m_creation_time;
-    static constexpr int STARTUP_GRACE_PERIOD_SECS = 10;      // Skip fork detection for 10 seconds on startup
+    static constexpr int STARTUP_GRACE_PERIOD_SECS = 60;      // Skip fork detection for 60 seconds on startup
 };
 
 #endif // DILITHION_NODE_IBD_COORDINATOR_H

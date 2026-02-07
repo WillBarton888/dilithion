@@ -737,8 +737,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // If we've received many consecutive orphan blocks, this is conclusive evidence
     // of being on a stale fork. Trigger fork recovery immediately - don't wait for
     // Layer 3's 60-cycle stall threshold (which can deadlock due to counter resets).
+    //
+    // BUG #261 FIX: Skip Layer 2 during startup grace period
     bool force_fork_check = m_consecutive_orphan_blocks.load() >= ORPHAN_FORK_THRESHOLD;
-    if (force_fork_check && !m_fork_detected.load()) {
+    if (past_startup_grace && force_fork_check && !m_fork_detected.load()) {
         std::cout << "[FORK-DETECT] Layer 2 triggered: " << m_consecutive_orphan_blocks.load()
                   << " consecutive orphan blocks received - attempting immediate fork recovery" << std::endl;
         m_consecutive_orphan_blocks.store(0);  // Reset counter
@@ -772,12 +774,13 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                               m_node_context.block_fetcher->GetInFlightCount() > 0;
         }
 
-        if (has_ibd_activity && stall_cycles >= FORK_DETECTION_THRESHOLD) {
+        // BUG #261 FIX: Skip Layer 3 during startup grace period
+        if (past_startup_grace && has_ibd_activity && stall_cycles >= FORK_DETECTION_THRESHOLD) {
             // Issue #6 FIX: Throttle fork detection to avoid CPU overhead
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_fork_check).count();
-            if (elapsed >= FORK_CHECK_MIN_INTERVAL_SECS) {
-                m_last_fork_check = now;
+            auto now_check = std::chrono::steady_clock::now();
+            auto elapsed_check = std::chrono::duration_cast<std::chrono::seconds>(now_check - m_last_fork_check).count();
+            if (elapsed_check >= FORK_CHECK_MIN_INTERVAL_SECS) {
+                m_last_fork_check = now_check;
 
                 std::cout << "[FORK-DETECT] Layer 3: Chain stalled at height " << chain_height
                           << " for " << stall_cycles << " cycles - attempting fork recovery..." << std::endl;

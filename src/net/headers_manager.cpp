@@ -26,10 +26,9 @@
 // BUG #150 FIX: Access to validated chainstate for fork-safe locator building
 extern CChainState g_chainstate;
 
-// BUG #261 FIX: Startup grace period for fork detection in headers processing
+// BUG #261 FIX: Fork detection only when synced
 // Prevents false fork detection when peers send headers during initial startup.
-static const std::chrono::steady_clock::time_point g_headers_manager_start_time = std::chrono::steady_clock::now();
-static constexpr int HEADERS_FORK_GRACE_PERIOD_SECS = 30;  // Skip fork detection for first 30 seconds
+// Uses IsSynced() instead of time-based grace period - won't miss genuine forks.
 
 CHeadersManager::CHeadersManager()
     : nBestHeight(-1)
@@ -295,19 +294,14 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                         std::cout << "[HeadersManager] FORK: Sent GETHEADERS to peer " << peer << std::endl;
                     }
 
-                    // BUG #261 FIX: Only signal fork after startup grace period
-                    // During the first 30 seconds, peers send headers that may have
-                    // "unknown parents" due to timing of header population vs peer messages.
-                    // This is normal startup behavior, not a real fork.
-                    auto now = std::chrono::steady_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                        now - g_headers_manager_start_time).count();
-                    bool past_grace_period = (elapsed >= HEADERS_FORK_GRACE_PERIOD_SECS);
-
-                    if (past_grace_period) {
-                        // Signal fork detected for mining pause
+                    // BUG #261 FIX: Only signal fork if node is synced
+                    // During startup/IBD, headers with "unknown parents" are normal
+                    // because we're still loading/syncing. Only treat as fork if synced.
+                    bool is_synced = g_node_context.ibd_coordinator &&
+                                     g_node_context.ibd_coordinator->IsSynced();
+                    if (is_synced) {
                         g_node_context.fork_detected.store(true);
-                        g_metrics.SetForkDetected(true, 0, 0);  // Depth will be set by IBD coordinator
+                        g_metrics.SetForkDetected(true, 0, 0);
                     }
                 }
 
