@@ -254,6 +254,12 @@ bool CBlockchainDB::WriteBlock(const uint256& hash, const CBlock& block) {
     append_uint32(block.nBits);
     append_uint32(block.nNonce);
 
+    // VDF extension fields (version >= 4)
+    if (block.IsVDFBlock()) {
+        append_uint256(block.vdfOutput);
+        append_uint256(block.vdfProofHash);
+    }
+
     // Serialize transaction data
     // DB-005 FIX: Check for integer overflow before casting
     if (block.vtx.size() > std::numeric_limits<uint32_t>::max()) {
@@ -495,6 +501,24 @@ bool CBlockchainDB::ReadBlock(const uint256& hash, CBlock& block) {
     block.nBits = read_uint32();
     block.nNonce = read_uint32();
 
+    // VDF extension fields (version >= 4)
+    if (block.IsVDFBlock()) {
+        if (!read_uint256(block.vdfOutput)) {
+            ErrorMessage error = CErrorFormatter::DatabaseError("read block",
+                "Failed to read vdfOutput");
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+            (void)BENCHMARK_END("db_read_block");
+            return false;
+        }
+        if (!read_uint256(block.vdfProofHash)) {
+            ErrorMessage error = CErrorFormatter::DatabaseError("read block",
+                "Failed to read vdfProofHash");
+            std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
+            (void)BENCHMARK_END("db_read_block");
+            return false;
+        }
+    }
+
     // Deserialize transaction data
     uint32_t vtx_size = read_uint32();
     if (data_offset + vtx_size > data.size()) {
@@ -563,6 +587,14 @@ bool CBlockchainDB::WriteBlockIndex(const uint256& hash, const CBlockIndex& inde
     // Without this, headers sent to peers have zero merkle root, causing "Invalid PoW" errors
     std::string hashMerkleHex = index.header.hashMerkleRoot.GetHex();
     data.append(hashMerkleHex);
+
+    // VDF extension fields (version >= 4)
+    if (index.header.IsVDFBlock()) {
+        std::string vdfOutHex = index.header.vdfOutput.GetHex();
+        data.append(vdfOutHex);
+        std::string vdfProofHex = index.header.vdfProofHash.GetHex();
+        data.append(vdfProofHex);
+    }
 
     // Write data length
     uint32_t data_length = static_cast<uint32_t>(data.size());
@@ -749,6 +781,16 @@ bool CBlockchainDB::ReadBlockIndex(const uint256& hash, CBlockIndex& index) {
         data_offset += 64;
     }
     // Note: If merkle root not present (old format), it stays as zero - legacy compatibility
+
+    // VDF extension fields (version >= 4): 64 hex chars for vdfOutput + 64 for vdfProofHash
+    if (index.header.IsVDFBlock() && data_offset + 128 <= data.size()) {
+        std::string vdfOutHex = data.substr(data_offset, 64);
+        index.header.vdfOutput.SetHex(vdfOutHex);
+        data_offset += 64;
+        std::string vdfProofHex = data.substr(data_offset, 64);
+        index.header.vdfProofHash.SetHex(vdfProofHex);
+        data_offset += 64;
+    }
 
     return true;
 }

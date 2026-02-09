@@ -61,6 +61,7 @@ inline uint256 uint256S(const std::string& str) {
 
 class CBlockHeader {
 public:
+    // --- Legacy fields (80 bytes, all versions) ---
     int32_t nVersion;
     uint256 hashPrevBlock;
     uint256 hashMerkleRoot;
@@ -68,10 +69,17 @@ public:
     uint32_t nBits;
     uint32_t nNonce;
 
-    // IBD OPTIMIZATION: Cache the RandomX hash to avoid recomputation
+    // --- VDF fields (64 bytes, version >= 4 only) ---
+    uint256 vdfOutput;       // 32 bytes - VDF computation result
+    uint256 vdfProofHash;    // 32 bytes - SHA3-256(full VDF proof)
+
+    // IBD OPTIMIZATION: Cache the hash to avoid recomputation
     // This is mutable because GetHash() is logically const but caches the result
     mutable uint256 cachedHash;
     mutable bool fHashCached{false};
+
+    // VDF block version threshold.
+    static constexpr int32_t VDF_VERSION = 4;
 
     CBlockHeader() { SetNull(); }
 
@@ -82,21 +90,32 @@ public:
         nTime = 0;
         nBits = 0;
         nNonce = 0;
+        vdfOutput = uint256();
+        vdfProofHash = uint256();
         fHashCached = false;
         cachedHash = uint256();
     }
 
     bool IsNull() const { return (nBits == 0); }
 
-    // GetHash() - RandomX hash for PoW validation
-    // OPTIMIZATION: Now cached - first call is slow (50-100ms), subsequent calls instant
+    /** True if this block uses VDF consensus (version >= 4). */
+    bool IsVDFBlock() const { return nVersion >= VDF_VERSION; }
+
+    /** Serialized header size: 80 bytes (legacy) or 144 bytes (VDF). */
+    size_t GetHeaderSize() const { return IsVDFBlock() ? 144 : 80; }
+
+    /** Serialize the header into a byte vector (version-aware). */
+    std::vector<uint8_t> SerializeHeader() const;
+
+    // GetHash() - RandomX for legacy, SHA3-256 for VDF blocks
+    // OPTIMIZATION: Cached - first call is slow for legacy (50-100ms), subsequent instant
     uint256 GetHash() const;
 
     // GetFastHash() - SHA3-256 hash for header identification (FAST: <0.01ms)
     // Use for map lookups when you don't need the canonical RandomX hash
     uint256 GetFastHash() const;
 
-    // InvalidateCache() - Call after modifying header fields (e.g., mining nonce changes)
+    // InvalidateCache() - Call after modifying header fields
     void InvalidateCache() { fHashCached = false; }
 };
 

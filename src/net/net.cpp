@@ -977,6 +977,12 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
         block.nBits = stream.ReadUint32();
         block.nNonce = stream.ReadUint32();
 
+        // VDF extension fields (version >= 4)
+        if (block.IsVDFBlock()) {
+            block.vdfOutput = stream.ReadUint256();
+            block.vdfProofHash = stream.ReadUint256();
+        }
+
         // Deserialize transaction data
         uint64_t vtx_size = stream.ReadCompactSize();
 
@@ -1279,6 +1285,12 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
             header.nBits = stream.ReadUint32();
             header.nNonce = stream.ReadUint32();
 
+            // VDF extension fields (version >= 4)
+            if (header.IsVDFBlock()) {
+                header.vdfOutput = stream.ReadUint256();
+                header.vdfProofHash = stream.ReadUint256();
+            }
+
             // Skip transaction count (headers message has 0 txs per header)
             uint64_t tx_count = stream.ReadCompactSize();
             if (tx_count != 0) {
@@ -1375,6 +1387,12 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
         cmpctblock.header.nTime = stream.ReadUint32();
         cmpctblock.header.nBits = stream.ReadUint32();
         cmpctblock.header.nNonce = stream.ReadUint32();
+
+        // VDF extension fields (version >= 4)
+        if (cmpctblock.header.IsVDFBlock()) {
+            cmpctblock.header.vdfOutput = stream.ReadUint256();
+            cmpctblock.header.vdfProofHash = stream.ReadUint256();
+        }
 
         // Nonce for short ID calculation
         cmpctblock.nonce = stream.ReadUint64();
@@ -1718,6 +1736,12 @@ CNetMessage CNetMessageProcessor::CreateBlockMessage(const CBlock& block) {
     stream.WriteUint32(block.nBits);
     stream.WriteUint32(block.nNonce);
 
+    // VDF extension fields (version >= 4)
+    if (block.IsVDFBlock()) {
+        stream.WriteUint256(block.vdfOutput);
+        stream.WriteUint256(block.vdfProofHash);
+    }
+
     // Serialize transaction data
     stream.WriteCompactSize(block.vtx.size());
     if (!block.vtx.empty()) {
@@ -1803,6 +1827,12 @@ CNetMessage CNetMessageProcessor::CreateHeadersMessage(const std::vector<CBlockH
         stream.WriteUint32(header.nBits);
         stream.WriteUint32(header.nNonce);
 
+        // VDF extension fields (version >= 4)
+        if (header.IsVDFBlock()) {
+            stream.WriteUint256(header.vdfOutput);
+            stream.WriteUint256(header.vdfProofHash);
+        }
+
         // Transaction count (always 0 for headers message)
         stream.WriteCompactSize(0);
     }
@@ -1848,6 +1878,12 @@ CNetMessage CNetMessageProcessor::CreateCmpctBlockMessage(const CBlockHeaderAndS
     stream.WriteUint32(cmpctblock.header.nTime);
     stream.WriteUint32(cmpctblock.header.nBits);
     stream.WriteUint32(cmpctblock.header.nNonce);
+
+    // VDF extension fields (version >= 4)
+    if (cmpctblock.header.IsVDFBlock()) {
+        stream.WriteUint256(cmpctblock.header.vdfOutput);
+        stream.WriteUint256(cmpctblock.header.vdfProofHash);
+    }
 
     // Nonce for short ID calculation
     stream.WriteUint64(cmpctblock.nonce);

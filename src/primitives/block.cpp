@@ -51,66 +51,58 @@ std::ostream& operator<<(std::ostream& os, const uint256& h) {
     return os << h.GetHex();
 }
 
+std::vector<uint8_t> CBlockHeader::SerializeHeader() const {
+    std::vector<uint8_t> buf;
+    buf.reserve(GetHeaderSize());
+
+    // Legacy 80-byte portion: version(4) + prevBlock(32) + merkleRoot(32) + time(4) + bits(4) + nonce(4)
+    const uint8_t* p;
+    p = reinterpret_cast<const uint8_t*>(&nVersion);
+    buf.insert(buf.end(), p, p + 4);
+    buf.insert(buf.end(), hashPrevBlock.begin(), hashPrevBlock.end());
+    buf.insert(buf.end(), hashMerkleRoot.begin(), hashMerkleRoot.end());
+    p = reinterpret_cast<const uint8_t*>(&nTime);
+    buf.insert(buf.end(), p, p + 4);
+    p = reinterpret_cast<const uint8_t*>(&nBits);
+    buf.insert(buf.end(), p, p + 4);
+    p = reinterpret_cast<const uint8_t*>(&nNonce);
+    buf.insert(buf.end(), p, p + 4);
+
+    // VDF extension (64 bytes, version >= 4 only)
+    if (IsVDFBlock()) {
+        buf.insert(buf.end(), vdfOutput.begin(), vdfOutput.end());
+        buf.insert(buf.end(), vdfProofHash.begin(), vdfProofHash.end());
+    }
+
+    return buf;
+}
+
 uint256 CBlockHeader::GetHash() const {
-    // IBD OPTIMIZATION: Return cached hash if available
-    // This makes subsequent GetHash() calls instant instead of 50-100ms
+    // Return cached hash if available
     if (fHashCached) {
         return cachedHash;
     }
 
-    // Serialize header for hashing
-    std::vector<uint8_t> data;
-    data.reserve(80); // Standard block header size
+    std::vector<uint8_t> data = SerializeHeader();
 
-    // Serialize: version (4) + prevBlock (32) + merkleRoot (32) + time (4) + bits (4) + nonce (4) = 80 bytes
-    const uint8_t* versionBytes = reinterpret_cast<const uint8_t*>(&nVersion);
-    data.insert(data.end(), versionBytes, versionBytes + 4);
-    data.insert(data.end(), hashPrevBlock.begin(), hashPrevBlock.end());
-    data.insert(data.end(), hashMerkleRoot.begin(), hashMerkleRoot.end());
-    const uint8_t* timeBytes = reinterpret_cast<const uint8_t*>(&nTime);
-    data.insert(data.end(), timeBytes, timeBytes + 4);
-    const uint8_t* bitsBytes = reinterpret_cast<const uint8_t*>(&nBits);
-    data.insert(data.end(), bitsBytes, bitsBytes + 4);
-    const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&nNonce);
-    data.insert(data.end(), nonceBytes, nonceBytes + 4);
-
-    // RandomX hash (CPU-mining resistant, ASIC-resistant)
     uint256 result;
-    randomx_hash_fast(data.data(), data.size(), result.data);
+    if (IsVDFBlock()) {
+        // VDF blocks use SHA3-256 of the full 144-byte header (no RandomX).
+        SHA3_256(data.data(), data.size(), result.data);
+    } else {
+        // Legacy blocks use RandomX hash of the 80-byte header.
+        randomx_hash_fast(data.data(), data.size(), result.data);
+    }
 
-    // Cache the result
     cachedHash = result;
     fHashCached = true;
-
     return result;
 }
 
 uint256 CBlockHeader::GetFastHash() const {
-    // Fast SHA3-256 hash for header identification (NOT for PoW)
-    // This is ~10000x faster than RandomX, used for:
-    // - Map lookups in headers manager
-    // - Duplicate detection
-    // - Peer state tracking
-    // - Any non-PoW identification
-
-    // Serialize header (same as GetHash)
-    std::vector<uint8_t> data;
-    data.reserve(80);
-
-    const uint8_t* versionBytes = reinterpret_cast<const uint8_t*>(&nVersion);
-    data.insert(data.end(), versionBytes, versionBytes + 4);
-    data.insert(data.end(), hashPrevBlock.begin(), hashPrevBlock.end());
-    data.insert(data.end(), hashMerkleRoot.begin(), hashMerkleRoot.end());
-    const uint8_t* timeBytes = reinterpret_cast<const uint8_t*>(&nTime);
-    data.insert(data.end(), timeBytes, timeBytes + 4);
-    const uint8_t* bitsBytes = reinterpret_cast<const uint8_t*>(&nBits);
-    data.insert(data.end(), bitsBytes, bitsBytes + 4);
-    const uint8_t* nonceBytes = reinterpret_cast<const uint8_t*>(&nNonce);
-    data.insert(data.end(), nonceBytes, nonceBytes + 4);
-
-    // SHA3-256 (fast, quantum-resistant)
+    // SHA3-256 of the full header (version-aware) for fast identification.
+    std::vector<uint8_t> data = SerializeHeader();
     uint256 result;
     SHA3_256(data.data(), data.size(), result.data);
-
     return result;
 }
