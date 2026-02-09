@@ -44,6 +44,9 @@
 #include <api/cached_stats.h>
 #include <api/metrics.h>
 #include <miner/controller.h>
+#include <miner/vdf_miner.h>
+#include <vdf/vdf.h>
+#include <vdf/cooldown_tracker.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
 #include <rpc/rest_api.h>  // REST API for light wallet
@@ -3111,6 +3114,33 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_node_state.miner = &miner;
         std::cout << "  [OK] Mining controller initialized (" << mining_threads << " threads)" << std::endl;
 
+        // Phase 3b: Initialize VDF mining subsystem
+        bool vdf_available = vdf::init();
+        if (vdf_available) {
+            std::cout << "  [OK] VDF library initialized (" << vdf::version() << ")" << std::endl;
+        } else {
+            std::cout << "  [--] VDF library not available (VDF mining disabled)" << std::endl;
+        }
+
+        CCooldownTracker cooldown_tracker;
+        g_node_context.cooldown_tracker = &cooldown_tracker;
+
+        CVDFMiner vdf_miner;
+        g_node_context.vdf_miner = &vdf_miner;
+
+        // VDF miner configuration (set up later after wallet is ready)
+        uint64_t vdf_iterations = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->vdfIterations : 200'000'000;
+        int vdf_activation = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->vdfActivationHeight : 999999999;
+        vdf_miner.SetIterations(vdf_iterations);
+        vdf_miner.SetCooldownTracker(&cooldown_tracker);
+
+        // Helper lambda: check if VDF mining should be used at given height
+        auto shouldUseVDF = [&vdf_available, &vdf_activation](uint32_t height) -> bool {
+            return vdf_available && static_cast<int>(height) >= vdf_activation;
+        };
+
         // Phase 4: Initialize wallet (before mining callback setup)
         // BUG #56 FIX: Full wallet persistence with Bitcoin Core pattern
         CWallet wallet;
@@ -3985,6 +4015,86 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         });
 
+        // Set up VDF miner callbacks (same block found handler, plus template provider)
+        vdf_miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
+            // Reuse the same block processing logic as RandomX miner.
+            // The block found callback above (for RandomX) handles saving, chain activation,
+            // wallet crediting, etc. We replicate the reference to the same callback.
+            if (!g_node_state.running) return;
+
+            uint256 blockHash = block.GetHash();
+            std::cout << "[VDF] Processing mined VDF block: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+
+            // Save block
+            if (!blockchain.WriteBlock(blockHash, block)) {
+                std::cerr << "[VDF] ERROR: Failed to save block" << std::endl;
+                return;
+            }
+
+            // Create block index
+            auto pblockIndex = std::make_unique<CBlockIndex>(block);
+            pblockIndex->phashBlock = blockHash;
+            pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+            pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+            if (!pblockIndex->pprev) {
+                std::cerr << "[VDF] ERROR: Cannot find parent block" << std::endl;
+                return;
+            }
+            pblockIndex->nHeight = pblockIndex->pprev->nHeight + 1;
+            pblockIndex->BuildChainWork();
+
+            if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
+                std::cerr << "[VDF] ERROR: Failed to save block index" << std::endl;
+                return;
+            }
+
+            if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
+                std::cerr << "[VDF] ERROR: Failed to add block to chain state" << std::endl;
+                return;
+            }
+
+            CBlockIndex* pblockIndexPtr = g_chainstate.GetBlockIndex(blockHash);
+            if (!pblockIndexPtr) return;
+
+            bool reorgOccurred = false;
+            if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
+                if (g_chainstate.GetTip() == pblockIndexPtr) {
+                    std::cout << "[VDF] Block became new chain tip at height "
+                              << pblockIndexPtr->nHeight << std::endl;
+
+                    // Update cooldown tracker
+                    if (g_node_context.cooldown_tracker) {
+                        std::array<uint8_t, 20> winnerAddr{};
+                        ExtractCoinbaseAddress(block, winnerAddr);
+                        g_node_context.cooldown_tracker->OnBlockConnected(
+                            pblockIndexPtr->nHeight, winnerAddr);
+                    }
+
+                    // Credit wallet
+                    CBlockValidator validator;
+                    std::vector<CTransactionRef> transactions;
+                    std::string error;
+                    if (validator.DeserializeBlockTransactions(block, transactions, error) && !transactions.empty()) {
+                        auto& coinbase = transactions[0];
+                        if (!coinbase->vout.empty()) {
+                            std::vector<uint8_t> pubkey_hash = WalletCrypto::ExtractPubKeyHash(coinbase->vout[0].scriptPubKey);
+                            std::vector<uint8_t> our_hash = wallet.GetPubKeyHash();
+                            if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
+                                CDilithiumAddress our_address = wallet.GetNewAddress();
+                                wallet.AddTxOut(coinbase->GetHash(), 0, coinbase->vout[0].nValue,
+                                               our_address, pblockIndexPtr->nHeight, true);
+                            }
+                        }
+                    }
+                }
+                g_node_state.new_block_found = true;
+            }
+        });
+
+        vdf_miner.SetTemplateProvider([&blockchain, &wallet]() -> std::optional<CBlockTemplate> {
+            return BuildMiningTemplate(blockchain, wallet, false, g_node_state.mining_address_override);
+        });
+
         // Phase 2.5: Start P2P networking server
         std::cerr.flush();
         std::cout << "[4/6] Starting P2P networking server..." << std::flush;
@@ -4478,17 +4588,35 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                 std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                if (!templateOpt) {
-                    std::cerr << "ERROR: Failed to build mining template" << std::endl;
-                    std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
-                    return 1;
+                if (shouldUseVDF(current_height + 1)) {
+                    // VDF mining mode
+                    std::cout << "  [VDF] VDF mining active (activation height: " << vdf_activation << ")" << std::endl;
+                    std::cout << "  [VDF] Iterations: " << vdf_iterations << std::endl;
+
+                    // Set miner address from wallet
+                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                    if (pubKeyHash.size() >= 20) {
+                        std::array<uint8_t, 20> addr{};
+                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                        vdf_miner.SetMinerAddress(addr);
+                    }
+
+                    vdf_miner.Start();
+                    std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
+                } else {
+                    // RandomX mining mode
+                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                    if (!templateOpt) {
+                        std::cerr << "ERROR: Failed to build mining template" << std::endl;
+                        std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
+                        return 1;
+                    }
+
+                    miner.StartMining(*templateOpt);
+
+                    std::cout << "  [OK] RandomX mining started with " << mining_threads << " threads" << std::endl;
+                    std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
                 }
-
-                miner.StartMining(*templateOpt);
-
-                std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
-                std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
             }
         }
 
@@ -4527,15 +4655,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_state.new_block_found.load()) {
                 std::cout << "[Mining] New block found, updating template..." << std::endl;
 
-                // ========================================================================
-                // BUG #109 FIX: Stop mining and WAIT for threads to fully stop
-                // ========================================================================
-                // CRITICAL: We must wait for all mining threads to stop before building
-                // a new template. Otherwise, threads may continue mining on old template
-                // and submit blocks with stale transactions.
-                if (miner.IsMining()) {
+                // Determine current height for VDF/RandomX decision
+                unsigned int next_height = g_chainstate.GetTip() ?
+                    g_chainstate.GetTip()->nHeight + 1 : 1;
+
+                if (vdf_miner.IsRunning()) {
+                    // VDF mining mode: signal epoch change (VDF miner handles restart internally)
+                    vdf_miner.OnNewBlock();
+                } else if (miner.IsMining()) {
+                    // ========================================================================
+                    // BUG #109 FIX: Stop mining and WAIT for threads to fully stop
+                    // ========================================================================
                     miner.StopMining();
-                    // Wait for threads to actually stop (up to 2 seconds)
                     int wait_count = 0;
                     while (miner.IsMining() && wait_count < 20) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -4548,34 +4679,39 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Additional small delay to ensure any in-flight block submission completes
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-                // Build new template for next block (only if mining was requested)
-                // Skip restart if mining is paused due to no peers or fork resolution
+                // Restart mining if appropriate (skip if paused or VDF miner handles itself)
                 if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()
-                    && !mining_paused_no_peers && !mining_paused_fork) {
-                    // BUG #65 FIX: Retry template build up to 3 times with delays
-                    // This handles the race condition where database write hasn't fully synced
-                    std::optional<CBlockTemplate> templateOpt;
-                    constexpr int MAX_TEMPLATE_RETRIES = 3;
+                    && !mining_paused_no_peers && !mining_paused_fork
+                    && !vdf_miner.IsRunning()) {
 
-                    for (int attempt = 1; attempt <= MAX_TEMPLATE_RETRIES; attempt++) {
-                        templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                        if (templateOpt) {
-                            break;  // Success!
+                    if (shouldUseVDF(next_height)) {
+                        // Switch to VDF mining (if not already running)
+                        std::cout << "[Mining] Switching to VDF mining at height " << next_height << std::endl;
+                        std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                        if (pubKeyHash.size() >= 20) {
+                            std::array<uint8_t, 20> addr{};
+                            std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                            vdf_miner.SetMinerAddress(addr);
                         }
-                        std::cerr << "[Mining] Template build failed (attempt " << attempt << "/" << MAX_TEMPLATE_RETRIES << ")" << std::endl;
-                        if (attempt < MAX_TEMPLATE_RETRIES) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                        }
-                    }
-
-                    if (templateOpt) {
-                        // Restart mining with new template
-                        miner.StartMining(*templateOpt);
-                        std::cout << "[Mining] Resumed mining on block height " << templateOpt->nHeight << std::endl;
+                        vdf_miner.Start();
                     } else {
-                        std::cerr << "[ERROR] Failed to build mining template after " << MAX_TEMPLATE_RETRIES << " attempts!" << std::endl;
-                        // BUG #65: Keep mining_enabled true so we can retry on next iteration
-                        // The next main loop iteration will try again
+                        // RandomX mining: rebuild template and restart
+                        std::optional<CBlockTemplate> templateOpt;
+                        constexpr int MAX_TEMPLATE_RETRIES = 3;
+                        for (int attempt = 1; attempt <= MAX_TEMPLATE_RETRIES; attempt++) {
+                            templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
+                            if (templateOpt) break;
+                            std::cerr << "[Mining] Template build failed (attempt " << attempt << "/" << MAX_TEMPLATE_RETRIES << ")" << std::endl;
+                            if (attempt < MAX_TEMPLATE_RETRIES) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                            }
+                        }
+                        if (templateOpt) {
+                            miner.StartMining(*templateOpt);
+                            std::cout << "[Mining] Resumed mining on block height " << templateOpt->nHeight << std::endl;
+                        } else {
+                            std::cerr << "[ERROR] Failed to build mining template after " << MAX_TEMPLATE_RETRIES << " attempts!" << std::endl;
+                        }
                     }
                 }
 
@@ -4587,7 +4723,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // BUG #54 FIX: Deferred mining startup after IBD
             // ========================================
             // If mining was deferred due to IBD, check if we can start now
-            if (mining_deferred_for_ibd && !miner.IsMining()) {
+            if (mining_deferred_for_ibd && !miner.IsMining() && !vdf_miner.IsRunning()) {
                 static int ibd_progress_counter = 0;
                 ibd_progress_counter++;
 
@@ -4621,13 +4757,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                     std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                    if (templateOpt) {
-                        miner.StartMining(*templateOpt);
-                        std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
-                        mining_deferred_for_ibd = false;  // Clear flag
+                    if (shouldUseVDF(current_height + 1)) {
+                        std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
+                        std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                        if (pubKeyHash.size() >= 20) {
+                            std::array<uint8_t, 20> addr{};
+                            std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                            vdf_miner.SetMinerAddress(addr);
+                        }
+                        vdf_miner.Start();
+                        mining_deferred_for_ibd = false;
                     } else {
-                        std::cerr << "[ERROR] Failed to build mining template!" << std::endl;
+                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                        if (templateOpt) {
+                            miner.StartMining(*templateOpt);
+                            std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
+                            mining_deferred_for_ibd = false;
+                        } else {
+                            std::cerr << "[ERROR] Failed to build mining template!" << std::endl;
+                        }
                     }
                 } else if (ibd_progress_counter % 10 == 0) {
                     // Show progress every 10 seconds
@@ -4722,6 +4870,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             // Grace period expired - pause mining
                             std::cout << "[Mining] PAUSING: No peers for " << seconds_without_peers << " seconds" << std::endl;
                             std::cout << "[Mining] Mining will resume automatically when a peer connects" << std::endl;
+                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
                             miner.StopMining();
                             mining_paused_no_peers = true;
                         } else {
@@ -4749,12 +4898,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         mining_paused_no_peers = false;
 
                         // Rebuild template and restart mining
-                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                        if (templateOpt) {
-                            miner.StartMining(*templateOpt);
-                            std::cout << "[Mining] Mining resumed with fresh template" << std::endl;
-                        } else {
-                            std::cerr << "[Mining] ERROR: Failed to build template for resume" << std::endl;
+                        unsigned int resume_height = g_chainstate.GetTip() ?
+                            g_chainstate.GetTip()->nHeight + 1 : 1;
+                        if (shouldUseVDF(resume_height) && !vdf_miner.IsRunning()) {
+                            vdf_miner.Start();
+                            std::cout << "[Mining] VDF mining resumed" << std::endl;
+                        } else if (!shouldUseVDF(resume_height)) {
+                            auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
+                            if (templateOpt) {
+                                miner.StartMining(*templateOpt);
+                                std::cout << "[Mining] Mining resumed with fresh template" << std::endl;
+                            } else {
+                                std::cerr << "[Mining] ERROR: Failed to build template for resume" << std::endl;
+                            }
                         }
                     }
                 }
@@ -4765,9 +4921,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // When a competing chain is detected (headers with unknown parent),
                 // pause mining to avoid wasting hashpower on potentially orphaned blocks.
                 // Mining resumes automatically when fork is resolved.
-                if (g_node_context.fork_detected.load() && miner.IsMining() && !mining_paused_fork) {
+                if (g_node_context.fork_detected.load() && (miner.IsMining() || vdf_miner.IsRunning()) && !mining_paused_fork) {
                     std::cout << "[Mining] PAUSING: Fork detected - resolving competing chain..." << std::endl;
                     std::cout << "[Mining] Mining will resume automatically when fork is resolved" << std::endl;
+                    if (vdf_miner.IsRunning()) vdf_miner.Stop();
                     miner.StopMining();
                     mining_paused_fork = true;
                 }
@@ -4778,12 +4935,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     mining_paused_fork = false;
 
                     // Rebuild template and restart mining
-                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                    if (templateOpt) {
-                        miner.StartMining(*templateOpt);
-                        std::cout << "[Mining] Mining resumed with fresh template after fork resolution" << std::endl;
-                    } else {
-                        std::cerr << "[Mining] ERROR: Failed to build template after fork resolution" << std::endl;
+                    unsigned int fork_resume_height = g_chainstate.GetTip() ?
+                        g_chainstate.GetTip()->nHeight + 1 : 1;
+                    if (shouldUseVDF(fork_resume_height) && !vdf_miner.IsRunning()) {
+                        vdf_miner.Start();
+                        std::cout << "[Mining] VDF mining resumed after fork resolution" << std::endl;
+                    } else if (!shouldUseVDF(fork_resume_height)) {
+                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
+                        if (templateOpt) {
+                            miner.StartMining(*templateOpt);
+                            std::cout << "[Mining] Mining resumed with fresh template after fork resolution" << std::endl;
+                        } else {
+                            std::cerr << "[Mining] ERROR: Failed to build template after fork resolution" << std::endl;
+                        }
                     }
                 }
             }
@@ -4796,11 +4960,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Clear ibd_coordinator pointer before local variable goes out of scope
         g_node_context.ibd_coordinator = nullptr;
 
+        if (vdf_miner.IsRunning()) {
+            std::cout << "[Shutdown] Stopping VDF miner..." << std::flush;
+            vdf_miner.Stop();
+            std::cout << " done" << std::endl;
+        }
         if (miner.IsMining()) {
             std::cout << "[Shutdown] Stopping mining..." << std::flush;
             miner.StopMining();
-            std::cout << " ✓" << std::endl;
+            std::cout << " done" << std::endl;
         }
+        if (vdf_available) {
+            vdf::shutdown();
+        }
+        g_node_context.vdf_miner = nullptr;
+        g_node_context.cooldown_tracker = nullptr;
 
         // REMOVED: CMessageProcessorQueue shutdown (no longer used)
 

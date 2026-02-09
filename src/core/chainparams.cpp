@@ -62,6 +62,11 @@ ChainParams ChainParams::Mainnet() {
     // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
     params.dfmpV3ActivationHeight = 7000;
 
+    // VDF Fair Mining (not yet scheduled for mainnet)
+    params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
+    params.vdfExclusiveHeight  = 999999999;
+    params.vdfIterations       = 200'000'000; // ~200s on reference hardware
+
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
     //
@@ -138,6 +143,11 @@ ChainParams ChainParams::Testnet() {
     // Testnet tip was ~86,829 when v3.0 was implemented
     // Activation at 87,000 gives ~170 blocks buffer for upgrade
     params.dfmpV3ActivationHeight = 87000;
+
+    // VDF Fair Mining (not yet scheduled for testnet)
+    params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
+    params.vdfExclusiveHeight  = 999999999;
+    params.vdfIterations       = 10'000'000;  // ~10s on reference hardware (faster for testing)
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint

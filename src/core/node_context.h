@@ -31,6 +31,8 @@ class CBlockTracker;  // IBD Redesign: Single source of truth for block download
 class CIbdCoordinator;  // Phase 5.1: IBD state machine coordinator
 class PartiallyDownloadedBlock;  // BIP 152: Compact block reconstruction state
 class uint256;  // Forward declaration for block hash
+class CVDFMiner;         // VDF fair mining controller
+class CCooldownTracker;  // VDF cooldown rate limiter
 
 // Digital DNA: Sybil-resistant identity system
 namespace digital_dna {
@@ -79,6 +81,10 @@ struct NodeContext {
 
     // IBD HANG FIX #14: Block database for serving blocks to peers
     CBlockchainDB* blockchain_db{nullptr};
+
+    // VDF Fair Mining
+    CVDFMiner* vdf_miner{nullptr};              // VDF miner controller (raw ptr, owned by main)
+    CCooldownTracker* cooldown_tracker{nullptr}; // VDF cooldown tracker (raw ptr, owned by main)
 
     // Digital DNA: Sybil-resistant identity system
     std::unique_ptr<digital_dna::DigitalDNARegistry> dna_registry;

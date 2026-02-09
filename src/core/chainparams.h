@@ -92,6 +92,15 @@ public:
     // This is a consensus-critical change - all nodes must upgrade before this height
     int dfmpV3ActivationHeight;
 
+    // VDF Fair Mining parameters
+    // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
+    // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)
+    // vdfIterations:       Target squarings per VDF round
+    // 0 = VDF not active (default for both networks until fork is scheduled)
+    int vdfActivationHeight;
+    int vdfExclusiveHeight;
+    uint64_t vdfIterations;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release

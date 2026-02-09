@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <consensus/pow.h>
+#include <consensus/vdf_validation.h>
 #include <consensus/validation.h>  // DFMP: For DeserializeBlockTransactions
 #include <node/block_index.h>
 #include <core/chainparams.h>
@@ -150,6 +151,23 @@ bool CheckProofOfWorkDFMP(
     int height,
     int activationHeight)
 {
+    // VDF dispatch: version >= 4 blocks use VDF consensus, not RandomX PoW.
+    // The actual VDF proof verification is done by CheckVDFProof() in the
+    // block validation pipeline. Here we simply skip the hash-under-target
+    // check for VDF blocks (their "PoW" is the VDF proof, not RandomX).
+    if (block.IsVDFBlock()) {
+        if (Dilithion::g_chainParams && height >= Dilithion::g_chainParams->vdfActivationHeight) {
+            return true;  // VDF proof checked separately in CheckBlock()
+        }
+        // VDF block before activation height is invalid.
+        return false;
+    }
+
+    // After VDF exclusive height, only VDF blocks are accepted.
+    if (Dilithion::g_chainParams && height >= Dilithion::g_chainParams->vdfExclusiveHeight) {
+        return false;  // Legacy RandomX blocks rejected after exclusive height
+    }
+
     // Convert compact difficulty to full target
     uint256 baseTarget = CompactToBig(nBits);
 

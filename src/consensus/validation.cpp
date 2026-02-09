@@ -4,6 +4,7 @@
 #include <consensus/validation.h>
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
+#include <consensus/vdf_validation.h>
 #include <consensus/params.h>
 #include <core/chainparams.h>
 #include <crypto/sha3.h>
@@ -188,11 +189,14 @@ bool CBlockValidator::CheckBlockHeader(
     uint32_t nBits,
     std::string& error
 ) const {
-    // Check proof of work
-    uint256 hash = block.GetHash();
-    if (!CheckProofOfWork(hash, nBits)) {
-        error = "Invalid proof of work";
-        return false;
+    // VDF blocks skip RandomX hash-under-target check.
+    // Their proof-of-work is the VDF proof, validated in CheckVDFProof().
+    if (!block.IsVDFBlock()) {
+        uint256 hash = block.GetHash();
+        if (!CheckProofOfWork(hash, nBits)) {
+            error = "Invalid proof of work";
+            return false;
+        }
     }
 
     // Check block version (P1-1 FIX: Add upper bound to prevent consensus fork)
@@ -531,6 +535,18 @@ bool CBlockValidator::CheckBlock(
 
         if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, nHeight, dfmpActivationHeight)) {
             error = "Block fails DFMP difficulty check";
+            return false;
+        }
+    }
+
+    // VDF proof validation (version >= 4 blocks only)
+    if (block.IsVDFBlock()) {
+        uint64_t vdfIters = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->vdfIterations : 0;
+        std::string vdfError;
+        if (!CheckVDFProof(block, static_cast<int>(nHeight),
+                           block.hashPrevBlock, vdfIters, vdfError)) {
+            error = "VDF validation failed: " + vdfError;
             return false;
         }
     }

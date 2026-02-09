@@ -143,7 +143,8 @@ CONSENSUS_SOURCES := src/consensus/fees.cpp \
                      src/consensus/chain_verifier.cpp \
                      src/consensus/tx_validation.cpp \
                      src/consensus/signature_batch_verifier.cpp \
-                     src/consensus/validation.cpp
+                     src/consensus/validation.cpp \
+                     src/consensus/vdf_validation.cpp
 
 CORE_SOURCES_UTIL := src/core/chainparams.cpp \
                      src/core/globals.cpp \
@@ -158,7 +159,8 @@ CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/pbkdf2_sha3.cpp \
                   src/crypto/siphash.cpp
 
-MINER_SOURCES := src/miner/controller.cpp
+MINER_SOURCES := src/miner/controller.cpp \
+                 src/miner/vdf_miner.cpp
 
 # DFMP (Fair Mining Protocol) sources
 DFMP_SOURCES := src/dfmp/dfmp.cpp \
@@ -173,7 +175,8 @@ DIGITAL_DNA_SOURCES := src/digital_dna/digital_dna.cpp \
                        src/digital_dna/digital_dna_rpc.cpp
 
 # VDF (Verifiable Delay Function) sources - uses chiavdf class group VDF
-VDF_SOURCES := src/vdf/vdf.cpp
+VDF_SOURCES := src/vdf/vdf.cpp \
+               src/vdf/cooldown_tracker.cpp
 
 # chiavdf library objects (compiled separately from third-party source)
 CHIAVDF_OBJECTS := $(OBJ_DIR)/chiavdf/c_wrapper.o $(OBJ_DIR)/chiavdf/lzcnt.o
@@ -450,6 +453,16 @@ vdf_test: $(CORE_OBJECTS) $(OBJ_DIR)/vdf/vdf_test.o $(DILITHIUM_OBJECTS) $(CHIAV
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ vdf_test built successfully$(COLOR_RESET)"
+
+vdf_consensus_test: $(CORE_OBJECTS) $(OBJ_DIR)/vdf/vdf_consensus_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ vdf_consensus_test built successfully$(COLOR_RESET)"
+
+vdf_miner_test: $(CORE_OBJECTS) $(OBJ_DIR)/miner/vdf_miner_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ vdf_miner_test built successfully$(COLOR_RESET)"
 
 test_passphrase_validator: $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/test_passphrase_validator.o
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
