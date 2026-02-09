@@ -32,6 +32,12 @@ class CIbdCoordinator;  // Phase 5.1: IBD state machine coordinator
 class PartiallyDownloadedBlock;  // BIP 152: Compact block reconstruction state
 class uint256;  // Forward declaration for block hash
 
+// Digital DNA: Sybil-resistant identity system
+namespace digital_dna {
+    class DigitalDNARegistry;
+    class DigitalDNACollector;
+}
+
 /**
  * NodeContext - Bitcoin Core-style global state management
  *
@@ -73,6 +79,10 @@ struct NodeContext {
 
     // IBD HANG FIX #14: Block database for serving blocks to peers
     CBlockchainDB* blockchain_db{nullptr};
+
+    // Digital DNA: Sybil-resistant identity system
+    std::unique_ptr<digital_dna::DigitalDNARegistry> dna_registry;
+    digital_dna::DigitalDNACollector* dna_collector{nullptr};  // Active collector (if mining)
 
     // Node state flags
     std::atomic<bool> running{false};

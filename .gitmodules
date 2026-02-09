@@ -4,3 +4,6 @@
 [submodule "depends/openssl-src"]
 	path = depends/openssl-src
 	url = https://github.com/openssl/openssl.git
+[submodule "depends/chiavdf"]
+	path = depends/chiavdf
+	url = https://github.com/WillBarton888/chiavdf.git

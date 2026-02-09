@@ -10,6 +10,7 @@
 #include <net/block_tracker.h>  // IBD Redesign: Single source of truth
 #include <net/blockencodings.h>  // BIP 152: For PartiallyDownloadedBlock destructor
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
+#include <digital_dna/digital_dna.h>  // Digital DNA: Sybil-resistant identity
 #include <util/logging.h>
 #include <iostream>
 
@@ -54,6 +55,22 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
     } catch (const std::exception& e) {
         LogPrintf(IBD, ERROR, "Failed to initialize IBD managers: %s", e.what());
         return false;
+    }
+
+    // Initialize Digital DNA registry
+    try {
+        dna_registry = std::make_unique<digital_dna::DigitalDNARegistry>();
+        // Try to load persisted identities
+        std::string dna_path = datadir + "/digital_dna.dat";
+        if (dna_registry->load(dna_path)) {
+            LogPrintf(ALL, INFO, "Loaded %zu Digital DNA identities from %s",
+                      dna_registry->count(), dna_path.c_str());
+        } else {
+            LogPrintf(ALL, INFO, "No persisted Digital DNA identities found, starting fresh");
+        }
+    } catch (const std::exception& e) {
+        LogPrintf(ALL, ERROR, "Failed to initialize Digital DNA registry: %s", e.what());
+        // Non-fatal - continue without DNA registry
     }
 
     // Initialize state flags
@@ -108,6 +125,13 @@ void NodeContext::Shutdown() {
     // Reset peer manager (unique_ptr will handle cleanup)
     peer_manager.reset();
 
+    // Digital DNA: Save and cleanup
+    if (dna_registry) {
+        // Note: Save path would need to be passed in or stored
+        dna_registry.reset();
+    }
+    dna_collector = nullptr;
+
     // Clear pointers
     chainstate = nullptr;
     rpc_server = nullptr;
@@ -129,6 +153,8 @@ void NodeContext::Reset() {
     block_fetcher.reset();
     block_tracker.reset();  // IBD Redesign
     validation_queue.reset();  // Phase 2: Reset validation queue
+    dna_registry.reset();  // Digital DNA
+    dna_collector = nullptr;
     async_broadcaster = nullptr;
     rpc_server = nullptr;
     miner = nullptr;

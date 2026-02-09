@@ -11,6 +11,7 @@
 #include <net/net.h>
 #include <net/connman.h>
 #include <net/protocol.h>
+#include <digital_dna/digital_dna.h>  // Digital DNA: Sybil-resistant identity
 #include <util/strencodings.h>
 #include <util/logging.h>
 #include <algorithm>
@@ -1328,6 +1329,16 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
         }
     }
 
+    // Digital DNA: Notify collector about new peer connection
+    if (g_node_context.dna_collector) {
+        // Convert peer address to 20-byte ID (hash of IP:port)
+        std::array<uint8_t, 20> peer_dna_id = {};
+        std::string addr_str = peer->addr.ToString();
+        auto hash = std::hash<std::string>{}(addr_str);
+        memcpy(peer_dna_id.data(), &hash, std::min(sizeof(hash), peer_dna_id.size()));
+        g_node_context.dna_collector->on_peer_connected(peer_dna_id);
+    }
+
     return true;
 }
 
@@ -1343,6 +1354,20 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
         if (!heights.empty()) {
             std::cout << "[BLOCK-TRACKER] Cleared " << heights.size()
                       << " in-flight blocks from disconnected peer " << peer_id << std::endl;
+        }
+    }
+
+    // Digital DNA: Notify collector about peer disconnection
+    if (g_node_context.dna_collector) {
+        // Get peer address for ID computation
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        auto it = peers.find(peer_id);
+        if (it != peers.end()) {
+            std::array<uint8_t, 20> peer_dna_id = {};
+            std::string addr_str = it->second->addr.ToString();
+            auto hash = std::hash<std::string>{}(addr_str);
+            memcpy(peer_dna_id.data(), &hash, std::min(sizeof(hash), peer_dna_id.size()));
+            g_node_context.dna_collector->on_peer_disconnected(peer_dna_id);
         }
     }
 
