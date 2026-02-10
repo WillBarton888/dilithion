@@ -144,9 +144,9 @@ ChainParams ChainParams::Testnet() {
     // Activation at 87,000 gives ~170 blocks buffer for upgrade
     params.dfmpV3ActivationHeight = 87000;
 
-    // VDF Fair Mining (not yet scheduled for testnet)
-    params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
-    params.vdfExclusiveHeight  = 999999999;
+    // VDF Fair Mining (testnet activation)
+    params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted
+    params.vdfExclusiveHeight  = 87500;       // VDF-only after this height
     params.vdfIterations       = 10'000'000;  // ~10s on reference hardware (faster for testing)
 
     // TESTNET: Checkpoints for IBD optimization
