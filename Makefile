@@ -496,6 +496,11 @@ difficulty_determinism_test: $(OBJ_DIR)/test/difficulty_determinism_test.o $(OBJ
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Difficulty determinism test built successfully$(COLOR_RESET)"
 
+eda_test: $(OBJ_DIR)/test/eda_test.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/vdf_validation.o $(OBJ_DIR)/consensus/signature_batch_verifier.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/core/node_context.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/logging.o $(OBJ_DIR)/util/assert.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/siphash.o $(OBJ_DIR)/dfmp/dfmp.o $(OBJ_DIR)/dfmp/identity_db.o $(OBJ_DIR)/dfmp/mik.o $(OBJ_DIR)/db/db_errors.o $(OBJ_DIR)/chiavdf/lzcnt.o $(DILITHIUM_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ EDA test built successfully$(COLOR_RESET)"
+
 # ============================================================================
 # Run Tests
 # ============================================================================
@@ -565,12 +570,13 @@ $(OBJ_DIR)/util \
 $(OBJ_DIR)/api \
 $(OBJ_DIR)/vdf \
 $(OBJ_DIR)/chiavdf \
+$(OBJ_DIR)/digital_dna \
 $(OBJ_DIR)/test \
 $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
