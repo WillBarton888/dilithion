@@ -583,7 +583,7 @@ $(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/cryp
 # Compile chiavdf C++ wrapper (third-party, suppress warnings with -w)
 $(OBJ_DIR)/chiavdf/c_wrapper.o: depends/chiavdf/src/c_bindings/c_wrapper.cpp | $(OBJ_DIR)/chiavdf
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $< (chiavdf)"
-	@$(CXX) -std=c++17 -O2 -pipe -w -I depends/chiavdf/src -I depends/chiavdf/src/c_bindings -c $< -o $@
+	@$(CXX) -std=c++17 -O2 -pipe -w $(CPPFLAGS) -I depends/chiavdf/src -I depends/chiavdf/src/c_bindings -c $< -o $@
 
 # Compile chiavdf lzcnt utility (C file)
 $(OBJ_DIR)/chiavdf/lzcnt.o: depends/chiavdf/src/refcode/lzcnt.c | $(OBJ_DIR)/chiavdf
