@@ -26,6 +26,24 @@ const uint32_t MIN_DIFFICULTY_BITS = 0x1d00ffff;
 /** Maximum difficulty target (easiest - allow testnet 0x1f060000) */
 const uint32_t MAX_DIFFICULTY_BITS = 0x1f0fffff;
 
+/**
+ * Emergency Difficulty Adjustment (EDA) parameters
+ *
+ * Prevents death spiral when hashrate drops significantly between
+ * 2016-block difficulty adjustments. When a block takes more than
+ * EDA_THRESHOLD_BLOCKS * blockTime to arrive, difficulty progressively
+ * decreases to allow mining to continue.
+ */
+/** Threshold: EDA triggers after this many missed block intervals */
+const int EDA_THRESHOLD_BLOCKS = 6;
+/** Step size: each step beyond threshold reduces difficulty further */
+const int EDA_STEP_BLOCKS = 6;
+/** Reduction per step: target *= 5/4 (25% easier each step) */
+const int EDA_REDUCTION_NUMERATOR = 5;
+const int EDA_REDUCTION_DENOMINATOR = 4;
+/** Maximum number of reduction steps (cap at ~97% reduction) */
+const int EDA_MAX_STEPS = 20;
+
 /** Check whether a block hash satisfies the proof-of-work requirement */
 bool CheckProofOfWork(uint256 hash, uint32_t nBits);
 
@@ -90,12 +108,13 @@ class CBlockIndex;
 /**
  * Calculate the next required proof-of-work difficulty
  * Implements difficulty adjustment algorithm (every 2016 blocks)
+ * with Emergency Difficulty Adjustment (EDA) for stuck chains.
  *
  * @param pindexLast The last block in the chain
- * @param params Chain parameters containing adjustment interval and target spacing
+ * @param nBlockTime Timestamp of the new block (0 = no EDA check, backward compatible)
  * @return The new difficulty target in compact format (nBits)
  */
-uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast);
+uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime = 0);
 
 /**
  * Calculate median-time-past for timestamp validation

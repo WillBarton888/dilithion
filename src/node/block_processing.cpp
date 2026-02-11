@@ -308,7 +308,7 @@ BlockProcessResult ProcessNewBlock(
         // to calculate expected difficulty). For orphan blocks, nBits validation
         // is deferred until the parent connects (same as DFMP validation).
         if (parentOnActiveChain) {
-            uint32_t expectedNBits = GetNextWorkRequired(pParent);
+            uint32_t expectedNBits = GetNextWorkRequired(pParent, static_cast<int64_t>(block.nTime));
             if (block.nBits != expectedNBits) {
                 std::cerr << "[ProcessNewBlock] ERROR: Block has wrong difficulty" << std::endl;
                 std::cerr << "  Block nBits:    0x" << std::hex << block.nBits << std::endl;

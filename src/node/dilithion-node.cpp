@@ -653,22 +653,9 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     // Block timestamps are uint32_t per blockchain protocol (valid until year 2106)
     time_t currentTime = std::time(nullptr);
     block.nTime = static_cast<uint32_t>(currentTime & 0xFFFFFFFF);
-    block.nBits = GetNextWorkRequired(pindexPrev);
-
-    // TESTNET ESCAPE RULE: Allow minimum difficulty if block is overdue
-    // If no block has been found for 2x the target time (480s for 240s target),
-    // reset difficulty to easiest level. This prevents testnet from getting
-    // stuck when miners leave, but is disabled on mainnet for security.
-    if (Dilithion::g_chainParams->fPowAllowMinDifficultyBlocks && pindexPrev != nullptr) {
-        int64_t timeSinceLastBlock = static_cast<int64_t>(currentTime) - static_cast<int64_t>(pindexPrev->nTime);
-        int64_t escapeThreshold = 2 * static_cast<int64_t>(Dilithion::g_chainParams->blockTime);
-
-        if (timeSinceLastBlock > escapeThreshold) {
-            block.nBits = MAX_DIFFICULTY_BITS;  // Reset to easiest difficulty
-            std::cout << "[Mining] TESTNET: Block overdue by " << (timeSinceLastBlock - Dilithion::g_chainParams->blockTime)
-                      << "s - using minimum difficulty (0x" << std::hex << MAX_DIFFICULTY_BITS << std::dec << ")" << std::endl;
-        }
-    }
+    // Pass block timestamp to GetNextWorkRequired for EDA (Emergency Difficulty Adjustment)
+    // If the gap since the last block exceeds the EDA threshold, difficulty is reduced
+    block.nBits = GetNextWorkRequired(pindexPrev, static_cast<int64_t>(block.nTime));
 
     block.nNonce = 0;
 

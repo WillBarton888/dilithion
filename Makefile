@@ -496,9 +496,9 @@ difficulty_determinism_test: $(OBJ_DIR)/test/difficulty_determinism_test.o $(OBJ
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Difficulty determinism test built successfully$(COLOR_RESET)"
 
-eda_test: $(OBJ_DIR)/test/eda_test.o $(OBJ_DIR)/consensus/pow.o $(OBJ_DIR)/consensus/validation.o $(OBJ_DIR)/consensus/chain.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/consensus/tx_validation.o $(OBJ_DIR)/consensus/vdf_validation.o $(OBJ_DIR)/consensus/signature_batch_verifier.o $(OBJ_DIR)/core/chainparams.o $(OBJ_DIR)/core/globals.o $(OBJ_DIR)/core/node_context.o $(OBJ_DIR)/primitives/block.o $(OBJ_DIR)/primitives/transaction.o $(OBJ_DIR)/node/block_index.o $(OBJ_DIR)/util/system.o $(OBJ_DIR)/util/strencodings.o $(OBJ_DIR)/util/base58.o $(OBJ_DIR)/util/logging.o $(OBJ_DIR)/util/assert.o $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/crypto/randomx_hash.o $(OBJ_DIR)/crypto/siphash.o $(OBJ_DIR)/dfmp/dfmp.o $(OBJ_DIR)/dfmp/identity_db.o $(OBJ_DIR)/dfmp/mik.o $(OBJ_DIR)/db/db_errors.o $(OBJ_DIR)/chiavdf/lzcnt.o $(DILITHIUM_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+eda_test:
+	@echo "$(COLOR_BLUE)[CXX+LINK]$(COLOR_RESET) src/test/eda_test.cpp (standalone)"
+	@$(CXX) -std=c++17 -O2 -o $@ src/test/eda_test.cpp
 	@echo "$(COLOR_GREEN)✓ EDA test built successfully$(COLOR_RESET)"
 
 # ============================================================================

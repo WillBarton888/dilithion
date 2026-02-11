@@ -798,4 +798,214 @@ BOOST_AUTO_TEST_CASE(get_next_work_required_extreme_slow_clamp) {
     BOOST_CHECK(actual_timespan > expected_timespan * 4);  // >4x slower (will be clamped)
 }
 
+// ============================================================================
+// EMERGENCY DIFFICULTY ADJUSTMENT (EDA) TESTS
+// ============================================================================
+
+/**
+ * Helper: Initialize chain params for EDA testing
+ */
+static void InitEDATestParams() {
+    if (!Dilithion::g_chainParams) {
+        Dilithion::g_chainParams = new Dilithion::ChainParams();
+    }
+    Dilithion::g_chainParams->genesisNBits = 0x1d00ffff;
+    Dilithion::g_chainParams->difficultyAdjustment = 2016;
+    Dilithion::g_chainParams->blockTime = 240;  // 4 minutes
+    Dilithion::g_chainParams->edaActivationHeight = 100;  // Active from height 100
+}
+
+/**
+ * EDA Test 1: No trigger within threshold
+ * Gap < 6 * blockTime (1440s) should NOT reduce difficulty
+ */
+BOOST_AUTO_TEST_CASE(eda_no_trigger_within_threshold) {
+    InitEDATestParams();
+
+    CBlockIndex index;
+    index.nHeight = 200;  // Above EDA activation
+    index.nTime = 1000000;
+    index.header.nBits = 0x1d00ffff;
+    index.nBits = 0x1d00ffff;
+    index.pprev = nullptr;
+
+    // Gap = 1200s (5 * 240), below threshold of 1440s
+    int64_t nBlockTime = 1000000 + 1200;
+
+    uint32_t result = GetNextWorkRequired(&index, nBlockTime);
+    BOOST_CHECK_EQUAL(result, 0x1d00ffff);  // Unchanged
+}
+
+/**
+ * EDA Test 2: Single step at threshold
+ * Gap just past threshold triggers 1 step of reduction
+ */
+BOOST_AUTO_TEST_CASE(eda_triggers_single_step) {
+    InitEDATestParams();
+
+    CBlockIndex index;
+    index.nHeight = 200;
+    index.nTime = 1000000;
+    index.header.nBits = 0x1d00ffff;
+    index.nBits = 0x1d00ffff;
+    index.pprev = nullptr;
+
+    // Gap = 1500s (> 1440s threshold, < 2880s for next step)
+    int64_t nBlockTime = 1000000 + 1500;
+
+    uint32_t result = GetNextWorkRequired(&index, nBlockTime);
+    // Should be easier (higher nBits = larger target)
+    BOOST_CHECK(result > 0x1d00ffff);
+    BOOST_CHECK(result <= MAX_DIFFICULTY_BITS);
+}
+
+/**
+ * EDA Test 3: Multiple steps for long gaps
+ * 8-hour gap should produce many reduction steps
+ */
+BOOST_AUTO_TEST_CASE(eda_multiple_steps) {
+    InitEDATestParams();
+
+    CBlockIndex index;
+    index.nHeight = 200;
+    index.nTime = 1000000;
+    index.header.nBits = 0x1d00ffff;
+    index.nBits = 0x1d00ffff;
+    index.pprev = nullptr;
+
+    // Gap = 28800s (8 hours)
+    // steps = (28800 - 1440) / 1440 + 1 = 20 (capped)
+    int64_t nBlockTime = 1000000 + 28800;
+
+    uint32_t result = GetNextWorkRequired(&index, nBlockTime);
+    // Should be significantly easier
+    BOOST_CHECK(result > 0x1d00ffff);
+
+    // 1 step result should be between normal and multi-step result
+    int64_t nBlockTimeSingle = 1000000 + 1500;
+    uint32_t singleStep = GetNextWorkRequired(&index, nBlockTimeSingle);
+    BOOST_CHECK(result > singleStep);  // More steps = easier
+}
+
+/**
+ * EDA Test 4: Max steps cap (20)
+ * Extremely long gap should be capped at EDA_MAX_STEPS
+ */
+BOOST_AUTO_TEST_CASE(eda_max_steps_cap) {
+    InitEDATestParams();
+
+    CBlockIndex index;
+    index.nHeight = 200;
+    index.nTime = 1000000;
+    index.header.nBits = 0x1d00ffff;
+    index.nBits = 0x1d00ffff;
+    index.pprev = nullptr;
+
+    // Gap = 86400s (24 hours) - would be 60 steps uncapped
+    int64_t nBlockTime24h = 1000000 + 86400;
+    uint32_t result24h = GetNextWorkRequired(&index, nBlockTime24h);
+
+    // Gap = 172800s (48 hours) - would be 119 steps uncapped
+    int64_t nBlockTime48h = 1000000 + 172800;
+    uint32_t result48h = GetNextWorkRequired(&index, nBlockTime48h);
+
+    // Both should produce same result (both capped at 20 steps)
+    BOOST_CHECK_EQUAL(result24h, result48h);
+}
+
+/**
+ * EDA Test 5: Respects MAX_DIFFICULTY_BITS floor
+ * EDA should never produce nBits > MAX_DIFFICULTY_BITS
+ */
+BOOST_AUTO_TEST_CASE(eda_respects_max_difficulty_bits) {
+    InitEDATestParams();
+
+    // Start with already-easy difficulty near max
+    CBlockIndex index;
+    index.nHeight = 200;
+    index.nTime = 1000000;
+    index.header.nBits = 0x1f0f0000;  // Very easy, close to max
+    index.nBits = 0x1f0f0000;
+    index.pprev = nullptr;
+
+    // Long gap to trigger many steps
+    int64_t nBlockTime = 1000000 + 86400;
+
+    uint32_t result = GetNextWorkRequired(&index, nBlockTime);
+    BOOST_CHECK(result <= MAX_DIFFICULTY_BITS);
+}
+
+/**
+ * EDA Test 6: Not active before activation height
+ * Blocks before edaActivationHeight should NOT get EDA
+ */
+BOOST_AUTO_TEST_CASE(eda_not_active_before_activation) {
+    InitEDATestParams();
+    // edaActivationHeight = 100
+
+    CBlockIndex index;
+    index.nHeight = 50;  // Below activation height
+    index.nTime = 1000000;
+    index.header.nBits = 0x1d00ffff;
+    index.nBits = 0x1d00ffff;
+    index.pprev = nullptr;
+
+    // Large gap that would trigger EDA if active
+    int64_t nBlockTime = 1000000 + 86400;
+
+    uint32_t result = GetNextWorkRequired(&index, nBlockTime);
+    BOOST_CHECK_EQUAL(result, 0x1d00ffff);  // Unchanged - EDA not active
+}
+
+/**
+ * EDA Test 7: Backward compatible with nBlockTime=0
+ * Calling without timestamp should behave exactly like old API
+ */
+BOOST_AUTO_TEST_CASE(eda_backward_compatible_no_timestamp) {
+    InitEDATestParams();
+
+    CBlockIndex index;
+    index.nHeight = 200;
+    index.nTime = 1000000;
+    index.header.nBits = 0x1d00ffff;
+    index.nBits = 0x1d00ffff;
+    index.pprev = nullptr;
+
+    // nBlockTime = 0 (default) should not trigger EDA
+    uint32_t result = GetNextWorkRequired(&index, 0);
+    BOOST_CHECK_EQUAL(result, 0x1d00ffff);  // Unchanged
+
+    // Also test with default parameter (no second arg)
+    uint32_t resultDefault = GetNextWorkRequired(&index);
+    BOOST_CHECK_EQUAL(resultDefault, 0x1d00ffff);
+}
+
+/**
+ * EDA Test 8: Does not interfere with 2016-block adjustment
+ * At adjustment boundaries, normal algorithm runs (not EDA)
+ */
+BOOST_AUTO_TEST_CASE(eda_does_not_interfere_with_2016_adjustment) {
+    InitEDATestParams();
+
+    // Create a chain of 2016 blocks for normal adjustment
+    std::vector<CBlockIndex> chain(2016);
+    for (int i = 0; i < 2016; i++) {
+        chain[i].nHeight = i;
+        chain[i].nBits = 0x1d00ffff;
+        chain[i].header.nBits = 0x1d00ffff;
+        // Normal timing: 240s per block
+        chain[i].nTime = 1000000 + (i * 240);
+        chain[i].pprev = (i > 0) ? &chain[i - 1] : nullptr;
+    }
+
+    // At height 2016 (adjustment point), call with large nBlockTime
+    // The normal 2016-block adjustment should run, NOT the EDA
+    int64_t nBlockTime = chain[2015].nTime + 86400;  // 24h later
+    uint32_t resultWithTime = GetNextWorkRequired(&chain[2015], nBlockTime);
+    uint32_t resultWithoutTime = GetNextWorkRequired(&chain[2015], 0);
+
+    // Both should return the same result (normal adjustment, not EDA)
+    BOOST_CHECK_EQUAL(resultWithTime, resultWithoutTime);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

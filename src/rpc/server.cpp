@@ -3610,7 +3610,7 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
     // BUG #8 FIX: Use GetNextWorkRequired() to get proper difficulty instead of hardcoded value
     // The hardcoded 0x1f00ffff was ~42x harder than testnet genesis (0x1f060000)
     CBlockIndex* pindexPrev = m_chainstate->GetTip();
-    uint32_t nBits = GetNextWorkRequired(pindexPrev);
+    uint32_t nBits = GetNextWorkRequired(pindexPrev, static_cast<int64_t>(std::time(nullptr)));
 
     // Get miner address from wallet
     std::vector<CDilithiumAddress> addresses = m_wallet->GetAddresses();

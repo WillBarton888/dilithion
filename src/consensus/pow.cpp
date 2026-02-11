@@ -601,7 +601,7 @@ uint32_t CalculateNextWorkRequired(
     return nBitsNew;
 }
 
-uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
+uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) {
     // Genesis block (or no previous block)
     if (pindexLast == nullptr) {
         return Dilithion::g_chainParams->genesisNBits;
@@ -619,6 +619,66 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast) {
         // Safety check: if previous difficulty is zero, use genesis difficulty
         if (prevBits == 0) {
             return Dilithion::g_chainParams->genesisNBits;
+        }
+
+        // ====================================================================
+        // Emergency Difficulty Adjustment (EDA)
+        // ====================================================================
+        // If the new block's timestamp indicates a long gap since the previous
+        // block, progressively reduce difficulty to prevent chain death spiral.
+        //
+        // Algorithm:
+        //   gap = nBlockTime - pindexLast->nTime
+        //   threshold = EDA_THRESHOLD_BLOCKS * blockTime
+        //   if gap > threshold:
+        //     steps = min((gap - threshold) / (EDA_STEP_BLOCKS * blockTime) + 1, EDA_MAX_STEPS)
+        //     for each step: target *= EDA_REDUCTION_NUMERATOR / EDA_REDUCTION_DENOMINATOR
+        //     return adjusted nBits (capped at MAX_DIFFICULTY_BITS)
+        //
+        int edaActivation = Dilithion::g_chainParams->edaActivationHeight;
+        int newBlockHeight = pindexLast->nHeight + 1;
+
+        if (nBlockTime > 0 && edaActivation >= 0 && newBlockHeight >= edaActivation) {
+            int64_t blockTime = static_cast<int64_t>(Dilithion::g_chainParams->blockTime);
+            int64_t gap = nBlockTime - static_cast<int64_t>(pindexLast->nTime);
+            int64_t threshold = static_cast<int64_t>(EDA_THRESHOLD_BLOCKS) * blockTime;
+
+            if (gap > threshold) {
+                // Calculate number of reduction steps
+                int64_t stepSize = static_cast<int64_t>(EDA_STEP_BLOCKS) * blockTime;
+                int64_t stepsRaw = (gap - threshold) / stepSize + 1;
+                int steps = static_cast<int>(std::min(stepsRaw, static_cast<int64_t>(EDA_MAX_STEPS)));
+
+                // Start with current target
+                uint256 target = CompactToBig(prevBits);
+
+                // Apply reductions: target *= (5/4)^steps using integer arithmetic
+                for (int i = 0; i < steps; i++) {
+                    uint8_t product[40];
+                    if (!Multiply256x64(target, static_cast<uint64_t>(EDA_REDUCTION_NUMERATOR), product)) {
+                        break;  // Overflow: stop reducing
+                    }
+                    target = Divide320x64(product, static_cast<uint64_t>(EDA_REDUCTION_DENOMINATOR));
+                }
+
+                // Convert back to compact and enforce bounds
+                uint32_t edaBits = BigToCompact(target);
+                if (edaBits > MAX_DIFFICULTY_BITS) {
+                    edaBits = MAX_DIFFICULTY_BITS;
+                }
+                if (edaBits < MIN_DIFFICULTY_BITS) {
+                    edaBits = MIN_DIFFICULTY_BITS;
+                }
+
+                std::cout << "[EDA] Emergency difficulty adjustment at height " << newBlockHeight << std::endl;
+                std::cout << "  Gap: " << gap << "s (threshold: " << threshold << "s)" << std::endl;
+                std::cout << "  Steps: " << steps << " (target *= " << EDA_REDUCTION_NUMERATOR
+                          << "/" << EDA_REDUCTION_DENOMINATOR << " per step)" << std::endl;
+                std::cout << "  Normal nBits: 0x" << std::hex << prevBits << std::endl;
+                std::cout << "  EDA nBits:    0x" << edaBits << std::dec << std::endl;
+
+                return edaBits;
+            }
         }
 
         return prevBits;

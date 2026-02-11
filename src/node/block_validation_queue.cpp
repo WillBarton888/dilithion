@@ -106,7 +106,7 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
 
             // CRITICAL FIX: Validate nBits matches expected difficulty
             // Without this check, miners can use ANY difficulty forever.
-            uint32_t expectedNBits = GetNextWorkRequired(pParent);
+            uint32_t expectedNBits = GetNextWorkRequired(pParent, static_cast<int64_t>(block.nTime));
             if (block.nBits != expectedNBits) {
                 std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has wrong difficulty" << std::endl;
                 std::cerr << "  Block nBits:    0x" << std::hex << block.nBits << std::endl;

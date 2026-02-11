@@ -47,6 +47,10 @@ ChainParams ChainParams::Mainnet() {
     // This prevents attackers from gaming timestamps to get easy blocks
     params.fPowAllowMinDifficultyBlocks = false;
 
+    // Emergency Difficulty Adjustment: activate at block 7034
+    // Mainnet stuck at 7033 due to hashrate drop - EDA prevents death spiral
+    params.edaActivationHeight = 7034;
+
     // DFMP (Fair Mining Protocol) activation
     // Active from genesis to establish fair mining from the start
     // This prevents early mining dominance before DFMP can take effect
@@ -129,7 +133,11 @@ ChainParams ChainParams::Testnet() {
     // If no block is found for 2x target time (120s), allow easy difficulty
     // This prevents testnet from getting stuck when miners leave
     // Safe for testnet since coins have no value (would be exploitable on mainnet)
+    // NOTE: Superseded by EDA which handles this at the consensus level
     params.fPowAllowMinDifficultyBlocks = true;
+
+    // Emergency Difficulty Adjustment: always active on testnet
+    params.edaActivationHeight = 0;
 
     // DFMP (Fair Mining Protocol) activation
     // Active from genesis for testing fair mining protocol

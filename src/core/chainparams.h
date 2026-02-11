@@ -68,7 +68,14 @@ public:
     // When enabled, if a block takes > 2x target time (e.g., 120s for 60s testnet),
     // miners can submit blocks at minimum difficulty. This prevents testnet from
     // getting stuck when miners leave, but would be exploitable on mainnet.
+    // NOTE: Superseded by EDA (Emergency Difficulty Adjustment) which is consensus-safe.
     bool fPowAllowMinDifficultyBlocks;
+
+    // Emergency Difficulty Adjustment (EDA) activation height
+    // Prevents death spiral when hashrate drops between 2016-block adjustments.
+    // When a block takes more than 6x target time, difficulty progressively decreases.
+    // -1 = EDA disabled
+    int edaActivationHeight;
 
     // DFMP (Fair Mining Protocol) activation height
     // Before this height: Standard PoW (no identity penalties)
