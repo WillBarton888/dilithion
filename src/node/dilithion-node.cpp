@@ -4816,28 +4816,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // 3. We're not in IBD
                 //
                 // This is similar to Bitcoin Core's getblocktemplate behavior.
+                // Template refresh temporarily disabled for deadlock diagnosis.
+                // The initial template built at mining start already includes
+                // minimum difficulty for overdue blocks on testnet.
+                // TODO: Re-enable once deadlock root cause is identified.
                 if (miner.IsMining()) {
-                    bool needRefresh = false;
                     CTxMemPool* mempool = g_mempool.load();
                     if (mempool && mempool->Size() > 0) {
                         std::cout << "[Mining] BUG #109: Mempool has " << mempool->Size()
                                   << " tx(s), refreshing template..." << std::endl;
-                        needRefresh = true;
-                    }
-                    // Refresh template when block is overdue so nBits gets
-                    // recalculated with minimum difficulty (testnet only).
-                    // Throttled to every 60s to minimize contention with the
-                    // block_found callback's immediate update path.
-                    if (!needRefresh && Dilithion::g_chainParams->fPowAllowMinDifficultyBlocks) {
-                        static auto lastDiffRefresh = std::chrono::steady_clock::now();
-                        auto now = std::chrono::steady_clock::now();
-                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastDiffRefresh).count();
-                        if (elapsed >= 60) {
-                            lastDiffRefresh = now;
-                            needRefresh = true;
-                        }
-                    }
-                    if (needRefresh) {
                         auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
                         if (templateOpt) {
                             miner.UpdateTemplate(*templateOpt);
