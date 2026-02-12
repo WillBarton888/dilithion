@@ -66,7 +66,7 @@ $noCache = isset($_GET['nocache']) && $_GET['nocache'] === '1';
 
 if (!$noCache && $page === 1 && file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
-    if ($cacheAge < 30) {
+    if ($cacheAge < 60) {
         $cached = json_decode(file_get_contents($cacheFile), true);
         if ($cached !== null && isset($cached['blocks'])) {
             // Slice the cached blocks to match the requested limit

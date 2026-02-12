@@ -14,7 +14,7 @@ function dilithionRPC($method, $params = []) {
         $_rpcCurlHandle = curl_init();
         curl_setopt($_rpcCurlHandle, CURLOPT_URL, 'http://127.0.0.1:8332/');
         curl_setopt($_rpcCurlHandle, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($_rpcCurlHandle, CURLOPT_TIMEOUT, 10);
+        curl_setopt($_rpcCurlHandle, CURLOPT_TIMEOUT, 5);
         curl_setopt($_rpcCurlHandle, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($_rpcCurlHandle, CURLOPT_POST, true);
         curl_setopt($_rpcCurlHandle, CURLOPT_HTTPHEADER, [

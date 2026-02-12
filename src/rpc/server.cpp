@@ -26,6 +26,7 @@
 #include <core/chainparams.h>  // For Dilithion::g_chainParams
 #include <util/strencodings.h>
 #include <util/error_format.h>  // UX: Better error messages
+#include <set>
 #include <amount.h>
 #include <net/peers.h>  // For CPeerManager
 #include <core/node_context.h>  // For g_node_context
@@ -221,6 +222,9 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["setban"] = [this](const std::string& p) { return RPC_SetBan(p); };
     m_handlers["listbanned"] = [this](const std::string& p) { return RPC_ListBanned(p); };
     m_handlers["clearbanned"] = [this](const std::string& p) { return RPC_ClearBanned(p); };
+
+    // UTXO set queries
+    m_handlers["getholdercount"] = [this](const std::string& p) { return RPC_GetHolderCount(p); };
 
     // Block repair commands
     m_handlers["repairblocks"] = [this](const std::string& p) { return RPC_RepairBlocks(p); };
@@ -3031,6 +3035,37 @@ std::string CRPCServer::RPC_GetTxOut(const std::string& params) {
     oss << std::dec << "\"";
     oss << "},";
     oss << "\"coinbase\":" << (entry.fCoinBase ? "true" : "false");
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetHolderCount(const std::string& params) {
+    if (!m_utxo_set) {
+        throw std::runtime_error("UTXO set not initialized");
+    }
+
+    // Iterate all UTXOs and collect unique pubkey hashes (addresses)
+    std::set<std::vector<uint8_t>> uniqueAddresses;
+    uint64_t totalUTXOs = 0;
+    uint64_t totalAmount = 0;
+
+    m_utxo_set->ForEach([&](const COutPoint& outpoint, const CUTXOEntry& entry) -> bool {
+        totalUTXOs++;
+        totalAmount += entry.out.nValue;
+
+        // Extract pubkey hash from scriptPubKey
+        std::vector<uint8_t> pkh = WalletCrypto::ExtractPubKeyHash(entry.out.scriptPubKey);
+        if (!pkh.empty()) {
+            uniqueAddresses.insert(pkh);
+        }
+        return true;  // Continue iteration
+    });
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"holders\":" << uniqueAddresses.size() << ",";
+    oss << "\"utxos\":" << totalUTXOs << ",";
+    oss << "\"total_amount\":" << FormatAmount(totalAmount);
     oss << "}";
     return oss.str();
 }

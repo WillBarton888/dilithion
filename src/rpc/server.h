@@ -330,6 +330,9 @@ private:
     std::string RPC_ListBanned(const std::string& params);
     std::string RPC_ClearBanned(const std::string& params);
 
+    // UTXO set query methods
+    std::string RPC_GetHolderCount(const std::string& params);
+
     // Block repair methods (Bug #243 fix)
     std::string RPC_RepairBlocks(const std::string& params);
     std::string RPC_CheckBlockDB(const std::string& params);

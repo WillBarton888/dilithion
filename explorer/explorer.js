@@ -266,6 +266,7 @@ async function renderHome() {
         html += statCard('Difficulty', stats.difficulty ? Number(stats.difficulty).toFixed(4) : 'N/A');
         html += statCard('Supply', stats.supply ? formatNumber(Math.floor(stats.supply)) + ' DIL' : 'N/A');
         html += statCard('Avg Block Time', stats.avgBlockTime ? stats.avgBlockTime.toFixed(0) + 's' : 'N/A');
+        html += statCard('Holders', stats.holders != null ? formatNumber(stats.holders) : 'N/A');
         html += statCard('Peers', stats.connections != null ? formatNumber(stats.connections) : 'N/A');
         html += '</div>';
 
@@ -316,6 +317,7 @@ async function renderHome() {
                         statCard('Difficulty', s.difficulty ? Number(s.difficulty).toFixed(4) : 'N/A') +
                         statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' DIL' : 'N/A') +
                         statCard('Avg Block Time', s.avgBlockTime != null ? s.avgBlockTime.toFixed(0) + 's' : 'N/A') +
+                        statCard('Holders', s.holders != null ? formatNumber(s.holders) : 'N/A') +
                         statCard('Peers', s.connections != null ? formatNumber(s.connections) : 'N/A');
                 }
                 // Update blocks table when new block arrives
