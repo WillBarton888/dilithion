@@ -196,24 +196,30 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             return false;
         }
 
+        std::cout << "[Chain] DIAG: ConnectTip starting..." << std::flush;
         if (!ConnectTip(pindexNew, block)) {
             std::cerr << "[Chain] ERROR: Failed to connect block extending tip" << std::endl;
             return false;
         }
+        std::cout << " done" << std::endl;
 
         pindexTip = pindexNew;
         // BUG #74 FIX: Update atomic cached height
         m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
 
         // Persist to database
+        std::cout << "[Chain] DIAG: WriteBestBlock starting..." << std::flush;
         if (pdb != nullptr) {
             bool success = pdb->WriteBestBlock(pindexNew->GetBlockHash());
         } else {
             std::cerr << "[Chain] ERROR: pdb is nullptr! Cannot write best block!" << std::endl;
         }
+        std::cout << " done" << std::endl;
 
         // Bug #40 fix: Notify registered callbacks of tip update
+        std::cout << "[Chain] DIAG: NotifyTipUpdate starting..." << std::flush;
         NotifyTipUpdate(pindexTip);
+        std::cout << " done" << std::endl;
 
         return true;
     }
@@ -643,6 +649,8 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // IBD OPTIMIZATION: Get cached hash once and reuse throughout
     const uint256& blockHash = pindex->GetBlockHash();
 
+    std::cout << "[ConnectTip] DIAG: height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0,16) << std::endl;
+
     // ============================================================================
     // FORK FIX: Validate MIK at connection time (not arrival time)
     // ============================================================================
@@ -662,6 +670,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
 
         // Only validate MIK for post-DFMP blocks (skip genesis - it predates any mining identity)
         if (pindex->nHeight > 0 && pindex->nHeight >= dfmpActivationHeight) {
+            std::cout << "[ConnectTip] DIAG: CheckProofOfWorkDFMP starting..." << std::flush;
             if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, pindex->nHeight, dfmpActivationHeight)) {
                 std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
                           << " failed MIK validation at connection time" << std::endl;
@@ -683,7 +692,10 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
         }
     }
 
+    std::cout << " passed" << std::endl;
+
     // Step 1: Update UTXO set (CS-004)
+    std::cout << "[ConnectTip] DIAG: ApplyBlock (UTXO) starting..." << std::flush;
     if (pUTXOSet != nullptr) {
         if (!pUTXOSet->ApplyBlock(block, pindex->nHeight, blockHash)) {
             std::cerr << "[Chain] ERROR: Failed to apply block to UTXO set at height "
@@ -701,6 +713,8 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
             return false;
         }
     }
+
+    std::cout << " done" << std::endl;
 
     // Step 2: Update pnext pointer on parent
     if (pindex->pprev != nullptr) {

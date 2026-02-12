@@ -3844,19 +3844,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             std::cout << "[Blockchain] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
 
+            // DIAG: Pinpoint hang location after block index creation
+            std::cout << "[Blockchain] DIAG: WriteBlockIndex starting..." << std::flush;
             // Save block index to database
             if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
                 std::cerr << "[Blockchain] ERROR: Failed to save block index" << std::endl;
                 // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
+            std::cout << " done" << std::endl;
 
             // Add to chain state memory map (transfer ownership with std::move)
+            std::cout << "[Blockchain] DIAG: AddBlockIndex starting..." << std::flush;
             if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
                 std::cerr << "[Blockchain] ERROR: Failed to add block to chain state" << std::endl;
                 // HIGH-C001 FIX: No manual delete needed - ownership transferred
                 return;
             }
+            std::cout << " done" << std::endl;
 
             // HIGH-C001 FIX: After move, retrieve pointer from chain state
             CBlockIndex* pblockIndexPtr = g_chainstate.GetBlockIndex(blockHash);
@@ -3866,6 +3871,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Activate best chain (handles reorg if needed)
+            std::cout << "[Blockchain] DIAG: ActivateBestChain starting..." << std::flush;
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (reorgOccurred) {
