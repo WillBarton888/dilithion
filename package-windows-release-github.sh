@@ -41,7 +41,8 @@ cp /mingw64/bin/libleveldb.dll "${RELEASE_DIR}/" || { echo "ERROR: Failed to cop
 cp /mingw64/bin/libcrypto-3-x64.dll "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy libcrypto-3-x64.dll"; exit 1; }
 cp /mingw64/bin/libssl-3-x64.dll "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy libssl-3-x64.dll"; exit 1; }
 cp /mingw64/bin/libminiupnpc.dll "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy libminiupnpc.dll"; exit 1; }
-echo "   [SUCCESS] All 7 DLLs copied successfully"
+cp /mingw64/bin/libgmp-10.dll "${RELEASE_DIR}/" || { echo "ERROR: Failed to copy libgmp-10.dll"; exit 1; }
+echo "   [SUCCESS] All 8 DLLs copied successfully"
 
 # Copy launcher scripts and documentation
 echo "[4/5] Copying launcher scripts and documentation..."

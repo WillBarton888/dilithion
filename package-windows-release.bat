@@ -43,7 +43,8 @@ copy "C:\ProgramData\mingw64\mingw64\bin\libstdc++-6.dll" %RELEASE_DIR%\ || (ech
 copy libleveldb.dll %RELEASE_DIR%\ || (echo FAILED: libleveldb.dll && goto :copy_error)
 copy "C:\ProgramData\mingw64\mingw64\opt\bin\libcrypto-3-x64.dll" %RELEASE_DIR%\ || (echo FAILED: libcrypto-3-x64.dll && goto :copy_error)
 copy "C:\ProgramData\mingw64\mingw64\opt\bin\libssl-3-x64.dll" %RELEASE_DIR%\ || (echo FAILED: libssl-3-x64.dll && goto :copy_error)
-echo    [SUCCESS] All 6 DLLs copied successfully
+copy "C:\ProgramData\mingw64\mingw64\bin\libgmp-10.dll" %RELEASE_DIR%\ || (echo FAILED: libgmp-10.dll && goto :copy_error)
+echo    [SUCCESS] All 7 DLLs copied successfully
 
 REM Copy launcher scripts and documentation
 echo [4/5] Copying launcher scripts and documentation...
