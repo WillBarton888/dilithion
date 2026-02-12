@@ -1060,11 +1060,40 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         // Calculate DFMP multiplier - must match validator (pow.cpp CheckProofOfWorkDFMP)
         int dfmpV3ActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpV3ActivationHeight : 999999999;
+        int dfmpV31ActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpV31ActivationHeight : 999999999;
 
         int64_t multiplierFP;
         double payoutHeatMult = 1.0;
 
-        if (static_cast<int>(nHeight) >= dfmpV3ActivationHeight) {
+        if (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) {
+            // DFMP v3.1: Softened parameters (must match validator exactly)
+            int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP_V31(heat, uniqueMiners);
+
+            // Payout address heat penalty (v3.1 softened)
+            int64_t payoutHeatPenalty = DFMP::FP_SCALE;  // 1.0x default
+            if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+                DFMP::Identity payoutIdentity = DFMP::DeriveIdentityFromScript(
+                    coinbaseTx.vout[0].scriptPubKey);
+                int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutIdentity);
+                int payoutUniqueMiners = 0;
+                if (static_cast<int>(nHeight) >= dfmpDynamicScalingHeight) {
+                    payoutUniqueMiners = DFMP::g_payoutHeatTracker->GetUniqueMinerCount();
+                }
+                payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP_V31(payoutHeat, payoutUniqueMiners);
+                payoutHeatMult = static_cast<double>(payoutHeatPenalty) / DFMP::FP_SCALE;
+            }
+
+            // Effective heat = max(MIK heat, payout heat)
+            int64_t effectiveHeatPenalty = std::max(mikHeatPenalty, payoutHeatPenalty);
+
+            // Maturity penalty (v3.1 softened)
+            int64_t maturityPenalty = DFMP::CalculatePendingPenaltyFP_V31(nHeight, firstSeen);
+
+            // Total = maturity × effective heat
+            multiplierFP = (maturityPenalty * effectiveHeatPenalty) / DFMP::FP_SCALE;
+
+        } else if (static_cast<int>(nHeight) >= dfmpV3ActivationHeight) {
             // DFMP v3.0: Multi-layer penalty (must match validator exactly)
             int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP(heat, uniqueMiners);
 
@@ -1101,10 +1130,15 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         // Log DFMP info
         double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
         if (multiplier > 1.01) {
-            double maturityMult = DFMP::GetPendingPenalty(nHeight, firstSeen);
-            double heatMult = DFMP::GetHeatMultiplier(heat, uniqueMiners);
+            const char* versionTag = (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) ? "v3.1" : "v3.0";
+            double maturityMult = (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) ?
+                DFMP::GetPendingPenalty_V31(nHeight, firstSeen) :
+                DFMP::GetPendingPenalty(nHeight, firstSeen);
+            double heatMult = (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) ?
+                DFMP::GetHeatMultiplier_V31(heat, uniqueMiners) :
+                DFMP::GetHeatMultiplier(heat, uniqueMiners);
 
-            std::cout << "[Mining] DFMP penalty: MIK " << mikIdentity.GetHex().substr(0, 8) << "..."
+            std::cout << "[Mining] DFMP " << versionTag << " penalty: MIK " << mikIdentity.GetHex().substr(0, 8) << "..."
                       << " firstSeen=" << firstSeen
                       << " heat=" << heat
                       << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
@@ -1112,16 +1146,20 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                       << " payoutHeat=" << payoutHeatMult << "x"
                       << " total=" << multiplier << "x";
             if (uniqueMiners > 0) {
-                int effectiveFree = std::max(DFMP::FREE_TIER_THRESHOLD,
+                int freeTierBase = (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) ?
+                    DFMP::FREE_TIER_THRESHOLD_V31 : DFMP::FREE_TIER_THRESHOLD;
+                int effectiveFree = std::max(freeTierBase,
                     DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
                 std::cout << " (dynamic: " << uniqueMiners << " miners, free=" << effectiveFree << ")";
             }
             std::cout << std::endl;
         } else if (uniqueMiners > 0) {
             // Log dynamic scaling even when no penalty (so miners see it's working)
-            int effectiveFree = std::max(DFMP::FREE_TIER_THRESHOLD,
+            int freeTierBase = (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) ?
+                DFMP::FREE_TIER_THRESHOLD_V31 : DFMP::FREE_TIER_THRESHOLD;
+            int effectiveFree = std::max(freeTierBase,
                 DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
-            if (effectiveFree > DFMP::FREE_TIER_THRESHOLD) {
+            if (effectiveFree > freeTierBase) {
                 std::cout << "[Mining] DFMP dynamic scaling: " << uniqueMiners
                           << " active miners, free tier=" << effectiveFree
                           << " (heat=" << heat << ")" << std::endl;
@@ -4044,10 +4082,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "[P2P] WARNING: No connected peers to broadcast block" << std::endl;
                     }
 
-                    // BUG #65 FIX: Only signal main loop if immediate update failed
-                    // If immediate update succeeded, mining is already continuing - don't let
-                    // main loop stop it (which it would do if IBD check fails there)
-                    if (!immediate_update_succeeded) {
+                    // Check if VDF mining should activate for next height.
+                    // The immediate update path only updates the RandomX template,
+                    // so we must force the main loop handler to run for VDF switching.
+                    unsigned int next_h = pblockIndexPtr->nHeight + 1;
+                    int vdf_act = Dilithion::g_chainParams ?
+                        Dilithion::g_chainParams->vdfActivationHeight : 999999999;
+                    if (static_cast<int>(next_h) >= vdf_act) {
+                        std::cout << "[Mining] VDF activation height reached (next=" << next_h
+                                  << ", activation=" << vdf_act << ") - signaling main loop" << std::endl;
+                        g_node_state.new_block_found = true;
+                    } else if (!immediate_update_succeeded) {
+                        // BUG #65 FIX: Only signal main loop if immediate update failed
                         g_node_state.new_block_found = true;
                     }
                 } else {

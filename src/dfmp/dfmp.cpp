@@ -366,6 +366,64 @@ uint256 CalculateEffectiveTarget(const uint256& baseTarget, int64_t multiplierFP
 }
 
 // ============================================================================
+// DFMP v3.1 MULTIPLIER CALCULATION (Softened for small networks)
+// ============================================================================
+
+int64_t CalculatePendingPenaltyFP_V31(int currentHeight, int firstSeenHeight) {
+    // DFMP v3.1: Softened maturity penalty
+    // 2.0x → 1.5x → 1.0x over 400 blocks (100-block steps)
+
+    if (firstSeenHeight < 0) {
+        return FP_PENDING_START_V31;  // 2.0x for new identity
+    }
+
+    int age = currentHeight - firstSeenHeight;
+
+    if (age < 100) return 2000000;   // 2.0x
+    if (age < 200) return 1500000;   // 1.5x
+    if (age < 300) return 1250000;   // 1.25x
+    if (age < 400) return 1100000;   // 1.1x
+    return FP_PENDING_END;           // 1.0x (mature)
+}
+
+int64_t CalculateHeatMultiplierFP_V31(int heat, int uniqueMiners) {
+    // DFMP v3.1: Softened heat penalty
+    // Free tier: 36 blocks (or dynamic if higher)
+    // Above free tier: 1.5x cliff, then 1.08x per block
+
+    // Dynamic free tier: scale by active miner count
+    int effectiveFreeThreshold = FREE_TIER_THRESHOLD_V31;  // Default: 36
+    if (uniqueMiners > 0) {
+        int dynamicThreshold = OBSERVATION_WINDOW / std::max(1, uniqueMiners);
+        effectiveFreeThreshold = std::max(FREE_TIER_THRESHOLD_V31, dynamicThreshold);
+    }
+
+    // Free tier: no penalty
+    if (heat <= effectiveFreeThreshold) {
+        return FP_SCALE;  // 1.0x
+    }
+
+    // Cliff + exponential: blocks above free tier
+    // penalty = 1.5 × 1.08^(blocks - effectiveFreeThreshold - 1)
+    int64_t penalty = FP_HEAT_CLIFF_V31;  // 1.5 × FP_SCALE
+    int exponent = heat - effectiveFreeThreshold - 1;
+
+    for (int i = 0; i < exponent; i++) {
+        penalty = (penalty * FP_HEAT_GROWTH_V31) / 100;  // × 1.08
+    }
+
+    return penalty;
+}
+
+int64_t CalculateTotalMultiplierFP_V31(int currentHeight, int firstSeenHeight, int heat, int uniqueMiners) {
+    int64_t pendingFP = CalculatePendingPenaltyFP_V31(currentHeight, firstSeenHeight);
+    int64_t heatFP = CalculateHeatMultiplierFP_V31(heat, uniqueMiners);
+
+    // total = maturity × heat
+    return (pendingFP * heatFP) / FP_SCALE;
+}
+
+// ============================================================================
 // CONVENIENCE FUNCTIONS
 // ============================================================================
 
@@ -379,6 +437,14 @@ double GetHeatMultiplier(int heat, int uniqueMiners) {
 
 double GetTotalMultiplier(int currentHeight, int firstSeenHeight, int heat, int uniqueMiners) {
     return static_cast<double>(CalculateTotalMultiplierFP(currentHeight, firstSeenHeight, heat, uniqueMiners)) / FP_SCALE;
+}
+
+double GetPendingPenalty_V31(int currentHeight, int firstSeenHeight) {
+    return static_cast<double>(CalculatePendingPenaltyFP_V31(currentHeight, firstSeenHeight)) / FP_SCALE;
+}
+
+double GetHeatMultiplier_V31(int heat, int uniqueMiners) {
+    return static_cast<double>(CalculateHeatMultiplierFP_V31(heat, uniqueMiners)) / FP_SCALE;
 }
 
 // ============================================================================

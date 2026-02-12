@@ -106,6 +106,12 @@ public:
     // This prevents DFMP from punishing normal mining when few miners are active
     int dfmpDynamicScalingHeight;
 
+    // DFMP v3.1 Activation Height (emergency parameter softening)
+    // Before this height: DFMP v3.0 rules (12-block free tier, 1.58x growth, 5.0x maturity)
+    // After this height: DFMP v3.1 rules (36-block free tier, 1.08x growth, 2.0x maturity)
+    // Same structure as v3.0 (payout heat, dormancy, registration PoW) but gentler parameters
+    int dfmpV31ActivationHeight;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)

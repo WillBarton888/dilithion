@@ -70,6 +70,10 @@ ChainParams ChainParams::Mainnet() {
     // Prevents penalty spiral with few miners (e.g., 3 miners sharing 360-block window)
     params.dfmpDynamicScalingHeight = 7100;
 
+    // DFMP v3.1 - emergency parameter softening (network stalling at v3.0 parameters)
+    // Reduces: free tier 12→36, growth 1.58x→1.08x, maturity 5.0x→2.0x
+    params.dfmpV31ActivationHeight = 7168;
+
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
@@ -158,6 +162,9 @@ ChainParams ChainParams::Testnet() {
 
     // DFMP Dynamic Scaling - always active on testnet
     params.dfmpDynamicScalingHeight = 0;
+
+    // DFMP v3.1 - always active on testnet (softened parameters)
+    params.dfmpV31ActivationHeight = 0;
 
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted

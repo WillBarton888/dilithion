@@ -1153,7 +1153,15 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
             }
 
             // Calculate total DFMP multiplier (pending × heat)
-            int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(nHeight, firstSeen, heat);
+            // Use v3.1 softened parameters if activated
+            int dfmpV31Height = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->dfmpV31ActivationHeight : 999999999;
+            int64_t multiplierFP;
+            if (static_cast<int>(nHeight) >= dfmpV31Height) {
+                multiplierFP = DFMP::CalculateTotalMultiplierFP_V31(nHeight, firstSeen, heat);
+            } else {
+                multiplierFP = DFMP::CalculateTotalMultiplierFP(nHeight, firstSeen, heat);
+            }
 
             // Apply multiplier to get effective target
             hashTarget = DFMP::CalculateEffectiveTarget(hashTarget, multiplierFP);
@@ -1161,10 +1169,19 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
             // Log DFMP info for miner awareness (only if multiplier > 1.0)
             double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
             if (multiplier > 1.01) {
-                double pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP(nHeight, firstSeen)) / DFMP::FP_SCALE;
-                double heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP(heat)) / DFMP::FP_SCALE;
+                double pendingMult, heatMult;
+                const char* vTag;
+                if (static_cast<int>(nHeight) >= dfmpV31Height) {
+                    pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP_V31(nHeight, firstSeen)) / DFMP::FP_SCALE;
+                    heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP_V31(heat)) / DFMP::FP_SCALE;
+                    vTag = "v3.1";
+                } else {
+                    pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP(nHeight, firstSeen)) / DFMP::FP_SCALE;
+                    heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP(heat)) / DFMP::FP_SCALE;
+                    vTag = "v3.0";
+                }
 
-                std::cout << "[DFMP] Mining at height " << nHeight
+                std::cout << "[DFMP " << vTag << "] Mining at height " << nHeight
                           << " identity " << minerIdentity.GetHex().substr(0, 8) << "..."
                           << " firstSeen=" << firstSeen
                           << " heat=" << heat
