@@ -4817,14 +4817,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 //
                 // This is similar to Bitcoin Core's getblocktemplate behavior.
                 if (miner.IsMining()) {
+                    bool needRefresh = false;
                     CTxMemPool* mempool = g_mempool.load();
                     if (mempool && mempool->Size() > 0) {
                         std::cout << "[Mining] BUG #109: Mempool has " << mempool->Size()
                                   << " tx(s), refreshing template..." << std::endl;
+                        needRefresh = true;
+                    }
+                    // Also refresh template periodically so nTime/nBits stay current.
+                    // This is critical for testnet minimum-difficulty blocks: when
+                    // fPowAllowMinDifficultyBlocks is true and the block becomes
+                    // overdue, nBits must be recalculated to use minimum difficulty.
+                    // Without this, the miner keeps mining with stale high difficulty.
+                    if (!needRefresh && Dilithion::g_chainParams->fPowAllowMinDifficultyBlocks) {
+                        needRefresh = true;  // Always refresh on testnet (every 10s)
+                    }
+                    if (needRefresh) {
                         auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
                         if (templateOpt) {
                             miner.UpdateTemplate(*templateOpt);
-                            std::cout << "[Mining] Template refreshed with mempool transactions" << std::endl;
                         }
                     }
                 }
