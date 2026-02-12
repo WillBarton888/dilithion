@@ -4824,13 +4824,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                   << " tx(s), refreshing template..." << std::endl;
                         needRefresh = true;
                     }
-                    // Also refresh template periodically so nTime/nBits stay current.
-                    // This is critical for testnet minimum-difficulty blocks: when
-                    // fPowAllowMinDifficultyBlocks is true and the block becomes
-                    // overdue, nBits must be recalculated to use minimum difficulty.
-                    // Without this, the miner keeps mining with stale high difficulty.
+                    // Refresh template when block is overdue so nBits gets
+                    // recalculated with minimum difficulty (testnet only).
+                    // Throttled to every 60s to minimize contention with the
+                    // block_found callback's immediate update path.
                     if (!needRefresh && Dilithion::g_chainParams->fPowAllowMinDifficultyBlocks) {
-                        needRefresh = true;  // Always refresh on testnet (every 10s)
+                        static auto lastDiffRefresh = std::chrono::steady_clock::now();
+                        auto now = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastDiffRefresh).count();
+                        if (elapsed >= 60) {
+                            lastDiffRefresh = now;
+                            needRefresh = true;
+                        }
                     }
                     if (needRefresh) {
                         auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
