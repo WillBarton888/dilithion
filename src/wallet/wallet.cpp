@@ -1189,6 +1189,18 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
     fWalletUnlocked = true;
     nUnlockTime = std::chrono::steady_clock::time_point::max();
 
+    // Encrypt MIK private key if present (must happen after vMasterKey is set)
+    if (fHasMIK && m_mik && m_mik->HasPrivateKey()) {
+        if (!EncryptMIKPrivKey()) {
+            std::cerr << "[Wallet] WARNING: Failed to encrypt MIK private key during wallet encryption" << std::endl;
+            // Don't fail entire encryption - MIK can be regenerated
+        } else {
+            // Clear in-memory private key (will decrypt on demand)
+            m_mik->privkey.clear();
+            std::cout << "[Wallet] MIK private key encrypted successfully" << std::endl;
+        }
+    }
+
     // Wipe sensitive data
     memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
     memory_cleanse(derivedKey.data(), derivedKey.size());
@@ -2019,12 +2031,23 @@ bool CWallet::Load(const std::string& filename) {
                 m_mik->privkey.assign(temp_vchMIKPrivKey.begin(), temp_vchMIKPrivKey.end());
                 m_mik->identity = DFMP::DeriveIdentityFromMIK(vchMIKPubKey);
                 m_mikIdentity = m_mik->identity;
+            } else if (masterKey.IsValid() && vchEncryptedMIKPrivKey.empty()) {
+                // Bug recovery: wallet was encrypted after MIK generation but
+                // MIK private key was never encrypted (pre-v3.0.4 bug).
+                // Clear broken MIK so it gets regenerated on next mining attempt.
+                std::cerr << "[WALLET] WARNING: MIK private key lost during wallet encryption (pre-v3.0.4 bug)" << std::endl;
+                std::cerr << "[WALLET] MIK will be automatically regenerated on next mining attempt" << std::endl;
+                fHasMIK = false;
+                vchMIKPubKey.clear();
+                m_mikIdentity = DFMP::Identity();
             } else {
                 // Encrypted wallet - just set the identity from pubkey
                 // m_mik will be reconstructed when wallet is unlocked
                 m_mikIdentity = DFMP::DeriveIdentityFromMIK(vchMIKPubKey);
             }
-            std::cout << "[WALLET] Loaded MIK identity: " << m_mikIdentity.GetHex() << std::endl;
+            if (fHasMIK) {
+                std::cout << "[WALLET] Loaded MIK identity: " << m_mikIdentity.GetHex() << std::endl;
+            }
         }
 
         m_walletFile = filename;  // Set wallet file path only on successful load
@@ -4649,10 +4672,13 @@ bool CWallet::DecryptMIKPrivKey(std::vector<uint8_t, SecureAllocator<uint8_t>>& 
     // Assumes caller holds cs_wallet lock
 
     if (!masterKey.IsValid() || !fWalletUnlocked) {
+        std::cerr << "[WALLET] DecryptMIKPrivKey: wallet not encrypted or not unlocked" << std::endl;
         return false;
     }
 
     if (vchEncryptedMIKPrivKey.empty() || vchMIKPrivKeyIV.empty()) {
+        std::cerr << "[WALLET] DecryptMIKPrivKey: encrypted key empty=" << vchEncryptedMIKPrivKey.empty()
+                  << " IV empty=" << vchMIKPrivKeyIV.empty() << std::endl;
         return false;
     }
 
@@ -4664,12 +4690,14 @@ bool CWallet::DecryptMIKPrivKey(std::vector<uint8_t, SecureAllocator<uint8_t>>& 
     std::vector<uint8_t> iv(vchMIKPrivKeyIV.begin(), vchMIKPrivKeyIV.end());
 
     if (!crypter.SetKey(vMasterKeyVec, iv)) {
+        std::cerr << "[WALLET] DecryptMIKPrivKey: SetKey failed" << std::endl;
         memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
         return false;
     }
 
     std::vector<uint8_t> decrypted;
     if (!crypter.Decrypt(vchEncryptedMIKPrivKey, decrypted)) {
+        std::cerr << "[WALLET] DecryptMIKPrivKey: Decrypt failed" << std::endl;
         memory_cleanse(vMasterKeyVec.data(), vMasterKeyVec.size());
         return false;
     }
