@@ -179,6 +179,11 @@ size_t CHeatTracker::GetWindowSize() const {
     return m_window.size();
 }
 
+int CHeatTracker::GetUniqueMinerCount() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return static_cast<int>(m_heatCache.size());
+}
+
 std::map<Identity, int> CHeatTracker::GetAllHeat() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_heatCache;  // Return a copy
@@ -207,22 +212,28 @@ int64_t CalculatePendingPenaltyFP(int currentHeight, int firstSeenHeight) {
     return FP_PENDING_END;           // 1.0x (mature)
 }
 
-int64_t CalculateHeatMultiplierFP(int heat) {
-    // DFMP v3.0 Heat Penalty:
-    // - 0-12 blocks:  Free tier (1.0x)
-    // - 13+ blocks:   2.0x cliff, then ×1.58 per additional block
-    //                 Block 13 = 2.0x, 14 = 3.16x, 15 = 5.0x, 20 = 49x
+int64_t CalculateHeatMultiplierFP(int heat, int uniqueMiners) {
+    // DFMP v3.0 Heat Penalty with Dynamic Scaling:
+    // Free tier scales by active miner count:
+    //   effectiveFreeThreshold = max(FREE_TIER_THRESHOLD, OBSERVATION_WINDOW / uniqueMiners)
+    // Above free tier: 2.0x cliff, then ×1.58 per additional block
+
+    // Dynamic free tier: scale by active miner count
+    int effectiveFreeThreshold = FREE_TIER_THRESHOLD;  // Default: 12
+    if (uniqueMiners > 0) {
+        int dynamicThreshold = OBSERVATION_WINDOW / std::max(1, uniqueMiners);
+        effectiveFreeThreshold = std::max(FREE_TIER_THRESHOLD, dynamicThreshold);
+    }
 
     // Free tier: no penalty
-    if (heat <= FREE_TIER_THRESHOLD) {  // FREE_TIER_THRESHOLD = 12
+    if (heat <= effectiveFreeThreshold) {
         return FP_SCALE;  // 1.0x
     }
 
-    // Cliff + exponential: 13+ blocks
-    // penalty = 2.0 × 1.58^(blocks - 13)
-    // Using fixed-point: start at 2.0x, multiply by 158/100 per block
+    // Cliff + exponential: blocks above free tier
+    // penalty = 2.0 × 1.58^(blocks - effectiveFreeThreshold - 1)
     int64_t penalty = FP_HEAT_CLIFF;  // 2.0 × FP_SCALE
-    int exponent = heat - FREE_TIER_THRESHOLD - 1;  // blocks over 13
+    int exponent = heat - effectiveFreeThreshold - 1;
 
     for (int i = 0; i < exponent; i++) {
         penalty = (penalty * FP_HEAT_GROWTH) / 100;  // × 1.58
@@ -231,9 +242,9 @@ int64_t CalculateHeatMultiplierFP(int heat) {
     return penalty;
 }
 
-int64_t CalculateTotalMultiplierFP(int currentHeight, int firstSeenHeight, int heat) {
+int64_t CalculateTotalMultiplierFP(int currentHeight, int firstSeenHeight, int heat, int uniqueMiners) {
     int64_t pendingFP = CalculatePendingPenaltyFP(currentHeight, firstSeenHeight);
-    int64_t heatFP = CalculateHeatMultiplierFP(heat);
+    int64_t heatFP = CalculateHeatMultiplierFP(heat, uniqueMiners);
 
     // total = maturity × heat
     // In fixed-point: total_fp = (maturity_fp × heat_fp) / FP_SCALE
@@ -362,12 +373,12 @@ double GetPendingPenalty(int currentHeight, int firstSeenHeight) {
     return static_cast<double>(CalculatePendingPenaltyFP(currentHeight, firstSeenHeight)) / FP_SCALE;
 }
 
-double GetHeatMultiplier(int heat) {
-    return static_cast<double>(CalculateHeatMultiplierFP(heat)) / FP_SCALE;
+double GetHeatMultiplier(int heat, int uniqueMiners) {
+    return static_cast<double>(CalculateHeatMultiplierFP(heat, uniqueMiners)) / FP_SCALE;
 }
 
-double GetTotalMultiplier(int currentHeight, int firstSeenHeight, int heat) {
-    return static_cast<double>(CalculateTotalMultiplierFP(currentHeight, firstSeenHeight, heat)) / FP_SCALE;
+double GetTotalMultiplier(int currentHeight, int firstSeenHeight, int heat, int uniqueMiners) {
+    return static_cast<double>(CalculateTotalMultiplierFP(currentHeight, firstSeenHeight, heat, uniqueMiners)) / FP_SCALE;
 }
 
 // ============================================================================

@@ -388,17 +388,18 @@ constexpr int64_t FP_MATURITY_STEP_15 = 1500000;      // 1.5 × FP_SCALE
 int64_t CalculateMaturityPenaltyFP_V2(int currentHeight, int firstSeenHeight);
 
 /**
- * Calculate heat penalty (v2.0) - fixed-point
+ * Calculate heat penalty (v2.0) - fixed-point with dynamic scaling
  *
  * Uses 360-block observation window:
- * - 0-20 blocks: Free tier (1.0x)
- * - 21-25 blocks: Linear zone (1.0x → 1.5x)
- * - 26+ blocks: Exponential (1.5 × 1.08^(blocks-25))
+ * - 0-N blocks: Free tier (1.0x) where N = max(20, 360/uniqueMiners)
+ * - N+1 to N+5: Linear zone (1.0x → 1.5x)
+ * - N+6+ blocks: Exponential (1.5 × 1.08^(blocks-N-5))
  *
  * @param blocksInWindow Number of blocks by this identity in the window
+ * @param uniqueMiners Number of unique miners in window (0 = use static threshold)
  * @return Heat penalty × FP_SCALE
  */
-int64_t CalculateHeatPenaltyFP_V2(int blocksInWindow);
+int64_t CalculateHeatPenaltyFP_V2(int blocksInWindow, int uniqueMiners = 0);
 
 /**
  * Calculate total DFMP v2.0 multiplier - fixed-point
@@ -408,9 +409,10 @@ int64_t CalculateHeatPenaltyFP_V2(int blocksInWindow);
  * @param currentHeight Current block height
  * @param firstSeenHeight Height where MIK was first seen (-1 for new)
  * @param blocksInWindow Number of blocks by this MIK in observation window
+ * @param uniqueMiners Number of unique miners in window (0 = use static threshold)
  * @return Total multiplier × FP_SCALE
  */
-int64_t CalculateTotalMultiplierFP_V2(int currentHeight, int firstSeenHeight, int blocksInWindow);
+int64_t CalculateTotalMultiplierFP_V2(int currentHeight, int firstSeenHeight, int blocksInWindow, int uniqueMiners = 0);
 
 /**
  * Get maturity penalty as double (for display/logging)

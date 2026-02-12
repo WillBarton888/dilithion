@@ -1049,24 +1049,47 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             heat = DFMP::g_heatTracker->GetHeat(mikIdentity);
         }
 
-        // Calculate total DFMP multiplier (maturity × heat)
-        int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(nHeight, firstSeen, heat);
+        // Dynamic scaling: get unique miner count if active
+        int dfmpDynamicScalingHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpDynamicScalingHeight : 999999999;
+        int uniqueMiners = 0;
+        if (static_cast<int>(nHeight) >= dfmpDynamicScalingHeight && DFMP::g_heatTracker) {
+            uniqueMiners = DFMP::g_heatTracker->GetUniqueMinerCount();
+        }
+
+        // Calculate total DFMP multiplier (maturity × heat, with dynamic scaling)
+        int64_t multiplierFP = DFMP::CalculateTotalMultiplierFP(nHeight, firstSeen, heat, uniqueMiners);
 
         // Apply multiplier to get effective target (harder target = smaller value)
         hashTarget = DFMP::CalculateEffectiveTarget(hashTarget, multiplierFP);
 
-        // Log DFMP info (only if multiplier > 1.0)
+        // Log DFMP info
         double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
         if (multiplier > 1.01) {
             double maturityMult = DFMP::GetPendingPenalty(nHeight, firstSeen);
-            double heatMult = DFMP::GetHeatMultiplier(heat);
+            double heatMult = DFMP::GetHeatMultiplier(heat, uniqueMiners);
 
             std::cout << "[Mining] DFMP penalty: MIK " << mikIdentity.GetHex().substr(0, 8) << "..."
                       << " firstSeen=" << firstSeen
                       << " heat=" << heat
                       << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
                       << " heatMult=" << heatMult << "x"
-                      << " total=" << multiplier << "x" << std::endl;
+                      << " total=" << multiplier << "x";
+            if (uniqueMiners > 0) {
+                int effectiveFree = std::max(DFMP::FREE_TIER_THRESHOLD,
+                    DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
+                std::cout << " (dynamic: " << uniqueMiners << " miners, free=" << effectiveFree << ")";
+            }
+            std::cout << std::endl;
+        } else if (uniqueMiners > 0) {
+            // Log dynamic scaling even when no penalty (so miners see it's working)
+            int effectiveFree = std::max(DFMP::FREE_TIER_THRESHOLD,
+                DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
+            if (effectiveFree > DFMP::FREE_TIER_THRESHOLD) {
+                std::cout << "[Mining] DFMP dynamic scaling: " << uniqueMiners
+                          << " active miners, free tier=" << effectiveFree
+                          << " (heat=" << heat << ")" << std::endl;
+            }
         }
     }
 
@@ -4827,10 +4850,36 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // minimum difficulty for overdue blocks on testnet.
                 // TODO: Re-enable once deadlock root cause is identified.
                 if (miner.IsMining()) {
+                    bool shouldRefresh = false;
+
+                    // Refresh for mempool transactions
                     CTxMemPool* mempool = g_mempool.load();
                     if (mempool && mempool->Size() > 0) {
-                        std::cout << "[Mining] BUG #109: Mempool has " << mempool->Size()
+                        std::cout << "[Mining] Mempool has " << mempool->Size()
                                   << " tx(s), refreshing template..." << std::endl;
+                        shouldRefresh = true;
+                    }
+
+                    // EDA template refresh: rebuild template every 60s so EDA difficulty
+                    // steps down as the gap grows. Without this, the miner uses stale nBits
+                    // from when the template was first built and never benefits from further
+                    // EDA reductions.
+                    static auto lastEdaRefresh = std::chrono::steady_clock::now();
+                    if (!shouldRefresh && Dilithion::g_chainParams) {
+                        int64_t blockTime = static_cast<int64_t>(Dilithion::g_chainParams->blockTime);
+                        int64_t edaThreshold = 6 * blockTime;  // Same as EDA_THRESHOLD_BLOCKS * blockTime
+                        CBlockIndex* pTip = g_chainstate.GetTip();
+                        if (pTip) {
+                            int64_t gap = static_cast<int64_t>(std::time(nullptr)) - static_cast<int64_t>(pTip->nTime);
+                            auto timeSinceRefresh = std::chrono::steady_clock::now() - lastEdaRefresh;
+                            if (gap > edaThreshold && timeSinceRefresh > std::chrono::seconds(60)) {
+                                shouldRefresh = true;
+                                lastEdaRefresh = std::chrono::steady_clock::now();
+                            }
+                        }
+                    }
+
+                    if (shouldRefresh) {
                         auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
                         if (templateOpt) {
                             miner.UpdateTemplate(*templateOpt);

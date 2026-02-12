@@ -568,26 +568,31 @@ int64_t CalculateMaturityPenaltyFP_V2(int currentHeight, int firstSeenHeight) {
     return FP_SCALE;  // 1.0x (mature, 400+ blocks)
 }
 
-int64_t CalculateHeatPenaltyFP_V2(int blocksInWindow) {
-    // Free tier: 0-20 blocks → 1.0x
-    if (blocksInWindow <= FREE_TIER_THRESHOLD_V2) {
+int64_t CalculateHeatPenaltyFP_V2(int blocksInWindow, int uniqueMiners) {
+    // Dynamic free tier: scale by active miner count
+    int effectiveFreeThreshold = FREE_TIER_THRESHOLD_V2;  // Default: 20
+    if (uniqueMiners > 0) {
+        int dynamicThreshold = OBSERVATION_WINDOW_V2 / std::max(1, uniqueMiners);
+        effectiveFreeThreshold = std::max(FREE_TIER_THRESHOLD_V2, dynamicThreshold);
+    }
+    int linearZoneWidth = LINEAR_ZONE_UPPER_V2 - FREE_TIER_THRESHOLD_V2;  // 5 blocks
+    int effectiveLinearUpper = effectiveFreeThreshold + linearZoneWidth;
+
+    // Free tier: 0-N blocks → 1.0x
+    if (blocksInWindow <= effectiveFreeThreshold) {
         return FP_SCALE;  // 1.0x
     }
 
-    // Linear zone: 21-25 blocks → 1.0x to 1.5x
-    // Formula: 1.0 + 0.1 × (blocks - 20)
-    if (blocksInWindow <= LINEAR_ZONE_UPPER_V2) {
-        int64_t linearPart = FP_LINEAR_INCREMENT_V2 * (blocksInWindow - FREE_TIER_THRESHOLD_V2);
-        return FP_SCALE + linearPart;  // 1.1x to 1.5x
+    // Linear zone: N+1 to N+5 blocks → 1.0x to 1.5x
+    if (blocksInWindow <= effectiveLinearUpper) {
+        int64_t linearPart = FP_LINEAR_INCREMENT_V2 * (blocksInWindow - effectiveFreeThreshold);
+        return FP_SCALE + linearPart;
     }
 
-    // Exponential zone: 26+ blocks → 1.5 × 1.08^(blocks - 25)
-    // Start at 1.5x and multiply by 1.08 for each block over 25
+    // Exponential zone: N+6+ blocks → 1.5 × 1.08^(blocks - N - 5)
     int64_t penalty = FP_MATURITY_STEP_15;  // 1.5 × FP_SCALE = 1,500,000
-    int exponent = blocksInWindow - LINEAR_ZONE_UPPER_V2;
+    int exponent = blocksInWindow - effectiveLinearUpper;
 
-    // Multiply by 1.08 for each block over 25
-    // Using fixed-point: × 1.08 = × 108 / 100
     for (int i = 0; i < exponent; i++) {
         penalty = (penalty * 108) / 100;
     }
@@ -595,9 +600,9 @@ int64_t CalculateHeatPenaltyFP_V2(int blocksInWindow) {
     return penalty;
 }
 
-int64_t CalculateTotalMultiplierFP_V2(int currentHeight, int firstSeenHeight, int blocksInWindow) {
+int64_t CalculateTotalMultiplierFP_V2(int currentHeight, int firstSeenHeight, int blocksInWindow, int uniqueMiners) {
     int64_t maturityFP = CalculateMaturityPenaltyFP_V2(currentHeight, firstSeenHeight);
-    int64_t heatFP = CalculateHeatPenaltyFP_V2(blocksInWindow);
+    int64_t heatFP = CalculateHeatPenaltyFP_V2(blocksInWindow, uniqueMiners);
 
     // total = maturity × heat
     // In fixed-point: total_fp = (maturity_fp × heat_fp) / FP_SCALE

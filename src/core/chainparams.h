@@ -99,6 +99,13 @@ public:
     // This is a consensus-critical change - all nodes must upgrade before this height
     int dfmpV3ActivationHeight;
 
+    // DFMP Dynamic Scaling Activation Height
+    // Before this height: Static free tier thresholds (12 for v3.0, 20 for v2.0)
+    // After this height: Free tier scales by active miner count:
+    //   effectiveFreeThreshold = max(staticThreshold, observationWindow / uniqueMiners)
+    // This prevents DFMP from punishing normal mining when few miners are active
+    int dfmpDynamicScalingHeight;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)

@@ -204,6 +204,12 @@ public:
     size_t GetWindowSize() const;
 
     /**
+     * Get number of unique miners in the current observation window
+     * Used for dynamic DFMP scaling
+     */
+    int GetUniqueMinerCount() const;
+
+    /**
      * Get all identities and their block counts in the current window
      * (for distribution analysis)
      */
@@ -228,14 +234,16 @@ public:
 int64_t CalculatePendingPenaltyFP(int currentHeight, int firstSeenHeight);
 
 /**
- * Calculate heat multiplier (fixed-point)
+ * Calculate heat multiplier (fixed-point) with dynamic scaling
  *
- * Formula: 1 + 0.046 × max(0, heat - 14)²
+ * Free tier scales by active miner count:
+ *   effectiveFreeThreshold = max(FREE_TIER_THRESHOLD, OBSERVATION_WINDOW / uniqueMiners)
  *
  * @param heat Block count in observation window
+ * @param uniqueMiners Number of unique miners in window (0 = use static threshold)
  * @return Heat multiplier × FP_SCALE (e.g., 1000000 for 1.0×)
  */
-int64_t CalculateHeatMultiplierFP(int heat);
+int64_t CalculateHeatMultiplierFP(int heat, int uniqueMiners = 0);
 
 /**
  * Calculate total DFMP multiplier (fixed-point)
@@ -245,9 +253,10 @@ int64_t CalculateHeatMultiplierFP(int heat);
  * @param currentHeight Current block height
  * @param firstSeenHeight Height where identity was first seen (-1 for new)
  * @param heat Block count in observation window
+ * @param uniqueMiners Number of unique miners in window (0 = use static threshold)
  * @return Total multiplier × FP_SCALE
  */
-int64_t CalculateTotalMultiplierFP(int currentHeight, int firstSeenHeight, int heat);
+int64_t CalculateTotalMultiplierFP(int currentHeight, int firstSeenHeight, int heat, int uniqueMiners = 0);
 
 /**
  * Calculate effective target (256-bit integer division)
@@ -272,12 +281,12 @@ double GetPendingPenalty(int currentHeight, int firstSeenHeight);
 /**
  * Get heat multiplier as double (for display/logging)
  */
-double GetHeatMultiplier(int heat);
+double GetHeatMultiplier(int heat, int uniqueMiners = 0);
 
 /**
  * Get total multiplier as double (for display/logging)
  */
-double GetTotalMultiplier(int currentHeight, int firstSeenHeight, int heat);
+double GetTotalMultiplier(int currentHeight, int firstSeenHeight, int heat, int uniqueMiners = 0);
 
 // ============================================================================
 // GLOBAL STATE

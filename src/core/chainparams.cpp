@@ -66,6 +66,10 @@ ChainParams ChainParams::Mainnet() {
     // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
     params.dfmpV3ActivationHeight = 7000;
 
+    // DFMP Dynamic Scaling - free tier scales by active miner count
+    // Prevents penalty spiral with few miners (e.g., 3 miners sharing 360-block window)
+    params.dfmpDynamicScalingHeight = 7100;
+
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
@@ -151,6 +155,9 @@ ChainParams ChainParams::Testnet() {
     // Testnet tip was ~86,829 when v3.0 was implemented
     // Activation at 87,000 gives ~170 blocks buffer for upgrade
     params.dfmpV3ActivationHeight = 87000;
+
+    // DFMP Dynamic Scaling - always active on testnet
+    params.dfmpDynamicScalingHeight = 0;
 
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted

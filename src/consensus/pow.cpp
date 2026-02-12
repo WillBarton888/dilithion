@@ -357,6 +357,14 @@ bool CheckProofOfWorkDFMP(
         blocksInWindow = DFMP::g_heatTracker->GetHeat(identity);
     }
 
+    // Dynamic scaling: get unique miner count if activation height reached
+    int dfmpDynamicScalingHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpDynamicScalingHeight : 999999999;
+    int uniqueMiners = 0;  // 0 = use static thresholds (pre-activation)
+    if (height >= dfmpDynamicScalingHeight && DFMP::g_heatTracker) {
+        uniqueMiners = DFMP::g_heatTracker->GetUniqueMinerCount();
+    }
+
     int64_t multiplierFP;
 
     if (height >= dfmpV3ActivationHeight) {
@@ -364,8 +372,8 @@ bool CheckProofOfWorkDFMP(
         // DFMP v3.0: Multi-layer penalty (payout heat + dormancy + reduced thresholds)
         // ====================================================================
 
-        // MIK identity heat penalty
-        int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP(blocksInWindow);
+        // MIK identity heat penalty (with dynamic scaling)
+        int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP(blocksInWindow, uniqueMiners);
 
         // Payout address heat penalty (closes primary exploit)
         int64_t payoutHeatPenalty = DFMP::FP_SCALE;  // 1.0x default
@@ -373,7 +381,11 @@ bool CheckProofOfWorkDFMP(
             DFMP::Identity payoutIdentity = DFMP::DeriveIdentityFromScript(
                 coinbaseTx.vout[0].scriptPubKey);
             int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutIdentity);
-            payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP(payoutHeat);
+            int payoutUniqueMiners = 0;
+            if (height >= dfmpDynamicScalingHeight) {
+                payoutUniqueMiners = DFMP::g_payoutHeatTracker->GetUniqueMinerCount();
+            }
+            payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP(payoutHeat, payoutUniqueMiners);
         }
 
         // Effective heat = max(MIK heat, payout heat)
@@ -388,7 +400,7 @@ bool CheckProofOfWorkDFMP(
         // ====================================================================
         // DFMP v2.0: Standard penalty (MIK heat only, original thresholds)
         // ====================================================================
-        multiplierFP = DFMP::CalculateTotalMultiplierFP_V2(height, firstSeen, blocksInWindow);
+        multiplierFP = DFMP::CalculateTotalMultiplierFP_V2(height, firstSeen, blocksInWindow, uniqueMiners);
     }
 
     // Calculate effective target: baseTarget / multiplier
