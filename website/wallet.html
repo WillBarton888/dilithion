@@ -2573,7 +2573,7 @@
 
                 if (isFullNode && connected) {
                     // FULL NODE MODE: Send via node's wallet RPC
-                    const txid = await rpcCall('sendtoaddress', [toAddress, amount]);
+                    const txid = await rpcCall('sendtoaddress', {address: toAddress, amount: amount});
                     result = { txid: txid, fee: 0.001 };  // Fee is deducted automatically
                 } else if (!isFullNode) {
                     // LIGHT WALLET MODE: Use browser wallet + transaction builder

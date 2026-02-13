@@ -74,7 +74,7 @@ constexpr int DORMANCY_DECAY_BLOCKS = 400;         // Decay duration after dorma
 constexpr int64_t FP_DORMANCY_PENALTY = 2500000;   // 2.5 × 1,000,000 (dormancy reset penalty)
 
 // DFMP v3.0: Registration PoW - computational cost per new MIK identity
-constexpr int REGISTRATION_POW_BITS = 28;          // Leading zero bits required (~5s CPU)
+constexpr int REGISTRATION_POW_BITS = 28;          // Leading zero bits required (~10-15 min with ref SHA3)
 
 // ============================================================================
 // DFMP v3.1 CONSTANTS (softened for small networks)

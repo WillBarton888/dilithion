@@ -328,7 +328,7 @@ bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, i
  * Mine registration proof-of-work nonce (DFMP v3.0)
  *
  * Finds a nonce such that SHA3-256(pubkey || nonce) has >= requiredBits leading zero bits.
- * This is computationally expensive (~5 seconds for 28 bits).
+ * This is computationally expensive (~10-15 minutes for 28 bits with reference SHA3).
  *
  * @param pubkey MIK public key (1,952 bytes)
  * @param requiredBits Number of leading zero bits required

@@ -1979,37 +1979,71 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
         throw std::runtime_error("Chain state not initialized");
     }
 
-    // Parse params - expecting {"address":"DLT1...", "amount":1.5}
+    // Early lock check - fail fast with clear message before doing any work
+    if (m_wallet->IsCrypted() && m_wallet->IsLocked()) {
+        throw std::runtime_error("Wallet is encrypted and locked. Please unlock first using walletpassphrase.");
+    }
+
+    // Parse params - supports both formats:
+    //   Object: {"address":"DLT1...", "amount":1.5}
+    //   Array:  ["DLT1...", 1.5]  (Bitcoin Core compat)
     std::string address_str;
     CAmount amount = 0;
 
-    // Extract address
-    size_t addr_pos = params.find("\"address\"");
-    if (addr_pos != std::string::npos) {
-        size_t colon = params.find(":", addr_pos);
-        size_t quote1 = params.find("\"", colon);
-        size_t quote2 = params.find("\"", quote1 + 1);
-        if (quote1 != std::string::npos && quote2 != std::string::npos) {
-            address_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+    // Try array format first: ["address", amount]
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 2) {
+                if (arr[0].is_string()) {
+                    address_str = arr[0].get<std::string>();
+                }
+                if (arr[1].is_number()) {
+                    double amt_dbl = arr[1].get<double>();
+                    if (amt_dbl > 0.0 && amt_dbl <= 21000000.0) {
+                        amount = static_cast<CAmount>(amt_dbl * 100000000);
+                    }
+                } else if (arr[1].is_string()) {
+                    // Handle amount as string: ["addr", "1.5"]
+                    double amt_dbl = SafeParseDouble(arr[1].get<std::string>(), 0.0, 21000000.0);
+                    amount = static_cast<CAmount>(amt_dbl * 100000000);
+                }
+            }
+        } catch (const nlohmann::json::parse_error&) {
+            // Fall through to object format
         }
     }
 
-    // Extract amount
-    size_t amt_pos = params.find("\"amount\"");
-    if (amt_pos != std::string::npos) {
-        size_t colon = params.find(":", amt_pos);
-        size_t num_start = colon + 1;
-        while (num_start < params.length() && isspace(params[num_start])) num_start++;
-        size_t num_end = num_start;
-        while (num_end < params.length() &&
-               (isdigit(params[num_end]) || params[num_end] == '.' || params[num_end] == '-')) {
-            num_end++;
+    // Try object format: {"address":"...", "amount":...}
+    if (address_str.empty()) {
+        size_t addr_pos = params.find("\"address\"");
+        if (addr_pos != std::string::npos) {
+            size_t colon = params.find(":", addr_pos);
+            size_t quote1 = params.find("\"", colon);
+            size_t quote2 = params.find("\"", quote1 + 1);
+            if (quote1 != std::string::npos && quote2 != std::string::npos) {
+                address_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+            }
         }
-        if (num_end > num_start) {
-            // MEDIUM-004: Use SafeParseDouble to prevent RPC crashes from malformed input
-            // Max supply is 21 million DIL, so 21000000.0 is a reasonable upper bound
-            double amt_dbl = SafeParseDouble(params.substr(num_start, num_end - num_start), 0.0, 21000000.0);
-            amount = static_cast<CAmount>(amt_dbl * 100000000);  // Convert DIL to ions
+
+        if (amount == 0) {
+            size_t amt_pos = params.find("\"amount\"");
+            if (amt_pos != std::string::npos) {
+                size_t colon = params.find(":", amt_pos);
+                size_t num_start = colon + 1;
+                while (num_start < params.length() && isspace(params[num_start])) num_start++;
+                size_t num_end = num_start;
+                while (num_end < params.length() &&
+                       (isdigit(params[num_end]) || params[num_end] == '.' || params[num_end] == '-')) {
+                    num_end++;
+                }
+                if (num_end > num_start) {
+                    // MEDIUM-004: Use SafeParseDouble to prevent RPC crashes from malformed input
+                    // Max supply is 21 million DIL, so 21000000.0 is a reasonable upper bound
+                    double amt_dbl = SafeParseDouble(params.substr(num_start, num_end - num_start), 0.0, 21000000.0);
+                    amount = static_cast<CAmount>(amt_dbl * 100000000);  // Convert DIL to ions
+                }
+            }
         }
     }
 
