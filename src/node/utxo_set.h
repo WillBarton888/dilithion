@@ -88,7 +88,7 @@ private:
     // Helper functions for serialization
     std::string SerializeOutPoint(const COutPoint& outpoint) const;
     std::string SerializeUTXOEntry(const CUTXOEntry& entry) const;
-    bool DeserializeUTXOEntry(const std::string& data, CUTXOEntry& entry) const;
+    bool DeserializeUTXOEntry(const std::string& data, CUTXOEntry& entry, bool silent = false) const;
 
     // Internal cache management
     void UpdateCache(const COutPoint& outpoint, const CUTXOEntry& entry) const;
@@ -282,7 +282,7 @@ size_t CUTXOSet::ForEach(Callback callback) const {
         CUTXOEntry entry;
         std::string valueStr(value.data(), value.size());
 
-        if (DeserializeUTXOEntry(valueStr, entry)) {
+        if (DeserializeUTXOEntry(valueStr, entry, true)) {
             // Call callback - if it returns false, stop iteration
             if (!callback(outpoint, entry)) {
                 delete it;

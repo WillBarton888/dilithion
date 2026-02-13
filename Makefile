@@ -172,7 +172,11 @@ DIGITAL_DNA_SOURCES := src/digital_dna/digital_dna.cpp \
                        src/digital_dna/latency_fingerprint.cpp \
                        src/digital_dna/timing_signature.cpp \
                        src/digital_dna/perspective_proof.cpp \
-                       src/digital_dna/digital_dna_rpc.cpp
+                       src/digital_dna/digital_dna_rpc.cpp \
+                       src/digital_dna/behavioral_profile.cpp \
+                       src/digital_dna/memory_fingerprint.cpp \
+                       src/digital_dna/clock_drift.cpp \
+                       src/digital_dna/bandwidth_proof.cpp
 
 # VDF (Verifiable Delay Function) sources - uses chiavdf class group VDF
 VDF_SOURCES := src/vdf/vdf.cpp \

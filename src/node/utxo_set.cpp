@@ -170,9 +170,10 @@ std::string CUTXOSet::SerializeUTXOEntry(const CUTXOEntry& entry) const {
     return value;
 }
 
-bool CUTXOSet::DeserializeUTXOEntry(const std::string& data, CUTXOEntry& entry) const {
+bool CUTXOSet::DeserializeUTXOEntry(const std::string& data, CUTXOEntry& entry, bool silent) const {
     if (data.size() < 17) {
-        std::cerr << "[ERROR] CUTXOSet::DeserializeUTXOEntry: Data too small (" << data.size() << " bytes)" << std::endl;
+        if (!silent)
+            std::cerr << "[ERROR] CUTXOSet::DeserializeUTXOEntry: Data too small (" << data.size() << " bytes)" << std::endl;
         return false;
     }
 
@@ -200,7 +201,8 @@ bool CUTXOSet::DeserializeUTXOEntry(const std::string& data, CUTXOEntry& entry) 
 
     // Validate script size
     if (offset + script_size != data.size()) {
-        std::cerr << "[ERROR] CUTXOSet::DeserializeUTXOEntry: Size mismatch" << std::endl;
+        if (!silent)
+            std::cerr << "[ERROR] CUTXOSet::DeserializeUTXOEntry: Size mismatch" << std::endl;
         return false;
     }
 
