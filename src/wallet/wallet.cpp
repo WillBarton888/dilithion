@@ -16,6 +16,7 @@
 #include <primitives/transaction.h>  // BUG #56 FIX: For CTransaction deserialization
 #include <consensus/chain.h>  // BUG #56 FIX: For CChainState (RescanFromHeight)
 #include <consensus/tx_validation.h>
+#include <consensus/fees.h>
 #include <consensus/sighash.h>  // WALLET-015 FIX: SIGHASH types
 #include <consensus/validation.h>  // BUG #112 FIX: For CBlockValidator::DeserializeBlockTransactions
 #include <core/chainparams.h>  // CHAIN-ID FIX: For replay protection
@@ -3542,13 +3543,9 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
     }
 
     // WALLET-013 FIX: Verify fee is sufficient for actual transaction size
-    // Without this check, transactions with insufficient fees will be created and signed,
-    // but then rejected during validation/relay, wasting user's time
-    // Impact: Prevents transaction relay failures due to insufficient fees
-    // Calculate minimum fee based on transaction size (fee per KB model)
-    static const CAmount MIN_FEE_PER_KB = MIN_RELAY_FEE * 10;  // 0.001 DIL per KB
+    // Uses consensus fee formula to ensure consistency with mempool admission
     size_t tx_size = tx.GetSerializedSize();
-    CAmount required_fee = ((tx_size / 1000) + 1) * MIN_FEE_PER_KB;
+    CAmount required_fee = Consensus::CalculateMinFee(tx_size);
 
     if (fee < required_fee) {
         char msg[512];

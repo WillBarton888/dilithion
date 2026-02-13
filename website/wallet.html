@@ -2551,6 +2551,9 @@
         }
 
         // Handle send
+        // Pending send data for confirmation flow
+        let pendingSend = null;
+
         async function handleSend(event) {
             event.preventDefault();
             const toAddress = document.getElementById('sendAddress').value;
@@ -2564,17 +2567,46 @@
             }
 
             sendBtn.disabled = true;
-            sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
+            sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Estimating fee...';
 
             const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
 
             try {
-                let result;
-
                 if (isFullNode && connected) {
-                    // FULL NODE MODE: Send via node's wallet RPC
-                    const txid = await rpcCall('sendtoaddress', {address: toAddress, amount: amount});
-                    result = { txid: txid, fee: 0.001 };  // Fee is deducted automatically
+                    // FULL NODE MODE: Estimate fee first, then show confirmation
+                    const estimate = await rpcCall('estimatesendfee', {address: toAddress, amount: amount});
+                    pendingSend = { address: toAddress, amount: amount, fee: estimate.fee, total: estimate.total };
+
+                    alertDiv.innerHTML = `
+                        <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 16px;">
+                            <div style="font-weight: 600; margin-bottom: 12px; font-size: 0.95rem;">Confirm Transaction</div>
+                            <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 4px 0; color: var(--text-muted);">To</td>
+                                    <td style="padding: 4px 0; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">${toAddress.substring(0, 12)}...${toAddress.substring(toAddress.length - 6)}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 4px 0; color: var(--text-muted);">Amount</td>
+                                    <td style="padding: 4px 0; text-align: right; font-weight: 600;">${amount.toFixed(8)} DIL</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 4px 0; color: var(--text-muted);">Network Fee</td>
+                                    <td style="padding: 4px 0; text-align: right;">${estimate.fee.toFixed(8)} DIL</td>
+                                </tr>
+                                <tr style="border-top: 1px solid var(--border);">
+                                    <td style="padding: 8px 0 4px; font-weight: 600;">Total</td>
+                                    <td style="padding: 8px 0 4px; text-align: right; font-weight: 600; color: var(--primary);">${estimate.total.toFixed(8)} DIL</td>
+                                </tr>
+                            </table>
+                            <div style="display: flex; gap: 8px; margin-top: 12px;">
+                                <button class="btn btn-primary" onclick="confirmSend()" style="flex: 1;">Confirm & Send</button>
+                                <button class="btn" onclick="cancelSend()" style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border);">Cancel</button>
+                            </div>
+                        </div>
+                    `;
+                    sendBtn.disabled = false;
+                    sendBtn.style.display = 'none';
+                    return;
                 } else if (!isFullNode) {
                     // LIGHT WALLET MODE: Use browser wallet + transaction builder
                     if (!localWallet || !localWallet.isWalletUnlocked()) {
@@ -2604,29 +2636,59 @@
                         throw new Error(`Insufficient balance. You have ${totalBalance.toFixed(8)} DIL but need ${amount} DIL`);
                     }
 
-                    result = await txBuilder.send(fromAddress, toAddress, amount);
+                    const result = await txBuilder.send(fromAddress, toAddress, amount);
+                    showSendSuccess(result.txid);
                 } else {
                     throw new Error('Connect to node first');
                 }
-
-                alertDiv.innerHTML = `
-                    <div class="alert alert-success">
-                        Transaction sent successfully!<br>
-                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
-                            TXID: ${result.txid}
-                        </span>
-                    </div>
-                `;
-
-                document.getElementById('sendAddress').value = '';
-                document.getElementById('sendAmount').value = '';
-                await refreshBalance();
-                await refreshTransactions();
             } catch(e) {
                 alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
             }
 
+            resetSendButton();
+        }
+
+        async function confirmSend() {
+            if (!pendingSend) return;
+            const alertDiv = document.getElementById('sendAlert');
+            alertDiv.innerHTML = '<div style="text-align: center; padding: 16px;"><div class="spinner" style="width: 20px; height: 20px; margin: 0 auto;"></div><div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">Sending transaction...</div></div>';
+
+            try {
+                const txid = await rpcCall('sendtoaddress', {address: pendingSend.address, amount: pendingSend.amount});
+                showSendSuccess(typeof txid === 'object' ? txid.txid : txid);
+            } catch(e) {
+                alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
+            }
+            pendingSend = null;
+            resetSendButton();
+        }
+
+        function cancelSend() {
+            pendingSend = null;
+            document.getElementById('sendAlert').innerHTML = '';
+            resetSendButton();
+        }
+
+        function showSendSuccess(txid) {
+            const alertDiv = document.getElementById('sendAlert');
+            alertDiv.innerHTML = `
+                <div class="alert alert-success">
+                    Transaction sent successfully!<br>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                        TXID: ${txid}
+                    </span>
+                </div>
+            `;
+            document.getElementById('sendAddress').value = '';
+            document.getElementById('sendAmount').value = '';
+            refreshBalance();
+            refreshTransactions();
+        }
+
+        function resetSendButton() {
+            const sendBtn = document.getElementById('sendBtn');
             sendBtn.disabled = false;
+            sendBtn.style.display = '';
             sendBtn.innerHTML = `
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="22" y1="2" x2="11" y2="13"></line>

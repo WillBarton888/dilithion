@@ -256,6 +256,7 @@ private:
 
     // Transaction creation methods
     std::string RPC_SendToAddress(const std::string& params);
+    std::string RPC_EstimateSendFee(const std::string& params);
     std::string RPC_SignRawTransaction(const std::string& params);
     std::string RPC_SendRawTransaction(const std::string& params);
 

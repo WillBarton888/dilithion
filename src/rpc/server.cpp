@@ -15,6 +15,7 @@
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
 #include <consensus/chain.h>
+#include <consensus/fees.h>
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For DeserializeBlockTransactions
@@ -159,6 +160,7 @@ CRPCServer::CRPCServer(uint16_t port)
 
     // Transaction creation
     m_handlers["sendtoaddress"] = [this](const std::string& p) { return RPC_SendToAddress(p); };
+    m_handlers["estimatesendfee"] = [this](const std::string& p) { return RPC_EstimateSendFee(p); };
     m_handlers["signrawtransaction"] = [this](const std::string& p) { return RPC_SignRawTransaction(p); };
     m_handlers["sendrawtransaction"] = [this](const std::string& p) { return RPC_SendRawTransaction(p); };
 
@@ -2073,15 +2075,30 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
         throw std::runtime_error("Invalid Dilithion address: " + address_str);
     }
 
-    // Create transaction
+    // Create transaction with size-based fee estimation (two-pass)
+    // Pass 1: Estimate fee assuming 2 inputs (covers ~90% of transactions)
     unsigned int currentHeight = m_chainstate->GetHeight();
-    CAmount fee = CWallet::EstimateFee();
+    size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
+    CAmount fee = Consensus::CalculateMinFee(est_size);
     CTransactionRef tx;
     std::string error;
 
     if (!m_wallet->CreateTransaction(recipient_address, amount, fee,
                                      *m_utxo_set, currentHeight, tx, error)) {
         throw std::runtime_error("Failed to create transaction: " + error);
+    }
+
+    // Pass 2: Check actual tx size and rebuild if fee doesn't match
+    size_t actual_size = tx->GetSerializedSize();
+    CAmount exact_fee = Consensus::CalculateMinFee(actual_size);
+    if (fee != exact_fee) {
+        // Rebuild with exact fee for the actual transaction size
+        tx.reset();
+        fee = exact_fee;
+        if (!m_wallet->CreateTransaction(recipient_address, amount, fee,
+                                         *m_utxo_set, currentHeight, tx, error)) {
+            throw std::runtime_error("Failed to create transaction: " + error);
+        }
     }
 
     // Send transaction
@@ -2094,6 +2111,90 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
     m_wallet->RecordSentTransaction(txid, recipient_address, amount, fee);
     std::ostringstream oss;
     oss << "{\"txid\":\"" << txid.GetHex() << "\"}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_EstimateSendFee(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+    if (!m_utxo_set) {
+        throw std::runtime_error("UTXO set not initialized");
+    }
+
+    // Parse params (same format as sendtoaddress: object or array)
+    std::string address_str;
+    CAmount amount = 0;
+
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 2) {
+                if (arr[0].is_string()) address_str = arr[0].get<std::string>();
+                if (arr[1].is_number()) {
+                    double amt_dbl = arr[1].get<double>();
+                    if (amt_dbl > 0.0 && amt_dbl <= 21000000.0)
+                        amount = static_cast<CAmount>(amt_dbl * 100000000);
+                }
+            }
+        } catch (const nlohmann::json::parse_error&) {}
+    }
+
+    if (address_str.empty()) {
+        size_t addr_pos = params.find("\"address\"");
+        if (addr_pos != std::string::npos) {
+            size_t colon = params.find(":", addr_pos);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                address_str = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+        if (amount == 0) {
+            size_t amt_pos = params.find("\"amount\"");
+            if (amt_pos != std::string::npos) {
+                size_t colon = params.find(":", amt_pos);
+                size_t ns = colon + 1;
+                while (ns < params.length() && isspace(params[ns])) ns++;
+                size_t ne = ns;
+                while (ne < params.length() && (isdigit(params[ne]) || params[ne] == '.' || params[ne] == '-')) ne++;
+                if (ne > ns) {
+                    double amt_dbl = SafeParseDouble(params.substr(ns, ne - ns), 0.0, 21000000.0);
+                    amount = static_cast<CAmount>(amt_dbl * 100000000);
+                }
+            }
+        }
+    }
+
+    if (address_str.empty()) throw std::runtime_error("Missing or invalid address parameter");
+    if (amount <= 0) throw std::runtime_error("Invalid amount (must be positive)");
+
+    CDilithiumAddress recipient_address;
+    if (!ValidateAddress(address_str, recipient_address)) {
+        throw std::runtime_error("Invalid Dilithion address: " + address_str);
+    }
+
+    // Estimate fee based on likely tx size (use 2-input estimate, then refine)
+    size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
+    CAmount fee = Consensus::CalculateMinFee(est_size);
+
+    // Check balance
+    CAmount balance = m_wallet->GetBalance();
+    CAmount total = amount + fee;
+    if (balance < total) {
+        throw std::runtime_error("Insufficient balance. Have " +
+            std::to_string(balance / 100000000.0) + " DIL, need " +
+            std::to_string(total / 100000000.0) + " DIL (amount + fee)");
+    }
+
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(8);
+    oss << "{"
+        << "\"address\":\"" << address_str << "\","
+        << "\"amount\":" << (amount / 100000000.0) << ","
+        << "\"fee\":" << (fee / 100000000.0) << ","
+        << "\"total\":" << (total / 100000000.0) << ","
+        << "\"balance\":" << (balance / 100000000.0)
+        << "}";
     return oss.str();
 }
 
