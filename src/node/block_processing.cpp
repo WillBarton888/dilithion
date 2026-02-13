@@ -567,7 +567,20 @@ BlockProcessResult ProcessNewBlock(
                     }
                 }
 
-                std::cout << "[ProcessNewBlock] Block in DB but parent still missing, skipping" << std::endl;
+                // Diagnostic: why can't we find the parent?
+                std::cout << "[ProcessNewBlock] Block in DB but parent still missing"
+                          << " prevBlock=" << block.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                          << " parentHeight=" << parent_height
+                          << " chainTip=" << currentChainHeight << std::endl;
+                // Check what hash we actually have at the expected parent height
+                if (ctx.headers_manager && parent_height > 0) {
+                    uint256 expected_parent = ctx.headers_manager->GetRandomXHashAtHeight(parent_height);
+                    if (!expected_parent.IsNull() && expected_parent != block.hashPrevBlock) {
+                        std::cout << "[ProcessNewBlock] FORK: prevBlock doesn't match header chain at height " << parent_height
+                                  << " header=" << expected_parent.GetHex().substr(0, 16) << "..."
+                                  << " block.prev=" << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                    }
+                }
                 // Notify IBD coordinator of orphan block for Layer 2 fork detection
                 if (g_node_context.ibd_coordinator) {
                     g_node_context.ibd_coordinator->OnOrphanBlockReceived();

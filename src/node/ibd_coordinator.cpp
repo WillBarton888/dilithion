@@ -1110,8 +1110,19 @@ bool CIbdCoordinator::FetchBlocks() {
     }
 
     // Get next blocks to request
+    int in_flight_before = g_node_context.block_tracker ? g_node_context.block_tracker->GetTotalInFlight() : 0;
     std::vector<int> blocks_to_request = m_node_context.block_fetcher->GetNextBlocksToRequest(
         peer_capacity, chain_height, header_height);
+
+    // Diagnostic: show what we're about to request
+    if (!blocks_to_request.empty() && (header_height - chain_height) > 5) {
+        std::cout << "[IBD] FetchBlocks: chain=" << chain_height << " headers=" << header_height
+                  << " peer=" << m_blocks_sync_peer << " inflight=" << in_flight_before
+                  << " toRequest=" << blocks_to_request.size()
+                  << " range=[" << blocks_to_request.front() << ".." << blocks_to_request.back() << "]"
+                  << std::endl;
+    }
+
     if (blocks_to_request.empty()) {
         // BUG #246b FIX: If no blocks to request, check if in-flight blocks are from
         // disconnected peers. This can cause "stuck" scenarios where we have blocks
@@ -1159,6 +1170,9 @@ bool CIbdCoordinator::FetchBlocks() {
         }
     }
 
+    int null_hash_count = 0;
+    int first_null_hash_height = -1;
+    int already_have_count = 0;
     for (int h : blocks_to_request) {
         // Re-check capacity before each request
         int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
@@ -1195,6 +1209,8 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         if (hash.IsNull()) {
+            null_hash_count++;
+            if (first_null_hash_height == -1) first_null_hash_height = h;
             continue;
         }
 
@@ -1221,12 +1237,29 @@ bool CIbdCoordinator::FetchBlocks() {
                 pindex->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
                 continue;
             }
+            // BUG FIX: Skip blocks we already have data for (orphans awaiting parents)
+            // Without this, orphan blocks get re-requested indefinitely since they have
+            // a CBlockIndex (created on first arrival) but null pprev (parent not connected).
+            // The old code only checked BLOCK_VALID_CHAIN and IsInvalid, missing this case.
+            if (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA) {
+                already_have_count++;
+                continue;
+            }
         }
 
         // Request block from our single sync peer
         if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, h, hash)) {
             getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, hash);
         }
+    }
+
+    // Diagnostic: log when heights have null hashes (indicates header chain gap)
+    if (null_hash_count > 0) {
+        std::cout << "[IBD] WARNING: " << null_hash_count << " heights had null hashes (first=" << first_null_hash_height
+                  << " chain=" << chain_height << " headers=" << header_height << ")" << std::endl;
+    }
+    if (already_have_count > 0) {
+        std::cout << "[IBD] Skipped " << already_have_count << " blocks already in DB (orphans awaiting parents)" << std::endl;
     }
 
     // Send GETDATA to our single sync peer
