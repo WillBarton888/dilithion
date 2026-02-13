@@ -19,49 +19,6 @@ For critical vulnerabilities, you can also reach us via:
 
 ---
 
-## Bug Bounty Program
-
-### Bounty Rewards (Paid in DIL):
-
-- **Critical vulnerabilities:** 1,000 DIL
-  - Private key exposure
-  - Consensus bugs allowing double-spend
-  - Remote code execution
-  - Fund theft vulnerabilities
-
-- **Major bugs:** 100 DIL
-  - DoS vulnerabilities
-  - Wallet security issues
-  - Network protocol exploits
-  - Data corruption bugs
-
-- **Minor issues:** 10 DIL
-  - Performance problems
-  - Edge case bugs
-  - Non-critical security improvements
-
-### Scope
-
-**In scope:**
-- Post-quantum cryptography implementation (CRYSTALS-Dilithium3, NIST FIPS 204)
-- Quantum-resistant hashing (SHA-3/Keccak-256, NIST FIPS 202)
-- Wallet security and key management
-- Consensus and validation logic (RandomX PoW, DFMP anti-concentration)
-- Network protocol and P2P security
-- Mining and RandomX integration
-- RPC security and authentication
-- VDF (Verifiable Delay Function) implementation
-- Digital DNA identity system
-
-**Out of scope:**
-- Social engineering attacks
-- Physical attacks
-- Third-party software or services
-- Attacks requiring physical access to hardware
-- Denial of service attacks on the network (51% attacks)
-
----
-
 ## Security Architecture
 
 ### Post-Quantum Cryptography
@@ -120,7 +77,7 @@ For critical vulnerabilities, you can also reach us via:
 
 ### Key Exposure
 - **Risk:** MEDIUM — Keys encrypted at rest, never logged
-- PBKDF2 key derivation with 100,000 iterations
+- PBKDF2-SHA3-512 key derivation with 500,000 iterations
 - Secure memory wiping after key operations
 
 ### Implementation Bugs
@@ -160,7 +117,7 @@ We request **90 days** to patch critical issues before public disclosure.
 - Provide regular updates on remediation progress
 - Credit researchers who report responsibly (if desired)
 - Coordinate disclosure timing with you
-- Pay bug bounties as promised
+- Credit you publicly in our Hall of Fame (if desired)
 
 ### Your Commitment:
 - Report vulnerabilities privately before public disclosure
@@ -203,7 +160,7 @@ We publicly acknowledge security researchers who report vulnerabilities responsi
 - **Security Reports:** security@dilithion.org
 - **GitHub Advisory:** https://github.com/WillBarton888/dilithion/security/advisories/new
 - **Discord:** https://discord.gg/c25WwRNg
-- **Bug Bounty Submissions:** Via GitHub Security Advisory or security@dilithion.org
+- **Vulnerability Reports:** Via GitHub Security Advisory or security@dilithion.org
 
 ---
 
