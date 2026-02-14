@@ -831,6 +831,41 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
     }
 
+    // FORK FIX: Check if fork is ready for chain switch after feeding blocks from DB
+    // This handles the case where all fork blocks were already in DB (arrived as orphans
+    // before fork detection). FetchBlocks above feeds them to ForkManager; now check
+    // if the fork has enough work to trigger a chain switch.
+    {
+        ForkManager& forkMgr = ForkManager::GetInstance();
+        if (forkMgr.HasActiveFork()) {
+            auto fork = forkMgr.GetActiveFork();
+            if (fork && fork->AllReceivedBlocksPrevalidated()) {
+                int32_t tipHeight = fork->GetHighestPrevalidatedHeight();
+                if (tipHeight > 0) {
+                    ForkBlock* tipBlock = fork->GetBlockAtHeight(tipHeight);
+                    if (tipBlock) {
+                        CBlockIndex* forkIndex = m_chainstate.GetBlockIndex(tipBlock->hash);
+                        CBlockIndex* currentTip = m_chainstate.GetTip();
+                        if (forkIndex && currentTip &&
+                            currentTip->nChainWork < forkIndex->nChainWork) {
+                            std::cout << "[IBD] Fork ready with more work (fork="
+                                      << forkIndex->nChainWork.GetHex().substr(0, 16) << " current="
+                                      << currentTip->nChainWork.GetHex().substr(0, 16)
+                                      << ") - triggering chain switch" << std::endl;
+                            if (m_node_context.blockchain_db &&
+                                forkMgr.TriggerChainSwitch(m_node_context, *m_node_context.blockchain_db)) {
+                                std::cout << "[IBD] Fork chain switch SUCCESSFUL!" << std::endl;
+                                m_fork_detected.store(false);
+                                g_node_context.fork_detected.store(false);
+                                g_metrics.ClearForkDetected();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ORPHAN SSOT: Orphans are now processed ONLY by validation queue (block_validation_queue.cpp)
     // This periodic scan is for DIAGNOSTICS ONLY - logging orphan pool health
     static auto last_orphan_scan = std::chrono::steady_clock::now();
@@ -1242,6 +1277,30 @@ bool CIbdCoordinator::FetchBlocks() {
             // a CBlockIndex (created on first arrival) but null pprev (parent not connected).
             // The old code only checked BLOCK_VALID_CHAIN and IsInvalid, missing this case.
             if (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA) {
+                // FORK FIX: If this is a fork block already in DB, feed it to ForkManager
+                // for pre-validation. This handles the case where fork blocks arrived as
+                // orphans before the fork was detected - they need to be pre-validated
+                // so TriggerChainSwitch can activate the better chain.
+                ForkManager& forkMgr2 = ForkManager::GetInstance();
+                if (forkMgr2.HasActiveFork()) {
+                    auto fork2 = forkMgr2.GetActiveFork();
+                    if (fork2 && fork2->IsExpectedBlock(hash, h)) {
+                        ForkBlock* existing = fork2->GetBlockAtHeight(h);
+                        if (!existing || existing->status == ForkBlockStatus::PENDING) {
+                            CBlock blockData;
+                            if (m_node_context.blockchain_db &&
+                                m_node_context.blockchain_db->ReadBlock(hash, blockData)) {
+                                std::cout << "[IBD] Fork block at height " << h
+                                          << " already in DB - feeding to ForkManager for pre-validation" << std::endl;
+                                forkMgr2.AddBlockToFork(blockData, hash, h);
+                                ForkBlock* forkBlock = fork2->GetBlockAtHeight(h);
+                                if (forkBlock && forkBlock->status == ForkBlockStatus::PENDING) {
+                                    forkMgr2.PreValidateBlock(*forkBlock, *m_node_context.blockchain_db);
+                                }
+                            }
+                        }
+                    }
+                }
                 already_have_count++;
                 continue;
             }
