@@ -867,6 +867,8 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             }
 
             if (hasConflict || !allInputsAvailable) {
+                std::cout << "[Mining] Skipping tx " << tx->GetHash().GetHex().substr(0, 16)
+                          << "...: " << (hasConflict ? "conflict" : missingInputInfo) << std::endl;
                 continue;
             }
 
@@ -874,12 +876,18 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             std::string validationError;
             CAmount txFee = 0;
             if (!validator.CheckTransaction(*tx, *utxoSet, nHeight, txFee, validationError)) {
+                std::cerr << "[Mining] Rejecting tx " << tx->GetHash().GetHex().substr(0, 16)
+                          << "... from template: " << validationError << std::endl;
                 continue;
             }
 
             // Sanity check on fee
             const uint64_t MAX_REASONABLE_FEE = 10 * COIN;
-            if (txFee > MAX_REASONABLE_FEE) continue;
+            if (txFee > MAX_REASONABLE_FEE) {
+                std::cerr << "[Mining] Rejecting tx " << tx->GetHash().GetHex().substr(0, 16)
+                          << "... from template: fee too high (" << txFee << " ions)" << std::endl;
+                continue;
+            }
 
             // Add transaction to block
             selectedTxs.push_back(tx);
@@ -4931,7 +4939,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Print mining stats every 10 seconds if mining
-            if (config.start_mining && ++counter % 10 == 0) {
+            // BUG #181 FIX: Use miner.IsMining() instead of config.start_mining
+            // config.start_mining is only true for --mine flag. If mining was started
+            // via RPC (startmining) or wallet UI, template refresh and mempool tx
+            // inclusion never fired, causing transactions to never be mined.
+            if (miner.IsMining() && ++counter % 10 == 0) {
                 auto stats = miner.GetStats();
                 std::cout << "[Mining] Hash rate: " << miner.GetHashRate() << " H/s, "
                          << "Total hashes: " << stats.nHashesComputed << std::endl;
