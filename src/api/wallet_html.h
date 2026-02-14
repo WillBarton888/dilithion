@@ -664,7 +664,7 @@ inline const std::string& GetWalletHTML() {
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Connecting...</span>
             </div>
-            <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); reconnectAttempts = 0; connect();">Reconnect</button>
+            <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); connect();">Reconnect</button>
         </div>
     </nav>
 
@@ -698,6 +698,41 @@ inline const std::string& GetWalletHTML() {
                         <span id="immatureBalance">0.00000000</span>
                         <span class="balance-unit">DIL</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Node Wallet Security Card (Dashboard) -->
+            <div class="card" id="dashboardWalletSecurity" style="margin-bottom: 16px; display: none;">
+                <div class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px; vertical-align: middle;">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0110 0v4"></path>
+                    </svg>
+                    Node Wallet Security
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span id="dashWalletLockIcon" style="font-size: 1.5rem;">🔓</span>
+                        <div>
+                            <div id="dashWalletLockStatus" style="font-weight: 600;">Unlocked</div>
+                            <div id="dashWalletLockHint" style="font-size: 0.8rem; color: var(--text-muted);">Wallet is ready for mining</div>
+                        </div>
+                    </div>
+                    <button id="dashLockBtn" class="btn btn-secondary" onclick="toggleNodeWalletLock()" style="padding: 8px 16px;">
+                        🔒 Lock Wallet
+                    </button>
+                </div>
+                <div id="dashUnlockForm" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                    <div style="display: flex; gap: 12px; align-items: flex-end;">
+                        <div style="flex: 1;">
+                            <label class="form-label" style="font-size: 0.85rem;">Password</label>
+                            <input type="password" id="dashUnlockPassword" class="form-input" placeholder="Enter wallet password">
+                        </div>
+                        <button class="btn btn-primary" onclick="unlockNodeWalletFromDash()">Unlock</button>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+                        ⚠️ Mining requires wallet to be unlocked for block signing
+                    </p>
                 </div>
             </div>
 
@@ -1218,7 +1253,7 @@ inline const std::string& GetWalletHTML() {
                         <p style="color: var(--text-secondary); margin-bottom: 16px;">
                             Write down these 24 words in order. This is the ONLY way to recover your wallet if you lose access.
                         </p>
-                        <div id="mnemonicDisplay" style="background: var(--bg-darker); padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; margin-bottom: 16px;">
+                        <div id="lightWalletMnemonicDisplay" style="background: var(--bg-darker); padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; margin-bottom: 16px;">
                         </div>
                         <div style="background: rgba(239, 68, 68, 0.1); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                             <strong style="color: #ef4444;">NEVER share these words with anyone!</strong>
@@ -1238,7 +1273,7 @@ inline const std::string& GetWalletHTML() {
                 </p>
                 <div class="form-group">
                     <label class="form-label">RPC Host</label>
-                    <input type="text" class="form-input" id="rpcHost" value="">
+                    <input type="text" class="form-input" id="rpcHost" value="127.0.0.1">
                 </div>
                 <div class="form-group">
                     <label class="form-label">RPC Port</label>
@@ -1246,12 +1281,12 @@ inline const std::string& GetWalletHTML() {
                     <small style="color: var(--text-muted); font-size: 0.75rem;">Mainnet: 8332, Testnet: 18332</small>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">RPC Username (optional)</label>
-                    <input type="text" class="form-input" id="rpcUser" placeholder="Leave empty if not configured">
+                    <label class="form-label">RPC Username</label>
+                    <input type="text" class="form-input" id="rpcUser" value="rpc" placeholder="Default: rpc">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">RPC Password (optional)</label>
-                    <input type="password" class="form-input" id="rpcPass" placeholder="Leave empty if not configured">
+                    <label class="form-label">RPC Password</label>
+                    <input type="password" class="form-input" id="rpcPass" value="rpc" placeholder="Default: rpc">
                 </div>
                 <button class="btn btn-primary" onclick="saveSettings()">Save & Connect</button>
             </div>
@@ -1366,10 +1401,10 @@ inline const std::string& GetWalletHTML() {
         // Wallet State
         let connected = false;
         let rpcConfig = {
-            host: window.location.hostname || '127.0.0.1',
-            port: parseInt(window.location.port) || 8332,  // Auto-detect from URL
-            user: '',
-            pass: ''
+            host: '127.0.0.1',
+            port: 8332,  // Mainnet RPC port (testnet: 18332)
+            user: 'rpc',
+            pass: 'rpc'
         };
 
         // Load saved settings
@@ -1378,13 +1413,15 @@ inline const std::string& GetWalletHTML() {
             if (saved) {
                 try {
                     rpcConfig = JSON.parse(saved);
+                    document.getElementById('rpcHost').value = rpcConfig.host;
+                    document.getElementById('rpcPort').value = rpcConfig.port;
+                    document.getElementById('rpcUser').value = rpcConfig.user || 'rpc';
+                    document.getElementById('rpcPass').value = rpcConfig.pass || 'rpc';
+                    // Ensure defaults are set even for old saved configs
+                    if (!rpcConfig.user) rpcConfig.user = 'rpc';
+                    if (!rpcConfig.pass) rpcConfig.pass = 'rpc';
                 } catch(e) {}
             }
-            // Always show current config in UI
-            document.getElementById('rpcHost').value = rpcConfig.host;
-            document.getElementById('rpcPort').value = rpcConfig.port;
-            document.getElementById('rpcUser').value = rpcConfig.user || '';
-            document.getElementById('rpcPass').value = rpcConfig.pass || '';
         }
 
         // Save settings
@@ -1398,8 +1435,42 @@ inline const std::string& GetWalletHTML() {
             connect();
         }
 
-        // RPC Call with timeout
+        // RPC call mutex to prevent parallel requests
+        let rpcMutex = Promise.resolve();
+        let consecutiveErrors = 0;
+        const MAX_CONSECUTIVE_ERRORS = 3;  // Only disconnect after 3 consecutive failures
+
+        // RPC Call with timeout and mutex
         async function rpcCall(method, params = []) {
+            // Wait for any pending RPC call to complete
+            const previousCall = rpcMutex;
+            let resolveThis;
+            rpcMutex = new Promise(r => resolveThis = r);
+            await previousCall;
+
+            try {
+                const result = await rpcCallInternal(method, params);
+                consecutiveErrors = 0;  // Reset on success
+                return result;
+            } catch (e) {
+                // Track consecutive errors
+                if (e.message && (e.message.includes('fetch') || e.message.includes('timed out'))) {
+                    consecutiveErrors++;
+                    console.warn('[RPC] Connection error count:', consecutiveErrors);
+                    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                        setConnectionStatus(false, 'Connection lost');
+                        consecutiveErrors = 0;  // Reset after disconnect
+                    }
+                }
+                throw e;
+            } finally {
+                // Small delay before allowing next call
+                setTimeout(resolveThis, 100);
+            }
+        }
+
+        // Internal RPC call implementation
+        async function rpcCallInternal(method, params = []) {
             const url = `http://${rpcConfig.host}:${rpcConfig.port}/`;
             const headers = {
                 'Content-Type': 'application/json',
@@ -1434,7 +1505,17 @@ inline const std::string& GetWalletHTML() {
 
                     const data = await response.json();
                     if (data.error) {
-                        throw new Error(data.error.message || 'RPC Error');
+                        console.error('[RPC] Error for', method, ':', JSON.stringify(data.error));
+                        // Handle different error formats
+                        let errMsg = 'RPC Error';
+                        if (typeof data.error === 'string') {
+                            errMsg = data.error;
+                        } else if (data.error.message) {
+                            errMsg = data.error.message;
+                        } else if (data.error.code) {
+                            errMsg = 'RPC Error (code: ' + data.error.code + ')';
+                        }
+                        throw new Error(errMsg);
                     }
                     return data.result;
                 } catch (e) {
@@ -1557,21 +1638,25 @@ inline const std::string& GetWalletHTML() {
         // Connect to node
         async function connect() {
             setConnectionStatus(false, 'Connecting...');
+            console.log('[Connect] Attempting connection to', rpcConfig.host + ':' + rpcConfig.port);
             try {
                 const info = await rpcCall('getblockchaininfo');
+                console.log('[Connect] Connection successful, chain:', info.chain);
                 setConnectionStatus(true, info.chain === 'testnet' ? 'Testnet' : 'Mainnet');
 
-                // Auto-set mining address from browser wallet (if unlocked)
-                await autoSetMiningAddress();
+                // Wait before making more requests - server needs time between connections
+                console.log('[Connect] Waiting 1 second before loading data...');
+                await new Promise(r => setTimeout(r, 1000));
 
-                await refreshAll();
-                // Check wallet security status after connection
-                await checkSecurityStatus();
-                // Update node wallet security UI in settings
-                await checkNodeWalletEncryption();
+                // MINIMAL initial load - just get balance
+                console.log('[Connect] Loading initial balance...');
+                await refreshBalance();
+                console.log('[Connect] Initial load complete');
+
             } catch(e) {
                 setConnectionStatus(false, 'Connection failed');
-                console.error('Connection error:', e);
+                console.error('[Connect] Connection failed:', e.message);
+                console.log('[Connect] Tried to connect to:', rpcConfig.host + ':' + rpcConfig.port);
             }
         }
 
@@ -1622,7 +1707,7 @@ inline const std::string& GetWalletHTML() {
         // Refresh all data (serialized to prevent connection overload)
         async function refreshAll() {
             if (!connected) return;
-            const wait = () => new Promise(r => setTimeout(r, 200));  // 200ms between function calls
+            const wait = () => new Promise(r => setTimeout(r, 300));  // 300ms between function calls
             try {
                 // Serialize requests with delays to prevent server socket issues
                 await refreshBalance();
@@ -1638,8 +1723,37 @@ inline const std::string& GetWalletHTML() {
         // Refresh balance
         async function refreshBalance() {
             try {
-                if (localWallet && localWallet.isWalletUnlocked()) {
-                    // Browser wallet unlocked: query per-address via connectionManager
+                const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
+
+                if (isFullNode && connected) {
+                    // FULL NODE MODE: Get balance directly from node's wallet via RPC
+                    console.log('[Balance] Calling getbalance RPC...');
+                    try {
+                        const nodeBalance = await rpcCall('getbalance');
+                        console.log('[Balance] Success:', nodeBalance);
+                        const mature = nodeBalance.balance || 0;
+                        const unconfirmed = nodeBalance.unconfirmed_balance || 0;
+                        const immature = nodeBalance.immature_balance || 0;
+                        const total = mature + unconfirmed + immature;
+
+                        document.getElementById('totalBalance').textContent = total.toFixed(8);
+                        document.getElementById('matureBalance').textContent = mature.toFixed(8);
+                        document.getElementById('immatureBalance').textContent = immature.toFixed(8);
+                        document.getElementById('availableForSend').textContent = mature.toFixed(8);
+                    } catch (e) {
+                        console.error('[Balance] RPC error:', e.message);
+                        // Connection loss is handled centrally in rpcCall()
+                    }
+                } else if (!isFullNode) {
+                    // LIGHT WALLET MODE: Use browser wallet addresses
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        document.getElementById('totalBalance').textContent = '0.00000000';
+                        document.getElementById('matureBalance').textContent = '0.00000000';
+                        document.getElementById('immatureBalance').textContent = '0.00000000';
+                        document.getElementById('availableForSend').textContent = '0.00000000';
+                        return;
+                    }
+
                     const addresses = await localWallet.getAddresses();
                     let confirmedBalance = 0;
                     let unconfirmedBalance = 0;
@@ -1657,23 +1771,14 @@ inline const std::string& GetWalletHTML() {
                     const total = confirmedBalance + unconfirmedBalance;
                     document.getElementById('totalBalance').textContent = total.toFixed(8);
                     document.getElementById('matureBalance').textContent = confirmedBalance.toFixed(8);
-                    document.getElementById('immatureBalance').textContent = unconfirmedBalance.toFixed(8);
+                    document.getElementById('immatureBalance').textContent = '0.00000000';
                     document.getElementById('availableForSend').textContent = confirmedBalance.toFixed(8);
                 } else {
-                    // Browser wallet not unlocked: fall back to server wallet via getbalance RPC
-                    try {
-                        const result = await rpcCall('getbalance', []);
-                        const balance = result.balance || 0;
-                        const immature = result.immature_balance || 0;
-                        const total = balance + immature;
-                        document.getElementById('totalBalance').textContent = total.toFixed(8);
-                        document.getElementById('matureBalance').textContent = balance.toFixed(8);
-                        document.getElementById('immatureBalance').textContent = immature.toFixed(8);
-                        document.getElementById('availableForSend').textContent = balance.toFixed(8);
-                    } catch (e) {
-                        // RPC error - keep last known balance displayed (don't zero out on temporary failures)
-                        console.warn('[Balance] RPC error, keeping last known balance:', e.message);
-                    }
+                    // Not connected
+                    document.getElementById('totalBalance').textContent = '0.00000000';
+                    document.getElementById('matureBalance').textContent = '0.00000000';
+                    document.getElementById('immatureBalance').textContent = '0.00000000';
+                    document.getElementById('availableForSend').textContent = '0.00000000';
                 }
             } catch(e) {
                 console.error('Balance error:', e);
@@ -1682,7 +1787,7 @@ inline const std::string& GetWalletHTML() {
 
         // Refresh blockchain info
         async function refreshBlockchainInfo() {
-            const wait = () => new Promise(r => setTimeout(r, 150));  // 150ms delay between calls
+            const wait = () => new Promise(r => setTimeout(r, 300));  // 300ms delay between calls
 
             // Check if we're in light wallet mode
             const isLightMode = connectionManager && connectionManager.getMode() === 'light';
@@ -1742,6 +1847,7 @@ inline const std::string& GetWalletHTML() {
                 }
             } catch(e) {
                 console.error('Blockchain info error:', e);
+                // Connection loss is handled centrally in rpcCall()
             }
         }
 
@@ -1908,27 +2014,55 @@ inline const std::string& GetWalletHTML() {
         let lastTransactions = null;  // Cache last successful transaction load
         let txLoadAttempts = 0;       // Track load attempts
         async function refreshTransactions() {
-            // Unified wallet: browser holds keys, so node doesn't have TX history for our addresses
-            // For MVP, show a helpful message. Later could track local TX history.
-            const browserWalletMessage = `
-                <div class="empty-state" style="text-align: center; padding: 24px;">
-                    <div style="font-size: 2rem; margin-bottom: 12px;">🔐</div>
-                    <div style="font-weight: 600; margin-bottom: 8px;">Browser Wallet</div>
-                    <div style="color: var(--text-muted); font-size: 0.9rem;">
-                        Your keys are stored securely in your browser.<br>
-                        Use a block explorer to view transaction history.
-                    </div>
-                </div>
-            `;
-            document.getElementById('recentTxList').innerHTML = browserWalletMessage;
-            const txListEl = document.getElementById('txList');
-            if (txListEl) {
-                txListEl.innerHTML = browserWalletMessage;
-            }
+            const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
 
-            // Mining stats not tracked for browser wallet
-            const blocksFoundEl = document.getElementById('blocksFound');
-            if (blocksFoundEl) blocksFoundEl.textContent = 'N/A';
+            if (isFullNode && connected) {
+                // FULL NODE MODE: Get transactions directly from node's wallet via RPC
+                try {
+                    const result = await rpcCall('listtransactions', {count: 50});
+                    const transactions = result.transactions || [];
+
+                    if (transactions.length > 0) {
+                        renderTransactions(transactions);
+
+                        // Count mining rewards (blocks found)
+                        const miningTxs = transactions.filter(tx =>
+                            tx.category === 'generate' || tx.category === 'immature'
+                        );
+                        const blocksFoundEl = document.getElementById('blocksFound');
+                        if (blocksFoundEl) blocksFoundEl.textContent = miningTxs.length.toString();
+                    } else {
+                        const emptyHtml = '<div class="empty-state">No transactions yet</div>';
+                        document.getElementById('recentTxList').innerHTML = emptyHtml;
+                        const txListEl = document.getElementById('txList');
+                        if (txListEl) txListEl.innerHTML = emptyHtml;
+
+                        const blocksFoundEl = document.getElementById('blocksFound');
+                        if (blocksFoundEl) blocksFoundEl.textContent = '0';
+                    }
+                } catch (e) {
+                    console.error('[Transactions] RPC error:', e.message);
+                    // Connection loss is handled centrally in rpcCall()
+                }
+            } else if (!isFullNode) {
+                // LIGHT WALLET MODE: Show message (no TX history in browser)
+                const browserWalletMessage = `
+                    <div class="empty-state" style="text-align: center; padding: 24px;">
+                        <div style="font-size: 2rem; margin-bottom: 12px;">🔐</div>
+                        <div style="font-weight: 600; margin-bottom: 8px;">Light Wallet Mode</div>
+                        <div style="color: var(--text-muted); font-size: 0.9rem;">
+                            Your keys are stored securely in your browser.<br>
+                            Use a block explorer to view transaction history.
+                        </div>
+                    </div>
+                `;
+                document.getElementById('recentTxList').innerHTML = browserWalletMessage;
+                const txListEl = document.getElementById('txList');
+                if (txListEl) txListEl.innerHTML = browserWalletMessage;
+
+                const blocksFoundEl = document.getElementById('blocksFound');
+                if (blocksFoundEl) blocksFoundEl.textContent = 'N/A';
+            }
         }
 
         // Format timestamp for display - shows both relative and absolute time
@@ -2071,22 +2205,45 @@ inline const std::string& GetWalletHTML() {
         // Get receive address
         async function refreshReceiveAddress() {
             try {
-                // Always use browser wallet for addresses (unified wallet architecture)
-                if (!localWallet || !localWallet.isWalletUnlocked()) {
-                    document.getElementById('receiveAddress').textContent = 'Unlock wallet to see address (Settings → Wallet Setup)';
-                    return;
-                }
-
-                // Get addresses from browser wallet
-                let addresses = await localWallet.getAddresses();
+                const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
                 let address;
 
-                // If no addresses exist, generate one
-                if (addresses.length === 0) {
-                    address = await localWallet.getNewAddress(0);  // Account 0
+                if (isFullNode && connected) {
+                    // FULL NODE MODE: Get address directly from node's wallet via RPC
+                    console.log('[Receive] Full node mode, calling getaddresses RPC');
+                    try {
+                        const addresses = await rpcCall('getaddresses');
+                        if (addresses && addresses.length > 0) {
+                            address = addresses[0];
+                        } else {
+                            // No addresses yet, generate one
+                            address = await rpcCall('getnewaddress');
+                        }
+                    } catch (e) {
+                        console.error('[Receive] RPC error:', e.message);
+                        // Display error (connection loss is handled centrally in rpcCall)
+                        document.getElementById('receiveAddress').textContent = 'Error: ' + e.message;
+                        return;
+                    }
+                } else if (isFullNode && !connected) {
+                    // Full node mode but not connected
+                    document.getElementById('receiveAddress').textContent = 'Connect to node first (click Reconnect below)';
+                    return;
+                } else if (!isFullNode) {
+                    // LIGHT WALLET MODE: Use browser wallet
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        document.getElementById('receiveAddress').textContent = 'Unlock browser wallet (Settings → Wallet Setup)';
+                        return;
+                    }
+                    let addresses = await localWallet.getAddresses();
+                    if (addresses.length === 0) {
+                        address = await localWallet.getNewAddress(0);
+                    } else {
+                        address = addresses[0].address;
+                    }
                 } else {
-                    // Use the first address (could enhance to show multiple)
-                    address = addresses[0].address;
+                    document.getElementById('receiveAddress').textContent = 'Connect to node to see address';
+                    return;
                 }
 
                 document.getElementById('receiveAddress').textContent = address;
@@ -2146,15 +2303,27 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        // Generate new address (always uses browser wallet)
+        // Generate new address
         async function generateNewAddress() {
-            if (!localWallet || !localWallet.isWalletUnlocked()) {
-                showNotification('Please unlock your wallet first (Settings → Wallet Setup)', 'error');
-                return;
-            }
+            const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
+            let newAddress;
 
             try {
-                const newAddress = await localWallet.getNewAddress(0);  // Account 0
+                if (isFullNode && connected) {
+                    // FULL NODE MODE: Generate address via node's wallet RPC
+                    newAddress = await rpcCall('getnewaddress');
+                } else if (!isFullNode) {
+                    // LIGHT WALLET MODE: Generate in browser wallet
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        showNotification('Please unlock your browser wallet first (Settings → Wallet Setup)', 'error');
+                        return;
+                    }
+                    newAddress = await localWallet.getNewAddress(0);
+                } else {
+                    showNotification('Connect to node first', 'error');
+                    return;
+                }
+
                 document.getElementById('receiveAddress').textContent = newAddress;
 
                 // Generate QR code
@@ -2215,16 +2384,41 @@ inline const std::string& GetWalletHTML() {
             }
 
             try {
-                // First unlock wallet if password provided
-                if (password) {
+                // First check if this is an HD wallet
+                const hdInfo = await rpcCall('gethdwalletinfo');
+                console.log('[Mnemonic] HD wallet info:', hdInfo);
+                if (!hdInfo || hdInfo.hdwallet === false) {
+                    throw new Error('This wallet was not created as an HD wallet. No recovery phrase is available. Your wallet uses randomly generated keys - make sure to keep a backup of your wallet.dat file instead.');
+                }
+
+                // Check wallet encryption status
+                const walletInfo = await rpcCall('getwalletinfo');
+                console.log('[Mnemonic] Wallet info:', walletInfo);
+                const isEncrypted = walletInfo && walletInfo.encrypted;
+
+                // If encrypted, always try to unlock with provided password
+                // (the wallet may report locked:false but still need re-unlocking)
+                if (isEncrypted) {
+                    if (!password) {
+                        throw new Error('Wallet is encrypted. Please enter your password to export the recovery phrase.');
+                    }
+                    // Try to unlock (or re-unlock to ensure fresh unlock state)
                     try {
                         await rpcCall('walletpassphrase', {passphrase: password, timeout: 60});
+                        console.log('[Mnemonic] Wallet unlocked successfully');
                     } catch(e) {
-                        // Wallet might not be encrypted, continue anyway
+                        console.error('[Mnemonic] Wallet unlock failed:', e.message);
+                        // Check if it's a password error vs other error
+                        if (e.message.includes('passphrase') || e.message.includes('incorrect')) {
+                            throw new Error('Incorrect password. Please try again.');
+                        }
+                        // Otherwise continue - maybe wallet doesn't need unlocking
+                        console.log('[Mnemonic] Continuing despite unlock error');
                     }
                 }
 
-                const result = await rpcCall('exportmnemonic', {});
+                const result = await rpcCall('exportmnemonic');
+                console.log('[Mnemonic] Export result:', result ? 'success' : 'null');
 
                 if (result && result.mnemonic) {
                     const words = result.mnemonic.split(' ');
@@ -2248,7 +2442,16 @@ inline const std::string& GetWalletHTML() {
                     throw new Error('No mnemonic returned. This wallet may not be an HD wallet.');
                 }
             } catch(e) {
-                alertDiv.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+                console.error('[Mnemonic] Export error:', e);
+                let errorMsg = e.message;
+
+                // Provide clearer error messages for common issues
+                if (errorMsg.includes('Failed to export mnemonic') || errorMsg.includes('wallet may be locked')) {
+                    // If we already unlocked successfully, this likely means mnemonic wasn't stored
+                    errorMsg = 'Unable to export recovery phrase. This wallet may have been created before HD wallet support, or the recovery phrase was not saved during wallet creation. Please backup your wallet.dat file instead.';
+                }
+
+                alertDiv.innerHTML = `<div class="alert alert-error">${errorMsg}</div>`;
             }
         }
 
@@ -2356,6 +2559,9 @@ inline const std::string& GetWalletHTML() {
         }
 
         // Handle send
+        // Pending send data for confirmation flow
+        let pendingSend = null;
+
         async function handleSend(event) {
             event.preventDefault();
             const toAddress = document.getElementById('sendAddress').value;
@@ -2369,60 +2575,128 @@ inline const std::string& GetWalletHTML() {
             }
 
             sendBtn.disabled = true;
-            sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Sending...';
+            sendBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; margin: 0;"></div> Estimating fee...';
+
+            const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
 
             try {
-                // Always use browser wallet for sending (unified wallet architecture)
-                if (!localWallet || !localWallet.isWalletUnlocked()) {
-                    throw new Error('Please unlock your wallet first (Settings → Wallet Setup)');
-                }
-                if (!txBuilder) {
-                    throw new Error('Transaction builder not initialized');
-                }
+                if (isFullNode && connected) {
+                    // FULL NODE MODE: Estimate fee first, then show confirmation
+                    const estimate = await rpcCall('estimatesendfee', {address: toAddress, amount: amount});
+                    pendingSend = { address: toAddress, amount: amount, fee: estimate.fee, total: estimate.total };
 
-                // Get addresses from browser wallet
-                const addresses = await localWallet.getAddresses();
-                if (addresses.length === 0) {
-                    throw new Error('No addresses in wallet. Generate an address first.');
-                }
-
-                // Find an address with sufficient balance
-                let fromAddress = null;
-                let totalBalance = 0;
-                for (const addr of addresses) {
-                    const balanceInfo = await connectionManager.getBalance(addr.address);
-                    const balance = (balanceInfo.confirmed || 0) / 100000000;
-                    totalBalance += balance;
-                    if (balance >= amount && !fromAddress) {
-                        fromAddress = addr.address;
+                    alertDiv.innerHTML = `
+                        <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 16px;">
+                            <div style="font-weight: 600; margin-bottom: 12px; font-size: 0.95rem;">Confirm Transaction</div>
+                            <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 4px 0; color: var(--text-muted);">To</td>
+                                    <td style="padding: 4px 0; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">${toAddress.substring(0, 12)}...${toAddress.substring(toAddress.length - 6)}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 4px 0; color: var(--text-muted);">Amount</td>
+                                    <td style="padding: 4px 0; text-align: right; font-weight: 600;">${amount.toFixed(8)} DIL</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 4px 0; color: var(--text-muted);">Network Fee</td>
+                                    <td style="padding: 4px 0; text-align: right;">${estimate.fee.toFixed(8)} DIL</td>
+                                </tr>
+                                <tr style="border-top: 1px solid var(--border);">
+                                    <td style="padding: 8px 0 4px; font-weight: 600;">Total</td>
+                                    <td style="padding: 8px 0 4px; text-align: right; font-weight: 600; color: var(--primary);">${estimate.total.toFixed(8)} DIL</td>
+                                </tr>
+                            </table>
+                            <div style="display: flex; gap: 8px; margin-top: 12px;">
+                                <button class="btn btn-primary" onclick="confirmSend()" style="flex: 1;">Confirm & Send</button>
+                                <button class="btn" onclick="cancelSend()" style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border);">Cancel</button>
+                            </div>
+                        </div>
+                    `;
+                    sendBtn.disabled = false;
+                    sendBtn.style.display = 'none';
+                    return;
+                } else if (!isFullNode) {
+                    // LIGHT WALLET MODE: Use browser wallet + transaction builder
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        throw new Error('Please unlock your browser wallet first (Settings → Wallet Setup)');
                     }
+                    if (!txBuilder) {
+                        throw new Error('Transaction builder not initialized');
+                    }
+
+                    const addresses = await localWallet.getAddresses();
+                    if (addresses.length === 0) {
+                        throw new Error('No addresses in wallet. Generate an address first.');
+                    }
+
+                    let fromAddress = null;
+                    let totalBalance = 0;
+                    for (const addr of addresses) {
+                        const balanceInfo = await connectionManager.getBalance(addr.address);
+                        const balance = (balanceInfo.confirmed || 0) / 100000000;
+                        totalBalance += balance;
+                        if (balance >= amount && !fromAddress) {
+                            fromAddress = addr.address;
+                        }
+                    }
+
+                    if (!fromAddress) {
+                        throw new Error(`Insufficient balance. You have ${totalBalance.toFixed(8)} DIL but need ${amount} DIL`);
+                    }
+
+                    const result = await txBuilder.send(fromAddress, toAddress, amount);
+                    showSendSuccess(result.txid);
+                } else {
+                    throw new Error('Connect to node first');
                 }
-
-                if (!fromAddress) {
-                    throw new Error(`Insufficient balance. You have ${totalBalance.toFixed(8)} DIL but need ${amount} DIL`);
-                }
-
-                // Send using transaction builder (signs locally, broadcasts via node/seed)
-                const result = await txBuilder.send(fromAddress, toAddress, amount);
-                alertDiv.innerHTML = `
-                    <div class="alert alert-success">
-                        Transaction sent successfully!<br>
-                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
-                            TXID: ${result.txid}
-                        </span>
-                        <br><small>Fee: ${result.fee.toFixed(8)} DIL</small>
-                    </div>
-                `;
-
-                document.getElementById('sendAddress').value = '';
-                document.getElementById('sendAmount').value = '';
-                await refreshBalance();
-                await refreshTransactions();
             } catch(e) {
                 alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
             }
 
+            resetSendButton();
+        }
+
+        async function confirmSend() {
+            if (!pendingSend) return;
+            const alertDiv = document.getElementById('sendAlert');
+            alertDiv.innerHTML = '<div style="text-align: center; padding: 16px;"><div class="spinner" style="width: 20px; height: 20px; margin: 0 auto;"></div><div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">Sending transaction...</div></div>';
+
+            try {
+                const txid = await rpcCall('sendtoaddress', {address: pendingSend.address, amount: pendingSend.amount});
+                showSendSuccess(typeof txid === 'object' ? txid.txid : txid);
+            } catch(e) {
+                alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
+            }
+            pendingSend = null;
+            resetSendButton();
+        }
+
+        function cancelSend() {
+            pendingSend = null;
+            document.getElementById('sendAlert').innerHTML = '';
+            resetSendButton();
+        }
+
+        function showSendSuccess(txid) {
+            const alertDiv = document.getElementById('sendAlert');
+            alertDiv.innerHTML = `
+                <div class="alert alert-success">
+                    Transaction sent successfully!<br>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                        TXID: ${txid}
+                    </span>
+                </div>
+            `;
+            document.getElementById('sendAddress').value = '';
+            document.getElementById('sendAmount').value = '';
+            refreshBalance();
+            refreshTransactions();
+        }
+
+        function resetSendButton() {
+            const sendBtn = document.getElementById('sendBtn');
             sendBtn.disabled = false;
+            sendBtn.style.display = '';
             sendBtn.innerHTML = `
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -2595,6 +2869,7 @@ inline const std::string& GetWalletHTML() {
             }
             if (pageName === 'settings') {
                 checkSecurityStatus();
+                checkNodeWalletEncryption();
             }
         }
 
@@ -2784,7 +3059,7 @@ inline const std::string& GetWalletHTML() {
                 document.getElementById('showMnemonicForm').style.display = 'block';
 
                 // Display mnemonic words
-                const display = document.getElementById('mnemonicDisplay');
+                const display = document.getElementById('lightWalletMnemonicDisplay');
                 display.innerHTML = result.mnemonic.map((word, i) =>
                     `<span style="display: inline-block; background: var(--bg-card); padding: 4px 8px; margin: 4px; border-radius: 4px;">${i + 1}. ${word}</span>`
                 ).join('');
@@ -2894,6 +3169,8 @@ inline const std::string& GetWalletHTML() {
             const mode = connectionManager ? connectionManager.getMode() : 'full';
             const card = document.getElementById('nodeWalletSecurityCard');
 
+            console.log('[Wallet] checkNodeWalletEncryption - mode:', mode, 'connected:', connected);
+
             if (mode !== 'full' || !connected) {
                 card.style.display = 'none';
                 return;
@@ -2904,18 +3181,23 @@ inline const std::string& GetWalletHTML() {
             try {
                 // Try to get wallet info to check if encrypted
                 const walletInfo = await rpcCall('getwalletinfo');
-                const isEncrypted = walletInfo.encrypted === true;
+                console.log('[Wallet] getwalletinfo response:', JSON.stringify(walletInfo));
+
+                // Handle both boolean and string responses
+                const isEncrypted = walletInfo.encrypted === true || walletInfo.encrypted === 'true';
+                console.log('[Wallet] isEncrypted:', isEncrypted);
 
                 document.getElementById('nodeWalletNotEncrypted').style.display = isEncrypted ? 'none' : 'block';
                 document.getElementById('nodeWalletEncrypted').style.display = isEncrypted ? 'block' : 'none';
 
                 if (isEncrypted) {
                     const lockStatus = document.getElementById('nodeWalletLockStatus');
-                    lockStatus.textContent = walletInfo.unlocked_until > 0 ? 'Unlocked' : 'Locked';
+                    const isUnlocked = walletInfo.unlocked_until > 0 || walletInfo.locked === false;
+                    lockStatus.textContent = isUnlocked ? 'Unlocked' : 'Locked';
                 }
             } catch (e) {
-                // If getwalletinfo fails, assume not encrypted
-                console.log('[Wallet] Could not check encryption status:', e.message);
+                // If getwalletinfo fails, show error state instead of assuming not encrypted
+                console.error('[Wallet] Failed to check encryption status:', e.message);
                 document.getElementById('nodeWalletNotEncrypted').style.display = 'block';
                 document.getElementById('nodeWalletEncrypted').style.display = 'none';
             }
@@ -2988,6 +3270,107 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
+        // ============================================================
+        // Dashboard Wallet Lock/Unlock Functions
+        // ============================================================
+
+        // Track node wallet lock state
+        let nodeWalletLocked = true;
+        let nodeWalletEncrypted = false;
+
+        // Update dashboard wallet security card
+        async function updateDashboardWalletSecurity() {
+            const card = document.getElementById('dashboardWalletSecurity');
+            const mode = connectionManager ? connectionManager.getMode() : 'full';
+
+            // Only show in full node mode when wallet is encrypted
+            if (mode !== 'full' || !connected) {
+                card.style.display = 'none';
+                return;
+            }
+
+            try {
+                const walletInfo = await rpcCall('getwalletinfo');
+                nodeWalletEncrypted = walletInfo.encrypted === true;
+                nodeWalletLocked = walletInfo.locked === true || walletInfo.unlocked_until === 0;
+
+                if (!nodeWalletEncrypted) {
+                    card.style.display = 'none';
+                    return;
+                }
+
+                card.style.display = 'block';
+
+                const icon = document.getElementById('dashWalletLockIcon');
+                const status = document.getElementById('dashWalletLockStatus');
+                const hint = document.getElementById('dashWalletLockHint');
+                const btn = document.getElementById('dashLockBtn');
+                const unlockForm = document.getElementById('dashUnlockForm');
+
+                if (nodeWalletLocked) {
+                    icon.textContent = '🔒';
+                    status.textContent = 'Locked';
+                    status.style.color = '#22c55e';
+                    hint.textContent = 'Wallet is secure but mining cannot sign blocks';
+                    btn.innerHTML = '🔓 Unlock';
+                    btn.style.display = 'none';
+                    unlockForm.style.display = 'block';
+                } else {
+                    icon.textContent = '🔓';
+                    status.textContent = 'Unlocked';
+                    status.style.color = '#f59e0b';
+                    hint.textContent = 'Wallet is ready for mining';
+                    btn.innerHTML = '🔒 Lock Wallet';
+                    btn.style.display = 'block';
+                    unlockForm.style.display = 'none';
+                }
+            } catch (e) {
+                console.error('[Wallet] Dashboard security update failed:', e.message);
+                card.style.display = 'none';
+            }
+        }
+
+        // Toggle node wallet lock from dashboard
+        async function toggleNodeWalletLock() {
+            if (nodeWalletLocked) {
+                // Show unlock form
+                document.getElementById('dashUnlockForm').style.display = 'block';
+                document.getElementById('dashLockBtn').style.display = 'none';
+            } else {
+                // Lock the wallet
+                try {
+                    await rpcCall('walletlock');
+                    showNotification('Wallet locked. Mining will not be able to sign blocks.', 'warning');
+                    await updateDashboardWalletSecurity();
+                    await checkNodeWalletEncryption();
+                } catch (e) {
+                    showNotification('Failed to lock wallet: ' + e.message, 'error');
+                }
+            }
+        }
+
+        // Unlock node wallet from dashboard
+        async function unlockNodeWalletFromDash() {
+            const password = document.getElementById('dashUnlockPassword').value;
+
+            if (!password) {
+                showNotification('Please enter your password', 'error');
+                return;
+            }
+
+            try {
+                // Unlock for a long time (1 year in seconds) for mining
+                await rpcCall('walletpassphrase', {passphrase: password, timeout: 31536000});
+
+                document.getElementById('dashUnlockPassword').value = '';
+                showNotification('Wallet unlocked. Ready for mining!', 'success');
+                await updateDashboardWalletSecurity();
+                await checkNodeWalletEncryption();
+            } catch (e) {
+                showNotification('Failed to unlock: ' + e.message, 'error');
+            }
+        }
+
         // Initialize
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', () => {
@@ -3007,48 +3390,23 @@ inline const std::string& GetWalletHTML() {
 
         // BUG #115 FIX: Auto-refresh with serialized requests to prevent connection overload
         let refreshInProgress = false;
-        let reconnectAttempts = 0;
-        const MAX_RECONNECT_ATTEMPTS = 3;
-        const wait200 = () => new Promise(r => setTimeout(r, 200));
+        const wait300 = () => new Promise(r => setTimeout(r, 300));
 
         setInterval(async () => {
-            if (refreshInProgress) return;
-
-            // Auto-reconnect if disconnected
-            if (!connected) {
-                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                    reconnectAttempts++;
-                    console.log('[Wallet] Auto-reconnect attempt', reconnectAttempts);
-                    try {
-                        await connect();
-                        reconnectAttempts = 0;  // Reset on success
-                    } catch (e) {
-                        console.warn('[Wallet] Auto-reconnect failed:', e.message);
-                    }
-                }
-                return;
-            }
-
-            refreshInProgress = true;
-            try {
-                // Serialize requests with 200ms delays to prevent server socket issues
-                await refreshBalance();
-                await wait200();
-                await refreshBlockchainInfo();
-                await wait200();
-                await refreshTransactions();
-                reconnectAttempts = 0;  // Reset on successful refresh
-            } catch (e) {
-                console.warn('[Wallet] Refresh cycle error:', e.message);
-                // Check if connection is actually down
+            if (connected && !refreshInProgress) {
+                refreshInProgress = true;
                 try {
-                    await rpcCall('getblockchaininfo');
-                } catch (e2) {
-                    console.warn('[Wallet] Connection lost, will auto-reconnect');
-                    setConnectionStatus(false, 'Connection lost');
+                    // Serialize requests with 300ms delays to prevent server socket issues
+                    await refreshBalance();
+                    await wait300();
+                    await refreshBlockchainInfo();
+                    await wait300();
+                    await refreshTransactions();
+                } catch (e) {
+                    console.warn('[Wallet] Refresh cycle error:', e.message);
+                } finally {
+                    refreshInProgress = false;
                 }
-            } finally {
-                refreshInProgress = false;
             }
         }, 10000);  // Refresh every 10 seconds
     </script>
