@@ -1301,6 +1301,10 @@ bool CIbdCoordinator::FetchBlocks() {
                         }
                     }
                 }
+                // Mark as completed so GetNextBlocksToRequest skips past this height
+                if (g_node_context.block_tracker) {
+                    g_node_context.block_tracker->MarkCompleted(h);
+                }
                 already_have_count++;
                 continue;
             }

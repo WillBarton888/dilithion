@@ -230,11 +230,11 @@ public:
     }
 
     /**
-     * @brief Check if a height is being tracked
+     * @brief Check if a height is being tracked (in-flight or completed)
      */
     bool IsTracked(int height) const {
         std::lock_guard<std::mutex> lock(m_mutex);
-        return m_heights.count(height) > 0;
+        return m_heights.count(height) > 0 || m_completed_heights.count(height) > 0;
     }
 
     /**
@@ -332,6 +332,17 @@ public:
     }
 
     /**
+     * @brief Mark a height as completed (already in DB, no need to request)
+     *
+     * Used during fork recovery when blocks are found already in the DB.
+     * Prevents GetNextBlocksToRequest from returning these heights again.
+     */
+    void MarkCompleted(int height) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_completed_heights.insert(height);
+    }
+
+    /**
      * @brief Clear all tracking (for reset/reinit)
      */
     void Clear() {
@@ -339,6 +350,7 @@ public:
         m_heights.clear();
         m_hash_to_height.clear();
         m_peer_heights.clear();
+        m_completed_heights.clear();
     }
 
     /**
@@ -380,11 +392,23 @@ public:
             }
         }
 
+        // Also clear completed heights above fork_point
+        for (auto it = m_completed_heights.begin(); it != m_completed_heights.end();) {
+            if (*it > fork_point) {
+                it = m_completed_heights.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
         return heights_to_remove.size();
     }
 
 private:
     mutable std::mutex m_mutex;
+
+    // Heights that are already in DB (no need to request)
+    std::set<int> m_completed_heights;
 
     // Per-height state
     struct BlockInfo {
