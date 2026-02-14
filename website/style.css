@@ -10,7 +10,7 @@
     --accent-color: #06b6d4;       /* Cyan */
     --bg-dark: #0f172a;            /* Dark blue-gray */
     --bg-darker: #020617;
-    --bg-card: #1e293b;
+    --bg-card: #061229;
     --text-primary: #f1f5f9;
     --text-secondary: #94a3b8;
     --text-muted: #64748b;
@@ -18,6 +18,7 @@
     --success-color: #22c55e;
     --warning-color: #f59e0b;
     --error-color: #ef4444;
+    --bg-secondary: var(--bg-card);
 }
 
 /* Reset & Base Styles */
@@ -40,6 +41,31 @@ body {
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     width: 100%;
     max-width: 100vw;
+    /* Circuit board background - swap between bg-circuit-vertical.png and bg-circuit-horizontal.png */
+    background-image: url('bg-circuit-vertical.png');
+    background-size: cover;
+    background-attachment: fixed;
+    background-position: center top;
+    background-repeat: no-repeat;
+}
+
+/* Dark overlay so text remains readable over the background image */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(2, 6, 23, 0.50);
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* Ensure all direct children of body sit above the overlay */
+body > * {
+    position: relative;
+    z-index: 1;
 }
 
 .container {
@@ -113,13 +139,13 @@ a:hover {
 }
 
 .btn-download {
-    background: #0a1929;
+    background: var(--bg-card);
     color: white;
     border: 1px solid white;
 }
 
 .btn-download:hover {
-    background: #1e3a8a;
+    background: #0d2050;
     border-color: white;
     color: white;
 }
@@ -198,7 +224,7 @@ a:hover {
 /* Hero Section */
 .hero {
     padding: 160px 0 100px;
-    background: linear-gradient(180deg, var(--bg-darker) 0%, var(--bg-dark) 100%);
+    background: linear-gradient(180deg, rgba(2, 6, 23, 0.6) 0%, rgba(15, 23, 42, 0.75) 100%);
     position: relative;
     overflow: hidden;
 }
@@ -378,10 +404,15 @@ a:hover {
     margin-top: 40px;
 }
 
+/* All sections - semi-transparent so circuit background shows through */
+.mainnet-info {
+    background: rgba(15, 23, 42, 0.5) !important;
+}
+
 /* Features Section */
 .features {
     padding: 100px 0;
-    background: var(--bg-dark);
+    background: rgba(15, 23, 42, 0.5);
 }
 
 .section-title {
@@ -433,7 +464,7 @@ a:hover {
 /* Dashboard Section */
 .dashboard {
     padding: 100px 0;
-    background: var(--bg-darker);
+    background: rgba(2, 6, 23, 0.5);
 }
 
 .dashboard-status {
@@ -503,7 +534,7 @@ a:hover {
 /* Getting Started Section */
 .getting-started {
     padding: 100px 0;
-    background: var(--bg-dark);
+    background: rgba(15, 23, 42, 0.5);
 }
 
 .guide-container {
@@ -598,7 +629,7 @@ a:hover {
 /* Downloads Section */
 .downloads {
     padding: 100px 0;
-    background: var(--bg-darker);
+    background: rgba(2, 6, 23, 0.5);
 }
 
 .section-subtitle {
@@ -677,7 +708,7 @@ a:hover {
 /* Specifications Section */
 .specifications {
     padding: 100px 0;
-    background: var(--bg-dark);
+    background: rgba(15, 23, 42, 0.5);
 }
 
 .specs-grid {
@@ -716,7 +747,7 @@ a:hover {
 /* FAQ Section */
 .faq-section {
     padding: 100px 0;
-    background: var(--bg-darker);
+    background: rgba(2, 6, 23, 0.5);
 }
 
 .faq-container {
@@ -823,7 +854,7 @@ a:hover {
 /* Newsletter Section */
 .newsletter-section {
     padding: 100px 0;
-    background: linear-gradient(135deg, var(--bg-dark), var(--bg-darker));
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.5), rgba(2, 6, 23, 0.5));
     position: relative;
     overflow: hidden;
 }
@@ -935,7 +966,7 @@ a:hover {
 
 /* Footer */
 .footer {
-    background: var(--bg-darker);
+    background: rgba(2, 6, 23, 0.5);
     border-top: 1px solid var(--border-color);
     padding: 80px 0 32px;
 }
@@ -1376,7 +1407,7 @@ a:hover {
 /* Warning Badge for Experimental Status */
 .warning-badge {
     display: inline-block;
-    background: #1e3a8a;
+    background: var(--bg-card);
     border: 2px solid white;
     color: white;
     padding: 12px 24px;
@@ -1400,10 +1431,10 @@ a:hover {
 /* Mainnet Banner Pulse Animation */
 @keyframes pulse-glow {
     0%, 100% {
-        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+        box-shadow: 0 0 0 0 rgba(30, 58, 95, 0.5);
     }
     50% {
-        box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+        box-shadow: 0 0 0 8px rgba(30, 58, 95, 0);
     }
 }
 

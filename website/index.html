@@ -27,7 +27,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css?v=3">
+    <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
     <!-- SVG Icon Library -->
@@ -236,19 +236,19 @@
                 </div>
 
                 <!-- Mainnet Live Banner -->
-                <div class="mainnet-banner" style="background: linear-gradient(135deg, #22c55e, #16a34a); padding: 16px 24px; text-align: center; border-radius: 12px; margin: 32px 0 24px 0; animation: pulse-glow 2s infinite;">
+                <div class="mainnet-banner" style="background: #061229; padding: 16px 24px; text-align: center; border-radius: 12px; margin: 32px 0 24px 0; border: 1px solid var(--border-color); animation: pulse-glow 2s infinite;">
                     <h2 style="margin: 0; font-size: 1.5rem; color: white;"><svg class="inline-icon"><use href="#icon-rocket"/></svg> MAINNET IS NOW LIVE!</h2>
                     <p style="margin: 8px 0 0 0; font-size: 1.1rem; color: white;">Fair launch • No premine • CPU mining • Real DIL coins with value</p>
-                    <a href="#downloads" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #16a34a;">Download & Start Mining →</a>
+                    <a href="#downloads" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #061229;">Download & Start Mining →</a>
                 </div>
 
-                <p class="info-badge" style="background: rgba(34, 197, 94, 0.1); border: 1px solid #22c55e; color: #22c55e; padding: 10px 16px; border-radius: 8px; font-size: 0.9rem;"><svg class="inline-icon"><use href="#icon-check"/></svg> MAINNET LIVE - Real coins with value - Mine DIL today - AI-Assisted Development</p>
+                <p class="info-badge" style="background: #061229; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 10px 16px; border-radius: 8px; font-size: 0.9rem;"><svg class="inline-icon"><use href="#icon-code"/></svg> AI-Assisted Development using Claude Code</p>
 
                 <!-- Mainnet is LIVE - countdown removed -->
 
                 <div class="hero-actions">
-                    <a href="#downloads" class="btn btn-primary">Download & Start Mining</a>
                     <a href="https://github.com/WillBarton888/dilithion" target="_blank" class="btn btn-secondary">View on GitHub</a>
+                    <a href="https://discord.gg/DS3gjmsFEJ" target="_blank" class="btn btn-secondary">Join us on Discord</a>
                 </div>
             </div>
         </div>
@@ -279,14 +279,14 @@
                     </div>
                 </div>
 
-                <div class="feature-card" style="background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(6, 182, 212, 0.1)); border: 1px solid rgba(34, 211, 238, 0.3);">
+                <div class="feature-card">
                     <div class="feature-icon">💳</div>
-                    <h3>CLI Wallet</h3>
-                    <p>Easy command-line wallet tools now available! Check balance, send transactions, generate addresses:</p>
+                    <h3>HD Wallet</h3>
+                    <p>Full hierarchical deterministic wallet with BIP39 seed phrases, BIP44 key derivation, and encrypted storage:</p>
                     <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px; font-size: 0.85rem;">
                         <code>./dilithion-wallet balance<br>./dilithion-wallet send</code>
                     </div>
-                    <a href="https://github.com/WillBarton888/dilithion/blob/main/CLI-WALLET-GUIDE.md" target="_blank" class="btn btn-small">Wallet Guide</a>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/docs/HD_WALLET_USER_GUIDE.md" target="_blank" class="btn btn-small">Wallet Guide</a>
                 </div>
 
                 <div class="feature-card">
@@ -304,7 +304,7 @@
                 </div>
             </div>
 
-            <div class="tips-box" style="margin-top: 60px; background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.1)); border-left: 4px solid #22c55e;">
+            <div class="tips-box" style="margin-top: 60px; border-left: 4px solid #1e3a5f;">
                 <h3><svg class="inline-icon"><use href="#icon-globe"/></svg> Official Mainnet Seed Nodes</h3>
                 <p style="color: var(--text-secondary); margin-bottom: 16px;">Connect to our global network of 24/7 seed nodes for optimal network connectivity:</p>
                 <ul>
@@ -365,7 +365,7 @@
                     <h3>Decentralized</h3>
                     <p>Fully peer-to-peer network. No central authority, no master nodes, no staking. Pure proof-of-work.</p>
                 </div>
-                <div class="feature-card" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(99, 102, 241, 0.3);">
+                <div class="feature-card">
                     <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-code"/></svg></div>
                     <h3>Sustainable Development</h3>
                     <p>1% development fund + 1% developer rewards (mainnet only). Miners keep 98% of block rewards.</p>
@@ -521,7 +521,7 @@
                         <h3>Extract the Package</h3>
                         <p>Unzip (Windows) or extract the .tar.gz (Linux/Mac) to a folder on your computer.</p>
                         <div class="code-block">
-                            <code># Linux/Mac<br>tar -xzf dilithion-v2.0.18-mainnet-linux-x64.tar.gz<br>cd dilithion-v2.0.18-mainnet-linux-x64/</code>
+                            <code># Linux/Mac<br>tar -xzf dilithion-v3.0.12-mainnet-linux-x64.tar.gz<br>cd dilithion-v3.0.12-mainnet-linux-x64/</code>
                         </div>
                     </div>
                 </div>
@@ -573,12 +573,12 @@
             <p class="section-subtitle">Choose your platform and get started</p>
 
             <div class="download-notice" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(22, 163, 74, 0.1)); border-left: 4px solid #22c55e; padding: 20px; margin-bottom: 30px; border-radius: 8px;">
-                <h3 style="margin-top: 0; color: #22c55e;">🚀 MAINNET v2.0.18 Available - All Platforms!</h3>
-                <p><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Windows v2.0.18 • <svg class="inline-icon"><use href="#icon-check"/></svg> macOS v2.0.18 • <svg class="inline-icon"><use href="#icon-check"/></svg> Linux v2.0.18</strong></p>
+                <h3 style="margin-top: 0; color: #22c55e;">🚀 MAINNET v3.0.12 Available - All Platforms!</h3>
+                <p><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Windows v3.0.12 • <svg class="inline-icon"><use href="#icon-check"/></svg> macOS v3.0.12 • <svg class="inline-icon"><use href="#icon-check"/></svg> Linux v3.0.12</strong></p>
                 <p style="background: rgba(34, 197, 94, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;"><strong>🚀 MAINNET LAUNCH:</strong> This is the official mainnet release. DIL coins have real value. Fair launch - everyone starts at block 0!</p>
                 <p><strong>Easy Installation:</strong> Download, extract, and run! No compiler needed. Defaults to mainnet automatically.</p>
                 <p>Each package includes one-click launcher scripts, interactive setup wizard, and beginner-friendly README.</p>
-                <p><strong>v2.0.18:</strong> Critical fork recovery fixes: orphan block detection, Layer 2/3 stall counter race condition, null chainwork handling.</p>
+                <p><strong>v3.0.12:</strong> Fix mining session counter, website mobile menu, dev contribution wording updates.</p>
                 <p><strong>Start mining real DIL in under 60 seconds!</strong></p>
             </div>
 
@@ -586,12 +586,12 @@
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-windows"/></svg></div>
                     <h3>Windows</h3>
-                    <p>Windows 10/11 (64-bit x86-64) - Latest: v2.0.18 (Feb 3)</p>
+                    <p>Windows 10/11 (64-bit x86-64) - Latest: v3.0.12 (Feb 14)</p>
                     <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v2.0.18/dilithion-v2.0.18-mainnet-windows-x64.zip" class="btn btn-download" style="flex: 1;">Download ZIP (6.6 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v3.0.12/dilithion-v3.0.12-mainnet-windows-x64.zip" class="btn btn-download" style="flex: 1;">Download ZIP (7.9 MB)</a>
                         <a href="https://github.com/WillBarton888/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
                     </div>
-                    <span class="version">v2.0.18-mainnet • x64 • Embedded web wallet</span>
+                    <span class="version">v3.0.12-mainnet • x64 • Embedded web wallet</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-MINING.bat, SETUP-AND-START.bat, dilithion-wallet.bat, README, Binaries, Runtime DLLs</p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
                         <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">See GitHub release for checksum</code>
@@ -601,12 +601,12 @@
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-linux"/></svg></div>
                     <h3>Linux</h3>
-                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Latest: v2.0.18 (Feb 3)</p>
+                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Latest: v3.0.12 (Feb 14)</p>
                     <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v2.0.18/dilithion-v2.0.18-mainnet-linux-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (1.8 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v3.0.12/dilithion-v3.0.12-mainnet-linux-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (3.1 MB)</a>
                         <a href="https://github.com/WillBarton888/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
                     </div>
-                    <span class="version">v2.0.18-mainnet • x64 • Bundled libraries</span>
+                    <span class="version">v3.0.12-mainnet • x64 • Bundled libraries</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: dilithion-node binary, bundled libraries (libleveldb, libminiupnpc, libsnappy), run-node.sh wrapper</p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
                         <strong style="color: #22c55e;">✓ No dependencies required!</strong> Libraries are bundled. Just extract and run <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">./run-node.sh</code>
@@ -619,12 +619,12 @@
                 <div class="download-card">
                     <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-macos"/></svg></div>
                     <h3>macOS</h3>
-                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3 & Intel) - Latest: v2.0.18 (Feb 3)</p>
+                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3 & Intel) - Latest: v3.0.12 (Feb 14)</p>
                     <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v2.0.18/dilithion-v2.0.18-mainnet-macos-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (5.3 MB)</a>
+                        <a href="https://github.com/WillBarton888/dilithion/releases/download/v3.0.12/dilithion-v3.0.12-mainnet-macos-x64.tar.gz" class="btn btn-download" style="flex: 1;">Download TAR.GZ (6.7 MB)</a>
                         <a href="https://github.com/WillBarton888/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
                     </div>
-                    <span class="version">v2.0.18-mainnet • x64 • Embedded web wallet</span>
+                    <span class="version">v3.0.12-mainnet • x64 • Embedded web wallet</span>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: start-mining.sh, setup-and-start.sh, README, Binaries</p>
                     <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
                         <span style="color: #f59e0b;">⚠️ macOS Gatekeeper: Unsigned files may show "cannot be verified" warning.</span><br>
@@ -957,10 +957,10 @@
                     <h4>Resources</h4>
                     <ul>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/README.md" target="_blank">Getting Started</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/CLI-WALLET-GUIDE.md" target="_blank">CLI Wallet Guide</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/docs/HD_WALLET_USER_GUIDE.md" target="_blank">HD Wallet Guide</a></li>
                         <li><a href="wallet.html" target="_blank">Web Wallet (Beta)</a></li>
                         <li><a href="http://explorer.dilithion.org" target="_blank">Block Explorer</a></li>
-                        <li><a href="https://github.com/WillBarton888/dilithion/releases/latest" target="_blank">Latest Release (v2.0.18)</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/releases/latest" target="_blank">Latest Release (v3.0.12)</a></li>
                         <li><a href="WHITEPAPER.html" target="_blank">Whitepaper (HTML)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md" target="_blank">Whitepaper (Markdown)</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion" target="_blank">GitHub Repository</a></li>
@@ -1012,6 +1012,6 @@
         </div>
     </footer>
 
-    <script src="script.js?v=3"></script>
+    <script src="script.js?v=4"></script>
 </body>
 </html>
