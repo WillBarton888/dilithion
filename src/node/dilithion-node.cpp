@@ -3871,8 +3871,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         std::cout << "  [OK] P2P networking started" << std::endl;
 
+        // Path for persistent blocks-mined counter
+        std::string blocksMined_path = config.datadir + "/blocks_mined.dat";
+
         // Set up block found callback to save mined blocks and credit wallet
-        miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
+        miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set, blocksMined_path](const CBlock& block) {
             // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
             if (!g_node_state.running) {
                 // Shutting down - discard this block to prevent race condition
@@ -3981,6 +3984,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     g_node_state.new_block_found = true;
                 } else if (g_chainstate.GetTip() == pblockIndexPtr) {
                     std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
+
+                    // Persist total blocks mined counter
+                    if (g_node_state.rpc_server) {
+                        uint64_t total = g_node_state.rpc_server->IncrementTotalBlocksMined();
+                        std::ofstream ofs(blocksMined_path, std::ios::trunc);
+                        if (ofs) ofs << total;
+                    }
 
                     // BUG #95 FIX: Only credit wallet when block actually becomes chain tip
                     // This prevents crediting for orphaned/stale blocks on competing chains
@@ -4114,7 +4124,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Set up VDF miner callbacks (same block found handler, plus template provider)
-        vdf_miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
+        vdf_miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set, blocksMined_path](const CBlock& block) {
             // Reuse the same block processing logic as RandomX miner.
             // The block found callback above (for RandomX) handles saving, chain activation,
             // wallet crediting, etc. We replicate the reference to the same callback.
@@ -4159,6 +4169,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (g_chainstate.GetTip() == pblockIndexPtr) {
                     std::cout << "[VDF] Block became new chain tip at height "
                               << pblockIndexPtr->nHeight << std::endl;
+
+                    // Persist total blocks mined counter
+                    if (g_node_state.rpc_server) {
+                        uint64_t total = g_node_state.rpc_server->IncrementTotalBlocksMined();
+                        std::ofstream ofs(blocksMined_path, std::ios::trunc);
+                        if (ofs) ofs << total;
+                    }
 
                     // Update cooldown tracker
                     if (g_node_context.cooldown_tracker) {
@@ -4556,6 +4573,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterUTXOSet(&utxo_set);
         rpc_server.SetTestnet(config.testnet);
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
+
+        // Load persistent total blocks mined counter
+        {
+            std::ifstream ifs(blocksMined_path);
+            uint64_t totalMined = 0;
+            if (ifs >> totalMined) {
+                rpc_server.SetTotalBlocksMined(totalMined);
+                std::cout << " (lifetime blocks mined: " << totalMined << ")";
+            }
+        }
 
         // Phase 1: Initialize authentication and permissions
         std::string rpcuser = config_parser.GetString("rpcuser", "");

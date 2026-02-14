@@ -24,9 +24,13 @@ inline const std::string& GetWalletHTML() {
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <!-- SHA3 library for Light Wallet -->
     <script src="https://cdn.jsdelivr.net/npm/js-sha3@0.9.3/src/sha3.min.js"></script>
-    <!-- Light Wallet Modules: only loaded when served from a full web server (not embedded RPC) -->
-    <!-- The RPC server only serves wallet.html at the root path; JS files require a web server -->
-    <!-- These modules are NOT loaded in embedded RPC mode - the wallet falls back to direct RPC calls -->
+    <!-- Dilithium WASM Module (must load before dilithium-crypto.js) -->
+    <script src="js/dilithium.js"></script>
+    <!-- Light Wallet Modules -->
+    <script src="js/dilithium-crypto.js"></script>
+    <script src="js/connection-manager.js"></script>
+    <script src="js/local-wallet.js"></script>
+    <script src="js/transaction-builder.js"></script>
     <style>
         :root {
             --primary: #6366f1;
@@ -1892,8 +1896,15 @@ inline const std::string& GetWalletHTML() {
                 hashRateEl.textContent = hashrate.toFixed(2) + ' H/s';
             }
 
-            // Display blocks found (updated from transaction data)
-            document.getElementById('blocksFound').textContent = totalBlocksMined;
+            // Display blocks found (session + lifetime total from persistent counter)
+            const sessionBlocks = miningInfo.blocks_found || 0;
+            const totalBlocks = miningInfo.blocks_found_total || 0;
+            const blocksEl = document.getElementById('blocksFound');
+            if (totalBlocks > 0 && totalBlocks !== sessionBlocks) {
+                blocksEl.textContent = totalBlocks + ' (' + sessionBlocks + ' this session)';
+            } else {
+                blocksEl.textContent = totalBlocks;
+            }
 
             // Calculate estimated time to block
             const etaEl = document.getElementById('etaToBlock');
@@ -1908,15 +1919,17 @@ inline const std::string& GetWalletHTML() {
         function estimateTimeToBlock(hashrate, difficulty) {
             if (!hashrate || hashrate <= 0 || !difficulty) return 'N/A';
 
-            // For RandomX, difficulty represents expected hashes needed
-            // Simplified: expectedHashes = difficulty * 2^32
-            const expectedHashes = difficulty * Math.pow(2, 32);
+            // Dilithion max target: 0x1f060000 → mantissa 0x060000 = 393216
+            // expectedHashes = difficulty * (2^32 / maxMantissa)
+            // At difficulty 1.0, you need ~10,923 hashes on average
+            const HASHES_PER_DIFFICULTY = Math.pow(2, 32) / 393216;
+            const expectedHashes = difficulty * HASHES_PER_DIFFICULTY;
             const secondsToBlock = expectedHashes / hashrate;
 
             if (secondsToBlock < 60) return '< 1 min';
             if (secondsToBlock < 3600) return '~' + Math.round(secondsToBlock / 60) + ' min';
-            if (secondsToBlock < 86400) return '~' + Math.round(secondsToBlock / 3600) + ' hrs';
-            return '~' + Math.round(secondsToBlock / 86400) + ' days';
+            if (secondsToBlock < 86400) return '~' + (secondsToBlock / 3600).toFixed(1) + ' hrs';
+            return '~' + (secondsToBlock / 86400).toFixed(1) + ' days';
         }
 
         // Handle thread selector change
@@ -2024,21 +2037,11 @@ inline const std::string& GetWalletHTML() {
 
                     if (transactions.length > 0) {
                         renderTransactions(transactions);
-
-                        // Count mining rewards (blocks found)
-                        const miningTxs = transactions.filter(tx =>
-                            tx.category === 'generate' || tx.category === 'immature'
-                        );
-                        const blocksFoundEl = document.getElementById('blocksFound');
-                        if (blocksFoundEl) blocksFoundEl.textContent = miningTxs.length.toString();
                     } else {
                         const emptyHtml = '<div class="empty-state">No transactions yet</div>';
                         document.getElementById('recentTxList').innerHTML = emptyHtml;
                         const txListEl = document.getElementById('txList');
                         if (txListEl) txListEl.innerHTML = emptyHtml;
-
-                        const blocksFoundEl = document.getElementById('blocksFound');
-                        if (blocksFoundEl) blocksFoundEl.textContent = '0';
                     }
                 } catch (e) {
                     console.error('[Transactions] RPC error:', e.message);
@@ -2060,8 +2063,6 @@ inline const std::string& GetWalletHTML() {
                 const txListEl = document.getElementById('txList');
                 if (txListEl) txListEl.innerHTML = browserWalletMessage;
 
-                const blocksFoundEl = document.getElementById('blocksFound');
-                if (blocksFoundEl) blocksFoundEl.textContent = 'N/A';
             }
         }
 

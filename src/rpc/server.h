@@ -136,6 +136,9 @@ private:
 
     // Network configuration
     bool m_testnet{false};
+
+    // Persistent total blocks mined counter (loaded from file, survives restarts)
+    std::atomic<uint64_t> m_totalBlocksMined{0};
     // CNetworkManager* m_network;  // TODO: Implement network manager
 
     // RPC handlers
@@ -395,6 +398,15 @@ public:
      * Set testnet mode
      */
     void SetTestnet(bool testnet) { m_testnet = testnet; }
+
+    /** Set total blocks mined (loaded from persistent file on startup) */
+    void SetTotalBlocksMined(uint64_t count) { m_totalBlocksMined.store(count); }
+
+    /** Increment total blocks mined (called when block becomes chain tip) */
+    uint64_t IncrementTotalBlocksMined() { return ++m_totalBlocksMined; }
+
+    /** Get total blocks mined */
+    uint64_t GetTotalBlocksMined() const { return m_totalBlocksMined.load(); }
 
     /**
      * Set public API mode (--public-api flag)

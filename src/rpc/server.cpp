@@ -3709,11 +3709,14 @@ std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
         throw std::runtime_error("Miner not initialized");
     }
 
+    auto stats = m_miner->GetStats();
     std::ostringstream oss;
     oss << "{";
     oss << "\"mining\":" << (m_miner->IsMining() ? "true" : "false") << ",";
     oss << "\"hashrate\":" << m_miner->GetHashRate() << ",";
-    oss << "\"threads\":" << m_miner->GetThreadCount();
+    oss << "\"threads\":" << m_miner->GetThreadCount() << ",";
+    oss << "\"blocks_found\":" << stats.nBlocksFound.load() << ",";
+    oss << "\"blocks_found_total\":" << m_totalBlocksMined.load();
     oss << "}";
     return oss.str();
 }
