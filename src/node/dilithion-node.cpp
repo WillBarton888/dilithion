@@ -2396,7 +2396,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_metrics.SetNetworkName(network_name);
 
         // Set metrics handler for Prometheus scraping
-        http_server.SetMetricsHandler([]() -> std::string {
+        http_server.SetMetricsHandler([&mempool]() -> std::string {
             // Update current metrics from live state
             CBlockIndex* tip = g_chainstate.GetTip();
             g_metrics.block_height = tip ? tip->nHeight : 0;
@@ -2413,6 +2413,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_metrics.inbound_peers = 0;
                 g_metrics.outbound_peers = peers.size();
             }
+
+            // Update mempool metrics
+            g_metrics.mempool_size = mempool.Size();
 
             // Sync bandwidth metrics from g_network_stats
             g_metrics.bytes_received_total.store(g_network_stats.bytes_recv);
