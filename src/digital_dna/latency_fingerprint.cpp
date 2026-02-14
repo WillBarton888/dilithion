@@ -167,8 +167,9 @@ LatencyFingerprint LatencyFingerprintCollector::collect() {
     fp.measurement_height = 0;  // Caller should set this
 
     // Measure each seed
+    fp.seed_stats.reserve(MAINNET_SEEDS.size());
     for (size_t i = 0; i < MAINNET_SEEDS.size(); i++) {
-        fp.seed_stats[i] = measure_seed(MAINNET_SEEDS[i]);
+        fp.seed_stats.push_back(measure_seed(MAINNET_SEEDS[i]));
     }
 
     return fp;
@@ -248,18 +249,22 @@ double LatencyFingerprint::wasserstein_distance(const std::vector<double>& a, co
 }
 
 double LatencyFingerprint::distance(const LatencyFingerprint& a, const LatencyFingerprint& b) {
+    // Compare seeds that both fingerprints have in common (by name)
     double total_distance = 0.0;
+    size_t matched = 0;
 
-    for (size_t i = 0; i < 4; i++) {
-        // Use Wasserstein distance on the raw measurements
-        double seed_distance = wasserstein_distance(
-            a.seed_stats[i].measurements,
-            b.seed_stats[i].measurements
-        );
-        total_distance += seed_distance;
+    for (const auto& sa : a.seed_stats) {
+        for (const auto& sb : b.seed_stats) {
+            if (sa.seed_name == sb.seed_name) {
+                total_distance += wasserstein_distance(sa.measurements, sb.measurements);
+                matched++;
+                break;
+            }
+        }
     }
 
-    return total_distance / 4.0;  // Average distance across seeds
+    if (matched == 0) return 1000.0;  // No common seeds = maximum distance
+    return total_distance / matched;
 }
 
 std::string LatencyFingerprint::to_json() const {

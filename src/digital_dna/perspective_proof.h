@@ -12,16 +12,26 @@
 
 namespace digital_dna {
 
-// A witnessed peer observation (peer-signed receipt)
+// Dilithium-3 signature constants (matching wallet.h)
+static constexpr size_t DNA_PUBKEY_SIZE = 1952;
+static constexpr size_t DNA_SIGNATURE_SIZE = 3309;
+
+// A witnessed peer observation (peer-signed receipt using Dilithium)
 struct WitnessedObservation {
     std::array<uint8_t, 20> peer_id;        // Hash of peer's public key
     std::array<uint8_t, 20> observer_id;    // Our identity
     uint64_t timestamp;                      // When observation occurred
     uint32_t block_height;                   // Block height at observation
-    std::array<uint8_t, 64> peer_signature; // Peer's signature on the observation
 
-    // For simplicity in prototype, we use a hash as the "signature"
+    // Dilithium signature from the peer attesting to this observation
+    std::vector<uint8_t> peer_pubkey;       // Peer's full public key (1952 bytes)
+    std::vector<uint8_t> peer_signature;    // Dilithium signature (~3309 bytes)
+
+    // Verify the peer's Dilithium signature on this observation
     bool verify() const;
+
+    // Compute the message that is signed: SHA3-256(peer_id || observer_id || timestamp || height)
+    std::array<uint8_t, 32> signed_message() const;
 };
 
 // Perspective snapshot at a point in time
@@ -46,6 +56,7 @@ struct PerspectiveProof {
     size_t total_unique_peers() const;
     double peer_turnover_rate() const;          // How often peers change
     double witness_coverage() const;            // % of observations with witnesses
+    size_t verified_witness_count() const;      // Count of cryptographically verified witnesses
 
     // Serialization
     std::string to_json() const;
@@ -59,7 +70,7 @@ struct PerspectiveConfig {
     uint32_t snapshot_interval_sec = 60;        // Take snapshot every 60 seconds
     uint32_t collection_duration_sec = 3600;    // Collect for 1 hour
     uint32_t min_witnesses_required = 3;        // Minimum peer witnesses needed
-    bool require_signatures = false;            // Prototype mode: don't require real sigs
+    bool require_signatures = true;             // Require real Dilithium signatures
 };
 
 // Perspective collector (would integrate with node's peer manager)

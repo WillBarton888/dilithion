@@ -1,16 +1,22 @@
 /**
- * Digital DNA - Anonymous Sybil-Resistant Identity System
+ * Digital DNA v3.0 - Anonymous Sybil-Resistant Identity System
  *
- * Combines three unforgeable identity factors:
- *   L - Latency Fingerprint (geographic location via RTT)
- *   V - VDF Timing Signature (hardware fingerprint via computation speed)
- *   P - Perspective Proof (network vantage point via peer observations)
+ * Combines eight unforgeable identity dimensions:
+ *   L  - Latency Fingerprint (geographic location via RTT)
+ *   V  - VDF Timing Signature (hardware fingerprint via computation speed)
+ *   P  - Perspective Proof (network vantage point via peer observations)
+ *   M  - Memory Fingerprint (cache hierarchy probing)
+ *   D  - Clock Drift (crystal oscillator uniqueness)
+ *   B  - Bandwidth Proof (network throughput measurement)
+ *   T  - Thermal Profile (cooling curve from VDF checkpoints)
+ *   BP - Behavioral Profile (protocol participation patterns)
  *
  * Key properties:
  *   - Anonymous: No KYC, no trusted hardware, no personal data
  *   - Unforgeable: Based on physics (speed of light, computation time)
  *   - Verifiable: Third parties can validate claims
  *   - Sybil-resistant: Similar identities flagged for additional verification
+ *   - Data-driven: Equal-weight bootstrap, ML calibration, then ML-primary
  */
 
 #ifndef DILITHION_DIGITAL_DNA_H
@@ -19,6 +25,10 @@
 #include "latency_fingerprint.h"
 #include "timing_signature.h"
 #include "perspective_proof.h"
+#include "memory_fingerprint.h"
+#include "clock_drift.h"
+#include "bandwidth_proof.h"
+#include "behavioral_profile.h"
 
 #include <array>
 #include <string>
@@ -38,10 +48,17 @@ class CConnman;  // Peer manager (from net.h)
  * This is the unforgeable identity that proves a miner is unique.
  */
 struct DigitalDNA {
-    // Identity components
+    // Core identity components (v2.0)
     LatencyFingerprint latency;         // L: Geographic fingerprint
     TimingSignature timing;             // V: Hardware fingerprint
     PerspectiveProof perspective;       // P: Network vantage point
+
+    // Extended dimensions (v3.0 — optional for backward compat)
+    std::optional<MemoryFingerprint> memory;           // M: Cache hierarchy
+    std::optional<ClockDriftFingerprint> clock_drift;  // D: Oscillator uniqueness
+    std::optional<BandwidthFingerprint> bandwidth;     // B: Throughput measurement
+    std::optional<ThermalProfile> thermal;             // T: Cooling curve
+    std::optional<BehavioralProfile> behavioral;       // BP: Protocol patterns
 
     // Metadata
     std::array<uint8_t, 20> address;    // Coinbase address (identity anchor)
@@ -65,16 +82,45 @@ struct DigitalDNA {
  * Similarity score between two Digital DNA identities.
  */
 struct SimilarityScore {
-    double latency_similarity;      // 0.0 (different) to 1.0 (identical)
-    double timing_similarity;       // Based on progress rate
-    double perspective_similarity;  // Jaccard similarity of peer sets
-    double combined_score;          // Weighted combination
+    // Per-dimension scores (0.0 = different, 1.0 = identical)
+    double latency_similarity = 0.0;       // L: RTT fingerprint
+    double timing_similarity = 0.0;        // V: VDF speed
+    double perspective_similarity = 0.0;   // P: Peer set Jaccard
+    double memory_similarity = 0.0;        // M: Cache hierarchy DTW
+    double clock_drift_similarity = 0.0;   // D: Oscillator drift
+    double bandwidth_similarity = 0.0;     // B: Throughput profile
+    double thermal_similarity = 0.0;       // T: Cooling curve
+    double behavioral_similarity = 0.0;    // BP: Activity patterns
 
-    // Thresholds
-    static constexpr double SAME_IDENTITY_THRESHOLD = 0.85;
-    static constexpr double SUSPICIOUS_THRESHOLD = 0.70;
+    // Data availability flags (0.0 is a valid score — "completely different")
+    bool has_memory = false;
+    bool has_clock_drift = false;
+    bool has_bandwidth = false;
+    bool has_thermal = false;
+    bool has_behavioral = false;
 
-    bool is_same_identity() const { return combined_score >= SAME_IDENTITY_THRESHOLD; }
+    double combined_score = 0.0;           // Equal-weight average of available dimensions
+
+    // How many dimensions were available for scoring
+    uint32_t dimensions_scored = 0;
+
+    // v3.0 thresholds (conservative bootstrap — will be refined by ML)
+    static constexpr double SAME_IDENTITY_THRESHOLD = 0.92;   // Auto-reject
+    static constexpr double SUSPICIOUS_THRESHOLD = 0.55;      // Trigger challenge
+
+    // Physics-justified hard rule: if both Memory AND Clock Drift > 0.95,
+    // probability of two distinct machines matching both is vanishingly small
+    static constexpr double PHYSICS_HARD_THRESHOLD = 0.95;
+
+    bool is_same_identity() const {
+        // Hard physics rule: Memory + Clock Drift both extremely high → auto-reject
+        if (memory_similarity >= PHYSICS_HARD_THRESHOLD &&
+            clock_drift_similarity >= PHYSICS_HARD_THRESHOLD) {
+            return true;
+        }
+        return combined_score >= SAME_IDENTITY_THRESHOLD;
+    }
+
     bool is_suspicious() const { return combined_score >= SUSPICIOUS_THRESHOLD; }
 
     std::string verdict() const;
@@ -188,10 +234,13 @@ public:
     // Statistics
     size_t count() const { return identities_.size(); }
 
+    // v3.0 equal-weight scoring across all available dimensions
+    static SimilarityScore compute_combined_score(SimilarityScore score);
+
 private:
     std::vector<DigitalDNA> identities_;
 
-    // Similarity calculation
+    // Similarity calculation (core v2.0 dimensions)
     double calculate_latency_similarity(const LatencyFingerprint& a, const LatencyFingerprint& b) const;
     double calculate_timing_similarity(const TimingSignature& a, const TimingSignature& b) const;
     double calculate_perspective_similarity(const PerspectiveProof& a, const PerspectiveProof& b) const;

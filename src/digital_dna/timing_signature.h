@@ -27,6 +27,10 @@ struct TimingSignature {
     double mean_interval_us;
     double stddev_interval_us;
 
+    // VDF output and proof (from real VDF computation)
+    std::array<uint8_t, 32> vdf_output;     // VDF result (verifiable)
+    std::vector<uint8_t> vdf_proof;         // Wesolowski proof
+
     // Serialization
     std::string to_json() const;
 
@@ -47,9 +51,8 @@ class TimingSignatureCollector {
 public:
     TimingSignatureCollector(const TimingConfig& config = TimingConfig());
 
-    // Collect timing signature using repeated hash as delay function
-    // Note: This is NOT a true VDF (it's parallelizable), but works for
-    // timing measurement prototyping
+    // Collect timing signature using real chiavdf VDF computation.
+    // Records timing checkpoints via VDF progress callback.
     TimingSignature collect(const std::array<uint8_t, 32>& challenge);
 
     // Get progress during collection (0.0 to 1.0)
@@ -63,9 +66,34 @@ private:
     double progress_ = 0.0;
     bool collecting_ = false;
 
-    // Simple hash function for delay (SHA256-like)
-    void hash_iteration(std::array<uint8_t, 32>& state);
+    // Compute derived metrics from checkpoints
+    void compute_derived_metrics(TimingSignature& sig);
 };
+
+// Thermal throttling profile (derived from VDF timing checkpoints)
+// CPUs heat up during VDF computation and throttle at rates depending on
+// cooling solution, TDP, and form factor. This creates a "cooling curve"
+// that distinguishes laptops from desktops from servers — at zero extra cost.
+struct ThermalProfile {
+    // VDF speed at each measurement interval (iterations/sec per bucket)
+    std::vector<double> speed_curve;
+    uint32_t measurement_interval_sec = 60;  // Bucket width (default: 1 minute)
+
+    // Derived metrics
+    double initial_speed = 0.0;           // Speed in first bucket (before thermal effects)
+    double sustained_speed = 0.0;         // Average speed in last 3 buckets (steady state)
+    double throttle_ratio = 1.0;          // sustained/initial (1.0 = no throttle)
+    double time_to_steady_state_sec = 0.0;// Time until speed stabilizes (within 5% of sustained)
+    double thermal_jitter = 0.0;          // Stddev of speed in steady state
+
+    // Comparison
+    static double similarity(const ThermalProfile& a, const ThermalProfile& b);
+};
+
+// Derive thermal profile from existing VDF timing checkpoints.
+// No additional computation — extracts data we already collect.
+ThermalProfile derive_thermal_profile(const TimingSignature& sig,
+                                       uint32_t bucket_sec = 60);
 
 // Utility functions
 double compute_correlation(const std::vector<double>& a, const std::vector<double>& b);

@@ -4,6 +4,8 @@
 
 #include "digital_dna.h"
 
+#include <crypto/sha3.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -12,32 +14,6 @@
 #include <iomanip>
 
 namespace digital_dna {
-
-// Simple hash function for identity (would use SHA3 in production)
-static void compute_hash(const uint8_t* data, size_t len, uint8_t* out) {
-    // SipHash-like mixing for simplicity
-    uint64_t h[4] = {0x736f6d6570736575ULL, 0x646f72616e646f6dULL,
-                     0x6c7967656e657261ULL, 0x7465646279746573ULL};
-
-    for (size_t i = 0; i < len; i++) {
-        h[i % 4] ^= static_cast<uint64_t>(data[i]) << ((i % 8) * 8);
-        h[0] += h[1]; h[1] = (h[1] << 13) | (h[1] >> 51); h[1] ^= h[0];
-        h[2] += h[3]; h[3] = (h[3] << 16) | (h[3] >> 48); h[3] ^= h[2];
-    }
-
-    // Final mixing
-    for (int round = 0; round < 4; round++) {
-        h[0] += h[1]; h[1] = (h[1] << 13) | (h[1] >> 51); h[1] ^= h[0];
-        h[2] += h[3]; h[3] = (h[3] << 16) | (h[3] >> 48); h[3] ^= h[2];
-        h[0] += h[3]; h[2] += h[1];
-    }
-
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
-            out[i * 8 + j] = static_cast<uint8_t>(h[i] >> (j * 8));
-        }
-    }
-}
 
 // ============ DigitalDNA ============
 
@@ -103,7 +79,11 @@ std::vector<uint8_t> DigitalDNA::serialize() const {
     for (int i = 0; i < 8; i++)
         data.push_back(static_cast<uint8_t>(registration_time >> (i * 8)));
 
-    // Latency - just median values for each seed (4 seeds * 8 bytes = 32 bytes)
+    // Latency - seed count (4 bytes) + median values (N seeds * 8 bytes)
+    uint32_t seed_count = static_cast<uint32_t>(latency.seed_stats.size());
+    for (int i = 0; i < 4; i++)
+        data.push_back(static_cast<uint8_t>(seed_count >> (i * 8)));
+
     for (const auto& s : latency.seed_stats) {
         uint64_t median_bits;
         std::memcpy(&median_bits, &s.median_ms, sizeof(double));
@@ -132,8 +112,8 @@ std::vector<uint8_t> DigitalDNA::serialize() const {
 }
 
 std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& data) {
-    // Minimum size: 20 + 4 + 8 + 32 + 8 + 12 = 84 bytes
-    if (data.size() < 84) return std::nullopt;
+    // Minimum size: 20 (addr) + 4 (height) + 8 (time) + 4 (seed_count) + 8 (timing) + 12 (persp) = 56 bytes
+    if (data.size() < 56) return std::nullopt;
 
     DigitalDNA dna;
     size_t offset = 0;
@@ -154,8 +134,16 @@ std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& da
         dna.registration_time |= static_cast<uint64_t>(data[offset + i]) << (i * 8);
     offset += 8;
 
-    // Latency - median values
-    for (int s = 0; s < 4; s++) {
+    // Latency - seed count + median values
+    uint32_t seed_count = 0;
+    for (int i = 0; i < 4; i++)
+        seed_count |= static_cast<uint32_t>(data[offset + i]) << (i * 8);
+    offset += 4;
+
+    if (data.size() < offset + seed_count * 8 + 8 + 12) return std::nullopt;
+
+    dna.latency.seed_stats.resize(seed_count);
+    for (uint32_t s = 0; s < seed_count; s++) {
         uint64_t median_bits = 0;
         for (int i = 0; i < 8; i++)
             median_bits |= static_cast<uint64_t>(data[offset + i]) << (i * 8);
@@ -170,8 +158,7 @@ std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& da
     std::memcpy(&dna.timing.iterations_per_second, &ips_bits, sizeof(double));
     offset += 8;
 
-    // Perspective - peer count (we don't fully reconstruct, just store key metrics)
-    // This is simplified - full deserialization would need more data
+    // Perspective - peer count (simplified - full deserialization would need more data)
     offset += 12;
 
     dna.is_valid = true;
@@ -181,7 +168,7 @@ std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& da
 std::array<uint8_t, 32> DigitalDNA::hash() const {
     auto data = serialize();
     std::array<uint8_t, 32> result;
-    compute_hash(data.data(), data.size(), result.data());
+    SHA3_256(data.data(), data.size(), result.data());
     return result;
 }
 
@@ -219,8 +206,9 @@ void DigitalDNACollector::start_collection() {
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
 
+    latency.seed_stats.reserve(MAINNET_SEEDS.size());
     for (size_t i = 0; i < MAINNET_SEEDS.size(); i++) {
-        latency.seed_stats[i] = latency_collector_.measure_seed(MAINNET_SEEDS[i]);
+        latency.seed_stats.push_back(latency_collector_.measure_seed(MAINNET_SEEDS[i]));
     }
     latency_result_ = latency;
 
@@ -346,14 +334,97 @@ std::vector<std::pair<DigitalDNA, SimilarityScore>> DigitalDNARegistry::find_sim
 SimilarityScore DigitalDNARegistry::compare(const DigitalDNA& a, const DigitalDNA& b) const {
     SimilarityScore score;
 
+    // Core v2.0 dimensions (always available)
     score.latency_similarity = calculate_latency_similarity(a.latency, b.latency);
     score.timing_similarity = calculate_timing_similarity(a.timing, b.timing);
     score.perspective_similarity = calculate_perspective_similarity(a.perspective, b.perspective);
 
-    // Weighted combination: latency 40%, timing 30%, perspective 30%
-    score.combined_score = 0.4 * score.latency_similarity +
-                          0.3 * score.timing_similarity +
-                          0.3 * score.perspective_similarity;
+    // v3.0 extended dimensions (scored only when both identities have data)
+    if (a.memory && b.memory) {
+        score.memory_similarity = MemoryFingerprint::similarity(*a.memory, *b.memory);
+        score.has_memory = true;
+    }
+    if (a.clock_drift && b.clock_drift) {
+        score.clock_drift_similarity = ClockDriftFingerprint::similarity(*a.clock_drift, *b.clock_drift);
+        score.has_clock_drift = true;
+    }
+    if (a.bandwidth && b.bandwidth) {
+        score.bandwidth_similarity = BandwidthFingerprint::similarity(*a.bandwidth, *b.bandwidth);
+        score.has_bandwidth = true;
+    }
+    if (a.thermal && b.thermal) {
+        score.thermal_similarity = ThermalProfile::similarity(*a.thermal, *b.thermal);
+        score.has_thermal = true;
+    }
+    if (a.behavioral && b.behavioral) {
+        score.behavioral_similarity = BehavioralProfile::similarity(*a.behavioral, *b.behavioral);
+        score.has_behavioral = true;
+    }
+
+    return compute_combined_score(score);
+}
+
+SimilarityScore DigitalDNARegistry::compute_combined_score(SimilarityScore score) {
+    // Equal-weight average across all available dimensions.
+    // During bootstrap (few v3.0 identities), this degrades gracefully
+    // to the 3 core dimensions. As the network matures, all 8 contribute.
+    //
+    // Correlation-aware damping: V (Timing), M (Memory), T (Thermal) are
+    // correlated by hardware SKU. When all three are high and close to each
+    // other, they likely indicate "same model" not "same machine." We dampen
+    // their combined contribution so they don't inflate the score.
+
+    double sum = 0.0;
+    double weight_sum = 0.0;
+
+    // Helper: add a dimension with given weight
+    auto add = [&](double similarity, double weight) {
+        sum += similarity * weight;
+        weight_sum += weight;
+    };
+
+    // Independent dimensions: full weight (1.0 each)
+    add(score.latency_similarity, 1.0);         // L: geographic
+    add(score.perspective_similarity, 1.0);       // P: network topology
+
+    // V/M/T correlation cluster: check if they move together
+    double vmt_weight = 1.0;  // default: full weight each
+    bool has_vmt_cluster = score.has_memory && score.has_thermal;
+    if (has_vmt_cluster) {
+        double v = score.timing_similarity;
+        double m = score.memory_similarity;
+        double t = score.thermal_similarity;
+        double vmt_max = std::max({v, m, t});
+        double vmt_min = std::min({v, m, t});
+        double vmt_spread = vmt_max - vmt_min;
+
+        // If all three are high (>0.80) and tightly clustered (spread <0.15),
+        // they're likely correlated by hardware SKU. Dampen to 0.5 weight each
+        // so the cluster contributes ~1.5 dimensions instead of 3.
+        if (vmt_min > 0.80 && vmt_spread < 0.15) {
+            vmt_weight = 0.5;
+        }
+    }
+
+    add(score.timing_similarity, vmt_weight);     // V: VDF speed
+    if (score.has_memory)
+        add(score.memory_similarity, vmt_weight);  // M: cache hierarchy
+    if (score.has_thermal)
+        add(score.thermal_similarity, vmt_weight); // T: cooling curve
+
+    // Independent extended dimensions: full weight
+    if (score.has_clock_drift)
+        add(score.clock_drift_similarity, 1.0);   // D: oscillator (unique per machine)
+    if (score.has_bandwidth)
+        add(score.bandwidth_similarity, 1.0);      // B: throughput
+    if (score.has_behavioral)
+        add(score.behavioral_similarity, 1.0);     // BP: activity patterns
+
+    score.dimensions_scored = static_cast<uint32_t>(
+        3 + (score.has_memory ? 1 : 0) + (score.has_clock_drift ? 1 : 0) +
+        (score.has_bandwidth ? 1 : 0) + (score.has_thermal ? 1 : 0) +
+        (score.has_behavioral ? 1 : 0));
+    score.combined_score = (weight_sum > 0.0) ? sum / weight_sum : 0.0;
 
     return score;
 }

@@ -61,6 +61,13 @@ enum MessageType {
     MSG_CMPCTBLOCK,   // BIP 152: Compact block message
     MSG_GETBLOCKTXN,  // BIP 152: Request missing transactions
     MSG_BLOCKTXN,     // BIP 152: Missing transactions response
+
+    // Digital DNA protocol extensions
+    MSG_DNA_LATENCY_PING,   // Latency measurement request (decentralized)
+    MSG_DNA_LATENCY_PONG,   // Latency measurement response
+    MSG_DNA_TIME_SYNC,      // Clock drift measurement exchange
+    MSG_DNA_BW_TEST,        // Bandwidth measurement payload
+    MSG_DNA_BW_RESULT,      // Bandwidth measurement result (signed)
 };
 
 /** Inventory vector types */
@@ -291,6 +298,11 @@ inline const char* GetMessageCommand(MessageType type) {
         case MSG_CMPCTBLOCK: return "cmpctblock";
         case MSG_GETBLOCKTXN: return "getblocktxn";
         case MSG_BLOCKTXN: return "blocktxn";
+        case MSG_DNA_LATENCY_PING: return "dnalping";
+        case MSG_DNA_LATENCY_PONG: return "dnalpong";
+        case MSG_DNA_TIME_SYNC: return "dnatsync";
+        case MSG_DNA_BW_TEST: return "dnabwtest";
+        case MSG_DNA_BW_RESULT: return "dnabwres";
         default: return "unknown";
     }
 }

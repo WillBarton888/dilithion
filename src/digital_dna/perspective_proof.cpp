@@ -1,10 +1,19 @@
 #include "perspective_proof.h"
 
+#include <crypto/sha3.h>
+
 #include <algorithm>
 #include <random>
 #include <sstream>
 #include <iomanip>
 #include <numeric>
+
+// Dilithium verification (defined in wallet.cpp, linked at build time)
+extern "C" int pqcrystals_dilithium3_ref_verify(
+    const uint8_t *sig, size_t siglen,
+    const uint8_t *m, size_t mlen,
+    const uint8_t *ctx, size_t ctxlen,
+    const uint8_t *pk);
 
 namespace digital_dna {
 
@@ -15,30 +24,41 @@ static uint64_t current_time_ms() {
     ).count();
 }
 
-// Simple hash for prototype (would use real crypto in production)
-static void simple_hash(const void* data, size_t len, uint8_t* out, size_t out_len) {
-    const uint8_t* bytes = static_cast<const uint8_t*>(data);
-    uint64_t h = 0x5555555555555555ULL;
-    for (size_t i = 0; i < len; i++) {
-        h ^= static_cast<uint64_t>(bytes[i]) << ((i % 8) * 8);
-        h = (h << 7) | (h >> 57);
-        h *= 0x9e3779b97f4a7c15ULL;
-    }
-    for (size_t i = 0; i < out_len; i++) {
-        out[i] = static_cast<uint8_t>(h >> ((i % 8) * 8));
-        if (i % 8 == 7) {
-            h *= 0x9e3779b97f4a7c15ULL;
-        }
-    }
+std::array<uint8_t, 32> WitnessedObservation::signed_message() const {
+    // Build message: peer_id || observer_id || timestamp || block_height
+    std::vector<uint8_t> msg;
+    msg.reserve(20 + 20 + 8 + 4);
+
+    msg.insert(msg.end(), peer_id.begin(), peer_id.end());
+    msg.insert(msg.end(), observer_id.begin(), observer_id.end());
+
+    for (int i = 0; i < 8; i++)
+        msg.push_back(static_cast<uint8_t>(timestamp >> (i * 8)));
+    for (int i = 0; i < 4; i++)
+        msg.push_back(static_cast<uint8_t>(block_height >> (i * 8)));
+
+    std::array<uint8_t, 32> hash;
+    SHA3_256(msg.data(), msg.size(), hash.data());
+    return hash;
 }
 
 bool WitnessedObservation::verify() const {
-    // In prototype, we just check that signature is non-zero
-    // Real implementation would verify Dilithium signature
-    for (auto b : peer_signature) {
-        if (b != 0) return true;
-    }
-    return false;
+    // Validate sizes
+    if (peer_pubkey.size() != DNA_PUBKEY_SIZE) return false;
+    if (peer_signature.empty()) return false;
+
+    // Compute the message hash that was signed
+    auto msg = signed_message();
+
+    // Verify Dilithium-3 signature
+    int result = pqcrystals_dilithium3_ref_verify(
+        peer_signature.data(), peer_signature.size(),
+        msg.data(), msg.size(),
+        nullptr, 0,  // No context
+        peer_pubkey.data()
+    );
+
+    return result == 0;
 }
 
 size_t PerspectiveProof::total_unique_peers() const {
@@ -61,7 +81,6 @@ double PerspectiveProof::peer_turnover_rate() const {
         std::set<std::array<uint8_t, 20>> curr(snapshots[i].active_peers.begin(),
                                                 snapshots[i].active_peers.end());
 
-        // Count peers that appeared or disappeared
         for (const auto& p : curr) {
             if (prev.find(p) == prev.end()) total_changes++;
         }
@@ -86,6 +105,16 @@ double PerspectiveProof::witness_coverage() const {
 
     if (total_observations == 0) return 0.0;
     return static_cast<double>(witnessed_observations) / total_observations;
+}
+
+size_t PerspectiveProof::verified_witness_count() const {
+    size_t count = 0;
+    for (const auto& snap : snapshots) {
+        for (const auto& w : snap.witnessed) {
+            if (w.verify()) count++;
+        }
+    }
+    return count;
 }
 
 std::string PerspectiveProof::to_json() const {
@@ -124,7 +153,6 @@ std::string PerspectiveProof::to_json() const {
 }
 
 double PerspectiveProof::similarity(const PerspectiveProof& a, const PerspectiveProof& b) {
-    // Compute Jaccard similarity of all unique peers seen
     std::set<std::array<uint8_t, 20>> peers_a, peers_b;
 
     for (const auto& snap : a.snapshots) {
@@ -158,6 +186,12 @@ void PerspectiveCollector::on_peer_disconnected(const std::array<uint8_t, 20>& p
 
 void PerspectiveCollector::add_witness(const WitnessedObservation& obs) {
     std::lock_guard<std::mutex> lock(mutex_);
+
+    // If signatures are required, verify before accepting
+    if (config_.require_signatures && !obs.verify()) {
+        return;  // Reject unverified witness
+    }
+
     witnesses_.push_back(obs);
 }
 
@@ -168,10 +202,8 @@ PerspectiveSnapshot PerspectiveCollector::take_snapshot(uint32_t block_height) {
     snap.timestamp = current_time_ms();
     snap.block_height = block_height;
 
-    // Copy active peers
     snap.active_peers.assign(active_peers_.begin(), active_peers_.end());
 
-    // Collect witnesses since last snapshot
     uint64_t last_snap_time = snapshots_.empty() ? start_time_ : snapshots_.back().timestamp;
     for (const auto& w : witnesses_) {
         if (w.timestamp > last_snap_time && w.timestamp <= snap.timestamp) {
@@ -199,18 +231,19 @@ void PerspectiveCollector::simulate_peer_activity(int num_peers, int churn_event
     std::random_device rd;
     std::mt19937 gen(rd());
 
-    // Generate initial peer set
     std::vector<std::array<uint8_t, 20>> all_peers;
     for (int i = 0; i < num_peers * 2; i++) {
         all_peers.push_back(generate_random_peer_id());
     }
 
-    // Connect initial peers
     for (int i = 0; i < num_peers; i++) {
         on_peer_connected(all_peers[i]);
     }
 
-    // Simulate churn events
+    // Temporarily disable signature requirement for simulation
+    bool orig_require_sigs = config_.require_signatures;
+    config_.require_signatures = false;
+
     std::uniform_int_distribution<> peer_dist(0, static_cast<int>(all_peers.size()) - 1);
     std::uniform_int_distribution<> action_dist(0, 1);
 
@@ -222,26 +255,26 @@ void PerspectiveCollector::simulate_peer_activity(int num_peers, int churn_event
             on_peer_disconnected(all_peers[idx]);
         }
 
-        // Occasionally create a witness
-        if (i % 3 == 0 && !active_peers_.empty()) {
+        // Occasionally create a simulated witness (no real signature in test mode)
+        if (i % 3 == 0) {
             std::lock_guard<std::mutex> lock(mutex_);
-            auto it = active_peers_.begin();
-            std::advance(it, gen() % active_peers_.size());
+            if (!active_peers_.empty()) {
+                auto it = active_peers_.begin();
+                std::advance(it, gen() % active_peers_.size());
 
-            WitnessedObservation obs;
-            obs.peer_id = *it;
-            obs.observer_id = node_id_;
-            obs.timestamp = current_time_ms();
-            obs.block_height = static_cast<uint32_t>(i);
+                WitnessedObservation obs;
+                obs.peer_id = *it;
+                obs.observer_id = node_id_;
+                obs.timestamp = current_time_ms();
+                obs.block_height = static_cast<uint32_t>(i);
+                // No real signature in simulation mode
 
-            // Fake signature (non-zero)
-            for (int j = 0; j < 64; j++) {
-                obs.peer_signature[j] = static_cast<uint8_t>(gen() % 256);
+                witnesses_.push_back(obs);
             }
-
-            witnesses_.push_back(obs);
         }
     }
+
+    config_.require_signatures = orig_require_sigs;
 }
 
 bool PerspectiveCollector::is_complete() const {

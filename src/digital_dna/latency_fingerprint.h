@@ -33,7 +33,7 @@ struct LatencyStats {
 
 // Complete latency fingerprint
 struct LatencyFingerprint {
-    std::array<LatencyStats, 4> seed_stats;
+    std::vector<LatencyStats> seed_stats;   // Variable-size for decentralized latency (future)
     uint64_t measurement_timestamp;
     uint32_t measurement_height;  // Block height when measured
 

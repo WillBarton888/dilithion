@@ -35,10 +35,9 @@ class CVDFMiner;         // VDF fair mining controller
 class CCooldownTracker;  // VDF cooldown rate limiter
 
 // Digital DNA: Sybil-resistant identity system
-namespace digital_dna {
-    class DigitalDNARegistry;
-    class DigitalDNACollector;
-}
+// Full include required because unique_ptr<DigitalDNARegistry> needs the complete type
+// for default_delete (GCC instantiates the static_assert even with user-declared dtor)
+#include <digital_dna/digital_dna.h>
 
 /**
  * NodeContext - Bitcoin Core-style global state management
@@ -132,6 +131,12 @@ struct NodeContext {
      * Safe to call multiple times.
      */
     void Shutdown();
+
+    /**
+     * Destructor — defined in node_context.cpp where unique_ptr member types are complete.
+     * This is the standard C++ pattern (pimpl) for forward-declared types in unique_ptr.
+     */
+    ~NodeContext();
 
     /**
      * Reset all pointers (for shutdown or testing)

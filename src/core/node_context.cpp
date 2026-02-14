@@ -17,6 +17,11 @@
 // Global node context instance
 NodeContext g_node_context;
 
+// Destructor defined here (not in header) because unique_ptr<DigitalDNARegistry>
+// requires the complete type, and we only forward-declare it in node_context.h.
+// This is the standard C++ pimpl pattern.
+NodeContext::~NodeContext() = default;
+
 bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) {
     if (IsInitialized()) {
         LogPrintf(ALL, WARN, "NodeContext already initialized");
