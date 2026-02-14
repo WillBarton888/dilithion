@@ -40,6 +40,9 @@ static const uint32_t WALLET_FILE_VERSION_4 = 4;
 // v5: Added Mining Identity Key (MIK) for DFMP v2.0
 static const char WALLET_FILE_MAGIC_V5[] = "DILWLT05";
 static const uint32_t WALLET_FILE_VERSION_5 = 5;
+// v6: Added sent transaction history persistence (mapSentTx)
+static const char WALLET_FILE_MAGIC_V6[] = "DILWLT06";
+static const uint32_t WALLET_FILE_VERSION_6 = 6;
 static const size_t WALLET_FILE_HMAC_SIZE = 32;    // HMAC-SHA3-256 output
 static const size_t WALLET_FILE_SALT_SIZE = 32;    // Salt for HMAC
 static const size_t WALLET_FILE_HEADER_SIZE = 8 + 4 + 4 + 32 + 32;  // Magic + Version + Flags + HMAC + Salt = 80 bytes

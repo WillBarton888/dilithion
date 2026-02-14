@@ -869,6 +869,33 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
     }
     // cs_main released here
 
+    // Return non-coinbase transactions to mempool for re-mining
+    // UTXO inputs have been restored by UndoBlock above, so txs are valid again
+    if (pMemPool != nullptr && block_loaded) {
+        CBlockValidator validator;
+        std::vector<CTransactionRef> block_txs;
+        std::string error;
+
+        if (validator.DeserializeBlockTransactions(block, block_txs, error)) {
+            int returned = 0;
+            for (const auto& tx : block_txs) {
+                if (!tx || tx->IsCoinBase()) continue;
+                int64_t current_time = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()
+                ).count();
+                std::string add_error;
+                if (pMemPool->AddTx(tx, 0, current_time, disconnectHeight - 1, &add_error)) {
+                    ++returned;
+                }
+                // Silently skip failures (tx may conflict with new chain's txs)
+            }
+            if (returned > 0) {
+                std::cout << "[Chain] Returned " << returned << " tx to mempool from disconnected block at height "
+                          << disconnectHeight << std::endl;
+            }
+        }
+    }
+
     // BUG #56 FIX: Notify block disconnect callbacks (wallet update)
     // NOTE: We don't hold cs_main during callbacks to prevent deadlock
     // The wallet has its own lock (cs_wallet)

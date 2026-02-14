@@ -92,6 +92,10 @@ ChainParams ChainParams::Mainnet() {
     params.checkpoints.emplace_back(2000, uint256S("0000002c86158454f79a22a31dcabcaca7861f7e95e98275439dd66f4f9e8b4d"));
     // Checkpoint at height 5000 - locks in chain past fork recovery fixes
     params.checkpoints.emplace_back(5000, uint256S("00000152698282228ce368858d4070bc9da937ff2ed5c6276adf45dd9d299ee9"));
+    // Checkpoint at height 10000
+    params.checkpoints.emplace_back(10000, uint256S("000032dc7d684254b446b7568ec895b3279e1230d5a6b6a42e5552e1d45f8402"));
+    // Checkpoint at height 11000
+    params.checkpoints.emplace_back(11000, uint256S("000009628d3af9adef443ee681d19e4ff7c9d8f56a0b05acce8f55e43f88a6cf"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)

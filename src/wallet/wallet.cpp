@@ -1380,14 +1380,14 @@ bool CWallet::Load(const std::string& filename) {
     std::string magic_str(magic, 8);
     // FIX-011 (PERSIST-001): Support DILWLT03 format with file integrity HMAC
     // v4: Added fCoinbase field to track mining rewards
-    if (magic_str != "DILWLT01" && magic_str != "DILWLT02" && magic_str != "DILWLT03" && magic_str != "DILWLT04" && magic_str != "DILWLT05") {
+    if (magic_str != "DILWLT01" && magic_str != "DILWLT02" && magic_str != "DILWLT03" && magic_str != "DILWLT04" && magic_str != "DILWLT05" && magic_str != "DILWLT06") {
         return false;  // Invalid file format
     }
 
     uint32_t version;
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
     if (!file.good()) return false;  // SEC-001: Check I/O error
-    if (version != 1 && version != 2 && version != 3 && version != 4 && version != 5) {
+    if (version != 1 && version != 2 && version != 3 && version != 4 && version != 5 && version != 6) {
         return false;  // Unsupported version
     }
 
@@ -1873,6 +1873,44 @@ bool CWallet::Load(const std::string& filename) {
         }
     }
 
+    // v6+: Read sent transaction history (mapSentTx)
+    std::map<uint256, CSentTx> temp_mapSentTx;
+    if (file.good() && version >= 6) {
+        uint32_t numSentTx = 0;
+        file.read(reinterpret_cast<char*>(&numSentTx), sizeof(numSentTx));
+        if (file.good() && numSentTx <= 100000) {  // Sanity limit
+            for (uint32_t i = 0; i < numSentTx; ++i) {
+                CSentTx stx;
+
+                // Read txid (32 bytes)
+                file.read(reinterpret_cast<char*>(stx.txid.begin()), 32);
+                if (!file.good()) break;
+
+                // Read recipient address (21 bytes)
+                std::vector<uint8_t> addrData(21);
+                file.read(reinterpret_cast<char*>(addrData.data()), 21);
+                if (!file.good()) break;
+                stx.toAddress = CDilithiumAddress::FromData(addrData);
+
+                // Read value, fee, time, height
+                file.read(reinterpret_cast<char*>(&stx.nValue), sizeof(stx.nValue));
+                if (!file.good()) break;
+                file.read(reinterpret_cast<char*>(&stx.nFee), sizeof(stx.nFee));
+                if (!file.good()) break;
+                file.read(reinterpret_cast<char*>(&stx.nTime), sizeof(stx.nTime));
+                if (!file.good()) break;
+                file.read(reinterpret_cast<char*>(&stx.nHeight), sizeof(stx.nHeight));
+                if (!file.good()) break;
+
+                temp_mapSentTx[stx.txid] = stx;
+            }
+        }
+        // Clear EOF state for backwards compatibility
+        if (file.eof()) {
+            file.clear();
+        }
+    }
+
     // SEC-001 FIX: Only if ALL data loaded successfully, swap into wallet
     // This ensures atomic load - either everything loads or nothing changes
     if (!file.good()) {
@@ -2051,6 +2089,9 @@ bool CWallet::Load(const std::string& filename) {
             }
         }
 
+        // v6: Restore sent transaction history
+        mapSentTx = std::move(temp_mapSentTx);
+
         m_walletFile = filename;  // Set wallet file path only on successful load
     }
 
@@ -2103,10 +2144,10 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
 
     // FIX-011 (PERSIST-001): Write header with file integrity HMAC (v3 format)
     // Format: [Magic][Version][Flags][HMAC-placeholder][Salt][Data...]
-    file.write(WALLET_FILE_MAGIC_V5, 8);  // "DILWLT05" - v5 adds MIK persistence
+    file.write(WALLET_FILE_MAGIC_V6, 8);  // "DILWLT06" - v6 adds sent tx persistence
     if (!file.good()) return false;
 
-    uint32_t version = WALLET_FILE_VERSION_5;
+    uint32_t version = WALLET_FILE_VERSION_6;
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
     if (!file.good()) return false;
 
@@ -2397,6 +2438,40 @@ bool CWallet::SaveUnlocked(const std::string& filename) const {
         } else {
             uint8_t hasUnencryptedMIK = 0;
             file.write(reinterpret_cast<const char*>(&hasUnencryptedMIK), 1);
+            if (!file.good()) return false;
+        }
+    }
+
+    // v6: Write sent transaction history (mapSentTx)
+    {
+        uint32_t numSentTx = static_cast<uint32_t>(mapSentTx.size());
+        file.write(reinterpret_cast<const char*>(&numSentTx), sizeof(numSentTx));
+        if (!file.good()) return false;
+
+        for (const auto& [txid, stx] : mapSentTx) {
+            // Write txid (32 bytes)
+            file.write(reinterpret_cast<const char*>(txid.begin()), 32);
+            if (!file.good()) return false;
+
+            // Write recipient address (21 bytes: 1 version + 20 hash)
+            const auto& addrData = stx.toAddress.GetData();
+            if (addrData.size() == 21) {
+                file.write(reinterpret_cast<const char*>(addrData.data()), 21);
+            } else {
+                // Pad with zeros if address is invalid (shouldn't happen)
+                std::vector<uint8_t> zeroPad(21, 0);
+                file.write(reinterpret_cast<const char*>(zeroPad.data()), 21);
+            }
+            if (!file.good()) return false;
+
+            // Write value, fee, time, height
+            file.write(reinterpret_cast<const char*>(&stx.nValue), sizeof(stx.nValue));
+            if (!file.good()) return false;
+            file.write(reinterpret_cast<const char*>(&stx.nFee), sizeof(stx.nFee));
+            if (!file.good()) return false;
+            file.write(reinterpret_cast<const char*>(&stx.nTime), sizeof(stx.nTime));
+            if (!file.good()) return false;
+            file.write(reinterpret_cast<const char*>(&stx.nHeight), sizeof(stx.nHeight));
             if (!file.good()) return false;
         }
     }
