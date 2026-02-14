@@ -27,7 +27,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
     <!-- SVG Icon Library -->
@@ -80,7 +80,7 @@
                 <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
             </symbol>
 
-            <!-- Rocket Icon (Testnet Live) -->
+            <!-- Rocket Icon (Mainnet Live) -->
             <symbol id="icon-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>
                 <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>
@@ -175,12 +175,11 @@
 
             <!-- Mobile Menu Button -->
             <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Toggle Menu" aria-expanded="false">
-                <svg class="menu-icon" id="menuIcon">
-                    <use href="#icon-menu"/>
-                </svg>
-                <svg class="close-icon" id="closeIcon">
-                    <use href="#icon-x"/>
-                </svg>
+                <span class="hamburger-lines">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </span>
             </button>
 
             <div class="nav-links" id="navLinks">
@@ -196,12 +195,7 @@
         </div>
     </nav>
 
-    <!-- MAINNET LAUNCH NOTICE -->
-    <div style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; padding: 15px 20px; text-align: center; font-weight: 600; box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);">
-        🚀 <strong>MAINNET IS NOW LIVE!</strong> Download v2.0.18 and start mining real DIL coins today!
-    </div>
-
-    <!-- Hero Section with Countdown -->
+    <!-- Hero Section -->
     <section class="hero">
         <div class="container">
             <div class="hero-content">
@@ -272,8 +266,8 @@
                 <div class="feature-card">
                     <div class="feature-icon">📖</div>
                     <h3>Quick Start Guide</h3>
-                    <p>Follow our comprehensive testnet launch guide to get started in minutes.</p>
-                    <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank" class="btn btn-small">Read Guide</a>
+                    <p>Follow our comprehensive quick start guide to get started mining in minutes.</p>
+                    <a href="https://github.com/WillBarton888/dilithion/blob/main/README.md" target="_blank" class="btn btn-small">Read Guide</a>
                 </div>
 
                 <div class="feature-card">
@@ -328,7 +322,7 @@
                 <ul>
                     <li><strong>Mainnet DIL coins have real value</strong> - Secure your wallet!</li>
                     <li><strong>Fair launch:</strong> No premine, no ICO, everyone starts at block 0</li>
-                    <li><strong>2% dev contribution:</strong> Funds ongoing development (mainnet only)</li>
+                    <li><strong>Development funding:</strong> 1% development fund + 1% developer rewards (mainnet only)</li>
                     <li><strong>Launch date:</strong> January 28, 2026</li>
                     <li><strong>Block reward:</strong> 50 DIL per block (49 DIL to miner + 1 DIL dev)</li>
                 </ul>
@@ -354,7 +348,7 @@
                 <div class="feature-card">
                     <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-target"/></svg></div>
                     <h3>Fair Launch</h3>
-                    <p>No premine, no ICO, no VC allocation. Pure proof-of-work with transparent 2% dev contribution. Everyone starts equal on January 28, 2026.</p>
+                    <p>No premine, no ICO, no VC allocation. Pure proof-of-work with transparent 1% dev fund + 1% developer rewards. Everyone starts equal on January 28, 2026.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-cpu"/></svg></div>
@@ -374,7 +368,7 @@
                 <div class="feature-card" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(99, 102, 241, 0.3);">
                     <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-code"/></svg></div>
                     <h3>Sustainable Development</h3>
-                    <p>2% mining development contribution (mainnet only) funds ongoing development. Split 50/50 between dev fund and developer rewards. Miners keep 98%.</p>
+                    <p>1% development fund + 1% developer rewards (mainnet only). Miners keep 98% of block rewards.</p>
                 </div>
             </div>
         </div>
@@ -527,7 +521,7 @@
                         <h3>Extract the Package</h3>
                         <p>Unzip (Windows) or extract the .tar.gz (Linux/Mac) to a folder on your computer.</p>
                         <div class="code-block">
-                            <code># Linux/Mac<br>tar -xzf dilithion-testnet-v1.0.0-linux-x64-fixed.tar.gz<br>cd dilithion-testnet-v1.0.0-linux-x64-fixed/</code>
+                            <code># Linux/Mac<br>tar -xzf dilithion-v2.0.18-mainnet-linux-x64.tar.gz<br>cd dilithion-v2.0.18-mainnet-linux-x64/</code>
                         </div>
                     </div>
                 </div>
@@ -552,7 +546,7 @@
                             <li>Connects to the official seed node</li>
                             <li>Syncs the blockchain</li>
                             <li>Creates a wallet</li>
-                            <li>Starts mining testnet DIL</li>
+                            <li>Starts mining DIL</li>
                         </ul>
                         <p>To check your balance, run: <code>./check-wallet-balance</code></p>
                     </div>
@@ -649,7 +643,7 @@
                     Security Notice: Antivirus &amp; Code Signing
                 </h3>
                 <p style="margin: 10px 0;"><strong style="color: #f59e0b;">Why might antivirus software flag these files?</strong></p>
-                <p style="margin: 10px 0;">During the testnet phase, our executables are <strong>not digitally code-signed</strong>. This is normal for open-source testnet software and doesn't mean the files are dangerous—it simply means we haven't purchased a code signing certificate yet.</p>
+                <p style="margin: 10px 0;">Currently, our executables are <strong>not digitally code-signed</strong>. This is normal for open-source software and doesn't mean the files are dangerous—it simply means we haven't purchased a code signing certificate yet.</p>
                 <p style="margin: 10px 0;">Windows SmartScreen and some antivirus programs may show warnings for unsigned executables. This is a false positive. All our binaries are compiled from open-source code available on GitHub.</p>
 
                 <p style="margin: 15px 0 10px 0;"><strong style="color: var(--primary);">How to verify the files are legitimate:</strong></p>
@@ -717,7 +711,7 @@
                 </div>
                 <div class="spec-row">
                     <div class="spec-label">Mining Dev Contribution</div>
-                    <div class="spec-value">2% of subsidy (mainnet only): 1% dev fund + 1% dev reward</div>
+                    <div class="spec-value">1% dev fund + 1% dev reward (mainnet only)</div>
                 </div>
                 <div class="spec-row">
                     <div class="spec-label">Halving Period</div>
@@ -834,17 +828,17 @@
 
                 <div class="faq-item">
                     <button class="faq-question">
-                        <span>What is the 2% mining development contribution?</span>
+                        <span>What is the mining development contribution?</span>
                         <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
                     </button>
                     <div class="faq-answer">
-                        <p><strong>On mainnet only</strong>, 2% of each block subsidy (NOT transaction fees) is allocated to fund ongoing development:</p>
+                        <p><strong>On mainnet only</strong>, each block subsidy (NOT transaction fees) includes a development allocation:</p>
                         <ul>
                             <li><strong>1% Dev Fund:</strong> Long-term development, security audits, infrastructure</li>
                             <li><strong>1% Developer Reward:</strong> Active contributor compensation</li>
                         </ul>
                         <p><strong>Example:</strong> From a 50 DIL block reward, the miner receives 49 DIL (98%), while 0.5 DIL goes to the dev fund and 0.5 DIL to developer rewards.</p>
-                        <p><strong>Note:</strong> This contribution is NOW ACTIVE on mainnet. Testnet continues to have no mining tax—testnet miners receive 100% of block rewards.</p>
+                        <p><strong>Note:</strong> This contribution is active on mainnet. 1% goes to the development fund and 1% to developer rewards.</p>
                         <p><strong>Addresses:</strong></p>
                         <ul>
                             <li>Dev Fund: <code style="font-size: 0.85rem;">DJrywx4AsVQSPLZCKRdg8erZdPMNaRSrKq</code></li>
@@ -874,7 +868,7 @@
                     <div class="faq-answer">
                         <p>We welcome contributions from the community:</p>
                         <ul>
-                            <li><strong>Test the testnet:</strong> Mine, make transactions, and report bugs on <a href="https://github.com/WillBarton888/dilithion/issues" target="_blank">GitHub Issues</a></li>
+                            <li><strong>Mine & test:</strong> Mine, make transactions, and report bugs on <a href="https://github.com/WillBarton888/dilithion/issues" target="_blank">GitHub Issues</a></li>
                             <li><strong>Code contributions:</strong> Submit pull requests on <a href="https://github.com/WillBarton888/dilithion" target="_blank">GitHub</a></li>
                             <li><strong>Documentation:</strong> Help improve guides, tutorials, and documentation</li>
                             <li><strong>Community:</strong> Join <a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank">GitHub Discussions</a> to help others</li>
@@ -912,7 +906,7 @@
                             <li><strong>GitHub Discussions:</strong> <a href="https://github.com/WillBarton888/dilithion/discussions" target="_blank">General questions and discussions</a></li>
                             <li><strong>GitHub Issues:</strong> <a href="https://github.com/WillBarton888/dilithion/issues" target="_blank">Bug reports and technical issues</a></li>
                             <li><strong>Email:</strong> team@dilithion.org for general inquiries</li>
-                            <li><strong>Documentation:</strong> <a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank">Testnet Launch Guide</a></li>
+                            <li><strong>Documentation:</strong> <a href="https://github.com/WillBarton888/dilithion/blob/main/README.md" target="_blank">Getting Started Guide</a></li>
                             <li><strong>Whitepaper:</strong> <a href="WHITEPAPER.html" target="_blank">Technical documentation</a></li>
                         </ul>
                     </div>
@@ -962,7 +956,7 @@
                 <div class="footer-section">
                     <h4>Resources</h4>
                     <ul>
-                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md" target="_blank">Testnet Guide</a></li>
+                        <li><a href="https://github.com/WillBarton888/dilithion/blob/main/README.md" target="_blank">Getting Started</a></li>
                         <li><a href="https://github.com/WillBarton888/dilithion/blob/main/CLI-WALLET-GUIDE.md" target="_blank">CLI Wallet Guide</a></li>
                         <li><a href="wallet.html" target="_blank">Web Wallet (Beta)</a></li>
                         <li><a href="http://explorer.dilithion.org" target="_blank">Block Explorer</a></li>
@@ -1018,6 +1012,6 @@
         </div>
     </footer>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=3"></script>
 </body>
 </html>

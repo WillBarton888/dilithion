@@ -86,7 +86,9 @@ struct CMiningStats {
 
     void Reset() {
         nHashesComputed = 0;
-        nBlocksFound = 0;
+        // NOTE: nBlocksFound is intentionally NOT reset here.
+        // "This session" means the entire node run, and Reset() is called
+        // every time mining restarts (after finding a block, template update, etc.)
         nStartTime = 0;
         nLastHashRate = 0;
     }

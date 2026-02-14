@@ -993,10 +993,57 @@ a:hover {
     color: var(--text-muted);
 }
 
+/* Mobile Menu Button - MUST be before media queries so display:block override works */
+.mobile-menu-btn {
+    display: none;
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 8px;
+    z-index: 1001;
+    position: relative;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+}
+
+.hamburger-lines {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 24px;
+    height: 18px;
+}
+
+.hamburger-lines span {
+    display: block;
+    width: 100%;
+    height: 2px;
+    background: var(--text-primary);
+    border-radius: 2px;
+    transition: all 0.3s ease;
+}
+
+/* X shape when menu is open */
+.mobile-menu-btn.active .hamburger-lines span:nth-child(1) {
+    transform: translateY(8px) rotate(45deg);
+}
+
+.mobile-menu-btn.active .hamburger-lines span:nth-child(2) {
+    opacity: 0;
+}
+
+.mobile-menu-btn.active .hamburger-lines span:nth-child(3) {
+    transform: translateY(-8px) rotate(-45deg);
+}
+
 /* Responsive Design */
 /* Tablet/Medium screens */
 @media (max-width: 1024px) {
-    /* Testnet cards - 2 columns on tablets */
+    /* Feature cards - 2 columns on tablets */
     .features-grid {
         grid-template-columns: repeat(2, 1fr) !important;
     }
@@ -1018,16 +1065,16 @@ a:hover {
         padding: 0 16px;
     }
 
-    .nav-brand .logo {
+    .nav-logo {
         width: 40px;
         height: 40px;
     }
 
-    .brand-text {
+    .nav-brand h1 {
         font-size: 1.25rem;
     }
 
-    .tagline {
+    .nav-brand .tagline {
         font-size: 0.7rem;
     }
 
@@ -1107,15 +1154,15 @@ a:hover {
 
     /* Mobile Navigation */
     .mobile-menu-btn {
-        display: block;
+        display: flex;
     }
 
     .nav-links {
         position: fixed;
-        top: 88px;
+        top: 80px;
         right: -100%;
         width: 280px;
-        height: calc(100vh - 88px);
+        height: calc(100vh - 80px);
         background: var(--bg-card);
         flex-direction: column;
         padding: 32px 24px;
@@ -1124,6 +1171,7 @@ a:hover {
         border-left: 1px solid var(--border-color);
         overflow-y: auto;
         gap: 0;
+        z-index: 1000;
     }
 
     .nav-links.active {
@@ -1183,7 +1231,7 @@ a:hover {
         gap: 24px;
     }
 
-    /* Testnet cards - stack on mobile */
+    /* Feature cards - stack on mobile */
     .features-grid {
         grid-template-columns: 1fr !important;
         gap: 20px !important;
@@ -1349,7 +1397,7 @@ a:hover {
     }
 }
 
-/* Testnet Banner Pulse Animation */
+/* Mainnet Banner Pulse Animation */
 @keyframes pulse-glow {
     0%, 100% {
         box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
@@ -1412,35 +1460,4 @@ a:hover {
     vertical-align: middle;
     margin: 0 4px;
     stroke: currentColor;
-}
-
-/* Mobile Menu Button */
-.mobile-menu-btn {
-    display: none;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 8px;
-    z-index: 1001;
-    position: relative;
-    transition: transform 0.3s ease;
-}
-
-.mobile-menu-btn:hover {
-    transform: scale(1.1);
-}
-
-.mobile-menu-btn:active {
-    transform: scale(0.95);
-}
-
-.mobile-menu-btn svg {
-    width: 28px;
-    height: 28px;
-    stroke: var(--text-primary);
-    stroke-width: 2;
-}
-
-.mobile-menu-btn .close-icon {
-    display: none;
 }

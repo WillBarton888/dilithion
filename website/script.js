@@ -4,7 +4,6 @@
  */
 
 // Configuration
-const TESTNET_LAUNCH_DATE = 1762041600000; // Nov 2, 2025 00:00:00 UTC
 const MAINNET_LAUNCH_DATE = 1769558400000; // Jan 28, 2026 00:00:00 UTC
 const RPC_ENDPOINT = 'http://localhost:8332';
 const API_ENDPOINT = '/api/stats.php'; // PHP proxy to backend nodes
@@ -486,12 +485,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Mainnet is live - show mainnet status
         updateNetworkStatus(true);
         startDashboardUpdates();
-    } else if (now >= TESTNET_LAUNCH_DATE) {
-        // Testnet is live but mainnet not yet
-        updateNetworkStatus(true);
-        startDashboardUpdates();
     } else {
-        // Neither network is live yet
+        // Pre-launch
         updateNetworkStatus(false);
     }
 });
@@ -509,54 +504,39 @@ window.addEventListener('beforeunload', function() {
 function initMobileMenu() {
     const mobileMenuBtn = document.getElementById('mobileMenuBtn');
     const navLinks = document.getElementById('navLinks');
-    const menuIcon = document.getElementById('menuIcon');
-    const closeIcon = document.getElementById('closeIcon');
 
     if (!mobileMenuBtn || !navLinks) return;
+
+    function closeMenu() {
+        navLinks.classList.remove('active');
+        mobileMenuBtn.classList.remove('active');
+        document.body.classList.remove('menu-open');
+        mobileMenuBtn.setAttribute('aria-expanded', 'false');
+    }
 
     // Toggle mobile menu
     mobileMenuBtn.addEventListener('click', function() {
         const isExpanded = this.getAttribute('aria-expanded') === 'true';
-
-        // Toggle menu state
-        this.setAttribute('aria-expanded', !isExpanded);
-        navLinks.classList.toggle('active');
-        document.body.classList.toggle('menu-open');
-
-        // Toggle icons
-        if (menuIcon && closeIcon) {
-            menuIcon.style.display = isExpanded ? 'block' : 'none';
-            closeIcon.style.display = isExpanded ? 'none' : 'block';
+        if (isExpanded) {
+            closeMenu();
+        } else {
+            navLinks.classList.add('active');
+            mobileMenuBtn.classList.add('active');
+            document.body.classList.add('menu-open');
+            mobileMenuBtn.setAttribute('aria-expanded', 'true');
         }
     });
 
     // Close mobile menu when clicking on a link
-    const navLinksAll = navLinks.querySelectorAll('a');
-    navLinksAll.forEach(link => {
-        link.addEventListener('click', function() {
-            navLinks.classList.remove('active');
-            document.body.classList.remove('menu-open');
-            mobileMenuBtn.setAttribute('aria-expanded', 'false');
-
-            if (menuIcon && closeIcon) {
-                menuIcon.style.display = 'block';
-                closeIcon.style.display = 'none';
-            }
-        });
+    navLinks.querySelectorAll('a').forEach(link => {
+        link.addEventListener('click', closeMenu);
     });
 
     // Close mobile menu when clicking outside
     document.addEventListener('click', function(event) {
         if (!navLinks.contains(event.target) && !mobileMenuBtn.contains(event.target)) {
             if (navLinks.classList.contains('active')) {
-                navLinks.classList.remove('active');
-                document.body.classList.remove('menu-open');
-                mobileMenuBtn.setAttribute('aria-expanded', 'false');
-
-                if (menuIcon && closeIcon) {
-                    menuIcon.style.display = 'block';
-                    closeIcon.style.display = 'none';
-                }
+                closeMenu();
             }
         }
     });
@@ -564,14 +544,7 @@ function initMobileMenu() {
     // Close mobile menu on escape key
     document.addEventListener('keydown', function(event) {
         if (event.key === 'Escape' && navLinks.classList.contains('active')) {
-            navLinks.classList.remove('active');
-            document.body.classList.remove('menu-open');
-            mobileMenuBtn.setAttribute('aria-expanded', 'false');
-
-            if (menuIcon && closeIcon) {
-                menuIcon.style.display = 'block';
-                closeIcon.style.display = 'none';
-            }
+            closeMenu();
         }
     });
 }
