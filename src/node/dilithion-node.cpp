@@ -758,13 +758,23 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 // First block with this MIK - include full pubkey (registration)
                 std::vector<uint8_t> mikPubkey;
                 if (wallet.GetMIKPubKey(mikPubkey)) {
-                    // DFMP v3.0: Mine registration PoW nonce
+                    // DFMP v3.0: Mine registration PoW nonce (cached to avoid re-mining)
+                    static uint64_t s_cachedRegNonce = 0;
+                    static bool s_regNonceMined = false;
+                    static DFMP::Identity s_regNonceIdentity;
                     uint64_t regNonce = 0;
                     if (Dilithion::g_chainParams && nHeight >= Dilithion::g_chainParams->dfmpV3ActivationHeight) {
-                        std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
-                        if (!DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce)) {
-                            std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
-                            // Continue without nonce - block will be invalid post-v3.0
+                        if (s_regNonceMined && s_regNonceIdentity == mikIdentity) {
+                            regNonce = s_cachedRegNonce;
+                        } else {
+                            std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
+                            if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce)) {
+                                s_cachedRegNonce = regNonce;
+                                s_regNonceMined = true;
+                                s_regNonceIdentity = mikIdentity;
+                            } else {
+                                std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
+                            }
                         }
                     }
 
