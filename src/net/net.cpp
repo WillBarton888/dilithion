@@ -461,8 +461,20 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                 "Peer has incompatible protocol version");
             error.severity = ErrorSeverity::WARNING;
             LogPrintf(ALL, WARN, "%s", CErrorFormatter::FormatForLog(error).c_str());
-            std::cout << "[P2P] ERROR: Peer " << peer_id << " has incompatible protocol version "
-                      << msg.version << " (minimum: " << NetProtocol::MIN_PEER_PROTO_VERSION << ")" << std::endl;
+            std::cout << "\n[P2P] ================================================" << std::endl;
+            std::cout << "[P2P] CONNECTION REJECTED - OUTDATED SOFTWARE" << std::endl;
+            std::cout << "[P2P] ================================================" << std::endl;
+            std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") protocol v"
+                      << msg.version << " (minimum required: " << NetProtocol::MIN_PEER_PROTO_VERSION << ")" << std::endl;
+            std::cout << "[P2P] " << std::endl;
+            std::cout << "[P2P] This peer is running outdated software with incompatible" << std::endl;
+            std::cout << "[P2P] consensus rules, which causes fork creation on the network." << std::endl;
+            std::cout << "[P2P] " << std::endl;
+            std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
+            std::cout << "[P2P] 1. Download the latest version from https://dilithion.org" << std::endl;
+            std::cout << "[P2P] 2. Stop your node" << std::endl;
+            std::cout << "[P2P] 3. Replace the binary and restart" << std::endl;
+            std::cout << "[P2P] ================================================\n" << std::endl;
             // Use proper misbehavior type for protocol version violation
             peer_manager.Misbehaving(peer_id, 50, MisbehaviorType::INVALID_PROTOCOL_VERSION);
             return false;

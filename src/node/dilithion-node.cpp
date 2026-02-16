@@ -4935,6 +4935,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         static int last_remaining_logged = -1;  // For countdown logging
         static constexpr int SOLO_MINING_GRACE_PERIOD_SECONDS = 120;  // 2 minute grace period
 
+        // Consensus fork detection state - detects when miner is solo on a fork
+        // by tracking consecutive blocks mined by our address with no peer blocks
+        static uint256 last_checked_tip_hash;
+        static int consecutive_self_mined = 0;
+        static bool mining_paused_consensus_fork = false;
+        static bool solo_warning_shown = false;
+        static constexpr int SOLO_WARNING_THRESHOLD = 5;   // Warn after 5 consecutive self-mined blocks
+        static constexpr int SOLO_PAUSE_THRESHOLD = 10;    // Pause after 10 consecutive self-mined blocks
+
         // Main loop
         while (g_node_state.running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -4969,7 +4978,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 // Restart mining if appropriate (skip if paused or VDF miner handles itself)
                 if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()
-                    && !mining_paused_no_peers && !mining_paused_fork
+                    && !mining_paused_no_peers && !mining_paused_fork && !mining_paused_consensus_fork
                     && !vdf_miner.IsRunning()) {
 
                     if (shouldUseVDF(next_height)) {
@@ -5268,6 +5277,122 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             std::cout << "[Mining] Mining resumed with fresh template after fork resolution" << std::endl;
                         } else {
                             std::cerr << "[Mining] ERROR: Failed to build template after fork resolution" << std::endl;
+                        }
+                    }
+                }
+            }
+
+            // ========================================================================
+            // Consensus fork detection: Solo mining on private fork
+            // ========================================================================
+            // Detects when we've mined many consecutive blocks with no blocks from
+            // other miners - a strong signal of a consensus fork. Our blocks are
+            // valid locally but rejected by the network, causing wasted work.
+            // Runs every iteration (cheap hash comparison, heavy work only on tip change).
+            // Placed OUTSIDE the miner.IsMining() block so resume works when paused.
+            {
+                CBlockIndex* tipIndex = g_chainstate.GetTip();
+                if (tipIndex && g_node_state.mining_enabled.load()) {
+                    uint256 tipHash = tipIndex->GetBlockHash();
+
+                    if (tipHash != last_checked_tip_hash) {
+                        last_checked_tip_hash = tipHash;
+
+                        // Read the tip block to identify the miner
+                        CBlock tipBlock;
+                        if (blockchain.ReadBlock(tipHash, tipBlock)) {
+                            CBlockValidator validator;
+                            std::vector<CTransactionRef> transactions;
+                            std::string error;
+
+                            if (validator.DeserializeBlockTransactions(tipBlock, transactions, error)
+                                && !transactions.empty() && !transactions[0]->vout.empty()) {
+
+                                std::vector<uint8_t> tipMinerPkh = WalletCrypto::ExtractPubKeyHash(
+                                    transactions[0]->vout[0].scriptPubKey);
+
+                                // Determine our mining pubkey hash
+                                std::vector<uint8_t> ourPkh;
+                                if (!config.mining_address_override.empty()) {
+                                    CDilithiumAddress addr;
+                                    addr.SetString(config.mining_address_override);
+                                    const std::vector<uint8_t>& addrData = addr.GetData();
+                                    if (addrData.size() >= 21) {
+                                        ourPkh.assign(addrData.begin() + 1, addrData.begin() + 21);
+                                    }
+                                } else {
+                                    ourPkh = wallet.GetPubKeyHash();
+                                }
+
+                                if (!tipMinerPkh.empty() && !ourPkh.empty()) {
+                                    if (tipMinerPkh == ourPkh) {
+                                        // We mined this block
+                                        consecutive_self_mined++;
+
+                                        if (consecutive_self_mined >= SOLO_PAUSE_THRESHOLD
+                                            && !mining_paused_consensus_fork) {
+                                            // CRITICAL: Auto-pause mining
+                                            std::cout << std::endl;
+                                            std::cout << "[Mining] ================================================" << std::endl;
+                                            std::cout << "[Mining] CRITICAL: " << consecutive_self_mined
+                                                      << " consecutive blocks mined solo" << std::endl;
+                                            std::cout << "[Mining] You appear to be on a CONSENSUS FORK" << std::endl;
+                                            std::cout << "[Mining] Your blocks are NOT being accepted by the network" << std::endl;
+                                            std::cout << "[Mining] ================================================" << std::endl;
+                                            std::cout << "[Mining] Mining PAUSED to prevent further wasted work" << std::endl;
+                                            std::cout << "[Mining] Please update to the latest version at dilithion.org" << std::endl;
+                                            std::cout << "[Mining] Mining will resume when blocks from other miners arrive" << std::endl;
+                                            std::cout << "[Mining] ================================================" << std::endl;
+                                            std::cout << std::endl;
+                                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
+                                            if (miner.IsMining()) miner.StopMining();
+                                            mining_paused_consensus_fork = true;
+                                        } else if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD
+                                                   && !solo_warning_shown) {
+                                            // Warning: unusual solo mining pattern
+                                            std::cout << std::endl;
+                                            std::cout << "[Mining] WARNING: You have mined " << consecutive_self_mined
+                                                      << " consecutive blocks with no blocks from other miners" << std::endl;
+                                            std::cout << "[Mining] This is unusual and may indicate a consensus fork" << std::endl;
+                                            std::cout << "[Mining] Ensure you are running the latest version from dilithion.org" << std::endl;
+                                            std::cout << std::endl;
+                                            solo_warning_shown = true;
+                                        }
+                                    } else {
+                                        // Another miner's block - healthy network activity
+                                        if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD) {
+                                            std::cout << "[Mining] Block from another miner received - solo mining counter reset" << std::endl;
+                                        }
+                                        consecutive_self_mined = 0;
+                                        solo_warning_shown = false;
+
+                                        // Resume mining if paused due to consensus fork
+                                        if (mining_paused_consensus_fork) {
+                                            std::cout << std::endl;
+                                            std::cout << "[Mining] ================================================" << std::endl;
+                                            std::cout << "[Mining] Block from another miner detected!" << std::endl;
+                                            std::cout << "[Mining] Consensus fork appears resolved - resuming mining" << std::endl;
+                                            std::cout << "[Mining] ================================================" << std::endl;
+                                            std::cout << std::endl;
+                                            mining_paused_consensus_fork = false;
+
+                                            unsigned int resume_height = tipIndex->nHeight + 1;
+                                            if (shouldUseVDF(resume_height) && !vdf_miner.IsRunning()) {
+                                                vdf_miner.Start();
+                                                std::cout << "[Mining] VDF mining resumed after consensus fork resolved" << std::endl;
+                                            } else if (!shouldUseVDF(resume_height)) {
+                                                auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
+                                                if (templateOpt) {
+                                                    miner.StartMining(*templateOpt);
+                                                    std::cout << "[Mining] Mining resumed after consensus fork resolved" << std::endl;
+                                                } else {
+                                                    std::cerr << "[Mining] ERROR: Failed to build template for consensus fork resume" << std::endl;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

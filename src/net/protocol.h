@@ -18,8 +18,8 @@ static const uint32_t TESTNET_MAGIC = 0xDAB5BFFA;
 static const uint32_t REGTEST_MAGIC = 0xFABFB5DA;
 
 /** Protocol version */
-static const int PROTOCOL_VERSION = 70003;          // Bug #256: Peer timeout cooldown fix
-static const int MIN_PEER_PROTO_VERSION = 70002;    // Allow 70002 nodes to connect
+static const int PROTOCOL_VERSION = 70004;          // v3.3.0: DFMP consensus enforcement
+static const int MIN_PEER_PROTO_VERSION = 70004;    // Require v3.3.0+ (DFMP v3.3 consensus)
 
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;
