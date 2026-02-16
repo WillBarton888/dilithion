@@ -56,6 +56,33 @@ Dilithion is a quantum-resistant cryptocurrency built from the ground up with po
 
 ---
 
+## Future Consensus: VDF + Digital DNA
+
+Dilithion is evolving beyond proof-of-work toward **VDF fair mining** with **Digital DNA** Sybil resistance -- eliminating hashrate advantages and reducing energy consumption by ~95%.
+
+### VDF Fair Mining
+- **How it works:** Each miner computes one Verifiable Delay Function per block. Lowest output wins. More hardware doesn't help.
+- **Energy savings:** ~95% reduction -- no more hash racing across all CPU cores
+- **Fairness:** 1 CPU = 1 ticket per round, regardless of farm size
+- **Cooldown:** Winners sit out N blocks, ensuring block distribution
+
+### Digital DNA (Anonymous Sybil Resistance)
+- **8 unforgeable dimensions:** Latency, VDF timing, perspective, memory, clock drift, bandwidth, thermal, behavioral
+- **Physics-based:** Speed of light, oscillator uniqueness, cache hierarchy -- cannot be faked
+- **Anonymous:** No KYC, no trusted hardware, no personal data
+- **ML-enhanced:** Isolation Forest anomaly detection (advisory mode, promotes to active after proving reliable)
+
+### Migration Path
+```
+Phase 1 (Current):  RandomX PoW + DFMP
+Phase 2 (Hybrid):   RandomX + VDF (both accepted)
+Phase 3 (Future):   VDF-Only + Digital DNA
+```
+
+**Status:** VDF implementation complete (46 tests passing). Testnet activation in progress. Mainnet activation pending community vote. See [VDF_LOTTERY_PROPOSAL.md](VDF_LOTTERY_PROPOSAL.md) for full details.
+
+---
+
 ## Post-Quantum Security
 
 Dilithion uses **NIST-standardized** post-quantum cryptography:
@@ -224,18 +251,21 @@ Coinbase:  "Dilithion Mainnet v2.0.0 - Fair Launch Reset - Quantum-Resistant Dig
 
 - **Language:** C++17
 - **Storage:** LevelDB
-- **Mining:** RandomX
+- **Mining:** RandomX (current), chiavdf VDF (future)
 - **Signatures:** CRYSTALS-Dilithium3
 - **Hashing:** SHA-3 (FIPS 202)
+- **Identity:** Digital DNA (8-dimension anonymous Sybil resistance)
 - **RPC:** JSON-RPC 2.0
 - **P2P:** Custom protocol (port 8444)
 
 ### Dependencies
 
 - **LevelDB:** Blockchain storage
-- **RandomX:** Mining algorithm
+- **RandomX:** Mining algorithm (current)
+- **chiavdf:** VDF fair mining (future)
 - **Dilithium:** Post-quantum signatures
 - **SHA-3:** Quantum-resistant hashing
+- **GMP:** Arbitrary precision arithmetic (for VDF)
 
 ---
 
@@ -279,17 +309,21 @@ make test
 ```
 dilithion/
 ├── src/
-│   ├── consensus/     # Consensus rules, fees
+│   ├── consensus/     # Consensus rules, fees, VDF validation
 │   ├── crypto/        # SHA-3, RandomX integration
+│   ├── digital_dna/   # Digital DNA identity system (8 dimensions)
+│   ├── dfmp/          # Fair Mining Protocol (MIK identity)
 │   ├── miner/         # Mining controller
 │   ├── net/           # P2P networking
 │   ├── node/          # Blockchain storage, genesis
 │   ├── primitives/    # Block, transaction structures
 │   ├── rpc/           # RPC server
 │   ├── test/          # Test suites
+│   ├── vdf/           # VDF miner, cooldown tracker
 │   └── wallet/        # HD wallet, addresses, keys
 ├── depends/
 │   ├── randomx/       # RandomX library
+│   ├── chiavdf/       # VDF library (class groups)
 │   └── dilithium/     # Dilithium library
 ├── docs/              # Documentation
 └── README.md
@@ -391,6 +425,7 @@ Dilithion is released under the **MIT License**. See [LICENSE](LICENSE) for deta
 Dilithion builds upon:
 
 - **RandomX** - Efficient CPU mining
+- **chiavdf** - Verifiable Delay Function (Chia Network)
 - **CRYSTALS-Dilithium** - Post-quantum signatures (NIST)
 - **SHA-3/Keccak** - Quantum-resistant hashing (NIST)
 - **Bitcoin** - Original blockchain design

@@ -1,9 +1,9 @@
 # Dilithion: A Post-Quantum Cryptocurrency
 
-**Version 2.0**
-**January 2026**
+**Version 3.0**
+**February 2026**
 
-**Launch Date:** January 18, 2026
+**Launch Date:** January 28, 2026
 
 ---
 
@@ -15,9 +15,10 @@ This whitepaper presents Dilithion's technical architecture, consensus parameter
 
 **Key Features:**
 - **Post-quantum security:** CRYSTALS-Dilithium3 (NIST FIPS 204, Level 3)
-- **ASIC-resistant mining:** RandomX proof-of-work
+- **ASIC-resistant mining:** RandomX proof-of-work (transitioning to VDF fair mining)
 - **Optimized consensus:** 4-minute blocks for large signature propagation
-- **Fair mining:** DFMP v2.0 with Mining Identity Keys (MIK)
+- **Fair mining:** DFMP v2.0 with Mining Identity Keys (current), VDF fair mining (future)
+- **Sybil resistance:** Digital DNA anonymous identity system (8 dimensions)
 - **Fair distribution:** No premine, pure proof-of-work launch
 - **Fixed supply:** 21 million coins
 - **Launch:** January 18, 2026, 00:00:00 UTC
@@ -41,6 +42,9 @@ This whitepaper presents Dilithion's technical architecture, consensus parameter
 3. [Technical Architecture](#3-technical-architecture)
 4. [Consensus Mechanism](#4-consensus-mechanism)
    - 4.5 [Dilithion Fair Mining Protocol (DFMP)](#45-dilithion-fair-mining-protocol-dfmp)
+   - 4.6 [VDF Fair Mining (Future Consensus)](#46-vdf-fair-mining-future-consensus)
+   - 4.7 [Digital DNA: Anonymous Sybil Resistance](#47-digital-dna-anonymous-sybil-resistance)
+   - 4.8 [Consensus Evolution Roadmap](#48-consensus-evolution-roadmap)
 5. [Economic Model](#5-economic-model)
 6. [Network Security](#6-network-security)
 7. [Roadmap](#7-roadmap)
@@ -458,6 +462,183 @@ DFMP multipliers are enforced at the consensus level:
 
 **Note:** Blocks that meet base difficulty but fail DFMP-adjusted difficulty are invalid.
 
+### 4.6 VDF Fair Mining (Future Consensus)
+
+**Status:** Implemented, tested (46 unit tests), testnet activation scheduled. Mainnet activation pending community vote.
+
+DFMP successfully prevents mining centralization, but it addresses a symptom rather than the root cause: **proof-of-work inherently rewards those who burn the most electricity.** Dilithion's next-generation consensus replaces hashrate competition with a Verifiable Delay Function (VDF).
+
+#### 4.6.1 What is a VDF?
+
+A Verifiable Delay Function is a computation that:
+- Takes a **fixed amount of time** (~200 seconds on mainnet) regardless of hardware
+- **Cannot be parallelized** -- 1 CPU or 1,000 CPUs produce the same result in the same time
+- Produces a **provable output** that anyone can verify in milliseconds
+- Is **deterministic** -- the same input always produces the same output
+
+Dilithion uses [chiavdf](https://github.com/Chia-Network/chiavdf), the same VDF library powering Chia Network since 2021, based on class groups of unknown order.
+
+#### 4.6.2 How VDF Mining Works
+
+```
+Every block period:
+1. Each miner computes ONE VDF seeded with their address
+2. The miner with the lowest VDF output wins the block
+3. The winner enters a cooldown period (sits out N blocks)
+4. Repeat
+```
+
+**Challenge derivation:**
+```
+challenge = SHA3-256(previous_block_hash || height || miner_address)
+```
+
+Each miner gets a unique, unpredictable challenge. The miner address component ensures every miner computes a different VDF, and the previous block hash prevents grinding.
+
+#### 4.6.3 Why This Eliminates Hashrate Advantage
+
+| Scenario | Current PoW | VDF Fair Mining |
+|----------|-------------|-----------------|
+| 1 miner, 1 CPU | 1 ticket | 1 ticket |
+| 1 miner, 100 CPUs | 100 tickets | 1 ticket |
+| 10 miners, 1 CPU each | 10 tickets total | 10 tickets total |
+
+**Hashrate becomes irrelevant.** Each address gets exactly one VDF computation per round. Additional hardware provides zero advantage.
+
+#### 4.6.4 Cooldown Mechanism
+
+After winning a block, a miner is excluded from the next N blocks. The cooldown scales with network participation:
+
+| Active Miners | Cooldown | Max Block Share |
+|---------------|----------|-----------------|
+| 10 | 10 blocks | 10% |
+| 50 | 50 blocks | 2% |
+| 100+ | 100 blocks | 1% |
+
+Parameters: `MIN_COOLDOWN = 10`, `MAX_COOLDOWN = 100`, `ACTIVE_WINDOW = 360 blocks`
+
+This single mechanism replaces all of DFMP's penalty systems (heat, maturity, payout tracking) with one elegant rule.
+
+#### 4.6.5 VDF Block Format
+
+VDF blocks use **block version 4** with a 144-byte header:
+
+| Field | Size | Description |
+|-------|------|-------------|
+| Legacy header | 80 bytes | version, prevHash, merkleRoot, timestamp, nBits, nonce |
+| `vdfOutput` | 32 bytes | VDF computation result |
+| `vdfProofHash` | 32 bytes | SHA3-256 commitment to full proof |
+
+The full Wesolowski VDF proof (~100 bytes) is stored in the coinbase transaction's OP_RETURN output. Block hash uses SHA3-256 of the full 144-byte header (no RandomX computation).
+
+#### 4.6.6 Energy Reduction
+
+| Metric | RandomX PoW | VDF Mining |
+|--------|-------------|------------|
+| CPU usage per miner | 100% all cores, 24/7 | 1 thread, ~200s per round |
+| Network total (50 miners) | 50 x 8 cores x 100% = 400 cores | 50 x 1 thread x ~30% duty = 15 cores |
+| Estimated energy reduction | Baseline | **~95% reduction** |
+
+#### 4.6.7 Parameters
+
+| Parameter | Mainnet | Testnet |
+|-----------|---------|---------|
+| VDF iterations | 200,000,000 (~200s) | 10,000,000 (~10s) |
+| Block time target | 240 seconds | 60 seconds |
+| Cooldown min/max | 10 / 100 blocks | 10 / 100 blocks |
+| Active window | 360 blocks | 360 blocks |
+| Block version | 4 | 4 |
+
+### 4.7 Digital DNA: Anonymous Sybil Resistance
+
+The primary attack against VDF fair mining is **address multiplication** (Sybil attack) -- creating many identities to get many lottery tickets. Dilithion addresses this with Digital DNA, an anonymous, physics-based identity system.
+
+#### 4.7.1 Design Principles
+
+- **Anonymous:** No KYC, no trusted hardware, no personal data
+- **Unforgeable:** Based on physics (speed of light, computation time, oscillator drift)
+- **Verifiable:** Third parties can validate claims
+- **Privacy-preserving:** Identity fingerprints reveal nothing about the person
+- **Data-driven:** Equal-weight bootstrap, ML calibration, then ML-primary detection
+
+#### 4.7.2 Eight Identity Dimensions
+
+Every miner builds an unforgeable identity fingerprint from 8 independent dimensions:
+
+| Dimension | Measures | Why It's Unique |
+|-----------|----------|-----------------|
+| **L** - Latency Fingerprint | Round-trip time to seed nodes | Speed of light -- geographic location determines latency |
+| **V** - VDF Timing Signature | VDF computation speed profile | CPU/silicon manufacturing differences are measurable |
+| **P** - Perspective Proof | Which peers you see and when | Network position is unique per node |
+| **M** - Memory Fingerprint | Cache hierarchy timing | L1/L2/L3 cache sizes and latencies vary by hardware |
+| **D** - Clock Drift | Crystal oscillator frequency | Every clock crystal drifts at a unique rate |
+| **B** - Bandwidth Proof | Upload/download throughput | Connection capacity varies per location and ISP |
+| **T** - Thermal Profile | Cooling curve from VDF checkpoints | Thermal behavior is hardware and environment-specific |
+| **BP** - Behavioral Profile | Protocol participation patterns | Activity timing and patterns are unique |
+
+#### 4.7.3 Sybil Detection
+
+When a new identity registers, it is compared against all existing identities across all available dimensions:
+
+- **Combined score >= 0.92** -- Auto-reject (same identity, different address)
+- **Combined score >= 0.55** -- Trigger challenge verification
+- **Memory + Clock Drift both >= 0.95** -- Physics hard rule: auto-reject (probability of two distinct machines matching both is vanishingly small)
+
+Scoring uses equal-weight averaging across all available dimensions, with correlation-aware damping for hardware-correlated dimensions (V, M, T).
+
+#### 4.7.4 ML Anomaly Detection
+
+An Isolation Forest ML model runs in **advisory mode** -- logging anomalies without auto-rejecting. It uses 13 features per identity pair and will be promoted to active mode after meeting these prerequisites:
+
+- 5,000+ scored identity pairs
+- 1,000+ full-dimension pairs
+- 300+ challenge-resolved outcomes
+- False positive rate below 1%
+- Diversity threshold: 3+ hardware clusters, 3+ geographic regions
+
+This ensures ML only influences decisions after proving reliable on real network data.
+
+#### 4.7.5 Cost of a Sybil Attack
+
+With Digital DNA + cooldown, an attacker trying to capture 50% of blocks would need:
+
+| Requirement | Reason |
+|------------|--------|
+| 60+ mining addresses | 100-block cooldown limits each to ~3 blocks per 360-block window |
+| 60+ distinct physical machines | DNA detects same-hardware identities |
+| 60+ distinct geographic locations | Latency fingerprint detects co-location |
+| Sustained long-term commitment | Identities build over time, not burst-rentable |
+
+Compare to current PoW: rent hashrate for an hour, dominate, leave. VDF + DNA requires **ongoing, geographically distributed, unique hardware** -- a fundamentally different cost model.
+
+### 4.8 Consensus Evolution Roadmap
+
+Dilithion's consensus evolves through three phases:
+
+```
+Phase 1 (Current):  RandomX PoW + DFMP
+                    ├── ASIC-resistant CPU mining
+                    ├── MIK-based identity tracking
+                    └── Heat/maturity penalty system
+
+Phase 2 (Hybrid):   RandomX PoW + VDF (both accepted)
+                    ├── Miners upgrade at their own pace
+                    ├── RandomX acts as safety net
+                    └── Digital DNA collection begins
+
+Phase 3 (Future):   VDF-Only + Digital DNA
+                    ├── Hashrate irrelevant
+                    ├── ~95% energy reduction
+                    ├── Anonymous Sybil resistance
+                    └── DFMP retired
+```
+
+**Migration safety:**
+- Long hybrid period gives miners time to upgrade
+- RandomX continues during hybrid as a fallback
+- Testnet activation proves the full migration path before mainnet
+- Activation heights set by community vote
+
 ---
 
 ## 5. Economic Model
@@ -593,14 +774,15 @@ fee = MIN_TX_FEE + (transaction_size_bytes × FEE_PER_BYTE)
 
 #### 6.1.3 Sybil Attack
 
-**Definition:** Attacker creates many fake network nodes
+**Definition:** Attacker creates many fake identities to gain disproportionate influence
 
 **Dilithion Defenses:**
-1. Mining power matters, not node count
-2. Nodes don't receive rewards (no incentive to fake)
-3. Peer quality scoring (future enhancement)
+1. **Current (PoW):** Mining power matters, not node count
+2. **Future (VDF):** Digital DNA 8-dimension fingerprinting detects same-machine identities
+3. **Physics-based:** Latency (speed of light), clock drift (crystal uniqueness), memory hierarchy (hardware-specific) are unforgeable
+4. **ML anomaly detection:** Isolation Forest model flags suspicious identity pairs
 
-**Risk Level:** LOW (ineffective attack vector)
+**Risk Level:** LOW (ineffective under PoW, actively countered under VDF via Digital DNA)
 
 #### 6.1.4 Eclipse Attack
 
@@ -728,28 +910,31 @@ fee = MIN_TX_FEE + (transaction_size_bytes × FEE_PER_BYTE)
    - Market-driven pricing
    - Mempool analytics
 
-### 7.4 Month 6+ (Advanced Features)
+### 7.4 Month 6+ (VDF + Digital DNA)
 
-**Long-term Enhancements:**
-1. **Payment Integration**
-   - Merchant tools
-   - Point-of-sale systems
-   - E-commerce plugins
+**Consensus Evolution:**
+1. **VDF Fair Mining Activation**
+   - Testnet validation of VDF mining (in progress)
+   - Community vote on mainnet activation heights
+   - Hybrid period: both RandomX and VDF blocks accepted
+   - VDF-only transition after successful hybrid period
 
-2. **Hardware Wallet Support**
-   - Research custom PQC hardware wallet
-   - Ledger/Trezor collaboration exploration
-   - Secure key storage solutions
+2. **Digital DNA Deployment**
+   - Passive identity collection from network behavior
+   - Sybil detection scoring across 8 dimensions
+   - ML anomaly detection in advisory mode
+   - Progressive enforcement as dataset grows
 
-3. **Layer 2 Scaling**
-   - Lightning Network research (adapted for PQC)
-   - Payment channels
-   - Atomic swaps
+3. **DFMP Retirement**
+   - Heat/maturity penalties replaced by cooldown mechanism
+   - MIK identity system replaced by Digital DNA
+   - Simpler, more elegant fairness model
 
-4. **Signature Aggregation**
-   - Research academic developments
-   - Implement if available (75-85% size reduction potential)
-   - Significant transaction size improvement
+**Other Enhancements:**
+4. **Payment Integration** - Merchant tools, POS systems, e-commerce plugins
+5. **Hardware Wallet Support** - Custom PQC hardware wallet research
+6. **Layer 2 Scaling** - Lightning Network research adapted for PQC
+7. **Signature Aggregation** - 75-85% transaction size reduction potential
 
 ### 7.5 Year 2+ (Ecosystem Maturity)
 
@@ -830,8 +1015,9 @@ Dilithion aims to be:
 1. **The standard** for quantum-safe cryptocurrency
 2. **A store of value** in the post-quantum era
 3. **A medium of exchange** with reasonable fees
-4. **A platform** for decentralized applications
-5. **A community** of quantum-aware developers and users
+4. **The fairest mining system** in crypto -- VDF eliminates hashrate advantage, Digital DNA prevents Sybil attacks, all without KYC or trusted hardware
+5. **Energy-efficient** -- ~95% reduction in mining energy via VDF
+6. **A community** of quantum-aware developers and users
 
 **Mission Statement:**
 > "Secure digital currency for the quantum age, built by the community, for the community."
@@ -871,9 +1057,11 @@ Dilithion aims to be:
 | **Halving Interval** | Every 210,000 blocks (~1.6 years) |
 | **Signature Algorithm** | CRYSTALS-Dilithium3 (NIST FIPS 204) |
 | **Hash Algorithm** | SHA-3-256 (NIST FIPS 202) |
-| **Mining Algorithm** | RandomX (Monero-derived, ASIC-resistant) |
+| **Mining Algorithm** | RandomX (current), VDF fair mining (future) |
 | **Difficulty Adjustment** | Every 2,016 blocks (~5.6 days) |
-| **Fair Mining Protocol** | DFMP v2.0 (MIK-based penalties) |
+| **Fair Mining Protocol** | DFMP v2.0 (current), VDF cooldown (future) |
+| **Sybil Resistance** | Digital DNA (8-dimension anonymous identity) |
+| **VDF Library** | chiavdf (class groups of unknown order) |
 | **Address Format** | Dilithium3 public key hash (SHA-3) |
 | **Transaction Fee** | 0.0005 DIL base + 25 ions/byte |
 | **Confirmations (typical)** | 3-10 blocks (12-40 minutes) |
@@ -905,7 +1093,9 @@ Dilithion aims to be:
 
 **CRYSTALS-Dilithium:** NIST-standardized post-quantum digital signature scheme based on lattice cryptography.
 
-**DFMP (Dilithion Fair Mining Protocol):** MIK-based difficulty adjustment system that prevents mining centralization by applying maturity and heat penalties to concentrated mining activity. Version 2.0 uses Mining Identity Keys (MIK) for persistent identity tracking.
+**DFMP (Dilithion Fair Mining Protocol):** MIK-based difficulty adjustment system that prevents mining centralization by applying maturity and heat penalties to concentrated mining activity. Version 2.0 uses Mining Identity Keys (MIK) for persistent identity tracking. To be replaced by VDF fair mining.
+
+**Digital DNA:** Anonymous, physics-based identity system using 8 unforgeable dimensions (latency, VDF timing, perspective, memory, clock drift, bandwidth, thermal, behavioral) to detect Sybil attacks without KYC or trusted hardware.
 
 **Halving:** Reduction of block reward by 50%, occurs every 210,000 blocks (~1.6 years for Dilithion).
 
@@ -926,6 +1116,8 @@ Dilithion aims to be:
 **SHA-3:** Secure Hash Algorithm 3, NIST-standardized hash function (Keccak).
 
 **Shor's Algorithm:** Quantum algorithm that can break RSA and ECDSA in polynomial time.
+
+**VDF (Verifiable Delay Function):** A computation that takes a fixed amount of time and cannot be parallelized, producing a provable result that can be verified quickly. Dilithion uses chiavdf (class groups of unknown order) for its VDF fair mining system.
 
 ---
 
@@ -949,9 +1141,9 @@ Dilithion aims to be:
 
 ---
 
-**Dilithion Whitepaper v2.0**
-**January 2026**
-**"Quantum-Safe. Community-Driven. Fair Launch."**
+**Dilithion Whitepaper v3.0**
+**February 2026**
+**"Quantum-Safe. Energy-Efficient. Truly Fair."**
 
 ---
 
