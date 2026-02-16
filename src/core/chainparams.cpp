@@ -200,6 +200,13 @@ ChainParams ChainParams::Testnet() {
     params.checkpoints.emplace_back(1000, uint256S("0000cb60f4051a278b03a4133a6cefda689a5788a215c6209b160a9be632b5ca"));
     params.checkpoints.emplace_back(2000, uint256S("000099b421f37840b53ec623a201c817a7ea9fcfa48e69e5c3461727fd92282f"));
     params.checkpoints.emplace_back(3000, uint256S("00002c1ca3bbbd9c7dd7b0903873b36724e1ee31c53f70ab7c81123228d9edb4"));
+    params.checkpoints.emplace_back(5000, uint256S("00000e8e96d5571c22a6dbf934cb50b9c27c513d0bdf86d3539a014b59751643"));
+    params.checkpoints.emplace_back(10000, uint256S("0001cb679cfe170ba4893cac1b6a3cb22c69dabe4913927a513761a0ad788e9a"));
+    params.checkpoints.emplace_back(20000, uint256S("000adc0c364bed2b4f2247961d852d19d5432b8363e801df24045258a6730b3c"));
+    params.checkpoints.emplace_back(40000, uint256S("0007eb5ab7d4a2086d5cc554ce7bbd7866c8ca5791e4ab1cedf631d04803f015"));
+    params.checkpoints.emplace_back(60000, uint256S("0003d271d83c1fc66bb2af7cf8f16207034c8f80ec918f119a51ccb4203aadc7"));
+    params.checkpoints.emplace_back(80000, uint256S("000a18c94a5bd98403807aff7260c5671079be0d822bdc0815916d8b6fed718e"));
+    params.checkpoints.emplace_back(86000, uint256S("00001432d1653a47059b1aa78e71b9cbe69720555cdea55473412d97f74cb3dd"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after testnet has established blocks)
