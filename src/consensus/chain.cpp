@@ -323,6 +323,24 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     std::cout << "  Connect " << connectBlocks.size() << " block(s)" << std::endl;
 
     // ============================================================================
+    // DFMP FORK FIX: Skip reorg if any block in connect path is already invalid
+    // ============================================================================
+    // Fork blocks only get basic PoW validation (no DFMP) when received because
+    // their parent is on a competing chain. Full DFMP validation runs at ConnectTip
+    // during reorg. If a previous reorg attempt already found a DFMP-invalid block,
+    // it's marked BLOCK_FAILED_VALID. Don't waste CPU disconnecting/reconnecting
+    // the entire chain just to fail at the same block again.
+    for (const auto* pindexCheck : connectBlocks) {
+        if (pindexCheck->IsInvalid()) {
+            std::cout << "[Chain] Skipping reorg: block at height " << pindexCheck->nHeight
+                      << " is marked invalid (status=" << pindexCheck->nStatus << ")" << std::endl;
+            std::cout << "[Chain] This fork contains blocks that failed DFMP consensus validation." << std::endl;
+            std::cout << "[Chain] The fork miner may be running incompatible software." << std::endl;
+            return true;  // Not an error - our chain is valid, fork is not
+        }
+    }
+
+    // ============================================================================
     // CRITICAL-C002 FIX: Pre-validate ALL blocks exist before starting reorg
     // ============================================================================
     // This prevents the most common cause of rollback failure: missing block data.
@@ -554,6 +572,20 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         if (!ConnectTip(pindexConnect, connectBlock)) {
             std::cerr << "[Chain] ERROR: Failed to connect block during reorg at height "
                       << pindexConnect->nHeight << std::endl;
+
+            // DFMP FORK FIX: Mark remaining connect blocks as BLOCK_FAILED_CHILD
+            // so future reorg attempts to this fork are skipped immediately.
+            // The failed block itself is already marked BLOCK_FAILED_VALID by ConnectTip.
+            for (size_t k = i + 1; k < connectBlocks.size(); ++k) {
+                if (!(connectBlocks[k]->nStatus & CBlockIndex::BLOCK_FAILED_MASK)) {
+                    connectBlocks[k]->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
+                    if (pdb != nullptr) {
+                        pdb->WriteBlockIndex(connectBlocks[k]->GetBlockHash(), *connectBlocks[k]);
+                    }
+                }
+            }
+            std::cerr << "[Chain] Marked " << (connectBlocks.size() - i - 1)
+                      << " descendant block(s) as BLOCK_FAILED_CHILD" << std::endl;
 
             // ROLLBACK: Same as above
             std::cerr << "[Chain] ROLLBACK: Disconnecting " << connectedCount << " newly connected blocks..." << std::endl;
