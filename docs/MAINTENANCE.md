@@ -10,7 +10,7 @@ Before compacting this conversation, verify:
 
 - [x] All commits pushed to GitHub ✅
 - [x] No uncommitted changes ✅
-- [x] Repository accessible at https://github.com/WillBarton888/dilithion ✅
+- [x] Repository accessible at https://github.com/dilithion/dilithion ✅
 - [x] All documentation files created ✅
 - [x] Agent OS complete (6/6 agents) ✅
 
@@ -30,7 +30,7 @@ Before compacting this conversation, verify:
 ### You Can Always Retrieve
 ```bash
 # Clone fresh copy anytime
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 
 # All your work is safe!
 ```
@@ -383,7 +383,7 @@ grep -r "keyword" docs/
 **Additional Backups:**
 ```bash
 # Clone to backup location monthly
-git clone https://github.com/WillBarton888/dilithion.git ~/backups/dilithion-$(date +%Y%m)
+git clone https://github.com/dilithion/dilithion.git ~/backups/dilithion-$(date +%Y%m)
 
 # Export important docs
 cd dilithion
@@ -405,7 +405,7 @@ tar -czf ~/backups/dilithion-docs-$(date +%Y%m%d).tar.gz docs/
 ```bash
 # In a different directory, clone fresh:
 cd /tmp
-git clone https://github.com/WillBarton888/dilithion.git test-clone
+git clone https://github.com/dilithion/dilithion.git test-clone
 cd test-clone
 ls -la  # Verify all files present
 

@@ -109,7 +109,7 @@ sha256sum releases/dilithion-testnet-v1.0.9-windows-x64.zip
 ```
 
 ### GitHub Release:
-✅ Package uploaded to: https://github.com/WillBarton888/dilithion/releases/tag/v1.0.9
+✅ Package uploaded to: https://github.com/dilithion/dilithion/releases/tag/v1.0.9
 ✅ SHA256SUMS.txt updated
 ✅ All files available for download
 

@@ -111,7 +111,7 @@ $ ./TEST-DEBUG.bat
 ### ✅ Test 2: GitHub Download Test
 ```bash
 $ curl -L -o dilithion-testnet-v1.0.9-windows-x64.zip \
-  https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
+  https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
 
 $ sha256sum dilithion-testnet-v1.0.9-windows-x64.zip
 dda15e0dc01cb4bedd99068dee1f7a3997513b7b4d9847cdc8b5952213950859 ✅
@@ -154,7 +154,7 @@ If you previously downloaded v1.0.9 and got the DLL error:
 
 2. **Download the new package:**
    ```
-   https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
+   https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
    ```
 
 3. **Verify the checksum:**
@@ -205,12 +205,12 @@ If you previously downloaded v1.0.9 and got the DLL error:
 
 **GitHub Release:**
 ```
-https://github.com/WillBarton888/dilithion/releases/tag/v1.0.9
+https://github.com/dilithion/dilithion/releases/tag/v1.0.9
 ```
 
 **Direct Download:**
 ```
-https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
+https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
 ```
 
 **SHA256 Verification:**

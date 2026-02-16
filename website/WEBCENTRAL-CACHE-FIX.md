@@ -139,7 +139,7 @@ If you need to get the external miner connected IMMEDIATELY:
 
 1. **Temporary workaround**: Give them the direct GitHub download link:
    ```
-   https://github.com/WillBarton888/dilithion/releases/download/v1.0.7-testnet/dilithion-testnet-v1.0.7-windows-x64.zip
+   https://github.com/dilithion/dilithion/releases/download/v1.0.7-testnet/dilithion-testnet-v1.0.7-windows-x64.zip
    ```
 
 2. This bypasses the website entirely while you fix the cache issue.

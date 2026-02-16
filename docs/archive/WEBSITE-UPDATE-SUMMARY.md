@@ -107,7 +107,7 @@
 
 - [ ] Open index.html in browser
 - [ ] Verify testnet banner is visible and animated
-- [ ] Check all download links point to: https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+- [ ] Check all download links point to: https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 - [ ] Verify "Join the Testnet" section displays correctly
 - [ ] Test all GitHub links (guide, discussions, issues)
 - [ ] Check footer displays testnet disclaimer
@@ -209,7 +209,7 @@ git commit -m "Website: Testnet launch updates - banner, links, new section"
 git push origin main
 
 # 3. Enable GitHub Pages
-# Go to: https://github.com/WillBarton888/dilithion/settings/pages
+# Go to: https://github.com/dilithion/dilithion/settings/pages
 # Source: main branch → /website
 # Save
 

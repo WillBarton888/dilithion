@@ -102,7 +102,7 @@ sudo apt install -y build-essential cmake git libleveldb-dev libssl-dev pkg-conf
 **Option A: Pre-Compiled Binary (Recommended)**
 ```bash
 mkdir -p ~/dilithion && cd ~/dilithion
-wget https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-1.0.0-linux-x64.tar.gz
+wget https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-1.0.0-linux-x64.tar.gz
 
 # Verify checksum (CRITICAL for security!)
 sha256sum dilithion-1.0.0-linux-x64.tar.gz
@@ -114,7 +114,7 @@ cd dilithion-1.0.0
 
 **Option B: Build from Source**
 ```bash
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 git checkout v1.0.0
 git submodule update --init --recursive
@@ -260,7 +260,7 @@ brew install cmake leveldb git openssl
 mkdir -p ~/dilithion && cd ~/dilithion
 
 # Download (Intel x64 or Apple Silicon ARM)
-curl -L -O https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-1.0.0-macos-x64.tar.gz
+curl -L -O https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-1.0.0-macos-x64.tar.gz
 
 # Verify checksum
 shasum -a 256 dilithion-1.0.0-macos-x64.tar.gz
@@ -611,7 +611,7 @@ gpg -c wallet-backup-20260101.dat
 **Check for updates:**
 ```bash
 # Watch GitHub releases
-watch -n 300 'curl -s https://api.github.com/repos/WillBarton888/dilithion/releases/latest | grep tag_name'
+watch -n 300 'curl -s https://api.github.com/repos/dilithion/dilithion/releases/latest | grep tag_name'
 ```
 
 **Update procedure:**
@@ -624,7 +624,7 @@ cp -r ~/.dilithion ~/.dilithion.backup.$(date +%Y%m%d)
 
 # Download new version
 cd ~/dilithion
-wget https://github.com/WillBarton888/dilithion/releases/download/v1.1.0/dilithion-1.1.0-linux-x64.tar.gz
+wget https://github.com/dilithion/dilithion/releases/download/v1.1.0/dilithion-1.1.0-linux-x64.tar.gz
 
 # Verify checksum
 sha256sum dilithion-1.1.0-linux-x64.tar.gz
@@ -910,7 +910,7 @@ sudo fstrim -v /
 
 - **Website:** https://dilithion.org
 - **Discord:** https://discord.gg/c25WwRNg
-- **GitHub:** https://github.com/WillBarton888/dilithion
+- **GitHub:** https://github.com/dilithion/dilithion
 - **Reddit:** r/dilithion (coming soon)
 
 ### Support the Network:

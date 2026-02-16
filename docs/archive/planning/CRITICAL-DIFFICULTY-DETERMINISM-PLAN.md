@@ -212,7 +212,7 @@ Expected difficulty adjustments:
 
 1. **Build Dilithion node**
    ```bash
-   git clone https://github.com/WillBarton888/dilithion.git
+   git clone https://github.com/dilithion/dilithion.git
    cd dilithion
    git checkout difficulty-validation-branch
    make clean

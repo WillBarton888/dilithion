@@ -73,7 +73,7 @@
    - Files uploaded to public_html
 
 3. **Documentation Updates**
-   - Updated all GitHub URLs (github.com/WillBarton888/dilithion)
+   - Updated all GitHub URLs (github.com/dilithion/dilithion)
    - Updated contact emails throughout
    - Fixed social media handles (@DilithionCoin)
 
@@ -252,7 +252,7 @@
 **Domain Registrar:** Webcentral Australia
 **Hosting:** Webcentral (198.38.93.43)
 **Email:** team@dilithion.org, security@dilithion.org, media@dilithion.org, support@dilithion.org
-**GitHub:** https://github.com/WillBarton888/dilithion
+**GitHub:** https://github.com/dilithion/dilithion
 **Twitter:** @DilithionCoin (to be created)
 **Reddit:** r/dilithion (to be created)
 

@@ -190,7 +190,7 @@ gh release upload v1.0.0-testnet \
 
 ### Method 2: Using GitHub Web Interface
 
-1. Go to: https://github.com/WillBarton888/dilithion/releases
+1. Go to: https://github.com/dilithion/dilithion/releases
 2. Click "Draft a new release"
 3. Tag: `v1.0.0-testnet`
 4. Title: `Dilithion Testnet v1.0.0`
@@ -210,17 +210,17 @@ Edit `website/index.html`:
 
 ```html
 <!-- Windows Download -->
-<a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip" class="btn btn-download">
+<a href="https://github.com/dilithion/dilithion/releases/download/v1.0.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip" class="btn btn-download">
   Download for Windows (.zip)
 </a>
 
 <!-- Linux Download -->
-<a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz" class="btn btn-download">
+<a href="https://github.com/dilithion/dilithion/releases/download/v1.0.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz" class="btn btn-download">
   Download for Linux (.tar.gz)
 </a>
 
 <!-- macOS Download -->
-<a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz" class="btn btn-download">
+<a href="https://github.com/dilithion/dilithion/releases/download/v1.0.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz" class="btn btn-download">
   Download for macOS (.tar.gz)
 </a>
 ```
@@ -362,5 +362,5 @@ For mainnet releases, use: `v1.0.0`
 ## Contact
 
 For build/release issues:
-- GitHub: https://github.com/WillBarton888/dilithion/issues
+- GitHub: https://github.com/dilithion/dilithion/issues
 - Website: https://dilithion.org

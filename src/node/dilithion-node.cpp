@@ -1084,11 +1084,36 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             Dilithion::g_chainParams->dfmpV31ActivationHeight : 999999999;
         int dfmpV32ActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpV32ActivationHeight : 999999999;
+        int dfmpV33ActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpV33ActivationHeight : 999999999;
 
         int64_t multiplierFP;
         double payoutHeatMult = 1.0;
 
-        if (static_cast<int>(nHeight) >= dfmpV32ActivationHeight) {
+        if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
+            // DFMP v3.3: No dynamic scaling, linear+exponential penalty (must match validator exactly)
+            int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP_V33(heat);
+
+            // Payout address heat penalty (v3.3, no dynamic scaling)
+            int64_t payoutHeatPenalty = DFMP::FP_SCALE;  // 1.0x default
+            if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+                DFMP::Identity payoutIdentity = DFMP::DeriveIdentityFromScript(
+                    coinbaseTx.vout[0].scriptPubKey);
+                int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutIdentity);
+                payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP_V33(payoutHeat);
+                payoutHeatMult = static_cast<double>(payoutHeatPenalty) / DFMP::FP_SCALE;
+            }
+
+            // Effective heat = max(MIK heat, payout heat)
+            int64_t effectiveHeatPenalty = std::max(mikHeatPenalty, payoutHeatPenalty);
+
+            // Maturity penalty (v3.3 = same as v3.2)
+            int64_t maturityPenalty = DFMP::CalculatePendingPenaltyFP_V33(nHeight, firstSeen);
+
+            // Total = maturity × effective heat
+            multiplierFP = (maturityPenalty * effectiveHeatPenalty) / DFMP::FP_SCALE;
+
+        } else if (static_cast<int>(nHeight) >= dfmpV32ActivationHeight) {
             // DFMP v3.2: Tightened anti-whale (must match validator exactly)
             int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP_V32(heat, uniqueMiners);
 
@@ -1181,7 +1206,11 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         if (multiplier > 1.01) {
             const char* versionTag;
             double maturityMult, heatMult;
-            if (static_cast<int>(nHeight) >= dfmpV32ActivationHeight) {
+            if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
+                versionTag = "v3.3";
+                maturityMult = DFMP::GetPendingPenalty_V33(nHeight, firstSeen);
+                heatMult = DFMP::GetHeatMultiplier_V33(heat);
+            } else if (static_cast<int>(nHeight) >= dfmpV32ActivationHeight) {
                 versionTag = "v3.2";
                 maturityMult = DFMP::GetPendingPenalty_V32(nHeight, firstSeen);
                 heatMult = DFMP::GetHeatMultiplier_V32(heat, uniqueMiners);
@@ -1202,7 +1231,9 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                       << " mikHeat=" << heatMult << "x"
                       << " payoutHeat=" << payoutHeatMult << "x"
                       << " total=" << multiplier << "x";
-            if (uniqueMiners > 0) {
+            if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
+                std::cout << " (freeTier=12 fixed)";
+            } else if (uniqueMiners > 0) {
                 int freeTierBase;
                 if (static_cast<int>(nHeight) >= dfmpV32ActivationHeight) freeTierBase = DFMP::FREE_TIER_THRESHOLD_V32;
                 else if (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) freeTierBase = DFMP::FREE_TIER_THRESHOLD_V31;
@@ -1212,8 +1243,9 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 std::cout << " (dynamic: " << uniqueMiners << " miners, free=" << effectiveFree << ")";
             }
             std::cout << std::endl;
-        } else if (uniqueMiners > 0) {
+        } else if (static_cast<int>(nHeight) < dfmpV33ActivationHeight && uniqueMiners > 0) {
             // Log dynamic scaling even when no penalty (so miners see it's working)
+            // v3.3+ has no dynamic scaling, so skip this
             int freeTierBase;
             if (static_cast<int>(nHeight) >= dfmpV32ActivationHeight) freeTierBase = DFMP::FREE_TIER_THRESHOLD_V32;
             else if (static_cast<int>(nHeight) >= dfmpV31ActivationHeight) freeTierBase = DFMP::FREE_TIER_THRESHOLD_V31;

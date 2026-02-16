@@ -122,7 +122,7 @@ TTL: 3600
 
 Type: CNAME
 Name: www
-Value: willbarton888.github.io
+Value: dilithion.github.io
 TTL: 3600
 ```
 

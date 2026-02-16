@@ -215,7 +215,7 @@ Add website reference:
 ## Official Links
 
 - 🌐 **Website:** https://dilithion.org/
-- 💻 **GitHub:** https://github.com/WillBarton888/dilithion
+- 💻 **GitHub:** https://github.com/dilithion/dilithion
 - 📖 **Testnet Guide:** [TESTNET-LAUNCH.md](TESTNET-LAUNCH.md)
 ```
 
@@ -339,7 +339,7 @@ After successful deployment:
 - Forum: https://forum.filezilla-project.org/
 
 **Dilithion Website Issues:**
-- GitHub: https://github.com/WillBarton888/dilithion/issues
+- GitHub: https://github.com/dilithion/dilithion/issues
 
 ---
 

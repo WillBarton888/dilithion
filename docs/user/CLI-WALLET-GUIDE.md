@@ -419,7 +419,7 @@ For advanced RPC methods, see [docs/RPC-API.md](docs/RPC-API.md)
 
 - **Documentation:** [docs/RPC-API.md](docs/RPC-API.md)
 - **Testnet Guide:** [TESTNET-LAUNCH.md](TESTNET-LAUNCH.md)
-- **GitHub Issues:** https://github.com/WillBarton888/dilithion/issues
+- **GitHub Issues:** https://github.com/dilithion/dilithion/issues
 - **Discord:** https://discord.gg/c25WwRNg
 
 ---

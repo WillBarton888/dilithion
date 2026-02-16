@@ -79,6 +79,11 @@ ChainParams ChainParams::Mainnet() {
     // Moderate maturity: 2.5x over 500 blocks (softer than v3.0's 5.0x/800)
     params.dfmpV32ActivationHeight = 13250;
 
+    // DFMP v3.3 - remove dynamic scaling, linear+exponential penalty
+    // Dynamic scaling was inflating free tier to 72+ blocks with few miners, negating v3.2
+    // v3.3: fixed 12-block free tier, linear ramp to 4.0x at 24, then exponential wall
+    params.dfmpV33ActivationHeight = 13500;
+
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
@@ -161,8 +166,10 @@ ChainParams ChainParams::Testnet() {
     params.dfmpActivationHeight = 0;
 
     // DFMP Assume-Valid Height (IBD optimization)
-    // Testnet: 0 = validate everything (testnet has different consensus testing needs)
-    params.dfmpAssumeValidHeight = 0;
+    // Skip MIK and penalty validation for historical blocks during IBD.
+    // Early testnet blocks were mined before MIK was added to coinbase.
+    // Must cover all pre-MIK blocks to allow fresh nodes to sync.
+    params.dfmpAssumeValidHeight = 86850;
 
     // DFMP v3.0 activation - set above existing testnet chain height
     // Testnet tip was ~86,829 when v3.0 was implemented
@@ -177,6 +184,9 @@ ChainParams ChainParams::Testnet() {
 
     // DFMP v3.2 - always active on testnet (tightened anti-whale)
     params.dfmpV32ActivationHeight = 0;
+
+    // DFMP v3.3 - always active on testnet (no dynamic scaling)
+    params.dfmpV33ActivationHeight = 0;
 
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted

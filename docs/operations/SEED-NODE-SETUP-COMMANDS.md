@@ -16,7 +16,7 @@ apt install -y build-essential git cmake libleveldb-dev wget curl
 
 # Clone and build
 cd /root
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 
 # Build dependencies

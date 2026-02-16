@@ -281,7 +281,7 @@ Historical documentation for reference.
 ## 📖 External Resources
 
 **Project Website:** https://dilithion.com
-**GitHub Repository:** https://github.com/WillBarton888/dilithion
+**GitHub Repository:** https://github.com/dilithion/dilithion
 **Whitepaper:** [WHITEPAPER.md](../WHITEPAPER.md)
 
 **Community:**

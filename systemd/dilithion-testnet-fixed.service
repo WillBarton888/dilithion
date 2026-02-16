@@ -20,7 +20,7 @@
 
 [Unit]
 Description=Dilithion Testnet Seed Node
-Documentation=https://github.com/WillBarton888/dilithion
+Documentation=https://github.com/dilithion/dilithion
 After=network-online.target
 Wants=network-online.target
 

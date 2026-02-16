@@ -76,7 +76,7 @@ git config push.default simple
 
 4. Switch repository to SSH:
    ```bash
-   wsl bash -c "cd /mnt/c/Users/will/dilithion && git remote set-url origin git@github.com:WillBarton888/dilithion.git"
+   wsl bash -c "cd /mnt/c/Users/will/dilithion && git remote set-url origin git@github.com:dilithion/dilithion.git"
    ```
 
 5. Test connection:
@@ -147,7 +147,7 @@ wsl bash -c "cd /mnt/c/Users/will/dilithion && git lfs track '*.log' '*.bin'"
 
 2. **Try SSH instead:**
    ```bash
-   git remote set-url origin git@github.com:WillBarton888/dilithion.git
+   git remote set-url origin git@github.com:dilithion/dilithion.git
    git push
    ```
 
@@ -246,7 +246,7 @@ watch -n 1 'netstat -an | grep ESTABLISHED | grep github'
 3. Test push performance
 
 📊 **Current Status:**
-- Remote: https://github.com/WillBarton888/dilithion.git (HTTPS)
+- Remote: https://github.com/dilithion/dilithion.git (HTTPS)
 - Week 6 Phase 3 commit (11c416e) ready to push
 - Push currently in progress...
 

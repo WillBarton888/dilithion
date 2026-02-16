@@ -67,7 +67,7 @@ git status -sb
 ```
 
 **Verify on GitHub:**
-- Go to: https://github.com/WillBarton888/dilithion
+- Go to: https://github.com/dilithion/dilithion
 - Check branch: `phase-1-signature-system`
 - Latest commit should be: `51c515b`
 
@@ -89,7 +89,7 @@ git status -sb
 
 3. **Try SSH instead of HTTPS**
    ```bash
-   git remote set-url origin git@github.com:WillBarton888/dilithion.git
+   git remote set-url origin git@github.com:dilithion/dilithion.git
    git push origin phase-1-signature-system
    ```
 

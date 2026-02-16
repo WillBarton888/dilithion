@@ -43,7 +43,7 @@ Want to skip the initial blockchain download? Download our
 bootstrap file to start with a pre-synced blockchain!
 
 1. Download the bootstrap from the GitHub release:
-   https://github.com/WillBarton888/dilithion/releases
+   https://github.com/dilithion/dilithion/releases
 
    Look for: bootstrap-testnet-blockXXXXX.tar.gz
 
@@ -262,10 +262,10 @@ Alternatively, use nohup:
 ================================================================
 
 Website:        https://dilithion.org
-Documentation:  https://github.com/WillBarton888/dilithion
+Documentation:  https://github.com/dilithion/dilithion
 Testnet Guide:  See TESTNET-GUIDE.md in this folder
 
-Report bugs:    https://github.com/WillBarton888/dilithion/issues
+Report bugs:    https://github.com/dilithion/dilithion/issues
 
 ================================================================
   SECURITY NOTE

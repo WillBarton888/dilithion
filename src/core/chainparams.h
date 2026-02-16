@@ -118,6 +118,11 @@ public:
     // Returns to v3.0 heat aggressiveness with moderate maturity penalty
     int dfmpV32ActivationHeight;
 
+    // DFMP v3.3 Activation Height (remove dynamic scaling, linear+exponential penalty)
+    // Before this height: DFMP v3.2 rules (dynamic scaling inflates free tier in small networks)
+    // After this height: DFMP v3.3 rules (fixed 12-block free tier, linear to 4x at 24, exponential)
+    int dfmpV33ActivationHeight;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)

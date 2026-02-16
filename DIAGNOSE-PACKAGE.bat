@@ -19,7 +19,7 @@ pause
 REM Download and extract the package
 echo.
 echo [1/5] Downloading v1.0.9 from GitHub...
-curl -sL https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip -o %TEMP%\dilithion-test.zip
+curl -sL https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip -o %TEMP%\dilithion-test.zip
 if errorlevel 1 (
     echo ERROR: Download failed
     pause

@@ -26,7 +26,7 @@ Critical bugfix release - Windows path validation fixed, launcher scripts update
 
 **Line 530 - Download Button with File Size:**
 ```html
-<a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip"
+<a href="https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip"
    class="btn btn-download" style="flex: 1;">✅ Download ZIP (6.0 MB)</a>
 ```
 - File size: 6.0 MB ✓ (Correct - includes OpenSSL DLLs)
@@ -119,7 +119,7 @@ After uploading, visit https://dilithion.org and verify:
 - [ ] Windows download section shows "v1.0.9 (Nov 16)"
 - [ ] Download button shows "6.0 MB"
 - [ ] SHA256 checksum shows `3ea2e49d6a7421c0723d99c802f9af4b...`
-- [ ] Download link works (https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip)
+- [ ] Download link works (https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip)
 - [ ] Page loads correctly without errors
 - [ ] All CSS styles working
 

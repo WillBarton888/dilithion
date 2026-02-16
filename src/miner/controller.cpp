@@ -1158,8 +1158,12 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
                 Dilithion::g_chainParams->dfmpV31ActivationHeight : 999999999;
             int dfmpV32Height = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->dfmpV32ActivationHeight : 999999999;
+            int dfmpV33Height = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->dfmpV33ActivationHeight : 999999999;
             int64_t multiplierFP;
-            if (static_cast<int>(nHeight) >= dfmpV32Height) {
+            if (static_cast<int>(nHeight) >= dfmpV33Height) {
+                multiplierFP = DFMP::CalculateTotalMultiplierFP_V33(nHeight, firstSeen, heat);
+            } else if (static_cast<int>(nHeight) >= dfmpV32Height) {
                 multiplierFP = DFMP::CalculateTotalMultiplierFP_V32(nHeight, firstSeen, heat);
             } else if (static_cast<int>(nHeight) >= dfmpV31Height) {
                 multiplierFP = DFMP::CalculateTotalMultiplierFP_V31(nHeight, firstSeen, heat);
@@ -1175,7 +1179,11 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
             if (multiplier > 1.01) {
                 double pendingMult, heatMult;
                 const char* vTag;
-                if (static_cast<int>(nHeight) >= dfmpV32Height) {
+                if (static_cast<int>(nHeight) >= dfmpV33Height) {
+                    pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP_V33(nHeight, firstSeen)) / DFMP::FP_SCALE;
+                    heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP_V33(heat)) / DFMP::FP_SCALE;
+                    vTag = "v3.3";
+                } else if (static_cast<int>(nHeight) >= dfmpV32Height) {
                     pendingMult = static_cast<double>(DFMP::CalculatePendingPenaltyFP_V32(nHeight, firstSeen)) / DFMP::FP_SCALE;
                     heatMult = static_cast<double>(DFMP::CalculateHeatMultiplierFP_V32(heat)) / DFMP::FP_SCALE;
                     vTag = "v3.2";

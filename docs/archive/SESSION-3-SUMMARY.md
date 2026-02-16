@@ -272,7 +272,7 @@ c58a95e Initial commit: Project structure and documentation
 
 **Total Commits:** 8
 **All Pushed:** ✅ Yes
-**Repository:** https://github.com/WillBarton888/dilithion
+**Repository:** https://github.com/dilithion/dilithion
 
 ---
 
@@ -419,7 +419,7 @@ All three Dilithium security levels validated:
 - **Project Overview:** `.claude/PROJECT.md`
 
 ### Repository
-- **GitHub:** https://github.com/WillBarton888/dilithion
+- **GitHub:** https://github.com/dilithion/dilithion
 - **Branch:** main
 - **Status:** Up to date
 

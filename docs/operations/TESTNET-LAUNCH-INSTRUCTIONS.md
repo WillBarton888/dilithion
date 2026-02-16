@@ -36,7 +36,7 @@ bash create-github-release.sh
 
 ### Option B: Manual via GitHub Web UI
 
-1. Go to: https://github.com/WillBarton888/dilithion/releases/new
+1. Go to: https://github.com/dilithion/dilithion/releases/new
 2. Tag: `v1.0-testnet`
 3. Title: `Dilithion v1.0-testnet - Public Testnet Launch`
 4. Description: Copy from `.github-release-notes.md`
@@ -48,7 +48,7 @@ bash create-github-release.sh
 ## Step 3: GitHub Repository Configuration
 
 ### Add Topics
-Go to: https://github.com/WillBarton888/dilithion/settings
+Go to: https://github.com/dilithion/dilithion/settings
 
 Add these topics:
 - `cryptocurrency`
@@ -74,7 +74,7 @@ Add these topics:
 Welcome to the Dilithion testnet! This is the official community hub for testnet participants.
 
 ## Quick Start
-📖 [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
+📖 [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
 
 ## What We Need
 🐛 Bug hunters

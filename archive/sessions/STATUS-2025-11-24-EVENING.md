@@ -368,7 +368,7 @@ done
 
 ## Contacts / References
 
-- **GitHub**: https://github.com/WillBarton888/dilithion
+- **GitHub**: https://github.com/dilithion/dilithion
 - **Latest commit**: d85c288
 - **Latest tag**: v1.0.19
 

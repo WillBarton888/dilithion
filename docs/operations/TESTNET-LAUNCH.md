@@ -47,7 +47,7 @@ Dilithion is a **post-quantum cryptocurrency** built from scratch (NOT a Bitcoin
 
 ```bash
 # Clone the repository
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 
 # Build (Linux/WSL)
@@ -225,7 +225,7 @@ getinfo                          # Get node info
 
 ### 📊 Report Issues
 
-**GitHub Issues**: https://github.com/WillBarton888/dilithion/issues
+**GitHub Issues**: https://github.com/dilithion/dilithion/issues
 
 When reporting bugs, please include:
 - Node version (`./dilithion-cli getinfo`)
@@ -311,7 +311,7 @@ sudo ufw allow 8444/tcp
 ```
 
 3. **Register as seed node**:
-- Post your IP:PORT in [GitHub Discussions](https://github.com/WillBarton888/dilithion/discussions)
+- Post your IP:PORT in [GitHub Discussions](https://github.com/dilithion/dilithion/discussions)
 - Join Discord and share in #seed-nodes channel
 
 4. **Monitor**:
@@ -379,9 +379,9 @@ sudo ufw allow 8444/tcp
 
 ### Official Channels
 
-- **GitHub Repository**: https://github.com/WillBarton888/dilithion
-- **Issues/Bugs**: https://github.com/WillBarton888/dilithion/issues
-- **Discussions**: https://github.com/WillBarton888/dilithion/discussions
+- **GitHub Repository**: https://github.com/dilithion/dilithion
+- **Issues/Bugs**: https://github.com/dilithion/dilithion/issues
+- **Discussions**: https://github.com/dilithion/dilithion/discussions
 
 ### Discord Server (Placeholder)
 ```

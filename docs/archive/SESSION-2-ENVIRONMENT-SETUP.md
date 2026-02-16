@@ -134,7 +134,7 @@ make check                   # Run unit tests
    # Check: git config --global http.proxy
 
    # Option C: Use SSH instead of HTTPS
-   git clone git@github.com:WillBarton888/dilithion.git
+   git clone git@github.com:dilithion/dilithion.git
    ```
 
 2. **Add Dilithium Library**
@@ -235,7 +235,7 @@ git config --global --list
 
 # Try different remote URL
 git remote -v
-git remote set-url origin git@github.com:WillBarton888/dilithion.git
+git remote set-url origin git@github.com:dilithion/dilithion.git
 ```
 
 ---
@@ -270,7 +270,7 @@ git remote set-url origin git@github.com:WillBarton888/dilithion.git
 
 ## 💾 What's Preserved in GitHub
 
-**Repository:** https://github.com/WillBarton888/dilithion
+**Repository:** https://github.com/dilithion/dilithion
 
 **Files (31 total):**
 - Complete documentation (docs/)

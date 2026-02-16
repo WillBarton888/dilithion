@@ -1012,7 +1012,7 @@ if (pubkey.VerifyParanoid(hash, signature)) {
 ### Q10: What if I find a bug?
 
 **A:** Report to:
-- GitHub: https://github.com/WillBarton888/dilithion/issues
+- GitHub: https://github.com/dilithion/dilithion/issues
 - Email: security@dilithion.dev
 - Responsible disclosure rewarded
 
@@ -1062,7 +1062,7 @@ if (pubkey.VerifyParanoid(hash, signature)) {
 - Integration tests: `test/functional/`
 
 **Support:**
-- GitHub Issues: https://github.com/WillBarton888/dilithion/issues
+- GitHub Issues: https://github.com/dilithion/dilithion/issues
 - Developer Chat: #dilithion-dev
 
 ---

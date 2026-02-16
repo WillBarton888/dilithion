@@ -405,7 +405,7 @@ cd /root/dilithion
 - This file: `CONTINUE-TOMORROW-2025-11-08.md`
 
 **Repository:**
-- GitHub: https://github.com/WillBarton888/dilithion
+- GitHub: https://github.com/dilithion/dilithion
 
 **Digital Ocean:**
 - Dashboard: https://cloud.digitalocean.com

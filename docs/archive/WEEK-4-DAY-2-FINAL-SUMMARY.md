@@ -475,7 +475,7 @@ uint32_t CalculateNextWorkRequired(
 
 1. Go to https://codecov.io/
 2. Create account / sign in with GitHub
-3. Add repository `WillBarton888/dilithion`
+3. Add repository `dilithion/dilithion`
 4. Get upload token
 5. Add `CODECOV_TOKEN` to GitHub Secrets
 6. Push changes

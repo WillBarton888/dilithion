@@ -6,4 +6,4 @@
 	url = https://github.com/openssl/openssl.git
 [submodule "depends/chiavdf"]
 	path = depends/chiavdf
-	url = https://github.com/WillBarton888/chiavdf.git
+	url = https://github.com/dilithion/chiavdf.git

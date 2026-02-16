@@ -139,13 +139,13 @@ gh release edit v1.0.0 --draft=false
 Edit `website/index.html`:
 ```html
 <!-- Change from "Coming Soon" to actual download links -->
-<a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip"
+<a href="https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip"
    class="btn btn-download">Download for Windows</a>
 
-<a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-linux-x64.tar.gz"
+<a href="https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-linux-x64.tar.gz"
    class="btn btn-download">Download for Linux</a>
 
-<a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-macos-universal.tar.gz"
+<a href="https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-macos-universal.tar.gz"
    class="btn btn-download">Download for macOS</a>
 ```
 

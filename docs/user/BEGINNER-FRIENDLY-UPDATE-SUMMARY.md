@@ -374,7 +374,7 @@ if (threads_str == "auto" || threads_str == "AUTO") {
 ### Immediate Actions Required:
 
 1. **Upload Linux Package to GitHub:**
-   - Go to: https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+   - Go to: https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
    - Click "Edit release"
    - Upload: `releases/dilithion-testnet-v1.0.0-linux-x64.tar.gz`
    - Verify download works

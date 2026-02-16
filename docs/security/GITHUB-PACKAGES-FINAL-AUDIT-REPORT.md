@@ -3,9 +3,9 @@
 **Audit Date:** October 31, 2025
 **Packages Source:** GitHub Release v1.0-testnet
 **Download URLs:**
-- https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip
-- https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
-- https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz
+- https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip
+- https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
+- https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz
 
 ---
 
@@ -256,7 +256,7 @@ Permissions will be automatically preserved as -rwxr-xr-x ✅
 
 This comprehensive audit certifies that the Dilithion Testnet v1.0.0 packages available on GitHub at:
 
-**https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet**
+**https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet**
 
 have been thoroughly tested and verified to meet all quality, security, and functional requirements for public release.
 

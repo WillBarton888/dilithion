@@ -15,7 +15,7 @@
 - [x] All progress documented
 
 ### GitHub Repository Status
-- [x] Repository URL: https://github.com/WillBarton888/dilithion
+- [x] Repository URL: https://github.com/dilithion/dilithion
 - [x] All 31 files committed and pushed (from Session 1)
 - [x] Session 2 changes ready to commit (Windows side)
 - [x] Repository accessible and public

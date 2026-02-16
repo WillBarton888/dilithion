@@ -50,7 +50,7 @@ Tasks are organized by:
 - [ ] SSH into node: `ssh root@<IP>`
 - [ ] Update system: `apt update && apt upgrade -y`
 - [ ] Install dependencies: `apt install -y build-essential git cmake libleveldb-dev libssl-dev`
-- [ ] Clone repository: `git clone https://github.com/WillBarton888/dilithion.git`
+- [ ] Clone repository: `git clone https://github.com/dilithion/dilithion.git`
 - [ ] Build RandomX: `cd depends/randomx && mkdir build && cd build && cmake .. && make -j$(nproc)`
 - [ ] Build Dilithium: `cd ../../dilithium/ref && make -j$(nproc)`
 - [ ] Build node: `cd ../../.. && make dilithion-node`

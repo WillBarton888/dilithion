@@ -4027,8 +4027,15 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
     oss << "\"dfmp_v32_activation_height\":" << dfmpV32ActivationHeight << ",";
     oss << "\"dfmp_v32_active\":" << (isV32Active ? "true" : "false") << ",";
 
+    // DFMP v3.3 activation
+    int dfmpV33ActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpV33ActivationHeight : 999999999;
+    bool isV33Active = currentHeight >= dfmpV33ActivationHeight;
+    oss << "\"dfmp_v33_activation_height\":" << dfmpV33ActivationHeight << ",";
+    oss << "\"dfmp_v33_active\":" << (isV33Active ? "true" : "false") << ",";
+
     // Current active DFMP version
-    const char* activeVersion = isV32Active ? "v3.2" : (isV31Active ? "v3.1" : (isV3Active ? "v3.0" : "v2.0"));
+    const char* activeVersion = isV33Active ? "v3.3" : (isV32Active ? "v3.2" : (isV31Active ? "v3.1" : (isV3Active ? "v3.0" : "v2.0")));
     oss << "\"dfmp_version\":\"" << activeVersion << "\",";
 
     // Get penalty info for this identity
@@ -4079,10 +4086,12 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
     oss << "\"dormancy_blocks\":" << dormancyBlocks << ",";
 
     // Report active version's parameters
-    int activeMaturityBlocks = isV32Active ? DFMP::MATURITY_BLOCKS_V32 :
-        (isV31Active ? DFMP::MATURITY_BLOCKS_V31 : DFMP::MATURITY_BLOCKS);
-    int activeFreeTier = isV32Active ? DFMP::FREE_TIER_THRESHOLD_V32 :
-        (isV31Active ? DFMP::FREE_TIER_THRESHOLD_V31 : DFMP::FREE_TIER_THRESHOLD);
+    int activeMaturityBlocks = isV33Active ? DFMP::MATURITY_BLOCKS_V33 :
+        (isV32Active ? DFMP::MATURITY_BLOCKS_V32 :
+        (isV31Active ? DFMP::MATURITY_BLOCKS_V31 : DFMP::MATURITY_BLOCKS));
+    int activeFreeTier = isV33Active ? DFMP::FREE_TIER_THRESHOLD_V33 :
+        (isV32Active ? DFMP::FREE_TIER_THRESHOLD_V32 :
+        (isV31Active ? DFMP::FREE_TIER_THRESHOLD_V31 : DFMP::FREE_TIER_THRESHOLD));
     oss << "\"maturity_blocks\":" << activeMaturityBlocks << ",";
     oss << "\"free_tier_threshold\":" << activeFreeTier << ",";
     oss << "\"registration_pow_bits\":" << DFMP::REGISTRATION_POW_BITS << ",";
@@ -4094,7 +4103,11 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
     }
 
     double maturityPenalty, heatPenalty, payoutHeatPenalty;
-    if (isV32Active) {
+    if (isV33Active) {
+        maturityPenalty = DFMP::GetPendingPenalty_V33(currentHeight, effectiveFirstSeen);
+        heatPenalty = DFMP::GetHeatMultiplier_V33(heat);
+        payoutHeatPenalty = DFMP::GetHeatMultiplier_V33(payoutHeat);
+    } else if (isV32Active) {
         maturityPenalty = DFMP::GetPendingPenalty_V32(currentHeight, effectiveFirstSeen);
         heatPenalty = DFMP::GetHeatMultiplier_V32(heat);
         payoutHeatPenalty = DFMP::GetHeatMultiplier_V32(payoutHeat);

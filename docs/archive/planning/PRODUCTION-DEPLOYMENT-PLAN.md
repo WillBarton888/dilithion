@@ -15,7 +15,7 @@
 - ✅ 374M+ fuzzing executions, ZERO crashes
 - ✅ All 3 security gaps fixed and verified
 - ✅ Testnet live at 170.64.203.134:18444 (7 releases)
-- ✅ Repository: https://github.com/WillBarton888/dilithion
+- ✅ Repository: https://github.com/dilithion/dilithion
 
 **Gaps to Address:**
 1. Deployment documentation for mainnet

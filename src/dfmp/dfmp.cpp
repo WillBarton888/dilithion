@@ -483,6 +483,54 @@ int64_t CalculateTotalMultiplierFP_V32(int currentHeight, int firstSeenHeight, i
 }
 
 // ============================================================================
+// DFMP v3.3 MULTIPLIER CALCULATION (No dynamic scaling, linear+exponential)
+// ============================================================================
+
+int64_t CalculatePendingPenaltyFP_V33(int currentHeight, int firstSeenHeight) {
+    // Same maturity curve as v3.2
+    return CalculatePendingPenaltyFP_V32(currentHeight, firstSeenHeight);
+}
+
+int64_t CalculateHeatMultiplierFP_V33(int heat) {
+    // DFMP v3.3: Three-zone penalty, NO dynamic scaling
+    //   Zone 1 (Free):        0-12 blocks  → 1.0x
+    //   Zone 2 (Linear):     13-24 blocks  → 1.0 + (heat-12) × 0.25  (ramps to 4.0x)
+    //   Zone 3 (Exponential): 25+ blocks   → 4.0 × 1.58^(heat-24)
+
+    // Zone 1: Free tier
+    if (heat <= FREE_TIER_THRESHOLD_V33) {
+        return FP_SCALE;  // 1.0x
+    }
+
+    // Zone 2: Linear ramp from 1.0x to 4.0x
+    if (heat <= LINEAR_ZONE_END_V33) {
+        // penalty = 1.0 + (heat - 12) × 0.25
+        // In fixed-point: FP_SCALE + (heat - 12) × FP_SCALE / 4
+        int excess = heat - FREE_TIER_THRESHOLD_V33;
+        return FP_SCALE + (static_cast<int64_t>(excess) * FP_SCALE) / 4;
+    }
+
+    // Zone 3: Exponential from 4.0x base
+    // penalty = 4.0 × 1.58^(heat - 24)
+    int64_t penalty = FP_LINEAR_END_PENALTY_V33;  // 4.0x
+    int exponent = heat - LINEAR_ZONE_END_V33;
+
+    for (int i = 0; i < exponent; i++) {
+        penalty = (penalty * FP_HEAT_GROWTH_V33) / 100;  // × 1.58
+    }
+
+    return penalty;
+}
+
+int64_t CalculateTotalMultiplierFP_V33(int currentHeight, int firstSeenHeight, int heat) {
+    int64_t pendingFP = CalculatePendingPenaltyFP_V33(currentHeight, firstSeenHeight);
+    int64_t heatFP = CalculateHeatMultiplierFP_V33(heat);
+
+    // total = maturity × heat
+    return (pendingFP * heatFP) / FP_SCALE;
+}
+
+// ============================================================================
 // CONVENIENCE FUNCTIONS
 // ============================================================================
 
@@ -512,6 +560,14 @@ double GetPendingPenalty_V32(int currentHeight, int firstSeenHeight) {
 
 double GetHeatMultiplier_V32(int heat, int uniqueMiners) {
     return static_cast<double>(CalculateHeatMultiplierFP_V32(heat, uniqueMiners)) / FP_SCALE;
+}
+
+double GetPendingPenalty_V33(int currentHeight, int firstSeenHeight) {
+    return static_cast<double>(CalculatePendingPenaltyFP_V33(currentHeight, firstSeenHeight)) / FP_SCALE;
+}
+
+double GetHeatMultiplier_V33(int heat) {
+    return static_cast<double>(CalculateHeatMultiplierFP_V33(heat)) / FP_SCALE;
 }
 
 // ============================================================================

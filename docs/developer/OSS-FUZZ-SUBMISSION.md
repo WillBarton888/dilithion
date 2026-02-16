@@ -24,7 +24,7 @@ OSS-Fuzz is Google's free, continuous fuzzing service for open-source projects. 
 1. **Open Source Project:** ✅ Dilithion is open source
 2. **Fuzz Targets:** ✅ We have 23 fuzz harnesses (80+ targets)
 3. **Build System:** ✅ Makefile-based build system
-4. **GitHub Repository:** ✅ https://github.com/WillBarton888/dilithion
+4. **GitHub Repository:** ✅ https://github.com/dilithion/dilithion
 
 ---
 
@@ -130,7 +130,7 @@ echo "✅ Fuzz targets built successfully"
      - address
      - undefined
      - memory
-   main_repo: https://github.com/WillBarton888/dilithion.git
+   main_repo: https://github.com/dilithion/dilithion.git
    ```
 
 4. **Create `Dockerfile`:**

@@ -24,7 +24,7 @@
 ```
 
 ### Location:
-🔗 https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+🔗 https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 
 ---
 
@@ -45,7 +45,7 @@
    - ✅ Discord support links
 
 ### Download Link for User:
-🔗 https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64-FIXED.zip
+🔗 https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64-FIXED.zip
 
 ### Quick Fix Guide Created:
 📄 **`DISCORD-QUICK-FIX-WINDOWS-CURL.md`**
@@ -83,7 +83,7 @@ Use the -FIXED packages below! They contain critical bug fixes for first-time us
 
 ### 4. ✅ GitHub Release Notes Updated
 **File:** Release v1.0-testnet notes updated
-**URL:** https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+**URL:** https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 
 **Changes:**
 - Added urgent notice at top pointing to -FIXED packages
@@ -201,15 +201,15 @@ Use the -FIXED packages below! They contain critical bug fixes for first-time us
 ## 🔗 Quick Links
 
 ### For Discord User:
-- **Download:** https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64-FIXED.zip
+- **Download:** https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64-FIXED.zip
 - **Message Template:** `DISCORD-MESSAGE-FOR-USER.md`
 - **Troubleshooting:** `DISCORD-QUICK-FIX-WINDOWS-CURL.md`
 
 ### For Team:
-- **Release Page:** https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+- **Release Page:** https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 - **Website:** https://dilithion.org
 - **Full Audit:** `CRITICAL-FIXES-NOV2-2025.md`
-- **Commit:** https://github.com/WillBarton888/dilithion/commit/4dd09a4
+- **Commit:** https://github.com/dilithion/dilithion/commit/4dd09a4
 
 ---
 

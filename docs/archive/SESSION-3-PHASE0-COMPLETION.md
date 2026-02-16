@@ -46,14 +46,14 @@ Completing the final 5% of Phase 0 by:
 **Primary: Shallow Clone**
 ```bash
 # Instead of full clone, use shallow clone
-git clone --depth 1 https://github.com/WillBarton888/dilithion.git
+git clone --depth 1 https://github.com/dilithion/dilithion.git
 ```
 
 **Workaround 1: Windows Git + WSL2 Access**
 ```bash
 # Clone on Windows side
 cd C:\Users\will
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 
 # Access from WSL2
 wsl bash -c "ln -s /mnt/c/Users/will/dilithion ~/dilithion-windows"
@@ -62,18 +62,18 @@ wsl bash -c "ln -s /mnt/c/Users/will/dilithion ~/dilithion-windows"
 **Workaround 2: Download Archive**
 ```bash
 # Download from GitHub as zip
-curl -L https://github.com/WillBarton888/dilithion/archive/refs/heads/main.zip -o dilithion.zip
+curl -L https://github.com/dilithion/dilithion/archive/refs/heads/main.zip -o dilithion.zip
 unzip dilithion.zip
 mv dilithion-main dilithion
 cd dilithion
 git init
-git remote add origin https://github.com/WillBarton888/dilithion.git
+git remote add origin https://github.com/dilithion/dilithion.git
 ```
 
 **Workaround 3: SSH Instead of HTTPS**
 ```bash
 # If HTTPS times out, try SSH
-git clone git@github.com:WillBarton888/dilithion.git
+git clone git@github.com:dilithion/dilithion.git
 ```
 
 ### Network Diagnostics Performed
@@ -89,7 +89,7 @@ git config --global user.name "Will Barton"
 git config --global user.email "will@dilithion.com"
 
 # 🟡 IN PROGRESS: Shallow clone
-git clone --depth 1 https://github.com/WillBarton888/dilithion.git
+git clone --depth 1 https://github.com/dilithion/dilithion.git
 ```
 
 ---

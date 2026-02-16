@@ -41,7 +41,7 @@ We created comprehensive automated tests:
 
 **Download the FIXED version:**
 
-🔗 **Latest Release:** https://github.com/WillBarton888/dilithion/releases/latest
+🔗 **Latest Release:** https://github.com/dilithion/dilithion/releases/latest
 
 **For Windows users:**
 The wallet scripts now automatically detect curl in 5 locations:
@@ -119,7 +119,7 @@ Your bug report triggered a comprehensive security audit. We found and fixed:
 **Success Rate:** 50% → 95% of users
 
 **Download Fixed Version:**
-🔗 https://github.com/WillBarton888/dilithion/releases/latest
+🔗 https://github.com/dilithion/dilithion/releases/latest
 
 **For Windows:** curl now automatically detected in 5 locations. If not found, you get clear install instructions.
 
@@ -177,10 +177,10 @@ Thanks for being an awesome early tester! 🚀
 ## Additional Materials to Share (if requested)
 
 **GitHub Links:**
-- Latest release: https://github.com/WillBarton888/dilithion/releases/latest
-- Security fixes doc: https://github.com/WillBarton888/dilithion/blob/main/SECURITY-COMPATIBILITY-FIXES-NOV2-2025.md
-- Test results: https://github.com/WillBarton888/dilithion/blob/main/TEST-RESULTS-SUMMARY-NOV2-2025.md
-- Testing guide: https://github.com/WillBarton888/dilithion/blob/main/FRESH-VM-TESTING-GUIDE.md
+- Latest release: https://github.com/dilithion/dilithion/releases/latest
+- Security fixes doc: https://github.com/dilithion/dilithion/blob/main/SECURITY-COMPATIBILITY-FIXES-NOV2-2025.md
+- Test results: https://github.com/dilithion/dilithion/blob/main/TEST-RESULTS-SUMMARY-NOV2-2025.md
+- Testing guide: https://github.com/dilithion/dilithion/blob/main/FRESH-VM-TESTING-GUIDE.md
 
 **Testing Instructions:**
 - Windows: Download zip → Extract → Run `START-MINING.bat`

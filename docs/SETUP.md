@@ -62,7 +62,7 @@ sudo apt-get update && sudo apt-get install -y \
 
 # 2. Clone repositories
 git clone https://github.com/bitcoin/bitcoin.git ~/bitcoin-core
-git clone https://github.com/WillBarton888/dilithion.git ~/dilithion
+git clone https://github.com/dilithion/dilithion.git ~/dilithion
 cd ~/dilithion
 git submodule add https://github.com/pq-crystals/dilithium.git depends/dilithium
 
@@ -256,7 +256,7 @@ If all tests pass, your environment is ready!
 cd ~/crypto-projects
 
 # Clone your Dilithion fork
-git clone https://github.com/WillBarton888/dilithion.git dilithion
+git clone https://github.com/dilithion/dilithion.git dilithion
 cd dilithion
 
 # Verify structure

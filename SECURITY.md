@@ -7,7 +7,7 @@
 Instead, report privately to: **security@dilithion.org**
 
 For critical vulnerabilities, you can also reach us via:
-- **GitHub Security Advisory:** https://github.com/WillBarton888/dilithion/security/advisories/new
+- **GitHub Security Advisory:** https://github.com/dilithion/dilithion/security/advisories/new
 - **Discord:** https://discord.gg/c25WwRNg
 
 ## Response Timeline
@@ -135,7 +135,7 @@ We request **90 days** to patch critical issues before public disclosure.
 - **RandomX:** [Official Repository](https://github.com/tevador/RandomX)
 - **pqcrystals/dilithium:** [Reference Implementation](https://github.com/pqcrystals/dilithium)
 - **Dilithion Website:** [dilithion.org](https://dilithion.org)
-- **Source Code:** [GitHub Repository](https://github.com/WillBarton888/dilithion)
+- **Source Code:** [GitHub Repository](https://github.com/dilithion/dilithion)
 
 ---
 
@@ -158,7 +158,7 @@ We publicly acknowledge security researchers who report vulnerabilities responsi
 ## Contact
 
 - **Security Reports:** security@dilithion.org
-- **GitHub Advisory:** https://github.com/WillBarton888/dilithion/security/advisories/new
+- **GitHub Advisory:** https://github.com/dilithion/dilithion/security/advisories/new
 - **Discord:** https://discord.gg/c25WwRNg
 - **Vulnerability Reports:** Via GitHub Security Advisory or security@dilithion.org
 

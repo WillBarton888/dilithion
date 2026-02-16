@@ -114,7 +114,7 @@ echo  If antivirus blocked the files:
 echo    - Check your antivirus quarantine/history
 echo    - Add exception for dilithion folder: %CD%
 echo    - Restore files from quarantine
-echo    - Re-download from: github.com/WillBarton888/dilithion
+echo    - Re-download from: github.com/dilithion/dilithion
 ```
 
 ---

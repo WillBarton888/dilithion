@@ -435,6 +435,15 @@ bool ForkManager::ValidateMIK(const CBlock& block, int32_t height, ForkCandidate
         return true;
     }
 
+    // Assume-valid blocks: skip MIK validation for historical blocks
+    // During IBD, pre-MIK blocks don't have MIK data in coinbase.
+    // Strict MIK validation is only needed for NEW fork blocks above assume-valid.
+    int dfmpAssumeValidHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
+    if (dfmpAssumeValidHeight > 0 && height <= dfmpAssumeValidHeight) {
+        return true;
+    }
+
     // CRITICAL: For fork pre-validation, we do NOT use CheckProofOfWorkDFMP
     // because it honors dfmpAssumeValidHeight and can skip MIK validation.
     // We must ALWAYS validate MIK for fork blocks to catch invalid miners.

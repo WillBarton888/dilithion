@@ -4,7 +4,7 @@
 
 - **Release**: v1.0-testnet exists
 - **Release ID**: 257731183
-- **Upload URL**: https://uploads.github.com/repos/WillBarton888/dilithion/releases/257731183/assets
+- **Upload URL**: https://uploads.github.com/repos/dilithion/dilithion/releases/257731183/assets
 - **Current Assets**: None (source code only)
 
 ## Available Packages
@@ -15,7 +15,7 @@
 
 ## Method 1: Using GitHub Web Interface (Easiest)
 
-1. Go to: https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+1. Go to: https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 
 2. Click "Edit release" button (top right)
 
@@ -55,7 +55,7 @@ curl -X POST \
   -H "Authorization: token $GITHUB_TOKEN" \
   -H "Content-Type: application/gzip" \
   --data-binary @releases/dilithion-testnet-v1.0.0-linux-x64.tar.gz \
-  "https://uploads.github.com/repos/WillBarton888/dilithion/releases/257731183/assets?name=dilithion-testnet-v1.0.0-linux-x64.tar.gz"
+  "https://uploads.github.com/repos/dilithion/dilithion/releases/257731183/assets?name=dilithion-testnet-v1.0.0-linux-x64.tar.gz"
 ```
 
 ## Direct Download URLs (After Upload)
@@ -64,17 +64,17 @@ Once uploaded, the download URLs will be:
 
 **Linux**:
 ```
-https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
+https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
 ```
 
 **Windows** (when ready):
 ```
-https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip
+https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip
 ```
 
 **macOS** (when ready):
 ```
-https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz
+https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz
 ```
 
 ## After Upload: Update Website
@@ -88,19 +88,19 @@ Replace the current source code download links with:
   <h2>Download Testnet</h2>
 
   <!-- Linux -->
-  <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz"
+  <a href="https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz"
      class="btn btn-download">
     <i class="fab fa-linux"></i> Download for Linux (.tar.gz)
   </a>
 
   <!-- Windows (when ready) -->
-  <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip"
+  <a href="https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-windows-x64.zip"
      class="btn btn-download">
     <i class="fab fa-windows"></i> Download for Windows (.zip)
   </a>
 
   <!-- macOS (when ready) -->
-  <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz"
+  <a href="https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-macos-x64.tar.gz"
      class="btn btn-download">
     <i class="fab fa-apple"></i> Download for macOS (.tar.gz)
   </a>

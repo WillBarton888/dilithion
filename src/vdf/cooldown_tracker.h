@@ -14,16 +14,28 @@
  * they cannot win again.  The cooldown length scales with the number of
  * active miners so that rotation is fair regardless of network size.
  *
+ * Formula: cooldown = activeMiners - max(3, activeMiners/10)
+ *   10 miners  →  7 blocks  (max ~14.3% share, fair = 10%)
+ *   50 miners  → 45 blocks  (max ~2.2% share,  fair = 2%)
+ *  100 miners  → 90 blocks  (max ~1.1% share,  fair = 1%)
+ *
+ * This allows a small buffer above fair share (generous at low miner
+ * counts, tight at high counts) while the VDF lottery itself ensures
+ * actual distribution stays close to fair.
+ *
  * Thread-safe: all public methods acquire m_mutex.
  */
 class CCooldownTracker {
 public:
     using Address = std::array<uint8_t, 20>;
 
-    // Consensus-level bounds (matching chainparams in Phase 4).
-    static constexpr int MIN_COOLDOWN = 10;   // blocks
+    // Consensus-level bounds.
+    static constexpr int MIN_COOLDOWN = 2;    // blocks (floor for very small networks)
     static constexpr int MAX_COOLDOWN = 100;  // blocks
-    static constexpr int ACTIVE_WINDOW = 360; // blocks (~6 hours at 60s blocks)
+    static constexpr int ACTIVE_WINDOW = 360; // blocks (~24 hours at 4-min mainnet blocks)
+
+    /** Compute cooldown from active miner count. */
+    static int CalculateCooldown(int activeMiners);
 
     // --- Query interface ---
 

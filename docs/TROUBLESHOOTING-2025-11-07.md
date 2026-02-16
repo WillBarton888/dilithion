@@ -986,7 +986,7 @@ dilithion-node --version
 
 **Official Channels:**
 - **Discord:** https://discord.gg/c25WwRNg (#support channel)
-- **GitHub Issues:** https://github.com/WillBarton888/dilithion/issues
+- **GitHub Issues:** https://github.com/dilithion/dilithion/issues
 - **Reddit:** r/dilithion (coming soon)
 
 **When Reporting Issues:**

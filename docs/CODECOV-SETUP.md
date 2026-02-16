@@ -35,7 +35,7 @@ Codecov provides automated code coverage tracking and reporting for pull request
 ### 2. Get Upload Token
 
 **Steps:**
-1. Navigate to https://codecov.io/gh/WillBarton888/dilithion
+1. Navigate to https://codecov.io/gh/dilithion/dilithion
 2. Click "Settings" → "General"
 3. Copy the "Upload Token" (starts with `codecov_`)
 4. Keep this token secure!
@@ -43,7 +43,7 @@ Codecov provides automated code coverage tracking and reporting for pull request
 ### 3. Add Token to GitHub Secrets
 
 **Steps:**
-1. Go to GitHub repository: https://github.com/WillBarton888/dilithion
+1. Go to GitHub repository: https://github.com/dilithion/dilithion
 2. Click "Settings" → "Secrets and variables" → "Actions"
 3. Click "New repository secret"
 4. Name: `CODECOV_TOKEN`
@@ -116,7 +116,7 @@ git push origin test-codecov
 
 ### 6. Verify Codecov Dashboard
 
-**Dashboard URL:** https://codecov.io/gh/WillBarton888/dilithion
+**Dashboard URL:** https://codecov.io/gh/dilithion/dilithion
 
 **Check:**
 1. Coverage percentage displayed
@@ -240,7 +240,7 @@ Coverage dropped below threshold. Please add tests.
 
 **Current Badge:**
 ```markdown
-[![codecov](https://codecov.io/gh/WillBarton888/dilithion/branch/main/graph/badge.svg)](https://codecov.io/gh/WillBarton888/dilithion)
+[![codecov](https://codecov.io/gh/dilithion/dilithion/branch/main/graph/badge.svg)](https://codecov.io/gh/dilithion/dilithion)
 ```
 
 **Badge Displays:**
@@ -267,7 +267,7 @@ Coverage dropped below threshold. Please add tests.
 # Repository → Settings → Secrets → CODECOV_TOKEN
 
 # Re-add token if missing:
-1. Get token from https://codecov.io/gh/WillBarton888/dilithion
+1. Get token from https://codecov.io/gh/dilithion/dilithion
 2. Add to GitHub Secrets as CODECOV_TOKEN
 ```
 
@@ -427,9 +427,9 @@ coverage:
 
 ### Codecov Dashboard
 
-- **Main Dashboard:** https://codecov.io/gh/WillBarton888/dilithion
-- **Coverage Trends:** https://codecov.io/gh/WillBarton888/dilithion/trends
-- **File Browser:** https://codecov.io/gh/WillBarton888/dilithion/tree/main/src
+- **Main Dashboard:** https://codecov.io/gh/dilithion/dilithion
+- **Coverage Trends:** https://codecov.io/gh/dilithion/dilithion/trends
+- **File Browser:** https://codecov.io/gh/dilithion/dilithion/tree/main/src
 
 ### Support
 
@@ -469,7 +469,7 @@ coverage:
 
 **Test 3: Dashboard**
 ```bash
-# Visit https://codecov.io/gh/WillBarton888/dilithion
+# Visit https://codecov.io/gh/dilithion/dilithion
 # Coverage percentage displayed
 # File tree shows component coverage
 ```

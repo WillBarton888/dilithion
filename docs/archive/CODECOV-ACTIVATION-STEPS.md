@@ -19,7 +19,7 @@
 ### Step 2: Get Upload Token (2 minutes)
 
 1. Once logged in, you should see the dashboard
-2. Navigate to: **https://codecov.io/gh/WillBarton888/dilithion**
+2. Navigate to: **https://codecov.io/gh/dilithion/dilithion**
    - Or click "Add Repository" and select `dilithion`
 3. Click **"Settings"** (left sidebar)
 4. Click **"General"** tab
@@ -29,7 +29,7 @@
 
 ### Step 3: Add Token to GitHub Secrets (2 minutes)
 
-1. Open: **https://github.com/WillBarton888/dilithion/settings/secrets/actions**
+1. Open: **https://github.com/dilithion/dilithion/settings/secrets/actions**
 2. Click **"New repository secret"**
 3. Name: **`CODECOV_TOKEN`** (exactly this, case-sensitive)
 4. Value: Paste the token from Step 2
@@ -49,12 +49,12 @@ Changes to commit:
 
 ### Step 5: Verify Activation (2 minutes)
 
-1. After pushing, go to: **https://github.com/WillBarton888/dilithion/actions**
+1. After pushing, go to: **https://github.com/dilithion/dilithion/actions**
 2. Wait for the "Coverage" job to complete
 3. Check for **"✅ Upload successful"** in the Codecov upload step
-4. Go to: **https://codecov.io/gh/WillBarton888/dilithion**
+4. Go to: **https://codecov.io/gh/dilithion/dilithion**
 5. You should see coverage data appearing
-6. Check README badge at: **https://github.com/WillBarton888/dilithion**
+6. Check README badge at: **https://github.com/dilithion/dilithion**
    - Badge should show coverage percentage
 
 ---

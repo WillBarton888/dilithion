@@ -1,7 +1,7 @@
 # GitHub Launch Status Report
 
 **Generated**: October 28, 2025
-**Repository**: https://github.com/WillBarton888/dilithion
+**Repository**: https://github.com/dilithion/dilithion
 
 ---
 
@@ -20,12 +20,12 @@
 - **Release**: v1.0-testnet
 - **Type**: Pre-release
 - **Published**: October 28, 2025
-- **URL**: https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+- **URL**: https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 - **Status**: Live and public
 
 ### 3. Discussions Enabled ✅
 - **Feature**: Enabled
-- **URL**: https://github.com/WillBarton888/dilithion/discussions
+- **URL**: https://github.com/dilithion/dilithion/discussions
 - **Status**: Active
 
 ### 4. Discussion Thread Created ✅
@@ -33,7 +33,7 @@
 - **Category**: Announcements (📣)
 - **Status**: Pinned
 - **Created**: October 28, 2025
-- **URL**: https://github.com/WillBarton888/dilithion/discussions
+- **URL**: https://github.com/dilithion/dilithion/discussions
 
 ---
 
@@ -51,7 +51,7 @@
 **Status**: Could not verify from external check. Please verify manually:
 
 **To check:**
-1. Go to https://github.com/WillBarton888/dilithion
+1. Go to https://github.com/dilithion/dilithion
 2. Look at "About" section (top right)
 3. You should see 6 blue topic badges
 
@@ -86,17 +86,17 @@ Topics are just for discoverability (help people find your repo). Everything cri
 Open browser and check each:
 
 ```
-[ ] https://github.com/WillBarton888/dilithion
+[ ] https://github.com/dilithion/dilithion
     - README shows testnet announcement?
     - TESTNET-LAUNCH.md file visible?
     - Topics visible in About section?
 
-[ ] https://github.com/WillBarton888/dilithion/releases
+[ ] https://github.com/dilithion/dilithion/releases
     - v1.0-testnet release exists?
     - Release notes look correct?
     - Marked as pre-release?
 
-[ ] https://github.com/WillBarton888/dilithion/discussions
+[ ] https://github.com/dilithion/dilithion/discussions
     - Discussion thread visible?
     - Thread is pinned?
     - Content looks correct?
@@ -131,7 +131,7 @@ Open browser and check each:
 **Your testnet is LIVE and ready for users!**
 
 Anyone can now:
-1. Visit https://github.com/WillBarton888/dilithion
+1. Visit https://github.com/dilithion/dilithion
 2. Read TESTNET-LAUNCH.md
 3. Clone the repository
 4. Build and run a node
@@ -223,4 +223,4 @@ The community will come if the project is solid. 🔐
 
 ---
 
-**URL to share**: https://github.com/WillBarton888/dilithion
+**URL to share**: https://github.com/dilithion/dilithion

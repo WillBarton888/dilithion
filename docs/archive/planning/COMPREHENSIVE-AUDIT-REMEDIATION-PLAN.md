@@ -230,7 +230,7 @@ if not exist "dilithion-node.exe" (
     echo.
     echo SOLUTIONS:
     echo   - Make sure you extracted ALL files from the ZIP archive
-    echo   - Re-download from: https://github.com/WillBarton888/dilithion/releases
+    echo   - Re-download from: https://github.com/dilithion/dilithion/releases
     echo   - Verify download integrity (check SHA256 hash)
     echo.
     echo Current directory: %CD%

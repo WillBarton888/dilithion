@@ -19,7 +19,7 @@ The world's first NIST-approved post-quantum cryptocurrency testnet is ready for
 ✅ 93% test pass rate
 ✅ Open source (MIT)
 
-Join now: github.com/WillBarton888/dilithion
+Join now: github.com/dilithion/dilithion
 
 #PostQuantum #Cryptocurrency #Blockchain
 ```
@@ -57,11 +57,11 @@ Block time: ~4 min
 ```
 Join the testnet in 3 steps:
 
-1️⃣ Clone: git clone github.com/WillBarton888/dilithion
+1️⃣ Clone: git clone github.com/dilithion/dilithion
 2️⃣ Build: make
 3️⃣ Mine: ./dilithion-node --mine --threads=4
 
-Full guide: github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
+Full guide: github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
 
 #Testnet #CryptoDev
 ```
@@ -80,7 +80,7 @@ This is for TESTING ONLY
 
 Help us build the quantum-safe future! 🚀
 
-Join: github.com/WillBarton888/dilithion
+Join: github.com/dilithion/dilithion
 ```
 
 ### Single Tweet Format:
@@ -94,7 +94,7 @@ First NIST-approved post-quantum cryptocurrency testnet is ready.
 ✅ MIT licensed
 ✅ 93% test pass
 
-Join: github.com/WillBarton888/dilithion
+Join: github.com/dilithion/dilithion
 
 #PostQuantum #Crypto #Blockchain
 ```
@@ -133,13 +133,13 @@ Quantum computers are coming, and they'll break current cryptocurrencies. "Harve
 ## Join the Testnet
 
 ```bash
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 make
 ./dilithion-node --mine --threads=4
 ```
 
-**Full Guide**: [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
+**Full Guide**: [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
 
 ## Important Disclaimers
 
@@ -167,10 +167,10 @@ We're looking for:
 
 ## Links
 
-- **GitHub**: https://github.com/WillBarton888/dilithion
-- **Testnet Guide**: [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
-- **Whitepaper**: [WHITEPAPER.md](https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md)
-- **Security**: [SECURITY.md](https://github.com/WillBarton888/dilithion/blob/main/docs/SECURITY.md)
+- **GitHub**: https://github.com/dilithion/dilithion
+- **Testnet Guide**: [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
+- **Whitepaper**: [WHITEPAPER.md](https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md)
+- **Security**: [SECURITY.md](https://github.com/dilithion/dilithion/blob/main/docs/SECURITY.md)
 
 Questions? Comments? Concerns? Fire away! 🚀
 
@@ -193,7 +193,7 @@ First NIST-approved post-quantum cryptocurrency testnet is open for testing.
 
 **Status**: 93% test pass, all critical bugs fixed, ready for testing
 
-**Join**: https://github.com/WillBarton888/dilithion
+**Join**: https://github.com/dilithion/dilithion
 
 **Disclaimer**: Experimental software, AI-assisted dev, testnet coins = no value
 
@@ -226,13 +226,13 @@ A post-quantum cryptocurrency built from scratch with NIST-approved CRYSTALS-Dil
 
 **Quick Start**:
 ```bash
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 make
 ./dilithion-node --mine --threads=4
 ```
 
-**Full Guide**: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
+**Full Guide**: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
 
 **What We Need**:
 🐛 Bug hunters - find issues, report them
@@ -252,7 +252,7 @@ make
 
 Let's build the quantum-safe future together! 🔐🚀
 
-**GitHub**: https://github.com/WillBarton888/dilithion
+**GitHub**: https://github.com/dilithion/dilithion
 ```
 
 ---
@@ -282,10 +282,10 @@ CURRENT STATUS:
 ✅ Ready for community testing
 
 HOW TO JOIN:
-Full guide: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
+Full guide: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
 
 Quick start:
-$ git clone https://github.com/WillBarton888/dilithion.git
+$ git clone https://github.com/dilithion/dilithion.git
 $ cd dilithion && make
 $ ./dilithion-node --mine --threads=4
 
@@ -309,9 +309,9 @@ TIMELINE:
 - Mainnet: 3-6 months (if successful)
 
 LINKS:
-GitHub: https://github.com/WillBarton888/dilithion
-Testnet Guide: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
-Whitepaper: https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md
+GitHub: https://github.com/dilithion/dilithion
+Testnet Guide: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
+Whitepaper: https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md
 
 Questions? Feel free to reach out or open a GitHub discussion.
 
@@ -348,8 +348,8 @@ CURRENT STATUS:
 ✅ Ready for testing
 
 JOIN THE TESTNET:
-Guide: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
-GitHub: https://github.com/WillBarton888/dilithion
+Guide: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
+GitHub: https://github.com/dilithion/dilithion
 
 TIMESTAMPS:
 0:00 - Introduction
@@ -361,10 +361,10 @@ TIMESTAMPS:
 7:00 - Q&A
 
 LINKS:
-• GitHub: https://github.com/WillBarton888/dilithion
-• Testnet Guide: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
-• Whitepaper: https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md
-• Security: https://github.com/WillBarton888/dilithion/blob/main/docs/SECURITY.md
+• GitHub: https://github.com/dilithion/dilithion
+• Testnet Guide: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
+• Whitepaper: https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md
+• Security: https://github.com/dilithion/dilithion/blob/main/docs/SECURITY.md
 
 DISCLAIMER:
 This is experimental software. Testnet coins have NO VALUE. AI-assisted development. No professional audit yet. Use at your own risk. Not financial advice.
@@ -402,7 +402,7 @@ ABOUT DILITHION:
 Dilithion is an experimental cryptocurrency project developed with AI assistance and released under an open-source MIT license. The project emphasizes transparency, including full disclosure of its AI-assisted development process and plans for external security audits before mainnet launch.
 
 TESTNET PARTICIPATION:
-Community members can join the testnet at: https://github.com/WillBarton888/dilithion
+Community members can join the testnet at: https://github.com/dilithion/dilithion
 
 DISCLAIMER:
 Dilithion is experimental software with no professional security audit yet. Testnet coins have no monetary value. This is for testing purposes only.
@@ -411,7 +411,7 @@ CONTACT:
 Will Barton
 Lead Developer
 will@bananatree.com.au
-https://github.com/WillBarton888/dilithion
+https://github.com/dilithion/dilithion
 
 ###
 ```
@@ -438,7 +438,7 @@ First public testnet release of Dilithion, a post-quantum cryptocurrency.
 - ✅ **FIXED**: DNS seed node initialization
 - ✅ **Test pass rate**: Improved from 79% to 93%
 
-Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/WillBarton888/dilithion/blob/main/DEFICIENCY-FIXES-SUMMARY.md)
+Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/dilithion/dilithion/blob/main/DEFICIENCY-FIXES-SUMMARY.md)
 
 ### Features
 - CRYSTALS-Dilithium3 post-quantum signatures (NIST-approved)
@@ -451,14 +451,14 @@ Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/WillBarton888/dil
 
 ### Quick Start
 ```bash
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 make
 ./dilithion-node --mine --threads=4
 ```
 
 ### Full Guide
-See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
+See [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
 
 ## What to Test
 
@@ -474,10 +474,10 @@ See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TES
 
 ## Documentation
 
-- [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md) - Testnet guide
-- [WHITEPAPER.md](https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md) - Technical specification
-- [SECURITY.md](https://github.com/WillBarton888/dilithion/blob/main/docs/SECURITY.md) - Security documentation
-- [CHANGELOG.md](https://github.com/WillBarton888/dilithion/blob/main/CHANGELOG.md) - Version history
+- [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md) - Testnet guide
+- [WHITEPAPER.md](https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md) - Technical specification
+- [SECURITY.md](https://github.com/dilithion/dilithion/blob/main/docs/SECURITY.md) - Security documentation
+- [CHANGELOG.md](https://github.com/dilithion/dilithion/blob/main/CHANGELOG.md) - Version history
 
 ## Disclaimer
 
@@ -490,7 +490,7 @@ See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TES
 
 ## Reporting Issues
 
-Please report bugs at: https://github.com/WillBarton888/dilithion/issues
+Please report bugs at: https://github.com/dilithion/dilithion/issues
 
 ## Checksums
 

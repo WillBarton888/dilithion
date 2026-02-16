@@ -340,7 +340,7 @@ su - dilithion
 **Install Dependencies:**
 ```bash
 cd ~
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 git checkout v1.0.0-genesis  # Use the genesis tag
 ```
@@ -816,7 +816,7 @@ sha256sum dilithion-v1.0.0-rc1-linux-x64.tar.gz > SHA256SUMS
 ### Step 5.3: GitHub Release
 
 **Create GitHub release:**
-1. Go to https://github.com/WillBarton888/dilithion/releases
+1. Go to https://github.com/dilithion/dilithion/releases
 2. Click "Draft a new release"
 3. Tag: v1.0.0-rc1
 4. Title: "Dilithion v1.0.0-rc1 - Release Candidate"
@@ -860,7 +860,7 @@ Please help test this release candidate! Report any issues on GitHub.
 ## Support
 
 - Documentation: https://dilithion.org
-- GitHub Issues: https://github.com/WillBarton888/dilithion/issues
+- GitHub Issues: https://github.com/dilithion/dilithion/issues
 ```
 
 6. Upload binaries and checksums

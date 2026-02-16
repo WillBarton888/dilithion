@@ -111,7 +111,7 @@ Seed Nodes (auto-connected):
   London:    209.97.177.197:18444
   Singapore: 188.166.255.63:18444
 
-Support: https://github.com/WillBarton888/dilithion/issues
+Support: https://github.com/dilithion/dilithion/issues
 EOF
 
         # Create tarball

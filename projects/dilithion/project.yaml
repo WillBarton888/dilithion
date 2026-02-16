@@ -1,5 +1,5 @@
-homepage: "https://github.com/WillBarton888/dilithion"
-main_repo: "https://github.com/WillBarton888/dilithion.git"
+homepage: "https://github.com/dilithion/dilithion"
+main_repo: "https://github.com/dilithion/dilithion.git"
 language: c++
 fuzzing_engines:
   - libfuzzer

@@ -117,7 +117,7 @@ gh release create v1.0.0 \
 ```
 
 ### Step 10: Verify Release
-Visit: https://github.com/WillBarton888/dilithion/releases/tag/v1.0.0
+Visit: https://github.com/dilithion/dilithion/releases/tag/v1.0.0
 
 Check:
 - [  ] Release is public
@@ -135,10 +135,10 @@ Check:
 ```bash
 # Edit website/index.html
 # Change download button hrefs from:
-href="https://github.com/WillBarton888/dilithion/releases"
+href="https://github.com/dilithion/dilithion/releases"
 
 # To actual download links:
-href="https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip"
+href="https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip"
 # etc.
 ```
 
@@ -180,7 +180,7 @@ The world's first standalone post-quantum cryptocurrency is ready for mainnet la
 ⚡ RandomX CPU mining
 📅 Launch: Jan 1, 2026
 
-Download: https://github.com/WillBarton888/dilithion/releases
+Download: https://github.com/dilithion/dilithion/releases
 
 #Dilithion #PostQuantum #Crypto
 ```

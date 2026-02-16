@@ -55,19 +55,19 @@ Dilithion v1.0.0 marks the **first production release** of the world's first sta
 
 **Linux (x64):**
 ```bash
-wget https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-linux-x64.tar.gz
+wget https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-linux-x64.tar.gz
 tar -xzf dilithion-v1.0.0-linux-x64.tar.gz
 cd dilithion-v1.0.0-linux-x64
 ./bin/dilithion-node
 ```
 
 **Windows (x64):**
-- Download: [dilithion-v1.0.0-windows-x64.zip](https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip)
+- Download: [dilithion-v1.0.0-windows-x64.zip](https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip)
 - Extract and run `dilithion-node.exe`
 
 **macOS (Universal):**
 ```bash
-wget https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-macos-universal.tar.gz
+wget https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-macos-universal.tar.gz
 tar -xzf dilithion-v1.0.0-macos-universal.tar.gz
 cd dilithion-v1.0.0-macos-universal
 ./bin/dilithion-node
@@ -76,7 +76,7 @@ cd dilithion-v1.0.0-macos-universal
 ### Verify Downloads
 ```bash
 # Download checksums
-wget https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/SHA256SUMS
+wget https://github.com/dilithion/dilithion/releases/download/v1.0.0/SHA256SUMS
 
 # Verify (Linux/macOS)
 sha256sum -c SHA256SUMS
@@ -187,11 +187,11 @@ protection for The People's Coin
 
 ## 📚 Documentation
 
-- **Whitepaper:** [WHITEPAPER.md](https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md)
-- **Security:** [SECURITY.md](https://github.com/WillBarton888/dilithion/blob/main/SECURITY.md)
-- **Team:** [TEAM.md](https://github.com/WillBarton888/dilithion/blob/main/TEAM.md)
-- **Contributing:** [CONTRIBUTING.md](https://github.com/WillBarton888/dilithion/blob/main/CONTRIBUTING.md)
-- **Infrastructure Guide:** [INFRASTRUCTURE-SETUP-GUIDE.md](https://github.com/WillBarton888/dilithion/blob/main/INFRASTRUCTURE-SETUP-GUIDE.md)
+- **Whitepaper:** [WHITEPAPER.md](https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md)
+- **Security:** [SECURITY.md](https://github.com/dilithion/dilithion/blob/main/SECURITY.md)
+- **Team:** [TEAM.md](https://github.com/dilithion/dilithion/blob/main/TEAM.md)
+- **Contributing:** [CONTRIBUTING.md](https://github.com/dilithion/dilithion/blob/main/CONTRIBUTING.md)
+- **Infrastructure Guide:** [INFRASTRUCTURE-SETUP-GUIDE.md](https://github.com/dilithion/dilithion/blob/main/INFRASTRUCTURE-SETUP-GUIDE.md)
 
 ---
 
@@ -207,7 +207,7 @@ The following seed nodes are available for initial connection:
 ## 🤝 Community
 
 - **Website:** https://dilithion.org
-- **GitHub:** https://github.com/WillBarton888/dilithion
+- **GitHub:** https://github.com/dilithion/dilithion
 - **Twitter:** [@DilithionCoin](https://twitter.com/DilithionCoin)
 - **Reddit:** [r/dilithion](https://reddit.com/r/dilithion)
 - **Discord:** Coming Soon

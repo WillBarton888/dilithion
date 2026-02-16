@@ -1967,7 +1967,7 @@ Dilithion is the world's first **production-ready post-quantum cryptocurrency** 
 ## Get Started
 
 **Website:** https://dilithion.org
-**GitHub:** https://github.com/WillBarton888/dilithion
+**GitHub:** https://github.com/dilithion/dilithion
 **Testnet Guide:** TESTNET-LAUNCH.md
 **Documentation:** docs/
 

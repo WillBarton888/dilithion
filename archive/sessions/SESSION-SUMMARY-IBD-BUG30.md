@@ -173,7 +173,7 @@ src/node/dilithion-node.cpp       - IBD handlers (VERACK, GetHeaders)
 **Commit Hash**: 1677ec4
 **Branch**: main
 **Pushed**: Yes
-**GitHub**: https://github.com/WillBarton888/dilithion/commit/1677ec4
+**GitHub**: https://github.com/dilithion/dilithion/commit/1677ec4
 
 ---
 

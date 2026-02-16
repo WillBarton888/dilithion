@@ -189,7 +189,7 @@ Dilithion builds upon excellent open source work:
 ### Official Channels
 
 - **Website:** https://dilithion.org [to be launched]
-- **GitHub:** https://github.com/WillBarton888/dilithion
+- **GitHub:** https://github.com/dilithion/dilithion
 - **Discord:** [Server link - to be added]
 - **Twitter:** @DilithionCoin [to be created]
 - **Reddit:** r/dilithion [to be created]

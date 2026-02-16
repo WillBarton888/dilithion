@@ -562,7 +562,7 @@ curl -X POST http://localhost:8332 -d '{"jsonrpc":"2.0","method":"listtransactio
 - User Guide: `docs/USER-GUIDE.md`
 
 **Support:**
-- GitHub Issues: https://github.com/WillBarton888/dilithion/issues
+- GitHub Issues: https://github.com/dilithion/dilithion/issues
 - Website: https://dilithion.org
 - Email: support@dilithion.org
 

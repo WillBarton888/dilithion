@@ -121,6 +121,31 @@ constexpr int64_t FP_HEAT_CLIFF_V32 = 2000000;      // 2.0 × 1,000,000
 constexpr int64_t FP_HEAT_GROWTH_V32 = 158;          // 1.58x per block
 
 // ============================================================================
+// DFMP v3.3 CONSTANTS (remove dynamic scaling, linear+exponential penalty)
+// ============================================================================
+// v3.3 removes dynamic scaling entirely. Uses a three-zone penalty curve:
+//   Zone 1 (Free):        0-12 blocks  → 1.0x (no penalty)
+//   Zone 2 (Linear):     13-24 blocks  → ramps from 1.25x to 4.0x
+//   Zone 3 (Exponential): 25+ blocks   → 4.0x × 1.58^(heat-24)
+// This prevents whale dominance in small networks while keeping the chain moving.
+
+/** v3.3: Free blocks before any penalty (same base as v3.2, but NO dynamic scaling) */
+constexpr int FREE_TIER_THRESHOLD_V33 = 12;
+
+/** v3.3: End of linear zone (penalty reaches 4.0x at this point) */
+constexpr int LINEAR_ZONE_END_V33 = 24;
+
+/** v3.3: Penalty at end of linear zone / start of exponential (4.0x) */
+constexpr int64_t FP_LINEAR_END_PENALTY_V33 = 4000000;   // 4.0 × 1,000,000
+
+/** v3.3: Exponential growth rate per block above linear zone (1.58x) */
+constexpr int64_t FP_HEAT_GROWTH_V33 = 158;               // 1.58x per block
+
+/** v3.3: Maturity penalty unchanged from v3.2 */
+constexpr int MATURITY_BLOCKS_V33 = 500;
+constexpr int64_t FP_PENDING_START_V33 = 2500000;         // 2.5 × 1,000,000
+
+// ============================================================================
 // IDENTITY TYPE (20 bytes)
 // ============================================================================
 
@@ -365,6 +390,23 @@ int64_t CalculateTotalMultiplierFP_V32(int currentHeight, int firstSeenHeight, i
 /** v3.2 convenience functions for logging */
 double GetPendingPenalty_V32(int currentHeight, int firstSeenHeight);
 double GetHeatMultiplier_V32(int heat, int uniqueMiners = 0);
+
+// ============================================================================
+// DFMP v3.3 MULTIPLIER CALCULATION (Fixed-Point)
+// ============================================================================
+
+/** v3.3 pending penalty: same as v3.2 (2.5x → 1.0x over 500 blocks) */
+int64_t CalculatePendingPenaltyFP_V33(int currentHeight, int firstSeenHeight);
+
+/** v3.3 heat multiplier: 12-block free, linear to 4.0x at 24, then exponential (NO dynamic scaling) */
+int64_t CalculateHeatMultiplierFP_V33(int heat);
+
+/** v3.3 total multiplier: maturity × heat */
+int64_t CalculateTotalMultiplierFP_V33(int currentHeight, int firstSeenHeight, int heat);
+
+/** v3.3 convenience functions for logging */
+double GetPendingPenalty_V33(int currentHeight, int firstSeenHeight);
+double GetHeatMultiplier_V33(int heat);
 
 // ============================================================================
 // GLOBAL STATE

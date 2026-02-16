@@ -31,19 +31,19 @@
 - ✅ `WHITEPAPER.html` → Whitepaper HTML version
 
 ### Download Links (Updated)
-- ✅ **Windows:** `https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip`
-- ✅ **Linux:** `https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-linux-x64.tar.gz`
-- ✅ **macOS:** `https://github.com/WillBarton888/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-macos-universal.tar.gz`
+- ✅ **Windows:** `https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-windows-x64.zip`
+- ✅ **Linux:** `https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-linux-x64.tar.gz`
+- ✅ **macOS:** `https://github.com/dilithion/dilithion/releases/download/v1.0.0/dilithion-v1.0.0-macos-universal.tar.gz`
 
 **Note:** These links will be active once GitHub releases are created.
 
 ### Footer Resource Links
 - ✅ `Dilithion-Whitepaper-v1.0.pdf` → PDF whitepaper
-- ✅ `https://github.com/WillBarton888/dilithion` → GitHub repository
-- ✅ `https://github.com/WillBarton888/dilithion/blob/main/TEAM.md` → Team documentation
-- ✅ `https://github.com/WillBarton888/dilithion/blob/main/SECURITY.md` → Security documentation
+- ✅ `https://github.com/dilithion/dilithion` → GitHub repository
+- ✅ `https://github.com/dilithion/dilithion/blob/main/TEAM.md` → Team documentation
+- ✅ `https://github.com/dilithion/dilithion/blob/main/SECURITY.md` → Security documentation
 - ✅ `POST-QUANTUM-CRYPTO-COURSE.md` → Learning course
-- ✅ `https://github.com/WillBarton888/dilithion/blob/main/LICENSE` → MIT License
+- ✅ `https://github.com/dilithion/dilithion/blob/main/LICENSE` → MIT License
 
 ### Community Links
 - ✅ `https://twitter.com/DilithionCoin` → Twitter account

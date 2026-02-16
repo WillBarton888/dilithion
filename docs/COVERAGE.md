@@ -211,7 +211,7 @@ Coverage is automatically run on every push/PR:
 
 ### Codecov Dashboard
 
-View coverage trends at: `https://codecov.io/gh/WillBarton888/dilithion`
+View coverage trends at: `https://codecov.io/gh/dilithion/dilithion`
 
 **Features:**
 - Coverage over time graph

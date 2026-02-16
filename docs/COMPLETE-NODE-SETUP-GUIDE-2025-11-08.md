@@ -329,7 +329,7 @@ git --version
 cd /root
 
 # Clone Dilithion repository
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 
 # Enter directory
 cd dilithion
@@ -884,7 +884,7 @@ apt install -y build-essential git curl wget htop cmake \
 # Clone repository
 echo "[5/8] Cloning Dilithion repository..."
 cd /root
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 git submodule init && git submodule update
 
@@ -1002,7 +1002,7 @@ After your node is running:
 
 ## Support and Documentation
 
-- **GitHub:** https://github.com/WillBarton888/dilithion
+- **GitHub:** https://github.com/dilithion/dilithion
 - **Testnet Validation Plan:** See TESTNET-VALIDATION-PLAN-2025-11-07.md
 - **Security Checklist:** See docs/SECURITY-CHECKLIST-2025-11-07.md
 - **Deployment Guide:** See docs/DEPLOYMENT-GUIDE-2025-11-07.md

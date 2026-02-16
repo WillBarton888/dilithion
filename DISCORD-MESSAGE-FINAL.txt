@@ -35,7 +35,7 @@ Your single bug report led to:
 You literally saved this project from a catastrophic launch. Thank you.
 
 NEXT STEPS:
-1. Pull latest code from main branch: https://github.com/WillBarton888/dilithion
+1. Pull latest code from main branch: https://github.com/dilithion/dilithion
 2. Test START-MINING.bat or dilithion-wallet.bat
 3. Let us know if curl detection works and if you encounter any other issues
 

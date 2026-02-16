@@ -420,7 +420,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                     std::cout << "[P2P] Our genesis:   " << our_genesis.GetHex().substr(0, 16) << "..." << std::endl;
                     std::cout << "[P2P] " << std::endl;
                     std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
-                    std::cout << "[P2P] 1. Download the latest binary: https://github.com/WillBarton888/dilithion/releases" << std::endl;
+                    std::cout << "[P2P] 1. Download the latest binary: https://github.com/dilithion/dilithion/releases" << std::endl;
                     std::cout << "[P2P] 2. Stop your node" << std::endl;
                     std::cout << "[P2P] 3. Delete your data directory (~/.dilithion or %APPDATA%\\.dilithion)" << std::endl;
                     std::cout << "[P2P] 4. Restart with the new binary" << std::endl;
@@ -436,7 +436,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                       peer_id, msg.user_agent.c_str());
             std::cout << "[P2P] WARNING: Peer " << peer_id << " (" << msg.user_agent
                       << ") is running old protocol without genesis validation." << std::endl;
-            std::cout << "[P2P] Please update to latest version: https://github.com/WillBarton888/dilithion/releases" << std::endl;
+            std::cout << "[P2P] Please update to latest version: https://github.com/dilithion/dilithion/releases" << std::endl;
         }
 
         // NET-001 FIX: Explicit user agent length validation (defense-in-depth)
@@ -1007,7 +1007,7 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             }
             // Cap tracking set size per peer to prevent memory growth
             if (served.size() > MAX_SERVED_BLOCKS_TRACK) {
-                // Remove oldest entries (std::set is ordered, erase from beginning)
+                // Evict entries from beginning of set to stay within limit
                 auto it = served.begin();
                 size_t to_remove = served.size() - MAX_SERVED_BLOCKS_TRACK;
                 for (size_t i = 0; i < to_remove; ++i) {

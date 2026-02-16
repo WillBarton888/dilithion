@@ -170,7 +170,7 @@ cmake --version
 cd ~
 
 # Clone Dilithion repository
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 
 # Enter directory
 cd dilithion
@@ -417,7 +417,7 @@ iftop
    ```
 
 2. **Post in GitHub Discussions:**
-   - Go to: https://github.com/WillBarton888/dilithion/discussions
+   - Go to: https://github.com/dilithion/dilithion/discussions
    - Find "Dilithion Testnet Launch - Join Here!" thread
    - Post:
      ```
@@ -646,8 +646,8 @@ sudo journalctl -u dilithion-node -f
 
 ## Support & Questions
 
-- **GitHub Discussions:** https://github.com/WillBarton888/dilithion/discussions
-- **GitHub Issues:** https://github.com/WillBarton888/dilithion/issues
+- **GitHub Discussions:** https://github.com/dilithion/dilithion/discussions
+- **GitHub Issues:** https://github.com/dilithion/dilithion/issues
 - **Email:** will@bananatree.com.au (for seed node operators)
 
 ---

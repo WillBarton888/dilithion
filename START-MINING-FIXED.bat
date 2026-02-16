@@ -135,7 +135,7 @@ if not exist "dilithion-node.exe" (
     echo    - Whitelist folder: %CD%
     echo.
     echo  Dilithion is legitimate open-source software:
-    echo    - Source: github.com/WillBarton888/dilithion
+    echo    - Source: github.com/dilithion/dilithion
     echo    - No malware, no viruses
     echo    - Miners use CPU (triggers false positives)
     echo.

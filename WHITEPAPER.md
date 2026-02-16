@@ -1125,7 +1125,7 @@ Dilithion aims to be:
 
 **Website:** https://dilithion.org (launching soon)
 
-**GitHub:** https://github.com/WillBarton888/dilithion
+**GitHub:** https://github.com/dilithion/dilithion
 
 **Discord:** [Community server - launching Week 2]
 

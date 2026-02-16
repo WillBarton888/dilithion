@@ -910,7 +910,7 @@ cp ~/wallet-backup.dat ~/.dilithion/wallet.dat
 
 - **Discord:** https://discord.gg/c25WwRNg
 - **Website:** https://dilithion.org
-- **GitHub:** https://github.com/WillBarton888/dilithion
+- **GitHub:** https://github.com/dilithion/dilithion
 
 **Your funds are quantum-safe! Welcome to the future!** 🛡️💎
 

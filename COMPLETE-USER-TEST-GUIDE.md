@@ -16,7 +16,7 @@ I've created multiple versions to help diagnose the issue:
 ### Step 1: Clean Start
 
 1. **Delete** the folder `C:\Dilithion4\dilithion-testnet-v1.0.9-windows-x64`
-2. **Download fresh** from: https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
+2. **Download fresh** from: https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
 3. **Verify SHA256**:
    ```
    7da26734cfd701d5dd3d9857ef9663d05056408a8ca37cb2b10d68b2df0fce03

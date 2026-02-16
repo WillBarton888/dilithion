@@ -151,7 +151,7 @@ Files: 4 files, 837 insertions
 Commit: a8bf820
 ```
 
-**Both commits pushed to:** https://github.com/WillBarton888/dilithion
+**Both commits pushed to:** https://github.com/dilithion/dilithion
 
 ---
 
@@ -466,6 +466,6 @@ Comprehensive guides enable future maintenance, troubleshooting, and onboarding.
 
 **Session Summary Created:** November 8, 2025
 **Project:** Dilithion Blockchain - Post-Quantum Cryptocurrency
-**Repository:** https://github.com/WillBarton888/dilithion
+**Repository:** https://github.com/dilithion/dilithion
 
 *Dilithion - Building the Future of Post-Quantum Blockchain Security* 🔐

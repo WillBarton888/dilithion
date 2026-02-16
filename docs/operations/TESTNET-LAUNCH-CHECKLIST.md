@@ -295,11 +295,11 @@ Dilithion is a post-quantum cryptocurrency built from scratch with NIST-approved
 ✅ Ready for testing
 
 JOIN THE TESTNET:
-📖 Guide: github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
-💻 GitHub: github.com/WillBarton888/dilithion
+📖 Guide: github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
+💻 GitHub: github.com/dilithion/dilithion
 
 Quick start:
-$ git clone github.com/WillBarton888/dilithion
+$ git clone github.com/dilithion/dilithion
 $ cd dilithion && make
 $ ./dilithion-node --mine --threads=4
 

@@ -1,6 +1,16 @@
 #include "cooldown_tracker.h"
 #include <algorithm>
 
+int CCooldownTracker::CalculateCooldown(int activeMiners)
+{
+    // Formula: cooldown = miners - max(3, miners/10)
+    // Allows a small buffer above fair share — generous at low miner
+    // counts (~1.43x at 10 miners), tight at scale (~1.11x at 50+).
+    int reduction = std::max(3, activeMiners / 10);
+    int cooldown = activeMiners - reduction;
+    return std::clamp(cooldown, MIN_COOLDOWN, MAX_COOLDOWN);
+}
+
 bool CCooldownTracker::IsInCooldown(const Address& addr, int height) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -10,7 +20,7 @@ bool CCooldownTracker::IsInCooldown(const Address& addr, int height) const
         return false;
 
     RecalcActiveMiners(height);
-    int cooldown = std::clamp(m_cachedActiveMinersMut, MIN_COOLDOWN, MAX_COOLDOWN);
+    int cooldown = CalculateCooldown(m_cachedActiveMinersMut);
     return (height - it->second) < cooldown;
 }
 
@@ -19,7 +29,7 @@ int CCooldownTracker::GetCooldownBlocks() const
     std::lock_guard<std::mutex> lock(m_mutex);
     // Use the most recent cached count; caller should have triggered
     // a RecalcActiveMiners via IsInCooldown or OnBlockConnected first.
-    return std::clamp(m_cachedActiveMinersMut, MIN_COOLDOWN, MAX_COOLDOWN);
+    return CalculateCooldown(m_cachedActiveMinersMut);
 }
 
 int CCooldownTracker::GetActiveMiners() const

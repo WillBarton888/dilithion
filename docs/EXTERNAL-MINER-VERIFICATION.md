@@ -35,7 +35,7 @@ START-MINING.bat
 
 ```bash
 # 1. Download and extract
-wget https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-linux-x64.tar.gz
+wget https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-linux-x64.tar.gz
 tar -xzf dilithion-testnet-v1.0.9-linux-x64.tar.gz
 cd dilithion-testnet-v1.0.9-linux-x64
 
@@ -82,7 +82,7 @@ chmod +x dilithion-node start-mining.sh
 
 ```bash
 # 1. Download and extract
-curl -LO https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-macos-x64.tar.gz
+curl -LO https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-macos-x64.tar.gz
 tar -xzf dilithion-testnet-v1.0.9-macos-x64.tar.gz
 cd dilithion-testnet-v1.0.9-macos-x64
 
@@ -281,7 +281,7 @@ sudo pacman -S leveldb snappy
 
 If you encounter issues not listed here:
 
-1. **Check GitHub Issues:** https://github.com/WillBarton888/dilithion/issues
+1. **Check GitHub Issues:** https://github.com/dilithion/dilithion/issues
 2. **Search existing issues** for your error message
 3. **Create new issue** with:
    - Operating system and version
@@ -313,7 +313,7 @@ Your installation is verified when:
 ## Security Best Practices
 
 - ✅ **Always verify SHA256 checksums** before running binaries
-- ✅ **Download only from official GitHub releases:** https://github.com/WillBarton888/dilithion/releases
+- ✅ **Download only from official GitHub releases:** https://github.com/dilithion/dilithion/releases
 - ✅ **Review source code** if building from source
 - ⚠️ **Testnet coins have NO value** - do not buy/sell them
 - ⚠️ **Experimental software** - not audited, use at own risk

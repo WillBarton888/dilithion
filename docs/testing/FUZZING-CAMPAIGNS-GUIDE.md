@@ -4,7 +4,7 @@
 
 ### Option 1: Run via GitHub Web Interface (Easiest)
 
-1. Go to your repo: https://github.com/WillBarton888/dilithion
+1. Go to your repo: https://github.com/dilithion/dilithion
 2. Click **Actions** tab
 3. Select **Fuzzing Extended Campaigns** workflow
 4. Click **Run workflow** button

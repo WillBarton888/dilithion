@@ -72,7 +72,7 @@ Same steps, but choose **"Process"** instead and add:
 3. Our binary is compiled with MinGW and uses cryptography libraries (triggers heuristics)
 
 **Dilithion is NOT malware:**
-- ✅ Open source: https://github.com/WillBarton888/dilithion
+- ✅ Open source: https://github.com/dilithion/dilithion
 - ✅ No obfuscation
 - ✅ No network backdoors
 - ✅ Only connects to known seed nodes

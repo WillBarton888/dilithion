@@ -12,7 +12,7 @@ Simple step-by-step guide to configure your Dilithion repository for testnet lau
 
 1. **Go to your repository home page:**
    ```
-   https://github.com/WillBarton888/dilithion
+   https://github.com/dilithion/dilithion
    ```
 
 2. **Look for the "About" section** (top right of the page, next to the green "Code" button)
@@ -44,7 +44,7 @@ Simple step-by-step guide to configure your Dilithion repository for testnet lau
 1. **Go to Settings:**
    - Click "Settings" tab at the top of your repository page
    ```
-   https://github.com/WillBarton888/dilithion/settings
+   https://github.com/dilithion/dilithion/settings
    ```
 
 2. **Find "Features" section** (left sidebar under "General")
@@ -64,7 +64,7 @@ Simple step-by-step guide to configure your Dilithion repository for testnet lau
 1. **Go to Discussions tab:**
    - Click "Discussions" at the top of your repository
    ```
-   https://github.com/WillBarton888/dilithion/discussions
+   https://github.com/dilithion/dilithion/discussions
    ```
 
 2. **Click the green "New discussion" button**
@@ -85,7 +85,7 @@ Simple step-by-step guide to configure your Dilithion repository for testnet lau
    Welcome to the Dilithion testnet! This is the official community hub for testnet participants.
 
    ## Quick Start
-   📖 [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
+   📖 [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
 
    ## What We Need
    🐛 Bug hunters - find and report bugs
@@ -109,7 +109,7 @@ Simple step-by-step guide to configure your Dilithion repository for testnet lau
    ## Important Reminders
    ⚠️ **Testnet coins have NO VALUE** - for testing only
    ⚠️ Experimental software - use at your own risk
-   ⚠️ Report bugs at: https://github.com/WillBarton888/dilithion/issues
+   ⚠️ Report bugs at: https://github.com/dilithion/dilithion/issues
 
    ---
 
@@ -147,10 +147,10 @@ Discussions tab → New discussion → Announcements → Fill form → Start dis
 ## Quick Links
 
 After setup, your key URLs will be:
-- Repository: https://github.com/WillBarton888/dilithion
-- Releases: https://github.com/WillBarton888/dilithion/releases
-- Discussions: https://github.com/WillBarton888/dilithion/discussions
-- Issues: https://github.com/WillBarton888/dilithion/issues
+- Repository: https://github.com/dilithion/dilithion
+- Releases: https://github.com/dilithion/dilithion/releases
+- Discussions: https://github.com/dilithion/dilithion/discussions
+- Issues: https://github.com/dilithion/dilithion/issues
 
 ---
 

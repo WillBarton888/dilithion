@@ -21,7 +21,7 @@ Coverity Scan is a free static analysis service for open-source projects. It hel
 ## Prerequisites
 
 1. **Open Source Project:** ✅ Dilithion is open source
-2. **GitHub Repository:** ✅ https://github.com/WillBarton888/dilithion
+2. **GitHub Repository:** ✅ https://github.com/dilithion/dilithion
 3. **Coverity Account:** ⏳ Need to create
 
 ---
@@ -39,7 +39,7 @@ Coverity Scan is a free static analysis service for open-source projects. It hel
 3. **Create Project:**
    - Click "Add a Project"
    - Project name: `dilithion`
-   - Repository URL: `https://github.com/WillBarton888/dilithion`
+   - Repository URL: `https://github.com/dilithion/dilithion`
    - Language: C/C++
    - Build system: Make
 
@@ -53,7 +53,7 @@ Coverity Scan is a free static analysis service for open-source projects. It hel
 ## Step 2: Configure GitHub Secrets
 
 1. **Go to GitHub Repository:**
-   - Navigate to: https://github.com/WillBarton888/dilithion/settings/secrets/actions
+   - Navigate to: https://github.com/dilithion/dilithion/settings/secrets/actions
 
 2. **Add Secrets:**
    - Click "New repository secret"

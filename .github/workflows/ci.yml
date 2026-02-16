@@ -730,7 +730,7 @@ jobs:
         echo "Downloading Coverity Build Tool..."
         if ! curl -sSL https://scan.coverity.com/download/linux64 \
           --form token="$COVERITY_TOKEN" \
-          --form project="WillBarton888/dilithion" \
+          --form project="dilithion/dilithion" \
           --form platform=linux64 \
           -o /tmp/cov-analysis.tar.gz; then
           echo "⚠️ Failed to download Coverity tool (network error or invalid token)"
@@ -851,7 +851,7 @@ jobs:
              --form file=@cov-int.tar.gz \
              --form version="$(git rev-parse --short HEAD)" \
              --form description="Automated Coverity scan" \
-             https://scan.coverity.com/builds?project=WillBarton888%2Fdilithion; then
+             https://scan.coverity.com/builds?project=dilithion%2Fdilithion; then
           echo "✅ Coverity scan submitted successfully"
         else
           echo "⚠️ Failed to submit to Coverity (network error or invalid credentials)"

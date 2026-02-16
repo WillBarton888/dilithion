@@ -31,7 +31,7 @@ First public testnet release of Dilithion, a post-quantum cryptocurrency.
 - ✅ **ADDED**: Platform-specific error messages for all OSes
 - ✅ **IMPROVED**: First-time user experience significantly enhanced
 
-Full details: [CRITICAL-FIXES-NOV2-2025.md](https://github.com/WillBarton888/dilithion/blob/main/CRITICAL-FIXES-NOV2-2025.md)
+Full details: [CRITICAL-FIXES-NOV2-2025.md](https://github.com/dilithion/dilithion/blob/main/CRITICAL-FIXES-NOV2-2025.md)
 
 ### Critical Bug Fixes (October 28, 2025)
 - ✅ **FIXED**: UTXO serialization format mismatch (consensus-critical)
@@ -39,7 +39,7 @@ Full details: [CRITICAL-FIXES-NOV2-2025.md](https://github.com/WillBarton888/dil
 - ✅ **FIXED**: DNS seed node initialization
 - ✅ **Test pass rate**: Improved from 79% to 93%
 
-Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/WillBarton888/dilithion/blob/main/DEFICIENCY-FIXES-SUMMARY.md)
+Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/dilithion/dilithion/blob/main/DEFICIENCY-FIXES-SUMMARY.md)
 
 ### Features
 - CRYSTALS-Dilithium3 post-quantum signatures (NIST-approved)
@@ -69,7 +69,7 @@ cd dilithion-testnet-v1.0.0-*-x64/
 
 ### Option 2: Build from Source
 ```bash
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 make
 ./dilithion-node --testnet --mine --threads=4
@@ -96,7 +96,7 @@ dilithion-wallet.bat send DLT1address... 10.5
 ```
 
 ### Full Guide
-See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
+See [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
 
 ## What to Test
 
@@ -119,9 +119,9 @@ See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TES
 
 ## Documentation
 
-- [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md) - Testnet guide
-- [CRITICAL-FIXES-NOV2-2025.md](https://github.com/WillBarton888/dilithion/blob/main/CRITICAL-FIXES-NOV2-2025.md) - Latest fixes
-- [WHITEPAPER.md](https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md) - Technical specification
+- [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md) - Testnet guide
+- [CRITICAL-FIXES-NOV2-2025.md](https://github.com/dilithion/dilithion/blob/main/CRITICAL-FIXES-NOV2-2025.md) - Latest fixes
+- [WHITEPAPER.md](https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md) - Technical specification
 
 ---
 

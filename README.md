@@ -3,10 +3,10 @@
 **Post-Quantum Cryptocurrency with NIST-Standard Cryptography**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v3.0.12-brightgreen.svg)](https://github.com/WillBarton888/dilithion/releases)
+[![Version](https://img.shields.io/badge/version-v3.0.12-brightgreen.svg)](https://github.com/dilithion/dilithion/releases)
 [![Mainnet](https://img.shields.io/badge/mainnet-LIVE-success.svg)](https://dilithion.org)
-[![CI](https://github.com/WillBarton888/dilithion/workflows/Dilithion%20CI/badge.svg)](https://github.com/WillBarton888/dilithion/actions)
-[![Fuzzing](https://github.com/WillBarton888/dilithion/workflows/Fuzzing%20Infrastructure%20Build/badge.svg)](https://github.com/WillBarton888/dilithion/actions)
+[![CI](https://github.com/dilithion/dilithion/workflows/Dilithion%20CI/badge.svg)](https://github.com/dilithion/dilithion/actions)
+[![Fuzzing](https://github.com/dilithion/dilithion/workflows/Fuzzing%20Infrastructure%20Build/badge.svg)](https://github.com/dilithion/dilithion/actions)
 
 ---
 
@@ -31,13 +31,13 @@
 
 **Quick Start**:
 ```bash
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 make
 ./dilithion-node --mine --threads=4
 ```
 
-**Pre-built binaries** for Linux, macOS, and Windows are available on the [Releases](https://github.com/WillBarton888/dilithion/releases) page.
+**Pre-built binaries** for Linux, macOS, and Windows are available on the [Releases](https://github.com/dilithion/dilithion/releases) page.
 
 ---
 
@@ -121,7 +121,7 @@ Dilithion uses **NIST-standardized** post-quantum cryptography:
 sudo apt-get install build-essential git cmake libleveldb-dev
 
 # Clone repository
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 
 # Build dependencies
@@ -391,13 +391,13 @@ See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
 ### Official Channels
 
 - **Website:** [dilithion.org](https://dilithion.org)
-- **GitHub:** [github.com/WillBarton888/dilithion](https://github.com/WillBarton888/dilithion)
+- **GitHub:** [github.com/dilithion/dilithion](https://github.com/dilithion/dilithion)
 - **Discord:** [Join our Discord](https://discord.gg/DS3gjmsFEJ)
 
 ### Support
 
 - **Documentation:** `docs/` directory
-- **Issues:** [GitHub Issues](https://github.com/WillBarton888/dilithion/issues)
+- **Issues:** [GitHub Issues](https://github.com/dilithion/dilithion/issues)
 
 ---
 

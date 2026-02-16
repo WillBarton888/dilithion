@@ -151,7 +151,7 @@ The Dilithion project is fully open-source (MIT license) with comprehensive docu
 - Mining and setup instructions
 - Developer contribution guidelines
 
-All code is available for review on GitHub: https://github.com/WillBarton888/dilithion
+All code is available for review on GitHub: https://github.com/dilithion/dilithion
 
 ### About Dilithion
 
@@ -215,7 +215,7 @@ Dilithion is positioned as the leading solution in this emerging market segment.
 ### Community and Support
 
 **Website**: https://dilithion.org
-**GitHub**: https://github.com/WillBarton888/dilithion
+**GitHub**: https://github.com/dilithion/dilithion
 **Email**: support@dilithion.org
 **Documentation**: Full technical docs available on GitHub
 
@@ -241,8 +241,8 @@ Email: media@dilithion.org
 Website: https://dilithion.org
 
 **For Technical Information:**
-GitHub: https://github.com/WillBarton888/dilithion
-Documentation: https://github.com/WillBarton888/dilithion/tree/main/docs
+GitHub: https://github.com/dilithion/dilithion
+Documentation: https://github.com/dilithion/dilithion/tree/main/docs
 
 **For General Inquiries:**
 Email: support@dilithion.org
@@ -251,12 +251,12 @@ Email: support@dilithion.org
 
 ## Additional Resources
 
-- **Technical Documentation**: https://github.com/WillBarton888/dilithion/blob/main/DILITHION-COMPREHENSIVE-TECHNICAL-DOCUMENTATION.md
-- **Security Audit Report**: https://github.com/WillBarton888/dilithion/blob/main/COMPREHENSIVE-BLOCKCHAIN-SECURITY-AUDIT-2025-10-30.md
-- **User Guide**: https://github.com/WillBarton888/dilithion/blob/main/docs/USER-GUIDE.md
-- **RPC API Documentation**: https://github.com/WillBarton888/dilithion/blob/main/docs/RPC-API.md
-- **Mining Guide**: https://github.com/WillBarton888/dilithion/blob/main/docs/MINING-GUIDE.md
-- **How to Transfer DIL**: https://github.com/WillBarton888/dilithion/blob/main/HOW-TO-TRANSFER-DIL.md
+- **Technical Documentation**: https://github.com/dilithion/dilithion/blob/main/DILITHION-COMPREHENSIVE-TECHNICAL-DOCUMENTATION.md
+- **Security Audit Report**: https://github.com/dilithion/dilithion/blob/main/COMPREHENSIVE-BLOCKCHAIN-SECURITY-AUDIT-2025-10-30.md
+- **User Guide**: https://github.com/dilithion/dilithion/blob/main/docs/USER-GUIDE.md
+- **RPC API Documentation**: https://github.com/dilithion/dilithion/blob/main/docs/RPC-API.md
+- **Mining Guide**: https://github.com/dilithion/dilithion/blob/main/docs/MINING-GUIDE.md
+- **How to Transfer DIL**: https://github.com/dilithion/dilithion/blob/main/HOW-TO-TRANSFER-DIL.md
 
 ---
 

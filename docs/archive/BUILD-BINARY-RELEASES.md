@@ -64,7 +64,7 @@ Quick Start:
 1. Connect to seed node: 170.64.203.134:18444
 2. Run: dilithion-node.exe --testnet --addnode=170.64.203.134:18444 --mine --threads=4
 
-Documentation: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
+Documentation: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
 EOF
 
 # Create ZIP
@@ -97,7 +97,7 @@ Quick Start:
 1. Make executable: chmod +x dilithion-node
 2. Connect to seed: ./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=4
 
-Documentation: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
+Documentation: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
 EOF
 
 # Create tarball
@@ -130,7 +130,7 @@ Quick Start:
 1. Allow execution: xattr -d com.apple.quarantine dilithion-node
 2. Connect to seed: ./dilithion-node --testnet --addnode=170.64.203.134:18444 --mine --threads=4
 
-Documentation: https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md
+Documentation: https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md
 EOF
 
 # Create ZIP
@@ -232,7 +232,7 @@ jobs:
 1. **Build the binaries** (see above)
 2. **Go to GitHub Release page**:
    ```
-   https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+   https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
    ```
 3. **Click "Edit"** (top right)
 4. **Drag and drop** the files:
@@ -251,7 +251,7 @@ gh release upload v1.0-testnet \
   release/dilithion-windows-x64.zip \
   release/dilithion-linux-x64.tar.gz \
   release/dilithion-macos-universal.zip \
-  --repo WillBarton888/dilithion
+  --repo dilithion/dilithion
 ```
 
 ---
@@ -266,7 +266,7 @@ Once binaries are uploaded, update `website/index.html`:
         <div class="platform-icon">🪟</div>
         <h3>Windows</h3>
         <p>Windows 10/11 (64-bit) - Ready to Run</p>
-        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-windows-x64.zip" class="btn btn-download">Download (.zip)</a>
+        <a href="https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-windows-x64.zip" class="btn btn-download">Download (.zip)</a>
         <span class="version">v1.0-testnet • No build required</span>
     </div>
 
@@ -274,7 +274,7 @@ Once binaries are uploaded, update `website/index.html`:
         <div class="platform-icon">🐧</div>
         <h3>Linux</h3>
         <p>Ubuntu, Debian, Fedora, Arch - Ready to Run</p>
-        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-linux-x64.tar.gz" class="btn btn-download">Download (.tar.gz)</a>
+        <a href="https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-linux-x64.tar.gz" class="btn btn-download">Download (.tar.gz)</a>
         <span class="version">v1.0-testnet • No build required</span>
     </div>
 
@@ -282,7 +282,7 @@ Once binaries are uploaded, update `website/index.html`:
         <div class="platform-icon">🍎</div>
         <h3>macOS</h3>
         <p>macOS 11+ (Intel & Apple Silicon) - Ready to Run</p>
-        <a href="https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-macos-universal.zip" class="btn btn-download">Download (.zip)</a>
+        <a href="https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-macos-universal.zip" class="btn btn-download">Download (.zip)</a>
         <span class="version">v1.0-testnet • No build required</span>
     </div>
 </div>

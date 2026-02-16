@@ -111,7 +111,7 @@ su - dilithion
 
 # Clone and build
 cd ~
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 git checkout v1.0.0-genesis
 
@@ -416,7 +416,7 @@ ssh dilithion@[SERVER_IP]
 ```
 
 **GitHub repo:**
-https://github.com/WillBarton888/dilithion
+https://github.com/dilithion/dilithion
 
 **Website (once live):**
 https://dilithion.org

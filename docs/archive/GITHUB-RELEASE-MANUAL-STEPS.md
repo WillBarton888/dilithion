@@ -6,7 +6,7 @@ GitHub CLI is not installed, so follow these manual steps via web UI.
 
 1. **Go to releases page:**
    ```
-   https://github.com/WillBarton888/dilithion/releases/new
+   https://github.com/dilithion/dilithion/releases/new
    ```
 
 2. **Fill in the form:**
@@ -36,7 +36,7 @@ First public testnet release of Dilithion, a post-quantum cryptocurrency.
 - ✅ **FIXED**: DNS seed node initialization
 - ✅ **Test pass rate**: Improved from 79% to 93%
 
-Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/WillBarton888/dilithion/blob/main/DEFICIENCY-FIXES-SUMMARY.md)
+Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/dilithion/dilithion/blob/main/DEFICIENCY-FIXES-SUMMARY.md)
 
 ### Features
 - CRYSTALS-Dilithium3 post-quantum signatures (NIST-approved)
@@ -49,14 +49,14 @@ Full details: [DEFICIENCY-FIXES-SUMMARY.md](https://github.com/WillBarton888/dil
 
 ### Quick Start
 ```bash
-git clone https://github.com/WillBarton888/dilithion.git
+git clone https://github.com/dilithion/dilithion.git
 cd dilithion
 make
 ./dilithion-node --mine --threads=4
 ```
 
 ### Full Guide
-See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
+See [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
 
 ## What to Test
 
@@ -72,10 +72,10 @@ See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TES
 
 ## Documentation
 
-- [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md) - Testnet guide
-- [WHITEPAPER.md](https://github.com/WillBarton888/dilithion/blob/main/WHITEPAPER.md) - Technical specification
-- [SECURITY.md](https://github.com/WillBarton888/dilithion/blob/main/docs/SECURITY.md) - Security documentation
-- [CHANGELOG.md](https://github.com/WillBarton888/dilithion/blob/main/CHANGELOG.md) - Version history
+- [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md) - Testnet guide
+- [WHITEPAPER.md](https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md) - Technical specification
+- [SECURITY.md](https://github.com/dilithion/dilithion/blob/main/docs/SECURITY.md) - Security documentation
+- [CHANGELOG.md](https://github.com/dilithion/dilithion/blob/main/CHANGELOG.md) - Version history
 
 ## Disclaimer
 
@@ -88,7 +88,7 @@ See [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TES
 
 ## Reporting Issues
 
-Please report bugs at: https://github.com/WillBarton888/dilithion/issues
+Please report bugs at: https://github.com/dilithion/dilithion/issues
 
 ---
 
@@ -126,7 +126,7 @@ Please report bugs at: https://github.com/WillBarton888/dilithion/issues
      Welcome to the Dilithion testnet! This is the official community hub for testnet participants.
 
      ## Quick Start
-     📖 [TESTNET-LAUNCH.md](https://github.com/WillBarton888/dilithion/blob/main/TESTNET-LAUNCH.md)
+     📖 [TESTNET-LAUNCH.md](https://github.com/dilithion/dilithion/blob/main/TESTNET-LAUNCH.md)
 
      ## What We Need
      🐛 Bug hunters

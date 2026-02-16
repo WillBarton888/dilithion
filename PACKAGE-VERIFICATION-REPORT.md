@@ -131,7 +131,7 @@ When user runs SETUP-AND-START.bat:
 
 **Verified Working Package:**
 ```
-https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
+https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
 ```
 
 **Expected SHA256:**

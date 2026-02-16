@@ -240,7 +240,7 @@ if (inet_pton(AF_INET, peer_addr.c_str(), &ipv4_addr) == 1) {
 
 **Commit Hash**: 7d5343d
 **Branch**: main
-**Remote**: https://github.com/WillBarton888/dilithion.git
+**Remote**: https://github.com/dilithion/dilithion.git
 **Files Changed**: 4
 **Insertions**: +321
 **Deletions**: -8

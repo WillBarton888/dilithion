@@ -45,12 +45,11 @@ static void test_basic_cooldown()
 
     tracker.OnBlockConnected(100, alice);
 
-    // Alice should be in cooldown for MIN_COOLDOWN blocks (10).
-    CHECK(tracker.IsInCooldown(alice, 101));
-    CHECK(tracker.IsInCooldown(alice, 109));
+    // 1 active miner → cooldown = CalculateCooldown(1) = max(2, 1-3) = 2.
+    CHECK(tracker.IsInCooldown(alice, 101));   // 101-100=1 < 2 → in cooldown
 
-    // At height 110, exactly MIN_COOLDOWN blocks later, cooldown expires.
-    CHECK(!tracker.IsInCooldown(alice, 110));
+    // At height 102, exactly 2 blocks later, cooldown expires.
+    CHECK(!tracker.IsInCooldown(alice, 102));
     CHECK(!tracker.IsInCooldown(alice, 200));
 
     PASS();
@@ -93,17 +92,21 @@ static void test_cooldown_scales_with_miners()
     CCooldownTracker tracker;
     Address alice = make_addr(1);
 
-    // Register 50 distinct miners so cooldown becomes 50.
+    // Register 50 distinct miners at heights 1001-1050.
     for (uint8_t i = 1; i <= 50; i++) {
         tracker.OnBlockConnected(1000 + i, make_addr(i));
     }
 
-    CHECK(tracker.GetCooldownBlocks() == 50);
+    // 50 miners → cooldown = 50 - max(3, 5) = 45.
+    CHECK(tracker.GetCooldownBlocks() == 45);
 
-    // Alice won at height 1001. At 1001 + 49 she should still be in cooldown.
-    CHECK(tracker.IsInCooldown(alice, 1050));
-    // At 1001 + 50 she's out.
-    CHECK(!tracker.IsInCooldown(alice, 1051));
+    // Have Alice win again at height 1060 (all 50 miners in window).
+    tracker.OnBlockConnected(1060, alice);
+
+    // Alice last won at 1060. At 1060+44=1104 she should still be in cooldown.
+    CHECK(tracker.IsInCooldown(alice, 1104));
+    // At 1060+45=1105 she's out.
+    CHECK(!tracker.IsInCooldown(alice, 1105));
 
     PASS();
 }
@@ -113,7 +116,7 @@ static void test_cooldown_clamped_min()
     TEST(cooldown_clamped_min);
     CCooldownTracker tracker;
 
-    // Only 3 miners — cooldown should be MIN_COOLDOWN (10), not 3.
+    // Only 3 miners → formula gives 3-3=0, clamped to MIN_COOLDOWN (2).
     for (uint8_t i = 1; i <= 3; i++) {
         tracker.OnBlockConnected(200 + i, make_addr(i));
     }
@@ -239,10 +242,28 @@ static void test_consecutive_wins_same_miner()
 
     // Only 1 unique miner.
     CHECK(tracker.GetActiveMiners() == 1);
-    // Last win at 102, cooldown = MIN_COOLDOWN (10).
+    // Last win at 102, cooldown = MIN_COOLDOWN (2).
     CHECK(tracker.GetLastWinHeight(alice) == 102);
     CHECK(tracker.IsInCooldown(alice, 103));
-    CHECK(!tracker.IsInCooldown(alice, 112));
+    CHECK(!tracker.IsInCooldown(alice, 104));
+
+    PASS();
+}
+
+static void test_cooldown_formula_values()
+{
+    TEST(cooldown_formula_values);
+
+    // Verify the formula: cooldown = miners - max(3, miners/10)
+    CHECK(CCooldownTracker::CalculateCooldown(1) == 2);    // 1-3=-2 → clamped to MIN(2)
+    CHECK(CCooldownTracker::CalculateCooldown(5) == 2);    // 5-3=2
+    CHECK(CCooldownTracker::CalculateCooldown(10) == 7);   // 10-3=7
+    CHECK(CCooldownTracker::CalculateCooldown(20) == 17);  // 20-3=17  (20/10=2, max(3,2)=3)
+    CHECK(CCooldownTracker::CalculateCooldown(30) == 27);  // 30-3=27  (30/10=3, max(3,3)=3)
+    CHECK(CCooldownTracker::CalculateCooldown(31) == 28);  // 31-3=28  (31/10=3, max(3,3)=3)
+    CHECK(CCooldownTracker::CalculateCooldown(50) == 45);  // 50-5=45  (50/10=5)
+    CHECK(CCooldownTracker::CalculateCooldown(100) == 90); // 100-10=90
+    CHECK(CCooldownTracker::CalculateCooldown(200) == 100); // 200-20=180 → clamped to MAX(100)
 
     PASS();
 }
@@ -263,6 +284,7 @@ int main()
     test_reorg_undo_removes_address();
     test_clear();
     test_consecutive_wins_same_miner();
+    test_cooldown_formula_values();
 
     std::cout << "\n" << passed << " passed, " << failed << " failed\n";
 

@@ -277,7 +277,7 @@ Dilithion is fully open-source with comprehensive documentation:
 - ✅ Mining and setup instructions
 - ✅ Cryptographic performance analysis
 
-**GitHub Repository**: https://github.com/WillBarton888/dilithion
+**GitHub Repository**: https://github.com/dilithion/dilithion
 **Website**: https://dilithion.org
 **Documentation**: Full technical documentation available
 
@@ -357,7 +357,7 @@ The $2+ trillion cryptocurrency market faces an existential quantum computing th
 ### Community and Support
 
 **Website**: https://dilithion.org
-**GitHub**: https://github.com/WillBarton888/dilithion
+**GitHub**: https://github.com/dilithion/dilithion
 **Email**: support@dilithion.org
 
 **Social Media** (Coming Soon):
@@ -389,8 +389,8 @@ Email: media@dilithion.org
 Website: https://dilithion.org
 
 **For Technical Information:**
-GitHub: https://github.com/WillBarton888/dilithion
-Documentation: https://github.com/WillBarton888/dilithion/tree/main/docs
+GitHub: https://github.com/dilithion/dilithion
+Documentation: https://github.com/dilithion/dilithion/tree/main/docs
 
 **For Partnership Inquiries:**
 Email: partnerships@dilithion.org
@@ -403,19 +403,19 @@ Email: support@dilithion.org
 ## Additional Resources
 
 ### Documentation:
-- **Technical Documentation**: https://github.com/WillBarton888/dilithion/blob/main/DILITHION-COMPREHENSIVE-TECHNICAL-DOCUMENTATION.md
-- **Security Audit Report**: https://github.com/WillBarton888/dilithion/blob/main/COMPREHENSIVE-BLOCKCHAIN-SECURITY-AUDIT-2025-10-30.md
-- **Security Fixes Report**: https://github.com/WillBarton888/dilithion/blob/main/SECURITY-FIXES-IMPLEMENTATION-REPORT-2025-10-30.md
-- **Executive Summary**: https://github.com/WillBarton888/dilithion/blob/main/AUDIT-EXECUTIVE-SUMMARY.md
+- **Technical Documentation**: https://github.com/dilithion/dilithion/blob/main/DILITHION-COMPREHENSIVE-TECHNICAL-DOCUMENTATION.md
+- **Security Audit Report**: https://github.com/dilithion/dilithion/blob/main/COMPREHENSIVE-BLOCKCHAIN-SECURITY-AUDIT-2025-10-30.md
+- **Security Fixes Report**: https://github.com/dilithion/dilithion/blob/main/SECURITY-FIXES-IMPLEMENTATION-REPORT-2025-10-30.md
+- **Executive Summary**: https://github.com/dilithion/dilithion/blob/main/AUDIT-EXECUTIVE-SUMMARY.md
 
 ### User Guides:
-- **User Guide**: https://github.com/WillBarton888/dilithion/blob/main/docs/USER-GUIDE.md
-- **Mining Guide**: https://github.com/WillBarton888/dilithion/blob/main/docs/MINING-GUIDE.md
-- **How to Transfer DIL**: https://github.com/WillBarton888/dilithion/blob/main/HOW-TO-TRANSFER-DIL.md
+- **User Guide**: https://github.com/dilithion/dilithion/blob/main/docs/USER-GUIDE.md
+- **Mining Guide**: https://github.com/dilithion/dilithion/blob/main/docs/MINING-GUIDE.md
+- **How to Transfer DIL**: https://github.com/dilithion/dilithion/blob/main/HOW-TO-TRANSFER-DIL.md
 
 ### Technical Reference:
-- **RPC API Documentation**: https://github.com/WillBarton888/dilithion/blob/main/docs/RPC-API.md
-- **Performance Analysis**: https://github.com/WillBarton888/dilithion/blob/main/DILITHIUM3-PERFORMANCE-ANALYSIS-REPORT.md
+- **RPC API Documentation**: https://github.com/dilithion/dilithion/blob/main/docs/RPC-API.md
+- **Performance Analysis**: https://github.com/dilithion/dilithion/blob/main/DILITHIUM3-PERFORMANCE-ANALYSIS-REPORT.md
 
 ---
 

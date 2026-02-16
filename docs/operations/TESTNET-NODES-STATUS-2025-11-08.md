@@ -380,7 +380,7 @@ htop
 - Project: [Your project name]
 
 **Repository:**
-- GitHub: https://github.com/WillBarton888/dilithion
+- GitHub: https://github.com/dilithion/dilithion
 - Branch: main
 
 ---

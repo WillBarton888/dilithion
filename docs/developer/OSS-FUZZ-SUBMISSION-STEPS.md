@@ -175,7 +175,7 @@ Copy the files from `projects/dilithion/` in this repository:
      - fuzz_rpc: RPC parsing
      - fuzz_p2p_validation: P2P message validation
 
-     Repository: https://github.com/WillBarton888/dilithion
+     Repository: https://github.com/dilithion/dilithion
      ```
 
 3. **Submit PR:**

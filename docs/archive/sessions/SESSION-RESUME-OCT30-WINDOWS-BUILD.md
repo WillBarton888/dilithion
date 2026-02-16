@@ -14,7 +14,7 @@
 - ✅ Linux binaries built successfully
 - ✅ Package created: `releases/dilithion-testnet-v1.0.0-linux-x64.tar.gz` (1.05 MB)
 - ✅ **Uploaded to GitHub release v1.0-testnet**
-- ✅ Download link working: https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
+- ✅ Download link working: https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
 
 ### 2. User-Friendly Features - COMPLETE ✅
 - ✅ One-click launcher scripts created (Windows + Linux/Mac)
@@ -170,7 +170,7 @@ gh release upload v1.0-testnet releases\dilithion-testnet-v1.0.0-windows-x64.zip
 
 ### Step 10: Verify Upload
 
-Go to: https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+Go to: https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 
 Should see both:
 - ✅ Linux package (already there)
@@ -375,10 +375,10 @@ If everything goes smoothly tomorrow:
 ## Contact Info for Tomorrow
 
 **GitHub Release Page:**
-https://github.com/WillBarton888/dilithion/releases/tag/v1.0-testnet
+https://github.com/dilithion/dilithion/releases/tag/v1.0-testnet
 
 **Current Working Linux Download:**
-https://github.com/WillBarton888/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
+https://github.com/dilithion/dilithion/releases/download/v1.0-testnet/dilithion-testnet-v1.0.0-linux-x64.tar.gz
 
 **Website:**
 https://dilithion.org (or wherever it's hosted)

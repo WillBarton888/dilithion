@@ -7,7 +7,7 @@
 Instead, report privately to: **security@dilithion.org**
 
 For critical vulnerabilities, you can also reach us via:
-- **GitHub Security Advisory:** https://github.com/WillBarton888/dilithion/security/advisories/new
+- **GitHub Security Advisory:** https://github.com/dilithion/dilithion/security/advisories/new
 - **Discord:** [Server link - to be added]
 - **Email:** security@dilithion.org
 
@@ -99,7 +99,7 @@ We request **90 days** to patch critical issues before public disclosure.
 - **Professional audit:** Not yet completed (TBD based on community/budget)
 - **Community review:** Actively seeking expert feedback
 - **Testing status:** Unit tests complete, testnet launching November 2025
-- **Known issues:** See [GitHub Issues](https://github.com/WillBarton888/dilithion/issues)
+- **Known issues:** See [GitHub Issues](https://github.com/dilithion/dilithion/issues)
 
 ### Development Approach
 
@@ -363,7 +363,7 @@ Dilithion uses CRYSTALS-Dilithium3 (NIST FIPS 204) for all digital signatures. T
 
 - **Security Review Checklist:** [SECURITY-REVIEW-CHECKLIST.md](SECURITY-REVIEW-CHECKLIST.md)
 - **Incident Response Plan:** [INCIDENT-RESPONSE-PLAN.md](INCIDENT-RESPONSE-PLAN.md)
-- **Source Code:** [GitHub Repository](https://github.com/WillBarton888/dilithion)
+- **Source Code:** [GitHub Repository](https://github.com/dilithion/dilithion)
 - **Documentation:** [docs/](docs/)
 - **Training Summary:** [DILITHION-TRAINING-SUMMARY.md](DILITHION-TRAINING-SUMMARY.md)
 - **Whitepaper:** [Dilithion-Whitepaper-v1.0.pdf](Dilithion-Whitepaper-v1.0.pdf)
@@ -421,7 +421,7 @@ gpg --fingerprint "<fingerprint>"
 - keyserver.ubuntu.com
 
 **Public Communication:**
-- **GitHub:** https://github.com/WillBarton888/dilithion
+- **GitHub:** https://github.com/dilithion/dilithion
 - **Discord:** [Server link - to be added]
 - **Twitter:** @DilithionCoin [to be created]
 - **Reddit:** r/dilithion [to be created]

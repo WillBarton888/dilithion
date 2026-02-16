@@ -178,13 +178,13 @@ comment:
 
 **After:**
 ```markdown
-[![codecov](https://codecov.io/gh/WillBarton888/dilithion/branch/main/graph/badge.svg)](https://codecov.io/gh/WillBarton888/dilithion)
+[![codecov](https://codecov.io/gh/dilithion/dilithion/branch/main/graph/badge.svg)](https://codecov.io/gh/dilithion/dilithion)
 
-**Current Coverage:** Baseline being established (Week 4) - Track progress on [Codecov Dashboard](https://codecov.io/gh/WillBarton888/dilithion)
+**Current Coverage:** Baseline being established (Week 4) - Track progress on [Codecov Dashboard](https://codecov.io/gh/dilithion/dilithion)
 ```
 
 **Changes:**
-1. Corrected repository URL: `dilithion/dilithion` → `WillBarton888/dilithion`
+1. Corrected repository URL: `dilithion/dilithion` → `dilithion/dilithion`
 2. Added dashboard link for tracking progress
 3. Badge will update automatically after first coverage upload
 
@@ -336,11 +336,11 @@ GitHub Check Status:
 **Steps:**
 1. Go to https://codecov.io/
 2. Sign up/in with GitHub account
-3. Add repository: `WillBarton888/dilithion`
+3. Add repository: `dilithion/dilithion`
 4. Get upload token from Settings → General
 5. Copy token (starts with `codecov_`)
 6. Add to GitHub:
-   - Navigate to https://github.com/WillBarton888/dilithion/settings/secrets/actions
+   - Navigate to https://github.com/dilithion/dilithion/settings/secrets/actions
    - Click "New repository secret"
    - Name: `CODECOV_TOKEN`
    - Value: Paste token

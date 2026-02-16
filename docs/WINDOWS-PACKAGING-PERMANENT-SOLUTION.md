@@ -300,7 +300,7 @@ ldd dilithion-node.exe  # Should show minimal Windows DLLs only
 
 **GitHub Release:**
 ```
-https://github.com/WillBarton888/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
+https://github.com/dilithion/dilithion/releases/download/v1.0.9/dilithion-testnet-v1.0.9-windows-x64.zip
 ```
 
 **SHA256 Verification:**

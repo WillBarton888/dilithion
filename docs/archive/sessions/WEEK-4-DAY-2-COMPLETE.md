@@ -79,7 +79,7 @@
 **File Modified:** `README.md`
 
 **Changes:**
-- Updated badge URL: `dilithion/dilithion` → `WillBarton888/dilithion`
+- Updated badge URL: `dilithion/dilithion` → `dilithion/dilithion`
 - Added dashboard link for tracking progress
 - Badge will update automatically after first coverage upload
 
@@ -157,7 +157,7 @@
 
 **Steps:**
 1. Create Codecov account at https://codecov.io/
-2. Add repository: `WillBarton888/dilithion`
+2. Add repository: `dilithion/dilithion`
 3. Get upload token from Settings → General
 4. Add to GitHub: Settings → Secrets → Actions → New secret
    - Name: `CODECOV_TOKEN`

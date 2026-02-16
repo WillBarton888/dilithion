@@ -174,7 +174,7 @@ d9f6001 Fix GitHub Actions CI Failures
 
 ### 3.3 Remote Repository
 
-**GitHub:** https://github.com/WillBarton888/dilithion.git
+**GitHub:** https://github.com/dilithion/dilithion.git
 **Branches:**
 - main
 - standalone-implementation (current)
