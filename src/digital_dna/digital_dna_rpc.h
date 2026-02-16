@@ -25,6 +25,7 @@
 #include <string>
 #include <functional>
 #include <map>
+#include <memory>
 
 namespace digital_dna {
 
@@ -53,6 +54,13 @@ public:
 
     // Execute a command
     JsonObject execute(const std::string& method, const JsonObject& params);
+
+    // Set the mining address for DNA collection
+    static void set_my_address(const std::array<uint8_t, 20>& address);
+
+    // Get/set the collector pointer (for node integration)
+    static DigitalDNACollector* get_collector();
+    static void set_collector(std::unique_ptr<DigitalDNACollector> collector);
 
 private:
     DigitalDNARegistry& registry_;

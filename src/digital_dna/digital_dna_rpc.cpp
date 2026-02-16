@@ -59,6 +59,18 @@ JsonObject DigitalDNARpc::execute(const std::string& method, const JsonObject& p
     return handler(params);
 }
 
+void DigitalDNARpc::set_my_address(const std::array<uint8_t, 20>& address) {
+    g_my_address = address;
+}
+
+DigitalDNACollector* DigitalDNARpc::get_collector() {
+    return g_collector.get();
+}
+
+void DigitalDNARpc::set_collector(std::unique_ptr<DigitalDNACollector> collector) {
+    g_collector = std::move(collector);
+}
+
 // ============ Command Implementations ============
 
 JsonObject DigitalDNARpc::cmd_getmydigitaldna(const JsonObject& params) {

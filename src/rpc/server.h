@@ -13,6 +13,7 @@
 #include <rpc/ssl_wrapper.h>
 #include <rpc/websocket.h>
 #include <rpc/rest_api.h>
+#include <digital_dna/digital_dna_rpc.h>
 
 #include <string>
 #include <sstream>
@@ -407,6 +408,11 @@ public:
 
     /** Get total blocks mined */
     uint64_t GetTotalBlocksMined() const { return m_totalBlocksMined.load(); }
+
+    /**
+     * Register Digital DNA RPC handler
+     */
+    void RegisterDNARpc(digital_dna::DigitalDNARpc* dna_rpc);
 
     /**
      * Set public API mode (--public-api flag)

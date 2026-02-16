@@ -64,10 +64,12 @@
 #include <util/logging.h>  // Bitcoin Core-style logging
 #include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
 #include <util/pidfile.h>  // STRESS TEST FIX: Stale lock detection
+#include <util/system.h>  // EnsureDataDirExists for first-run setup
 #include <util/config.h>  // Phase 10: Configuration system
 #include <util/config_validator.h>  // UX: Configuration validation
 #include <util/error_format.h>  // User experience: Better error messages
 #include <util/bench.h>  // Performance: Benchmarking
+#include <digital_dna/digital_dna_rpc.h>  // Digital DNA RPC commands
 
 #include <iostream>
 #include <fstream>
@@ -1448,7 +1450,14 @@ int main(int argc, char* argv[]) {
 
     // BUG #88: Windows startup crash diagnostics
     std::cerr.flush();
-    
+
+    // BUG #3 FIX: Create data directory on first run
+    // Without this, PID file creation fails on fresh installs
+    if (!EnsureDataDirExists(config.datadir)) {
+        std::cerr << "ERROR: Failed to create data directory: " << config.datadir << std::endl;
+        return 1;
+    }
+
     try {
         // STRESS TEST FIX: Acquire PID file lock and clean up stale locks
         // This must happen before opening databases to handle crashed process locks
@@ -4206,6 +4215,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             pblockIndexPtr->nHeight, winnerAddr);
                     }
 
+                    // BUG FIX: Broadcast VDF block to peers
+                    // (Previously missing - VDF blocks were saved locally but never sent to network)
+                    if (g_node_context.peer_manager && g_node_context.async_broadcaster) {
+                        auto connected_peers = g_node_context.peer_manager->GetConnectedPeers();
+                        if (!connected_peers.empty()) {
+                            std::vector<int> peer_ids;
+                            for (const auto& peer : connected_peers) {
+                                if (peer && peer->IsHandshakeComplete()) {
+                                    peer_ids.push_back(peer->id);
+                                }
+                            }
+                            if (!peer_ids.empty()) {
+                                if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, block, peer_ids)) {
+                                    std::cout << "[VDF] Queued block broadcast to " << peer_ids.size()
+                                              << " peer(s) (async)" << std::endl;
+                                } else {
+                                    std::cerr << "[VDF] ERROR: Failed to queue block broadcast" << std::endl;
+                                }
+                            } else {
+                                std::cout << "[VDF] WARNING: No peers with completed handshakes" << std::endl;
+                            }
+                        } else {
+                            std::cout << "[VDF] WARNING: No connected peers to broadcast block" << std::endl;
+                        }
+                    }
+
                     // Credit wallet
                     CBlockValidator validator;
                     std::vector<CTransactionRef> transactions;
@@ -4594,6 +4629,40 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterUTXOSet(&utxo_set);
         rpc_server.SetTestnet(config.testnet);
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
+
+        // Register Digital DNA RPC commands
+        std::unique_ptr<digital_dna::DigitalDNARpc> dna_rpc;
+        if (g_node_context.dna_registry) {
+            dna_rpc = std::make_unique<digital_dna::DigitalDNARpc>(*g_node_context.dna_registry);
+            dna_rpc->register_commands();
+            rpc_server.RegisterDNARpc(dna_rpc.get());
+            std::cout << "  [OK] Digital DNA RPC commands registered" << std::endl;
+
+            // Initialize DNA collector with mining address (if wallet is loaded)
+            if (!config.relay_only && wallet.GetAddresses().size() > 0) {
+                std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                if (pubKeyHash.size() == 20) {
+                    std::array<uint8_t, 20> address{};
+                    std::copy(pubKeyHash.begin(), pubKeyHash.end(), address.begin());
+
+                    // Set address for RPC-initiated collection
+                    digital_dna::DigitalDNARpc::set_my_address(address);
+
+                    // Create and start the collector
+                    auto collector = std::make_unique<digital_dna::DigitalDNACollector>(address);
+                    collector->start_collection();
+                    g_node_context.dna_collector = collector.get();
+                    digital_dna::DigitalDNARpc::set_collector(std::move(collector));
+
+                    // Display truncated address hex
+                    std::ostringstream addr_hex;
+                    for (int i = 0; i < 4; ++i)
+                        addr_hex << std::hex << std::setfill('0') << std::setw(2) << (int)address[i];
+                    std::cout << "  [OK] Digital DNA collector started (address: "
+                              << addr_hex.str() << "...)" << std::endl;
+                }
+            }
+        }
 
         // Load persistent total blocks mined counter
         {

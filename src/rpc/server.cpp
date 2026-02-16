@@ -239,6 +239,77 @@ CRPCServer::~CRPCServer() {
     Stop();
 }
 
+void CRPCServer::RegisterDNARpc(digital_dna::DigitalDNARpc* dna_rpc) {
+    if (!dna_rpc) return;
+
+    // Bridge DNA RPC commands into the main RPC handler dispatch.
+    // DNA RPC uses map<string,string>, main RPC uses string -> string.
+    auto commands = dna_rpc->list_commands();
+    for (const auto& cmd : commands) {
+        m_handlers[cmd] = [dna_rpc, cmd](const std::string& params) -> std::string {
+            // Parse JSON params string into DNA's JsonObject (map<string,string>)
+            digital_dna::JsonObject dna_params;
+            if (!params.empty() && params != "[]" && params != "{}") {
+                std::string s = params;
+                if (s.front() == '{' || s.front() == '[') s = s.substr(1);
+                if (s.back() == '}' || s.back() == ']') s.pop_back();
+
+                size_t pos = 0;
+                while (pos < s.size()) {
+                    while (pos < s.size() && (s[pos] == ' ' || s[pos] == ',' || s[pos] == '\n' || s[pos] == '\t')) pos++;
+                    if (pos >= s.size()) break;
+
+                    if (s[pos] != '"') break;
+                    size_t key_start = pos + 1;
+                    size_t key_end = s.find('"', key_start);
+                    if (key_end == std::string::npos) break;
+                    std::string key = s.substr(key_start, key_end - key_start);
+                    pos = key_end + 1;
+
+                    while (pos < s.size() && (s[pos] == ':' || s[pos] == ' ')) pos++;
+                    if (pos >= s.size()) break;
+
+                    std::string value;
+                    if (s[pos] == '"') {
+                        size_t val_start = pos + 1;
+                        size_t val_end = s.find('"', val_start);
+                        if (val_end == std::string::npos) break;
+                        value = s.substr(val_start, val_end - val_start);
+                        pos = val_end + 1;
+                    } else {
+                        size_t val_start = pos;
+                        while (pos < s.size() && s[pos] != ',' && s[pos] != '}' && s[pos] != ']' && s[pos] != ' ') pos++;
+                        value = s.substr(val_start, pos - val_start);
+                    }
+                    dna_params[key] = value;
+                }
+            }
+
+            auto result = dna_rpc->execute(cmd, dna_params);
+
+            // Convert result map<string,string> to JSON string
+            std::ostringstream oss;
+            oss << "{";
+            bool first = true;
+            for (const auto& [k, v] : result) {
+                if (!first) oss << ",";
+                oss << "\"" << k << "\":";
+                if (!v.empty() && (v[0] == '[' || v[0] == '{' || v == "true" || v == "false" ||
+                    (v[0] >= '0' && v[0] <= '9') || v[0] == '-')) {
+                    oss << v;
+                } else {
+                    oss << "\"" << v << "\"";
+                }
+                first = false;
+            }
+            oss << "}";
+            return oss.str();
+        };
+    }
+
+    std::cout << "[RPC] Registered " << commands.size() << " Digital DNA RPC commands" << std::endl;
+}
+
 bool CRPCServer::Start() {
     if (m_running) {
         return false;
