@@ -99,6 +99,28 @@ constexpr int64_t FP_HEAT_CLIFF_V31 = 1500000;      // 1.5 × 1,000,000
 constexpr int64_t FP_HEAT_GROWTH_V31 = 108;          // 1.08x per block
 
 // ============================================================================
+// DFMP v3.2 CONSTANTS (tightened anti-whale, back to v3.0 heat with softer maturity)
+// ============================================================================
+// v3.2 returns to v3.0 heat aggressiveness (12-block free tier, 2.0x cliff,
+// 1.58x growth) but with a more moderate maturity penalty (2.5x over 500 blocks)
+// to avoid the network stall that occurred with v3.0's 5.0x over 800 blocks.
+
+/** v3.2: Free blocks before heat penalty (back to v3.0: 12) */
+constexpr int FREE_TIER_THRESHOLD_V32 = 12;
+
+/** v3.2: Maturity decay duration (500 blocks, between v3.0's 800 and v3.1's 400) */
+constexpr int MATURITY_BLOCKS_V32 = 500;
+
+/** v3.2: Starting maturity penalty (2.5x, between v3.0's 5.0x and v3.1's 2.0x) */
+constexpr int64_t FP_PENDING_START_V32 = 2500000;   // 2.5 × 1,000,000
+
+/** v3.2: Cliff penalty at free tier + 1 (back to v3.0: 2.0x) */
+constexpr int64_t FP_HEAT_CLIFF_V32 = 2000000;      // 2.0 × 1,000,000
+
+/** v3.2: Exponential growth rate per block (back to v3.0: 1.58x) */
+constexpr int64_t FP_HEAT_GROWTH_V32 = 158;          // 1.58x per block
+
+// ============================================================================
 // IDENTITY TYPE (20 bytes)
 // ============================================================================
 
@@ -326,6 +348,23 @@ double GetTotalMultiplier(int currentHeight, int firstSeenHeight, int heat, int 
 /** v3.1 convenience functions for logging */
 double GetPendingPenalty_V31(int currentHeight, int firstSeenHeight);
 double GetHeatMultiplier_V31(int heat, int uniqueMiners = 0);
+
+// ============================================================================
+// DFMP v3.2 MULTIPLIER CALCULATION (Fixed-Point)
+// ============================================================================
+
+/** v3.2 pending penalty: 2.5x → 2.0x → 1.5x → 1.25x → 1.0x over 500 blocks */
+int64_t CalculatePendingPenaltyFP_V32(int currentHeight, int firstSeenHeight);
+
+/** v3.2 heat multiplier: 12-block free tier, 2.0x cliff, 1.58x growth */
+int64_t CalculateHeatMultiplierFP_V32(int heat, int uniqueMiners = 0);
+
+/** v3.2 total multiplier: maturity × heat */
+int64_t CalculateTotalMultiplierFP_V32(int currentHeight, int firstSeenHeight, int heat, int uniqueMiners = 0);
+
+/** v3.2 convenience functions for logging */
+double GetPendingPenalty_V32(int currentHeight, int firstSeenHeight);
+double GetHeatMultiplier_V32(int heat, int uniqueMiners = 0);
 
 // ============================================================================
 // GLOBAL STATE

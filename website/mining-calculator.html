@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Dilithion Mining Rewards Estimator - Calculate your estimated DIL earnings based on your CPU and current network conditions.">
+    <title>Mining Rewards Estimator - Dilithion</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --secondary: #8b5cf6;
+            --accent: #06b6d4;
+            --bg-dark: #0f172a;
+            --bg-darker: #020617;
+            --bg-card: #1e293b;
+            --bg-card-hover: #283548;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #334155;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-dark);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-left img {
+            width: 32px;
+            height: 32px;
+        }
+
+        .header-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-links {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .header-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: color 0.2s;
+        }
+
+        .header-links a:hover {
+            color: var(--text-primary);
+        }
+
+        /* Main content */
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        .page-header {
+            margin-bottom: 32px;
+        }
+
+        .page-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .page-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Form elements */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .form-input, .form-select {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--bg-darker);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .form-select option {
+            background: var(--bg-dark);
+            color: var(--text-primary);
+        }
+
+        .form-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        /* Info grid */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .info-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .info-value {
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .info-value.large {
+            font-size: 1.5rem;
+        }
+
+        .info-value.highlight {
+            color: var(--success);
+        }
+
+        /* Results section */
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .result-card {
+            background: var(--bg-darker);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .result-period {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .result-amount {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--success);
+            margin-bottom: 4px;
+        }
+
+        .result-unit {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        /* Status indicator */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .status-badge.live {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success);
+        }
+
+        .status-badge.loading {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--warning);
+        }
+
+        .status-badge.offline {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--error);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .status-badge.live .status-dot {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Additional stats row */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            padding: 16px;
+            background: var(--bg-darker);
+            border-radius: 8px;
+        }
+
+        /* CTA section */
+        .cta-section {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px;
+            padding: 32px;
+            text-align: center;
+        }
+
+        .cta-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .cta-steps {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin: 24px 0;
+            text-align: center;
+        }
+
+        .cta-step {
+            padding: 16px;
+        }
+
+        .cta-step-num {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+
+        .cta-step h4 {
+            margin-bottom: 6px;
+            font-size: 0.95rem;
+        }
+
+        .cta-step p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card-hover);
+        }
+
+        /* Note box */
+        .note-box {
+            padding: 14px 18px;
+            background: rgba(6, 182, 212, 0.08);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .note-box strong {
+            color: var(--accent);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .results-grid {
+                grid-template-columns: 1fr;
+            }
+            .cta-steps {
+                grid-template-columns: 1fr;
+            }
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            .header-links {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <img src="dilithion-logo-256.png" alt="Dilithion" onerror="this.style.display='none'">
+            <span class="header-title">Dilithion</span>
+        </div>
+        <div class="header-links">
+            <a href="index.html">Home</a>
+            <a href="wallet.html">Web Wallet</a>
+            <a href="https://github.com/WillBarton888/dilithion/releases/latest" target="_blank">Download</a>
+            <a href="https://discord.gg/DS3gjmsFEJ" target="_blank">Discord</a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <div class="page-header">
+            <h1 class="page-title">Mining Rewards Estimator</h1>
+            <p class="page-subtitle">Estimate your DIL earnings based on your CPU and current network conditions</p>
+        </div>
+
+        <!-- Your Hardware -->
+        <div class="card">
+            <div class="card-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                    <rect x="9" y="9" width="6" height="6"></rect>
+                    <line x1="9" y1="1" x2="9" y2="4"></line>
+                    <line x1="15" y1="1" x2="15" y2="4"></line>
+                    <line x1="9" y1="20" x2="9" y2="23"></line>
+                    <line x1="15" y1="20" x2="15" y2="23"></line>
+                    <line x1="20" y1="9" x2="23" y2="9"></line>
+                    <line x1="20" y1="14" x2="23" y2="14"></line>
+                    <line x1="1" y1="9" x2="4" y2="9"></line>
+                    <line x1="1" y1="14" x2="4" y2="14"></line>
+                </svg>
+                Your Hardware
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">CPU Model</label>
+                <select class="form-select" id="cpuSelect" onchange="onCpuChange()">
+                    <option value="15500" data-watts="170">AMD Ryzen 9 7950X (16C/32T) - ~15,500 H/s</option>
+                    <option value="14000" data-watts="170">AMD Ryzen 9 9950X (16C/32T) - ~14,000 H/s</option>
+                    <option value="13500" data-watts="142">AMD Ryzen 9 5950X (16C/32T) - ~13,500 H/s</option>
+                    <option value="11500" data-watts="105">AMD Ryzen 9 5900X (12C/24T) - ~11,500 H/s</option>
+                    <option value="8500" data-watts="105">AMD Ryzen 7 5800X (8C/16T) - ~8,500 H/s</option>
+                    <option value="7500" data-watts="65">AMD Ryzen 7 5700X (8C/16T) - ~7,500 H/s</option>
+                    <option value="6500" data-watts="65" selected>AMD Ryzen 5 5600X (6C/12T) - ~6,500 H/s</option>
+                    <option value="5500" data-watts="65">AMD Ryzen 5 3600 (6C/12T) - ~5,500 H/s</option>
+                    <option value="10500" data-watts="253">Intel Core i9-13900K (24C/32T) - ~10,500 H/s</option>
+                    <option value="8000" data-watts="181">Intel Core i7-13700K (16C/24T) - ~8,000 H/s</option>
+                    <option value="6500" data-watts="125">Intel Core i5-13600K (14C/20T) - ~6,500 H/s</option>
+                    <option value="9000" data-watts="241">Intel Core i9-12900K (16C/24T) - ~9,000 H/s</option>
+                    <option value="7000" data-watts="190">Intel Core i7-12700K (12C/20T) - ~7,000 H/s</option>
+                    <option value="4500" data-watts="65">Intel Core i5-12400 (6C/12T) - ~4,500 H/s</option>
+                    <option value="5000" data-watts="30">Apple M2 Pro (12C) - ~5,000 H/s</option>
+                    <option value="3500" data-watts="15">Apple M1 (8C) - ~3,500 H/s</option>
+                    <option value="2000" data-watts="45">Budget / Older CPU - ~2,000 H/s</option>
+                    <option value="custom" data-watts="0">Custom (enter your own H/s)</option>
+                </select>
+                <div class="form-hint">Hashrates are approximate RandomX benchmarks. Actual results vary by RAM speed, OS, and thread count.</div>
+            </div>
+
+            <div id="customHashrateRow" style="display: none;">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Your Hashrate (H/s)</label>
+                        <input type="number" class="form-input" id="customHashrate" placeholder="e.g. 6500" min="1" oninput="recalculate()">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Power Draw (Watts)</label>
+                        <input type="number" class="form-input" id="customWatts" placeholder="e.g. 65" min="0" oninput="recalculate()">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row" id="electricityRow">
+                <div class="form-group">
+                    <label class="form-label">Electricity Cost ($/kWh)</label>
+                    <input type="number" class="form-input" id="electricityCost" value="0.12" step="0.01" min="0" oninput="recalculate()">
+                    <div class="form-hint">US average: ~$0.12/kWh. Check your power bill for your rate.</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Power Draw (Watts)</label>
+                    <input type="number" class="form-input" id="powerWatts" value="65" min="0" oninput="recalculate()">
+                    <div class="form-hint">TDP of your CPU under mining load.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Network Data -->
+        <div class="card">
+            <div class="card-title" style="justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 8px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                    Live Network Data
+                </span>
+                <span class="status-badge loading" id="networkStatus">
+                    <span class="status-dot"></span>
+                    <span id="networkStatusText">Loading...</span>
+                </span>
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Block Height</span>
+                    <span class="info-value" id="netBlockHeight">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Difficulty</span>
+                    <span class="info-value" id="netDifficulty">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Est. Network Hashrate</span>
+                    <span class="info-value" id="netHashrate">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Current Block Reward</span>
+                    <span class="info-value" id="netBlockReward">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Blocks Until Halving</span>
+                    <span class="info-value" id="netHalving">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Connected Nodes</span>
+                    <span class="info-value" id="netPeers">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estimated Earnings -->
+        <div class="card" id="resultsCard">
+            <div class="card-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="1" x2="12" y2="23"></line>
+                    <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"></path>
+                </svg>
+                Estimated Mining Rewards
+            </div>
+
+            <div class="results-grid">
+                <div class="result-card">
+                    <div class="result-period">Daily</div>
+                    <div class="result-amount" id="resDailyDIL">-</div>
+                    <div class="result-unit">DIL</div>
+                </div>
+                <div class="result-card">
+                    <div class="result-period">Monthly</div>
+                    <div class="result-amount" id="resMonthlyDIL">-</div>
+                    <div class="result-unit">DIL</div>
+                </div>
+                <div class="result-card">
+                    <div class="result-period">Yearly</div>
+                    <div class="result-amount" id="resYearlyDIL">-</div>
+                    <div class="result-unit">DIL</div>
+                </div>
+            </div>
+
+            <div class="stats-row">
+                <div class="info-item">
+                    <span class="info-label">Your Network Share</span>
+                    <span class="info-value" id="resNetShare">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Est. Time to First Block</span>
+                    <span class="info-value" id="resTimeToBlock">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Daily Electricity Cost</span>
+                    <span class="info-value" id="resDailyElec">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Monthly Electricity Cost</span>
+                    <span class="info-value" id="resMonthlyElec">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Important Notes -->
+        <div class="note-box" style="margin-bottom: 20px;">
+            <strong>Important:</strong> These are estimates based on current network conditions and assume constant difficulty. Actual rewards vary based on luck, difficulty changes, and the number of miners on the network. DIL is not yet listed on exchanges, so there is no established market price. You are mining to accumulate DIL early while rewards are highest (50 DIL/block, pre-halving). The DFMP anti-whale system ensures fair mining distribution &mdash; small miners are not penalized.
+        </div>
+
+        <!-- How to Start Mining CTA -->
+        <div class="cta-section">
+            <div class="cta-title">Ready to Start Mining?</div>
+            <p style="color: var(--text-secondary); margin-bottom: 8px;">Get mining in under 60 seconds. No configuration needed.</p>
+
+            <div class="cta-steps">
+                <div class="cta-step">
+                    <div class="cta-step-num">1</div>
+                    <h4>Download</h4>
+                    <p>Grab the latest release for your OS (Windows, Linux, or macOS)</p>
+                </div>
+                <div class="cta-step">
+                    <div class="cta-step-num">2</div>
+                    <h4>Run</h4>
+                    <p>Double-click START-MINING.bat (Windows) or run ./start-mining.sh (Linux/Mac)</p>
+                </div>
+                <div class="cta-step">
+                    <div class="cta-step-num">3</div>
+                    <h4>Earn</h4>
+                    <p>Your node syncs, creates a wallet, and starts mining automatically</p>
+                </div>
+            </div>
+
+            <div class="cta-buttons">
+                <a href="https://github.com/WillBarton888/dilithion/releases/latest" target="_blank" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download Latest Release
+                </a>
+                <a href="wallet.html" class="btn btn-secondary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                        <path d="M22 10H2"></path>
+                    </svg>
+                    Open Web Wallet
+                </a>
+                <a href="https://discord.gg/DS3gjmsFEJ" target="_blank" class="btn btn-secondary">
+                    Join Discord
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // =====================================================
+    // Constants (from Dilithion consensus params)
+    // =====================================================
+    const BLOCK_TIME = 240;                    // 4 minutes
+    const INITIAL_BLOCK_REWARD = 50;           // 50 DIL
+    const DEV_TAX_FRACTION = 0.02;             // 2% dev tax on mainnet
+    const MINER_REWARD_FRACTION = 1 - DEV_TAX_FRACTION; // 98%
+    const HALVING_INTERVAL = 210000;
+    const BLOCKS_PER_DAY = 86400 / BLOCK_TIME; // 360
+    // Dilithion max target: 0x1f060000
+    // HASHES_PER_DIFFICULTY = 2^32 / max_mantissa = 4294967296 / 393216
+    const HASHES_PER_DIFFICULTY = Math.pow(2, 32) / 393216; // ~10922.667
+
+    // =====================================================
+    // Data fetching
+    // =====================================================
+    const API_ENDPOINT = '/api/stats.php';
+    const SEED_NODES = [
+        'http://138.197.68.128:8334/api/stats',
+        'http://167.172.56.119:8334/api/stats',
+        'http://165.22.103.114:8334/api/stats'
+    ];
+
+    let networkData = null;
+
+    async function fetchNetworkData() {
+        // Try API proxy first (works when hosted on dilithion.org)
+        try {
+            const response = await fetch(API_ENDPOINT, {
+                cache: 'no-store',
+                signal: AbortSignal.timeout(5000)
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data && data.blockHeight > 0) return data;
+            }
+        } catch (e) {
+            // Expected to fail if not on dilithion.org
+        }
+
+        // Try static JSON fallback
+        try {
+            const response = await fetch('https://dilithion.org/network-stats.json?t=' + Date.now(), {
+                cache: 'no-store',
+                signal: AbortSignal.timeout(5000)
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data && data.blockHeight > 0) return data;
+            }
+        } catch (e) {}
+
+        // Try seed nodes directly
+        for (const url of SEED_NODES) {
+            try {
+                const response = await fetch(url, {
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.blockHeight > 0) return data;
+                }
+            } catch (e) {}
+        }
+
+        return null;
+    }
+
+    async function loadNetworkData() {
+        const statusBadge = document.getElementById('networkStatus');
+        const statusText = document.getElementById('networkStatusText');
+
+        statusBadge.className = 'status-badge loading';
+        statusText.textContent = 'Fetching...';
+
+        networkData = await fetchNetworkData();
+
+        if (networkData) {
+            statusBadge.className = 'status-badge live';
+            statusText.textContent = 'Live';
+
+            const height = networkData.blockHeight || 0;
+            const difficulty = networkData.difficulty || 0;
+            const reward = networkData.blockReward || INITIAL_BLOCK_REWARD;
+            const halvings = Math.floor(height / HALVING_INTERVAL);
+            const currentReward = INITIAL_BLOCK_REWARD / Math.pow(2, halvings);
+            const networkHashrate = difficulty * HASHES_PER_DIFFICULTY / BLOCK_TIME;
+
+            document.getElementById('netBlockHeight').textContent = height.toLocaleString();
+            document.getElementById('netDifficulty').textContent = difficulty.toLocaleString();
+            document.getElementById('netHashrate').textContent = formatHashrate(networkHashrate);
+            document.getElementById('netBlockReward').textContent = currentReward + ' DIL (' + (currentReward * MINER_REWARD_FRACTION).toFixed(2) + ' to miner)';
+            document.getElementById('netHalving').textContent = (networkData.blocksUntilHalving || (HALVING_INTERVAL - (height % HALVING_INTERVAL))).toLocaleString();
+            document.getElementById('netPeers').textContent = (networkData.peerCount || 0).toLocaleString();
+
+            recalculate();
+        } else {
+            statusBadge.className = 'status-badge offline';
+            statusText.textContent = 'Offline';
+            showFallbackEstimate();
+        }
+    }
+
+    // =====================================================
+    // Calculations
+    // =====================================================
+    function getSelectedHashrate() {
+        const select = document.getElementById('cpuSelect');
+        if (select.value === 'custom') {
+            return parseFloat(document.getElementById('customHashrate').value) || 0;
+        }
+        return parseFloat(select.value) || 0;
+    }
+
+    function getSelectedWatts() {
+        const select = document.getElementById('cpuSelect');
+        if (select.value === 'custom') {
+            return parseFloat(document.getElementById('customWatts').value) || 0;
+        }
+        return parseFloat(document.getElementById('powerWatts').value) || 0;
+    }
+
+    function recalculate() {
+        if (!networkData) return;
+
+        const yourHashrate = getSelectedHashrate();
+        if (yourHashrate <= 0) {
+            clearResults();
+            return;
+        }
+
+        const height = networkData.blockHeight || 0;
+        const difficulty = networkData.difficulty || 1;
+        const electricityRate = parseFloat(document.getElementById('electricityCost').value) || 0;
+        const watts = getSelectedWatts();
+
+        // Current block reward
+        const halvings = Math.floor(height / HALVING_INTERVAL);
+        const currentReward = INITIAL_BLOCK_REWARD / Math.pow(2, halvings);
+        const minerReward = currentReward * MINER_REWARD_FRACTION;
+
+        // Network hashrate estimate
+        const expectedHashesPerBlock = difficulty * HASHES_PER_DIFFICULTY;
+        const networkHashrate = expectedHashesPerBlock / BLOCK_TIME;
+
+        // Your share
+        const yourShare = networkHashrate > 0 ? yourHashrate / networkHashrate : 0;
+
+        // Earnings
+        const dailyDIL = yourShare * BLOCKS_PER_DAY * minerReward;
+        const monthlyDIL = dailyDIL * 30;
+        const yearlyDIL = dailyDIL * 365;
+
+        // Electricity
+        const dailyKWh = (watts / 1000) * 24;
+        const dailyElec = dailyKWh * electricityRate;
+        const monthlyElec = dailyElec * 30;
+
+        // Time to block (solo)
+        const secondsToBlock = yourHashrate > 0 ? expectedHashesPerBlock / yourHashrate : Infinity;
+
+        // Update display
+        document.getElementById('resDailyDIL').textContent = formatDIL(dailyDIL);
+        document.getElementById('resMonthlyDIL').textContent = formatDIL(monthlyDIL);
+        document.getElementById('resYearlyDIL').textContent = formatDIL(yearlyDIL);
+        document.getElementById('resNetShare').textContent = (yourShare * 100).toFixed(4) + '%';
+        document.getElementById('resTimeToBlock').textContent = formatDuration(secondsToBlock);
+        document.getElementById('resDailyElec').textContent = '$' + dailyElec.toFixed(2);
+        document.getElementById('resMonthlyElec').textContent = '$' + monthlyElec.toFixed(2);
+    }
+
+    function clearResults() {
+        document.getElementById('resDailyDIL').textContent = '-';
+        document.getElementById('resMonthlyDIL').textContent = '-';
+        document.getElementById('resYearlyDIL').textContent = '-';
+        document.getElementById('resNetShare').textContent = '-';
+        document.getElementById('resTimeToBlock').textContent = '-';
+        document.getElementById('resDailyElec').textContent = '-';
+        document.getElementById('resMonthlyElec').textContent = '-';
+    }
+
+    function showFallbackEstimate() {
+        // Can't calculate without network data - show message
+        document.getElementById('resDailyDIL').textContent = 'N/A';
+        document.getElementById('resMonthlyDIL').textContent = 'N/A';
+        document.getElementById('resYearlyDIL').textContent = 'N/A';
+        document.getElementById('resNetShare').textContent = 'Network offline';
+        document.getElementById('resTimeToBlock').textContent = '-';
+        document.getElementById('resDailyElec').textContent = '-';
+        document.getElementById('resMonthlyElec').textContent = '-';
+    }
+
+    // =====================================================
+    // UI handlers
+    // =====================================================
+    function onCpuChange() {
+        const select = document.getElementById('cpuSelect');
+        const customRow = document.getElementById('customHashrateRow');
+        const powerInput = document.getElementById('powerWatts');
+
+        if (select.value === 'custom') {
+            customRow.style.display = 'block';
+        } else {
+            customRow.style.display = 'none';
+            // Update watts from selected CPU
+            const option = select.options[select.selectedIndex];
+            const watts = option.getAttribute('data-watts');
+            if (watts) {
+                powerInput.value = watts;
+            }
+        }
+
+        recalculate();
+    }
+
+    // =====================================================
+    // Formatting helpers
+    // =====================================================
+    function formatHashrate(h) {
+        if (h >= 1e12) return (h / 1e12).toFixed(2) + ' TH/s';
+        if (h >= 1e9) return (h / 1e9).toFixed(2) + ' GH/s';
+        if (h >= 1e6) return (h / 1e6).toFixed(2) + ' MH/s';
+        if (h >= 1e3) return (h / 1e3).toFixed(2) + ' KH/s';
+        return h.toFixed(0) + ' H/s';
+    }
+
+    function formatDIL(amount) {
+        if (amount >= 1000) return amount.toFixed(2);
+        if (amount >= 1) return amount.toFixed(4);
+        if (amount >= 0.001) return amount.toFixed(6);
+        return amount.toFixed(8);
+    }
+
+    function formatDuration(seconds) {
+        if (!isFinite(seconds) || seconds <= 0) return 'N/A';
+        if (seconds < 60) return Math.round(seconds) + ' seconds';
+        if (seconds < 3600) return Math.round(seconds / 60) + ' minutes';
+        if (seconds < 86400) return (seconds / 3600).toFixed(1) + ' hours';
+        if (seconds < 86400 * 30) return (seconds / 86400).toFixed(1) + ' days';
+        if (seconds < 86400 * 365) return (seconds / (86400 * 30)).toFixed(1) + ' months';
+        return (seconds / (86400 * 365)).toFixed(1) + ' years';
+    }
+
+    // =====================================================
+    // Initialize
+    // =====================================================
+    document.addEventListener('DOMContentLoaded', () => {
+        // Set initial watts from selected CPU
+        onCpuChange();
+        // Fetch live data
+        loadNetworkData();
+        // Refresh every 60 seconds
+        setInterval(loadNetworkData, 60000);
+    });
+    </script>
+</body>
+</html>

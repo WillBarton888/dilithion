@@ -365,13 +365,46 @@ bool CheckProofOfWorkDFMP(
         uniqueMiners = DFMP::g_heatTracker->GetUniqueMinerCount();
     }
 
-    // DFMP v3.1 activation height
+    // DFMP v3.1/v3.2 activation heights
     int dfmpV31ActivationHeight = Dilithion::g_chainParams ?
         Dilithion::g_chainParams->dfmpV31ActivationHeight : 999999999;
+    int dfmpV32ActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpV32ActivationHeight : 999999999;
 
     int64_t multiplierFP;
 
-    if (height >= dfmpV31ActivationHeight) {
+    if (height >= dfmpV32ActivationHeight) {
+        // ====================================================================
+        // DFMP v3.2: Tightened anti-whale (back to v3.0 heat, moderate maturity)
+        // Free tier: 12, growth: 1.58x, cliff: 2.0x, maturity: 2.5x/500 blocks
+        // ====================================================================
+
+        // MIK identity heat penalty (v3.2 aggressive)
+        int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP_V32(blocksInWindow, uniqueMiners);
+
+        // Payout address heat penalty (v3.2 aggressive)
+        int64_t payoutHeatPenalty = DFMP::FP_SCALE;  // 1.0x default
+        if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+            DFMP::Identity payoutIdentity = DFMP::DeriveIdentityFromScript(
+                coinbaseTx.vout[0].scriptPubKey);
+            int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutIdentity);
+            int payoutUniqueMiners = 0;
+            if (height >= dfmpDynamicScalingHeight) {
+                payoutUniqueMiners = DFMP::g_payoutHeatTracker->GetUniqueMinerCount();
+            }
+            payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP_V32(payoutHeat, payoutUniqueMiners);
+        }
+
+        // Effective heat = max(MIK heat, payout heat)
+        int64_t effectiveHeatPenalty = std::max(mikHeatPenalty, payoutHeatPenalty);
+
+        // Maturity penalty (v3.2 moderate, using effective first-seen for dormancy)
+        int64_t maturityPenalty = DFMP::CalculatePendingPenaltyFP_V32(height, effectiveFirstSeen);
+
+        // Total = maturity x heat
+        multiplierFP = (maturityPenalty * effectiveHeatPenalty) / DFMP::FP_SCALE;
+
+    } else if (height >= dfmpV31ActivationHeight) {
         // ====================================================================
         // DFMP v3.1: Softened parameters (same structure as v3.0)
         // Free tier: 36, growth: 1.08x, maturity: 2.0x start
@@ -444,7 +477,41 @@ bool CheckProofOfWorkDFMP(
     // Log DFMP info for debugging (only if multiplier > 1.0)
     double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
     if (multiplier > 1.01) {
-        if (height >= dfmpV31ActivationHeight) {
+        if (height >= dfmpV32ActivationHeight) {
+            double maturityMult = DFMP::GetPendingPenalty_V32(height, effectiveFirstSeen);
+            double heatMult = DFMP::GetHeatMultiplier_V32(blocksInWindow, uniqueMiners);
+
+            // Get payout heat for logging
+            double payoutHeatMult = 1.0;
+            if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+                DFMP::Identity payoutId = DFMP::DeriveIdentityFromScript(coinbaseTx.vout[0].scriptPubKey);
+                int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutId);
+                int payoutUniqueForLog = 0;
+                if (height >= dfmpDynamicScalingHeight) {
+                    payoutUniqueForLog = DFMP::g_payoutHeatTracker->GetUniqueMinerCount();
+                }
+                payoutHeatMult = DFMP::GetHeatMultiplier_V32(payoutHeat, payoutUniqueForLog);
+            }
+
+            // Show effective free tier for dynamic scaling visibility
+            int effectiveFreeForLog = DFMP::FREE_TIER_THRESHOLD_V32;
+            if (uniqueMiners > 0) {
+                effectiveFreeForLog = std::max(DFMP::FREE_TIER_THRESHOLD_V32, DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
+            }
+
+            std::cout << "[DFMP v3.2] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
+                      << " firstSeen=" << firstSeen
+                      << " effFirstSeen=" << effectiveFirstSeen
+                      << " mikBlocks=" << blocksInWindow
+                      << " miners=" << uniqueMiners
+                      << " freeTier=" << effectiveFreeForLog
+                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
+                      << " mikHeat=" << heatMult << "x"
+                      << " payoutHeat=" << payoutHeatMult << "x"
+                      << " total=" << multiplier << "x"
+                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+
+        } else if (height >= dfmpV31ActivationHeight) {
             double maturityMult = DFMP::GetPendingPenalty_V31(height, effectiveFirstSeen);
             double heatMult = DFMP::GetHeatMultiplier_V31(blocksInWindow, uniqueMiners);
 

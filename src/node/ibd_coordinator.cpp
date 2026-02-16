@@ -39,6 +39,22 @@
 // IBD STUCK FIX #3: Access to global NodeContext for orphan manager
 extern NodeContext g_node_context;
 
+// Forward-declare NodeState for clean shutdown during deep fork resync
+struct NodeState {
+    std::atomic<bool> running{false};
+    std::atomic<bool> new_block_found{false};
+    std::atomic<bool> mining_enabled{false};
+    std::atomic<uint64_t> template_version{0};
+    std::string mining_address_override;
+    bool rotate_mining_address{false};
+    class CRPCServer* rpc_server;
+    class CMiningController* miner;
+    class CWallet* wallet;
+    class CSocket* p2p_socket;
+    class CHttpServer* http_server;
+};
+extern NodeState g_node_state;
+
 CIbdCoordinator::CIbdCoordinator(CChainState& chainstate, NodeContext& node_context)
     : m_chainstate(chainstate),
       m_node_context(node_context),
@@ -739,7 +755,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // Layer 3's 60-cycle stall threshold (which can deadlock due to counter resets).
     //
     // BUG #261 FIX: Skip Layer 2 during startup grace period
-    bool force_fork_check = m_consecutive_orphan_blocks.load() >= ORPHAN_FORK_THRESHOLD;
+    int orphan_count = m_consecutive_orphan_blocks.load();
+    bool force_fork_check = orphan_count >= ORPHAN_FORK_THRESHOLD;
     if (past_startup_grace && force_fork_check && !m_fork_detected.load()) {
         std::cout << "[FORK-DETECT] Layer 2 triggered: " << m_consecutive_orphan_blocks.load()
                   << " consecutive orphan blocks received - attempting immediate fork recovery" << std::endl;
@@ -1672,12 +1689,82 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height) {
     std::cout << "[FORK-DETECT] Fork point found at height " << fork_point
               << " (depth=" << fork_depth << " blocks)" << std::endl;
 
-    // Check reorg depth limit
+    // Deep fork handling: fork exceeds MAX_AUTO_REORG_DEPTH
     if (fork_depth > MAX_AUTO_REORG_DEPTH) {
-        std::cerr << "[FORK-DETECT] Fork too deep (" << fork_depth
-                  << " > " << MAX_AUTO_REORG_DEPTH << ") for automatic recovery" << std::endl;
-        m_fork_stall_cycles.store(0);
-        return false;
+        std::cout << "[FORK-DETECT] Deep fork detected (" << fork_depth
+                  << " blocks, fork_point=" << fork_point << ")" << std::endl;
+
+        CBlockIndex* pResetTarget = nullptr;
+        int reset_height = 0;
+
+        if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet()) {
+            // TESTNET: Full resync from genesis
+            std::cout << "[RESYNC] Testnet deep fork - performing full resync from genesis" << std::endl;
+            uint256 genesisHash = Genesis::GetGenesisHash();
+            pResetTarget = m_chainstate.GetBlockIndex(genesisHash);
+            reset_height = 0;
+        } else {
+            // MAINNET: Reset to last checkpoint before fork point
+            const Dilithion::CCheckpoint* cp = nullptr;
+            if (Dilithion::g_chainParams) {
+                cp = Dilithion::g_chainParams->GetLastCheckpoint(fork_point);
+            }
+            if (cp) {
+                std::cout << "[RESYNC] Mainnet deep fork - resetting to checkpoint at height "
+                          << cp->nHeight << std::endl;
+                pResetTarget = m_chainstate.GetBlockIndex(cp->hashBlock);
+                reset_height = cp->nHeight;
+                if (!pResetTarget) {
+                    // Checkpoint block not in index - walk chain to that height
+                    CBlockIndex* pindex = m_chainstate.GetTip();
+                    while (pindex && pindex->nHeight > cp->nHeight) {
+                        pindex = pindex->pprev;
+                    }
+                    pResetTarget = pindex;
+                }
+            } else {
+                // No checkpoint available - reset to genesis
+                std::cout << "[RESYNC] No checkpoint found before fork point - full resync from genesis" << std::endl;
+                uint256 genesisHash = Genesis::GetGenesisHash();
+                pResetTarget = m_chainstate.GetBlockIndex(genesisHash);
+                reset_height = 0;
+            }
+        }
+
+        if (pResetTarget) {
+            m_resync_in_progress = true;
+            m_resync_fork_point = fork_point;
+            m_resync_original_height = chain_height;
+            m_resync_target_height = header_height;
+
+            std::cout << "[RESYNC] Resetting chain from height " << chain_height
+                      << " to height " << pResetTarget->nHeight << std::endl;
+            std::cout << "[RESYNC] Discarding " << (chain_height - pResetTarget->nHeight)
+                      << " blocks" << std::endl;
+
+            // Persist the reset to disk - on next startup the node will
+            // load from the reset point and re-sync the canonical chain
+            uint256 resetHash = pResetTarget->GetBlockHash();
+            if (m_node_context.blockchain_db) {
+                m_node_context.blockchain_db->WriteBestBlock(resetHash);
+                std::cout << "[RESYNC] Persisted best block to height "
+                          << pResetTarget->nHeight << std::endl;
+            }
+
+            std::cout << "\n[RESYNC] ════════════════════════════════════════════════════" << std::endl;
+            std::cout << "[RESYNC] Deep fork recovery complete." << std::endl;
+            std::cout << "[RESYNC] Chain reset persisted to height " << pResetTarget->nHeight << std::endl;
+            std::cout << "[RESYNC] The node will now shut down. Please restart to begin re-sync." << std::endl;
+            std::cout << "[RESYNC] ════════════════════════════════════════════════════\n" << std::endl;
+
+            // Request clean shutdown - can't safely modify live block index
+            g_node_state.running.store(false);
+            return true;
+        } else {
+            std::cerr << "[FORK-DETECT] ERROR: Could not find reset target block!" << std::endl;
+            m_fork_stall_cycles.store(0);
+            return false;
+        }
     }
 
     // BUG #245 FIX: Only fork recover if incoming chain has MORE work than ours
@@ -1846,6 +1933,7 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
         m_headers_sync_peer = best_peer;
         m_headers_sync_peer_consecutive_stalls = 0;  // Reset stall counter for new peer
         m_headers_sync_last_height = m_node_context.headers_manager->GetBestHeight();
+        m_headers_sync_last_processed = m_node_context.headers_manager->GetProcessedCount();
 
         // Calculate timeout: base + 1ms per missing header (Bitcoin Core style)
         int headers_missing = best_height - m_headers_sync_last_height;
@@ -1880,7 +1968,7 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
     int current_height = m_node_context.headers_manager ?
                          m_node_context.headers_manager->GetBestHeight() : 0;
 
-    // Check if we've made progress
+    // Check if we've made progress (height increased = best chain advanced)
     if (current_height > m_headers_sync_last_height) {
         // Progress made, update tracking and extend timeout
         m_headers_sync_last_height = current_height;
@@ -1900,6 +1988,27 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
             m_headers_sync_timeout = now + std::chrono::milliseconds(timeout_ms);
         }
         return true;  // Making progress
+    }
+
+    // Fork catch-up detection: headers may be received on a competing chain
+    // without nBestHeight changing (canonical chain hasn't surpassed fork yet).
+    // Track processed count to detect this and extend the timeout.
+    if (m_node_context.headers_manager) {
+        uint64_t current_processed = m_node_context.headers_manager->GetProcessedCount();
+        if (current_processed > m_headers_sync_last_processed) {
+            m_headers_sync_last_processed = current_processed;
+            // Headers are being received and stored - extend timeout
+            auto progress_peer = m_node_context.peer_manager ? m_node_context.peer_manager->GetPeer(m_headers_sync_peer) : nullptr;
+            int peer_height = progress_peer ? (progress_peer->best_known_height > 0 ? progress_peer->best_known_height : progress_peer->start_height)
+                                            : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
+            int headers_missing = peer_height - current_height;
+            if (headers_missing > 0) {
+                int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
+                                 headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
+                m_headers_sync_timeout = now + std::chrono::milliseconds(timeout_ms);
+            }
+            return true;  // Fork catch-up in progress
+        }
     }
 
     // Check for timeout

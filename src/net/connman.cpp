@@ -527,22 +527,33 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
         return false;
     }
 
-    // Per-IP connection limit (NAT support: multiple nodes behind one router)
-    // Bitcoin Core has no per-IP limit, but we add a soft limit for DoS protection
+    // Per-IP connection limit with outbound duplicate prevention
+    // Rule 1: If we already have an OUTBOUND to this IP, reject inbound (same node, wasteful)
+    // Rule 2: Allow up to 2 INBOUND from same IP (NAT: multiple nodes behind one router)
     static constexpr int MAX_INBOUND_PER_IP = 2;
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
-        int ip_count = 0;
+        bool has_outbound = false;
+        int inbound_count = 0;
         for (const auto& node : m_nodes) {
             if (node && !node->fDisconnect.load()) {
                 if (node->addr.ToStringIP() == ip_str) {
-                    ++ip_count;
+                    if (!node->fInbound) {
+                        has_outbound = true;
+                        break;
+                    }
+                    ++inbound_count;
                 }
             }
         }
-        if (ip_count >= MAX_INBOUND_PER_IP) {
-            LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d connections, max %d per IP)\n",
-                      ip_str.c_str(), ip_count, MAX_INBOUND_PER_IP);
+        if (has_outbound) {
+            LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (already have outbound connection)\n",
+                      ip_str.c_str());
+            return false;
+        }
+        if (inbound_count >= MAX_INBOUND_PER_IP) {
+            LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d inbound connections, max %d per IP)\n",
+                      ip_str.c_str(), inbound_count, MAX_INBOUND_PER_IP);
             return false;
         }
     }
@@ -1182,24 +1193,36 @@ void CConnman::SocketHandler() {
             pnode->SetSocket(client_fd);
             pnode->state.store(CNode::STATE_CONNECTED);
 
-            // Per-IP connection limit (NAT support: multiple nodes behind one router)
+            // Per-IP connection limit with outbound duplicate prevention
+            // Rule 1: If we already have an OUTBOUND to this IP, reject (same node, wasteful)
+            // Rule 2: Allow up to 2 INBOUND from same IP (NAT: multiple nodes behind one router)
             static constexpr int MAX_INBOUND_PER_IP = 2;
             {
                 std::lock_guard<std::mutex> lock(cs_vNodes);
 
-                // Count existing connections from this IP
-                int ip_count = 0;
+                bool has_outbound = false;
+                int inbound_count = 0;
                 for (const auto& existing_node : m_nodes) {
                     if (existing_node && !existing_node->fDisconnect.load()) {
                         if (existing_node->addr.ToStringIP() == std::string(ip_str)) {
-                            ++ip_count;
+                            if (!existing_node->fInbound) {
+                                has_outbound = true;
+                                break;
+                            }
+                            ++inbound_count;
                         }
                     }
                 }
 
-                if (ip_count >= MAX_INBOUND_PER_IP) {
-                    LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d connections, max %d per IP)\n",
-                              ip_str, ip_count, MAX_INBOUND_PER_IP);
+                if (has_outbound) {
+                    LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (already have outbound connection)\n", ip_str);
+                    // Node destructor will close socket
+                    continue;  // Skip to next pending connection
+                }
+
+                if (inbound_count >= MAX_INBOUND_PER_IP) {
+                    LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d inbound connections, max %d per IP)\n",
+                              ip_str, inbound_count, MAX_INBOUND_PER_IP);
                     // Node destructor will close socket
                     continue;  // Skip to next pending connection
                 }

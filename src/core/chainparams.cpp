@@ -74,6 +74,11 @@ ChainParams ChainParams::Mainnet() {
     // Reduces: free tier 12→36, growth 1.58x→1.08x, maturity 5.0x→2.0x
     params.dfmpV31ActivationHeight = 7168;
 
+    // DFMP v3.2 - tightened anti-whale (community feedback: whales accumulating 50-60k coins)
+    // Returns to v3.0 heat: free tier 36→12, growth 1.08x→1.58x, cliff 1.5x→2.0x
+    // Moderate maturity: 2.5x over 500 blocks (softer than v3.0's 5.0x/800)
+    params.dfmpV32ActivationHeight = 13250;
+
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
@@ -169,6 +174,9 @@ ChainParams ChainParams::Testnet() {
 
     // DFMP v3.1 - always active on testnet (softened parameters)
     params.dfmpV31ActivationHeight = 0;
+
+    // DFMP v3.2 - always active on testnet (tightened anti-whale)
+    params.dfmpV32ActivationHeight = 0;
 
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted

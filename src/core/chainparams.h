@@ -112,6 +112,12 @@ public:
     // Same structure as v3.0 (payout heat, dormancy, registration PoW) but gentler parameters
     int dfmpV31ActivationHeight;
 
+    // DFMP v3.2 Activation Height (tightened anti-whale)
+    // Before this height: DFMP v3.1 rules (36-block free tier, 1.08x growth, 2.0x maturity)
+    // After this height: DFMP v3.2 rules (12-block free tier, 1.58x growth, 2.5x maturity)
+    // Returns to v3.0 heat aggressiveness with moderate maturity penalty
+    int dfmpV32ActivationHeight;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)

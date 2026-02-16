@@ -280,6 +280,9 @@ public:
      */
     int GetBestHeight() const;
 
+    /** @brief Get total headers ever processed (monotonic counter for fork catch-up tracking) */
+    uint64_t GetProcessedCount() const { return m_headers_processed_count.load(); }
+
     /**
      * @brief Check if header sync is in progress
      *
@@ -694,6 +697,9 @@ private:
     uint256 m_last_sent_locator_hash;                ///< Hash we last SENT request for (for dedup) - protected by cs_headers
     std::chrono::steady_clock::time_point m_last_header_request_time;  ///< When last header request was sent
     static constexpr int HEADER_SYNC_STALE_SECS = 30;                 ///< Header sync considered stale after 30s with no response
+
+    // Fork catch-up tracking: counts headers processed even when nBestHeight doesn't change
+    std::atomic<uint64_t> m_headers_processed_count{0};              ///< Total headers ever processed (monotonic)
 
     // Bug #46 Fix: Track multiple chain tips for competing chains
     std::set<uint256> setChainTips;         ///< All known chain tips (leaves in tree)

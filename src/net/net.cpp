@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <net/net.h>
+#include <set>
 #include <util/error_format.h>  // UX: Better error messages
 #include <net/connection_quality.h>  // Network: Connection quality metrics
 #include <net/partition_detector.h>  // Network: Partition detection
@@ -74,6 +75,14 @@ static std::map<std::string, int64_t> g_last_connection_attempt;
 static std::mutex cs_connection_cooldown;
 static const int64_t CONNECTION_COOLDOWN_SECONDS = 30;
 
+// Per-connection GETDATA deduplication: track recently-served block hashes per peer
+// If a peer re-requests blocks we already served ON THIS CONNECTION, increment misbehavior.
+// Legitimate reconnecting peers get a fresh slate (new peer_id = new connection).
+static std::map<int, std::set<uint256>> g_peer_served_blocks;
+static std::mutex cs_served_blocks;
+static const size_t MAX_SERVED_BLOCKS_TRACK = 500;  // Track last N served blocks per peer
+static const int DUPLICATE_GETDATA_PENALTY = 2;     // Misbehavior points per duplicate request
+
 // NET-013 FIX: Maximum size for rate limit maps to prevent memory exhaustion
 static const size_t MAX_RATE_LIMIT_MAP_SIZE = 1000;
 
@@ -89,6 +98,10 @@ void CleanupPeerRateLimitState(int peer_id) {
     {
         std::lock_guard<std::mutex> lock(cs_headers_rate);
         g_peer_headers_timestamps.erase(peer_id);
+    }
+    {
+        std::lock_guard<std::mutex> lock(cs_served_blocks);
+        g_peer_served_blocks.erase(peer_id);
     }
 }
 
@@ -143,6 +156,14 @@ void PeriodicRateLimitCleanup() {
             } else {
                 ++it;
             }
+        }
+    }
+
+    // Clean up served blocks tracking (evict entries for large maps)
+    {
+        std::lock_guard<std::mutex> lock(cs_served_blocks);
+        while (g_peer_served_blocks.size() > MAX_RATE_LIMIT_MAP_SIZE) {
+            g_peer_served_blocks.erase(g_peer_served_blocks.begin());
         }
     }
 }
@@ -947,9 +968,54 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             }
         }
 
-        // Call handler to serve requested data
+        // Per-connection GETDATA deduplication: check for re-requested blocks
+        // A legitimate node never re-requests blocks already received on the same connection.
+        // Penalize with soft misbehavior scoring (not an instant ban).
+        int duplicate_count = 0;
+        {
+            std::lock_guard<std::mutex> lock(cs_served_blocks);
+            auto& served = g_peer_served_blocks[peer_id];
+            for (const auto& inv : getdata) {
+                if (inv.type == NetProtocol::MSG_BLOCK_INV) {
+                    if (served.count(inv.hash)) {
+                        ++duplicate_count;
+                    }
+                }
+            }
+        }
+
+        if (duplicate_count > 0) {
+            int penalty = duplicate_count * DUPLICATE_GETDATA_PENALTY;
+            std::cout << "[P2P] DEDUP: Peer " << peer_id << " re-requested "
+                      << duplicate_count << " already-served blocks (+"
+                      << penalty << " misbehavior)" << std::endl;
+            peer_manager.Misbehaving(peer_id, penalty);
+        }
+
+        // Call handler to serve requested data (serve even duplicates - don't break sync)
         std::cout << "[P2P] Invoking GETDATA handler for " << getdata.size() << " items from peer " << peer_id << std::endl;
         on_getdata(peer_id, getdata);
+
+        // Record served blocks for future dedup detection
+        {
+            std::lock_guard<std::mutex> lock(cs_served_blocks);
+            auto& served = g_peer_served_blocks[peer_id];
+            for (const auto& inv : getdata) {
+                if (inv.type == NetProtocol::MSG_BLOCK_INV) {
+                    served.insert(inv.hash);
+                }
+            }
+            // Cap tracking set size per peer to prevent memory growth
+            if (served.size() > MAX_SERVED_BLOCKS_TRACK) {
+                // Remove oldest entries (std::set is ordered, erase from beginning)
+                auto it = served.begin();
+                size_t to_remove = served.size() - MAX_SERVED_BLOCKS_TRACK;
+                for (size_t i = 0; i < to_remove; ++i) {
+                    it = served.erase(it);
+                }
+            }
+        }
+
         return true;
 
     } catch (const std::out_of_range& e) {

@@ -4013,6 +4013,24 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
     oss << "\"dfmp_v3_activation_height\":" << dfmpV3ActivationHeight << ",";
     oss << "\"dfmp_v3_active\":" << (isV3Active ? "true" : "false") << ",";
 
+    // DFMP v3.1 activation
+    int dfmpV31ActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpV31ActivationHeight : 0;
+    bool isV31Active = currentHeight >= dfmpV31ActivationHeight;
+    oss << "\"dfmp_v31_activation_height\":" << dfmpV31ActivationHeight << ",";
+    oss << "\"dfmp_v31_active\":" << (isV31Active ? "true" : "false") << ",";
+
+    // DFMP v3.2 activation
+    int dfmpV32ActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpV32ActivationHeight : 999999999;
+    bool isV32Active = currentHeight >= dfmpV32ActivationHeight;
+    oss << "\"dfmp_v32_activation_height\":" << dfmpV32ActivationHeight << ",";
+    oss << "\"dfmp_v32_active\":" << (isV32Active ? "true" : "false") << ",";
+
+    // Current active DFMP version
+    const char* activeVersion = isV32Active ? "v3.2" : (isV31Active ? "v3.1" : (isV3Active ? "v3.0" : "v2.0"));
+    oss << "\"dfmp_version\":\"" << activeVersion << "\",";
+
     // Get penalty info for this identity
     int firstSeen = -1;
     int heat = 0;
@@ -4060,8 +4078,13 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
     oss << "\"dormant\":" << (isDormant ? "true" : "false") << ",";
     oss << "\"dormancy_blocks\":" << dormancyBlocks << ",";
 
-    oss << "\"maturity_blocks\":" << DFMP::MATURITY_BLOCKS << ",";
-    oss << "\"free_tier_threshold\":" << DFMP::FREE_TIER_THRESHOLD << ",";
+    // Report active version's parameters
+    int activeMaturityBlocks = isV32Active ? DFMP::MATURITY_BLOCKS_V32 :
+        (isV31Active ? DFMP::MATURITY_BLOCKS_V31 : DFMP::MATURITY_BLOCKS);
+    int activeFreeTier = isV32Active ? DFMP::FREE_TIER_THRESHOLD_V32 :
+        (isV31Active ? DFMP::FREE_TIER_THRESHOLD_V31 : DFMP::FREE_TIER_THRESHOLD);
+    oss << "\"maturity_blocks\":" << activeMaturityBlocks << ",";
+    oss << "\"free_tier_threshold\":" << activeFreeTier << ",";
     oss << "\"registration_pow_bits\":" << DFMP::REGISTRATION_POW_BITS << ",";
 
     // Calculate penalty using actual DFMP functions (version-aware)
@@ -4070,11 +4093,24 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
         effectiveFirstSeen = currentHeight - DFMP::DORMANCY_DECAY_BLOCKS;
     }
 
-    double maturityPenalty = DFMP::GetPendingPenalty(currentHeight, effectiveFirstSeen);
-    double heatPenalty = isV3Active ?
-        DFMP::GetHeatMultiplier(heat) : DFMP::GetHeatPenalty_V2(heat);
-    double payoutHeatPenalty = isV3Active ?
-        DFMP::GetHeatMultiplier(payoutHeat) : 1.0;
+    double maturityPenalty, heatPenalty, payoutHeatPenalty;
+    if (isV32Active) {
+        maturityPenalty = DFMP::GetPendingPenalty_V32(currentHeight, effectiveFirstSeen);
+        heatPenalty = DFMP::GetHeatMultiplier_V32(heat);
+        payoutHeatPenalty = DFMP::GetHeatMultiplier_V32(payoutHeat);
+    } else if (isV31Active) {
+        maturityPenalty = DFMP::GetPendingPenalty_V31(currentHeight, effectiveFirstSeen);
+        heatPenalty = DFMP::GetHeatMultiplier_V31(heat);
+        payoutHeatPenalty = DFMP::GetHeatMultiplier_V31(payoutHeat);
+    } else if (isV3Active) {
+        maturityPenalty = DFMP::GetPendingPenalty(currentHeight, effectiveFirstSeen);
+        heatPenalty = DFMP::GetHeatMultiplier(heat);
+        payoutHeatPenalty = DFMP::GetHeatMultiplier(payoutHeat);
+    } else {
+        maturityPenalty = DFMP::GetPendingPenalty(currentHeight, effectiveFirstSeen);
+        heatPenalty = DFMP::GetHeatPenalty_V2(heat);
+        payoutHeatPenalty = 1.0;
+    }
     double effectiveHeatPenalty = std::max(heatPenalty, payoutHeatPenalty);
     double totalPenalty = maturityPenalty * effectiveHeatPenalty;
 
@@ -4228,6 +4264,23 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
         oss << "{";
         oss << "\"id\":" << peer->id << ",";
         oss << "\"addr\":\"" << peer->addr.ToString() << "\",";
+
+        // Pull CNode fields for inbound/bytes (CNode is the source of truth)
+        bool is_inbound = false;
+        uint64_t bytes_sent = 0;
+        uint64_t bytes_recv = 0;
+        if (g_node_context.connman) {
+            CNode* pnode = g_node_context.connman->GetNode(peer->id);
+            if (pnode) {
+                is_inbound = pnode->fInbound;
+                bytes_sent = pnode->nSendBytes.load();
+                bytes_recv = pnode->nRecvBytes.load();
+            }
+        }
+
+        oss << "\"inbound\":" << (is_inbound ? "true" : "false") << ",";
+        oss << "\"bytes_sent\":" << bytes_sent << ",";
+        oss << "\"bytes_recv\":" << bytes_recv << ",";
         oss << "\"conntime\":" << peer->connect_time << ",";
         oss << "\"lastsend\":" << peer->last_send << ",";
         oss << "\"lastrecv\":" << peer->last_recv << ",";

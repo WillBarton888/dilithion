@@ -2480,6 +2480,11 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     std::cout << "[HeadersManager] Progressive processing complete: " << totalProcessed
               << " headers stored in " << total_ms << "ms (hashes: " << hash_ms << "ms)" << std::endl;
 
+    // Track total headers processed for fork catch-up progress detection
+    if (totalProcessed > 0) {
+        m_headers_processed_count.fetch_add(totalProcessed);
+    }
+
     // BUG FIX #183: Update m_last_request_hash AFTER successful processing
     // Use the hash of the last stored header (prevHash tracks this during processing)
     if (!prevHash.IsNull()) {

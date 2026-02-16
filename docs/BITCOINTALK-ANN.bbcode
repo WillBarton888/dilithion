@@ -1,0 +1,169 @@
+[center]
+[img]https://dilithion.org/dilithion-logo-256.png[/img]
+
+[size=24pt][b]DILITHION (DIL) - Post-Quantum Cryptocurrency[/b][/size]
+[size=14pt][b]CRYSTALS-Dilithium3 Signatures | RandomX CPU Mining | Fair Launch[/b][/size]
+[size=12pt][color=green][b]MAINNET LIVE since January 28, 2026[/b][/color][/size]
+
+[url=https://dilithion.org]Website[/url] | [url=https://github.com/WillBarton888/dilithion]GitHub[/url] | [url=https://discord.gg/DS3gjmsFEJ]Discord[/url] | [url=http://explorer.dilithion.org]Explorer[/url] | [url=https://dilithion.org/wallet.html]Web Wallet[/url] | [url=https://dilithion.org/WHITEPAPER.html]Whitepaper[/url]
+[/center]
+
+[hr]
+
+[size=16pt][b]What is Dilithion?[/b][/size]
+
+Dilithion is a quantum-resistant cryptocurrency built from the ground up for the post-quantum era. While most cryptocurrencies use ECDSA signatures that quantum computers will eventually break, Dilithion uses [b]CRYSTALS-Dilithium3[/b] -- the NIST post-quantum cryptography standard (FIPS 204) -- to protect your coins today and forever.
+
+[b]Key highlights:[/b]
+[list]
+[li][b]Post-Quantum Signatures:[/b] CRYSTALS-Dilithium3 (NIST FIPS 204 standard). Your coins are safe from quantum computers.[/li]
+[li][b]CPU Mining Only:[/b] RandomX proof-of-work. Mine with any CPU -- no expensive GPUs or ASICs needed.[/li]
+[li][b]Fair Launch:[/b] No premine, no ICO, no VC allocation. Everyone starts equal.[/li]
+[li][b]Bitcoin-Style Economics:[/b] 21M total supply, 50 DIL block reward, halving every 210,000 blocks.[/li]
+[li][b]Anti-Whale Mining:[/b] DFMP (Dynamic Fair Mining Protocol) prevents mining centralization with code-enforced fairness.[/li]
+[li][b]HD Wallet:[/b] BIP39 seed phrases, BIP44 key derivation, encrypted storage. Browser-based web wallet included.[/li]
+[li][b]Fully Open Source:[/b] MIT licensed. Every line of code on GitHub.[/li]
+[/list]
+
+[hr]
+
+[size=16pt][b]Technical Specifications[/b][/size]
+
+[table]
+[tr][td][b]Algorithm[/b][/td][td]RandomX (CPU-optimized, ASIC-resistant)[/td][/tr]
+[tr][td][b]Signatures[/b][/td][td]CRYSTALS-Dilithium3 (post-quantum, NIST FIPS 204)[/td][/tr]
+[tr][td][b]Hash Function[/b][/td][td]SHA-3 (Keccak-256)[/td][/tr]
+[tr][td][b]Block Time[/b][/td][td]4 minutes (240 seconds)[/td][/tr]
+[tr][td][b]Block Reward[/b][/td][td]50 DIL (49 DIL to miner after 2% dev contribution)[/td][/tr]
+[tr][td][b]Total Supply[/b][/td][td]21,000,000 DIL (fixed cap)[/td][/tr]
+[tr][td][b]Halving[/b][/td][td]Every 210,000 blocks (~1.6 years)[/td][/tr]
+[tr][td][b]Block Size[/b][/td][td]4 MB[/td][/tr]
+[tr][td][b]Smallest Unit[/b][/td][td]1 ion = 0.00000001 DIL[/td][/tr]
+[tr][td][b]Coinbase Maturity[/b][/td][td]100 blocks[/td][/tr]
+[tr][td][b]Dev Contribution[/b][/td][td]2% of block subsidy (1% dev fund + 1% dev reward)[/td][/tr]
+[tr][td][b]Fair Mining[/b][/td][td]DFMP v3.1 -- heat + maturity penalties for whale miners[/td][/tr]
+[tr][td][b]P2P Port[/b][/td][td]8444[/td][/tr]
+[tr][td][b]License[/b][/td][td]MIT (fully open source)[/td][/tr]
+[/table]
+
+[hr]
+
+[size=16pt][b]Why Post-Quantum Matters NOW[/b][/size]
+
+Quantum computers are advancing rapidly. NIST finalized post-quantum cryptography standards (FIPS 203/204) in 2024 because the threat is real. The "harvest now, decrypt later" attack means adversaries are already collecting encrypted data and blockchain transactions to break later when quantum computers are powerful enough.
+
+Most cryptocurrencies use ECDSA or Schnorr signatures that a sufficiently powerful quantum computer could break using Shor's algorithm. Retrofitting quantum resistance into existing chains is extremely difficult -- it requires hard forks, new address formats, and migration periods.
+
+Dilithion uses CRYSTALS-Dilithium3 from genesis block zero. No migration needed. No quantum hard fork to wait for. Your coins are protected from day one.
+
+[hr]
+
+[size=16pt][b]DFMP: Anti-Whale Fair Mining[/b][/size]
+
+One of Dilithion's unique features is the Dynamic Fair Mining Protocol (DFMP) -- a consensus-level system that prevents mining centralization:
+
+[list]
+[li][b]Heat System:[/b] Miners who find many blocks in a 360-block window (~24 hours) accumulate "heat" which exponentially increases their mining difficulty. Small miners below the free tier mine at standard difficulty with zero penalties.[/li]
+[li][b]Maturity Period:[/b] New miner identities face a maturity penalty (2x difficulty decaying over 400 blocks), preventing rapid Sybil identity rotation.[/li]
+[li][b]Registration PoW:[/b] Creating a new mining identity requires a one-time proof-of-work (28-bit SHA3), preventing mass identity generation.[/li]
+[li][b]Dual-Layer Tracking:[/b] Both miner identity AND payout address are tracked. Rotating either does not bypass penalties.[/li]
+[li][b]Dynamic Scaling:[/b] The free tier automatically adjusts based on the number of active miners. More miners = tighter limits for whales.[/li]
+[/list]
+
+[b]The result:[/b] A whale miner with 100 threads faces exponentially harder difficulty, while a small miner with 4-8 threads mines at standard difficulty with full 49 DIL rewards. Fair by design, enforced by code.
+
+[hr]
+
+[size=16pt][b]How to Start Mining (60 seconds)[/b][/size]
+
+[b]1. Download the latest release:[/b]
+[url=https://github.com/WillBarton888/dilithion/releases/latest]https://github.com/WillBarton888/dilithion/releases/latest[/url]
+Available for Windows, Linux, and macOS.
+
+[b]2. Run the miner:[/b]
+[code]
+Windows:   Double-click START-MINING.bat
+Linux:     chmod +x start-mining.sh && ./start-mining.sh
+macOS:     chmod +x start-mining.sh && ./start-mining.sh
+[/code]
+
+That's it. The node automatically syncs the blockchain, creates a wallet, registers a mining identity, and starts mining.
+
+[b]3. Check your rewards:[/b]
+Open the web wallet at [url=https://dilithion.org/wallet.html]https://dilithion.org/wallet.html[/url] or run [tt]./check-wallet-balance[/tt].
+
+[b]Estimate your earnings:[/b] Use the [url=https://dilithion.org/mining-calculator.html]Mining Rewards Estimator[/url] to see how much DIL your CPU can earn.
+
+[hr]
+
+[size=16pt][b]Why Mine Now?[/b][/size]
+
+[list]
+[li][b]Pre-halving rewards:[/b] 50 DIL per block right now. After 210,000 blocks it drops to 25 DIL. Early miners earn the most.[/li]
+[li][b]Low difficulty:[/b] The network is young. Your CPU has a much larger share of the hashrate now than it will later.[/li]
+[li][b]CPU-only:[/b] RandomX is specifically designed to run efficiently on consumer CPUs. No GPU rigs, no ASICs.[/li]
+[li][b]Fair mining:[/b] DFMP protects small miners from whale domination. Your 4-core laptop mines at the same difficulty as a big rig's first 36 blocks per day.[/li]
+[li][b]Post-quantum security:[/b] The coins you mine today are protected from future quantum threats. No other CPU-mineable coin offers this.[/li]
+[/list]
+
+[hr]
+
+[size=16pt][b]Development[/b][/size]
+
+Dilithion is built with production-grade standards from day one. The codebase ports battle-tested patterns from Bitcoin Core (peer management, header sync, difficulty adjustment) and adds post-quantum cryptography and fair mining on top.
+
+[b]Tech stack:[/b]
+[list]
+[li]C++ core node with LevelDB storage[/li]
+[li]RandomX (from Monero project) for CPU-optimized proof-of-work[/li]
+[li]CRYSTALS-Dilithium3 for all transaction signatures[/li]
+[li]SHA-3 (Keccak-256) for block and transaction hashing[/li]
+[li]Built-in web wallet (HTML/JS, runs in any browser)[/li]
+[li]4 global seed nodes (NYC, London, Singapore, Sydney)[/li]
+[/list]
+
+[b]Seed nodes (auto-connected):[/b]
+[list]
+[li]NYC: 138.197.68.128:8444[/li]
+[li]London: 167.172.56.119:8444[/li]
+[li]Singapore: 165.22.103.114:8444[/li]
+[li]Sydney: 134.199.159.83:8444[/li]
+[/list]
+
+[hr]
+
+[size=16pt][b]Roadmap[/b][/size]
+
+[list]
+[li][color=green][b][DONE][/b][/color] Mainnet launch with fair mining (Jan 28, 2026)[/li]
+[li][color=green][b][DONE][/b][/color] HD Wallet with BIP39 seed phrases[/li]
+[li][color=green][b][DONE][/b][/color] Browser-based Web Wallet[/li]
+[li][color=green][b][DONE][/b][/color] DFMP v3.1 anti-whale mining system[/li]
+[li][color=green][b][DONE][/b][/color] Block Explorer[/li]
+[li][color=green][b][DONE][/b][/color] Mining Rewards Estimator[/li]
+[li][color=green][b][DONE][/b][/color] VDF (Verifiable Delay Function) implementation (activation pending)[/li]
+[li][color=orange][b][IN PROGRESS][/b][/color] Exchange listings[/li]
+[li][color=orange][b][IN PROGRESS][/b][/color] Pool mining support[/li]
+[li]Mobile wallet[/li]
+[li]Digital DNA identity system[/li]
+[li]Smart contracts layer[/li]
+[/list]
+
+[hr]
+
+[size=16pt][b]Links[/b][/size]
+
+[list]
+[li][url=https://dilithion.org]Official Website[/url][/li]
+[li][url=https://github.com/WillBarton888/dilithion]GitHub Repository (Full Source)[/url][/li]
+[li][url=https://discord.gg/DS3gjmsFEJ]Discord Community[/url][/li]
+[li][url=http://explorer.dilithion.org]Block Explorer[/url][/li]
+[li][url=https://dilithion.org/wallet.html]Web Wallet[/url][/li]
+[li][url=https://dilithion.org/mining-calculator.html]Mining Rewards Estimator[/url][/li]
+[li][url=https://dilithion.org/WHITEPAPER.html]Whitepaper[/url][/li]
+[li][url=https://github.com/WillBarton888/dilithion/releases/latest]Download Latest Release[/url][/li]
+[/list]
+
+[hr]
+
+[size=10pt][i]Dilithion is experimental software. Cryptocurrency mining and trading carry financial risk. This is not financial advice. MIT licensed, fully open source. No premine, no ICO.[/i][/size]
