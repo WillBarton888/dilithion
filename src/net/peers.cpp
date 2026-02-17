@@ -492,12 +492,25 @@ CPeerManager::Stats CPeerManager::GetStats() const {
 int CPeerManager::GetBestPeerHeight() const {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-    // BUG #52: Returns the highest chain height reported by any connected peer
-    // Used for IBD detection - if peers are significantly ahead, we're still syncing
+    // Returns the highest chain height reported by any connected peer.
+    // Used for IBD detection and progress display.
+    //
+    // BUG FIX: Don't require full handshake (VERACK) to use start_height.
+    // After ProcessVersionMessage, start_height is already set from the peer's
+    // VERSION message. Requiring IsHandshakeComplete() creates an unnecessary gap
+    // where we know the peer's height but report 0 (confusing during IBD).
+    // Also check best_known_height which gets updated during headers sync and
+    // may be higher than start_height for long-lived connections.
     int best = 0;
     for (const auto& pair : peers) {
-        if (pair.second->IsHandshakeComplete() && pair.second->start_height > best) {
-            best = pair.second->start_height;
+        const auto& peer = pair.second;
+        // Accept height from any peer that has completed handshake OR has received
+        // a VERSION message (start_height > 0 means we got their VERSION)
+        if (peer->IsHandshakeComplete() || peer->start_height > 0) {
+            int peer_height = std::max(peer->start_height, peer->best_known_height);
+            if (peer_height > best) {
+                best = peer_height;
+            }
         }
     }
     return best;

@@ -192,6 +192,11 @@ private:
     std::chrono::steady_clock::time_point m_timed_out_peer_time;    // When the peer timed out
     static constexpr int TIMED_OUT_PEER_COOLDOWN_SEC = 3600;        // 1 hour cooldown (Bitcoin-style penalty)
 
+    // Capacity stall detection: if peer is "at capacity" for too long without blocks arriving,
+    // clear in-flight blocks and force peer reselection (much faster than 60s hard timeout)
+    int m_consecutive_capacity_stalls{0};
+    static constexpr int MAX_CAPACITY_STALLS_BEFORE_CLEAR = 15;  // 15 seconds of stalling
+
     // Backoff state
     int m_last_header_height{0};
     int m_ibd_no_peer_cycles{0};

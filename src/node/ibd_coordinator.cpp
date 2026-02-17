@@ -844,8 +844,41 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             case HangCause::NONE: cause_str = "no suitable peers"; break;
         }
         LogPrintIBD(WARN, "Could not send any block requests - %s", cause_str.c_str());
+
+        // CAPACITY STALL FIX: If peer stays "at capacity" for too many consecutive ticks
+        // without delivering any blocks, the peer is likely dead/unresponsive.
+        // Clear in-flight blocks, disconnect the peer, and force reselection.
+        // Disconnecting (vs just rotating) ensures the TCP connection is reset and the
+        // peer reconnects fresh through the normal connection cycle.
+        if (m_last_hang_cause == HangCause::PEERS_AT_CAPACITY) {
+            m_consecutive_capacity_stalls++;
+            if (m_consecutive_capacity_stalls >= MAX_CAPACITY_STALLS_BEFORE_CLEAR &&
+                m_blocks_sync_peer != -1) {
+                std::cout << "[IBD] Peer " << m_blocks_sync_peer
+                          << " at capacity for " << m_consecutive_capacity_stalls
+                          << "s without delivering blocks - disconnecting unresponsive peer"
+                          << std::endl;
+                if (g_node_context.block_tracker) {
+                    auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+                    if (!cleared.empty()) {
+                        std::cout << "[IBD] Cleared " << cleared.size()
+                                  << " stale in-flight blocks from peer "
+                                  << m_blocks_sync_peer << std::endl;
+                    }
+                }
+                // Disconnect the unresponsive peer - forces TCP reconnection
+                if (m_node_context.connman) {
+                    m_node_context.connman->DisconnectNode(m_blocks_sync_peer, "block delivery stall");
+                }
+                m_blocks_sync_peer = -1;
+                m_consecutive_capacity_stalls = 0;
+            }
+        } else {
+            m_consecutive_capacity_stalls = 0;
+        }
     } else {
         m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
+        m_consecutive_capacity_stalls = 0;     // Reset on successful request
     }
 
     // FORK FIX: Check if fork is ready for chain switch after feeding blocks from DB

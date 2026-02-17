@@ -4721,9 +4721,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Set address for RPC-initiated collection
                     digital_dna::DigitalDNARpc::set_my_address(address);
 
-                    // Create and start the collector
+                    // Create the collector (defer collection to avoid blocking startup)
                     auto collector = std::make_unique<digital_dna::DigitalDNACollector>(address);
-                    collector->start_collection();
+                    // NOTE: start_collection() deferred - will be triggered via RPC
                     g_node_context.dna_collector = collector.get();
                     digital_dna::DigitalDNARpc::set_collector(std::move(collector));
 
@@ -5078,8 +5078,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Show progress every 10 seconds
                     int height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                     int peerHeight = g_node_context.peer_manager ? g_node_context.peer_manager->GetBestPeerHeight() : 0;
-                    std::cout << "  [IBD] Progress: height=" << height
-                              << " peers_best=" << peerHeight << std::endl;
+                    bool hasHandshakes = g_node_context.peer_manager && g_node_context.peer_manager->HasCompletedHandshakes();
+                    if (peerHeight > 0 || hasHandshakes) {
+                        std::cout << "  [IBD] Progress: height=" << height
+                                  << " peers_best=" << peerHeight << std::endl;
+                    } else {
+                        size_t peerCount = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
+                        std::cout << "  [IBD] Waiting for peer handshakes... (connections=" << peerCount << ")" << std::endl;
+                    }
                 }
             }
 
