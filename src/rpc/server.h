@@ -298,6 +298,7 @@ private:
     std::string RPC_StartMining(const std::string& params);
     std::string RPC_StopMining(const std::string& params);
     std::string RPC_SetMiningAddress(const std::string& params);
+    std::string RPC_SetMiningThreads(const std::string& params);
     std::string RPC_GetMiningAddress(const std::string& params);
     std::string RPC_GetDFMPInfo(const std::string& params);
     std::string RPC_GetMIKDistribution(const std::string& params);

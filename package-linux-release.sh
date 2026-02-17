@@ -56,10 +56,12 @@ done
 # Copy launcher scripts
 echo "[4/5] Copying launcher scripts and documentation..."
 cp start-mining.sh "${RELEASE_DIR}/"
+cp start-miner-gui.sh "${RELEASE_DIR}/"
 cp setup-and-start.sh "${RELEASE_DIR}/"
 
 # Make scripts executable
 chmod +x "${RELEASE_DIR}/start-mining.sh"
+chmod +x "${RELEASE_DIR}/start-miner-gui.sh"
 chmod +x "${RELEASE_DIR}/setup-and-start.sh"
 
 # Copy documentation

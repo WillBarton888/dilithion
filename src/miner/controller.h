@@ -249,6 +249,11 @@ public:
     uint32_t GetThreadCount() const { return m_nThreads; }
 
     /**
+     * Set number of mining threads (only when not mining)
+     */
+    bool SetThreadCount(uint32_t nThreads);
+
+    /**
      * Get current hash rate in hashes per second
      */
     uint64_t GetHashRate() const { return m_stats.GetHashRate(); }

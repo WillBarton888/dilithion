@@ -133,6 +133,16 @@ CMiningController::CMiningController(uint32_t nThreads, const std::string& rando
     m_nThreads = std::min(m_nThreads.load(), static_cast<uint32_t>(Consensus::MAX_MINING_THREADS));
 }
 
+bool CMiningController::SetThreadCount(uint32_t nThreads) {
+    if (m_mining) return false; // Can't change while mining
+    if (nThreads == 0) {
+        nThreads = std::thread::hardware_concurrency();
+        if (nThreads == 0) nThreads = 1;
+    }
+    m_nThreads = std::min(nThreads, static_cast<uint32_t>(Consensus::MAX_MINING_THREADS));
+    return true;
+}
+
 CMiningController::~CMiningController() {
     StopMining();
 }

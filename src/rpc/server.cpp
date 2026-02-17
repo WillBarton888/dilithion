@@ -8,6 +8,7 @@
 #include <rpc/ssl_wrapper.h>  // Phase 3: SSL/TLS support
 #include <rpc/websocket.h>  // Phase 4: WebSocket support
 #include <api/wallet_html.h>  // Web wallet UI
+#include <api/miner_html.h>  // Web miner dashboard
 #include <wallet/wallet.h>  // BUG #104 FIX: For CSentTx
 #include <crypto/sha3.h>  // For hashing params
 #include <wallet/passphrase_validator.h>
@@ -198,6 +199,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["startmining"] = [this](const std::string& p) { return RPC_StartMining(p); };
     m_handlers["stopmining"] = [this](const std::string& p) { return RPC_StopMining(p); };
     m_handlers["setminingaddress"] = [this](const std::string& p) { return RPC_SetMiningAddress(p); };
+    m_handlers["setminingthreads"] = [this](const std::string& p) { return RPC_SetMiningThreads(p); };
     m_handlers["getminingaddress"] = [this](const std::string& p) { return RPC_GetMiningAddress(p); };
     m_handlers["getdfmpinfo"] = [this](const std::string& p) { return RPC_GetDFMPInfo(p); };
     m_handlers["getmikdistribution"] = [this](const std::string& p) { return RPC_GetMIKDistribution(p); };
@@ -825,6 +827,22 @@ void CRPCServer::HandleClient(int clientSocket) {
     // Null-terminate and convert to string
     buffer.push_back('\0');
     std::string request(buffer.data());
+
+    // Serve miner dashboard at GET /miner
+    if (request.find("GET /miner") == 0) {
+        const std::string& miner_html = GetMinerHTML();
+        std::ostringstream response;
+        response << "HTTP/1.1 200 OK\r\n"
+                 << "Content-Type: text/html; charset=utf-8\r\n"
+                 << "Content-Length: " << miner_html.length() << "\r\n"
+                 << "Connection: close\r\n"
+                 << "Cache-Control: no-cache\r\n"
+                 << "\r\n"
+                 << miner_html;
+        std::string resp_str = response.str();
+        send_response_and_cleanup(resp_str);
+        return;
+    }
 
     // Serve web wallet at GET /wallet or GET /wallet.html
     if (request.find("GET /wallet") == 0 || request.find("GET / HTTP") == 0) {
@@ -3939,6 +3957,45 @@ std::string CRPCServer::RPC_StopMining(const std::string& params) {
     g_node_state.mining_enabled = false;
 
     return "true";
+}
+
+std::string CRPCServer::RPC_SetMiningThreads(const std::string& params) {
+    if (!m_miner) {
+        throw std::runtime_error("Miner not initialized");
+    }
+
+    // Parse threads from params: {"threads": 12} or [12]
+    uint32_t threads = 0;
+    try {
+        // Try object format: {"threads": N}
+        size_t pos = params.find("\"threads\"");
+        if (pos != std::string::npos) {
+            pos = params.find(':', pos);
+            if (pos != std::string::npos) {
+                threads = static_cast<uint32_t>(std::stoul(params.substr(pos + 1)));
+            }
+        } else {
+            // Try array format: [N]
+            size_t start = params.find_first_of("0123456789");
+            if (start != std::string::npos) {
+                threads = static_cast<uint32_t>(std::stoul(params.substr(start)));
+            }
+        }
+    } catch (...) {
+        throw std::runtime_error("Invalid threads parameter");
+    }
+
+    if (threads == 0 || threads > std::thread::hardware_concurrency()) {
+        throw std::runtime_error("Threads must be between 1 and " + std::to_string(std::thread::hardware_concurrency()));
+    }
+
+    if (!m_miner->SetThreadCount(threads)) {
+        throw std::runtime_error("Cannot change threads while mining. Stop mining first.");
+    }
+
+    std::ostringstream oss;
+    oss << "{\"threads\":" << m_miner->GetThreadCount() << "}";
+    return oss.str();
 }
 
 std::string CRPCServer::RPC_SetMiningAddress(const std::string& params) {
