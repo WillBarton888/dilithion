@@ -475,6 +475,7 @@ BlockProcessResult ProcessNewBlock(
         // - Required Dev Fund and Dev Reward outputs are present with correct amounts
         if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), totalFees, validationError)) {
             std::cerr << "[ProcessNewBlock] ERROR: Coinbase validation failed: " << validationError << std::endl;
+            SendRejectMessage(peer_id, "block", "Invalid coinbase: " + validationError);
             if (ctx.peer_manager) {
                 ctx.peer_manager->Misbehaving(peer_id, 100);  // Ban peer for invalid coinbase
             }
@@ -651,6 +652,7 @@ BlockProcessResult ProcessNewBlock(
         if (!validator.DeserializeBlockTransactions(block, transactions, validationError)) {
             std::cerr << "[Orphan] ERROR: Failed to deserialize orphan block transactions" << std::endl;
             std::cerr << "  Error: " << validationError << std::endl;
+            SendRejectMessage(peer_id, "block", "Failed to deserialize block transactions");
             if (ctx.peer_manager) {
                 ctx.peer_manager->Misbehaving(peer_id, 100);
             }
@@ -661,6 +663,7 @@ BlockProcessResult ProcessNewBlock(
         if (!validator.VerifyMerkleRoot(block, transactions, validationError)) {
             std::cerr << "[Orphan] ERROR: Orphan block has invalid merkle root" << std::endl;
             std::cerr << "  Error: " << validationError << std::endl;
+            SendRejectMessage(peer_id, "block", "Invalid merkle root");
             if (ctx.peer_manager) {
                 ctx.peer_manager->Misbehaving(peer_id, 100);
             }
@@ -671,6 +674,7 @@ BlockProcessResult ProcessNewBlock(
         // Check for duplicate transactions
         if (!validator.CheckNoDuplicateTransactions(transactions, validationError)) {
             std::cerr << "[Orphan] ERROR: Orphan block contains duplicate transactions" << std::endl;
+            SendRejectMessage(peer_id, "block", "Block contains duplicate transactions", REJECT_DUPLICATE);
             if (ctx.peer_manager) {
                 ctx.peer_manager->Misbehaving(peer_id, 100);
             }
@@ -681,6 +685,7 @@ BlockProcessResult ProcessNewBlock(
         // Check for double-spends within block
         if (!validator.CheckNoDoubleSpends(transactions, validationError)) {
             std::cerr << "[Orphan] ERROR: Orphan block contains double-spend" << std::endl;
+            SendRejectMessage(peer_id, "block", "Block contains double-spend");
             if (ctx.peer_manager) {
                 ctx.peer_manager->Misbehaving(peer_id, 100);
             }
@@ -923,6 +928,12 @@ BlockProcessResult ProcessNewBlock(
         auto activate_end = std::chrono::steady_clock::now();
         auto activate_ms = std::chrono::duration_cast<std::chrono::milliseconds>(activate_end - activate_start).count();
         std::cout << "[ProcessNewBlock] ActivateBestChain succeeded in " << activate_ms << "ms" << std::endl;
+
+        // A1 FIX: Notify IBD coordinator that a block connected successfully
+        // Resets orphan streak counter (Layer 2 fork detection) and updates block-flow timestamp
+        if (g_node_context.ibd_coordinator) {
+            g_node_context.ibd_coordinator->OnBlockConnected();
+        }
 
         if (reorgOccurred) {
             std::cout << "[ProcessNewBlock] CHAIN REORGANIZATION occurred!" << std::endl;

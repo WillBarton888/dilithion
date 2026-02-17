@@ -87,6 +87,40 @@ static const int DUPLICATE_GETDATA_PENALTY = 2;     // Misbehavior points per du
 static const size_t MAX_RATE_LIMIT_MAP_SIZE = 1000;
 
 /**
+ * A4/A5: Send a reject message to a peer before banning/disconnecting.
+ * Best-effort delivery - peer may disconnect before receiving.
+ * This helps legitimate miners understand WHY they were banned.
+ *
+ * @param peer_id  The peer to notify
+ * @param command  The command that caused the rejection (e.g., "version", "block")
+ * @param reason   Human-readable reason string
+ */
+void SendRejectMessage(int peer_id, const std::string& command, const std::string& reason,
+                       uint8_t code) {
+    if (peer_id < 0) return;  // Guard against synthetic/invalid peer IDs
+    if (!g_node_context.connman) return;
+
+    // BIP 61 reject format: var_str(command) + uint8(code) + var_str(reason)
+    std::vector<uint8_t> payload;
+
+    // Write command string (varint length + bytes)
+    uint8_t cmd_len = static_cast<uint8_t>(std::min(command.size(), size_t(12)));
+    payload.push_back(cmd_len);
+    payload.insert(payload.end(), command.begin(), command.begin() + cmd_len);
+
+    // Reject code byte (BIP 61)
+    payload.push_back(code);
+
+    // Write reason string (varint length + bytes)
+    uint8_t reason_len = static_cast<uint8_t>(std::min(reason.size(), size_t(200)));
+    payload.push_back(reason_len);
+    payload.insert(payload.end(), reason.begin(), reason.begin() + reason_len);
+
+    CSerializedNetMsg reject_msg("reject", std::move(payload));
+    g_node_context.connman->PushMessage(peer_id, std::move(reject_msg));
+}
+
+/**
  * NET-011/NET-013 FIX: Cleanup rate limit state for a disconnected peer
  * Prevents memory leaks from stale peer entries
  */
@@ -427,6 +461,10 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                     std::cout << "[P2P] ================================================\n" << std::endl;
                 }
 
+                // A5: Send reject message so the peer knows why they were disconnected
+                SendRejectMessage(peer_id, "version",
+                    "Genesis hash mismatch - wrong network or outdated binary. "
+                    "Download latest from https://github.com/dilithion/dilithion/releases");
                 return false;
             }
         } else {
@@ -475,8 +513,14 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             std::cout << "[P2P] 2. Stop your node" << std::endl;
             std::cout << "[P2P] 3. Replace the binary and restart" << std::endl;
             std::cout << "[P2P] ================================================\n" << std::endl;
-            // Use proper misbehavior type for protocol version violation
-            peer_manager.Misbehaving(peer_id, 50, MisbehaviorType::INVALID_PROTOCOL_VERSION);
+            // A4: Send reject message so the peer knows WHY they were banned
+            SendRejectMessage(peer_id, "version",
+                "Outdated protocol version " + std::to_string(msg.version) +
+                " (minimum: " + std::to_string(NetProtocol::MIN_PEER_PROTO_VERSION) +
+                "). Upgrade at https://dilithion.org",
+                REJECT_OBSOLETE);
+            // A4: Use 100 for immediate ban persistence (was 50)
+            peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_PROTOCOL_VERSION);
             return false;
         }
 
@@ -1067,6 +1111,7 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
         // NET-003 FIX: Validate size before resize to prevent integer overflow
         if (vtx_size > MAX_BLOCK_TRANSACTIONS) {
             // NET-011 FIX: Penalize peer for sending invalid block
+            SendRejectMessage(peer_id, "block", "Block transaction count exceeds limit");
             peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
             throw std::runtime_error("Block transaction count exceeds limit");
         }
@@ -1108,6 +1153,7 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         // NET-003 FIX: Validate size before resize to prevent integer overflow
         if (vin_size_raw > MAX_TX_INPUTS) {
             // NET-011 FIX: Penalize peer for sending invalid transaction
+            SendRejectMessage(peer_id, "tx", "Transaction input count exceeds limit");
             peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
             throw std::runtime_error("Transaction input count exceeds limit");
         }

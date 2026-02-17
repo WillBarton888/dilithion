@@ -27,6 +27,26 @@ enum class IBDState {
 };
 
 /**
+ * @brief Fork recovery reason codes (A2: structured observability)
+ *
+ * Used for structured logging and metrics when fork recovery is triggered.
+ */
+enum class ForkRecoveryReason {
+    LAYER1_TIP_MISMATCH,    // Layer 1: Our tip hash doesn't match header chain
+    LAYER2_ORPHAN_STREAK,   // Layer 2: Consecutive orphan blocks exceeded threshold
+    LAYER3_STALL_TIMEOUT,   // Layer 3: Chain stalled with IBD activity
+};
+
+inline const char* ForkRecoveryReasonToString(ForkRecoveryReason reason) {
+    switch (reason) {
+        case ForkRecoveryReason::LAYER1_TIP_MISMATCH: return "LAYER1_TIP_MISMATCH";
+        case ForkRecoveryReason::LAYER2_ORPHAN_STREAK: return "LAYER2_ORPHAN_STREAK";
+        case ForkRecoveryReason::LAYER3_STALL_TIMEOUT: return "LAYER3_STALL_TIMEOUT";
+        default: return "UNKNOWN";
+    }
+}
+
+/**
  * @brief Encapsulates the Initial Block Download coordination logic.
  *
  * Phase 5.1: Encapsulates IBD logic from main loop
@@ -113,9 +133,12 @@ public:
      * @brief Called when a block successfully connects to the chain
      *
      * Resets the orphan counter since the chain is progressing normally.
+     * Also updates block-flow timestamp for Layer 3 flow-aware gating (B3).
      */
     void OnBlockConnected() {
         m_consecutive_orphan_blocks.store(0);
+        m_last_block_connected_ticks.store(
+            std::chrono::steady_clock::now().time_since_epoch().count());
     }
 
     /**
@@ -140,10 +163,11 @@ private:
     /**
      * @brief Attempt fork recovery: find fork point, validate chainwork, create ForkCandidate
      *
-     * Shared logic used by both Layer 2 (orphan detection) and Layer 3 (stall detection).
+     * Unified recovery pipeline for all layers (A2/B1).
      * Returns true if a fork candidate was created or is already active.
      */
-    bool AttemptForkRecovery(int chain_height, int header_height);
+    bool AttemptForkRecovery(int chain_height, int header_height,
+                             ForkRecoveryReason reason = ForkRecoveryReason::LAYER3_STALL_TIMEOUT);
 
     // Headers sync peer management (Bitcoin Core style)
     void SelectHeadersSyncPeer();           // Pick a sync peer if none selected
@@ -215,7 +239,11 @@ private:
     // Layer 1: Proactive O(1) chain mismatch (handled inline in DownloadBlocks)
     // Layer 2: Orphan block counter - consecutive orphans suggest fork
     std::atomic<int> m_consecutive_orphan_blocks{0};
-    static constexpr int ORPHAN_FORK_THRESHOLD = 10;  // Trigger fork check after 10 consecutive orphans
+    static constexpr int ORPHAN_FORK_THRESHOLD = 5;   // A3: Trigger fork check after 5 consecutive orphans (was 10)
+    // B3: Block-flow timestamp for flow-aware Layer 3 gating
+    // Uses atomic<int64_t> (steady_clock ticks) to avoid data race between
+    // block-processing threads (write) and IBD thread (read).
+    std::atomic<int64_t> m_last_block_connected_ticks;
     // Layer 3: Deep fork handling - requires manual reindex for security
     bool m_requires_reindex{false};
     static constexpr int MAX_AUTO_REORG_DEPTH = 100;  // Max blocks to auto-reorg

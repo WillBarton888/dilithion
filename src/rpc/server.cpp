@@ -4899,6 +4899,9 @@ std::string CRPCServer::RPC_ListBanned(const std::string& params) {
         oss << "\"banned_until\":" << entry.second.nBanUntil << ",";
         oss << "\"ban_created\":" << entry.second.nCreateTime << ",";
         oss << "\"ban_reason\":" << static_cast<int>(entry.second.banReason) << ",";
+        oss << "\"ban_reason_str\":\"" << (entry.second.banReason == BanReason::ManuallyBanned ? "manually_banned" :
+              entry.second.banReason == BanReason::NodeMisbehaving ? "node_misbehaving" : "unknown") << "\",";
+        oss << "\"misbehavior_type\":\"" << MisbehaviorTypeToString(entry.second.misbehaviorType) << "\",";
         oss << "\"misbehavior_score\":" << entry.second.nMisbehaviorScore;
         oss << "}";
     }

@@ -7,6 +7,8 @@
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For CheckCoinbase
 #include <node/blockchain_storage.h>
+#include <node/ibd_coordinator.h>  // A1 FIX: For OnBlockConnected()
+#include <net/net.h>               // A5: For SendRejectMessage()
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <net/peers.h>
@@ -96,6 +98,7 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
             // VDF blocks skip hash-under-target check (proof validated in CheckVDFProof)
             if (!block.IsVDFBlock() && !CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid basic PoW, rejecting" << std::endl;
+                SendRejectMessage(peer_id, "block", "Invalid proof of work");
                 if (g_node_context.peer_manager) {
                     g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
                 }
@@ -121,6 +124,7 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
 
             if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, blockHeight, dfmpActivationHeight)) {
                 std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid PoW (DFMP check failed), rejecting" << std::endl;
+                SendRejectMessage(peer_id, "block", "Invalid proof of work (DFMP check failed)");
 
                 // Invalidate header to prevent re-requesting this block
                 if (g_node_context.headers_manager) {
@@ -395,6 +399,12 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
 
     if (reorgOccurred) {
         std::cout << "[ValidationQueue] ⚠️  CHAIN REORGANIZATION occurred at height " << expected_height << std::endl;
+    }
+
+    // A1 FIX: Notify IBD coordinator that a block connected successfully
+    // Resets orphan streak counter (Layer 2 fork detection) and updates block-flow timestamp
+    if (g_node_context.ibd_coordinator) {
+        g_node_context.ibd_coordinator->OnBlockConnected();
     }
 
     // DEAD CODE REMOVED: OnChunkBlockReceived and OnWindowBlockConnected

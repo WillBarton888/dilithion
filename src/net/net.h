@@ -208,4 +208,19 @@ extern std::atomic<CNetMessageProcessor*> g_message_processor;
  */
 void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer, bool force_reannounce = false);
 
+/**
+ * A4/A5: Send a reject message to a peer before banning/disconnecting.
+ * Best-effort delivery - peer may disconnect before receiving.
+ * Helps miners understand WHY they were banned.
+ * Uses Bitcoin BIP 61 wire format: var_str(cmd) + uint8(code) + var_str(reason)
+ */
+// Bitcoin BIP 61 reject codes
+static constexpr uint8_t REJECT_MALFORMED   = 0x01;
+static constexpr uint8_t REJECT_INVALID     = 0x10;
+static constexpr uint8_t REJECT_OBSOLETE    = 0x11;
+static constexpr uint8_t REJECT_DUPLICATE   = 0x12;
+
+void SendRejectMessage(int peer_id, const std::string& command, const std::string& reason,
+                       uint8_t code = REJECT_INVALID);
+
 #endif // DILITHION_NET_NET_H
