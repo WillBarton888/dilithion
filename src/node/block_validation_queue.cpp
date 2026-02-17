@@ -135,34 +135,11 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
         }
     }
 
-    // Coinbase tax validation (mainnet only)
-    // BUG #250 FIX: Only run coinbase validation when parent is on active chain.
-    // Coinbase rules depend on block height, which is only authoritative when parent is active.
-    // Coinbase will be enforced later in ActivateBestChain → ConnectTip → CheckBlock.
-    bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
-    if (!isTestnet && !skipPoWCheck && parentOnActiveChain) {
-        int blockHeight = (pParent != nullptr) ? (pParent->nHeight + 1) :
-                          ((expected_height > 0) ? expected_height : (currentChainHeight + 1));
-
-        CBlockValidator validator;
-        std::vector<CTransactionRef> transactions;
-        std::string validationError;
-
-        if (!validator.DeserializeBlockTransactions(block, transactions, validationError)) {
-            std::cerr << "[ValidationQueue] Failed to deserialize transactions: " << validationError << std::endl;
-            return false;
-        }
-
-        if (!transactions.empty()) {
-            if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), 0, validationError)) {
-                std::cerr << "[ValidationQueue] Coinbase validation failed: " << validationError << std::endl;
-                if (g_node_context.peer_manager) {
-                    g_node_context.peer_manager->Misbehaving(peer_id, 100);
-                }
-                return false;
-            }
-        }
-    }
+    // Coinbase validation removed from QueueBlock - it passed fees=0 which rejected
+    // valid blocks that collected transaction fees, and banned the sending peer.
+    // Coinbase is validated authoritatively in:
+    // 1. ProcessNewBlock Phase 2.5 (with correct fee calculation)
+    // 2. ConnectTip → CheckBlock (final validation)
 
     // Check if we already have this block
     CBlockIndex* existing = m_chainstate.GetBlockIndex(blockHash);
@@ -331,7 +308,6 @@ void CBlockValidationQueue::ValidationWorker() {
 bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     const CBlock& block = queued_block.block;
     const uint256& blockHash = queued_block.hash;
-    int peer_id = queued_block.peer_id;
     int expected_height = queued_block.expected_height;
 
     std::cout << "[ValidationQueue] Processing block " << blockHash.GetHex().substr(0, 16)

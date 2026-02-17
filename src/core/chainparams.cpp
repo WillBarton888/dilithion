@@ -61,7 +61,7 @@ ChainParams ChainParams::Mainnet() {
     // PoW and MIK signature verification skipped for historical blocks during IBD.
     // This fixes IBD where identity database is empty/incomplete.
     // NOTE: Chain built with MIK bypassed - cannot be removed, only raised
-    params.dfmpAssumeValidHeight = 1000;
+    params.dfmpAssumeValidHeight = 13000;  // Must match highest checkpoint for IBD
 
     // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
     params.dfmpV3ActivationHeight = 7000;
@@ -106,6 +106,8 @@ ChainParams ChainParams::Mainnet() {
     params.checkpoints.emplace_back(10000, uint256S("000032dc7d684254b446b7568ec895b3279e1230d5a6b6a42e5552e1d45f8402"));
     // Checkpoint at height 11000
     params.checkpoints.emplace_back(11000, uint256S("000009628d3af9adef443ee681d19e4ff7c9d8f56a0b05acce8f55e43f88a6cf"));
+    // Checkpoint at height 13000
+    params.checkpoints.emplace_back(13000, uint256S("000001fe5b08776d2f96e3fca8a30ad4113e8e2d998f800e70b06e73454380c7"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)

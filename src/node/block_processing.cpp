@@ -134,6 +134,23 @@ BlockProcessResult ProcessNewBlock(
         std::cout.flush();
     }
 
+    // RAII guard: ensures block tracker is cleaned on ALL exit paths.
+    // 16 of 28 return paths were missing tracker cleanup, causing "all peers at capacity"
+    // stalls during IBD. Uses hash-only cleanup (safe, authoritative).
+    // Paths with existing explicit cleanup set released=true to avoid double stats.
+    struct BlockTrackerGuard {
+        NodeContext& ctx;
+        int peer_id;
+        uint256 hash;
+        bool released = false;
+        ~BlockTrackerGuard() {
+            if (!released && peer_id >= 0 && ctx.block_fetcher) {
+                ctx.block_fetcher->MarkBlockReceived(peer_id, hash);
+            }
+        }
+    };
+    BlockTrackerGuard tracker_guard{ctx, peer_id, blockHash};
+
     std::cout << "[ProcessNewBlock] Processing block: " << blockHash.GetHex().substr(0, 16) << "..."
               << " (chainHeight=" << currentChainHeight << ", checkpoint=" << checkpointHeight
               << ", skipPoWCheck=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
@@ -389,6 +406,7 @@ BlockProcessResult ProcessNewBlock(
             // Without this, failed blocks stay in-flight forever, causing
             // "all peers at capacity" stalls. We still reject the block, but
             // we clear it from tracking so new blocks can be requested.
+            tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                 ctx.block_fetcher->OnBlockReceived(peer_id, blockHeight);
@@ -477,6 +495,7 @@ BlockProcessResult ProcessNewBlock(
                       << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
                       << std::endl;
             // BUG #167 FIX: Use per-block tracking
+            tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
             }
@@ -503,6 +522,7 @@ BlockProcessResult ProcessNewBlock(
         if (g_chainstate.ActivateBestChain(pindex, block, reorgOccurred)) {
             std::cout << "[ProcessNewBlock] Successfully activated previously stuck block at height "
                       << pindex->nHeight << std::endl;
+            tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                 ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
@@ -510,6 +530,7 @@ BlockProcessResult ProcessNewBlock(
             return BlockProcessResult::ACCEPTED;
         } else {
             std::cerr << "[ProcessNewBlock] Failed to activate stuck block at height " << pindex->nHeight << std::endl;
+            tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                 ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
@@ -522,6 +543,7 @@ BlockProcessResult ProcessNewBlock(
     bool blockInDb = db.BlockExists(blockHash);
     if (blockInDb) {
         // BUG #86 FIX: Mark block as received even when skipping
+        tracker_guard.released = true;
         if (ctx.block_fetcher) {
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
         }
@@ -669,6 +691,7 @@ BlockProcessResult ProcessNewBlock(
         // Add block to orphan manager (now validated)
         if (ctx.orphan_manager->AddOrphanBlock(peer_id, block)) {
             // SSOT FIX: Free CBlockTracker entry by HEIGHT
+            tracker_guard.released = true;
             if (ctx.block_fetcher && ctx.headers_manager) {
                 int orphan_height = ctx.headers_manager->GetHeightForHash(blockHash);
                 if (orphan_height > 0) {
@@ -732,6 +755,7 @@ BlockProcessResult ProcessNewBlock(
         }
 
         // BUG #148 FIX: Mark block as received even when storing as orphan
+        tracker_guard.released = true;
         if (ctx.block_fetcher) {
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
         }
@@ -791,6 +815,7 @@ BlockProcessResult ProcessNewBlock(
             std::cout << "[ProcessNewBlock] Block queued for async validation (height " << expected_height
                       << ", queue depth: " << ctx.validation_queue->GetQueueDepth() << ")" << std::endl;
             // IBD HANG FIX: Mark block as received IMMEDIATELY
+            tracker_guard.released = true;
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
             ctx.block_fetcher->OnBlockReceived(peer_id, expected_height);
             auto handler_end = std::chrono::steady_clock::now();
@@ -852,6 +877,7 @@ BlockProcessResult ProcessNewBlock(
                     g_metrics.ClearForkDetected();
 
                     // Mark block as received
+                    tracker_guard.released = true;
                     if (ctx.block_fetcher) {
                         ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                         ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
@@ -874,6 +900,7 @@ BlockProcessResult ProcessNewBlock(
                           << " forkHasMoreWork=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
 
                 // Mark block as received
+                tracker_guard.released = true;
                 if (ctx.block_fetcher) {
                     ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                     ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
@@ -991,6 +1018,7 @@ BlockProcessResult ProcessNewBlock(
         }
 
         // Notify BlockFetcher
+        tracker_guard.released = true;
         if (ctx.block_fetcher) {
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
             ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
