@@ -420,6 +420,10 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
 
 bool ForkManager::ValidatePoW(const CBlock& block, const uint256& hash)
 {
+    // VDF blocks use VDF proof instead of RandomX PoW
+    if (block.IsVDFBlock()) {
+        return true;  // VDF proof validated in CheckVDFProof()
+    }
     // Basic PoW check (hash < target)
     return CheckProofOfWork(hash, block.nBits);
 }

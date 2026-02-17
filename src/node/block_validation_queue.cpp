@@ -93,7 +93,8 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
 
         if (!parentOnActiveChain) {
             // Parent missing or on competing chain - do basic PoW check only
-            if (!CheckProofOfWork(blockHash, block.nBits)) {
+            // VDF blocks skip hash-under-target check (proof validated in CheckVDFProof)
+            if (!block.IsVDFBlock() && !CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid basic PoW, rejecting" << std::endl;
                 if (g_node_context.peer_manager) {
                     g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW

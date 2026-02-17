@@ -219,12 +219,14 @@ bool HeadersSyncState::ValidateAndStoreHeadersCommitments(
 }
 
 bool HeadersSyncState::ValidateAndProcessSingleHeader(const CBlockHeader& header) {
-    // 1. Check proof of work
-    uint256 hash = header.GetHash();
-    if (!CheckProofOfWork(hash, header.nBits)) {
-        std::cerr << "[HeadersSyncState] Invalid PoW for header "
-                  << hash.GetHex().substr(0, 16) << "..." << std::endl;
-        return false;
+    // 1. Check proof of work (skip for VDF blocks which use VDF proof instead)
+    if (!header.IsVDFBlock()) {
+        uint256 hash = header.GetHash();
+        if (!CheckProofOfWork(hash, header.nBits)) {
+            std::cerr << "[HeadersSyncState] Invalid PoW for header "
+                      << hash.GetHex().substr(0, 16) << "..." << std::endl;
+            return false;
+        }
     }
 
     // 2. Check continuity with previous header
@@ -260,11 +262,13 @@ bool HeadersSyncState::ValidateAndProcessSingleHeader(const CBlockHeader& header
 // ============================================================================
 
 bool HeadersSyncState::ValidateAndStoreRedownloadedHeader(const CBlockHeader& header) {
-    // 1. Validate PoW
+    // 1. Validate PoW (skip for VDF blocks which use VDF proof instead)
     uint256 hash = header.GetHash();
-    if (!CheckProofOfWork(hash, header.nBits)) {
-        std::cerr << "[HeadersSyncState] Invalid PoW in REDOWNLOAD" << std::endl;
-        return false;
+    if (!header.IsVDFBlock()) {
+        if (!CheckProofOfWork(hash, header.nBits)) {
+            std::cerr << "[HeadersSyncState] Invalid PoW in REDOWNLOAD" << std::endl;
+            return false;
+        }
     }
 
     // 2. Check continuity

@@ -321,7 +321,8 @@ BlockProcessResult ProcessNewBlock(
 
         if (shouldSkipDFMP) {
             // Parent missing OR parent on competing chain - do basic PoW check only (no MIK/DFMP)
-            if (!CheckProofOfWork(blockHash, block.nBits)) {
+            // VDF blocks skip hash-under-target check (proof validated in CheckVDFProof)
+            if (!block.IsVDFBlock() && !CheckProofOfWork(blockHash, block.nBits)) {
                 std::cerr << "[ProcessNewBlock] ERROR: Block has invalid basic PoW (parent not on active chain)" << std::endl;
                 return BlockProcessResult::INVALID_POW;
             }
