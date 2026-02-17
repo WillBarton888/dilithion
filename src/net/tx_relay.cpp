@@ -59,6 +59,11 @@ bool CTxRelayManager::AlreadyHave(const uint256& txid, CTxMemPool& mempool) {
         return true;
     }
 
+    // Check if we recently rejected it (prevents relay loops)
+    if (recently_rejected.count(txid) > 0) {
+        return true;
+    }
+
     return false;
 }
 
@@ -68,6 +73,11 @@ void CTxRelayManager::MarkRequested(const uint256& txid, int64_t peer_id) {
     // Track in-flight request
     tx_in_flight[txid] = peer_id;
     tx_request_time[txid] = std::chrono::steady_clock::now();
+}
+
+void CTxRelayManager::MarkRejected(const uint256& txid) {
+    std::lock_guard<std::mutex> lock(cs);
+    recently_rejected[txid] = std::chrono::steady_clock::now();
 }
 
 void CTxRelayManager::RemoveInFlight(const uint256& txid) {
@@ -115,6 +125,20 @@ void CTxRelayManager::CleanupExpired() {
             recent_it = recently_announced.erase(recent_it);
         } else {
             ++recent_it;
+        }
+    }
+
+    // Cleanup expired recently_rejected entries (allow retry after TX_REJECT_TTL)
+    auto reject_it = recently_rejected.begin();
+    while (reject_it != recently_rejected.end()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            now - reject_it->second
+        ).count();
+
+        if (elapsed >= TX_REJECT_TTL) {
+            reject_it = recently_rejected.erase(reject_it);
+        } else {
+            ++reject_it;
         }
     }
 

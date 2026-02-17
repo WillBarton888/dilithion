@@ -47,9 +47,14 @@ private:
     // Maps txid -> announcement time
     std::map<uint256, std::chrono::steady_clock::time_point> recently_announced;
 
+    // Recently rejected transactions - prevents re-requesting invalid txs
+    // Maps txid -> rejection time (auto-expires after TX_REJECT_TTL)
+    std::map<uint256, std::chrono::steady_clock::time_point> recently_rejected;
+
     // Configuration constants
     static const int TX_REQUEST_TIMEOUT = 60;  // seconds
     static const int TX_ANNOUNCE_TTL = 15;      // seconds
+    static const int TX_REJECT_TTL = 900;       // 15 minutes - allow retry after reorgs
 
 public:
     CTxRelayManager();
@@ -101,6 +106,17 @@ public:
      * @param peer_id The peer node ID we're requesting from
      */
     void MarkRequested(const uint256& txid, int64_t peer_id);
+
+    /**
+     * MarkRejected
+     *
+     * Mark a transaction as recently rejected (invalid).
+     * Prevents re-requesting the same invalid tx from other peers.
+     * Entries expire after TX_REJECT_TTL to allow retry after reorgs.
+     *
+     * @param txid Transaction hash
+     */
+    void MarkRejected(const uint256& txid);
 
     /**
      * RemoveInFlight

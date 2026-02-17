@@ -1245,6 +1245,10 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
             if (!tx_validator->CheckTransaction(tx, *utxo_set, chain_height, fee, error)) {
                 std::cout << "[P2P] Invalid transaction " << txid.GetHex().substr(0, 16)
                           << "... from peer " << peer_id << ": " << error << std::endl;
+                // Mark as rejected to prevent relay loops (re-requesting same invalid tx)
+                if (tx_relay) {
+                    tx_relay->MarkRejected(txid);
+                }
                 // DoS hardening: Penalize peer for sending invalid transactions
                 // Distinguish between different failure types for appropriate penalties
                 bool is_severe = (error.find("double-spend") != std::string::npos ||
