@@ -530,16 +530,27 @@ bool CHeadersManager::InitializeDoSProtectedSync(NodeId peer, const uint256& min
 
 bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev)
 {
-    uint256 hash = header.GetHash();
+    // VDF blocks (version >= 4) skip RandomX PoW check.
+    // Their proof is validated during full block validation.
+    if (header.IsVDFBlock()) {
+        if (Dilithion::g_chainParams && Dilithion::g_chainParams->vdfActivationHeight >= 0) {
+            // VDF block - PoW check handled by VDF consensus validation
+            // Fall through to remaining checks (timestamp, etc.)
+        } else {
+            return false;
+        }
+    } else {
+        uint256 hash = header.GetHash();
 
-    // 1. Check Proof of Work
-    if (!CheckProofOfWork(hash, header.nBits)) {
-        // Compute target for debug
-        uint256 target = CompactToBig(header.nBits);
-        std::cerr << "  hash=   " << hash.GetHex() << std::endl;
-        std::cerr << "  target= " << target.GetHex() << std::endl;
-        std::cerr << "  Hash must be < target to be valid" << std::endl;
-        return false;
+        // 1. Check Proof of Work
+        if (!CheckProofOfWork(hash, header.nBits)) {
+            // Compute target for debug
+            uint256 target = CompactToBig(header.nBits);
+            std::cerr << "  hash=   " << hash.GetHex() << std::endl;
+            std::cerr << "  target= " << target.GetHex() << std::endl;
+            std::cerr << "  Hash must be < target to be valid" << std::endl;
+            return false;
+        }
     }
 
     // If this is genesis block (no parent), that's all we need to check
@@ -2018,6 +2029,16 @@ bool CHeadersManager::FullValidateHeader(const CBlockHeader& header, int height)
             // PoW validation skipped - block is at/before checkpoint
             return true;
         }
+    }
+
+    // VDF blocks (version >= 4) use SHA3-256, not RandomX PoW.
+    // Their proof is validated during full block validation (CheckVDFProof).
+    // Here we just check they're above VDF activation height.
+    if (header.IsVDFBlock()) {
+        if (Dilithion::g_chainParams && height >= Dilithion::g_chainParams->vdfActivationHeight) {
+            return true;  // VDF proof checked during block validation
+        }
+        return false;  // VDF block before activation height
     }
 
     // Full PoW validation - this is the expensive operation (50-250ms)
