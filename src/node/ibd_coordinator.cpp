@@ -892,6 +892,29 @@ bool CIbdCoordinator::FetchBlocks() {
             m_node_context.peer_manager->UpdatePeerBestKnownHeight(m_headers_sync_peer, header_height);
         }
 
+        // BUG FIX: If still no peer found but we have headers ahead, try ANY connected
+        // peer. This happens when peers' best_known_height is stale (set at handshake time,
+        // never updated because no new INVs/headers arrived). If headers are ahead of our
+        // chain, at least one peer on the network has those blocks.
+        if (best_peer == -1 && header_height > chain_height) {
+            for (const auto& peer : peers) {
+                if (!peer || !peer->IsConnected()) continue;
+                // Skip timed-out peer during cooldown
+                if (peer->id == m_timed_out_peer && m_timed_out_peer != -1) {
+                    auto elapsed = std::chrono::steady_clock::now() - m_timed_out_peer_time;
+                    if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < TIMED_OUT_PEER_COOLDOWN_SEC) {
+                        continue;
+                    }
+                }
+                best_peer = peer->id;
+                best_height = header_height;  // Assume they have up to header height
+                m_node_context.peer_manager->UpdatePeerBestKnownHeight(peer->id, header_height);
+                std::cout << "[IBD] No peer with known height > chain, trying peer "
+                          << peer->id << " (stale height fallback)" << std::endl;
+                break;
+            }
+        }
+
         if (best_peer != -1) {
             m_blocks_sync_peer = best_peer;
             m_blocks_sync_peer_consecutive_timeouts = 0;  // Reset timeout counter for new peer
