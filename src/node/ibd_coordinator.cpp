@@ -295,6 +295,13 @@ void CIbdCoordinator::UpdateState() {
     bool currently_synced = m_synced.load(std::memory_order_acquire);
     int blocks_behind = header_height - chain_height;
 
+    // Guard: Don't declare synced until we've heard from at least one peer.
+    // At startup, header_height == chain_height (headers populated from local chain),
+    // so blocks_behind == 0 which would incorrectly trigger SYNCED before any peer
+    // has told us the real network tip.
+    bool has_peer_info = m_node_context.peer_manager &&
+                         m_node_context.peer_manager->HasCompletedHandshakes();
+
     if (currently_synced) {
         // Already synced - only become un-synced if significantly behind
         if (blocks_behind > UNSYNC_THRESHOLD_BLOCKS) {
@@ -303,8 +310,8 @@ void CIbdCoordinator::UpdateState() {
                       << " blocks behind headers)" << std::endl;
         }
     } else {
-        // Not synced - become synced if within tolerance
-        if (blocks_behind <= SYNC_TOLERANCE_BLOCKS && header_height > 0) {
+        // Not synced - become synced if within tolerance AND we've heard from peers
+        if (blocks_behind <= SYNC_TOLERANCE_BLOCKS && header_height > 0 && has_peer_info) {
             m_synced.store(true, std::memory_order_release);
             std::cout << "[IBD] Sync state: NOT SYNCED -> SYNCED (chain within "
                       << SYNC_TOLERANCE_BLOCKS << " blocks of headers)" << std::endl;

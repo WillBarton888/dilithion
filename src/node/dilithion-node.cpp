@@ -4503,27 +4503,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         }
 
-        // Automatically connect to hardcoded seed nodes (unless --connect specified)
-        // BUG FIX: --connect is exclusive, --addnode is additive with seed nodes
+        // Seed node connections are handled by CConnman::ThreadOpenConnections (Phase 1).
+        // Removed manual seed connection code that raced with ThreadOpenConnections,
+        // causing duplicate connections to each seed node.
         if (config.connect_nodes.empty()) {
-            std::cout << "Connecting to seed nodes..." << std::endl;
-            auto seeds = g_node_context.peer_manager->GetSeedNodes();
-
-            for (const auto& seed_addr : seeds) {
-                std::string ip_str = seed_addr.ToStringIP();
-                uint16_t port = seed_addr.port;
-
-                std::cout << "  Connecting to " << ip_str << ":" << port << "..." << std::endl;
-
-                // Phase 5: Use CConnman to initiate connection
-                int peer_id = ConnectAndHandshake(seed_addr);
-                if (peer_id >= 0) {
-                    std::cout << "    [OK] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
-                    std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
-                } else {
-                    std::cout << "    [FAIL] Failed to connect to " << ip_str << ":" << port << std::endl;
-                }
-            }
+            std::cout << "Seed node connections will be established by CConnman..." << std::endl;
         }
 
         // Phase 5: CConnman handles message receiving internally via ThreadSocketHandler and ThreadMessageHandler
