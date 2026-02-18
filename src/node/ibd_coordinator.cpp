@@ -660,7 +660,14 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         }
     } else {
         m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
-        m_consecutive_capacity_stalls = 0;     // Reset on successful request
+        // BUG FIX: Only reset capacity stall counter when chain actually advances.
+        // Sending new GETDATA (triggered by incoming headers) doesn't prove the peer
+        // is delivering blocks. Without this, incoming headers repeatedly reset the
+        // 15s stall recovery counter, causing permanent stalls near the tip.
+        if (chain_height > m_last_stall_check_height) {
+            m_consecutive_capacity_stalls = 0;
+            m_last_stall_check_height = chain_height;
+        }
     }
 
     // FORK FIX: Check if fork is ready for chain switch after feeding blocks from DB

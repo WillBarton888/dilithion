@@ -225,6 +225,7 @@ private:
     // clear in-flight blocks and force peer reselection (much faster than 60s hard timeout)
     int m_consecutive_capacity_stalls{0};
     static constexpr int MAX_CAPACITY_STALLS_BEFORE_CLEAR = 15;  // 15 seconds of stalling
+    int m_last_stall_check_height{0};  // Chain height when stall counter was last reset
 
     // Backoff state
     int m_last_header_height{0};
