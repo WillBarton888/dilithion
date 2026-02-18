@@ -251,9 +251,20 @@ BlockProcessResult ProcessNewBlock(
                               << "\n  Got:      " << blockHash.GetHex().substr(0, 16) << "..."
                               << "\n  prevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
 
-                    // This block might be from the CORRECT chain (not the fork we're tracking)
-                    // Don't invalidate - let it go through normal orphan handling
-                    // If the fork we're tracking is wrong, we'll eventually time out and try the other chain
+                    // BUG #261 FIX: Track hash mismatches. If we keep getting blocks
+                    // at expected heights but with wrong hashes, the fork candidate's
+                    // expected hash set is stale. Cancel the fork to break the loop.
+                    int mismatchCount = fork->RecordHashMismatch();
+                    if (fork->HasExcessiveHashMismatches()) {
+                        std::cout << "[ProcessNewBlock] Fork has " << mismatchCount
+                                  << " hash mismatches - expected hashes are STALE, cancelling fork" << std::endl;
+                        int cancelForkPoint = fork->GetForkPointHeight();
+                        forkMgr.CancelFork("Excessive hash mismatches (" + std::to_string(mismatchCount) + ") - stale expected hashes");
+                        forkMgr.ClearInFlightState(ctx, cancelForkPoint);
+                        g_node_context.fork_detected.store(false);
+                        g_metrics.ClearForkDetected();
+                    }
+                    // Let block go through normal orphan handling regardless
                 }
             }
         }

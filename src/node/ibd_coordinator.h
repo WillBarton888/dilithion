@@ -262,6 +262,13 @@ private:
     std::chrono::steady_clock::time_point m_last_fork_check;  // Issue #6: Throttle fork checks
     static constexpr int FORK_CHECK_MIN_INTERVAL_SECS = 30;   // Min seconds between fork checks (was 5)
 
+    // BUG #261: Fork recovery cooldown - prevent re-creating fork candidate
+    // for the same fork point after cancellation due to hash mismatches.
+    // Without this, the node loops: create fork → mismatches → cancel → create again
+    int m_last_cancelled_fork_point{-1};
+    std::chrono::steady_clock::time_point m_fork_cancel_time;
+    static constexpr int FORK_COOLDOWN_SECS = 300;  // 5 minutes before retrying same fork point
+
     // Issue #11 FIX: Request tracking as member variables (not static)
     int m_last_request_trigger{-1};
     bool m_initial_request_done{false};

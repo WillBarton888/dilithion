@@ -194,6 +194,16 @@ void ForkCandidate::TouchLastBlockTime()
     m_lastBlockTime = std::chrono::steady_clock::now();
 }
 
+int ForkCandidate::RecordHashMismatch()
+{
+    return ++m_hashMismatchCount;
+}
+
+bool ForkCandidate::HasExcessiveHashMismatches() const
+{
+    return m_hashMismatchCount.load() >= MAX_HASH_MISMATCHES;
+}
+
 void ForkCandidate::AddForkIdentity(const std::vector<uint8_t>& identity, const std::vector<uint8_t>& pubkey)
 {
     std::lock_guard<std::mutex> lock(m_mutex);

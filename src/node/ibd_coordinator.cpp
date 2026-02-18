@@ -590,6 +590,11 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             g_node_context.fork_detected.store(false);  // Clear global flag so mining can resume
             g_metrics.ClearForkDetected();  // Clear Prometheus metrics
             m_fork_point.store(-1);
+            m_last_cancelled_fork_point = -1;  // BUG #261: Clear cooldown
+        }
+        // BUG #261: Also clear cooldown if chain advanced past the cancelled fork point
+        if (m_last_cancelled_fork_point >= 0 && chain_height > m_last_cancelled_fork_point) {
+            m_last_cancelled_fork_point = -1;
         }
     }
     m_last_checked_chain_height = chain_height;
@@ -1798,19 +1803,64 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
 
     // Check if we already have an active fork
     if (forkMgr.HasActiveFork()) {
-        if (forkMgr.CheckTimeout()) {
-            std::cout << "[FORK-DETECT] Existing fork timed out, canceling and starting new" << std::endl;
-            forkMgr.CancelFork("Timeout - 60s without blocks");
-            forkMgr.ClearInFlightState(m_node_context, fork_point);
+        auto activeFork = forkMgr.GetActiveFork();
+
+        // BUG #261: Check for excessive hash mismatches (stale expected hashes)
+        if (activeFork && activeFork->HasExcessiveHashMismatches()) {
+            std::cout << "[FORK-DETECT] Fork has excessive hash mismatches"
+                      << ", cancelling and setting cooldown" << std::endl;
+            int cancelPoint = activeFork->GetForkPointHeight();
+            forkMgr.CancelFork("Excessive hash mismatches - stale expected hashes");
+            forkMgr.ClearInFlightState(m_node_context, cancelPoint);
             m_fork_detected.store(false);
             g_node_context.fork_detected.store(false);
             g_metrics.ClearForkDetected();
             m_fork_point.store(-1);
+            // Set cooldown to prevent immediate re-creation
+            m_last_cancelled_fork_point = fork_point;
+            m_fork_cancel_time = std::chrono::steady_clock::now();
+            m_fork_stall_cycles.store(0);
+            return false;
+        }
+
+        if (forkMgr.CheckTimeout()) {
+            std::cout << "[FORK-DETECT] Existing fork timed out, canceling and starting new" << std::endl;
+            // BUG #261: If fork timed out with zero received blocks, set cooldown
+            int receivedCount = activeFork ? activeFork->GetReceivedBlockCount() : 0;
+            int cancelPoint = activeFork ? activeFork->GetForkPointHeight() : fork_point;
+            forkMgr.CancelFork("Timeout - 60s without blocks");
+            forkMgr.ClearInFlightState(m_node_context, cancelPoint);
+            m_fork_detected.store(false);
+            g_node_context.fork_detected.store(false);
+            g_metrics.ClearForkDetected();
+            m_fork_point.store(-1);
+            if (receivedCount == 0) {
+                std::cout << "[FORK-DETECT] Fork timed out with 0 received blocks - setting cooldown" << std::endl;
+                m_last_cancelled_fork_point = fork_point;
+                m_fork_cancel_time = std::chrono::steady_clock::now();
+                m_fork_stall_cycles.store(0);
+                return false;
+            }
         } else {
             std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;
             m_fork_stall_cycles.store(0);
             return true;  // Fork is active, caller should not proceed further
         }
+    }
+
+    // BUG #261: Cooldown check - don't re-create fork for same fork point too soon
+    if (fork_point == m_last_cancelled_fork_point) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - m_fork_cancel_time);
+        if (elapsed.count() < FORK_COOLDOWN_SECS) {
+            std::cout << "[FORK-DETECT] Fork at point " << fork_point
+                      << " on cooldown (" << elapsed.count() << "s/"
+                      << FORK_COOLDOWN_SECS << "s) - skipping" << std::endl;
+            m_fork_stall_cycles.store(0);
+            return false;
+        }
+        // Cooldown expired, allow re-creation
+        m_last_cancelled_fork_point = -1;
     }
 
     // Get the expected fork tip height from headers manager

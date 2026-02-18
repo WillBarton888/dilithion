@@ -159,6 +159,24 @@ public:
     void TouchLastBlockTime();
 
     /**
+     * @brief Record a hash mismatch (block arrived at expected height with wrong hash)
+     *
+     * Called when ProcessNewBlock receives a block in the fork's height range
+     * but with a different hash than expected. After MAX_HASH_MISMATCHES,
+     * the fork candidate's expected hashes are considered stale.
+     *
+     * @return Current mismatch count after increment
+     */
+    int RecordHashMismatch();
+
+    /**
+     * @brief Check if too many hash mismatches have occurred
+     *
+     * @return true if mismatch count exceeds threshold
+     */
+    bool HasExcessiveHashMismatches() const;
+
+    /**
      * @brief Get all blocks in height order for chain switch
      *
      * @return Vector of (height, ForkBlock*) pairs, sorted by height ascending
@@ -228,10 +246,12 @@ private:
     std::map<std::vector<uint8_t>, std::vector<uint8_t>> m_forkIdentities;  // identity bytes -> pubkey
 
     std::atomic<bool> m_validationFailed{false};  // Any block failed?
+    std::atomic<int> m_hashMismatchCount{0};       // Blocks arriving with wrong hash
 
     std::chrono::steady_clock::time_point m_lastBlockTime;  // For timeout detection
 
     static constexpr int FORK_TIMEOUT_SECONDS = 60;  // Timeout for fork completion
+    static constexpr int MAX_HASH_MISMATCHES = 3;    // Cancel fork after this many mismatches
 };
 
 #endif // DILITHION_NODE_FORK_CANDIDATE_H
