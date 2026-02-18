@@ -58,6 +58,7 @@ void CCachedChainStats::UpdateThread() {
             m_peer_count.store(data.peer_count);
             m_difficulty.store(data.difficulty);
             m_last_block_time.store(data.last_block_time);
+            m_actual_block_time_ms.store(static_cast<int>(data.actual_block_time * 1000.0));
             m_is_syncing.store(data.is_syncing);
 
             // Update cache timestamp
@@ -91,21 +92,21 @@ std::string CCachedChainStats::ToJSON(const std::string& network) const {
     int blocks_until_halving = 210000 - block_height;
     int64_t cache_age = GetCacheAge();
 
-    // Calculate network hashrate from nBits (compact target encoding)
-    // hashrate = (2^256 / target) / block_time
-    // target = mantissa * 256^(exponent - 3)
+    // Calculate network hashrate from nBits and actual block time
+    // hashrate = (2^256 / target) / actual_block_time
+    // Uses actual average block time from recent blocks instead of target (240s)
+    // so the displayed hashrate reflects real mining power, not just difficulty
     int64_t network_hashrate = 0;
+    double actual_block_time = m_actual_block_time_ms.load() / 1000.0;
+    if (actual_block_time < 1.0) actual_block_time = 240.0;  // Safety floor
     if (difficulty > 0) {
         int exp = difficulty >> 24;
         uint32_t mantissa = difficulty & 0x7fffff;
         if (mantissa > 0 && exp > 0) {
-            // Use floating point to avoid overflow: 2^256 / (mantissa * 256^(exp-3)) / 240
-            // = 2^256 / (mantissa * 2^(8*(exp-3))) / 240
-            // = 2^(256 - 8*(exp-3)) / mantissa / 240
             double log2_target = std::log2(static_cast<double>(mantissa)) + 8.0 * (exp - 3);
             double log2_hashes = 256.0 - log2_target;
             double expected_hashes = std::pow(2.0, log2_hashes);
-            network_hashrate = static_cast<int64_t>(expected_hashes / 240.0);
+            network_hashrate = static_cast<int64_t>(expected_hashes / actual_block_time);
         }
     }
 

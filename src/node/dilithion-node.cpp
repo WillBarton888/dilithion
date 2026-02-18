@@ -2462,6 +2462,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             data.difficulty = tip ? tip->nBits : 0;
             data.last_block_time = tip ? static_cast<int64_t>(tip->nTime) : 0;
 
+            // Compute actual average block time from last 20 blocks
+            // This gives a realistic hashrate instead of assuming 240s target
+            if (tip && tip->nHeight >= 20) {
+                CBlockIndex* older = tip;
+                for (int i = 0; i < 20 && older->pprev; i++) {
+                    older = older->pprev;
+                }
+                int64_t time_span = static_cast<int64_t>(tip->nTime) - static_cast<int64_t>(older->nTime);
+                int block_span = tip->nHeight - older->nHeight;
+                if (block_span > 0 && time_span > 0) {
+                    data.actual_block_time = static_cast<double>(time_span) / block_span;
+                }
+            }
+
             // Get headers height
             if (g_node_context.headers_manager) {
                 data.headers_height = g_node_context.headers_manager->GetBestHeight();

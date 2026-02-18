@@ -42,6 +42,7 @@ public:
         int peer_count{0};
         uint32_t difficulty{0};
         int64_t last_block_time{0};
+        double actual_block_time{240.0};  // Avg seconds between recent blocks (for hashrate)
         bool is_syncing{false};
     };
 
@@ -128,6 +129,7 @@ private:
     std::atomic<int> m_peer_count{0};
     std::atomic<uint32_t> m_difficulty{0};
     std::atomic<int64_t> m_last_block_time{0};
+    std::atomic<int> m_actual_block_time_ms{240000};  // Actual avg block time in ms (for hashrate)
     std::atomic<bool> m_is_syncing{false};
     std::atomic<int64_t> m_cache_time{0};
 };
