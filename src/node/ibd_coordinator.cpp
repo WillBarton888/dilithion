@@ -648,6 +648,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 if (m_node_context.connman) {
                     m_node_context.connman->DisconnectNode(m_blocks_sync_peer, "block delivery stall");
                 }
+                // Put peer on short cooldown (60s) - may just be temporarily slow
+                m_timed_out_peer = m_blocks_sync_peer;
+                m_timed_out_peer_time = std::chrono::steady_clock::now();
+                m_timed_out_peer_cooldown_sec = CAPACITY_STALL_COOLDOWN_SEC;
                 m_blocks_sync_peer = -1;
                 m_consecutive_capacity_stalls = 0;
             }
@@ -782,7 +786,7 @@ bool CIbdCoordinator::FetchBlocks() {
                     // BUG #256: Skip timed-out peer during cooldown
                     if (p->id == m_timed_out_peer && m_timed_out_peer != -1) {
                         auto elapsed = std::chrono::steady_clock::now() - m_timed_out_peer_time;
-                        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < TIMED_OUT_PEER_COOLDOWN_SEC) {
+                        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < m_timed_out_peer_cooldown_sec) {
                             continue;
                         }
                     }
@@ -849,7 +853,7 @@ bool CIbdCoordinator::FetchBlocks() {
             if (peer->id == m_timed_out_peer && m_timed_out_peer != -1) {
                 auto elapsed = std::chrono::steady_clock::now() - m_timed_out_peer_time;
                 auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
-                if (elapsed_sec < TIMED_OUT_PEER_COOLDOWN_SEC) {
+                if (elapsed_sec < m_timed_out_peer_cooldown_sec) {
                     continue;  // Still in cooldown, skip this peer
                 } else {
                     // Cooldown expired, clear the timed-out peer tracking
@@ -908,7 +912,7 @@ bool CIbdCoordinator::FetchBlocks() {
                 // Skip timed-out peer during cooldown
                 if (peer->id == m_timed_out_peer && m_timed_out_peer != -1) {
                     auto elapsed = std::chrono::steady_clock::now() - m_timed_out_peer_time;
-                    if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < TIMED_OUT_PEER_COOLDOWN_SEC) {
+                    if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < m_timed_out_peer_cooldown_sec) {
                         continue;
                     }
                 }
@@ -1306,8 +1310,9 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
                 // BUG #256: Track this peer to avoid re-selecting it for 1 hour
                 m_timed_out_peer = m_blocks_sync_peer;
                 m_timed_out_peer_time = std::chrono::steady_clock::now();
+                m_timed_out_peer_cooldown_sec = HARD_TIMEOUT_COOLDOWN_SEC;
                 std::cout << "[IBD] Peer " << m_timed_out_peer << " excluded from selection for "
-                          << TIMED_OUT_PEER_COOLDOWN_SEC << " seconds" << std::endl;
+                          << m_timed_out_peer_cooldown_sec << " seconds" << std::endl;
 
                 // BUG FIX: Clear in-flight blocks from this peer before reselecting
                 // Without this, blocks would stay tracked until 60s timeout, causing

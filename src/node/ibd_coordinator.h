@@ -212,9 +212,14 @@ private:
     int m_blocks_sync_peer_consecutive_timeouts{0};                 // Consecutive 60s timeout cycles without delivery
     static constexpr int MAX_PEER_CONSECUTIVE_TIMEOUTS = 3;         // Force reselection after N consecutive timeouts
     // BUG #256: Track timed-out peers to avoid re-selecting them immediately
+    // Cooldown duration varies by severity:
+    //   - Hard timeout (3×60s no delivery): 1 hour - peer is likely broken/malicious
+    //   - Capacity stall (15s no delivery): 60s - peer may just be temporarily slow
     int m_timed_out_peer{-1};                                       // Peer that timed out (excluded from selection)
     std::chrono::steady_clock::time_point m_timed_out_peer_time;    // When the peer timed out
-    static constexpr int TIMED_OUT_PEER_COOLDOWN_SEC = 3600;        // 1 hour cooldown (Bitcoin-style penalty)
+    int m_timed_out_peer_cooldown_sec{0};                           // Cooldown duration for this specific timeout
+    static constexpr int HARD_TIMEOUT_COOLDOWN_SEC = 3600;          // 1 hour for hard timeouts (Bitcoin-style penalty)
+    static constexpr int CAPACITY_STALL_COOLDOWN_SEC = 60;          // 60s for capacity stalls (peer may recover)
 
     // Capacity stall detection: if peer is "at capacity" for too long without blocks arriving,
     // clear in-flight blocks and force peer reselection (much faster than 60s hard timeout)
