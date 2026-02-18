@@ -3,6 +3,7 @@
 
 #include <rpc/server.h>
 #include <rpc/auth.h>
+#include <core/version.h>
 #include <rpc/json_util.h>  // RPC-007 FIX: Proper JSON parsing
 #include <rpc/logger.h>  // Phase 1: Request logging
 #include <rpc/ssl_wrapper.h>  // Phase 3: SSL/TLS support
@@ -4301,8 +4302,8 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
 std::string CRPCServer::RPC_GetNetworkInfo(const std::string& params) {
     std::ostringstream oss;
     oss << "{";
-    oss << "\"version\":\"1.0.0\",";
-    oss << "\"subversion\":\"/Dilithion:1.0.0/\",";
+    oss << "\"version\":\"" << GetVersionString() << "\",";
+    oss << "\"subversion\":\"/Dilithion:" << GetVersionString() << "/\",";
     oss << "\"protocolversion\":1";
     oss << "}";
     return oss.str();

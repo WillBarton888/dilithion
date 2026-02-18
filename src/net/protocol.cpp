@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <net/protocol.h>
+#include <core/version.h>
 #include <util/strencodings.h>
 #include <ctime>
 #include <sstream>
@@ -54,7 +55,7 @@ CVersionMessage::CVersionMessage(int32_t blockchain_height)
       services(NODE_NETWORK),
       timestamp(std::time(nullptr)),
       nonce(0),
-      user_agent("/Dilithion:3.3.0/"),
+      user_agent("/Dilithion:" + GetVersionString() + "/"),
       start_height(blockchain_height),  // Use actual blockchain height, not hardcoded 0
       relay(true)
 {

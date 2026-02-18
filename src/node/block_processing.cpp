@@ -706,14 +706,11 @@ BlockProcessResult ProcessNewBlock(
 
         // Add block to orphan manager (now validated)
         if (ctx.orphan_manager->AddOrphanBlock(peer_id, block)) {
-            // SSOT FIX: Free CBlockTracker entry by HEIGHT
-            tracker_guard.released = true;
-            if (ctx.block_fetcher && ctx.headers_manager) {
-                int orphan_height = ctx.headers_manager->GetHeightForHash(blockHash);
-                if (orphan_height > 0) {
-                    ctx.block_fetcher->OnBlockReceived(peer_id, orphan_height);
-                }
-            }
+            // BUG #262 FIX: Do NOT free CBlockTracker entry for orphan blocks.
+            // Keep them tracked as "in-flight" to prevent re-request loops.
+            // When parent arrives and orphan resolves via recursive ProcessNewBlock,
+            // MarkBlockReceived is called in the acceptance path, clearing the tracker.
+            tracker_guard.released = true;  // Prevent RAII guard from clearing
 
             // IBD OPTIMIZATION: Check if parent is already in-flight
             bool parent_in_flight = false;
@@ -770,11 +767,17 @@ BlockProcessResult ProcessNewBlock(
             std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;
         }
 
-        // BUG #148 FIX: Mark block as received even when storing as orphan
-        tracker_guard.released = true;
-        if (ctx.block_fetcher) {
-            ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-        }
+        // BUG #262 FIX: Do NOT clear orphan blocks from the tracker.
+        // Previously (BUG #148), we called MarkBlockReceived here which cleared
+        // the block from CBlockTracker. This caused a re-request loop:
+        //   1. Blocks arrive out of order → stored as orphans → cleared from tracker
+        //   2. GetNextBlocksToRequest sees untracked heights → re-requests them
+        //   3. FetchBlocks "succeeds" (sends GETDATA) → stall counter never increments
+        //   4. Peer may not re-send (already sent) → permanent stall
+        // Fix: Keep orphan blocks tracked as "in-flight". They won't be re-requested.
+        // When parent arrives and orphan resolves via recursive ProcessNewBlock,
+        // MarkBlockReceived is called in the acceptance path, clearing the tracker.
+        tracker_guard.released = true;  // Prevent RAII guard from clearing tracker
 
         // Notify IBD coordinator of orphan block for Layer 2 fork detection
         if (g_node_context.ibd_coordinator) {

@@ -8,6 +8,8 @@
 
 # Version detection from git tags
 # Tries to get version from git tag, falls back to "dev" if not available
+# Add Windows Git to PATH for MSYS2 environments that may not have git
+export PATH := $(PATH):/c/Program Files/Git/cmd
 GIT_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date +%Y-%m-%d 2>/dev/null || echo "unknown")
@@ -26,6 +28,7 @@ CXX := g++
 # -Wformat -Wformat-security: Format string vulnerability warnings
 # -fPIC: Position-independent code (for shared libraries)
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2 -pipe -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security
+CXXFLAGS += -DDILITHION_VERSION='"$(GIT_VERSION)"'
 CFLAGS ?= -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security
 
 # Include paths (base)
@@ -148,7 +151,8 @@ CONSENSUS_SOURCES := src/consensus/fees.cpp \
 
 CORE_SOURCES_UTIL := src/core/chainparams.cpp \
                      src/core/globals.cpp \
-                     src/core/node_context.cpp
+                     src/core/node_context.cpp \
+                     src/core/version.cpp
 
 # Phase 4.2: Database hardening
 DB_SOURCES := src/db/db_errors.cpp
@@ -612,6 +616,7 @@ $(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/cryp
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Compile chiavdf C++ wrapper (third-party, suppress warnings with -w)
+# Half-word Lehmer (32-bit approx) avoids signed overflow — no -fwrapv needed.
 $(OBJ_DIR)/chiavdf/c_wrapper.o: depends/chiavdf/src/c_bindings/c_wrapper.cpp | $(OBJ_DIR)/chiavdf
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $< (chiavdf)"
 	@$(CXX) -std=c++17 -O2 -pipe -w $(CPPFLAGS) -I depends/chiavdf/src -I depends/chiavdf/src/c_bindings -c $< -o $@
