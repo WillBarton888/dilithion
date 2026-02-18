@@ -32,6 +32,7 @@
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <node/fork_manager.h>  // Validate-before-disconnect fork handling
 #include <net/orphan_manager.h>  // IBD STUCK FIX #3: Periodic orphan scan
+#include <node/block_processing.h>  // BUG #260: ProcessNewBlock for orphan re-processing
 #include <util/logging.h>
 #include <util/bench.h>  // Performance: Benchmarking
 #include <api/metrics.h>  // Fork detection metrics
@@ -1054,6 +1055,8 @@ bool CIbdCoordinator::FetchBlocks() {
     int null_hash_count = 0;
     int first_null_hash_height = -1;
     int already_have_count = 0;
+    // BUG #260: Collect orphan blocks whose parents are now connected for re-processing
+    std::vector<std::pair<uint256, CBlock>> orphans_to_reprocess;
     for (int h : blocks_to_request) {
         // Re-check capacity before each request
         int current_in_flight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
@@ -1118,15 +1121,10 @@ bool CIbdCoordinator::FetchBlocks() {
                 pindex->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
                 continue;
             }
-            // BUG FIX: Skip blocks we already have data for (orphans awaiting parents)
-            // Without this, orphan blocks get re-requested indefinitely since they have
-            // a CBlockIndex (created on first arrival) but null pprev (parent not connected).
-            // The old code only checked BLOCK_VALID_CHAIN and IsInvalid, missing this case.
+            // Block has data but isn't connected to active chain.
+            // This is an orphan awaiting its parent.
             if (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA) {
                 // FORK FIX: If this is a fork block already in DB, feed it to ForkManager
-                // for pre-validation. This handles the case where fork blocks arrived as
-                // orphans before the fork was detected - they need to be pre-validated
-                // so TriggerChainSwitch can activate the better chain.
                 ForkManager& forkMgr2 = ForkManager::GetInstance();
                 if (forkMgr2.HasActiveFork()) {
                     auto fork2 = forkMgr2.GetActiveFork();
@@ -1147,10 +1145,30 @@ bool CIbdCoordinator::FetchBlocks() {
                         }
                     }
                 }
-                // Mark as completed so GetNextBlocksToRequest skips past this height
-                if (g_node_context.block_tracker) {
-                    g_node_context.block_tracker->MarkCompleted(h);
+
+                // BUG #260 FIX: Check if parent is now connected (orphan can be resolved).
+                // Orphan blocks expire from orphan_manager after 20 minutes, but their
+                // CBlockIndex with BLOCK_HAVE_DATA persists. If the parent arrived and
+                // connected AFTER the orphan expired, orphan resolution never runs.
+                // Fix: read the block from DB and use its actual hashPrevBlock to check
+                // if parent is now on active chain, then queue for re-processing.
+                if (m_node_context.blockchain_db) {
+                    CBlock blockData;
+                    if (m_node_context.blockchain_db->ReadBlock(hash, blockData)) {
+                        CBlockIndex* pParent = m_chainstate.GetBlockIndex(blockData.hashPrevBlock);
+                        if (pParent && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                            std::cout << "[IBD] Orphan at height " << h
+                                      << " has connected parent (prevhash="
+                                      << blockData.hashPrevBlock.GetHex().substr(0, 16)
+                                      << "...) - queuing for re-processing" << std::endl;
+                            orphans_to_reprocess.emplace_back(std::make_pair(hash, std::move(blockData)));
+                        }
+                    }
                 }
+
+                // NEVER MarkCompleted here. Only ProcessNewBlock results (ACCEPTED)
+                // should mark a height completed. If reprocess fails or parent isn't
+                // connected, the height stays untracked so it reappears in future ticks.
                 already_have_count++;
                 continue;
             }
@@ -1192,11 +1210,43 @@ bool CIbdCoordinator::FetchBlocks() {
         std::cout << "[IBD] Requested " << getdata.size() << " blocks from peer " << m_blocks_sync_peer
                   << " (in-flight=" << m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer)
                   << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << ")" << std::endl;
-
-        return true;
     }
 
-    return false;
+    // BUG #260: Re-process orphan blocks whose parents are now connected.
+    // This handles the case where orphan_manager expired the entries (20 min TTL)
+    // but the blocks still have BLOCK_HAVE_DATA in chainstate. Without this,
+    // orphan resolution never triggers and the node permanently stalls.
+    bool chain_advanced = false;
+    if (!orphans_to_reprocess.empty()) {
+        std::cout << "[IBD] Re-processing " << orphans_to_reprocess.size()
+                  << " orphan blocks with connected parents" << std::endl;
+        int chain_before = m_chainstate.GetHeight();
+        for (auto& [orphan_hash, orphan_block] : orphans_to_reprocess) {
+            auto result = ProcessNewBlock(m_node_context, *m_node_context.blockchain_db,
+                                          -1, orphan_block, &orphan_hash);
+            std::cout << "[IBD] Orphan re-process result: " << BlockProcessResultToString(result)
+                      << " hash=" << orphan_hash.GetHex().substr(0, 16) << "..." << std::endl;
+            if (result == BlockProcessResult::ACCEPTED) {
+                // Successfully connected - mark height completed
+                if (g_node_context.block_tracker) {
+                    int reprocessed_height = m_chainstate.GetHeight();
+                    g_node_context.block_tracker->MarkCompleted(reprocessed_height);
+                }
+            }
+        }
+        chain_advanced = (m_chainstate.GetHeight() > chain_before);
+    }
+
+    // Set hang cause when no GETDATA was sent and no orphans were resolved
+    if (getdata.empty() && !chain_advanced && already_have_count > 0) {
+        // All candidate blocks were orphans - not a peer issue
+        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;  // Reuse: "waiting for data"
+        std::cout << "[IBD] All " << already_have_count
+                  << " candidate blocks are orphans awaiting parents (chain="
+                  << chain_height << " headers=" << header_height << ")" << std::endl;
+    }
+
+    return !getdata.empty() || chain_advanced;
 }
 
 void CIbdCoordinator::RetryTimeoutsAndStalls() {
