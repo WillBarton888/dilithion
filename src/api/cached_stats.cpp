@@ -4,8 +4,10 @@
 #include <api/cached_stats.h>
 
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include <ctime>
+#include <cmath>
 
 CCachedChainStats::CCachedChainStats() = default;
 
@@ -89,15 +91,50 @@ std::string CCachedChainStats::ToJSON(const std::string& network) const {
     int blocks_until_halving = 210000 - block_height;
     int64_t cache_age = GetCacheAge();
 
+    // Calculate network hashrate from nBits (compact target encoding)
+    // hashrate = (2^256 / target) / block_time
+    // target = mantissa * 256^(exponent - 3)
+    int64_t network_hashrate = 0;
+    if (difficulty > 0) {
+        int exp = difficulty >> 24;
+        uint32_t mantissa = difficulty & 0x7fffff;
+        if (mantissa > 0 && exp > 0) {
+            // Use floating point to avoid overflow: 2^256 / (mantissa * 256^(exp-3)) / 240
+            // = 2^256 / (mantissa * 2^(8*(exp-3))) / 240
+            // = 2^(256 - 8*(exp-3)) / mantissa / 240
+            double log2_target = std::log2(static_cast<double>(mantissa)) + 8.0 * (exp - 3);
+            double log2_hashes = 256.0 - log2_target;
+            double expected_hashes = std::pow(2.0, log2_hashes);
+            network_hashrate = static_cast<int64_t>(expected_hashes / 240.0);
+        }
+    }
+
+    // Calculate human-readable difficulty (max_target / current_target)
+    // Dilithion max target: 0x1f060000
+    double difficulty_float = 0.0;
+    if (difficulty > 0) {
+        const uint32_t maxBits = 0x1f060000;
+        int maxExp = maxBits >> 24;           // 31
+        uint32_t maxMantissa = maxBits & 0x7fffff;  // 393216
+        int curExp = difficulty >> 24;
+        uint32_t curMantissa = difficulty & 0x7fffff;
+        if (curMantissa > 0) {
+            difficulty_float = static_cast<double>(maxMantissa) / static_cast<double>(curMantissa) * std::pow(256.0, maxExp - curExp);
+        }
+    }
+
     // Build JSON response
     std::ostringstream json;
+    json << std::fixed;
     json << "{\n";
     json << "  \"timestamp\": \"" << std::time(nullptr) << "\",\n";
     json << "  \"network\": \"" << network << "\",\n";
     json << "  \"blockHeight\": " << block_height << ",\n";
     json << "  \"headersHeight\": " << headers_height << ",\n";
-    json << "  \"difficulty\": " << difficulty << ",\n";
-    json << "  \"networkHashRate\": " << (difficulty / 240) << ",\n";
+    json << std::setprecision(8);
+    json << "  \"difficulty\": " << difficulty_float << ",\n";
+    json << std::setprecision(0);
+    json << "  \"networkHashRate\": " << network_hashrate << ",\n";
     json << "  \"totalSupply\": " << total_supply << ",\n";
     json << "  \"blockReward\": 50,\n";
     json << "  \"blocksUntilHalving\": " << blocks_until_halving << ",\n";
