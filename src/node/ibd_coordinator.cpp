@@ -1243,12 +1243,19 @@ bool CIbdCoordinator::FetchBlocks() {
     }
 
     // Set hang cause when no GETDATA was sent and no orphans were resolved
-    if (getdata.empty() && !chain_advanced && already_have_count > 0) {
-        // All candidate blocks were orphans - not a peer issue
-        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;  // Reuse: "waiting for data"
-        std::cout << "[IBD] All " << already_have_count
-                  << " candidate blocks are orphans awaiting parents (chain="
-                  << chain_height << " headers=" << header_height << ")" << std::endl;
+    if (getdata.empty() && !chain_advanced) {
+        int total_in_flight = g_node_context.block_tracker ? g_node_context.block_tracker->GetTotalInFlight() : 0;
+        if (total_in_flight > 0 || already_have_count > 0) {
+            // Blocks are in-flight or already in DB - we're waiting for delivery/resolution
+            // Setting PEERS_AT_CAPACITY enables the stall recovery to fire after
+            // MAX_CAPACITY_STALLS_BEFORE_CLEAR seconds of no progress
+            m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+        }
+        if (already_have_count > 0) {
+            std::cout << "[IBD] All " << already_have_count
+                      << " candidate blocks are orphans awaiting parents (chain="
+                      << chain_height << " headers=" << header_height << ")" << std::endl;
+        }
     }
 
     return !getdata.empty() || chain_advanced;
