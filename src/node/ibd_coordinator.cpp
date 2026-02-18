@@ -1004,13 +1004,14 @@ bool CIbdCoordinator::FetchBlocks() {
     }
 
     if (blocks_to_request.empty()) {
-        // BUG #246b FIX: If no blocks to request, check if in-flight blocks are from
-        // disconnected peers. This can cause "stuck" scenarios where we have blocks
-        // in-flight from a peer that no longer exists.
+        // All needed blocks are already in-flight - waiting for delivery
         if (g_node_context.block_tracker) {
             int total_in_flight = g_node_context.block_tracker->GetTotalInFlight();
             if (total_in_flight > 0 && header_height > chain_height) {
-                // Blocks in-flight but none to request - check for stale peer assignments
+                // Set accurate hang cause - blocks ARE requested, just waiting
+                m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+
+                // Check for stale peer assignments from disconnected peers
                 auto tracked = g_node_context.block_tracker->GetTrackedHeights();
                 std::set<NodeId> peers_with_blocks;
                 for (const auto& [height, peer_id] : tracked) {
@@ -1018,8 +1019,8 @@ bool CIbdCoordinator::FetchBlocks() {
                 }
 
                 for (NodeId peer_id : peers_with_blocks) {
-                    auto peer = m_node_context.peer_manager->GetPeer(peer_id);
-                    if (!peer || !peer->IsConnected()) {
+                    auto peer_check = m_node_context.peer_manager->GetPeer(peer_id);
+                    if (!peer_check || !peer_check->IsConnected()) {
                         auto cleared = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
                         if (!cleared.empty()) {
                             std::cout << "[IBD] Cleared " << cleared.size()
@@ -1204,12 +1205,15 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
     }
 
     // ============ HARD TIMEOUT: Remove blocks stuck too long ============
-    // After 60 seconds, remove from tracker so they can be re-requested from different peer
-    // Note: Increased from 10s to 60s because RandomX PoW validation above checkpoint
-    // can take 1-2 seconds per block on slower VPS hardware
-    static constexpr int HARD_TIMEOUT_SECONDS = 60;
+    // Use shorter timeout when close to tip (only a few blocks behind) since blocks
+    // should arrive quickly. Use longer timeout during bulk IBD where validation
+    // of RandomX PoW can take 1-2s per block on slower hardware.
+    int chain_height_now = m_chainstate.GetHeight();
+    int header_height_now = m_node_context.headers_manager ? m_node_context.headers_manager->GetBestHeight() : 0;
+    int blocks_behind = header_height_now - chain_height_now;
+    int timeout_seconds = (blocks_behind <= 20) ? 15 : 60;
     auto very_stalled = m_node_context.block_fetcher->GetStalledBlocks(
-        std::chrono::seconds(HARD_TIMEOUT_SECONDS));
+        std::chrono::seconds(timeout_seconds));
 
     if (!very_stalled.empty()) {
         int removed = 0;
@@ -1223,14 +1227,16 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
             }
         }
         if (removed > 0) {
-            std::cout << "[PerBlock] Removed " << removed << " blocks stuck >" << HARD_TIMEOUT_SECONDS
+            std::cout << "[PerBlock] Removed " << removed << " blocks stuck >" << timeout_seconds
                       << "s from tracker (will re-request)" << std::endl;
         }
 
         // BAD PEER DETECTION: If current sync peer has consecutive timeout cycles, rotate to new peer
+        // When close to tip, rotate after just 1 timeout (15s) instead of waiting for 3x60s
+        int max_timeouts = (blocks_behind <= 20) ? 1 : MAX_PEER_CONSECUTIVE_TIMEOUTS;
         if (current_peer_timed_out && m_blocks_sync_peer != -1) {
             m_blocks_sync_peer_consecutive_timeouts++;
-            if (m_blocks_sync_peer_consecutive_timeouts >= MAX_PEER_CONSECUTIVE_TIMEOUTS) {
+            if (m_blocks_sync_peer_consecutive_timeouts >= max_timeouts) {
                 std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
                           << " not delivering blocks (" << m_blocks_sync_peer_consecutive_timeouts
                           << " consecutive timeout cycles), forcing reselection" << std::endl;
