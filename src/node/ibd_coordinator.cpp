@@ -599,6 +599,29 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     }
     m_last_checked_chain_height = chain_height;
 
+    // FORK TIMEOUT CHECK: Check active fork timeout independently of detection layers.
+    // Once a fork is active, Layer 3's !m_fork_detected guard prevents AttemptForkRecovery
+    // from being called, so CheckTimeout() never fires. Check it here every tick.
+    {
+        ForkManager& forkMgr = ForkManager::GetInstance();
+        if (forkMgr.HasActiveFork() && forkMgr.CheckTimeout()) {
+            auto activeFork = forkMgr.GetActiveFork();
+            int receivedCount = activeFork ? activeFork->GetReceivedBlockCount() : 0;
+            int cancelPoint = activeFork ? activeFork->GetForkPointHeight() : chain_height;
+            std::cout << "[IBD] Active fork timed out (60s) with " << receivedCount
+                      << " received blocks - cancelling" << std::endl;
+            forkMgr.CancelFork("Timeout - no blocks delivered in 60s");
+            forkMgr.ClearInFlightState(m_node_context, cancelPoint);
+            m_fork_detected.store(false);
+            g_node_context.fork_detected.store(false);
+            g_metrics.ClearForkDetected();
+            m_fork_point.store(-1);
+            m_last_cancelled_fork_point = cancelPoint;
+            m_fork_cancel_time = std::chrono::steady_clock::now();
+            m_fork_stall_cycles.store(0);
+        }
+    }
+
     // IBD HANG FIX #1: Apply gradual backpressure rate multiplier
     // Reduces request rate gradually as validation queue fills, preventing binary stop/resume cycle
     double rate_multiplier = GetDownloadRateMultiplier();
