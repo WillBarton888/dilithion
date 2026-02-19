@@ -4,6 +4,7 @@
 #ifndef DILITHION_NODE_IBD_COORDINATOR_H
 #define DILITHION_NODE_IBD_COORDINATOR_H
 
+#include <uint256.h>
 #include <atomic>
 #include <chrono>
 #include <set>
@@ -238,6 +239,10 @@ private:
 
     // WAITING_ON_PARENT_VALIDATION timeout: if parent stays in DB but unconnected
     // for too long, escalate to full recovery (clear tracker, rotate peer).
+    // Tracks the specific parent (height + hash) so the timer resets when the
+    // chain advances and a *different* parent becomes the bottleneck.
+    int m_waiting_parent_height{-1};
+    uint256 m_waiting_parent_hash{};
     std::chrono::steady_clock::time_point m_parent_validation_wait_start{};
     bool m_parent_validation_wait_active{false};
     static constexpr int PARENT_VALIDATION_TIMEOUT_SECS = 30;  // Max wait before escalation

@@ -721,6 +721,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     } else {
         m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
         m_parent_validation_wait_active = false;  // Reset validation wait on progress
+        m_waiting_parent_height = -1;
+        m_waiting_parent_hash = uint256{};
         // BUG FIX: Only reset capacity stall counter when chain actually advances.
         // Sending new GETDATA (triggered by incoming headers) doesn't prove the peer
         // is delivering blocks. Without this, incoming headers repeatedly reset the
@@ -1332,9 +1334,15 @@ bool CIbdCoordinator::FetchBlocks() {
                     // Parent is in DB but not connected - validation queue should handle it.
                     // Use WAITING_ON_PARENT_VALIDATION to avoid wrongly disconnecting peer.
                     // BUT: add a timeout so we don't wait forever if validation is stuck.
-                    if (!m_parent_validation_wait_active) {
+                    // Track parent identity so timer resets when a different parent becomes
+                    // the bottleneck (e.g., chain advanced past the previous stuck parent).
+                    if (!m_parent_validation_wait_active ||
+                        m_waiting_parent_height != next_needed ||
+                        m_waiting_parent_hash != next_hash) {
                         m_parent_validation_wait_start = std::chrono::steady_clock::now();
                         m_parent_validation_wait_active = true;
+                        m_waiting_parent_height = next_needed;
+                        m_waiting_parent_hash = next_hash;
                     }
                     auto wait_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                         std::chrono::steady_clock::now() - m_parent_validation_wait_start).count();
@@ -1352,11 +1360,15 @@ bool CIbdCoordinator::FetchBlocks() {
                                   << " stuck in DB for " << wait_elapsed << "s - escalating to peer recovery"
                                   << std::endl;
                         m_parent_validation_wait_active = false;
+                        m_waiting_parent_height = -1;
+                        m_waiting_parent_hash = uint256{};
                         m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
                     }
                 } else {
                     // Parent is NOT in DB. Reset validation wait timer.
                     m_parent_validation_wait_active = false;
+                    m_waiting_parent_height = -1;
+                    m_waiting_parent_hash = uint256{};
 
                     // Check if it's tracked (in-flight).
                     int tracking_age = g_node_context.block_tracker ?
@@ -1394,6 +1406,8 @@ bool CIbdCoordinator::FetchBlocks() {
                 }
             } else {
                 m_parent_validation_wait_active = false;
+                m_waiting_parent_height = -1;
+                m_waiting_parent_hash = uint256{};
                 m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
             }
             std::cout << "[IBD] " << already_have_count
