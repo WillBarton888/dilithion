@@ -2274,7 +2274,14 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
         // BUG FIX #183 Part 2: Request more headers NOW with the updated m_last_request_hash
         // The previous GETHEADERS was sent before this update, so we need to send another.
+        // BUG FIX: Use dynamic best_known_height instead of static start_height.
         int peer_height = GetPeerStartHeight(peer);
+        if (g_node_context.peer_manager) {
+            auto p = g_node_context.peer_manager->GetPeer(peer);
+            if (p && p->best_known_height > peer_height) {
+                peer_height = p->best_known_height;
+            }
+        }
         if (peer_height > 0 && endHeight < peer_height) {
             SyncHeadersFromPeer(peer, peer_height, true);  // force=true to bypass dedup
         }
@@ -2520,7 +2527,16 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     // This ensures m_last_request_hash is set correctly before the request is sent.
     // Previously, the request was sent from QueueRawHeadersForProcessing BEFORE
     // processing, causing infinite loops with stale hash values.
+    // BUG FIX: Use dynamic best_known_height instead of static start_height.
+    // start_height is set at VERSION handshake and never updates - if the peer's
+    // chain grows during our sync, we'd stop requesting headers prematurely.
     int peer_height = GetPeerStartHeight(peer);
+    if (g_node_context.peer_manager) {
+        auto p = g_node_context.peer_manager->GetPeer(peer);
+        if (p && p->best_known_height > peer_height) {
+            peer_height = p->best_known_height;
+        }
+    }
     if (peer_height > 0 && !prevHash.IsNull()) {
         SyncHeadersFromPeer(peer, peer_height);
     }

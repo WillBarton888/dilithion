@@ -678,6 +678,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             case HangCause::VALIDATION_QUEUE_FULL: cause_str = "validation queue full"; break;
             case HangCause::NO_PEERS_AVAILABLE: cause_str = "no peers available"; break;
             case HangCause::PEERS_AT_CAPACITY: cause_str = "all peers at capacity"; break;
+            case HangCause::WAITING_ON_PARENT_VALIDATION: cause_str = "parent block awaiting validation"; break;
             case HangCause::NONE: cause_str = "no suitable peers"; break;
         }
         LogPrintIBD(WARN, "Could not send any block requests - %s", cause_str.c_str());
@@ -1315,16 +1316,64 @@ bool CIbdCoordinator::FetchBlocks() {
     // Set hang cause when no GETDATA was sent and no orphans were resolved
     if (getdata.empty() && !chain_advanced) {
         int total_in_flight = g_node_context.block_tracker ? g_node_context.block_tracker->GetTotalInFlight() : 0;
-        if (total_in_flight > 0 || already_have_count > 0) {
-            // Blocks are in-flight or already in DB - we're waiting for delivery/resolution
-            // Setting PEERS_AT_CAPACITY enables the stall recovery to fire after
-            // MAX_CAPACITY_STALLS_BEFORE_CLEAR seconds of no progress
+
+        // ORPHAN-PARENT PRIORITY FIX: When candidate blocks are orphans in DB,
+        // the pipeline is jammed. Check the critical parent (chain_height+1) to
+        // determine the correct recovery action. This fires regardless of in-flight
+        // count - the logs show stalls at inflight=22+ when children arrive via INV
+        // but the parent is stuck or missing.
+        if (already_have_count > 0 && header_height > chain_height) {
+            int next_needed = chain_height + 1;
+            uint256 next_hash = m_node_context.headers_manager->GetRandomXHashAtHeight(next_needed);
+            if (!next_hash.IsNull()) {
+                CBlockIndex* pindex = m_chainstate.GetBlockIndex(next_hash);
+                if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA)) {
+                    // Parent is in DB but not connected - validation queue will handle it.
+                    // Set WAITING_ON_PARENT_VALIDATION instead of PEERS_AT_CAPACITY to
+                    // prevent the 15s stall recovery from wrongly disconnecting the peer.
+                    m_last_hang_cause = HangCause::WAITING_ON_PARENT_VALIDATION;
+                    std::cout << "[IBD] Block " << next_needed
+                              << " is in DB awaiting validation - not a peer stall" << std::endl;
+                } else {
+                    // Parent is NOT in DB. Check if it's tracked (in-flight).
+                    int tracking_age = g_node_context.block_tracker ?
+                        g_node_context.block_tracker->GetTrackingAge(next_needed) : -1;
+                    if (tracking_age >= 0 && tracking_age < 30) {
+                        // Parent is in-flight and hasn't been waiting too long - let it arrive.
+                        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+                    } else {
+                        // Parent is either not tracked at all (gap!) or has been in-flight
+                        // for >30s (stale request). Force re-request it.
+                        if (tracking_age >= 30) {
+                            // Clear the stale tracking entry first
+                            g_node_context.block_tracker->RemoveTimedOut(next_needed);
+                            std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                      << " stale in tracker (" << tracking_age << "s) - clearing and re-requesting"
+                                      << std::endl;
+                        } else {
+                            std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                      << " missing from DB and tracker - force requesting from peer "
+                                      << m_blocks_sync_peer << std::endl;
+                        }
+                        if (m_blocks_sync_peer != -1) {
+                            if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, next_needed, next_hash)) {
+                                CNetMessage parent_msg = m_node_context.message_processor->CreateGetDataMessage(
+                                    {{NetProtocol::MSG_BLOCK_INV, next_hash}});
+                                m_node_context.connman->PushMessage(m_blocks_sync_peer, parent_msg);
+                            }
+                        }
+                        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+                    }
+                }
+            } else {
+                m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+            }
+            std::cout << "[IBD] " << already_have_count
+                      << " orphan blocks awaiting parents (chain="
+                      << chain_height << " headers=" << header_height
+                      << " inflight=" << total_in_flight << ")" << std::endl;
+        } else if (total_in_flight > 0) {
             m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
-        }
-        if (already_have_count > 0) {
-            std::cout << "[IBD] All " << already_have_count
-                      << " candidate blocks are orphans awaiting parents (chain="
-                      << chain_height << " headers=" << header_height << ")" << std::endl;
         }
     }
 
@@ -2015,7 +2064,9 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
     if (m_headers_sync_peer != -1) {
         if (m_node_context.peer_manager) {
             auto peer = m_node_context.peer_manager->GetPeer(m_headers_sync_peer);
-            if (peer) {
+            // BUG FIX: Check IsConnected() - GetPeer() can return stale objects
+            // (mirrors the same fix already in FetchBlocks block sync peer check)
+            if (peer && peer->IsConnected()) {
                 return;  // Current sync peer still valid
             }
         }

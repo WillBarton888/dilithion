@@ -324,6 +324,17 @@ public:
     }
 
     /**
+     * @brief Get the age (seconds) of a tracked height, or -1 if not tracked
+     */
+    int GetTrackingAge(int height) const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_heights.find(height);
+        if (it == m_heights.end()) return -1;
+        auto age = std::chrono::steady_clock::now() - it->second.request_time;
+        return std::chrono::duration_cast<std::chrono::seconds>(age).count();
+    }
+
+    /**
      * @brief Check if tracker has any blocks
      */
     bool IsInitialized() const {

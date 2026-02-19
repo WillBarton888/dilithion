@@ -179,7 +179,8 @@ private:
         NONE,
         VALIDATION_QUEUE_FULL,
         NO_PEERS_AVAILABLE,
-        PEERS_AT_CAPACITY
+        PEERS_AT_CAPACITY,
+        WAITING_ON_PARENT_VALIDATION  // Parent block in DB but not yet connected
     };
     HangCause GetLastHangCause() const { return m_last_hang_cause; }
 
