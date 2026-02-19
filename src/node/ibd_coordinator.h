@@ -236,6 +236,12 @@ private:
     // IBD HANG FIX #6: Hang cause tracking
     mutable HangCause m_last_hang_cause{HangCause::NONE};
 
+    // WAITING_ON_PARENT_VALIDATION timeout: if parent stays in DB but unconnected
+    // for too long, escalate to full recovery (clear tracker, rotate peer).
+    std::chrono::steady_clock::time_point m_parent_validation_wait_start{};
+    bool m_parent_validation_wait_active{false};
+    static constexpr int PARENT_VALIDATION_TIMEOUT_SECS = 30;  // Max wait before escalation
+
     // BUG #158 FIX: Fork detection state
     // THREAD SAFETY FIX: Using atomic for thread-safe access
     std::atomic<int> m_fork_stall_cycles{0};  // Cycles where blocks aren't connecting

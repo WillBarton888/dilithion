@@ -720,6 +720,7 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         }
     } else {
         m_last_hang_cause = HangCause::NONE;  // Clear hang cause on success
+        m_parent_validation_wait_active = false;  // Reset validation wait on progress
         // BUG FIX: Only reset capacity stall counter when chain actually advances.
         // Sending new GETDATA (triggered by incoming headers) doesn't prove the peer
         // is delivering blocks. Without this, incoming headers repeatedly reset the
@@ -1328,14 +1329,36 @@ bool CIbdCoordinator::FetchBlocks() {
             if (!next_hash.IsNull()) {
                 CBlockIndex* pindex = m_chainstate.GetBlockIndex(next_hash);
                 if (pindex && (pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA)) {
-                    // Parent is in DB but not connected - validation queue will handle it.
-                    // Set WAITING_ON_PARENT_VALIDATION instead of PEERS_AT_CAPACITY to
-                    // prevent the 15s stall recovery from wrongly disconnecting the peer.
-                    m_last_hang_cause = HangCause::WAITING_ON_PARENT_VALIDATION;
-                    std::cout << "[IBD] Block " << next_needed
-                              << " is in DB awaiting validation - not a peer stall" << std::endl;
+                    // Parent is in DB but not connected - validation queue should handle it.
+                    // Use WAITING_ON_PARENT_VALIDATION to avoid wrongly disconnecting peer.
+                    // BUT: add a timeout so we don't wait forever if validation is stuck.
+                    if (!m_parent_validation_wait_active) {
+                        m_parent_validation_wait_start = std::chrono::steady_clock::now();
+                        m_parent_validation_wait_active = true;
+                    }
+                    auto wait_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now() - m_parent_validation_wait_start).count();
+
+                    if (wait_elapsed < PARENT_VALIDATION_TIMEOUT_SECS) {
+                        // Still within timeout - give validation queue time to process
+                        m_last_hang_cause = HangCause::WAITING_ON_PARENT_VALIDATION;
+                        std::cout << "[IBD] Block " << next_needed
+                                  << " is in DB awaiting validation (" << wait_elapsed << "s/"
+                                  << PARENT_VALIDATION_TIMEOUT_SECS << "s)" << std::endl;
+                    } else {
+                        // Timeout expired - validation is stuck. Escalate to full recovery:
+                        // clear tracker, rotate peer, let normal stall recovery handle it.
+                        std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
+                                  << " stuck in DB for " << wait_elapsed << "s - escalating to peer recovery"
+                                  << std::endl;
+                        m_parent_validation_wait_active = false;
+                        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+                    }
                 } else {
-                    // Parent is NOT in DB. Check if it's tracked (in-flight).
+                    // Parent is NOT in DB. Reset validation wait timer.
+                    m_parent_validation_wait_active = false;
+
+                    // Check if it's tracked (in-flight).
                     int tracking_age = g_node_context.block_tracker ?
                         g_node_context.block_tracker->GetTrackingAge(next_needed) : -1;
                     if (tracking_age >= 0 && tracking_age < 30) {
@@ -1355,17 +1378,22 @@ bool CIbdCoordinator::FetchBlocks() {
                                       << " missing from DB and tracker - force requesting from peer "
                                       << m_blocks_sync_peer << std::endl;
                         }
+                        // Only force-request if peer has capacity under the IBD scheduler limit
                         if (m_blocks_sync_peer != -1) {
-                            if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, next_needed, next_hash)) {
-                                CNetMessage parent_msg = m_node_context.message_processor->CreateGetDataMessage(
-                                    {{NetProtocol::MSG_BLOCK_INV, next_hash}});
-                                m_node_context.connman->PushMessage(m_blocks_sync_peer, parent_msg);
+                            int peer_inflight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
+                            if (peer_inflight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+                                if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, next_needed, next_hash)) {
+                                    CNetMessage parent_msg = m_node_context.message_processor->CreateGetDataMessage(
+                                        {{NetProtocol::MSG_BLOCK_INV, next_hash}});
+                                    m_node_context.connman->PushMessage(m_blocks_sync_peer, parent_msg);
+                                }
                             }
                         }
                         m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
                     }
                 }
             } else {
+                m_parent_validation_wait_active = false;
                 m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
             }
             std::cout << "[IBD] " << already_have_count
