@@ -121,6 +121,42 @@ void CIbdCoordinator::Tick() {
     int chain_height = m_chainstate.GetHeight();
 
     // =========================================================================
+    // IBD PROGRESS DISPLAY (user-facing)
+    // =========================================================================
+    // Show sync progress every 30 seconds so new users know what's happening
+    {
+        static auto last_progress_time = std::chrono::steady_clock::now();
+        static int last_progress_height = 0;
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_progress_time).count();
+
+        if (elapsed >= 30 && header_height > 0 && chain_height < header_height) {
+            int blocks_per_sec = (elapsed > 0) ? (chain_height - last_progress_height) / elapsed : 0;
+            int remaining = header_height - chain_height;
+            int eta_seconds = (blocks_per_sec > 0) ? remaining / blocks_per_sec : 0;
+
+            std::cout << "[Sync] Progress: " << chain_height << "/" << header_height
+                      << " blocks (" << (header_height > 0 ? (chain_height * 100 / header_height) : 0) << "%)";
+            if (blocks_per_sec > 0) {
+                std::cout << " - " << blocks_per_sec << " blocks/sec";
+                if (eta_seconds > 0) {
+                    int mins = eta_seconds / 60;
+                    int secs = eta_seconds % 60;
+                    if (mins > 0) {
+                        std::cout << " - ~" << mins << "m " << secs << "s remaining";
+                    } else {
+                        std::cout << " - ~" << secs << "s remaining";
+                    }
+                }
+            }
+            std::cout << std::endl;
+
+            last_progress_time = now;
+            last_progress_height = chain_height;
+        }
+    }
+
+    // =========================================================================
     // BITCOIN CORE STYLE SINGLE-SYNC-PEER HEADERS MANAGEMENT
     // =========================================================================
 

@@ -761,26 +761,37 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 std::vector<uint8_t> mikPubkey;
                 if (wallet.GetMIKPubKey(mikPubkey)) {
                     // DFMP v3.0: Mine registration PoW nonce (cached to avoid re-mining)
+                    // Thread-safety: atomic flag prevents duplicate PoW mining when
+                    // BuildMiningTemplate is called concurrently (e.g. main thread
+                    // startup + chain tip callback from P2P thread)
                     static uint64_t s_cachedRegNonce = 0;
-                    static bool s_regNonceMined = false;
+                    static std::atomic<bool> s_regNonceMined{false};
+                    static std::atomic<bool> s_regPowInProgress{false};
                     static DFMP::Identity s_regNonceIdentity;
                     uint64_t regNonce = 0;
                     if (Dilithion::g_chainParams && nHeight >= Dilithion::g_chainParams->dfmpV3ActivationHeight) {
-                        if (s_regNonceMined && s_regNonceIdentity == mikIdentity) {
+                        if (s_regNonceMined.load() && s_regNonceIdentity == mikIdentity) {
                             regNonce = s_cachedRegNonce;
-                        } else {
+                        } else if (!s_regPowInProgress.exchange(true)) {
+                            // We acquired the lock - mine the PoW
                             std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
                             if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce)) {
                                 s_cachedRegNonce = regNonce;
-                                s_regNonceMined = true;
                                 s_regNonceIdentity = mikIdentity;
+                                s_regNonceMined.store(true);
                             } else {
                                 std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
                             }
+                            s_regPowInProgress.store(false);
+                        } else {
+                            // Another thread is already mining registration PoW - skip MIK for this template.
+                            // The next template rebuild (after PoW completes) will include the cached nonce.
+                            std::cout << "[DFMP v3.0] Registration PoW already in progress on another thread, skipping MIK..." << std::endl;
+                            regNonce = UINT64_MAX;  // Sentinel: skip registration
                         }
                     }
 
-                    if (DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, regNonce, mikData)) {
+                    if (regNonce != UINT64_MAX && DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, regNonce, mikData)) {
                         scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
                         if (verbose) {
                             std::cout << "  MIK: Registration (first block with this identity)" << std::endl;
@@ -2210,7 +2221,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // BUG #32 FIX: Register callback for mining template updates on chain tip change
         SetChainTipUpdateCallback([&blockchain](CBlockchainDB& db, int new_height, bool is_reorg) {
             // Only update if mining is enabled and not in IBD
-            if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
+            // Without the IBD check, BuildMiningTemplate runs on every block during sync,
+            // and at height 7000+ triggers MineRegistrationPoW which blocks the processing
+            // thread for ~10-15 minutes, stalling IBD.
+            if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()
+                && !IsInitialBlockDownload()) {
                 std::cout << "[Mining] " << (is_reorg ? "Reorg" : "New tip")
                           << " detected - updating template immediately..." << std::endl;
                 auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false, g_node_state.mining_address_override);
@@ -2373,6 +2388,89 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             } else {
                 std::cout << "  [INFO] No existing chain - heat tracker will populate during sync" << std::endl;
+            }
+        }
+
+        // =========================================================================
+        // BUG #263 FIX: Rebuild identity DB from full chain when empty (bootstrap fix)
+        // =========================================================================
+        // When a node starts from a bootstrap snapshot, the dfmp_identity/ database
+        // may be missing or empty. Without MIK pubkeys, blocks above dfmpAssumeValidHeight
+        // fail validation because the miner's pubkey can't be found.
+        // Fix: Scan ALL blocks from dfmpActivationHeight to tip and store all MIK
+        // registrations (firstSeen + pubkey) in the identity database.
+        if (DFMP::g_identityDb != nullptr) {
+            CBlockIndex* pindexTip = g_chainstate.GetTip();
+            if (pindexTip != nullptr && pindexTip->nHeight > 0) {
+                size_t identityCount = DFMP::g_identityDb->GetIdentityCount();
+                if (identityCount == 0) {
+                    std::cout << "Rebuilding identity database from chain (bootstrap detected)..." << std::endl;
+
+                    int dfmpActivation = Dilithion::g_chainParams ?
+                        Dilithion::g_chainParams->dfmpActivationHeight : 0;
+                    int tipHeight = pindexTip->nHeight;
+
+                    // Walk the active chain from tip backward to collect all blocks
+                    std::vector<CBlockIndex*> chainBlocks;
+                    CBlockIndex* pindex = pindexTip;
+                    while (pindex != nullptr && pindex->nHeight >= dfmpActivation) {
+                        chainBlocks.push_back(pindex);
+                        pindex = pindex->pprev;
+                    }
+
+                    int registered = 0;
+                    int skipped = 0;
+
+                    // Process from oldest to newest
+                    for (auto it = chainBlocks.rbegin(); it != chainBlocks.rend(); ++it) {
+                        CBlockIndex* blockIndex = *it;
+
+                        CBlock block;
+                        if (!blockchain.ReadBlock(blockIndex->GetBlockHash(), block) || block.vtx.empty()) {
+                            skipped++;
+                            continue;
+                        }
+
+                        CBlockValidator validator;
+                        std::vector<CTransactionRef> transactions;
+                        std::string error;
+                        if (!validator.DeserializeBlockTransactions(block, transactions, error) ||
+                            transactions.empty() || transactions[0]->vin.empty()) {
+                            skipped++;
+                            continue;
+                        }
+
+                        DFMP::CMIKScriptData mikData;
+                        if (!DFMP::ParseMIKFromScriptSig(transactions[0]->vin[0].scriptSig, mikData) ||
+                            mikData.identity.IsNull()) {
+                            skipped++;
+                            continue;
+                        }
+
+                        // Store first-seen height
+                        if (!DFMP::g_identityDb->Exists(mikData.identity)) {
+                            DFMP::g_identityDb->SetFirstSeen(mikData.identity, blockIndex->nHeight);
+                        }
+
+                        // Store MIK public key on registration
+                        if (mikData.isRegistration && !DFMP::g_identityDb->HasMIKPubKey(mikData.identity)) {
+                            DFMP::g_identityDb->SetMIKPubKey(mikData.identity, mikData.pubkey);
+                            registered++;
+                        }
+                    }
+
+                    std::cout << "  [OK] Rebuilt identity database: " << registered
+                              << " MIK pubkey(s) registered from " << chainBlocks.size()
+                              << " block(s) (height " << dfmpActivation << " to " << tipHeight << ")"
+                              << std::endl;
+                    if (skipped > 0) {
+                        std::cerr << "  [WARN] " << skipped
+                                  << " block(s) could not be parsed during identity rebuild" << std::endl;
+                    }
+                } else {
+                    std::cout << "  [OK] Identity database has " << identityCount
+                              << " known identities" << std::endl;
+                }
             }
         }
 
