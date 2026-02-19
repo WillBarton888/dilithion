@@ -815,11 +815,9 @@ bool CIbdCoordinator::FetchBlocks() {
     // ============ SELECT BLOCK SYNC PEER ============
     // Check if current block sync peer is still valid AND has blocks we need
     if (m_blocks_sync_peer != -1) {
-        auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
-        // BUG FIX: Also check IsConnected() - GetPeer returns stale objects
-        if (!peer || !peer->IsConnected()) {
+        CNode* node = m_node_context.peer_manager->GetNode(m_blocks_sync_peer);
+        if (!node || !node->IsConnected()) {
             std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer << " disconnected" << std::endl;
-            // BUG FIX: Clear in-flight blocks from disconnected peer
             if (g_node_context.block_tracker) {
                 auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
                 if (!cleared.empty()) {
@@ -830,13 +828,9 @@ bool CIbdCoordinator::FetchBlocks() {
             m_blocks_sync_peer = -1;
         } else {
             // BUG FIX: Re-select peer if their height is too low for blocks we need
-            // This happens when:
-            // 1. Peer selected during IBD with height N
-            // 2. Network advances, we need block N+1
-            // 3. Peer's best_known_height wasn't updated (or is stale)
-            // Without this check, we'd be stuck requesting from a peer that can't serve us
-            int peer_height = peer->best_known_height;
-            if (peer_height == 0) peer_height = peer->start_height;
+            auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
+            int peer_height = peer ? peer->best_known_height : 0;
+            if (peer_height == 0 && peer) peer_height = peer->start_height;
 
             // BUG FIX #2: Also reselect if current peer is far below header height
             // This helps when better peers connect while we're stuck on a lower-height peer
@@ -978,7 +972,9 @@ bool CIbdCoordinator::FetchBlocks() {
         // chain, at least one peer on the network has those blocks.
         if (best_peer == -1 && header_height > chain_height) {
             for (const auto& peer : peers) {
-                if (!peer || !peer->IsConnected()) continue;
+                if (!peer) continue;
+                CNode* pnode = m_node_context.peer_manager->GetNode(peer->id);
+                if (!pnode || !pnode->IsConnected()) continue;
                 // Skip timed-out peer during cooldown
                 if (peer->id == m_timed_out_peer && m_timed_out_peer != -1) {
                     auto elapsed = std::chrono::steady_clock::now() - m_timed_out_peer_time;
@@ -1015,10 +1011,10 @@ bool CIbdCoordinator::FetchBlocks() {
                         peers_with_blocks.insert(peer_id);
                     }
 
-                    // Check each peer and clear if disconnected
+                    // Check each peer and clear if disconnected (use CNode state, not CPeer)
                     for (NodeId peer_id : peers_with_blocks) {
-                        auto peer = m_node_context.peer_manager->GetPeer(peer_id);
-                        if (!peer || !peer->IsConnected()) {
+                        CNode* pnode = m_node_context.peer_manager->GetNode(peer_id);
+                        if (!pnode || !pnode->IsConnected()) {
                             auto cleared = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
                             if (!cleared.empty()) {
                                 std::cout << "[IBD] Cleared " << cleared.size()
@@ -1036,9 +1032,8 @@ bool CIbdCoordinator::FetchBlocks() {
     }
 
     // ============ REQUEST BLOCKS FROM SINGLE PEER ============
-    auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
-    // BUG FIX: Also check IsConnected() - GetPeer returns stale objects
-    if (!peer || !peer->IsConnected()) {
+    CNode* sync_node = m_node_context.peer_manager->GetNode(m_blocks_sync_peer);
+    if (!sync_node || !sync_node->IsConnected()) {
         // BUG FIX: Clear in-flight blocks from disconnected peer
         if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
             auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
@@ -1062,8 +1057,9 @@ bool CIbdCoordinator::FetchBlocks() {
     // Get peer height
     // BUG FIX: If this peer is our headers sync peer, they have blocks up to header_height
     // (they sent us the headers). Use header_height instead of stale best_known_height.
-    int peer_height = peer->best_known_height;
-    if (peer_height == 0) peer_height = peer->start_height;
+    auto peer = m_node_context.peer_manager->GetPeer(m_blocks_sync_peer);
+    int peer_height = peer ? peer->best_known_height : 0;
+    if (peer_height == 0 && peer) peer_height = peer->start_height;
     if (m_blocks_sync_peer == m_headers_sync_peer) {
         // Headers sync peer definitely has blocks up to header_height
         peer_height = std::max(peer_height, header_height);
@@ -1099,8 +1095,8 @@ bool CIbdCoordinator::FetchBlocks() {
                 }
 
                 for (NodeId peer_id : peers_with_blocks) {
-                    auto peer_check = m_node_context.peer_manager->GetPeer(peer_id);
-                    if (!peer_check || !peer_check->IsConnected()) {
+                    CNode* pnode = m_node_context.peer_manager->GetNode(peer_id);
+                    if (!pnode || !pnode->IsConnected()) {
                         auto cleared = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
                         if (!cleared.empty()) {
                             std::cout << "[IBD] Cleared " << cleared.size()
@@ -2105,10 +2101,9 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
     // If we already have a sync peer, check if they're still connected
     if (m_headers_sync_peer != -1) {
         if (m_node_context.peer_manager) {
-            auto peer = m_node_context.peer_manager->GetPeer(m_headers_sync_peer);
-            // BUG FIX: Check IsConnected() - GetPeer() can return stale objects
-            // (mirrors the same fix already in FetchBlocks block sync peer check)
-            if (peer && peer->IsConnected()) {
+            // Use CNode::IsConnected() (authoritative) instead of CPeer::IsConnected() (deprecated)
+            CNode* node = m_node_context.peer_manager->GetNode(m_headers_sync_peer);
+            if (node && node->IsConnected()) {
                 return;  // Current sync peer still valid
             }
         }
