@@ -1,12 +1,11 @@
 ================================================================
   DILITHION - POST-QUANTUM CRYPTOCURRENCY
-  TESTNET RELEASE v1.0.0 - LINUX
+  MAINNET RELEASE - LINUX
 ================================================================
 
 Welcome to Dilithion!
 
-This is the TESTNET version. Testnet coins have NO monetary value.
-They are for testing only.
+This is the MAINNET. DIL coins you mine here are real.
 
 ================================================================
   WHAT IS DILITHION?
@@ -16,10 +15,10 @@ Dilithion is a post-quantum cryptocurrency that uses NIST-
 standardized cryptography (CRYSTALS-Dilithium, SHA-3) to protect
 against future quantum computer attacks.
 
-This testnet allows you to:
-  - Test mining Dilithion coins (testnet DIL)
-  - Experiment with the wallet
-  - Help us find bugs before mainnet launch
+With Dilithion you can:
+  - Mine DIL coins using your CPU
+  - Send and receive quantum-resistant transactions
+  - Run a full node to support the network
 
 ================================================================
   INSTALL DEPENDENCIES (REQUIRED FIRST!)
@@ -37,60 +36,39 @@ FEDORA / RHEL / CENTOS:
 ARCH LINUX:
   sudo pacman -S leveldb snappy
 
+ALPINE LINUX:
+  sudo apk add leveldb-dev snappy-dev
+
 OPENSUSE:
   sudo zypper install leveldb-devel libsnappy-devel
 
 These libraries are required for the blockchain database.
 
 ================================================================
-  FAST SYNC WITH BOOTSTRAP (OPTIONAL)
-================================================================
-
-Want to skip the initial blockchain download? Download our
-bootstrap file to start with a pre-synced blockchain!
-
-1. Download the bootstrap from the GitHub release:
-   https://github.com/dilithion/dilithion/releases
-
-   Look for: bootstrap-testnet-blockXXXXX.tar.gz
-
-2. Create the data directory (if it doesn't exist):
-   mkdir -p ~/.dilithion-testnet
-
-3. Extract the bootstrap:
-   tar -xzf bootstrap-testnet-*.tar.gz -C ~/.dilithion-testnet --strip-components=1
-
-4. Start the node normally - it will sync from the bootstrap height!
-
-NOTE: If you're starting fresh, you can skip this step. The node
-will sync automatically (just takes a bit longer).
-
-================================================================
   GETTING STARTED - THREE EASY WAYS
 ================================================================
 
-OPTION 1: ONE-CLICK MINING (Easiest!)
+OPTION 1: INTERACTIVE SETUP WIZARD (Recommended for first time!)
+---------------------------------------
+1. Open terminal in this directory
+2. Run: ./setup-and-start.sh
+3. Follow the on-screen instructions
+
+The wizard will:
+  - Offer to download a blockchain snapshot for fast sync
+  - Let you choose how many CPU cores to use
+  - Start mining automatically
+
+OPTION 2: ONE-CLICK MINING (Quick start)
 ---------------------------------------
 1. Open terminal in this directory
 2. Run: ./start-mining.sh
 3. You're mining!
 
-That's it! The script automatically:
-  - Connects to the official seed node
+The script automatically:
+  - Connects to the official seed nodes
   - Detects your CPU cores
-  - Starts mining testnet DIL
-
-
-OPTION 2: INTERACTIVE SETUP WIZARD
----------------------------------------
-1. Open terminal in this directory
-2. Run: ./setup-and-start.sh
-3. Follow the on-screen instructions
-4. Choose how many CPU cores to use
-5. Start mining!
-
-This wizard walks you through each step and explains
-what each setting does.
+  - Starts mining DIL
 
 
 OPTION 3: ADVANCED (Command Line)
@@ -99,7 +77,7 @@ Run with no arguments for auto-start:
   ./dilithion-node
 
 Or customize with arguments:
-  ./dilithion-node --testnet --mine --threads=4
+  ./dilithion-node --mine --threads=4
 
 For all options:
   ./dilithion-node --help
@@ -131,12 +109,13 @@ The node will shut down gracefully.
 When you start mining, you'll see:
 
 1. CONNECTION MESSAGES
-   - "Connected to peer: 134.122.4.164:18444" (or Singapore/London)
+   - "Connected to peer: 138.197.68.128:8444" (or London/Singapore/Sydney)
    - This means you've connected to one of the official seed nodes
 
 2. BLOCKCHAIN SYNC
    - "Downloading blocks..."
    - Your node catches up to the latest block
+   - First sync requires ~2.5 GB RAM for RandomX initialization
 
 3. MINING MESSAGES
    - "Mining block at height XXXXX..."
@@ -145,7 +124,6 @@ When you start mining, you'll see:
 
 4. NETWORK ACTIVITY
    - Messages about peers connecting/disconnecting
-   - New transactions received
    - New blocks discovered by other miners
 
 ================================================================
@@ -153,41 +131,38 @@ When you start mining, you'll see:
 ================================================================
 
 Q: How long until I mine a block?
-A: Testnet difficulty is LOW (256x easier than mainnet).
-   Depending on your CPU and network hashrate, you might find
-   blocks in minutes to hours. Mainnet will be much harder!
-
-Q: Do testnet coins have value?
-A: NO! Testnet DIL has zero monetary value. They are for
-   testing only. The mainnet will launch later with real coins.
+A: Block time is ~4 minutes. With multiple miners on the network,
+   it depends on your CPU power relative to the total hashrate.
+   Be patient - mining is competitive!
 
 Q: How do I check my balance?
 A: Run: ./check-wallet-balance
-   This shows your testnet DIL balance.
+   This shows your DIL balance.
 
-Q: Is this safe?
-A: Testnet mining is safe. It only uses CPU (no GPU needed)
-   and won't harm your computer. You can stop it anytime with
-   Ctrl+C.
+Q: Is mining safe for my computer?
+A: Mining is safe. It uses CPU only (no GPU needed) and won't
+   harm your computer. You can stop it anytime with Ctrl+C.
+   Note: RandomX mining uses ~2.5 GB RAM.
 
 Q: Can I run this on a server?
 A: Yes! For headless servers, use:
-   ./dilithion-node --testnet --mine --threads=auto
+   ./dilithion-node --mine --threads=auto
 
    Or run in screen/tmux to keep it running after logout.
 
 Q: What are the official seed nodes?
-A: NYC: 134.122.4.164:18444 (Primary)
-   Singapore: 188.166.255.63:18444 (Asia-Pacific)
-   London: 209.97.177.197:18444 (Europe)
+A: NYC:       138.197.68.128:8444   (Primary)
+   London:    167.172.56.119:8444   (Europe)
+   Singapore: 165.22.103.114:8444   (Asia-Pacific)
+   Sydney:    134.199.159.83:8444   (Oceania)
    All launcher scripts connect to these automatically.
 
 ================================================================
   SYSTEM REQUIREMENTS
 ================================================================
 
-- Linux kernel 3.2+ (Ubuntu 16.04+, Debian 9+, CentOS 7+, etc.)
-- 2 GB RAM minimum (4 GB recommended)
+- Linux kernel 3.2+ (Ubuntu 18.04+, Debian 10+, CentOS 7+, etc.)
+- 4 GB RAM minimum (RandomX mining requires ~2.5 GB)
 - 1 GB disk space
 - x86_64 (64-bit) processor
 - Internet connection
@@ -197,14 +172,13 @@ A: NYC: 134.122.4.164:18444 (Primary)
 ================================================================
 
 dilithion-node           Main node software (mining + wallet)
-check-wallet-balance     Check your testnet DIL balance
+check-wallet-balance     Check your DIL balance
 genesis_gen              Genesis block generator (advanced)
 
 start-mining.sh          One-click mining launcher
 setup-and-start.sh       Interactive setup wizard
 
-README-LINUX.txt         This file
-TESTNET-GUIDE.md         Detailed testnet documentation
+README.txt               This file
 
 ================================================================
   RUNNING AS A SERVICE (OPTIONAL)
@@ -217,14 +191,14 @@ To run Dilithion as a systemd service:
 
 2. Add this content:
    [Unit]
-   Description=Dilithion Testnet Node
+   Description=Dilithion Mainnet Node
    After=network.target
 
    [Service]
    Type=simple
    User=YOUR_USERNAME
    WorkingDirectory=/path/to/dilithion
-   ExecStart=/path/to/dilithion/dilithion-node --testnet --mine
+   ExecStart=/path/to/dilithion/dilithion-node --mine
    Restart=always
 
    [Install]
@@ -245,33 +219,9 @@ To run Dilithion as a systemd service:
 ================================================================
 
 Website:        https://dilithion.org
-Documentation:  https://github.com/dilithion/dilithion
-Testnet Guide:  See TESTNET-GUIDE.md in this folder
-
+Telegram:       https://t.me/dilithion
+Source Code:    https://github.com/dilithion/dilithion
 Report bugs:    https://github.com/dilithion/dilithion/issues
-
-================================================================
-  SECURITY NOTE
-================================================================
-
-IMPORTANT: This is TESTNET software. Do NOT use testnet wallets
-or addresses for real value. When mainnet launches, you'll need
-to create a new wallet.
-
-The testnet uses different network ports and a different genesis
-block than mainnet. They are completely separate networks.
-
-================================================================
-  WHAT'S NEXT?
-================================================================
-
-1. Start mining with ./start-mining.sh
-2. Let it run for a while (at least 30 minutes)
-3. Check your balance with ./check-wallet-balance
-4. Experiment with the software
-5. Report any bugs you find!
-
-Thank you for helping test Dilithion!
 
 ================================================================
   QUANTUM-RESISTANT CRYPTOGRAPHY

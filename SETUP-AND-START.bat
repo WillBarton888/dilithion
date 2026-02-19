@@ -110,8 +110,14 @@ echo.
 echo  Connecting to seed nodes...
 echo  Initializing mining with %threads_display%...
 echo.
+echo  NOTE: First sync requires ~2.5 GB RAM for RandomX mining.
+echo  The node may appear to pause briefly while initializing.
+echo  This is normal - please be patient!
+echo.
 echo  The node will start shortly.
 echo  Press Ctrl+C anytime to stop mining.
+echo.
+echo  Need help? Join us: https://t.me/dilithion
 echo.
 echo  ========================================================
 echo.

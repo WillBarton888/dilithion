@@ -168,7 +168,80 @@ fi
 echo -e "${GREEN}✓ All dependencies found${NC}"
 echo ""
 
-./dilithion-node --mine --threads=$threads
+# Check if binary exists
+if [ ! -f "./dilithion-node" ]; then
+    echo -e "${YELLOW}ERROR: dilithion-node binary not found in current directory.${NC}"
+    echo "  Make sure you extracted the release package and are running from"
+    echo "  inside the extracted folder."
+    echo ""
+    echo "  Need help? Join us: https://t.me/dilithion"
+    exit 1
+fi
+
+# Set library path to include bundled libs
+if [ -d "./lib" ]; then
+    export LD_LIBRARY_PATH="./lib:${LD_LIBRARY_PATH}"
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        export DYLD_LIBRARY_PATH="./lib:${DYLD_LIBRARY_PATH}"
+    fi
+fi
+
+# =========================================================================
+# BOOTSTRAP: Fast-sync for first-time users
+# =========================================================================
+# Detect if this is a first run (no existing blockchain data)
+DATA_DIR="$HOME/.dilithion"
+if [ ! -d "$DATA_DIR/blocks" ] || [ ! -d "$DATA_DIR/chainstate" ]; then
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  FIRST TIME SETUP - Fast Sync Available${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  You can either:"
+    echo "    1) Download a blockchain snapshot (~67 MB) for instant sync"
+    echo "    2) Sync from scratch (slower, may take a while)"
+    echo ""
+    read -p "  Download snapshot for fast sync? [Y/n]: " bootstrap_choice
+
+    if [ -z "$bootstrap_choice" ] || [ "$bootstrap_choice" = "Y" ] || [ "$bootstrap_choice" = "y" ]; then
+        BOOTSTRAP_URL="https://github.com/dilithion/dilithion/releases/latest/download/bootstrap-mainnet-v3.3.12.tar.gz"
+        BOOTSTRAP_FILE="/tmp/dilithion-bootstrap.tar.gz"
+
+        echo ""
+        echo "  Downloading blockchain snapshot..."
+        if command -v wget >/dev/null 2>&1; then
+            wget -q --show-progress -O "$BOOTSTRAP_FILE" "$BOOTSTRAP_URL"
+        elif command -v curl >/dev/null 2>&1; then
+            curl -L --progress-bar -o "$BOOTSTRAP_FILE" "$BOOTSTRAP_URL"
+        else
+            echo -e "${YELLOW}  Neither wget nor curl found. Skipping bootstrap.${NC}"
+            echo "  The node will sync from scratch instead."
+            BOOTSTRAP_FILE=""
+        fi
+
+        if [ -n "$BOOTSTRAP_FILE" ] && [ -f "$BOOTSTRAP_FILE" ]; then
+            echo "  Extracting snapshot..."
+            mkdir -p "$DATA_DIR"
+            tar -xzf "$BOOTSTRAP_FILE" -C "$DATA_DIR" --strip-components=1
+            rm -f "$BOOTSTRAP_FILE"
+            echo -e "${GREEN}  ✓ Blockchain snapshot installed! Node will sync remaining blocks.${NC}"
+        fi
+    else
+        echo "  OK, syncing from scratch. This may take a while."
+    fi
+    echo ""
+fi
+
+echo -e "${BLUE}Starting Dilithion node...${NC}"
+echo ""
+echo "  NOTE: First sync requires ~2.5 GB RAM for RandomX mining."
+echo "  The node may appear to pause briefly while initializing."
+echo "  This is normal - please be patient!"
+echo ""
+echo "  Need help? Join us: https://t.me/dilithion"
+echo ""
+
+./dilithion-node --mine --threads="$threads"
 
 echo ""
 echo -e "${YELLOW}"

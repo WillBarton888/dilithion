@@ -59,7 +59,7 @@ if [ ! -f "dilithion-node" ]; then
     echo ""
     echo "Current directory: $(pwd)"
     echo ""
-    echo "For support: https://discord.gg/dilithion"
+    echo "For support: https://t.me/dilithion"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     exit 1
 fi
@@ -167,7 +167,7 @@ elif [ "$OS_TYPE" = "Darwin" ]; then
         echo ""
         echo "  5. Then run this mining script again"
         echo ""
-        echo "For support: https://discord.gg/dilithion"
+        echo "For support: https://t.me/dilithion"
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         exit 1
     fi
@@ -194,6 +194,14 @@ fi
 
 echo -e "${GREEN}✓ All dependencies found${NC}"
 echo ""
+
+# Set library path to include bundled libs
+if [ -d "./lib" ]; then
+    export LD_LIBRARY_PATH="./lib:${LD_LIBRARY_PATH}"
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        export DYLD_LIBRARY_PATH="./lib:${DYLD_LIBRARY_PATH}"
+    fi
+fi
 
 ./dilithion-node --mine --threads=auto
 

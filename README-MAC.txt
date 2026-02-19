@@ -1,12 +1,11 @@
 ================================================================
   DILITHION - POST-QUANTUM CRYPTOCURRENCY
-  TESTNET RELEASE v1.0.0 - macOS
+  MAINNET RELEASE - macOS
 ================================================================
 
 Welcome to Dilithion!
 
-This is the TESTNET version. Testnet coins have NO monetary value.
-They are for testing only.
+This is the MAINNET. DIL coins you mine here are real.
 
 ================================================================
   WHAT IS DILITHION?
@@ -16,10 +15,10 @@ Dilithion is a post-quantum cryptocurrency that uses NIST-
 standardized cryptography (CRYSTALS-Dilithium, SHA-3) to protect
 against future quantum computer attacks.
 
-This testnet allows you to:
-  - Test mining Dilithion coins (testnet DIL)
-  - Experiment with the wallet
-  - Help us find bugs before mainnet launch
+With Dilithion you can:
+  - Mine DIL coins using your CPU
+  - Send and receive quantum-resistant transactions
+  - Run a full node to support the network
 
 ================================================================
   INSTALL DEPENDENCIES (REQUIRED FIRST!)
@@ -36,58 +35,35 @@ Before running Dilithion, install Homebrew and LevelDB:
 This database library is required for the blockchain storage.
 
 ================================================================
-  FAST SYNC WITH BOOTSTRAP (OPTIONAL)
-================================================================
-
-Want to skip the initial blockchain download? Download our
-bootstrap file to start with a pre-synced blockchain!
-
-1. Download the bootstrap from the GitHub release:
-   https://github.com/dilithion/dilithion/releases
-
-   Look for: bootstrap-testnet-blockXXXXX.tar.gz
-
-2. Create the data directory (if it doesn't exist):
-   mkdir -p ~/.dilithion-testnet
-
-3. Extract the bootstrap:
-   tar -xzf bootstrap-testnet-*.tar.gz -C ~/.dilithion-testnet --strip-components=1
-
-4. Start the node normally - it will sync from the bootstrap height!
-
-NOTE: If you're starting fresh, you can skip this step. The node
-will sync automatically (just takes a bit longer).
-
-================================================================
   GETTING STARTED - THREE EASY WAYS
 ================================================================
 
-OPTION 1: ONE-CLICK MINING (Easiest!)
+OPTION 1: INTERACTIVE SETUP WIZARD (Recommended for first time!)
 ---------------------------------------
 1. Open Terminal (Applications > Utilities > Terminal)
 2. Navigate to this folder:
-   cd ~/Downloads/dilithion-testnet-macos
+   cd ~/Downloads/dilithion-macos
    (or wherever you extracted the files)
-3. Run: ./start-mining.sh
-4. You're mining!
+3. Run: ./setup-and-start.sh
+4. Follow the on-screen instructions
 
-That's it! The script automatically:
-  - Connects to the official seed node
-  - Detects your CPU cores
-  - Starts mining testnet DIL
+The wizard will:
+  - Offer to download a blockchain snapshot for fast sync
+  - Let you choose how many CPU cores to use
+  - Start mining automatically
 
 
-OPTION 2: INTERACTIVE SETUP WIZARD
+OPTION 2: ONE-CLICK MINING (Quick start)
 ---------------------------------------
 1. Open Terminal
 2. Navigate to this folder
-3. Run: ./setup-and-start.sh
-4. Follow the on-screen instructions
-5. Choose how many CPU cores to use
-6. Start mining!
+3. Run: ./start-mining.sh
+4. You're mining!
 
-This wizard walks you through each step and explains
-what each setting does.
+The script automatically:
+  - Connects to the official seed nodes
+  - Detects your CPU cores
+  - Starts mining DIL
 
 
 OPTION 3: ADVANCED (Command Line)
@@ -96,7 +72,7 @@ Run with no arguments for auto-start:
   ./dilithion-node
 
 Or customize with arguments:
-  ./dilithion-node --testnet --mine --threads=4
+  ./dilithion-node --mine --threads=4
 
 For all options:
   ./dilithion-node --help
@@ -125,9 +101,9 @@ Method 2 (Command Line):
   xattr -d com.apple.quarantine start-mining.sh
   xattr -d com.apple.quarantine setup-and-start.sh
 
-Method 3 (Allow in System Preferences):
+Method 3 (Allow in System Settings):
 1. Try to run the binary
-2. Go to System Preferences > Security & Privacy
+2. Go to System Settings > Privacy & Security
 3. Click "Allow Anyway" for the blocked app
 4. Try running again
 
@@ -155,12 +131,13 @@ The node will shut down gracefully.
 When you start mining, you'll see:
 
 1. CONNECTION MESSAGES
-   - "Connected to peer: 134.122.4.164:18444" (or Singapore/London)
+   - "Connected to peer: 138.197.68.128:8444" (or London/Singapore/Sydney)
    - This means you've connected to one of the official seed nodes
 
 2. BLOCKCHAIN SYNC
    - "Downloading blocks..."
    - Your node catches up to the latest block
+   - First sync requires ~2.5 GB RAM for RandomX initialization
 
 3. MINING MESSAGES
    - "Mining block at height XXXXX..."
@@ -169,7 +146,6 @@ When you start mining, you'll see:
 
 4. NETWORK ACTIVITY
    - Messages about peers connecting/disconnecting
-   - New transactions received
    - New blocks discovered by other miners
 
 ================================================================
@@ -177,27 +153,23 @@ When you start mining, you'll see:
 ================================================================
 
 Q: How long until I mine a block?
-A: Testnet difficulty is LOW (256x easier than mainnet).
-   Depending on your CPU and network hashrate, you might find
-   blocks in minutes to hours. Mainnet will be much harder!
-
-Q: Do testnet coins have value?
-A: NO! Testnet DIL has zero monetary value. They are for
-   testing only. The mainnet will launch later with real coins.
+A: Block time is ~4 minutes. With multiple miners on the network,
+   it depends on your CPU power relative to the total hashrate.
+   Be patient - mining is competitive!
 
 Q: How do I check my balance?
 A: Run: ./check-wallet-balance
-   This shows your testnet DIL balance.
+   This shows your DIL balance.
 
-Q: Is this safe?
-A: Testnet mining is safe. It only uses CPU (no GPU needed)
-   and won't harm your Mac. You can stop it anytime with Ctrl+C.
+Q: Is mining safe for my Mac?
+A: Mining is safe. It uses CPU only (no GPU needed) and won't
+   harm your Mac. You can stop it anytime with Ctrl+C.
+   Note: RandomX mining uses ~2.5 GB RAM.
 
-Q: Will this work on Apple Silicon (M1/M2/M3)?
+Q: Will this work on Apple Silicon (M1/M2/M3/M4)?
 A: This binary is compiled for x86_64 (Intel). It will run on
    Apple Silicon Macs through Rosetta 2 translation, but may be
-   slower. We're working on native ARM64 binaries for Apple
-   Silicon.
+   slower. Native ARM64 builds are planned.
 
 Q: Can I mine on a MacBook?
 A: Yes, but MacBooks may get warm. Use the wizard to choose
@@ -205,9 +177,10 @@ A: Yes, but MacBooks may get warm. Use the wizard to choose
    handle mining better.
 
 Q: What are the official seed nodes?
-A: NYC: 134.122.4.164:18444 (Primary)
-   Singapore: 188.166.255.63:18444 (Asia-Pacific)
-   London: 209.97.177.197:18444 (Europe)
+A: NYC:       138.197.68.128:8444   (Primary)
+   London:    167.172.56.119:8444   (Europe)
+   Singapore: 165.22.103.114:8444   (Asia-Pacific)
+   Sydney:    134.199.159.83:8444   (Oceania)
    All launcher scripts connect to these automatically.
 
 ================================================================
@@ -215,7 +188,7 @@ A: NYC: 134.122.4.164:18444 (Primary)
 ================================================================
 
 - macOS 10.13 (High Sierra) or later
-- 2 GB RAM minimum (4 GB recommended)
+- 4 GB RAM minimum (RandomX mining requires ~2.5 GB)
 - 1 GB disk space
 - Intel or Apple Silicon processor
 - Internet connection
@@ -225,14 +198,13 @@ A: NYC: 134.122.4.164:18444 (Primary)
 ================================================================
 
 dilithion-node           Main node software (mining + wallet)
-check-wallet-balance     Check your testnet DIL balance
+check-wallet-balance     Check your DIL balance
 genesis_gen              Genesis block generator (advanced)
 
 start-mining.sh          One-click mining launcher
 setup-and-start.sh       Interactive setup wizard
 
-README-MAC.txt           This file
-TESTNET-GUIDE.md         Detailed testnet documentation
+README.txt               This file
 
 ================================================================
   RUNNING IN BACKGROUND (OPTIONAL)
@@ -255,41 +227,16 @@ To keep mining when you close Terminal:
    screen -r dilithion
 
 Alternatively, use nohup:
-  nohup ./dilithion-node --testnet --mine &
+  nohup ./dilithion-node --mine &
 
 ================================================================
   NEED HELP?
 ================================================================
 
 Website:        https://dilithion.org
-Documentation:  https://github.com/dilithion/dilithion
-Testnet Guide:  See TESTNET-GUIDE.md in this folder
-
+Telegram:       https://t.me/dilithion
+Source Code:    https://github.com/dilithion/dilithion
 Report bugs:    https://github.com/dilithion/dilithion/issues
-
-================================================================
-  SECURITY NOTE
-================================================================
-
-IMPORTANT: This is TESTNET software. Do NOT use testnet wallets
-or addresses for real value. When mainnet launches, you'll need
-to create a new wallet.
-
-The testnet uses different network ports and a different genesis
-block than mainnet. They are completely separate networks.
-
-================================================================
-  WHAT'S NEXT?
-================================================================
-
-1. Bypass macOS security (see "FIRST TIME SETUP" above)
-2. Start mining with ./start-mining.sh
-3. Let it run for a while (at least 30 minutes)
-4. Check your balance with ./check-wallet-balance
-5. Experiment with the software
-6. Report any bugs you find!
-
-Thank you for helping test Dilithion!
 
 ================================================================
   QUANTUM-RESISTANT CRYPTOGRAPHY
