@@ -26,7 +26,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <iomanip>  // For std::fixed, std::setprecision
+#include <cstdio>   // For snprintf (thread-safe number formatting)
 #include <limits>
 
 // FIX-002 (PERSIST-003): File permissions
@@ -624,16 +624,23 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                                 double rewardDIL = static_cast<double>(out.nValue) / 100000000.0;
                                 double balanceDIL = static_cast<double>(newBalance) / 100000000.0;
 
-                                std::cout << "\n";
-                                std::cout << "============================================================" << std::endl;
-                                std::cout << "  MINING REWARD CREDITED!" << std::endl;
-                                std::cout << "============================================================" << std::endl;
-                                std::cout << "  Block Height:    " << height << std::endl;
-                                std::cout << "  Reward:          +" << std::fixed << std::setprecision(8) << rewardDIL << " DIL" << std::endl;
-                                std::cout << "  New Balance:     " << std::fixed << std::setprecision(8) << balanceDIL << " DIL" << std::endl;
-                                std::cout << "  Address:         " << addr.ToString() << std::endl;
-                                std::cout << "============================================================" << std::endl;
-                                std::cout << "\n";
+                                // Thread-safe formatting: use snprintf instead of
+                                // std::fixed/setprecision which modify std::cout's
+                                // persistent format state (race condition with P2P thread)
+                                char rewardStr[64], balanceStr[64];
+                                snprintf(rewardStr, sizeof(rewardStr), "%.8f", rewardDIL);
+                                snprintf(balanceStr, sizeof(balanceStr), "%.8f", balanceDIL);
+
+                                std::cout << "\n"
+                                    << "============================================================\n"
+                                    << "  MINING REWARD CREDITED!\n"
+                                    << "============================================================\n"
+                                    << "  Block Height:    " << height << "\n"
+                                    << "  Reward:          +" << rewardStr << " DIL\n"
+                                    << "  New Balance:     " << balanceStr << " DIL\n"
+                                    << "  Address:         " << addr.ToString() << "\n"
+                                    << "============================================================"
+                                    << std::endl;
 
                                 // BUG #99 FIX: Immediately save wallet after mining reward
                                 // This ensures check-wallet-balance can see the new balance

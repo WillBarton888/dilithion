@@ -196,30 +196,24 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             return false;
         }
 
-        std::cout << "[Chain] DIAG: ConnectTip starting..." << std::flush;
         if (!ConnectTip(pindexNew, block)) {
             std::cerr << "[Chain] ERROR: Failed to connect block extending tip" << std::endl;
             return false;
         }
-        std::cout << " done" << std::endl;
 
         pindexTip = pindexNew;
         // BUG #74 FIX: Update atomic cached height
         m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
 
         // Persist to database
-        std::cout << "[Chain] DIAG: WriteBestBlock starting..." << std::flush;
         if (pdb != nullptr) {
             bool success = pdb->WriteBestBlock(pindexNew->GetBlockHash());
         } else {
             std::cerr << "[Chain] ERROR: pdb is nullptr! Cannot write best block!" << std::endl;
         }
-        std::cout << " done" << std::endl;
 
         // Bug #40 fix: Notify registered callbacks of tip update
-        std::cout << "[Chain] DIAG: NotifyTipUpdate starting..." << std::flush;
         NotifyTipUpdate(pindexTip);
-        std::cout << " done" << std::endl;
 
         return true;
     }

@@ -127,7 +127,17 @@ static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* pExceptionInfo) {
 
         // Decode common exception codes
         switch (pExceptionInfo->ExceptionRecord->ExceptionCode) {
-            case 0xC0000005: crashLog << "Type: ACCESS_VIOLATION (segfault)" << std::endl; break;
+            case 0xC0000005: {
+                crashLog << "Type: ACCESS_VIOLATION (segfault)" << std::endl;
+                // Log read/write flag and target address for access violations
+                if (pExceptionInfo->ExceptionRecord->NumberParameters >= 2) {
+                    ULONG_PTR rwFlag = pExceptionInfo->ExceptionRecord->ExceptionInformation[0];
+                    ULONG_PTR targetAddr = pExceptionInfo->ExceptionRecord->ExceptionInformation[1];
+                    crashLog << "Access Type: " << (rwFlag == 0 ? "READ" : (rwFlag == 1 ? "WRITE" : "DEP"))
+                             << " at address 0x" << std::hex << targetAddr << std::dec << std::endl;
+                }
+                break;
+            }
             case 0xC00000FD: crashLog << "Type: STACK_OVERFLOW" << std::endl; break;
             case 0xC0000094: crashLog << "Type: INTEGER_DIVIDE_BY_ZERO" << std::endl; break;
             case 0xC000001D: crashLog << "Type: ILLEGAL_INSTRUCTION" << std::endl; break;
@@ -139,12 +149,24 @@ static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* pExceptionInfo) {
         CONTEXT* ctx = pExceptionInfo->ContextRecord;
         crashLog << "Registers: RIP=0x" << std::hex << ctx->Rip
                  << " RSP=0x" << ctx->Rsp
-                 << " RBP=0x" << ctx->Rbp << std::dec << std::endl;
+                 << " RBP=0x" << ctx->Rbp
+                 << " RAX=0x" << ctx->Rax
+                 << " RBX=0x" << ctx->Rbx
+                 << " RCX=0x" << ctx->Rcx
+                 << " RDX=0x" << ctx->Rdx << std::dec << std::endl;
 
         crashLog << "===================================" << std::endl;
         crashLog.close();
 
         std::cerr << "\n[CRASH] Fatal exception occurred. Details written to: " << crashLogPath << std::endl;
+        std::cerr << "[CRASH] Code=0x" << std::hex << pExceptionInfo->ExceptionRecord->ExceptionCode
+                  << " Addr=0x" << (uintptr_t)pExceptionInfo->ExceptionRecord->ExceptionAddress
+                  << " RIP=0x" << pExceptionInfo->ContextRecord->Rip << std::dec << std::endl;
+        if (pExceptionInfo->ExceptionRecord->ExceptionCode == 0xC0000005 &&
+            pExceptionInfo->ExceptionRecord->NumberParameters >= 2) {
+            std::cerr << "[CRASH] " << (pExceptionInfo->ExceptionRecord->ExceptionInformation[0] == 0 ? "READ" : "WRITE")
+                      << " at 0x" << std::hex << pExceptionInfo->ExceptionRecord->ExceptionInformation[1] << std::dec << std::endl;
+        }
     }
 
     return EXCEPTION_CONTINUE_SEARCH;  // Let default handler terminate

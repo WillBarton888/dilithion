@@ -495,7 +495,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     BENCHMARK_START("ibd_download_blocks");
     m_last_ibd_attempt = now;
 
-    LogPrintIBD(INFO, "Headers ahead of chain - downloading blocks (header=%d chain=%d)", header_height, chain_height);
+    // Only log download status when chain height changes to reduce log spam
+    static int s_last_logged_chain_height = -1;
+    if (chain_height != s_last_logged_chain_height) {
+        LogPrintIBD(INFO, "Headers ahead of chain - downloading blocks (header=%d chain=%d)", header_height, chain_height);
+        s_last_logged_chain_height = chain_height;
+    }
 
     // ============================================================================
     // LAYER 1: PROACTIVE CHAIN MISMATCH DETECTION (O(1) - runs every tick)
@@ -664,15 +669,14 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
 
     // PURE PER-BLOCK: No more window or queue population needed
     // GetNextBlocksToRequest() directly iterates from chain_height+1 to header_height
-    LogPrintIBD(INFO, "Downloading blocks (chain=%d, header=%d, rate=%.0f%%)...",
-                chain_height, header_height, rate_multiplier * 100.0);
+    // (download status already logged above when chain height changes)
 
     BENCHMARK_START("ibd_fetch_blocks");
     bool any_requested = FetchBlocks();
     BENCHMARK_END("ibd_fetch_blocks");
     if (!any_requested) {
         m_ibd_no_peer_cycles++;
-        // IBD HANG FIX #6: Log specific hang cause
+        // IBD HANG FIX #6: Log specific hang cause (only on state change to reduce spam)
         std::string cause_str = "unknown";
         switch (m_last_hang_cause) {
             case HangCause::VALIDATION_QUEUE_FULL: cause_str = "validation queue full"; break;
@@ -681,7 +685,14 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             case HangCause::WAITING_ON_PARENT_VALIDATION: cause_str = "parent block awaiting validation"; break;
             case HangCause::NONE: cause_str = "no suitable peers"; break;
         }
-        LogPrintIBD(WARN, "Could not send any block requests - %s", cause_str.c_str());
+        // Throttle: only log every 30s to avoid spam during normal IBD backpressure
+        static auto s_last_capacity_log = std::chrono::steady_clock::time_point{};
+        auto log_now = std::chrono::steady_clock::now();
+        if (s_last_capacity_log == std::chrono::steady_clock::time_point{} ||
+            std::chrono::duration_cast<std::chrono::seconds>(log_now - s_last_capacity_log).count() >= 30) {
+            LogPrintIBD(WARN, "Could not send any block requests - %s", cause_str.c_str());
+            s_last_capacity_log = log_now;
+        }
 
         // CAPACITY STALL FIX: If peer stays "at capacity" for too many consecutive ticks
         // without delivering any blocks, the peer is likely dead/unresponsive.
