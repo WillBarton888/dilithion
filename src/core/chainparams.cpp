@@ -87,6 +87,11 @@ ChainParams ChainParams::Mainnet() {
     // v3.3: fixed 12-block free tier, linear ramp to 4.0x at 24, then exponential wall
     params.dfmpV33ActivationHeight = 13500;
 
+    // Compact encoding fix: fixes BigToCompact sign bit bug that caused
+    // difficulty to be 18x harder than intended after retarget at block 18144.
+    // Activates alongside v2 difficulty rules at the same fork height.
+    params.compactEncodingFixHeight = 20160;
+
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
@@ -197,6 +202,9 @@ ChainParams ChainParams::Testnet() {
 
     // DFMP v3.3 - always active on testnet (no dynamic scaling)
     params.dfmpV33ActivationHeight = 0;
+
+    // Compact encoding fix: always active on testnet (no legacy blocks to worry about)
+    params.compactEncodingFixHeight = 0;
 
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted

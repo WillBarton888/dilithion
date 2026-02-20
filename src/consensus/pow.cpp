@@ -120,6 +120,21 @@ uint32_t BigToCompact(const uint256& target) {
     return nCompact;
 }
 
+uint32_t FixCompactEncoding(uint32_t nCompact) {
+    uint32_t nSize = nCompact >> 24;
+    uint32_t nMantissa = nCompact & 0x00ffffff;
+
+    // Bitcoin Core's GetCompact() fix: if bit 23 (the sign bit position) is set,
+    // shift mantissa right by 8 bits and increment the exponent. This prevents
+    // CompactToBig from stripping bit 23 via the 0x007fffff mask.
+    if (nMantissa & 0x00800000) {
+        nMantissa >>= 8;
+        nSize++;
+    }
+
+    return (nSize << 24) | nMantissa;
+}
+
 bool CheckProofOfWork(uint256 hash, uint32_t nBits) {
     // Bug #47 Fix: Match Bitcoin Core approach
     // Don't reject based on arbitrary MIN/MAX_DIFFICULTY_BITS
@@ -886,6 +901,13 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
 
                 // Convert back to compact and enforce bounds
                 uint32_t edaBits = BigToCompact(target);
+
+                // Fix sign bit collision (activated at compactEncodingFixHeight)
+                int fixHeight = Dilithion::g_chainParams->compactEncodingFixHeight;
+                if (fixHeight >= 0 && newBlockHeight >= fixHeight) {
+                    edaBits = FixCompactEncoding(edaBits);
+                }
+
                 if (edaBits > MAX_DIFFICULTY_BITS) {
                     edaBits = MAX_DIFFICULTY_BITS;
                 }
@@ -974,6 +996,12 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         nTargetTimespan,
         maxChange
     );
+
+    // Fix sign bit collision (activated at compactEncodingFixHeight)
+    int fixHeight = Dilithion::g_chainParams->compactEncodingFixHeight;
+    if (fixHeight >= 0 && newBlockHeight >= fixHeight) {
+        nBitsNew = FixCompactEncoding(nBitsNew);
+    }
 
     std::cout << "[Difficulty] Adjustment at height " << newBlockHeight
               << " (v" << (useV2 ? "2" : "1") << ", interval=" << nInterval

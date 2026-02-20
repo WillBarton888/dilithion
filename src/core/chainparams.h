@@ -135,6 +135,17 @@ public:
     int vdfExclusiveHeight;
     uint64_t vdfIterations;
 
+    // Compact encoding fix activation height
+    // Before this height: BigToCompact has a sign bit bug where bit 23 of the
+    // mantissa collides with the sign bit, causing ~2x difficulty corruption on
+    // round-trip through BigToCompact/CompactToBig. Discovered when the retarget
+    // at block 18144 produced nBits with bit 23 set, making the chain 18x harder
+    // than intended after cascading through EDA steps.
+    // After this height: GetNextWorkRequired applies the sign bit fix to all
+    // compact encoding outputs, matching Bitcoin Core's GetCompact() behavior.
+    // -1 = fix disabled
+    int compactEncodingFixHeight;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release

@@ -75,6 +75,22 @@ uint256 CompactToBig(uint32_t nCompact);
 uint32_t BigToCompact(const uint256& target);
 
 /**
+ * Fix compact encoding sign bit collision
+ *
+ * BigToCompact has a bug where bit 23 of the mantissa collides with the
+ * sign bit in Bitcoin's compact target format. CompactToBig masks with
+ * 0x007fffff, stripping bit 23 and corrupting the target value (making
+ * difficulty up to ~10x harder than intended on round-trip).
+ *
+ * This function applies Bitcoin Core's GetCompact() fix: if bit 23 is set,
+ * shift the mantissa right by 8 bits and increment the exponent.
+ *
+ * @param nCompact The compact value from BigToCompact
+ * @return The corrected compact value with no sign bit collision
+ */
+uint32_t FixCompactEncoding(uint32_t nCompact);
+
+/**
  * Calculate difficulty adjustment (testing version)
  *
  * This is a simplified version of GetNextWorkRequired for testing purposes.
