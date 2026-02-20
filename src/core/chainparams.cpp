@@ -37,7 +37,10 @@ ChainParams ChainParams::Mainnet() {
     // Consensus parameters
     params.blockTime = 240;                // 4 minutes (240 seconds)
     params.halvingInterval = 210000;       // ~1.6 years at 4-minute blocks
-    params.difficultyAdjustment = 2016;    // ~5.6 days at 4-minute blocks
+    params.difficultyAdjustment = 2016;    // ~5.6 days at 4-minute blocks (pre-fork)
+    params.difficultyAdjustmentV2 = 360;   // ~1 day at 4-minute blocks (post-fork)
+    params.difficultyForkHeight = 20160;   // Activate v2 difficulty at this height
+    params.difficultyMaxChange = 2;        // 2x max change per retarget (post-fork)
     params.maxBlockSize = 4 * 1024 * 1024; // 4 MB (for post-quantum signatures)
 
     // Mining parameters
@@ -149,7 +152,10 @@ ChainParams ChainParams::Testnet() {
     // Consensus parameters (faster blocks for testnet)
     params.blockTime = 60;                 // 1 minute (4x faster than mainnet for quicker testing)
     params.halvingInterval = 210000;       // Same as mainnet
-    params.difficultyAdjustment = 2016;    // Same as mainnet
+    params.difficultyAdjustment = 2016;    // Pre-fork (same as mainnet)
+    params.difficultyAdjustmentV2 = 360;   // Post-fork: ~6 hours at 1-minute blocks
+    params.difficultyForkHeight = 0;       // Active from genesis on testnet
+    params.difficultyMaxChange = 2;        // 2x max change per retarget
     params.maxBlockSize = 4 * 1024 * 1024; // 4 MB (same as mainnet)
 
     // Mining parameters (same as mainnet)

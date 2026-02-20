@@ -782,13 +782,14 @@ static uint256 Divide320x64(const uint8_t* dividend, uint64_t divisor) {
 uint32_t CalculateNextWorkRequired(
     uint32_t nCompactOld,
     int64_t nActualTimespan,
-    int64_t nTargetTimespan
+    int64_t nTargetTimespan,
+    int maxChange
 ) {
-    // Limit adjustment to prevent extreme changes (4x max change)
-    if (nActualTimespan < nTargetTimespan / 4)
-        nActualTimespan = nTargetTimespan / 4;
-    if (nActualTimespan > nTargetTimespan * 4)
-        nActualTimespan = nTargetTimespan * 4;
+    // Limit adjustment to prevent extreme changes
+    if (nActualTimespan < nTargetTimespan / maxChange)
+        nActualTimespan = nTargetTimespan / maxChange;
+    if (nActualTimespan > nTargetTimespan * maxChange)
+        nActualTimespan = nTargetTimespan * maxChange;
 
     // Convert compact to full target
     uint256 targetOld = CompactToBig(nCompactOld);
@@ -825,11 +826,15 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         return Dilithion::g_chainParams->genesisNBits;
     }
 
-    // Get difficulty adjustment interval from chain params
-    int64_t nInterval = Dilithion::g_chainParams->difficultyAdjustment;
+    // Get difficulty adjustment interval (fork-aware)
+    int newBlockHeight = pindexLast->nHeight + 1;
+    bool useV2 = (newBlockHeight >= Dilithion::g_chainParams->difficultyForkHeight);
+    int64_t nInterval = useV2
+        ? static_cast<int64_t>(Dilithion::g_chainParams->difficultyAdjustmentV2)
+        : static_cast<int64_t>(Dilithion::g_chainParams->difficultyAdjustment);
 
     // Only adjust difficulty at specific intervals
-    if ((pindexLast->nHeight + 1) % nInterval != 0) {
+    if (newBlockHeight % nInterval != 0) {
         // Not at adjustment point, return previous difficulty
         // Use header nBits (since block index nBits field may not be deserialized yet)
         uint32_t prevBits = pindexLast->header.nBits;
@@ -961,13 +966,18 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
     // MEDIUM-C001 FIX: Remove code duplication - use CalculateNextWorkRequired()
     // This helper function handles all the difficulty calculation logic,
     // including clamping, overflow checks, and bounds validation
+    // Pre-fork: 4x max change; post-fork: configurable (2x)
+    int maxChange = useV2 ? Dilithion::g_chainParams->difficultyMaxChange : 4;
     uint32_t nBitsNew = CalculateNextWorkRequired(
         pindexLast->nBits,
         nActualTimespan,
-        nTargetTimespan
+        nTargetTimespan,
+        maxChange
     );
 
-    std::cout << "[Difficulty] Adjustment at height " << (pindexLast->nHeight + 1) << std::endl;
+    std::cout << "[Difficulty] Adjustment at height " << newBlockHeight
+              << " (v" << (useV2 ? "2" : "1") << ", interval=" << nInterval
+              << ", max_change=" << maxChange << "x)" << std::endl;
     std::cout << "  Actual time: " << nActualTimespan << "s, Expected: " << nTargetTimespan << "s" << std::endl;
     std::cout << "  Old difficulty: 0x" << std::hex << pindexLast->nBits << std::endl;
     std::cout << "  New difficulty: 0x" << nBitsNew << std::dec << std::endl;

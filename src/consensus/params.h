@@ -111,8 +111,10 @@ static const int MAX_MINING_THREADS = 256;
 /** Target block time in seconds (4 minutes) */
 static const int64_t TARGET_BLOCK_TIME = 240;
 
-/** Difficulty adjustment interval in blocks */
+/** Difficulty adjustment interval in blocks (pre-fork, runtime value from chainparams) */
 static const int DIFFICULTY_ADJUSTMENT_INTERVAL = 2016;
+/** Post-fork difficulty adjustment interval (360 blocks = ~1 day at 4-min target) */
+static const int DIFFICULTY_ADJUSTMENT_INTERVAL_V2 = 360;
 
 //==============================================================================
 // Chain Security Parameters

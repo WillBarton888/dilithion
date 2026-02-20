@@ -57,7 +57,10 @@ public:
     // Consensus parameters
     uint32_t blockTime;             // Target seconds per block
     uint64_t halvingInterval;       // Blocks between reward halvings
-    uint64_t difficultyAdjustment;  // Blocks between difficulty adjustments
+    uint64_t difficultyAdjustment;  // Blocks between difficulty adjustments (pre-fork)
+    uint64_t difficultyAdjustmentV2; // Blocks between difficulty adjustments (post-fork)
+    int difficultyForkHeight;       // Height at which v2 difficulty rules activate
+    int difficultyMaxChange;        // Max difficulty change factor per retarget (2 = 2x, 4 = 4x)
     uint32_t maxBlockSize;          // Maximum block size in bytes
 
     // Mining parameters

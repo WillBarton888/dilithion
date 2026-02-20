@@ -13,8 +13,8 @@
  * Fuzz target: Difficulty calculation
  *
  * Tests:
- * - Difficulty adjustment at 2016 block intervals
- * - 4x maximum adjustment limits
+ * - Difficulty adjustment at 2016 and 360 block intervals
+ * - 4x (pre-fork) and 2x (post-fork) maximum adjustment limits
  * - Integer-only arithmetic correctness
  * - Edge cases (very fast/slow blocks)
  * - Boundary conditions
@@ -38,20 +38,22 @@ FUZZ_TARGET(difficulty_calculate)
         // Fuzz actual timespan
         int64_t nActualTimespan = fuzzed_data.ConsumeIntegral<int64_t>();
 
+        // Test both pre-fork (4x clamp) and post-fork (2x clamp)
+        int maxChange = fuzzed_data.ConsumeBool() ? 4 : 2;
+
         // Limit to reasonable range
         const int64_t nTargetTimespan = 14 * 24 * 60 * 60; // 2 weeks
 
-        // Apply 4x limits (same as Bitcoin)
-        if (nActualTimespan < nTargetTimespan / 4) {
-            nActualTimespan = nTargetTimespan / 4;
+        // Apply limits using configurable maxChange
+        if (nActualTimespan < nTargetTimespan / maxChange) {
+            nActualTimespan = nTargetTimespan / maxChange;
         }
-        if (nActualTimespan > nTargetTimespan * 4) {
-            nActualTimespan = nTargetTimespan * 4;
+        if (nActualTimespan > nTargetTimespan * maxChange) {
+            nActualTimespan = nTargetTimespan * maxChange;
         }
 
-        // Calculate new difficulty
-        // This calls the actual implementation
-        uint32_t nBitsNew = CalculateNextWorkRequired(nBits, nActualTimespan, nTargetTimespan);
+        // Calculate new difficulty with configurable max change
+        uint32_t nBitsNew = CalculateNextWorkRequired(nBits, nActualTimespan, nTargetTimespan, maxChange);
 
         // Verify result is reasonable
         if (nBitsNew != 0) {

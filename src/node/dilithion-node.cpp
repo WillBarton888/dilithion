@@ -1523,6 +1523,10 @@ int main(int argc, char* argv[]) {
     std::cout << "Data directory: " << config.datadir << std::endl;
     std::cout << "P2P port: " << config.p2pport << std::endl;
     std::cout << "RPC port: " << config.rpcport << std::endl;
+    std::cout << "Difficulty fork: height " << Dilithion::g_chainParams->difficultyForkHeight
+              << " (interval " << Dilithion::g_chainParams->difficultyAdjustment
+              << " -> " << Dilithion::g_chainParams->difficultyAdjustmentV2
+              << ", max change " << Dilithion::g_chainParams->difficultyMaxChange << "x)" << std::endl;
 
     if (!config.connect_nodes.empty()) {
         std::cout << "Connect to: ";
@@ -2106,6 +2110,27 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 g_chainstate.SetTip(pindexTip);
                 g_chain_height.store(static_cast<unsigned int>(pindexTip->nHeight));  // BUG #108 FIX: Set global height for TX validation
+
+                // BUG #270 FIX: Ensure all blocks on the active chain have BLOCK_VALID_CHAIN set.
+                // Bootstrap imports store blocks with only BLOCK_HAVE_DATA (status=8),
+                // missing the BLOCK_VALID_CHAIN flag that IBD orphan resolution depends on.
+                // Walk from tip to genesis and fix any blocks missing the flag.
+                {
+                    CBlockIndex* pwalker = pindexTip;
+                    int fixed_count = 0;
+                    while (pwalker) {
+                        if (!(pwalker->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                            pwalker->nStatus |= CBlockIndex::BLOCK_VALID_CHAIN;
+                            fixed_count++;
+                        }
+                        pwalker = pwalker->pprev;
+                    }
+                    if (fixed_count > 0) {
+                        std::cout << "  [FIX] Set BLOCK_VALID_CHAIN on " << fixed_count
+                                  << " blocks in active chain (bootstrap fix)" << std::endl;
+                    }
+                }
+
                 std::cout << "  [OK] Loaded chain state: " << chainHashes.size() + 1 << " blocks (height "
                           << pindexTip->nHeight << ")" << std::endl;
             } else {

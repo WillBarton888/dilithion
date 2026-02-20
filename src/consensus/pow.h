@@ -85,12 +85,14 @@ uint32_t BigToCompact(const uint256& target);
  * @param nCompactOld The current difficulty in compact format
  * @param nActualTimespan The actual time taken (seconds)
  * @param nTargetTimespan The target time expected (seconds)
+ * @param maxChange Maximum change factor (2 = 2x, 4 = 4x)
  * @return The new difficulty in compact format
  */
 uint32_t CalculateNextWorkRequired(
     uint32_t nCompactOld,
     int64_t nActualTimespan,
-    int64_t nTargetTimespan
+    int64_t nTargetTimespan,
+    int maxChange = 4
 );
 
 /** Check if hash is less than target (satisfies PoW) */

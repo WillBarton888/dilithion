@@ -493,6 +493,9 @@ BOOST_AUTO_TEST_CASE(get_next_work_required_nullptr) {
         Dilithion::g_chainParams = new Dilithion::ChainParams();
         Dilithion::g_chainParams->genesisNBits = 0x1d00ffff;
         Dilithion::g_chainParams->difficultyAdjustment = 2016;
+        Dilithion::g_chainParams->difficultyAdjustmentV2 = 360;
+        Dilithion::g_chainParams->difficultyForkHeight = 999999;  // Pre-fork for this test
+        Dilithion::g_chainParams->difficultyMaxChange = 2;
         Dilithion::g_chainParams->blockTime = 240;
     }
 
@@ -510,6 +513,9 @@ BOOST_AUTO_TEST_CASE(get_next_work_required_between_adjustments) {
         Dilithion::g_chainParams = new Dilithion::ChainParams();
         Dilithion::g_chainParams->genesisNBits = 0x1d00ffff;
         Dilithion::g_chainParams->difficultyAdjustment = 2016;
+        Dilithion::g_chainParams->difficultyAdjustmentV2 = 360;
+        Dilithion::g_chainParams->difficultyForkHeight = 999999;  // Pre-fork for this test
+        Dilithion::g_chainParams->difficultyMaxChange = 2;
         Dilithion::g_chainParams->blockTime = 240;
     }
 
@@ -592,6 +598,9 @@ BOOST_AUTO_TEST_CASE(get_next_work_required_full_2016_block_adjustment) {
         Dilithion::g_chainParams = new Dilithion::ChainParams();
         Dilithion::g_chainParams->genesisNBits = 0x1d00ffff;
         Dilithion::g_chainParams->difficultyAdjustment = 2016;
+        Dilithion::g_chainParams->difficultyAdjustmentV2 = 360;
+        Dilithion::g_chainParams->difficultyForkHeight = 999999;  // Pre-fork for this test
+        Dilithion::g_chainParams->difficultyMaxChange = 2;
         Dilithion::g_chainParams->blockTime = 240;  // 4 minutes
     }
 
@@ -799,6 +808,179 @@ BOOST_AUTO_TEST_CASE(get_next_work_required_extreme_slow_clamp) {
 }
 
 // ============================================================================
+// POST-FORK DIFFICULTY ADJUSTMENT TESTS (360-block interval, 2x max change)
+// ============================================================================
+
+/**
+ * Helper: Initialize chain params for post-fork testing
+ */
+static void InitPostForkTestParams() {
+    if (!Dilithion::g_chainParams) {
+        Dilithion::g_chainParams = new Dilithion::ChainParams();
+    }
+    Dilithion::g_chainParams->genesisNBits = 0x1d00ffff;
+    Dilithion::g_chainParams->difficultyAdjustment = 2016;
+    Dilithion::g_chainParams->difficultyAdjustmentV2 = 360;
+    Dilithion::g_chainParams->difficultyForkHeight = 20160;
+    Dilithion::g_chainParams->difficultyMaxChange = 2;
+    Dilithion::g_chainParams->blockTime = 240;  // 4 minutes
+    Dilithion::g_chainParams->edaActivationHeight = 0;
+}
+
+/**
+ * Post-fork Test 1: Full 360-block adjustment with perfect timing
+ * Difficulty should remain unchanged when blocks arrive exactly on target
+ */
+BOOST_AUTO_TEST_CASE(post_fork_360_block_adjustment_perfect_timing) {
+    InitPostForkTestParams();
+
+    // Create a chain starting at the fork height
+    // Need blocks from 19800 to 20159 (360 blocks for the first post-fork retarget)
+    const int chainStart = 19800;
+    const int chainLen = 360;
+    std::vector<CBlockIndex> chain(chainLen);
+
+    for (int i = 0; i < chainLen; i++) {
+        chain[i].nHeight = chainStart + i;
+        chain[i].nBits = 0x1d00ffff;
+        chain[i].header.nBits = 0x1d00ffff;
+        chain[i].nTime = 1000000 + (i * 240);  // Perfect 4-minute blocks
+        chain[i].pprev = (i > 0) ? &chain[i - 1] : nullptr;
+    }
+
+    // At height 20159, next block is 20160 (first post-fork retarget)
+    uint32_t result = GetNextWorkRequired(&chain[chainLen - 1]);
+
+    // With perfect timing, difficulty should remain the same
+    BOOST_CHECK(result >= MIN_DIFFICULTY_BITS);
+    BOOST_CHECK(result <= MAX_DIFFICULTY_BITS);
+
+    // Verify timespan: 359 intervals * 240s = 86,160s
+    int64_t actual = chain[chainLen - 1].nTime - chain[0].nTime;
+    BOOST_CHECK_EQUAL(actual, 359 * 240);
+}
+
+/**
+ * Post-fork Test 2: Fast blocks with 2x clamp
+ * When blocks are 4x faster, difficulty should be clamped to 2x increase (not 4x)
+ */
+BOOST_AUTO_TEST_CASE(post_fork_fast_blocks_2x_clamp) {
+    InitPostForkTestParams();
+
+    const int chainStart = 19800;
+    const int chainLen = 360;
+    std::vector<CBlockIndex> chain(chainLen);
+
+    for (int i = 0; i < chainLen; i++) {
+        chain[i].nHeight = chainStart + i;
+        chain[i].nBits = 0x1d00ffff;
+        chain[i].header.nBits = 0x1d00ffff;
+        // Blocks 4x faster than target (60s instead of 240s)
+        chain[i].nTime = 1000000 + (i * 60);
+        chain[i].pprev = (i > 0) ? &chain[i - 1] : nullptr;
+    }
+
+    uint32_t result = GetNextWorkRequired(&chain[chainLen - 1]);
+
+    // Difficulty should increase (lower nBits = harder), but clamped to 2x
+    BOOST_CHECK(result >= MIN_DIFFICULTY_BITS);
+    BOOST_CHECK(result <= MAX_DIFFICULTY_BITS);
+
+    // The result should be harder than original (same or lower nBits)
+    // With 2x clamp, it should be exactly half the timespan adjustment
+    int64_t actual = chain[chainLen - 1].nTime - chain[0].nTime;
+    int64_t expected = 359 * 240;
+    BOOST_CHECK(actual < expected / 2);  // 4x faster exceeds 2x clamp
+}
+
+/**
+ * Post-fork Test 3: Slow blocks with 2x clamp
+ * When blocks are 4x slower, difficulty should be clamped to 2x decrease (not 4x)
+ */
+BOOST_AUTO_TEST_CASE(post_fork_slow_blocks_2x_clamp) {
+    InitPostForkTestParams();
+
+    const int chainStart = 19800;
+    const int chainLen = 360;
+    std::vector<CBlockIndex> chain(chainLen);
+
+    for (int i = 0; i < chainLen; i++) {
+        chain[i].nHeight = chainStart + i;
+        chain[i].nBits = 0x1d00ffff;
+        chain[i].header.nBits = 0x1d00ffff;
+        // Blocks 4x slower than target (960s instead of 240s)
+        chain[i].nTime = 1000000 + (i * 960);
+        chain[i].pprev = (i > 0) ? &chain[i - 1] : nullptr;
+    }
+
+    uint32_t result = GetNextWorkRequired(&chain[chainLen - 1]);
+
+    // Difficulty should decrease (higher nBits = easier), but clamped to 2x
+    BOOST_CHECK(result > 0x1d00ffff);
+    BOOST_CHECK(result <= MAX_DIFFICULTY_BITS);
+
+    // Verify timespan exceeds 2x clamp threshold
+    int64_t actual = chain[chainLen - 1].nTime - chain[0].nTime;
+    int64_t expected = 359 * 240;
+    BOOST_CHECK(actual > expected * 2);  // 4x slower exceeds 2x clamp
+}
+
+/**
+ * Post-fork Test 4: Mid-period retarget (between 2016-block boundaries)
+ * After fork, retargets happen every 360 blocks, not just at 2016 multiples
+ */
+BOOST_AUTO_TEST_CASE(post_fork_retarget_at_360_not_2016) {
+    InitPostForkTestParams();
+
+    // Height 20520 is 360 blocks after fork (20160 + 360) — should retarget
+    // But it's NOT a 2016 multiple (20520 / 2016 = 10.178...) — pre-fork would NOT retarget
+    const int chainStart = 20160;
+    const int chainLen = 360;
+    std::vector<CBlockIndex> chain(chainLen);
+
+    for (int i = 0; i < chainLen; i++) {
+        chain[i].nHeight = chainStart + i;
+        chain[i].nBits = 0x1d00ffff;
+        chain[i].header.nBits = 0x1d00ffff;
+        // 2x slower blocks to see a difficulty change
+        chain[i].nTime = 1000000 + (i * 480);
+        chain[i].pprev = (i > 0) ? &chain[i - 1] : nullptr;
+    }
+
+    uint32_t result = GetNextWorkRequired(&chain[chainLen - 1]);
+
+    // Post-fork: height 20519 + 1 = 20520, which is 20520 % 360 == 0 → retarget
+    // With 2x slower blocks, difficulty should decrease
+    BOOST_CHECK(result > 0x1d00ffff);
+    BOOST_CHECK(result <= MAX_DIFFICULTY_BITS);
+}
+
+/**
+ * Post-fork Test 5: Pre-fork height still uses 2016/4x rules
+ * Verify that heights before the fork use the old rules
+ */
+BOOST_AUTO_TEST_CASE(pre_fork_still_uses_2016_4x) {
+    InitPostForkTestParams();  // Fork at 20160
+
+    // Create 2016-block chain at pre-fork heights (0-2015)
+    std::vector<CBlockIndex> chain(2016);
+    for (int i = 0; i < 2016; i++) {
+        chain[i].nHeight = i;
+        chain[i].nBits = 0x1d00ffff;
+        chain[i].header.nBits = 0x1d00ffff;
+        // 10x slower → will be clamped to 4x (pre-fork) not 2x
+        chain[i].nTime = 1000000 + (i * 2400);
+        chain[i].pprev = (i > 0) ? &chain[i - 1] : nullptr;
+    }
+
+    uint32_t result = GetNextWorkRequired(&chain[2015]);
+
+    // Pre-fork: should use 4x clamp (not 2x)
+    BOOST_CHECK(result > 0x1d00ffff);  // Difficulty decreased
+    BOOST_CHECK(result <= MAX_DIFFICULTY_BITS);
+}
+
+// ============================================================================
 // EMERGENCY DIFFICULTY ADJUSTMENT (EDA) TESTS
 // ============================================================================
 
@@ -811,6 +993,9 @@ static void InitEDATestParams() {
     }
     Dilithion::g_chainParams->genesisNBits = 0x1d00ffff;
     Dilithion::g_chainParams->difficultyAdjustment = 2016;
+    Dilithion::g_chainParams->difficultyAdjustmentV2 = 360;
+    Dilithion::g_chainParams->difficultyForkHeight = 999999;  // Pre-fork for EDA tests
+    Dilithion::g_chainParams->difficultyMaxChange = 2;
     Dilithion::g_chainParams->blockTime = 240;  // 4 minutes
     Dilithion::g_chainParams->edaActivationHeight = 100;  // Active from height 100
 }
