@@ -4682,7 +4682,11 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
     uint16_t port = default_port;
 
     if (!CSock::ParseEndpoint(node_str, ip_str, port)) {
-        // No port specified — use just the IP with default port
+        // No port specified — try as bare IP/hostname with default port
+        // Reject bare IPv6 (contains ':') — require bracket notation [ipv6]:port
+        if (node_str.find(':') != std::string::npos) {
+            throw std::runtime_error("Invalid address format. Use [IPv6]:port bracket notation (e.g. [::1]:8444)");
+        }
         ip_str = node_str;
         port = default_port;
     }

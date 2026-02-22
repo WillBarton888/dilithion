@@ -268,6 +268,12 @@ bool CSock::IsConnectionRefused(int error) {
 bool CSock::ParseEndpoint(const std::string& str, std::string& ip_out, uint16_t& port_out) {
     if (str.empty()) return false;
 
+    // Reject leading/trailing whitespace
+    if (std::isspace(static_cast<unsigned char>(str.front())) ||
+        std::isspace(static_cast<unsigned char>(str.back()))) {
+        return false;
+    }
+
     if (str[0] == '[') {
         // IPv6 bracket notation: [addr]:port
         size_t close = str.find(']');
@@ -288,6 +294,10 @@ bool CSock::ParseEndpoint(const std::string& str, std::string& ip_out, uint16_t&
     size_t colon = str.rfind(':');
     if (colon == std::string::npos || colon == 0) return false;
     ip_out = str.substr(0, colon);
+
+    // Reject bare IPv6 without brackets (ambiguous — e.g. "::1:8444")
+    if (ip_out.find(':') != std::string::npos) return false;
+
     try {
         int p = std::stoi(str.substr(colon + 1));
         if (p <= 0 || p > 65535) return false;

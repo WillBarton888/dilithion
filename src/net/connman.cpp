@@ -1695,8 +1695,9 @@ bool CConnman::IsOurAddress(const NetProtocol::CAddress& addr) const {
     // Extract IP string from address (supports both IPv4 and IPv6)
     std::string ip_str = addr.ToStringIP();
 
-    // Check localhost variants
-    if (ip_str == "127.0.0.1" || ip_str == "0.0.0.0") {
+    // Check localhost variants (IPv4 and IPv6)
+    if (ip_str == "127.0.0.1" || ip_str == "0.0.0.0" ||
+        ip_str == "::1" || ip_str == "::") {
         return true;
     }
 
