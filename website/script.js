@@ -26,7 +26,7 @@ function updateCountdown() {
         // Hide countdown timer and show status message
         const countdownContainer = document.querySelector('.countdown');
         if (countdownContainer) {
-            countdownContainer.innerHTML = '<div class="mainnet-live-banner" style="background: linear-gradient(135deg, #22c55e, #16a34a);"><h2>MAINNET IS LIVE!</h2><p>Download v3.3.1 and start mining real DIL coins today!</p></div>';
+            countdownContainer.innerHTML = '<div class="mainnet-live-banner" style="background: linear-gradient(135deg, #22c55e, #16a34a);"><h2>MAINNET IS LIVE!</h2><p>Download v3.4.2 and start mining real DIL coins today!</p></div>';
         }
 
         // Update status to live
