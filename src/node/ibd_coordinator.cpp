@@ -543,14 +543,15 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             std::cout << "[FORK-DETECT]   Local:  " << our_tip_hash.GetHex().substr(0, 16) << "..." << std::endl;
             std::cout << "[FORK-DETECT]   Header: " << header_hash_at_our_height.GetHex().substr(0, 16) << "..." << std::endl;
             // B1: Route all recovery through unified AttemptForkRecovery pipeline
-            // Only return (skip block fetching) if recovery was actually initiated.
-            // If it fails (no common ancestor, invalid fork point), fall through
-            // so DownloadBlocks can continue fetching - avoids no-progress loops.
+            // BUG FIX: Never return early here. Previously, when AttemptForkRecovery
+            // returned true, DownloadBlocks exited immediately, skipping FetchBlocks()
+            // at line 675. This meant blocks from the correct chain were never requested.
+            // Now we always fall through to FetchBlocks regardless of recovery result.
             if (AttemptForkRecovery(chain_height, header_height, ForkRecoveryReason::LAYER1_TIP_MISMATCH)) {
-                std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
-                return;
+                std::cout << "[FORK-DETECT] Fork recovery initiated/active - continuing to fetch blocks" << std::endl;
+            } else {
+                std::cout << "[FORK-DETECT] Recovery not initiated - continuing block download" << std::endl;
             }
-            std::cout << "[FORK-DETECT] Recovery not initiated - continuing block download" << std::endl;
             std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
             }
         }
@@ -624,14 +625,29 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         m_fork_stall_cycles.store(0);
         int current_fork_point = m_fork_point.load();
         if (m_fork_detected.load() && chain_height > current_fork_point) {
-            // We've advanced past the fork point - clear fork state
-            std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << current_fork_point
-                      << " to " << chain_height << " - fork recovery complete" << std::endl;
-            m_fork_detected.store(false);
-            g_node_context.fork_detected.store(false);  // Clear global flag so mining can resume
-            g_metrics.ClearForkDetected();  // Clear Prometheus metrics
-            m_fork_point.store(-1);
-            m_last_cancelled_fork_point = -1;  // BUG #261: Clear cooldown
+            // BUG FIX: Verify we're on the correct chain before clearing fork state.
+            // Previously, this only checked chain_height > fork_point, which is always
+            // true when ON a fork (you're above the fork point, on the wrong chain).
+            // Now we verify our tip hash matches the header chain's hash at the same height.
+            bool on_correct_chain = false;
+            if (m_node_context.headers_manager) {
+                CBlockIndex* tip = m_chainstate.GetTip();
+                if (tip) {
+                    uint256 our_hash = tip->GetBlockHash();
+                    uint256 header_hash = m_node_context.headers_manager->GetRandomXHashAtHeight(chain_height);
+                    on_correct_chain = (!header_hash.IsNull() && our_hash == header_hash);
+                }
+            }
+            if (on_correct_chain) {
+                // Actually recovered - clear fork state
+                std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << current_fork_point
+                          << " to " << chain_height << " - fork recovery complete (hash verified)" << std::endl;
+                m_fork_detected.store(false);
+                g_node_context.fork_detected.store(false);  // Clear global flag so mining can resume
+                g_metrics.ClearForkDetected();  // Clear Prometheus metrics
+                m_fork_point.store(-1);
+                m_last_cancelled_fork_point = -1;  // BUG #261: Clear cooldown
+            }
         }
         // BUG #261: Also clear cooldown if chain advanced past the cancelled fork point
         if (m_last_cancelled_fork_point >= 0 && chain_height > m_last_cancelled_fork_point) {
@@ -1141,6 +1157,7 @@ bool CIbdCoordinator::FetchBlocks() {
     int null_hash_count = 0;
     int first_null_hash_height = -1;
     int already_have_count = 0;
+    int failed_skip_count = 0;
     // BUG #260: Collect orphan blocks whose parents are now connected for re-processing
     std::vector<std::pair<uint256, CBlock>> orphans_to_reprocess;
     for (int h : blocks_to_request) {
@@ -1194,17 +1211,15 @@ bool CIbdCoordinator::FetchBlocks() {
             // BUG #255: Skip blocks marked as permanently failed
             // These failed authoritative validation in ConnectTip - no point retrying
             if (pindex->IsInvalid()) {
-                std::cout << "[IBD] Skipping failed block at height " << h
-                          << " (status=" << pindex->nStatus << ")" << std::endl;
+                failed_skip_count++;
                 continue;
             }
             // BUG #255: Skip blocks whose parent is marked failed (BLOCK_FAILED_CHILD logic)
             // If parent failed, this block can never connect - don't waste bandwidth
             if (pindex->pprev && pindex->pprev->IsInvalid()) {
-                std::cout << "[IBD] Skipping block at height " << h
-                          << " - parent is marked failed" << std::endl;
                 // Mark this block as failed child
                 pindex->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
+                failed_skip_count++;
                 continue;
             }
             // Block has data but isn't connected to active chain.
@@ -1273,6 +1288,48 @@ bool CIbdCoordinator::FetchBlocks() {
     }
     if (already_have_count > 0) {
         std::cout << "[IBD] Skipped " << already_have_count << " blocks already in DB (orphans awaiting parents)" << std::endl;
+    }
+
+    // =========================================================================
+    // BUG #270: Recovery from stuck failed-block ranges
+    // =========================================================================
+    // If ALL blocks in the requested range are marked as failed (e.g. from a
+    // bootstrap or old software version), IBD loops forever on the same range.
+    // Fix: During IBD (significantly behind peers), clear the BLOCK_FAILED_*
+    // flags so blocks can be re-validated with current consensus rules.
+    // Blocks with BLOCK_HAVE_DATA whose parent is connected get queued for
+    // immediate re-processing via the existing orphan reprocessing path.
+    if (getdata.empty() && failed_skip_count > 0 && (header_height - chain_height) > 10) {
+        std::cout << "[IBD] All " << failed_skip_count << " blocks in range marked as failed - "
+                  << "clearing flags for re-validation (chain=" << chain_height
+                  << " headers=" << header_height << ")" << std::endl;
+
+        int cleared_count = 0;
+        for (int h : blocks_to_request) {
+            uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
+            if (hash.IsNull()) continue;
+
+            CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
+            if (pindex && pindex->IsInvalid()) {
+                // Clear the failed flags
+                pindex->nStatus &= ~CBlockIndex::BLOCK_FAILED_MASK;
+                cleared_count++;
+
+                // If block data is in DB and parent is connected, queue for re-processing
+                if ((pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA) && m_node_context.blockchain_db) {
+                    CBlock blockData;
+                    if (m_node_context.blockchain_db->ReadBlock(hash, blockData)) {
+                        CBlockIndex* pParent = m_chainstate.GetBlockIndex(blockData.hashPrevBlock);
+                        if (pParent && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
+                            std::cout << "[IBD] Re-queuing cleared block at height " << h
+                                      << " for re-validation" << std::endl;
+                            orphans_to_reprocess.emplace_back(std::make_pair(hash, std::move(blockData)));
+                        }
+                    }
+                }
+            }
+        }
+        std::cout << "[IBD] Cleared failed flags on " << cleared_count << " blocks" << std::endl;
     }
 
     // Send GETDATA to our single sync peer
@@ -1630,107 +1687,10 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
     return chain_height;
 }
 
-/**
- * BUG #158 FIX: Handle a fork scenario by resetting IBD to start from fork point
- * BUG #159 FIX: Disconnect forked blocks via chain reorg before downloading correct chain
- */
-void CIbdCoordinator::HandleForkScenario(int fork_point, int chain_height) {
-    if (!m_node_context.block_fetcher || fork_point <= 0) {
-        return;
-    }
-
-    std::cout << "[FORK-RECOVERY] Resetting IBD to fork point " << fork_point
-              << " (chain was at " << chain_height << ")" << std::endl;
-
-    // CRITICAL: Pause header processing before modifying chainstate
-    // This prevents async workers from accessing CBlockIndex pointers that will be invalidated
-    if (m_node_context.headers_manager) {
-        m_node_context.headers_manager->PauseHeaderProcessing();
-    }
-
-    // BUG #159 FIX: Disconnect forked blocks before downloading correct chain
-    // We need to remove blocks from fork_point+1 to chain_height so new blocks can connect
-    int blocks_to_disconnect = chain_height - fork_point;
-    if (blocks_to_disconnect > 0) {
-        std::cout << "[FORK-RECOVERY] Disconnecting " << blocks_to_disconnect
-                  << " forked block(s) from height " << chain_height
-                  << " down to " << (fork_point + 1) << std::endl;
-
-        // Walk backwards from tip, disconnecting each forked block
-        int disconnected = 0;
-        CBlockIndex* pindex = m_chainstate.GetTip();
-
-        while (pindex && pindex->nHeight > fork_point && disconnected < blocks_to_disconnect) {
-            std::cout << "[FORK-RECOVERY] Disconnecting block at height " << pindex->nHeight
-                      << " hash=" << pindex->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
-
-            // Get parent before disconnecting (we'll need it for next iteration)
-            CBlockIndex* pprev = pindex->pprev;
-
-            // Disconnect this block from the chain
-            if (!m_chainstate.DisconnectTip(pindex, true)) {
-                std::cerr << "[FORK-RECOVERY] ERROR: Failed to disconnect block at height "
-                          << pindex->nHeight << std::endl;
-                // Continue anyway - the block may have already been disconnected
-            } else {
-                disconnected++;
-            }
-
-            // Move to parent block
-            pindex = pprev;
-        }
-
-        // Update chain tip to fork point
-        // VALIDATION FIX: Ensure disconnect completed successfully before setting tip
-        if (pindex && pindex->nHeight == fork_point) {
-            m_chainstate.SetTip(pindex);
-            std::cout << "[FORK-RECOVERY] Chain tip reset to height " << fork_point
-                      << " hash=" << pindex->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
-        } else {
-            // Disconnect loop did not complete as expected - log error
-            std::cerr << "[FORK-RECOVERY] ERROR: Disconnect incomplete! Expected tip at height "
-                      << fork_point << " but pindex is "
-                      << (pindex ? std::to_string(pindex->nHeight) : "nullptr") << std::endl;
-            std::cerr << "[FORK-RECOVERY] Chainstate may be inconsistent - consider reindex" << std::endl;
-        }
-
-        std::cout << "[FORK-RECOVERY] Disconnected " << disconnected << " forked block(s)" << std::endl;
-
-        // FORK SAFETY FIX: Do NOT delete orphan blocks from database
-        // Keep disconnected blocks in DB so they can be re-activated if they become best chain.
-        // This prevents the corruption issue where nodes end up on different forks after restart
-        // if block data was deleted before the replacement chain was fully downloaded.
-        //
-        // The blocks are:
-        // - Disconnected from chain (UTXO undone, pnext cleared, BLOCK_VALID_CHAIN cleared)
-        // - Still have BLOCK_HAVE_DATA set (data exists in DB)
-        // - Can be re-activated by ActivateBestChain if they become best chain
-        // - Will be pruned later by deferred cleanup (optional)
-        //
-        // This matches Bitcoin Core's approach: keep fork blocks, let chain work decide.
-        std::cout << "[FORK-RECOVERY] Keeping " << disconnected
-                  << " disconnected block(s) in database for safety" << std::endl;
-    }
-
-    // Clear in-flight tracking above fork point
-    // This allows blocks to be re-requested from the correct chain
-    int cleared = 0;
-    if (m_node_context.block_fetcher) {
-        cleared = m_node_context.block_fetcher->ClearAboveHeight(fork_point);
-    }
-    std::cout << "[FORK-RECOVERY] Cleared " << cleared << " in-flight blocks above fork point, "
-              << "downloads will resume from height " << (fork_point + 1) << std::endl;
-
-    // Reset fork detection state
-    m_fork_detected = true;
-    m_fork_point = fork_point;
-    m_fork_stall_cycles = 0;
-
-    // Resume header processing now that chainstate is stable
-    if (m_node_context.headers_manager) {
-        m_node_context.headers_manager->ResumeHeaderProcessing();
-    }
-}
+// HandleForkScenario was removed - it was dead code (never called).
+// Its block disconnection functionality is handled by TriggerChainSwitch()
+// in fork_manager.cpp, and block tracker clearing is now done in
+// AttemptForkRecovery() when creating a fork candidate.
 
 // ============================================================================
 // FORK RECOVERY: Unified pipeline for all layers (A2/B1)
@@ -2019,8 +1979,16 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
             }
         } else {
             std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;
+            // BUG FIX: Set m_fork_detected so Layer 1 doesn't keep re-triggering,
+            // and return false so DownloadBlocks falls through to FetchBlocks().
+            // Previously returned true without setting m_fork_detected, which caused
+            // an infinite loop: Layer 1 fires -> "Fork already active" -> return true
+            // -> DownloadBlocks exits early -> FetchBlocks never called -> no blocks
+            // ever requested -> fork recovery never progresses.
+            m_fork_detected.store(true);
+            m_fork_point.store(fork_point);
             m_fork_stall_cycles.store(0);
-            return true;  // Fork is active, caller should not proceed further
+            return false;  // Fall through to FetchBlocks so blocks get requested
         }
     }
 
@@ -2092,6 +2060,17 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         m_fork_detected.store(true);
         g_node_context.fork_detected.store(true);
         m_fork_point.store(fork_point);
+
+        // BUG FIX: Clear block tracker above fork point so blocks can be re-requested
+        // from the correct chain. Without this, IsTracked() may return true for heights
+        // that are in m_completed_heights, preventing GetNextBlocksToRequest from
+        // returning them. This was previously in HandleForkScenario() (dead code).
+        if (m_node_context.block_fetcher) {
+            int cleared = m_node_context.block_fetcher->ClearAboveHeight(fork_point);
+            if (cleared > 0) {
+                std::cout << "[FORK-DETECT] Cleared " << cleared << " tracked blocks above fork point " << fork_point << std::endl;
+            }
+        }
 
         std::cout << "[FORK-DETECT] Fork candidate created, blocks will be staged for pre-validation" << std::endl;
         std::cout << "[FORK-DETECT] Original chain remains ACTIVE until fork is fully validated" << std::endl;

@@ -157,9 +157,8 @@ private:
     bool FetchBlocks();
     void RetryTimeoutsAndStalls();
 
-    // BUG #158 FIX: Fork detection and recovery
+    // Fork detection and recovery
     int FindForkPoint(int chain_height);
-    void HandleForkScenario(int fork_point, int chain_height);
 
     /**
      * @brief Attempt fork recovery: find fork point, validate chainwork, create ForkCandidate
