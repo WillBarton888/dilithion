@@ -1343,13 +1343,13 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
     }
 
     // Digital DNA: Notify collector about new peer connection
-    if (g_node_context.dna_collector) {
+    if (auto collector = g_node_context.GetDNACollector()) {
         // Convert peer address to 20-byte ID (hash of IP:port)
         std::array<uint8_t, 20> peer_dna_id = {};
         std::string addr_str = peer->addr.ToString();
         auto hash = std::hash<std::string>{}(addr_str);
         memcpy(peer_dna_id.data(), &hash, std::min(sizeof(hash), peer_dna_id.size()));
-        g_node_context.dna_collector->on_peer_connected(peer_dna_id);
+        collector->on_peer_connected(peer_dna_id);
     }
 
     return true;
@@ -1371,7 +1371,7 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
     }
 
     // Digital DNA: Notify collector about peer disconnection
-    if (g_node_context.dna_collector) {
+    if (auto collector = g_node_context.GetDNACollector()) {
         // Get peer address for ID computation
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
         auto it = peers.find(peer_id);
@@ -1380,7 +1380,7 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
             std::string addr_str = it->second->addr.ToString();
             auto hash = std::hash<std::string>{}(addr_str);
             memcpy(peer_dna_id.data(), &hash, std::min(sizeof(hash), peer_dna_id.size()));
-            g_node_context.dna_collector->on_peer_disconnected(peer_dna_id);
+            collector->on_peer_disconnected(peer_dna_id);
         }
     }
 

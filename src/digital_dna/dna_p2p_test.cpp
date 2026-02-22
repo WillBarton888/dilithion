@@ -196,6 +196,30 @@ void test_clock_drift_fingerprint_roundtrip() {
     CHECK(decoded.num_samples == 100, "num_samples roundtrip");
 }
 
+// =================================================================
+// Test 7: Bandwidth throughput with realistic elapsed times
+// Regression: previously used hardcoded elapsed_ms=1
+// =================================================================
+void test_bandwidth_realistic_elapsed() {
+    std::cout << "\n=== Test 7: Bandwidth with realistic elapsed ===" << std::endl;
+
+    // 256KB in 50ms (realistic for LAN) = ~40 Mbps
+    double mbps_50 = BandwidthProofCollector::compute_throughput_mbps(256 * 1024, 50);
+    CHECK(mbps_50 > 10.0 && mbps_50 < 200.0, "256KB/50ms gives sane bandwidth (10-200 Mbps)");
+
+    // 1MB in 500ms (realistic for WAN) = ~16 Mbps
+    double mbps_500 = BandwidthProofCollector::compute_throughput_mbps(1024 * 1024, 500);
+    CHECK(mbps_500 > 5.0 && mbps_500 < 50.0, "1MB/500ms gives sane bandwidth (5-50 Mbps)");
+
+    // Regression: elapsed_ms=1 gave absurdly high values
+    double mbps_1 = BandwidthProofCollector::compute_throughput_mbps(1024 * 1024, 1);
+    CHECK(mbps_1 > 1000.0, "1MB/1ms gives unrealistic bandwidth (>1 Gbps) — this is the bug case");
+
+    // Sanity: elapsed=100 gives reasonable result
+    double mbps_100 = BandwidthProofCollector::compute_throughput_mbps(1024 * 1024, 100);
+    CHECK(mbps_100 > 50.0 && mbps_100 < 200.0, "1MB/100ms gives reasonable bandwidth");
+}
+
 int main() {
     std::cout << "Digital DNA P2P Protocol Tests" << std::endl;
     std::cout << "==============================" << std::endl;
@@ -206,6 +230,7 @@ int main() {
     test_bandwidth_from_measurements();
     test_throughput_computation();
     test_clock_drift_fingerprint_roundtrip();
+    test_bandwidth_realistic_elapsed();
 
     std::cout << "\n==============================" << std::endl;
     std::cout << "Results: " << g_passed << " passed, " << g_failed << " failed" << std::endl;

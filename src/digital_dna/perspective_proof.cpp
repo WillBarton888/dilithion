@@ -68,11 +68,15 @@ size_t PerspectiveProof::total_unique_peers() const {
             all_peers.insert(peer);
         }
     }
+    // Fall back to cached value from deserialization when snapshots are empty
+    if (all_peers.empty() && cached_peer_count > 0)
+        return cached_peer_count;
     return all_peers.size();
 }
 
 double PerspectiveProof::peer_turnover_rate() const {
-    if (snapshots.size() < 2) return 0.0;
+    // Fall back to cached value from deserialization when snapshots are insufficient
+    if (snapshots.size() < 2) return cached_turnover_rate;
 
     size_t total_changes = 0;
     for (size_t i = 1; i < snapshots.size(); i++) {

@@ -151,7 +151,7 @@ void NodeContext::Shutdown() {
         dna_registry->Close();
         dna_registry.reset();
     }
-    dna_collector = nullptr;
+    SetDNACollector(nullptr);
 
     // Clear pointers
     chainstate = nullptr;
@@ -176,7 +176,7 @@ void NodeContext::Reset() {
     validation_queue.reset();  // Phase 2: Reset validation queue
     dna_registry.reset();  // Digital DNA
     trust_manager.reset();
-    dna_collector = nullptr;
+    SetDNACollector(nullptr);
     async_broadcaster = nullptr;
     rpc_server = nullptr;
     miner = nullptr;

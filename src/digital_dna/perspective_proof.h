@@ -49,8 +49,12 @@ struct PerspectiveSnapshot {
 struct PerspectiveProof {
     std::array<uint8_t, 20> node_id;
     std::vector<PerspectiveSnapshot> snapshots;
-    uint64_t start_time;
-    uint64_t end_time;
+    uint64_t start_time = 0;
+    uint64_t end_time = 0;
+
+    // Cached summary from serialization (used when snapshots are not available)
+    uint32_t cached_peer_count = 0;
+    double cached_turnover_rate = 0.0;
 
     // Derived metrics
     size_t total_unique_peers() const;

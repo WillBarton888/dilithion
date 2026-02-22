@@ -50,9 +50,9 @@ public:
     using DNALatencyPingHandler = std::function<void(int peer_id, uint64_t nonce)>;
     using DNALatencyPongHandler = std::function<void(int peer_id, uint64_t nonce, uint64_t recv_timestamp_us)>;
     using DNATimeSyncHandler = std::function<void(int peer_id, uint64_t sender_ts_us,
-        uint64_t sender_wall_ms, uint64_t nonce, bool is_response)>;
+        uint64_t sender_wall_ms, uint64_t nonce, bool is_response, uint64_t local_send_ts_us)>;
     using DNABWTestHandler = std::function<void(int peer_id, uint32_t payload_size,
-        uint64_t nonce, uint64_t send_timestamp_ms)>;
+        uint64_t nonce, uint64_t send_wall_ms)>;
     using DNABWResultHandler = std::function<void(int peer_id, uint64_t nonce,
         double upload_mbps, double download_mbps)>;
 
@@ -113,8 +113,9 @@ public:
     void SetDNABWTestHandler(DNABWTestHandler handler) { on_dna_bw_test = handler; }
     void SetDNABWResultHandler(DNABWResultHandler handler) { on_dna_bw_result = handler; }
     // DNA nonce management (public for initiator logic in node)
-    void RegisterDNANonce(uint64_t nonce, int peer_id);
+    void RegisterDNANonce(uint64_t nonce, int peer_id, uint64_t send_timestamp_us = 0);
     bool ValidateDNANonce(uint64_t nonce, int peer_id);
+    uint64_t GetDNANonceSendTimestamp(uint64_t nonce) const;  // Read without erasing
     void CleanupDNANonces();
 
 private:
@@ -133,8 +134,13 @@ private:
     std::map<int, int64_t> peer_dna_bwtest_timestamps; // peer_id -> last dnabwtest time
     std::atomic<int> dna_bwtest_global_count_{0};       // Global concurrent BW tests
     mutable std::mutex cs_dna_rate_limit;
-    // Nonce tracking: nonce -> {peer_id, send_time_ms}
-    std::map<uint64_t, std::pair<int, int64_t>> dna_pending_nonces_;
+    // Nonce tracking: nonce -> {peer_id, send_time_sec, send_timestamp_us}
+    struct DNANonceInfo {
+        int peer_id;
+        int64_t send_time_sec;      // For expiry checks
+        uint64_t send_timestamp_us; // For clock drift calculation
+    };
+    std::map<uint64_t, DNANonceInfo> dna_pending_nonces_;
     mutable std::mutex cs_dna_nonces;
 
     // Message handlers

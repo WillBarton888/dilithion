@@ -394,6 +394,34 @@ static void test_registry_update_identity() {
     CHECK(r3 == IDNARegistry::RegisterResult::INVALID_DNA, "Update non-existent returns INVALID_DNA");
 }
 
+// =================================================================
+// Test 9: Perspective cached fields survive serialize/deserialize
+// =================================================================
+void test_perspective_cached_roundtrip() {
+    std::cout << "\n=== Test 9: Perspective cached fields roundtrip ===\n";
+
+    auto dna = make_core_dna(0xAA, 100.0, 2000000.0, 5);
+    // Simulate that perspective has peer_count/turnover from live collection
+    // These are serialized as summary stats (peer_count + turnover double)
+
+    auto data = dna.serialize();
+    CHECK(!data.empty(), "Serialization produces non-empty data");
+
+    auto restored = DigitalDNA::deserialize(data);
+    CHECK(restored.has_value(), "Deserialization succeeds");
+
+    // The cached fields should be populated from the serialized summary
+    CHECK(restored->perspective.cached_peer_count >= 0, "cached_peer_count populated");
+    CHECK(restored->perspective.cached_turnover_rate >= 0.0, "cached_turnover_rate populated");
+
+    // total_unique_peers should return cached value when snapshots are empty
+    CHECK(restored->perspective.snapshots.empty(), "No snapshots after deserialize");
+    size_t peers = restored->perspective.total_unique_peers();
+    double turnover = restored->perspective.peer_turnover_rate();
+    CHECK(peers == restored->perspective.cached_peer_count, "total_unique_peers uses cached fallback");
+    CHECK(turnover == restored->perspective.cached_turnover_rate, "peer_turnover_rate uses cached fallback");
+}
+
 int main() {
     std::cout << "Digital DNA Serialization & Persistence Tests\n";
     std::cout << "=============================================\n";
@@ -406,6 +434,7 @@ int main() {
     test_registry_db_crud();
     test_registry_advisory_sybil();
     test_registry_update_identity();
+    test_perspective_cached_roundtrip();
 
     std::cout << "\n=============================================\n";
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed\n";

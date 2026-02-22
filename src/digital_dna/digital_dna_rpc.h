@@ -59,9 +59,10 @@ public:
     // Set the mining address for DNA collection
     static void set_my_address(const std::array<uint8_t, 20>& address);
 
-    // Get/set the collector pointer (for node integration)
-    static DigitalDNACollector* get_collector();
-    static void set_collector(std::unique_ptr<DigitalDNACollector> collector);
+    // Get/set the collector (for node integration)
+    // Returns shared_ptr copy — caller holds a ref, safe across threads
+    static std::shared_ptr<DigitalDNACollector> get_collector();
+    static void set_collector(std::shared_ptr<DigitalDNACollector> collector);
 
 private:
     IDNARegistry& registry_;

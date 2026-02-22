@@ -3,6 +3,7 @@
  */
 
 #include "digital_dna_rpc.h"
+#include <core/node_context.h>
 
 #include <sstream>
 #include <iomanip>
@@ -10,10 +11,11 @@
 #include <chrono>
 #include <memory>
 
+// Forward-declared in node_context.h
+extern NodeContext g_node_context;
+
 namespace digital_dna {
 
-// Static collector for this node (singleton pattern)
-static std::unique_ptr<DigitalDNACollector> g_collector;
 static std::array<uint8_t, 20> g_my_address = {};
 
 DigitalDNARpc::DigitalDNARpc(IDNARegistry& registry)
@@ -63,28 +65,29 @@ void DigitalDNARpc::set_my_address(const std::array<uint8_t, 20>& address) {
     g_my_address = address;
 }
 
-DigitalDNACollector* DigitalDNARpc::get_collector() {
-    return g_collector.get();
+std::shared_ptr<DigitalDNACollector> DigitalDNARpc::get_collector() {
+    return g_node_context.GetDNACollector();
 }
 
-void DigitalDNARpc::set_collector(std::unique_ptr<DigitalDNACollector> collector) {
-    g_collector = std::move(collector);
+void DigitalDNARpc::set_collector(std::shared_ptr<DigitalDNACollector> collector) {
+    g_node_context.SetDNACollector(std::move(collector));
 }
 
 // ============ Command Implementations ============
 
 JsonObject DigitalDNARpc::cmd_getmydigitaldna(const JsonObject& params) {
     // Get this node's collected Digital DNA
-    if (!g_collector) {
+    auto collector = g_node_context.GetDNACollector();
+    if (!collector) {
         return error(-1, "Digital DNA not collected yet. Run 'collectdigitaldna start' first.");
     }
 
-    auto dna = g_collector->get_dna();
+    auto dna = collector->get_dna();
     if (!dna) {
         JsonObject result;
         result["status"] = "collecting";
         std::ostringstream oss;
-        oss << std::fixed << std::setprecision(1) << (g_collector->get_progress() * 100);
+        oss << std::fixed << std::setprecision(1) << (collector->get_progress() * 100);
         result["progress"] = oss.str() + "%";
         return result;
     }
@@ -94,11 +97,12 @@ JsonObject DigitalDNARpc::cmd_getmydigitaldna(const JsonObject& params) {
 
 JsonObject DigitalDNARpc::cmd_registerdigitaldna(const JsonObject& params) {
     // Register this node's Digital DNA on-chain
-    if (!g_collector) {
+    auto collector = g_node_context.GetDNACollector();
+    if (!collector) {
         return error(-1, "Digital DNA not collected yet");
     }
 
-    auto dna = g_collector->get_dna();
+    auto dna = collector->get_dna();
     if (!dna) {
         return error(-1, "DNA collection incomplete");
     }
@@ -343,13 +347,15 @@ JsonObject DigitalDNARpc::cmd_collectdigitaldna(const JsonObject& params) {
     std::string action = it != params.end() ? it->second : "status";
 
     if (action == "start") {
-        if (g_collector && g_collector->is_collecting()) {
+        auto cur = g_node_context.GetDNACollector();
+        if (cur && cur->is_collecting()) {
             return error(-1, "Collection already in progress");
         }
 
-        // Would get address from wallet in production
-        g_collector = std::make_unique<DigitalDNACollector>(g_my_address);
-        g_collector->start_collection();
+        // Create new collector — shared_ptr for safe cross-thread replacement
+        auto new_collector = std::make_shared<DigitalDNACollector>(g_my_address);
+        new_collector->start_collection();
+        set_collector(std::move(new_collector));
 
         JsonObject result;
         result["status"] = "started";
@@ -357,18 +363,20 @@ JsonObject DigitalDNARpc::cmd_collectdigitaldna(const JsonObject& params) {
         return result;
 
     } else if (action == "stop") {
-        if (!g_collector) {
+        auto collector = g_node_context.GetDNACollector();
+        if (!collector) {
             return error(-1, "No collection in progress");
         }
 
-        g_collector->stop_collection();
+        collector->stop_collection();
 
         JsonObject result;
         result["status"] = "stopped";
         return result;
 
     } else {  // status
-        if (!g_collector) {
+        auto collector = g_node_context.GetDNACollector();
+        if (!collector) {
             JsonObject result;
             result["status"] = "not_started";
             result["message"] = "Run 'collectdigitaldna start' to begin";
@@ -376,13 +384,13 @@ JsonObject DigitalDNARpc::cmd_collectdigitaldna(const JsonObject& params) {
         }
 
         JsonObject result;
-        if (g_collector->is_collecting()) {
+        if (collector->is_collecting()) {
             result["status"] = "collecting";
             std::ostringstream oss;
-            oss << std::fixed << std::setprecision(1) << (g_collector->get_progress() * 100);
+            oss << std::fixed << std::setprecision(1) << (collector->get_progress() * 100);
             result["progress"] = oss.str() + "%";
         } else {
-            auto dna = g_collector->get_dna();
+            auto dna = collector->get_dna();
             if (dna) {
                 result["status"] = "complete";
                 result["is_valid"] = dna->is_valid ? "true" : "false";

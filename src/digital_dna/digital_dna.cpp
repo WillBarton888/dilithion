@@ -266,13 +266,13 @@ std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& da
         // Core v2.0: Timing
         if (!read_double(data, off, dna.timing.iterations_per_second)) return std::nullopt;
 
-        // Core v2.0: Perspective
+        // Core v2.0: Perspective (summary stats — full peer list not serialized)
         uint32_t peer_count;
         if (!read_u32(data, off, peer_count)) return std::nullopt;
         double turnover;
         if (!read_double(data, off, turnover)) return std::nullopt;
-        // Store peer_count/turnover — perspective is partially reconstructed
-        // (full peer list not serialized, only summary stats)
+        dna.perspective.cached_peer_count = peer_count;
+        dna.perspective.cached_turnover_rate = turnover;
 
         // Optional v3.0 dimensions (order matches flags)
         if (flags & FLAG_MEMORY) {
