@@ -39,7 +39,7 @@ ChainParams ChainParams::Mainnet() {
     params.halvingInterval = 210000;       // ~1.6 years at 4-minute blocks
     params.difficultyAdjustment = 2016;    // ~5.6 days at 4-minute blocks (pre-fork)
     params.difficultyAdjustmentV2 = 360;   // ~1 day at 4-minute blocks (post-fork)
-    params.difficultyForkHeight = 20160;   // Activate v2 difficulty at this height
+    params.difficultyForkHeight = 18500;   // Activate v2 difficulty at this height (moved from 20160 to fix sign bit + EDA interaction)
     params.difficultyMaxChange = 2;        // 2x max change per retarget (post-fork)
     params.maxBlockSize = 4 * 1024 * 1024; // 4 MB (for post-quantum signatures)
 
@@ -88,9 +88,9 @@ ChainParams ChainParams::Mainnet() {
     params.dfmpV33ActivationHeight = 13500;
 
     // Compact encoding fix: fixes BigToCompact sign bit bug that caused
-    // difficulty to be 18x harder than intended after retarget at block 18144.
-    // Activates alongside v2 difficulty rules at the same fork height.
-    params.compactEncodingFixHeight = 20160;
+    // difficulty to be ~5x harder than intended due to EDA + sign bit compounding.
+    // Moved from 20160 to 18500 to stop ongoing chain degradation.
+    params.compactEncodingFixHeight = 18500;
 
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
