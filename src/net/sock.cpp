@@ -394,7 +394,7 @@ bool CSock::CreateListenSocket(uint16_t port, const std::string& bind_addr,
     bool is_loopback = (bind_addr == "127.0.0.1" || bind_addr == "localhost" || bind_addr == "::1");
 
     // Try creating an IPv6 dual-stack socket first (skip for loopback)
-    socket_t sock = is_loopback ? INVALID_SOCKET : socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    socket_t sock = is_loopback ? INVALID_SOCKET_VALUE : socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
     if (IsValid(sock)) {
         // Set IPV6_V6ONLY=0 for dual-stack (accepts both IPv4 and IPv6)
         // Critical on Windows where this defaults to 1
