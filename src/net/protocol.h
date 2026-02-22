@@ -167,19 +167,16 @@ struct CAddress {
         ip[15] = ipv4 & 0xFF;
     }
 
-    // Set IPv4 address from dotted-decimal string (e.g., "192.168.1.1")
-    bool SetFromString(const std::string& ipStr) {
-        unsigned int a, b, c, d;
-        if (sscanf(ipStr.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
-            return false;
-        }
-        if (a > 255 || b > 255 || c > 255 || d > 255) {
-            return false;
-        }
-        uint32_t ipv4 = (a << 24) | (b << 16) | (c << 8) | d;
-        SetIPv4(ipv4);
-        return true;
+    void SetIPv6(const uint8_t ipv6[16]) {
+        memcpy(ip, ipv6, 16);
     }
+
+    bool IsIPv4() const {
+        return memcmp(ip, "\0\0\0\0\0\0\0\0\0\0\xff\xff", 12) == 0;
+    }
+
+    // Set address from IPv4 or IPv6 string (implementation in protocol.cpp)
+    bool SetFromString(const std::string& ipStr);
 
     // BUG #125 FIX: Check if address is null/unset
     bool IsNull() const {
@@ -221,6 +218,18 @@ struct CAddress {
         // Reject all-zeros
         static const uint8_t ipv6_zero[16] = {0};
         if (memcmp(ip, ipv6_zero, 16) == 0) return false;
+
+        // Reject link-local (fe80::/10)
+        if (ip[0] == 0xfe && (ip[1] & 0xc0) == 0x80) return false;
+
+        // Reject unique-local (fc00::/7)
+        if ((ip[0] & 0xfe) == 0xfc) return false;
+
+        // Reject documentation (2001:db8::/32)
+        if (ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x0d && ip[3] == 0xb8) return false;
+
+        // Reject IPv6 multicast (ff00::/8)
+        if (ip[0] == 0xff) return false;
 
         return true;  // Accept other IPv6 addresses
     }

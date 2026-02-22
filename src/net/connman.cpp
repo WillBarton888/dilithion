@@ -5,6 +5,7 @@
 // See: docs/developer/LIBEVENT-NETWORKING-PORT-PLAN.md
 
 #include <net/connman.h>
+#include <net/netaddress.h>
 #include <net/peers.h>
 #include <net/net.h>
 #include <net/socket.h>
@@ -72,6 +73,7 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
         std::lock_guard<std::mutex> lock(cs_localAddresses);
         m_localAddresses.insert("127.0.0.1");
         m_localAddresses.insert("0.0.0.0");
+        m_localAddresses.insert("::1");
 
 #ifdef _WIN32
         // Windows: Use gethostname + getaddrinfo
@@ -79,15 +81,23 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
         if (gethostname(hostname, sizeof(hostname)) == 0) {
             struct addrinfo hints, *res, *p;
             memset(&hints, 0, sizeof(hints));
-            hints.ai_family = AF_INET;
+            hints.ai_family = AF_UNSPEC;  // Both IPv4 and IPv6
             hints.ai_socktype = SOCK_STREAM;
             if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
                 for (p = res; p != nullptr; p = p->ai_next) {
-                    struct sockaddr_in* ipv4 = (struct sockaddr_in*)p->ai_addr;
-                    char ip_str[INET_ADDRSTRLEN];
-                    if (inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str)) != nullptr) {
-                        m_localAddresses.insert(ip_str);
-                        LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                    char ip_str[INET6_ADDRSTRLEN];
+                    if (p->ai_family == AF_INET) {
+                        struct sockaddr_in* sa4 = (struct sockaddr_in*)p->ai_addr;
+                        if (inet_ntop(AF_INET, &sa4->sin_addr, ip_str, sizeof(ip_str)) != nullptr) {
+                            m_localAddresses.insert(ip_str);
+                            LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                        }
+                    } else if (p->ai_family == AF_INET6) {
+                        struct sockaddr_in6* sa6 = (struct sockaddr_in6*)p->ai_addr;
+                        if (inet_ntop(AF_INET6, &sa6->sin6_addr, ip_str, sizeof(ip_str)) != nullptr) {
+                            m_localAddresses.insert(ip_str);
+                            LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                        }
                     }
                 }
                 freeaddrinfo(res);
@@ -99,10 +109,16 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
         if (getifaddrs(&ifaddr) == 0) {
             for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
                 if (ifa->ifa_addr == nullptr) continue;
+                char ip_str[INET6_ADDRSTRLEN];
                 if (ifa->ifa_addr->sa_family == AF_INET) {
-                    struct sockaddr_in* ipv4 = (struct sockaddr_in*)ifa->ifa_addr;
-                    char ip_str[INET_ADDRSTRLEN];
-                    if (inet_ntop(AF_INET, &ipv4->sin_addr, ip_str, sizeof(ip_str)) != nullptr) {
+                    struct sockaddr_in* sa4 = (struct sockaddr_in*)ifa->ifa_addr;
+                    if (inet_ntop(AF_INET, &sa4->sin_addr, ip_str, sizeof(ip_str)) != nullptr) {
+                        m_localAddresses.insert(ip_str);
+                        LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
+                    }
+                } else if (ifa->ifa_addr->sa_family == AF_INET6) {
+                    struct sockaddr_in6* sa6 = (struct sockaddr_in6*)ifa->ifa_addr;
+                    if (inet_ntop(AF_INET6, &sa6->sin6_addr, ip_str, sizeof(ip_str)) != nullptr) {
                         m_localAddresses.insert(ip_str);
                         LogPrintf(NET, INFO, "[CConnman] Detected local address: %s\n", ip_str);
                     }
@@ -113,117 +129,33 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
 #endif
     }
 
-    // Phase 2: Create listen socket if fListen
+    // Phase 2: Create listen socket if fListen (dual-stack IPv4+IPv6)
     if (m_options.fListen) {
-        m_listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (m_listen_socket < 0) {
+        bool is_ipv6 = false;
+        if (!CSock::CreateListenSocket(m_options.nListenPort, "", m_listen_socket, is_ipv6)) {
             LogPrintf(NET, ERROR, "[CConnman] Failed to create listen socket\n");
-            return false;
-        }
-
-        // Set socket options for robust rebinding after crashes
-        int reuse = 1;
-        if (setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) != 0) {
-            LogPrintf(NET, WARN, "[CConnman] Failed to set SO_REUSEADDR (non-fatal)\n");
-        }
-#ifndef _WIN32
-        // On Linux/Unix, also set SO_REUSEPORT for faster rebinding
-        if (setsockopt(m_listen_socket, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse)) != 0) {
-            LogPrintf(NET, WARN, "[CConnman] Failed to set SO_REUSEPORT (non-fatal)\n");
-        }
-#endif
-
-        // Bind to port with retry logic (for production stability)
-        // If previous instance crashed, port may be in TIME_WAIT for up to 60s
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(m_options.nListenPort);
-
-        const int MAX_BIND_RETRIES = 10;
-        const int BIND_RETRY_DELAY_MS = 3000;  // 3 seconds between retries
-        bool bindSuccess = false;
-
-        for (int attempt = 1; attempt <= MAX_BIND_RETRIES; attempt++) {
-            if (bind(m_listen_socket, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
-                bindSuccess = true;
-                if (attempt > 1) {
-                    LogPrintf(NET, INFO, "[CConnman] Bind succeeded on attempt %d\n", attempt);
-                }
-                break;
-            }
-
-            // Get error code for diagnostics
-#ifdef _WIN32
-            int errCode = WSAGetLastError();
-            const char* errMsg = (errCode == WSAEADDRINUSE) ? "Address in use" :
-                                 (errCode == WSAEACCES) ? "Permission denied" : "Unknown";
-#else
-            int errCode = errno;
-            const char* errMsg = (errCode == EADDRINUSE) ? "Address in use" :
-                                 (errCode == EACCES) ? "Permission denied" :
-                                 (errCode == EADDRNOTAVAIL) ? "Address not available" : strerror(errCode);
-#endif
-
-            if (attempt < MAX_BIND_RETRIES) {
-                LogPrintf(NET, WARN, "[CConnman] Bind attempt %d/%d failed on port %d: %s (error %d). Retrying in %dms...\n",
-                         attempt, MAX_BIND_RETRIES, m_options.nListenPort, errMsg, errCode, BIND_RETRY_DELAY_MS);
-                std::this_thread::sleep_for(std::chrono::milliseconds(BIND_RETRY_DELAY_MS));
-            } else {
-                LogPrintf(NET, ERROR, "[CConnman] Failed to bind listen socket to port %d after %d attempts: %s (error %d)\n",
-                         m_options.nListenPort, MAX_BIND_RETRIES, errMsg, errCode);
-            }
-        }
-
-        if (!bindSuccess) {
-#ifdef _WIN32
-            closesocket(m_listen_socket);
-#else
-            close(m_listen_socket);
-#endif
-            m_listen_socket = -1;
             return false;
         }
 
         // Listen
         if (listen(m_listen_socket, 10) < 0) {
             LogPrintf(NET, ERROR, "[CConnman] Failed to listen on socket\n");
-#ifdef _WIN32
-            closesocket(m_listen_socket);
-#else
-            close(m_listen_socket);
-#endif
-            m_listen_socket = -1;
+            CSock::Close(m_listen_socket);
             return false;
         }
 
         // Set non-blocking
-#ifdef _WIN32
-        u_long mode = 1;
-        if (ioctlsocket(m_listen_socket, FIONBIO, &mode) == SOCKET_ERROR) {
-            LogPrintf(NET, ERROR, "[CConnman] Start: ioctlsocket failed to set non-blocking on listen socket\n");
-            closesocket(m_listen_socket);
-            m_listen_socket = -1;
+        if (!CSock::SetNonBlocking(m_listen_socket)) {
+            LogPrintf(NET, ERROR, "[CConnman] Failed to set listen socket non-blocking\n");
+            CSock::Close(m_listen_socket);
             return false;
         }
-#else
-        int flags = fcntl(m_listen_socket, F_GETFL, 0);
-        if (flags == -1) {
-            LogPrintf(NET, ERROR, "[CConnman] Start: fcntl F_GETFL failed on listen socket\n");
-            close(m_listen_socket);
-            m_listen_socket = -1;
-            return false;
-        }
-        if (fcntl(m_listen_socket, F_SETFL, flags | O_NONBLOCK) == -1) {
-            LogPrintf(NET, ERROR, "[CConnman] Start: fcntl F_SETFL failed on listen socket\n");
-            close(m_listen_socket);
-            m_listen_socket = -1;
-            return false;
-        }
-#endif
 
-        LogPrintf(NET, INFO, "[CConnman] Listening on port %d\n", m_options.nListenPort);
+        if (is_ipv6) {
+            LogPrintf(NET, INFO, "[CConnman] Listening on port %d (dual-stack IPv4+IPv6)\n", m_options.nListenPort);
+        } else {
+            LogPrintf(NET, WARN, "[CConnman] Listening on port %d (IPv4 only, IPv6 unavailable)\n", m_options.nListenPort);
+        }
     }
 
     // Phase 2: Start ThreadSocketHandler
@@ -325,13 +257,8 @@ void CConnman::Stop() {
     m_blocks_worker_threads.clear();
 
     // Close listen socket
-    if (m_listen_socket >= 0) {
-#ifdef _WIN32
-        closesocket(m_listen_socket);
-#else
-        close(m_listen_socket);
-#endif
-        m_listen_socket = -1;
+    if (CSock::IsValid(m_listen_socket)) {
+        CSock::Close(m_listen_socket);
     }
 
     // Disconnect all nodes
@@ -361,12 +288,10 @@ void CConnman::Interrupt() {
 CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     // Phase 2: Implement outbound connection
 
-    // Extract IP string from address (needed for logging and self-connection check)
-    std::string ip_str = strprintf("%d.%d.%d.%d",
-                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
+    // Extract IP string from address (supports both IPv4 and IPv6)
+    std::string ip_str = addr.ToStringIP();
 
     // Prevent self-connection: check if target is our own IP (any port)
-    // This prevents connecting to ourselves even on non-listen ports (from addr gossip)
     if (IsOurAddress(addr)) {
         LogPrintf(NET, WARN, "[CConnman] Preventing self-connection to %s:%d\n",
                   ip_str.c_str(), addr.port);
@@ -374,7 +299,6 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     }
 
     // FIX: Check for duplicate connection (already connected to this IP)
-    // Only ONE connection per peer allowed (regardless of direction)
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
         for (const auto& node : m_nodes) {
@@ -403,58 +327,49 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
         }
     }
 
-    // Create socket
-    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock < 0) {
+    // Create socket matching address family (AF_INET for IPv4, AF_INET6 for IPv6)
+    int family = CSock::DetectFamily(ip_str);
+    if (family == 0) {
+        LogPrintf(NET, ERROR, "[CConnman] Invalid address family for %s\n", ip_str.c_str());
+        return nullptr;
+    }
+    socket_t sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
+    if (!CSock::IsValid(sock)) {
         LogPrintf(NET, ERROR, "[CConnman] Failed to create socket for %s:%d\n",
                   ip_str.c_str(), addr.port);
         return nullptr;
     }
 
     // Set non-blocking
-#ifdef _WIN32
-    u_long mode = 1;
-    if (ioctlsocket(sock, FIONBIO, &mode) == SOCKET_ERROR) {
-        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: ioctlsocket failed to set non-blocking for %s:%d\n",
+    if (!CSock::SetNonBlocking(sock)) {
+        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: Failed to set non-blocking for %s:%d\n",
                   ip_str.c_str(), addr.port);
-        closesocket(sock);
+        CSock::Close(sock);
         return nullptr;
     }
-#else
-    int flags = fcntl(sock, F_GETFL, 0);
-    if (flags == -1) {
-        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: fcntl F_GETFL failed for %s:%d\n",
-                  ip_str.c_str(), addr.port);
-        close(sock);
-        return nullptr;
-    }
-    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) == -1) {
-        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: fcntl F_SETFL failed for %s:%d\n",
-                  ip_str.c_str(), addr.port);
-        close(sock);
-        return nullptr;
-    }
-#endif
 
-    // Connect
-    struct sockaddr_in sockaddr;
-    memset(&sockaddr, 0, sizeof(sockaddr));
-    sockaddr.sin_family = AF_INET;
-    inet_pton(AF_INET, ip_str.c_str(), &sockaddr.sin_addr);
-    sockaddr.sin_port = htons(addr.port);
+    // Connect using family-aware sockaddr
+    struct sockaddr_storage ss;
+    socklen_t ss_len;
+    if (!CSock::FillSockAddr(ip_str, addr.port, ss, ss_len)) {
+        LogPrintf(NET, ERROR, "[CConnman] ConnectNode: Failed to fill address for %s:%d\n",
+                  ip_str.c_str(), addr.port);
+        CSock::Close(sock);
+        return nullptr;
+    }
 
-    int result = connect(sock, (struct sockaddr*)&sockaddr, sizeof(sockaddr));
+    int result = connect(sock, (struct sockaddr*)&ss, ss_len);
 #ifdef _WIN32
     int err = WSAGetLastError();
     if (result < 0 && err != WSAEWOULDBLOCK && err != WSAEINPROGRESS) {
-        closesocket(sock);
+        CSock::Close(sock);
         LogPrintf(NET, ERROR, "[CConnman] Failed to connect to %s:%d (error %d)\n",
                   ip_str.c_str(), addr.port, err);
         return nullptr;
     }
 #else
     if (result < 0 && errno != EINPROGRESS && errno != EAGAIN) {
-        close(sock);
+        CSock::Close(sock);
         LogPrintf(NET, ERROR, "[CConnman] Failed to connect to %s:%d (error %d)\n",
                   ip_str.c_str(), addr.port, errno);
         return nullptr;
@@ -467,7 +382,7 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     CNode* pnode = node.get();
 
     // Set socket and state
-    pnode->SetSocket(sock);
+    pnode->SetSocket(static_cast<int>(sock));
     pnode->state.store(CNode::STATE_CONNECTING);
 
     // Add to m_nodes
@@ -517,9 +432,8 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
         }
     }
 
-    // Extract IP string
-    std::string ip_str = strprintf("%d.%d.%d.%d",
-                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
+    // Extract IP string (supports both IPv4 and IPv6)
+    std::string ip_str = addr.ToStringIP();
 
     // Check if IP is banned
     if (m_peer_manager && m_peer_manager->IsBanned(ip_str)) {
@@ -1119,7 +1033,7 @@ void CConnman::SocketHandler() {
     }
 
     // Add listen socket
-    if (m_listen_socket >= 0) {
+    if (CSock::IsValid(m_listen_socket)) {
         recv_set.insert(m_listen_socket);
     }
 
@@ -1131,13 +1045,13 @@ void CConnman::SocketHandler() {
     // Handle listen socket (new connections)
     // BUG #137 FIX: Loop to accept ALL pending connections, not just one
     // Multiple connections can arrive between select() calls
-    if (m_listen_socket >= 0 && recv_set.count(m_listen_socket)) {
+    if (CSock::IsValid(m_listen_socket) && recv_set.count(m_listen_socket)) {
         while (true) {
-            struct sockaddr_in client_addr;
+            struct sockaddr_storage client_addr;
             socklen_t addr_len = sizeof(client_addr);
 
-            int client_fd = accept(m_listen_socket, (struct sockaddr*)&client_addr, &addr_len);
-            if (client_fd < 0) {
+            socket_t client_fd = accept(m_listen_socket, (struct sockaddr*)&client_addr, &addr_len);
+            if (!CSock::IsValid(client_fd)) {
 #ifdef _WIN32
                 int err = WSAGetLastError();
                 if (err != WSAEWOULDBLOCK) {
@@ -1152,36 +1066,25 @@ void CConnman::SocketHandler() {
             }
 
             // Set non-blocking
-#ifdef _WIN32
-            u_long mode = 1;
-            if (ioctlsocket(client_fd, FIONBIO, &mode) == SOCKET_ERROR) {
-                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: ioctlsocket failed to set non-blocking\n");
-                closesocket(client_fd);
-                continue;  // Skip this connection, try next
+            if (!CSock::SetNonBlocking(client_fd)) {
+                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: Failed to set non-blocking\n");
+                CSock::Close(client_fd);
+                continue;
             }
-#else
-            int flags = fcntl(client_fd, F_GETFL, 0);
-            if (flags == -1) {
-                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: fcntl F_GETFL failed\n");
-                close(client_fd);
-                continue;  // Skip this connection, try next
-            }
-            if (fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: fcntl F_SETFL failed\n");
-                close(client_fd);
-                continue;  // Skip this connection, try next
-            }
-#endif
 
-            // Extract address
-            char ip_str[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &client_addr.sin_addr, ip_str, INET_ADDRSTRLEN);
-            uint16_t port = ntohs(client_addr.sin_port);
+            // Extract address (unwraps IPv4-mapped IPv6 for backward compatibility)
+            std::string ip_str_buf;
+            uint16_t port;
+            if (!CSock::ExtractAddress(client_addr, ip_str_buf, port)) {
+                LogPrintf(NET, ERROR, "[CConnman] SocketHandler: Failed to extract address\n");
+                CSock::Close(client_fd);
+                continue;
+            }
+            const char* ip_str = ip_str_buf.c_str();
 
-            // Create address using SetIPv4 to properly set IPv4-mapped IPv6 format
+            // Create address (SetFromString handles both IPv4 and IPv6)
             NetProtocol::CAddress addr;
-            uint32_t ipv4 = ntohl(client_addr.sin_addr.s_addr);
-            addr.SetIPv4(ipv4);
+            addr.SetFromString(ip_str_buf);
             addr.port = port;
             addr.services = NetProtocol::NODE_NETWORK;
 
@@ -1190,7 +1093,7 @@ void CConnman::SocketHandler() {
             auto node = std::make_unique<CNode>(node_id, addr, true);  // true = inbound
             CNode* pnode = node.get();
 
-            pnode->SetSocket(client_fd);
+            pnode->SetSocket(static_cast<int>(client_fd));
             pnode->state.store(CNode::STATE_CONNECTED);
 
             // Per-IP connection limit with outbound duplicate prevention
@@ -1789,9 +1692,8 @@ void CConnman::InactivityCheck() {
 }
 
 bool CConnman::IsOurAddress(const NetProtocol::CAddress& addr) const {
-    // Extract IP string from address
-    std::string ip_str = strprintf("%d.%d.%d.%d",
-                                   addr.ip[12], addr.ip[13], addr.ip[14], addr.ip[15]);
+    // Extract IP string from address (supports both IPv4 and IPv6)
+    std::string ip_str = addr.ToStringIP();
 
     // Check localhost variants
     if (ip_str == "127.0.0.1" || ip_str == "0.0.0.0") {
@@ -1805,23 +1707,15 @@ bool CConnman::IsOurAddress(const NetProtocol::CAddress& addr) const {
 
 void CConnman::RecordExternalIP(const std::string& ip, int peerId) {
     // Don't record private/local IPs - they're useless for global peer discovery
-    if (ip.empty() || ip == "0.0.0.0") {
+    if (ip.empty() || ip == "0.0.0.0" || ip == "::") {
         return;
     }
 
-    // Filter out RFC1918 private addresses
-    if (ip.substr(0, 8) == "192.168." ||
-        ip.substr(0, 3) == "10." ||
-        ip.substr(0, 4) == "127." ||
-        (ip.substr(0, 4) == "172." && ip.size() > 6)) {
-        // Check 172.16-31.x.x range
-        if (ip.substr(0, 4) == "172.") {
-            int second_octet = std::stoi(ip.substr(4, ip.find('.', 4) - 4));
-            if (second_octet >= 16 && second_octet <= 31) {
-                return;  // Private 172.16-31.x.x
-            }
-        } else {
-            return;  // Other private ranges
+    // Use CNetAddr::IsRoutable() for comprehensive routability check (covers both IPv4 and IPv6)
+    CNetAddr netAddr;
+    if (CNetAddr::FromString(ip, netAddr)) {
+        if (!netAddr.IsRoutable()) {
+            return;  // Non-routable address (private, link-local, loopback, etc.)
         }
     }
 

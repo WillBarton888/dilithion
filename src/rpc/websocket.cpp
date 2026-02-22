@@ -3,6 +3,7 @@
 
 #include <rpc/websocket.h>
 #include <rpc/ssl_wrapper.h>
+#include <net/sock.h>
 #include <util/strencodings.h>
 #include <iostream>
 #include <sstream>
@@ -74,44 +75,18 @@ bool CWebSocketServer::Start() {
     }
 #endif
 
-    // Create socket
-    m_server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_server_socket == INVALID_SOCKET) {
+    // Create dual-stack listen socket (localhost only for WebSocket)
+    socket_t ws_sock;
+    bool is_ipv6;
+    if (!CSock::CreateListenSocket(m_port, "127.0.0.1", ws_sock, is_ipv6)) {
+        std::cerr << "[WebSocket] Failed to create listen socket on port " << m_port << std::endl;
         return false;
     }
+    m_server_socket = static_cast<int>(ws_sock);
 
-    // Set socket options
-    int opt = 1;
-    // CID 1675303 FIX: Check return value of setsockopt to ensure socket option is set
-    // setsockopt returns 0 on success, SOCKET_ERROR (-1) on error
-#ifdef _WIN32
-    if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)) == SOCKET_ERROR) {
-        int error = WSAGetLastError();
-        std::cerr << "[WebSocket] Warning: Failed to set SO_REUSEADDR (error: " << error << ")" << std::endl;
-        // Continue anyway - SO_REUSEADDR failure is non-fatal, but may cause issues on restart
-    }
-#else
-    if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        std::cerr << "[WebSocket] Warning: Failed to set SO_REUSEADDR (" << strerror(errno) << ")" << std::endl;
-        // Continue anyway - SO_REUSEADDR failure is non-fatal, but may cause issues on restart
-    }
-#endif
-
-    // Bind to localhost
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(m_port);
-
-    if (bind(m_server_socket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        closesocket(m_server_socket);
-        m_server_socket = INVALID_SOCKET;
-        return false;
-    }
-
-    // Listen
+    // Listen for connections
     if (listen(m_server_socket, 10) == SOCKET_ERROR) {
+        std::cerr << "[WebSocket] Failed to listen on port " << m_port << std::endl;
         closesocket(m_server_socket);
         m_server_socket = INVALID_SOCKET;
         return false;
@@ -161,7 +136,7 @@ void CWebSocketServer::Stop() {
 
 void CWebSocketServer::ServerThread() {
     while (m_running) {
-        struct sockaddr_in clientAddr;
+        struct sockaddr_storage clientAddr;
         socklen_t clientLen = sizeof(clientAddr);
         int clientSocket = accept(m_server_socket, (struct sockaddr*)&clientAddr, &clientLen);
 
@@ -196,13 +171,17 @@ void CWebSocketServer::HandleClient(int clientSocket) {
     connection->ssl = ssl;
     connection->is_ssl = (ssl != nullptr);
     
-    // Get client IP
-    struct sockaddr_in clientAddr;
+    // Get client IP (supports both IPv4 and IPv6)
+    struct sockaddr_storage clientAddr;
     socklen_t addrLen = sizeof(clientAddr);
     if (getpeername(clientSocket, (struct sockaddr*)&clientAddr, &addrLen) == 0) {
-        char ip_str[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &clientAddr.sin_addr, ip_str, INET_ADDRSTRLEN);
-        connection->client_ip = std::string(ip_str);
+        std::string ip_str;
+        uint16_t client_port;
+        if (CSock::ExtractAddress(clientAddr, ip_str, client_port)) {
+            connection->client_ip = ip_str;
+        } else {
+            connection->client_ip = "unknown";
+        }
     } else {
         connection->client_ip = "unknown";
     }

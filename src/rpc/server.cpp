@@ -3,6 +3,8 @@
 
 #include <rpc/server.h>
 #include <rpc/auth.h>
+#include <net/sock.h>
+#include <net/dns.h>
 #include <core/version.h>
 #include <rpc/json_util.h>  // RPC-007 FIX: Proper JSON parsing
 #include <rpc/logger.h>  // Phase 1: Request logging
@@ -16,6 +18,7 @@
 #include <node/mempool.h>
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
+#include <consensus/params.h>
 #include <consensus/chain.h>
 #include <consensus/fees.h>
 #include <consensus/tx_validation.h>
@@ -82,15 +85,20 @@ extern NodeState g_node_state;
     #define closesocket close
 #endif
 
-// Helper function to extract IP address from client socket
+// Helper function to extract IP address from client socket (supports IPv4 and IPv6)
 static std::string GetClientIP(int clientSocket) {
-    struct sockaddr_in addr;
-    socklen_t addr_size = sizeof(struct sockaddr_in);
-    int res = getpeername(clientSocket, (struct sockaddr *)&addr, &addr_size);
+    struct sockaddr_storage ss;
+    socklen_t addr_size = sizeof(ss);
+    int res = getpeername(clientSocket, (struct sockaddr *)&ss, &addr_size);
     if (res != 0) {
         return "unknown";
     }
-    return std::string(inet_ntoa(addr.sin_addr));
+    std::string ip_str;
+    uint16_t port;
+    if (CSock::ExtractAddress(ss, ip_str, port)) {
+        return ip_str;
+    }
+    return "unknown";
 }
 
 /**
@@ -325,16 +333,6 @@ bool CRPCServer::Start() {
     }
 #endif
 
-    // Create socket
-    m_serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_serverSocket == INVALID_SOCKET) {
-        return false;
-    }
-
-    // Set socket options
-    int opt = 1;
-    (void)setsockopt(m_serverSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
-
     // RPC-001 FIX: Bind to localhost only for security (by default)
     // SECURITY: RPC server binds to 127.0.0.1 (localhost) only by default
     // This prevents remote network access and mitigates the risk of credential
@@ -344,22 +342,21 @@ bool CRPCServer::Start() {
     //   ssh -L 8332:127.0.0.1:8332 user@remote-host
     //
     // PUBLIC API MODE (--public-api flag):
-    // When m_publicAPI is true, binds to 0.0.0.0 to allow light wallet clients
+    // When m_publicAPI is true, binds to all interfaces to allow light wallet clients
     // to connect from any IP. Only the REST API endpoints (/api/v1/*) are accessible
     // without authentication. JSON-RPC endpoints still require auth.
     // SECURITY: Only enable on seed nodes, not home mining nodes.
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
+    std::string bind_addr;
     if (m_publicAPI) {
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);  // 0.0.0.0 - public access for light wallets
-        std::cout << "[RPC] Public API mode enabled - binding to 0.0.0.0:" << m_port << std::endl;
+        bind_addr = "";  // All interfaces (dual-stack IPv4+IPv6)
+        std::cout << "[RPC] Public API mode enabled - binding to all interfaces:" << m_port << std::endl;
     } else {
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1 localhost only
+        bind_addr = "127.0.0.1";  // Localhost only
     }
-    addr.sin_port = htons(m_port);
 
-    if (bind(m_serverSocket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+    socket_t rpc_sock;
+    bool is_ipv6;
+    if (!CSock::CreateListenSocket(static_cast<uint16_t>(m_port), bind_addr, rpc_sock, is_ipv6)) {
         ErrorMessage error = CErrorFormatter::NetworkError("bind RPC server",
             "Failed to bind to port " + std::to_string(m_port));
         error.recovery_steps = {
@@ -368,24 +365,28 @@ bool CRPCServer::Start() {
             "Try a different port with --rpcport"
         };
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-        closesocket(m_serverSocket);
-        m_serverSocket = INVALID_SOCKET;
         return false;
     }
+    m_serverSocket = static_cast<int>(rpc_sock);
 
-    // Log security notice
-    std::cout << "[RPC] Server bound to 127.0.0.1:" << m_port << " (localhost only)" << std::endl;
-    std::cout << "[RPC] SECURITY: For remote access, use SSH tunneling" << std::endl;
-
-    // Listen
+    // Listen for connections
     if (listen(m_serverSocket, 128) == SOCKET_ERROR) {
-        ErrorMessage error = CErrorFormatter::NetworkError("listen RPC server", 
+        ErrorMessage error = CErrorFormatter::NetworkError("listen RPC server",
             "Failed to listen on socket");
         std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
         closesocket(m_serverSocket);
         m_serverSocket = INVALID_SOCKET;
         return false;
     }
+
+    // Log security notice
+    if (m_publicAPI) {
+        std::cout << "[RPC] Server bound to port " << m_port
+                  << (is_ipv6 ? " (dual-stack IPv4+IPv6)" : " (IPv4 only)") << std::endl;
+    } else {
+        std::cout << "[RPC] Server bound to 127.0.0.1:" << m_port << " (localhost only)" << std::endl;
+    }
+    std::cout << "[RPC] SECURITY: For remote access, use SSH tunneling" << std::endl;
 
     // Initialize REST API with component references
     if (m_restAPI) {
@@ -2600,90 +2601,101 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
         throw std::runtime_error("Chain state not initialized");
     }
 
+    // Parse count parameter (default 50)
+    size_t count = 50;
+    if (!params.empty()) {
+        try {
+            nlohmann::json j = nlohmann::json::parse(params);
+            if (j.contains("count") && j["count"].is_number()) {
+                int c = j["count"].get<int>();
+                if (c > 0) count = static_cast<size_t>(c);
+                if (count > 1000) count = 1000;  // Cap at 1000
+            }
+        } catch (...) {}
+    }
+
     unsigned int currentHeight = m_chainstate->GetHeight();
 
-    // BUG #104 FIX: Collect both received and sent transactions
-    // Structure to hold unified transaction info for sorting
+    // Lightweight struct for initial collection (no expensive block lookups yet)
     struct TxInfo {
         std::string txid;
         std::string address;
-        std::string category;  // "receive" or "send"
-        int64_t amount;        // positive for receive, negative for send
-        int64_t fee;           // only for sends
-        unsigned int confirmations;
-        std::string blockhash;
-        int64_t time;          // for sorting
-        bool generated;        // true if coinbase (mining reward)
+        std::string category;
+        int64_t amount;
+        int64_t fee;
+        unsigned int height;       // for sorting and confirmations
+        int64_t time;              // sent tx time, or 0 for received (filled later)
+        bool generated;
     };
     std::vector<TxInfo> allTx;
 
-    // BUG #113 FIX: Get ALL received transactions (including spent) for complete history
+    // Collect received transactions (lightweight - no block lookups)
     std::vector<CWalletTx> allOutputs = m_wallet->ListAllOutputs(currentHeight);
+    allTx.reserve(allOutputs.size() + 32);
     for (const auto& utxo : allOutputs) {
         TxInfo info;
         info.txid = utxo.txid.GetHex();
         info.address = utxo.address.ToString();
-        info.category = utxo.fSpent ? "spent" : "receive";  // Mark spent outputs
+        info.category = utxo.fSpent ? "spent" : "receive";
         info.amount = utxo.nValue;
         info.fee = 0;
-        info.confirmations = 0;
-        if (utxo.nHeight > 0 && currentHeight >= utxo.nHeight) {
-            info.confirmations = currentHeight - utxo.nHeight + 1;
-        }
-        info.blockhash = "";
-        info.time = std::time(nullptr);  // Default to current time
-        info.generated = false;  // Check UTXO set for coinbase status
-        if (utxo.nHeight > 0) {
-            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(utxo.nHeight);
-            if (!hashes.empty()) {
-                info.blockhash = hashes[0].GetHex();
-                // Get actual block timestamp
-                CBlockIndex* pindex = m_chainstate->GetBlockIndex(hashes[0]);
-                if (pindex) {
-                    info.time = pindex->nTime;
-                }
-            }
-        }
-        // Use coinbase flag from wallet's stored transaction data
+        info.height = utxo.nHeight;
+        info.time = 0;  // Will be filled from block index after truncation
         info.generated = utxo.fCoinbase;
-        allTx.push_back(info);
+        allTx.push_back(std::move(info));
     }
 
-    // BUG #104 FIX: Get sent transactions
+    // Collect sent transactions
     std::vector<CSentTx> sentTxs = m_wallet->ListSentTransactions();
     for (const auto& stx : sentTxs) {
         TxInfo info;
         info.txid = stx.txid.GetHex();
         info.address = stx.toAddress.ToString();
         info.category = "send";
-        info.amount = -stx.nValue;  // Negative for sends
+        info.amount = -stx.nValue;
         info.fee = stx.nFee;
-        info.confirmations = 0;
-        if (stx.nHeight > 0 && currentHeight >= stx.nHeight) {
-            info.confirmations = currentHeight - stx.nHeight + 1;
-        }
-        info.blockhash = "";
-        if (stx.nHeight > 0) {
-            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(stx.nHeight);
-            if (!hashes.empty()) {
-                info.blockhash = hashes[0].GetHex();
-            }
-        }
+        info.height = stx.nHeight;
         info.time = stx.nTime;
-        info.generated = false;  // Sent transactions are never coinbase
-        allTx.push_back(info);
+        info.generated = false;
+        allTx.push_back(std::move(info));
     }
 
-    // Sort by time (newest first)
+    // Sort by height descending (newest first) - O(n log n) but no DB lookups
     std::sort(allTx.begin(), allTx.end(), [](const TxInfo& a, const TxInfo& b) {
-        return a.time > b.time;
+        return a.height > b.height;
     });
 
+    // Truncate to requested count BEFORE doing expensive block lookups
+    if (allTx.size() > count) {
+        allTx.resize(count);
+    }
+
+    // Now do block lookups only for the truncated result set
     std::ostringstream oss;
     oss << "{\"transactions\":[";
     for (size_t i = 0; i < allTx.size(); ++i) {
         if (i > 0) oss << ",";
-        const auto& tx = allTx[i];
+        auto& tx = allTx[i];
+
+        // Fill in block hash and time from chain state (only for top N results)
+        std::string blockhash;
+        if (tx.height > 0) {
+            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(tx.height);
+            if (!hashes.empty()) {
+                blockhash = hashes[0].GetHex();
+                if (tx.time == 0) {
+                    CBlockIndex* pindex = m_chainstate->GetBlockIndex(hashes[0]);
+                    if (pindex) tx.time = pindex->nTime;
+                }
+            }
+        }
+        if (tx.time == 0) tx.time = std::time(nullptr);
+
+        unsigned int confirmations = 0;
+        if (tx.height > 0 && currentHeight >= tx.height) {
+            confirmations = currentHeight - tx.height + 1;
+        }
+
         oss << "{";
         oss << "\"txid\":\"" << tx.txid << "\",";
         oss << "\"address\":\"" << tx.address << "\",";
@@ -2692,8 +2704,8 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
         if (tx.category == "send") {
             oss << "\"fee\":" << FormatAmount(tx.fee) << ",";
         }
-        oss << "\"confirmations\":" << tx.confirmations << ",";
-        oss << "\"blockhash\":\"" << tx.blockhash << "\",";
+        oss << "\"confirmations\":" << confirmations << ",";
+        oss << "\"blockhash\":\"" << blockhash << "\",";
         oss << "\"time\":" << tx.time << ",";
         oss << "\"generated\":" << (tx.generated ? "true" : "false");
         oss << "}";
@@ -4664,20 +4676,15 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
         throw std::runtime_error("Invalid command. Must be 'add', 'remove', or 'onetry'");
     }
 
-    // Parse IP:port from node_str
+    // Parse IP:port or [IPv6]:port from node_str
     std::string ip_str;
-    uint16_t port = 18444;  // Default testnet port
+    uint16_t default_port = m_testnet ? Consensus::DEFAULT_TESTNET_P2P_PORT : Consensus::DEFAULT_P2P_PORT;
+    uint16_t port = default_port;
 
-    size_t port_sep = node_str.rfind(':');
-    if (port_sep != std::string::npos) {
-        ip_str = node_str.substr(0, port_sep);
-        try {
-            port = static_cast<uint16_t>(std::stoi(node_str.substr(port_sep + 1)));
-        } catch (...) {
-            throw std::runtime_error("Invalid port number in node address");
-        }
-    } else {
+    if (!CSock::ParseEndpoint(node_str, ip_str, port)) {
+        // No port specified — use just the IP with default port
         ip_str = node_str;
+        port = default_port;
     }
 
     // Phase 5: Use CConnman instead of deprecated CConnectionManager
@@ -4718,19 +4725,12 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
     }
 
     // For "add" and "onetry" - connect to the peer
-    // Parse IP address using inet_pton
-    struct in_addr ipv4_addr;
-    if (inet_pton(AF_INET, ip_str.c_str(), &ipv4_addr) != 1) {
-        throw std::runtime_error("Invalid IPv4 address: " + ip_str);
-    }
-
-    // Create CAddress
     NetProtocol::CAddress addr;
-    uint32_t ipv4 = ntohl(ipv4_addr.s_addr);
-    addr.SetIPv4(ipv4);
+    if (!addr.SetFromString(ip_str)) {
+        throw std::runtime_error("Invalid IP address: " + ip_str);
+    }
     addr.port = port;
     addr.services = NetProtocol::NODE_NETWORK;
-    // CID 1675249 FIX: Safe 64-to-32 bit time conversion (valid until 2106)
     addr.time = static_cast<uint32_t>(time(nullptr) & 0xFFFFFFFF);
 
     // Phase 5: Use CConnman instead of deprecated CConnectionManager
@@ -4786,10 +4786,9 @@ std::string CRPCServer::RPC_SetBan(const std::string& params) {
 
     std::string ip_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
 
-    // Validate IP format (basic check)
-    struct in_addr ipv4_addr;
-    if (inet_pton(AF_INET, ip_str.c_str(), &ipv4_addr) != 1) {
-        throw std::runtime_error("Invalid IPv4 address: " + ip_str);
+    // Validate IP format (IPv4 or IPv6)
+    if (!CDNSResolver::IsIPv4(ip_str) && !CDNSResolver::IsIPv6(ip_str)) {
+        throw std::runtime_error("Invalid IP address: " + ip_str);
     }
 
     // Parse command (add/remove)

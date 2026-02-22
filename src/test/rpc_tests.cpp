@@ -6,6 +6,7 @@
 #include <miner/controller.h>
 #include <node/utxo_set.h>
 #include <consensus/chain.h>
+#include <net/sock.h>
 
 #include <iostream>
 #include <sstream>
@@ -28,20 +29,19 @@ using namespace std;
 
 // Helper: Send JSON-RPC request over HTTP
 string SendRPCRequest(uint16_t port, const string& method, const string& params = "[]", const string& id = "1") {
-    // Create socket
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    // Create socket and connect to localhost
+    struct sockaddr_storage ss;
+    socklen_t ss_len;
+    if (!CSock::FillSockAddr("127.0.0.1", port, ss, ss_len)) {
+        return "";
+    }
+
+    int sock = socket(ss.ss_family, SOCK_STREAM, 0);
     if (sock < 0) {
         return "";
     }
 
-    // Connect to server
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(port);
-
-    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    if (connect(sock, (struct sockaddr*)&ss, ss_len) < 0) {
         closesocket(sock);
         return "";
     }

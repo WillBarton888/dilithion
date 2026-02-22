@@ -22,6 +22,94 @@
 
     <title>Dilithion - Post-Quantum Cryptocurrency</title>
 
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://dilithion.org/">
+
+    <!-- Additional SEO Meta Tags -->
+    <meta name="keywords" content="dilithion, quantum resistant cryptocurrency, post quantum crypto, PQC blockchain, CRYSTALS-Dilithium, RandomX mining, CPU mining crypto, fair launch cryptocurrency, quantum safe blockchain, layer 1 blockchain, NIST PQC, quantum proof cryptocurrency">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="Dilithion">
+
+    <!-- FAQ Schema Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is Dilithion?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Dilithion is an experimental post-quantum cryptocurrency that uses CRYSTALS-Dilithium, a NIST-standardized digital signature algorithm designed to resist attacks from quantum computers. Unlike Bitcoin and other cryptocurrencies that use ECDSA (vulnerable to quantum attacks), Dilithion is built from the ground up for the quantum era."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why is quantum resistance important?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Quantum computers threaten current cryptocurrency security. A sufficiently powerful quantum computer could break ECDSA signatures used by Bitcoin, Ethereum, and most cryptocurrencies, allowing attackers to steal coins. NIST estimates this threat could materialize within 10-15 years. Dilithion uses post-quantum cryptography standardized by NIST in 2024, making it resistant to both classical and quantum computer attacks."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How is Dilithion different from Bitcoin?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Dilithion shares Bitcoin's 21 million coin supply, proof-of-work mining, and halving schedule. Key differences: Dilithium3 quantum-resistant signatures (vs ECDSA), 4-minute block time (vs 10 minutes), RandomX CPU-only mining (vs SHA-256 ASIC-dominated), and larger transactions due to post-quantum signature sizes."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I mine Dilithion with my GPU or ASIC?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Dilithion uses RandomX proof-of-work, which is optimized for CPUs and designed to be ASIC-resistant and GPU-inefficient. This keeps mining accessible to everyone with a regular computer. Any modern CPU can mine Dilithion effectively."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What is the total supply and halving schedule?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Total supply is 21 million DIL (same as Bitcoin). Initial reward is 50 DIL per block. Halving occurs every 210,000 blocks (~1.6 years with 4-minute blocks). Final halving around 2089 when block reward becomes negligible."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "When did Dilithion mainnet launch?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Mainnet launched on January 28, 2026 at 00:00:00 UTC. It was a fair launch with no premine, no ICO, and no VC allocation. Everyone started at block 0. Download the software and start mining real DIL coins today."
+          }
+        }
+      ]
+    }
+    </script>
+
+    <!-- Organization Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Dilithion",
+      "url": "https://dilithion.org",
+      "logo": "https://dilithion.org/dilithion-logo-256.png",
+      "description": "Quantum-resistant Layer 1 cryptocurrency using NIST-standardized CRYSTALS-Dilithium3 signatures and CPU-friendly RandomX mining.",
+      "sameAs": [
+        "https://github.com/dilithion/dilithion",
+        "https://t.me/dilithion",
+        "https://discord.gg/DS3gjmsFEJ"
+      ],
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "email": "team@dilithion.org",
+        "contactType": "customer support"
+      }
+    }
+    </script>
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -192,6 +280,9 @@
                 <a href="http://explorer.dilithion.org" target="_blank">Explorer</a>
                 <a href="#faq">FAQ</a>
                 <a href="WHITEPAPER.html" target="_blank">Whitepaper</a>
+                <a href="quantum-security.html">Quantum Security</a>
+                <a href="post-quantum-cryptography.html">PQC Explained</a>
+                <a href="mainnet.html">Mainnet</a>
             </div>
         </div>
     </nav>
@@ -977,6 +1068,9 @@
                         <li><a href="https://github.com/dilithion/dilithion" target="_blank">GitHub Repository</a></li>
                         <li><a href="https://github.com/dilithion/dilithion/blob/main/SECURITY.md" target="_blank">Security Policy</a></li>
                         <li><a href="https://github.com/dilithion/dilithion/blob/main/website/POST-QUANTUM-CRYPTO-COURSE.md" target="_blank">Learning Course</a></li>
+                        <li><a href="quantum-security.html">Quantum Security Guide</a></li>
+                        <li><a href="post-quantum-cryptography.html">PQC Explained</a></li>
+                        <li><a href="mainnet.html">Mainnet Details</a></li>
                     </ul>
                 </div>
 

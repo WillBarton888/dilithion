@@ -36,6 +36,7 @@
 #include <chrono>
 #include <optional>
 #include <functional>
+#include <thread>
 
 namespace digital_dna {
 
@@ -157,6 +158,7 @@ public:
     };
 
     explicit DigitalDNACollector(const std::array<uint8_t, 20>& address, const Config& config = Config());
+    ~DigitalDNACollector();
 
     // Start/stop collection
     void start_collection();
@@ -182,6 +184,9 @@ private:
     LatencyFingerprintCollector latency_collector_;
     TimingSignatureCollector timing_collector_;
     PerspectiveCollector perspective_collector_;
+
+    // Background collection thread
+    std::thread collection_thread_;
 
     // Results
     std::optional<LatencyFingerprint> latency_result_;

@@ -7,6 +7,7 @@
 
 #include <util/config_validator.h>
 #include <util/config.h>
+#include <net/sock.h>
 #include <consensus/params.h>
 #include <filesystem>
 #include <algorithm>
@@ -134,23 +135,25 @@ ConfigValidationResult CConfigValidator::ValidateBool(const std::string& value, 
 ConfigValidationResult CConfigValidator::ValidateAddNode(const std::string& node) {
     ConfigValidationResult result;
     result.field_name = "addnode";
-    
+
     if (node.empty()) {
         result.valid = false;
         result.error_message = "Node address cannot be empty";
-        result.suggestions.push_back("Format: IP:PORT or hostname:PORT");
-        result.suggestions.push_back("Example: 192.168.1.1:8333");
+        result.suggestions.push_back("Format: IP:PORT, [IPv6]:PORT, or hostname:PORT");
+        result.suggestions.push_back("Example: 192.168.1.1:8444 or [2001:db8::1]:8444");
         return result;
     }
-    
-    // Basic format check: should contain : for port
-    if (node.find(':') == std::string::npos) {
+
+    // Validate using CSock::ParseEndpoint (handles IPv4, [IPv6]:port, hostname:port)
+    std::string ip;
+    uint16_t port;
+    if (!CSock::ParseEndpoint(node, ip, port)) {
         result.valid = false;
-        result.error_message = "Node address must include port";
-        result.suggestions.push_back("Format: IP:PORT or hostname:PORT");
-        result.suggestions.push_back("Example: 192.168.1.1:8333");
+        result.error_message = "Invalid node address format";
+        result.suggestions.push_back("Format: IP:PORT, [IPv6]:PORT, or hostname:PORT");
+        result.suggestions.push_back("Example: 192.168.1.1:8444 or [2001:db8::1]:8444");
     }
-    
+
     return result;
 }
 

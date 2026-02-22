@@ -29,6 +29,7 @@
 #include <net/net.h>
 #include <net/tx_relay.h>
 #include <net/socket.h>
+#include <net/sock.h>
 #include <net/async_broadcaster.h>
 // REMOVED: #include <net/message_queue.h> - CMessageProcessorQueue was unused (CConnman handles messages directly)
 #include <net/headers_manager.h>
@@ -4206,24 +4207,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             std::cout << "[Blockchain] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
 
-            // DIAG: Pinpoint hang location after block index creation
-            std::cout << "[Blockchain] DIAG: WriteBlockIndex starting..." << std::flush;
             // Save block index to database
             if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
                 std::cerr << "[Blockchain] ERROR: Failed to save block index" << std::endl;
                 // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
                 return;
             }
-            std::cout << " done" << std::endl;
 
             // Add to chain state memory map (transfer ownership with std::move)
-            std::cout << "[Blockchain] DIAG: AddBlockIndex starting..." << std::flush;
             if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
                 std::cerr << "[Blockchain] ERROR: Failed to add block to chain state" << std::endl;
                 // HIGH-C001 FIX: No manual delete needed - ownership transferred
                 return;
             }
-            std::cout << " done" << std::endl;
 
             // HIGH-C001 FIX: After move, retrieve pointer from chain state
             CBlockIndex* pblockIndexPtr = g_chainstate.GetBlockIndex(blockHash);
@@ -4233,7 +4229,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Activate best chain (handles reorg if needed)
-            std::cout << "[Blockchain] DIAG: ActivateBestChain starting..." << std::flush;
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (reorgOccurred) {
@@ -4522,34 +4517,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // No need for separate p2p_thread - accept is handled in CConnman::SocketHandler()
         std::cout << "  [OK] P2P accept handled by CConnman::ThreadSocketHandler" << std::endl;
 
-        // Helper function to parse IPv4 address string to uint32_t
-        auto parseIPv4 = [](const std::string& ip) -> uint32_t {
-            if (ip == "localhost") {
-                return 0x7F000001;  // 127.0.0.1
-            }
-
-            // Parse dotted decimal notation (e.g., "134.122.4.164")
-            uint32_t result = 0;
-            int shift = 24;
-            size_t start = 0;
-            int octet_count = 0;
-
-            for (size_t i = 0; i <= ip.length(); ++i) {
-                if (i == ip.length() || ip[i] == '.') {
-                    if (i > start) {
-                        int octet = std::stoi(ip.substr(start, i - start));
-                        if (octet < 0 || octet > 255) {
-                            return 0;  // Invalid octet
-                        }
-                        result |= (static_cast<uint32_t>(octet) << shift);
-                        shift -= 8;
-                        octet_count++;
-                    }
-                    start = i + 1;
-                }
-            }
-
-            return (octet_count == 4) ? result : 0;
+        // Helper to parse address string (IPv4, IPv6, or hostname) with port
+        auto parseAddress = [](const std::string& node_addr, NetProtocol::CAddress& addr) -> bool {
+            std::string ip;
+            uint16_t port;
+            if (!CSock::ParseEndpoint(node_addr, ip, port)) return false;
+            if (port < Consensus::MIN_PORT || port > static_cast<uint16_t>(Consensus::MAX_PORT)) return false;
+            if (ip == "localhost") ip = "127.0.0.1";
+            if (!addr.SetFromString(ip)) return false;
+            addr.port = port;
+            addr.services = NetProtocol::NODE_NETWORK;
+            addr.time = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);
+            return true;
         };
 
         // Initiate outbound connections for --connect nodes
@@ -4558,51 +4537,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             for (const auto& node_addr : config.connect_nodes) {
                 std::cout << "  Connecting to " << node_addr << "..." << std::endl;
 
-                // Parse ip:port
-                size_t colon_pos = node_addr.find(':');
-                if (colon_pos != std::string::npos) {
-                    std::string ip = node_addr.substr(0, colon_pos);
-                    std::string port_str = node_addr.substr(colon_pos + 1);
+                NetProtocol::CAddress addr;
+                if (!parseAddress(node_addr, addr)) {
+                    std::cerr << "    [FAIL] Invalid address: " << node_addr
+                              << " (expected ip:port or [ipv6]:port)" << std::endl;
+                    continue;
+                }
 
-                    // PHASE 4 FIX: Add exception handling for invalid port in peer address
-                    uint16_t port = 0;
-                    try {
-                        int port_int = std::stoi(port_str);
-                        if (port_int < Consensus::MIN_PORT || port_int > Consensus::MAX_PORT) {
-                            std::cerr << "    [FAIL] Invalid port number in address: " << node_addr
-                                      << " (must be " << Consensus::MIN_PORT << "-" << Consensus::MAX_PORT << ")" << std::endl;
-                            continue;
-                        }
-                        port = static_cast<uint16_t>(port_int);
-                    } catch (const std::exception& e) {
-                        std::cerr << "    [FAIL] Invalid port format in address: " << node_addr
-                                  << " (expected ip:port)" << std::endl;
-                        continue;
-                    }
-
-                    NetProtocol::CAddress addr;
-                    addr.time = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);  // CID 1675257 FIX
-                    addr.services = NetProtocol::NODE_NETWORK;
-                    addr.port = port;
-
-                    // Parse IPv4 address
-                    uint32_t ip_addr = parseIPv4(ip);
-                    if (ip_addr == 0) {
-                        std::cerr << "    [FAIL] Invalid IP address: " << ip << std::endl;
-                        continue;
-                    }
-                    addr.SetIPv4(ip_addr);
-
-                    // Phase 5: Use CConnman to connect and send VERSION
-                    int peer_id = ConnectAndHandshake(addr);
-                    if (peer_id >= 0) {
-                        std::cout << "    [OK] Initiated connection to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
-                        std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
-                    } else {
-                        std::cout << "    [FAIL] Failed to connect to " << node_addr << std::endl;
-                    }
+                // Phase 5: Use CConnman to connect and send VERSION
+                int peer_id = ConnectAndHandshake(addr);
+                if (peer_id >= 0) {
+                    std::cout << "    [OK] Initiated connection to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
+                    std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
                 } else {
-                    std::cerr << "    [FAIL] Invalid address format: " << node_addr << " (expected ip:port)" << std::endl;
+                    std::cout << "    [FAIL] Failed to connect to " << node_addr << std::endl;
                 }
             }
         }
@@ -4613,51 +4561,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             for (const auto& node_addr : config.add_nodes) {
                 std::cout << "  Adding node " << node_addr << "..." << std::endl;
 
-                // Parse ip:port
-                size_t colon_pos = node_addr.find(':');
-                if (colon_pos != std::string::npos) {
-                    std::string ip = node_addr.substr(0, colon_pos);
-                    std::string port_str = node_addr.substr(colon_pos + 1);
+                NetProtocol::CAddress addr;
+                if (!parseAddress(node_addr, addr)) {
+                    std::cerr << "    [FAIL] Invalid address: " << node_addr
+                              << " (expected ip:port or [ipv6]:port)" << std::endl;
+                    continue;
+                }
 
-                    // PHASE 4 FIX: Add exception handling for invalid port in peer address
-                    uint16_t port = 0;
-                    try {
-                        int port_int = std::stoi(port_str);
-                        if (port_int < Consensus::MIN_PORT || port_int > Consensus::MAX_PORT) {
-                            std::cerr << "    [FAIL] Invalid port number in address: " << node_addr
-                                      << " (must be " << Consensus::MIN_PORT << "-" << Consensus::MAX_PORT << ")" << std::endl;
-                            continue;
-                        }
-                        port = static_cast<uint16_t>(port_int);
-                    } catch (const std::exception& e) {
-                        std::cerr << "    [FAIL] Invalid port format in address: " << node_addr
-                                  << " (expected ip:port)" << std::endl;
-                        continue;
-                    }
-
-                    NetProtocol::CAddress addr;
-                    addr.time = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);  // CID 1675257 FIX
-                    addr.services = NetProtocol::NODE_NETWORK;
-                    addr.port = port;
-
-                    // Parse IPv4 address
-                    uint32_t ip_addr = parseIPv4(ip);
-                    if (ip_addr == 0) {
-                        std::cerr << "    [FAIL] Invalid IP address: " << ip << std::endl;
-                        continue;
-                    }
-                    addr.SetIPv4(ip_addr);
-
-                    // Phase 5: Use CConnman to initiate connection
-                    int peer_id = ConnectAndHandshake(addr);
-                    if (peer_id >= 0) {
-                        std::cout << "    [OK] Added node " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
-                        std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
-                    } else {
-                        std::cout << "    [FAIL] Failed to add node " << node_addr << std::endl;
-                    }
+                // Phase 5: Use CConnman to initiate connection
+                int peer_id = ConnectAndHandshake(addr);
+                if (peer_id >= 0) {
+                    std::cout << "    [OK] Added node " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
+                    std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
                 } else {
-                    std::cerr << "    [FAIL] Invalid address format: " << node_addr << " (expected ip:port)" << std::endl;
+                    std::cout << "    [FAIL] Failed to add node " << node_addr << std::endl;
                 }
             }
         }

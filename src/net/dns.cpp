@@ -34,14 +34,14 @@ std::vector<NetProtocol::CAddress> CDNSResolver::QuerySeed(
 }
 
 std::string CDNSResolver::ResolveHostname(const std::string& hostname) {
-    // If it's already an IP, return it
-    if (IsIPv4(hostname)) {
+    // If it's already an IP address, return it
+    if (IsIPv4(hostname) || IsIPv6(hostname)) {
         return hostname;
     }
 
     struct addrinfo hints, *result = nullptr;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;  // IPv4
+    hints.ai_family = AF_UNSPEC;  // Both IPv4 and IPv6
     hints.ai_socktype = SOCK_STREAM;
 
     if (getaddrinfo(hostname.c_str(), nullptr, &hints, &result) != 0) {
@@ -49,11 +49,17 @@ std::string CDNSResolver::ResolveHostname(const std::string& hostname) {
     }
 
     std::string ip_str;
-    if (result && result->ai_family == AF_INET) {
-        struct sockaddr_in* addr = (struct sockaddr_in*)result->ai_addr;
-        char ip_buf[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &addr->sin_addr, ip_buf, INET_ADDRSTRLEN);
-        ip_str = ip_buf;
+    if (result) {
+        char ip_buf[INET6_ADDRSTRLEN];
+        if (result->ai_family == AF_INET) {
+            struct sockaddr_in* addr = (struct sockaddr_in*)result->ai_addr;
+            inet_ntop(AF_INET, &addr->sin_addr, ip_buf, sizeof(ip_buf));
+            ip_str = ip_buf;
+        } else if (result->ai_family == AF_INET6) {
+            struct sockaddr_in6* addr = (struct sockaddr_in6*)result->ai_addr;
+            inet_ntop(AF_INET6, &addr->sin6_addr, ip_buf, sizeof(ip_buf));
+            ip_str = ip_buf;
+        }
     }
 
     freeaddrinfo(result);
@@ -63,15 +69,15 @@ std::string CDNSResolver::ResolveHostname(const std::string& hostname) {
 std::vector<std::string> CDNSResolver::ResolveAll(const std::string& hostname) {
     std::vector<std::string> ips;
 
-    // If it's already an IP, return it
-    if (IsIPv4(hostname)) {
+    // If it's already an IP address, return it
+    if (IsIPv4(hostname) || IsIPv6(hostname)) {
         ips.push_back(hostname);
         return ips;
     }
 
     struct addrinfo hints, *result = nullptr, *ptr = nullptr;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;  // IPv4 only for now
+    hints.ai_family = AF_UNSPEC;  // Both IPv4 and IPv6
     hints.ai_socktype = SOCK_STREAM;
 
     if (getaddrinfo(hostname.c_str(), nullptr, &hints, &result) != 0) {
@@ -80,10 +86,14 @@ std::vector<std::string> CDNSResolver::ResolveAll(const std::string& hostname) {
 
     // Iterate through all results
     for (ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
+        char ip_buf[INET6_ADDRSTRLEN];
         if (ptr->ai_family == AF_INET) {
             struct sockaddr_in* addr = (struct sockaddr_in*)ptr->ai_addr;
-            char ip_buf[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &addr->sin_addr, ip_buf, INET_ADDRSTRLEN);
+            inet_ntop(AF_INET, &addr->sin_addr, ip_buf, sizeof(ip_buf));
+            ips.push_back(ip_buf);
+        } else if (ptr->ai_family == AF_INET6) {
+            struct sockaddr_in6* addr = (struct sockaddr_in6*)ptr->ai_addr;
+            inet_ntop(AF_INET6, &addr->sin6_addr, ip_buf, sizeof(ip_buf));
             ips.push_back(ip_buf);
         }
     }
@@ -117,13 +127,17 @@ NetProtocol::CAddress CDNSResolver::MakeAddress(
     addr.services = services;
     addr.port = port;
 
-    // Parse IPv4 address
+    // Parse address (IPv4 or IPv6)
     if (IsIPv4(ip_str)) {
         struct in_addr ipv4_addr;
         if (inet_pton(AF_INET, ip_str.c_str(), &ipv4_addr) == 1) {
-            // Convert to uint32_t in network byte order
             uint32_t ipv4 = ntohl(ipv4_addr.s_addr);
             addr.SetIPv4(ipv4);
+        }
+    } else if (IsIPv6(ip_str)) {
+        struct in6_addr ipv6_addr;
+        if (inet_pton(AF_INET6, ip_str.c_str(), &ipv6_addr) == 1) {
+            addr.SetIPv6(reinterpret_cast<const uint8_t*>(&ipv6_addr));
         }
     }
 

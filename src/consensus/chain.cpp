@@ -675,8 +675,6 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // IBD OPTIMIZATION: Get cached hash once and reuse throughout
     const uint256& blockHash = pindex->GetBlockHash();
 
-    std::cout << "[ConnectTip] DIAG: height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0,16) << std::endl;
-
     // ============================================================================
     // FORK FIX: Validate MIK at connection time (not arrival time)
     // ============================================================================
@@ -696,7 +694,6 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
 
         // Only validate MIK for post-DFMP blocks (skip genesis - it predates any mining identity)
         if (pindex->nHeight > 0 && pindex->nHeight >= dfmpActivationHeight) {
-            std::cout << "[ConnectTip] DIAG: CheckProofOfWorkDFMP starting..." << std::flush;
             if (!CheckProofOfWorkDFMP(block, blockHash, block.nBits, pindex->nHeight, dfmpActivationHeight)) {
                 std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
                           << " failed MIK validation at connection time" << std::endl;
@@ -718,10 +715,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
         }
     }
 
-    std::cout << " passed" << std::endl;
-
     // Step 1: Update UTXO set (CS-004)
-    std::cout << "[ConnectTip] DIAG: ApplyBlock (UTXO) starting..." << std::flush;
     if (pUTXOSet != nullptr) {
         if (!pUTXOSet->ApplyBlock(block, pindex->nHeight, blockHash)) {
             std::cerr << "[Chain] ERROR: Failed to apply block to UTXO set at height "

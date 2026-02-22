@@ -197,34 +197,49 @@ DigitalDNACollector::DigitalDNACollector(const std::array<uint8_t, 20>& address,
     latency_collector_.set_timeout_ms(config.latency_timeout_ms);
 }
 
+DigitalDNACollector::~DigitalDNACollector() {
+    collecting_ = false;
+    if (collection_thread_.joinable()) {
+        collection_thread_.join();
+    }
+}
+
 void DigitalDNACollector::start_collection() {
     collecting_ = true;
 
-    // Collect latency fingerprint (quick - ~30 seconds)
-    LatencyFingerprint latency;
-    latency.measurement_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
+    // Run collection in background thread to avoid blocking node startup
+    collection_thread_ = std::thread([this]() {
+        // Collect latency fingerprint (quick - ~30 seconds)
+        LatencyFingerprint latency;
+        latency.measurement_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
 
-    latency.seed_stats.reserve(MAINNET_SEEDS.size());
-    for (size_t i = 0; i < MAINNET_SEEDS.size(); i++) {
-        latency.seed_stats.push_back(latency_collector_.measure_seed(MAINNET_SEEDS[i]));
-    }
-    latency_result_ = latency;
+        latency.seed_stats.reserve(MAINNET_SEEDS.size());
+        for (size_t i = 0; i < MAINNET_SEEDS.size(); i++) {
+            latency.seed_stats.push_back(latency_collector_.measure_seed(MAINNET_SEEDS[i]));
+        }
+        latency_result_ = latency;
 
-    // Collect timing signature (depends on config - typically seconds to minutes)
-    std::array<uint8_t, 32> challenge = {};
-    for (int i = 0; i < 20; i++) {
-        challenge[i] = address_[i];
-    }
-    timing_result_ = timing_collector_.collect(challenge);
+        // Collect timing signature (depends on config - typically seconds to minutes)
+        std::array<uint8_t, 32> challenge = {};
+        for (int i = 0; i < 20; i++) {
+            challenge[i] = address_[i];
+        }
+        timing_result_ = timing_collector_.collect(challenge);
 
-    // Perspective collection is ongoing - call on_peer_* methods
-    // For now, we just take a snapshot
+        // Perspective collection is ongoing - call on_peer_* methods
+        // For now, we just take a snapshot
+    });
 }
 
 void DigitalDNACollector::stop_collection() {
     collecting_ = false;
+
+    // Wait for background collection thread to finish
+    if (collection_thread_.joinable()) {
+        collection_thread_.join();
+    }
 
     // Finalize perspective
     perspective_result_ = perspective_collector_.get_proof();

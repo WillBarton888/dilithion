@@ -11,11 +11,15 @@
 #include <chrono>
 #include <set>
 #include <string>
+#include <cstdint>
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
 using socket_t = SOCKET;
 #else
+#include <sys/socket.h>
+#include <netinet/in.h>
 using socket_t = int;
 #endif
 
@@ -161,6 +165,52 @@ public:
 #else
         -1;
 #endif
+
+    //
+    // IPv6 / dual-stack helpers
+    //
+
+    /**
+     * Parse endpoint string: "ip:port", "[ipv6]:port", or "hostname:port"
+     * @param str Input string
+     * @param[out] ip_out Extracted IP/hostname (without brackets)
+     * @param[out] port_out Extracted port
+     * @return true on success
+     */
+    static bool ParseEndpoint(const std::string& str, std::string& ip_out, uint16_t& port_out);
+
+    /**
+     * Detect address family from IP string
+     * @return AF_INET, AF_INET6, or 0 if neither
+     */
+    static int DetectFamily(const std::string& ip_str);
+
+    /**
+     * Fill sockaddr_storage from IP string and port
+     * Works for both IPv4 and IPv6 addresses
+     */
+    static bool FillSockAddr(const std::string& ip_str, uint16_t port,
+                             struct sockaddr_storage& ss, socklen_t& ss_len);
+
+    /**
+     * Extract IP string and port from sockaddr_storage
+     * Unwraps IPv4-mapped IPv6 (::ffff:x.x.x.x) to plain IPv4 for compatibility
+     */
+    static bool ExtractAddress(const struct sockaddr_storage& ss,
+                               std::string& ip_out, uint16_t& port_out);
+
+    /**
+     * Create a dual-stack (IPv4+IPv6) listening socket
+     * Uses AF_INET6 with IPV6_V6ONLY=0. Falls back to AF_INET if IPv6 unavailable.
+     * Sets SO_REUSEADDR. Does NOT call listen().
+     * @param port Port to bind to
+     * @param bind_addr Bind address ("" = all interfaces, "127.0.0.1" = localhost)
+     * @param[out] sock_out Created socket
+     * @param[out] is_ipv6 True if IPv6 socket was created (for logging)
+     * @return true on success
+     */
+    static bool CreateListenSocket(uint16_t port, const std::string& bind_addr,
+                                   socket_t& sock_out, bool& is_ipv6);
 };
 
 #endif // DILITHION_NET_SOCK_H

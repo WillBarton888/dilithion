@@ -3,6 +3,7 @@
 
 #include <api/http_server.h>
 #include <api/wallet_html.h>
+#include <net/sock.h>
 #include <iostream>
 #include <cstring>
 #include <sstream>
@@ -74,45 +75,17 @@ bool CHttpServer::Start() {
     }
 #endif
 
-    // Create server socket
-    m_server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_server_socket == INVALID_SOCKET) {
-        std::cerr << "[HttpServer] Failed to create socket" << std::endl;
+    // Create dual-stack listen socket (all interfaces for HTTP API)
+    socket_t http_sock;
+    bool is_ipv6;
+    if (!CSock::CreateListenSocket(static_cast<uint16_t>(m_port), "", http_sock, is_ipv6)) {
+        std::cerr << "[HttpServer] Failed to create listen socket on port " << m_port << std::endl;
 #ifdef _WIN32
         WSACleanup();
 #endif
         return false;
     }
-
-    // Set socket options to allow reuse
-    int opt = 1;
-#ifdef _WIN32
-    if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)) == SOCKET_ERROR) {
-#else
-    if (setsockopt(m_server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-#endif
-        std::cerr << "[HttpServer] Failed to set socket options" << std::endl;
-        close(m_server_socket);
-#ifdef _WIN32
-        WSACleanup();
-#endif
-        return false;
-    }
-
-    // Bind to port
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(m_port);
-
-    if (bind(m_server_socket, (struct sockaddr*)&address, sizeof(address)) == SOCKET_ERROR) {
-        std::cerr << "[HttpServer] Failed to bind to port " << m_port << std::endl;
-        close(m_server_socket);
-#ifdef _WIN32
-        WSACleanup();
-#endif
-        return false;
-    }
+    m_server_socket = http_sock;
 
     // Listen for connections
     if (listen(m_server_socket, 10) == SOCKET_ERROR) {
@@ -206,8 +179,8 @@ void CHttpServer::AcceptThread() {
     std::cout << "[HttpServer] Accept thread started" << std::endl;
 
     while (m_running.load()) {
-        // Accept connection
-        struct sockaddr_in client_address;
+        // Accept connection (supports both IPv4 and IPv6 clients)
+        struct sockaddr_storage client_address;
         socklen_t client_len = sizeof(client_address);
         SOCKET client_socket = accept(m_server_socket,
                                        (struct sockaddr*)&client_address,

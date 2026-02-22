@@ -9,6 +9,13 @@
 #include <sstream>
 #include <iomanip>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 // IPv4-mapped IPv6 prefix: ::ffff:0:0/96
 static const uint8_t IPV4_IN_IPV6_PREFIX[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
 
@@ -54,9 +61,13 @@ bool CNetAddr::FromString(const std::string& str, CNetAddr& addr) {
         }
     }
 
-    // Try parsing as IPv6 (simplified - just handles full form)
-    // For production, would need full IPv6 parsing including compressed forms
-    // This is a simplified implementation
+    // Try parsing as IPv6 using inet_pton (handles all forms: compressed, full, etc.)
+    struct in6_addr ipv6_addr;
+    if (inet_pton(AF_INET6, str.c_str(), &ipv6_addr) == 1) {
+        addr.SetIPv6(reinterpret_cast<const uint8_t*>(&ipv6_addr));
+        return true;
+    }
+
     return false;
 }
 
@@ -266,7 +277,15 @@ std::string CNetAddr::ToStringIP() const {
         return buf;
     }
 
-    // IPv6 format
+    // IPv6 format: use inet_ntop for proper compressed output (e.g., ::1, 2001:db8::1)
+    struct in6_addr ipv6_addr;
+    memcpy(&ipv6_addr, m_addr, 16);
+    char buf[INET6_ADDRSTRLEN];
+    if (inet_ntop(AF_INET6, &ipv6_addr, buf, sizeof(buf)) != nullptr) {
+        return std::string(buf);
+    }
+
+    // Fallback: manual hex format
     std::ostringstream ss;
     ss << std::hex;
     for (int i = 0; i < 16; i += 2) {
@@ -306,14 +325,23 @@ CService CService::FromIPv4(uint32_t ipv4, uint16_t port) {
 }
 
 bool CService::FromString(const std::string& str, CService& addr) {
-    // Find the last colon (port separator)
-    size_t colonPos = str.rfind(':');
-    if (colonPos == std::string::npos) {
-        return false;
-    }
+    std::string ipPart;
+    std::string portPart;
 
-    std::string ipPart = str.substr(0, colonPos);
-    std::string portPart = str.substr(colonPos + 1);
+    if (!str.empty() && str[0] == '[') {
+        // IPv6 bracket notation: [addr]:port
+        size_t closeBracket = str.find(']');
+        if (closeBracket == std::string::npos) return false;
+        ipPart = str.substr(1, closeBracket - 1);
+        if (closeBracket + 1 >= str.size() || str[closeBracket + 1] != ':') return false;
+        portPart = str.substr(closeBracket + 2);
+    } else {
+        // IPv4 or hostname: addr:port (find last colon)
+        size_t colonPos = str.rfind(':');
+        if (colonPos == std::string::npos) return false;
+        ipPart = str.substr(0, colonPos);
+        portPart = str.substr(colonPos + 1);
+    }
 
     // Parse port
     int port = atoi(portPart.c_str());
@@ -345,9 +373,13 @@ std::string CService::ToString() const {
 }
 
 std::string CService::ToStringKey() const {
-    // Simple format for use as map key
+    // Consistent format for use as map key (matches ToString() host:port format)
     std::ostringstream ss;
-    ss << ToStringIP() << ":" << m_port;
+    if (IsIPv4()) {
+        ss << ToStringIP() << ":" << m_port;
+    } else {
+        ss << "[" << ToStringIP() << "]:" << m_port;
+    }
     return ss.str();
 }
 

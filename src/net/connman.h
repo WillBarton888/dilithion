@@ -10,6 +10,7 @@
 
 #include <net/node.h>
 #include <net/protocol.h>
+#include <net/sock.h>
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -299,8 +300,8 @@ private:
     mutable std::mutex cs_vNodes;
     int m_next_node_id = 1;
 
-    // Listen socket
-    int m_listen_socket = -1;
+    // Listen socket (socket_t for cross-platform compatibility)
+    socket_t m_listen_socket = static_cast<socket_t>(-1);
 
     //
     // Thread control

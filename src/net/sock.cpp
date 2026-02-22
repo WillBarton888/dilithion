@@ -16,6 +16,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -23,6 +24,7 @@
 #endif
 
 #include <algorithm>
+#include <stdexcept>
 
 bool CSock::SetNonBlocking(socket_t sock) {
     if (!IsValid(sock)) return false;
@@ -257,4 +259,203 @@ bool CSock::IsConnectionRefused(int error) {
 #else
     return error == ECONNREFUSED;
 #endif
+}
+
+//-----------------------------------------------------------------------------
+// IPv6 / dual-stack helpers
+//-----------------------------------------------------------------------------
+
+bool CSock::ParseEndpoint(const std::string& str, std::string& ip_out, uint16_t& port_out) {
+    if (str.empty()) return false;
+
+    if (str[0] == '[') {
+        // IPv6 bracket notation: [addr]:port
+        size_t close = str.find(']');
+        if (close == std::string::npos) return false;
+        ip_out = str.substr(1, close - 1);
+        if (close + 2 > str.size() || str[close + 1] != ':') return false;
+        try {
+            int p = std::stoi(str.substr(close + 2));
+            if (p <= 0 || p > 65535) return false;
+            port_out = static_cast<uint16_t>(p);
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
+    // IPv4/hostname: addr:port (last colon)
+    size_t colon = str.rfind(':');
+    if (colon == std::string::npos || colon == 0) return false;
+    ip_out = str.substr(0, colon);
+    try {
+        int p = std::stoi(str.substr(colon + 1));
+        if (p <= 0 || p > 65535) return false;
+        port_out = static_cast<uint16_t>(p);
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+
+int CSock::DetectFamily(const std::string& ip_str) {
+    struct in_addr ipv4_addr;
+    if (inet_pton(AF_INET, ip_str.c_str(), &ipv4_addr) == 1) {
+        return AF_INET;
+    }
+    struct in6_addr ipv6_addr;
+    if (inet_pton(AF_INET6, ip_str.c_str(), &ipv6_addr) == 1) {
+        return AF_INET6;
+    }
+    return 0;
+}
+
+bool CSock::FillSockAddr(const std::string& ip_str, uint16_t port,
+                         struct sockaddr_storage& ss, socklen_t& ss_len) {
+    memset(&ss, 0, sizeof(ss));
+
+    // Try IPv4 first
+    struct in_addr ipv4_addr;
+    if (inet_pton(AF_INET, ip_str.c_str(), &ipv4_addr) == 1) {
+        struct sockaddr_in* sa4 = reinterpret_cast<struct sockaddr_in*>(&ss);
+        sa4->sin_family = AF_INET;
+        sa4->sin_addr = ipv4_addr;
+        sa4->sin_port = htons(port);
+        ss_len = sizeof(struct sockaddr_in);
+        return true;
+    }
+
+    // Try IPv6
+    struct in6_addr ipv6_addr;
+    if (inet_pton(AF_INET6, ip_str.c_str(), &ipv6_addr) == 1) {
+        struct sockaddr_in6* sa6 = reinterpret_cast<struct sockaddr_in6*>(&ss);
+        sa6->sin6_family = AF_INET6;
+        sa6->sin6_addr = ipv6_addr;
+        sa6->sin6_port = htons(port);
+        ss_len = sizeof(struct sockaddr_in6);
+        return true;
+    }
+
+    return false;
+}
+
+bool CSock::ExtractAddress(const struct sockaddr_storage& ss,
+                           std::string& ip_out, uint16_t& port_out) {
+    char buf[INET6_ADDRSTRLEN];
+
+    if (ss.ss_family == AF_INET) {
+        const struct sockaddr_in* sa4 = reinterpret_cast<const struct sockaddr_in*>(&ss);
+        if (inet_ntop(AF_INET, &sa4->sin_addr, buf, sizeof(buf)) == nullptr) return false;
+        ip_out = buf;
+        port_out = ntohs(sa4->sin_port);
+        return true;
+    }
+
+    if (ss.ss_family == AF_INET6) {
+        const struct sockaddr_in6* sa6 = reinterpret_cast<const struct sockaddr_in6*>(&ss);
+
+        // Check if this is an IPv4-mapped IPv6 address (::ffff:x.x.x.x)
+        // Unwrap to plain IPv4 for backward compatibility
+        if (IN6_IS_ADDR_V4MAPPED(&sa6->sin6_addr)) {
+            // Extract the IPv4 part (last 4 bytes of the 16-byte address)
+            const uint8_t* addr_bytes = reinterpret_cast<const uint8_t*>(&sa6->sin6_addr);
+            struct in_addr ipv4_addr;
+            memcpy(&ipv4_addr, addr_bytes + 12, 4);
+            if (inet_ntop(AF_INET, &ipv4_addr, buf, sizeof(buf)) == nullptr) return false;
+            ip_out = buf;
+        } else {
+            if (inet_ntop(AF_INET6, &sa6->sin6_addr, buf, sizeof(buf)) == nullptr) return false;
+            ip_out = buf;
+        }
+        port_out = ntohs(sa6->sin6_port);
+        return true;
+    }
+
+    return false;
+}
+
+bool CSock::CreateListenSocket(uint16_t port, const std::string& bind_addr,
+                               socket_t& sock_out, bool& is_ipv6) {
+    is_ipv6 = false;
+
+    // For loopback addresses, use IPv4 directly.
+    // On Windows, IPv6 dual-stack binding to ::1 does NOT accept IPv4 connections
+    // to 127.0.0.1, which breaks browsers, curl, and most tools.
+    bool is_loopback = (bind_addr == "127.0.0.1" || bind_addr == "localhost" || bind_addr == "::1");
+
+    // Try creating an IPv6 dual-stack socket first (skip for loopback)
+    socket_t sock = is_loopback ? INVALID_SOCKET : socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    if (IsValid(sock)) {
+        // Set IPV6_V6ONLY=0 for dual-stack (accepts both IPv4 and IPv6)
+        // Critical on Windows where this defaults to 1
+        int v6only = 0;
+        if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY,
+                       reinterpret_cast<const char*>(&v6only), sizeof(v6only)) == 0) {
+            // Set SO_REUSEADDR
+            int reuse = 1;
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+                       reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+#ifndef _WIN32
+            setsockopt(sock, SOL_SOCKET, SO_REUSEPORT,
+                       reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+#endif
+
+            // Bind
+            struct sockaddr_in6 addr6;
+            memset(&addr6, 0, sizeof(addr6));
+            addr6.sin6_family = AF_INET6;
+            addr6.sin6_port = htons(port);
+
+            if (bind_addr.empty() || bind_addr == "0.0.0.0" || bind_addr == "::") {
+                addr6.sin6_addr = in6addr_any;
+            } else if (bind_addr == "127.0.0.1" || bind_addr == "::1" || bind_addr == "localhost") {
+                addr6.sin6_addr = in6addr_loopback;
+            } else {
+                // Try to parse as specific address
+                inet_pton(AF_INET6, bind_addr.c_str(), &addr6.sin6_addr);
+            }
+
+            if (bind(sock, reinterpret_cast<struct sockaddr*>(&addr6), sizeof(addr6)) == 0) {
+                sock_out = sock;
+                is_ipv6 = true;
+                return true;
+            }
+        }
+        // IPv6 setup failed — close and fall through to IPv4
+        Close(sock);
+    }
+
+    // Fallback: IPv4-only socket
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (!IsValid(sock)) return false;
+
+    int reuse = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+               reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+#ifndef _WIN32
+    setsockopt(sock, SOL_SOCKET, SO_REUSEPORT,
+               reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+#endif
+
+    struct sockaddr_in addr4;
+    memset(&addr4, 0, sizeof(addr4));
+    addr4.sin_family = AF_INET;
+    addr4.sin_port = htons(port);
+
+    if (bind_addr.empty() || bind_addr == "0.0.0.0" || bind_addr == "::") {
+        addr4.sin_addr.s_addr = INADDR_ANY;
+    } else if (bind_addr == "127.0.0.1" || bind_addr == "::1" || bind_addr == "localhost") {
+        addr4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    } else {
+        inet_pton(AF_INET, bind_addr.c_str(), &addr4.sin_addr);
+    }
+
+    if (bind(sock, reinterpret_cast<struct sockaddr*>(&addr4), sizeof(addr4)) != 0) {
+        Close(sock);
+        return false;
+    }
+
+    sock_out = sock;
+    is_ipv6 = false;
+    return true;
 }

@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <net/socket.h>
+#include <net/sock.h>
 #include <cstring>
 
 #ifdef _WIN32
@@ -103,37 +104,44 @@ bool CSocket::Connect(const std::string& host, uint16_t port, int timeout_ms) {
 
     Close();
 
-    // Create socket
-    sock_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock_fd == INVALID_SOCKET_FD) {
+    // Resolve address — try direct IP first, then DNS
+    struct sockaddr_storage ss;
+    socklen_t ss_len;
+    bool resolved = false;
+
+    if (CSock::FillSockAddr(host, port, ss, ss_len)) {
+        resolved = true;
+    } else {
+        // Try DNS resolution (both IPv4 and IPv6)
+        struct addrinfo hints, *ai_result = nullptr;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+
+        if (getaddrinfo(host.c_str(), nullptr, &hints, &ai_result) == 0 && ai_result) {
+            memcpy(&ss, ai_result->ai_addr, ai_result->ai_addrlen);
+            ss_len = static_cast<socklen_t>(ai_result->ai_addrlen);
+            // Set port
+            if (ss.ss_family == AF_INET) {
+                reinterpret_cast<struct sockaddr_in*>(&ss)->sin_port = htons(port);
+            } else if (ss.ss_family == AF_INET6) {
+                reinterpret_cast<struct sockaddr_in6*>(&ss)->sin6_port = htons(port);
+            }
+            resolved = true;
+            freeaddrinfo(ai_result);
+        } else if (ai_result) {
+            freeaddrinfo(ai_result);
+        }
+    }
+
+    if (!resolved) {
         return false;
     }
 
-    // Resolve hostname
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-
-    // Try direct IP first
-    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
-        // Try DNS resolution
-        struct addrinfo hints, *result = nullptr;
-        memset(&hints, 0, sizeof(hints));
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
-
-        if (getaddrinfo(host.c_str(), nullptr, &hints, &result) != 0) {
-            Close();
-            return false;
-        }
-
-        if (result && result->ai_family == AF_INET) {
-            memcpy(&addr, result->ai_addr, sizeof(struct sockaddr_in));
-            addr.sin_port = htons(port);
-        }
-
-        freeaddrinfo(result);
+    // Create socket matching address family
+    sock_fd = socket(ss.ss_family, SOCK_STREAM, IPPROTO_TCP);
+    if (sock_fd == INVALID_SOCKET_FD) {
+        return false;
     }
 
     // Set non-blocking for timeout
@@ -142,7 +150,7 @@ bool CSocket::Connect(const std::string& host, uint16_t port, int timeout_ms) {
     }
 
     // Connect
-    int result = connect(sock_fd, (struct sockaddr*)&addr, sizeof(addr));
+    int result = connect(sock_fd, (struct sockaddr*)&ss, ss_len);
 
     if (result < 0) {
 #ifdef _WIN32
@@ -195,29 +203,15 @@ bool CSocket::Connect(const std::string& host, uint16_t port, int timeout_ms) {
 
 bool CSocket::Bind(uint16_t port) {
     // NET-010 FIX: Validate port number for binding
-    // Reject port 0 (OS-assigned) - we need explicit port for P2P networking
-    // Also reject privileged ports (< 1024) unless explicitly needed
     if (port == 0 || port < 1024) {
         return false;  // Invalid port for P2P binding
     }
 
     Close();
 
-    sock_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock_fd == INVALID_SOCKET_FD) {
-        return false;
-    }
-
-    SetReuseAddr(true);
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(port);
-
-    if (bind(sock_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        Close();
+    // Use dual-stack listen socket (IPv4+IPv6)
+    bool is_ipv6 = false;
+    if (!CSock::CreateListenSocket(port, "", sock_fd, is_ipv6)) {
         return false;
     }
 
@@ -237,14 +231,10 @@ bool CSocket::Listen(int backlog) {
 std::unique_ptr<CSocket> CSocket::Accept() {
     if (!IsValid()) return nullptr;
 
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t addr_len = sizeof(client_addr);
 
-#ifdef _WIN32
     socket_t client_fd = accept(sock_fd, (struct sockaddr*)&client_addr, &addr_len);
-#else
-    socket_t client_fd = accept(sock_fd, (struct sockaddr*)&client_addr, &addr_len);
-#endif
 
     if (client_fd == INVALID_SOCKET_FD) {
         return nullptr;
@@ -254,10 +244,13 @@ std::unique_ptr<CSocket> CSocket::Accept() {
     client_socket->sock_fd = client_fd;
     client_socket->connected = true;
 
-    char ip_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &client_addr.sin_addr, ip_str, INET_ADDRSTRLEN);
-    client_socket->peer_address = ip_str;
-    client_socket->peer_port = ntohs(client_addr.sin_port);
+    // Extract address (unwraps IPv4-mapped IPv6 for compatibility)
+    std::string ip_str;
+    uint16_t port;
+    if (CSock::ExtractAddress(client_addr, ip_str, port)) {
+        client_socket->peer_address = ip_str;
+        client_socket->peer_port = port;
+    }
 
     return client_socket;
 }
@@ -414,29 +407,37 @@ uint16_t CSocket::GetPeerPort() const {
 std::string CSocket::GetLocalAddress() const {
     if (!IsValid()) return "";
 
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
+    struct sockaddr_storage ss;
+    socklen_t addr_len = sizeof(ss);
 
-    if (getsockname(sock_fd, (struct sockaddr*)&addr, &addr_len) < 0) {
+    if (getsockname(sock_fd, (struct sockaddr*)&ss, &addr_len) < 0) {
         return "";
     }
 
-    char ip_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &addr.sin_addr, ip_str, INET_ADDRSTRLEN);
-    return std::string(ip_str);
+    std::string ip_str;
+    uint16_t port;
+    if (CSock::ExtractAddress(ss, ip_str, port)) {
+        return ip_str;
+    }
+    return "";
 }
 
 uint16_t CSocket::GetLocalPort() const {
     if (!IsValid()) return 0;
 
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
+    struct sockaddr_storage ss;
+    socklen_t addr_len = sizeof(ss);
 
-    if (getsockname(sock_fd, (struct sockaddr*)&addr, &addr_len) < 0) {
+    if (getsockname(sock_fd, (struct sockaddr*)&ss, &addr_len) < 0) {
         return 0;
     }
 
-    return ntohs(addr.sin_port);
+    std::string ip_str;
+    uint16_t port;
+    if (CSock::ExtractAddress(ss, ip_str, port)) {
+        return port;
+    }
+    return 0;
 }
 
 int CSocket::GetLastError() const {

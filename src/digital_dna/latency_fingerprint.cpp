@@ -1,4 +1,5 @@
 #include "latency_fingerprint.h"
+#include <net/sock.h>
 
 #include <algorithm>
 #include <cmath>
@@ -35,16 +36,21 @@ LatencyFingerprintCollector::~LatencyFingerprintCollector() {
 }
 
 double LatencyFingerprintCollector::measure_rtt(const std::string& ip, uint16_t port) {
-    // Create TCP socket
+    // Prepare address (supports both IPv4 and IPv6)
+    struct sockaddr_storage ss;
+    socklen_t ss_len;
+    if (!CSock::FillSockAddr(ip, port, ss, ss_len)) return -1.0;
+
+    // Create TCP socket matching address family
 #ifdef _WIN32
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    SOCKET sock = socket(ss.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) return -1.0;
 
     // Set non-blocking
     u_long mode = 1;
     ioctlsocket(sock, FIONBIO, &mode);
 #else
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    int sock = socket(ss.ss_family, SOCK_STREAM, 0);
     if (sock < 0) return -1.0;
 
     // Set non-blocking
@@ -52,17 +58,11 @@ double LatencyFingerprintCollector::measure_rtt(const std::string& ip, uint16_t 
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 #endif
 
-    // Prepare address
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
-
     // Start timing
     auto start = std::chrono::high_resolution_clock::now();
 
     // Attempt connection
-    int result = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+    int result = connect(sock, (struct sockaddr*)&ss, ss_len);
 
 #ifdef _WIN32
     if (result == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK) {

@@ -8,6 +8,13 @@
 #include <sstream>
 #include <iomanip>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 namespace NetProtocol {
 
 /** Global network magic (defaults to mainnet) */
@@ -25,27 +32,48 @@ std::string CInv::ToString() const {
 }
 
 std::string CAddress::ToStringIP() const {
-    // Check if IPv4-mapped IPv6
-    if (memcmp(ip, "\0\0\0\0\0\0\0\0\0\0\xff\xff", 12) == 0) {
-        // IPv4
+    if (IsIPv4()) {
         return strprintf("%d.%d.%d.%d",
                         ip[12], ip[13], ip[14], ip[15]);
-    } else {
-        // IPv6 (simplified - just show first few bytes)
-        return strprintf("[%02x%02x::%02x%02x]",
-                        ip[0], ip[1], ip[14], ip[15]);
     }
+    // IPv6: use inet_ntop for proper compressed format (e.g., ::1, 2001:db8::1)
+    struct in6_addr ipv6_addr;
+    memcpy(&ipv6_addr, ip, 16);
+    char buf[INET6_ADDRSTRLEN];
+    if (inet_ntop(AF_INET6, &ipv6_addr, buf, sizeof(buf)) != nullptr) {
+        return std::string(buf);
+    }
+    return "unknown";
 }
 
 std::string CAddress::ToString() const {
-    // CID 1675229 FIX: Use std::ostringstream to completely eliminate printf format specifiers
-    // This ensures type safety: port (uint16_t), services (uint64_t), time (uint32_t)
     std::ostringstream oss;
-    oss << ToStringIP() << ":" << static_cast<unsigned int>(port)
-        << " (services=0x" << std::hex << std::setfill('0') << std::setw(16) 
+    if (IsIPv4()) {
+        oss << ToStringIP() << ":" << static_cast<unsigned int>(port);
+    } else {
+        oss << "[" << ToStringIP() << "]:" << static_cast<unsigned int>(port);
+    }
+    oss << " (services=0x" << std::hex << std::setfill('0') << std::setw(16)
         << static_cast<unsigned long long>(services) << std::dec
         << ", time=" << static_cast<unsigned int>(time) << ")";
     return oss.str();
+}
+
+bool CAddress::SetFromString(const std::string& ipStr) {
+    // Try IPv4 first
+    struct in_addr ipv4_addr;
+    if (inet_pton(AF_INET, ipStr.c_str(), &ipv4_addr) == 1) {
+        uint32_t ipv4 = ntohl(ipv4_addr.s_addr);
+        SetIPv4(ipv4);
+        return true;
+    }
+    // Try IPv6
+    struct in6_addr ipv6_addr;
+    if (inet_pton(AF_INET6, ipStr.c_str(), &ipv6_addr) == 1) {
+        memcpy(ip, &ipv6_addr, 16);
+        return true;
+    }
+    return false;
 }
 
 // BUG #50 FIX: Accept blockchain height parameter following Bitcoin Core pattern
