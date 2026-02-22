@@ -14,7 +14,9 @@
  *   1. VDF proof is present in coinbase and matches header's vdfProofHash
  *   2. VDF proof verifies against the expected challenge
  *   3. VDF output in header matches the proof's output
- *   4. Miner is not in cooldown
+ *
+ * Note: Cooldown is enforced as miner-side policy (CCooldownTracker),
+ * not as a consensus validation rule in this function.
  */
 
 /**

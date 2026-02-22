@@ -48,6 +48,7 @@
 #include <miner/vdf_miner.h>
 #include <vdf/vdf.h>
 #include <vdf/cooldown_tracker.h>
+#include <consensus/vdf_validation.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
 #include <rpc/rest_api.h>  // REST API for light wallet
@@ -3483,6 +3484,79 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         vdf_miner.SetIterations(vdf_iterations);
         vdf_miner.SetCooldownTracker(&cooldown_tracker);
 
+        // =========================================================================
+        // Populate cooldown tracker from existing chain on startup.
+        //
+        // Without this, the tracker starts empty after every restart, meaning
+        // cooldown is effectively disabled for ACTIVE_WINDOW (360) blocks.
+        // Pattern follows the DFMP heat tracker population (lines 2330-2440).
+        // =========================================================================
+        if (g_node_context.cooldown_tracker != nullptr) {
+            CBlockIndex* pindexTip = g_chainstate.GetTip();
+            if (pindexTip != nullptr && pindexTip->nHeight > 0) {
+                const int windowSize = CCooldownTracker::ACTIVE_WINDOW;
+                int startHeight = std::max(vdf_activation, pindexTip->nHeight - windowSize + 1);
+
+                // Only attempt population if we're past VDF activation
+                if (pindexTip->nHeight >= vdf_activation) {
+                    std::cout << "Populating VDF cooldown tracker from existing chain..." << std::endl;
+
+                    // Walk back from tip to startHeight
+                    std::vector<CBlockIndex*> recentBlocks;
+                    CBlockIndex* pindex = pindexTip;
+                    while (pindex != nullptr && pindex->nHeight >= startHeight) {
+                        recentBlocks.push_back(pindex);
+                        pindex = pindex->pprev;
+                    }
+
+                    // Clear tracker before population for deterministic state
+                    g_node_context.cooldown_tracker->Clear();
+
+                    // Process oldest-to-newest to maintain proper window ordering
+                    int populated = 0;
+                    int readFailed = 0;
+
+                    for (auto it = recentBlocks.rbegin(); it != recentBlocks.rend(); ++it) {
+                        CBlockIndex* blockIndex = *it;
+
+                        // Read block from disk
+                        CBlock block;
+                        if (!blockchain.ReadBlock(blockIndex->GetBlockHash(), block)) {
+                            std::cerr << "[VDF] WARNING: Cannot read block " << blockIndex->nHeight
+                                      << " for cooldown tracker" << std::endl;
+                            readFailed++;
+                            continue;
+                        }
+
+                        // Only process VDF blocks
+                        if (!block.IsVDFBlock()) continue;
+
+                        // Extract miner address from coinbase P2PKH output
+                        std::array<uint8_t, 20> minerAddr{};
+                        if (!ExtractCoinbaseAddress(block, minerAddr)) continue;
+
+                        g_node_context.cooldown_tracker->OnBlockConnected(
+                            blockIndex->nHeight, minerAddr);
+                        populated++;
+                    }
+
+                    std::cout << "  [OK] Populated cooldown tracker with " << populated
+                              << " VDF block(s) from height " << startHeight
+                              << " to " << pindexTip->nHeight;
+                    if (readFailed > 0) {
+                        std::cout << " (WARNING: " << readFailed << " read failures)";
+                    }
+                    std::cout << std::endl;
+
+                    if (readFailed > 0) {
+                        std::cerr << "[VDF] CRITICAL: " << readFailed << " blocks could not be read!"
+                                  << " Cooldown tracker may be incomplete." << std::endl;
+                        std::cerr << "[VDF] Consider running with -reindex to rebuild block database." << std::endl;
+                    }
+                }
+            }
+        }
+
         // Helper lambda: check if VDF mining should be used at given height
         auto shouldUseVDF = [&vdf_available, &vdf_activation](uint32_t height) -> bool {
             return vdf_available && static_cast<int>(height) >= vdf_activation;
@@ -4119,6 +4193,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
         std::cout << "  [OK] DFMP chain notification callbacks registered" << std::endl;
 
+        // =========================================================================
+        // VDF: Register block connect/disconnect callbacks for cooldown tracker.
+        //
+        // Fires for ALL blocks (self-mined and peer-received) via ConnectTip/
+        // DisconnectTip in chain.cpp.  Only VDF blocks are processed.
+        // Must run for ALL modes (including relay-only) so that the cooldown
+        // tracker state is accurate on every node.
+        // =========================================================================
+        g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
+            if (!block.IsVDFBlock()) return;
+            if (g_node_context.cooldown_tracker) {
+                std::array<uint8_t, 20> minerAddr{};
+                if (ExtractCoinbaseAddress(block, minerAddr)) {
+                    g_node_context.cooldown_tracker->OnBlockConnected(height, minerAddr);
+                }
+            }
+        });
+
+        g_chainstate.RegisterBlockDisconnectCallback([](const CBlock& block, int height, const uint256& hash) {
+            if (!block.IsVDFBlock()) return;
+            if (g_node_context.cooldown_tracker) {
+                g_node_context.cooldown_tracker->OnBlockDisconnected(height);
+            }
+        });
+        std::cout << "  [OK] VDF cooldown chain notification callbacks registered" << std::endl;
+
         // NOW start CConnman (after all interactive wallet prompts are complete)
         // This runs for BOTH normal mode and relay-only mode
         // CRITICAL: Must be after wallet init to prevent network log spam during interactive prompts
@@ -4434,13 +4534,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (ofs) ofs << total;
                     }
 
-                    // Update cooldown tracker
-                    if (g_node_context.cooldown_tracker) {
-                        std::array<uint8_t, 20> winnerAddr{};
-                        ExtractCoinbaseAddress(block, winnerAddr);
-                        g_node_context.cooldown_tracker->OnBlockConnected(
-                            pblockIndexPtr->nHeight, winnerAddr);
-                    }
+                    // NOTE: Cooldown tracker is now updated via chainstate
+                    // RegisterBlockConnectCallback (fires for ALL blocks including
+                    // self-mined).  Do NOT call OnBlockConnected here — it would
+                    // double-count this block since ConnectTip already fired the
+                    // callback above.
 
                     // BUG FIX: Broadcast VDF block to peers
                     // (Previously missing - VDF blocks were saved locally but never sent to network)

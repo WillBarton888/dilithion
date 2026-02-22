@@ -268,6 +268,134 @@ static void test_cooldown_formula_values()
     PASS();
 }
 
+// --- Integration-style tests (validate the specific bugs being fixed) ---
+
+static void test_startup_repopulation()
+{
+    TEST(startup_repopulation);
+
+    // Simulate original tracker with 10 miners across 10 blocks.
+    CCooldownTracker original;
+    for (uint8_t i = 1; i <= 10; i++) {
+        original.OnBlockConnected(1000 + i, make_addr(i));
+    }
+
+    int orig_miners = original.GetActiveMiners();
+    int orig_cooldown = original.GetCooldownBlocks();
+    int orig_last_win_5 = original.GetLastWinHeight(make_addr(5));
+
+    CHECK(orig_miners == 10);
+    CHECK(orig_last_win_5 == 1005);
+
+    // Simulate node restart: create a NEW tracker and replay the same events
+    // (this is what the startup population code does).
+    CCooldownTracker restarted;
+    restarted.Clear();
+    for (uint8_t i = 1; i <= 10; i++) {
+        restarted.OnBlockConnected(1000 + i, make_addr(i));
+    }
+
+    // State must match exactly.
+    CHECK(restarted.GetActiveMiners() == orig_miners);
+    CHECK(restarted.GetCooldownBlocks() == orig_cooldown);
+    CHECK(restarted.GetLastWinHeight(make_addr(5)) == orig_last_win_5);
+
+    // Cooldown behavior must match.
+    for (uint8_t i = 1; i <= 10; i++) {
+        CHECK(restarted.IsInCooldown(make_addr(i), 1011) ==
+              original.IsInCooldown(make_addr(i), 1011));
+    }
+
+    PASS();
+}
+
+static void test_disconnect_reorg_multi_block()
+{
+    TEST(disconnect_reorg_multi_block);
+    CCooldownTracker tracker;
+    Address alice = make_addr(1);
+    Address bob   = make_addr(2);
+    Address carol = make_addr(3);
+
+    // Connect: A@100, B@101, C@102, A@103, B@104
+    tracker.OnBlockConnected(100, alice);
+    tracker.OnBlockConnected(101, bob);
+    tracker.OnBlockConnected(102, carol);
+    tracker.OnBlockConnected(103, alice);
+    tracker.OnBlockConnected(104, bob);
+
+    CHECK(tracker.GetLastWinHeight(alice) == 103);
+    CHECK(tracker.GetLastWinHeight(bob) == 104);
+    CHECK(tracker.GetLastWinHeight(carol) == 102);
+    CHECK(tracker.GetActiveMiners() == 3);
+
+    // Simulate 3-block reorg: disconnect 104, 103, 102
+    tracker.OnBlockDisconnected(104);
+    CHECK(tracker.GetLastWinHeight(bob) == 101);   // reverts to 101
+
+    tracker.OnBlockDisconnected(103);
+    CHECK(tracker.GetLastWinHeight(alice) == 100);  // reverts to 100
+
+    tracker.OnBlockDisconnected(102);
+    CHECK(tracker.GetLastWinHeight(carol) == -1);   // carol gone entirely
+
+    // Trigger cache recalc via IsInCooldown before checking active count.
+    // (GetActiveMiners returns cached value; cache is invalidated by
+    // OnBlockDisconnected but only recalculated by IsInCooldown/OnBlockConnected.)
+    tracker.IsInCooldown(alice, 102);
+    CHECK(tracker.GetActiveMiners() == 2);  // only alice and bob remain
+
+    // Connect new competing chain: D@102, E@103, F@104
+    Address dave  = make_addr(4);
+    Address eve   = make_addr(5);
+    Address frank = make_addr(6);
+    tracker.OnBlockConnected(102, dave);
+    tracker.OnBlockConnected(103, eve);
+    tracker.OnBlockConnected(104, frank);
+
+    CHECK(tracker.GetActiveMiners() == 5);  // alice, bob, dave, eve, frank
+    CHECK(tracker.GetLastWinHeight(dave) == 102);
+    CHECK(tracker.GetLastWinHeight(eve) == 103);
+    CHECK(tracker.GetLastWinHeight(frank) == 104);
+    // Original miners still tracked at their earlier heights
+    CHECK(tracker.GetLastWinHeight(alice) == 100);
+    CHECK(tracker.GetLastWinHeight(bob) == 101);
+
+    PASS();
+}
+
+static void test_no_double_count()
+{
+    TEST(no_double_count);
+    CCooldownTracker tracker;
+    Address alice = make_addr(1);
+
+    // Connect alice at height 100
+    tracker.OnBlockConnected(100, alice);
+    CHECK(tracker.GetActiveMiners() == 1);
+    CHECK(tracker.GetLastWinHeight(alice) == 100);
+
+    // Call OnBlockConnected again for the SAME height and address.
+    // This simulates what would have happened if both the miner callback
+    // AND the chainstate callback fired for the same self-mined block
+    // (the bug we prevent by removing the miner callback).
+    // The tracker uses height as map key, so duplicate calls are idempotent.
+    tracker.OnBlockConnected(100, alice);
+    CHECK(tracker.GetActiveMiners() == 1);   // still 1, not 2
+    CHECK(tracker.GetLastWinHeight(alice) == 100);
+
+    // Add another miner and verify counts are still correct.
+    Address bob = make_addr(2);
+    tracker.OnBlockConnected(101, bob);
+    CHECK(tracker.GetActiveMiners() == 2);
+
+    // Double-call bob at 101 — still 2 unique miners.
+    tracker.OnBlockConnected(101, bob);
+    CHECK(tracker.GetActiveMiners() == 2);
+
+    PASS();
+}
+
 int main()
 {
     std::cout << "\nCCooldownTracker Unit Tests\n";
@@ -285,6 +413,9 @@ int main()
     test_clear();
     test_consecutive_wins_same_miner();
     test_cooldown_formula_values();
+    test_startup_repopulation();
+    test_disconnect_reorg_multi_block();
+    test_no_double_count();
 
     std::cout << "\n" << passed << " passed, " << failed << " failed\n";
 
