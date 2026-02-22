@@ -88,20 +88,9 @@ struct NodeContext {
     // Digital DNA: Sybil-resistant identity system
     std::unique_ptr<digital_dna::DNARegistryDB> dna_registry;
     std::unique_ptr<digital_dna::TrustScoreManager> trust_manager;
-    // Collector uses shared_ptr + mutex for safe cross-thread replacement:
-    // Readers take a local shared_ptr copy (keeps object alive); writers swap under lock.
-    std::shared_ptr<digital_dna::DigitalDNACollector> dna_collector;
-    mutable std::mutex cs_dna_collector;
-    // Thread-safe accessor: returns a shared_ptr copy (caller holds a ref)
-    std::shared_ptr<digital_dna::DigitalDNACollector> GetDNACollector() const {
-        std::lock_guard<std::mutex> lock(cs_dna_collector);
-        return dna_collector;
-    }
-    // Thread-safe replacement: swaps in new collector, old dies when last reader drops it
-    void SetDNACollector(std::shared_ptr<digital_dna::DigitalDNACollector> new_collector) {
-        std::lock_guard<std::mutex> lock(cs_dna_collector);
-        dna_collector = std::move(new_collector);
-    }
+    // DNA collector accessors (storage is a separate global to avoid NodeContext memory stomps)
+    std::shared_ptr<digital_dna::DigitalDNACollector> GetDNACollector() const;
+    void SetDNACollector(std::shared_ptr<digital_dna::DigitalDNACollector> new_collector);
 
     // Node state flags
     std::atomic<bool> running{false};

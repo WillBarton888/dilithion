@@ -12,7 +12,6 @@
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <digital_dna/dna_registry_db.h>  // Digital DNA: LevelDB-backed registry
 #include <util/logging.h>
-#include <iostream>
 
 // Global node context instance
 NodeContext g_node_context;
@@ -20,6 +19,22 @@ NodeContext g_node_context;
 // Destructor defined here (not in header) because unique_ptr<DNARegistryDB>
 // requires the complete type for default_delete.
 NodeContext::~NodeContext() = default;
+
+// DNA collector stored in a separate global to avoid memory stomp from NodeContext fields.
+// Something in the NodeContext layout overwrites byte 4 of the shared_ptr's internal pointer
+// when stored as a member. Isolating it here eliminates that corruption.
+static std::shared_ptr<digital_dna::DigitalDNACollector> g_dna_collector;
+static std::mutex g_cs_dna_collector;
+
+std::shared_ptr<digital_dna::DigitalDNACollector> NodeContext::GetDNACollector() const {
+    std::lock_guard<std::mutex> lock(g_cs_dna_collector);
+    return g_dna_collector;
+}
+
+void NodeContext::SetDNACollector(std::shared_ptr<digital_dna::DigitalDNACollector> new_collector) {
+    std::lock_guard<std::mutex> lock(g_cs_dna_collector);
+    g_dna_collector = std::move(new_collector);
+}
 
 bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) {
     if (IsInitialized()) {
