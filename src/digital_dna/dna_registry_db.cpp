@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 namespace digital_dna {
@@ -52,7 +53,7 @@ bool DNARegistryDB::IsOpen() const {
     return db_ != nullptr;
 }
 
-DNARegistryDB::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& dna) {
+IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& dna) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (!db_) return RegisterResult::DB_ERROR;
@@ -66,23 +67,35 @@ DNARegistryDB::RegisterResult DNARegistryDB::register_identity(const DigitalDNA&
         return RegisterResult::ALREADY_REGISTERED;
     }
 
-    // Check for Sybils against all cached identities (v3.0: 8-dimension scoring)
-    bool ml_flagged = false;
+    // Advisory Sybil check: always store, log warnings
+    bool sybil_flagged = false;
     for (const auto& [addr, other] : cache_) {
         if (addr == dna.address) continue;
 
         auto score = compare(dna, other);
 
-        // Primary gate: threshold-based rejection
-        if (score.is_same_identity()) {
-            return RegisterResult::SYBIL_DETECTED;
+        if (score.is_same_identity() || score.is_suspicious()) {
+            std::cout << "[DNA-SYBIL] ADVISORY: " << address_to_hex(dna.address)
+                      << " matches " << address_to_hex(addr)
+                      << " (" << score.verdict()
+                      << ", score=" << std::fixed << std::setprecision(3) << score.combined_score
+                      << ", dims=" << score.dimensions_scored << ")" << std::endl;
+            std::cout << "[DNA-SYBIL]   L=" << std::setprecision(2) << score.latency_similarity
+                      << " V=" << score.timing_similarity
+                      << " P=" << score.perspective_similarity;
+            if (score.has_memory) std::cout << " M=" << score.memory_similarity;
+            if (score.has_clock_drift) std::cout << " D=" << score.clock_drift_similarity;
+            if (score.has_bandwidth) std::cout << " B=" << score.bandwidth_similarity;
+            if (score.has_thermal) std::cout << " T=" << score.thermal_similarity;
+            if (score.has_behavioral) std::cout << " BP=" << score.behavioral_similarity;
+            std::cout << std::endl;
+            sybil_flagged = true;
         }
 
-        // ML supplementary gate: if suspicious and ML is active + trained
+        // ML supplementary logging (advisory only)
         if (score.is_suspicious() && ml_detector_ &&
             ml_detector_->get_mode() != MLSybilDetector::Mode::DISABLED) {
 
-            // Build raw feature vector from the pair
             double lat_dist = LatencyFingerprint::distance(dna.latency, other.latency);
             double vdf_ratio = (other.timing.iterations_per_second > 0)
                 ? dna.timing.iterations_per_second / other.timing.iterations_per_second : 1.0;
@@ -98,39 +111,18 @@ DNARegistryDB::RegisterResult DNARegistryDB::register_identity(const DigitalDNA&
                 static_cast<double>(dna.registration_height) - static_cast<double>(other.registration_height));
 
             auto features = ml_detector_->extract_features(
-                lat_dist,                       // 1. Latency Euclidean distance
-                0.0,                            // 2. Latency Wasserstein (not yet computed)
-                vdf_ratio,                      // 3. VDF speed ratio
-                score.timing_similarity,        // 4. VDF checkpoint correlation proxy
-                mem_dtw,                        // 5. Memory curve DTW distance
-                drift_diff,                     // 6. Clock drift rate difference (ppm)
-                score.perspective_similarity,   // 7. Peer set Jaccard
-                score.behavioral_similarity,    // 8. Hourly activity cosine
-                bw_asym_diff,                   // 9. Bandwidth asymmetry difference
-                therm_diff,                     // 10. Thermal throttle ratio difference
-                0.0,                            // 11. Trust score difference (not in DigitalDNA yet)
-                reg_gap,                        // 12. Registration time gap (blocks)
-                false);                         // 13. Same region (not yet computed)
+                lat_dist, 0.0, vdf_ratio, score.timing_similarity,
+                mem_dtw, drift_diff, score.perspective_similarity,
+                score.behavioral_similarity, bw_asym_diff, therm_diff,
+                0.0, reg_gap, false);
 
-            // Track readiness stats
             bool full_dims = score.dimensions_scored >= 8;
             ml_detector_->record_scored(full_dims);
-
-            if (ml_detector_->is_anomalous(features)) {
-                if (ml_detector_->get_mode() == MLSybilDetector::Mode::SUPPLEMENTARY) {
-                    ml_flagged = true;
-                }
-                // ADVISORY mode: logged inside is_anomalous(), no action
-            }
+            ml_detector_->is_anomalous(features);  // Advisory logging inside
         }
     }
 
-    // ML supplementary rejection: suspicious pair + ML anomaly = reject
-    if (ml_flagged) {
-        return RegisterResult::SYBIL_DETECTED;
-    }
-
-    // Serialize and store
+    // Always store (advisory mode — never reject for Sybil)
     auto data = dna.serialize();
     std::string value(data.begin(), data.end());
 
@@ -139,10 +131,35 @@ DNARegistryDB::RegisterResult DNARegistryDB::register_identity(const DigitalDNA&
         return RegisterResult::DB_ERROR;
     }
 
-    // Update cache
     cache_[dna.address] = dna;
+    return sybil_flagged ? RegisterResult::SYBIL_FLAGGED : RegisterResult::SUCCESS;
+}
 
-    return RegisterResult::SUCCESS;
+IDNARegistry::RegisterResult DNARegistryDB::update_identity(const DigitalDNA& dna) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!db_) return RegisterResult::DB_ERROR;
+    if (!dna.is_valid) return RegisterResult::INVALID_DNA;
+
+    // Must already be registered
+    std::string key = make_key(dna.address);
+    std::string existing;
+    leveldb::Status status = db_->Get(leveldb::ReadOptions(), key, &existing);
+    if (!status.ok()) {
+        return RegisterResult::INVALID_DNA;  // Not registered yet
+    }
+
+    // Overwrite with enriched version
+    auto data = dna.serialize();
+    std::string value(data.begin(), data.end());
+
+    status = db_->Put(leveldb::WriteOptions(), key, value);
+    if (!status.ok()) {
+        return RegisterResult::DB_ERROR;
+    }
+
+    cache_[dna.address] = dna;
+    return RegisterResult::UPDATED;
 }
 
 bool DNARegistryDB::is_registered(const std::array<uint8_t, 20>& address) const {

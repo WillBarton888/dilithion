@@ -16,7 +16,7 @@ namespace digital_dna {
 static std::unique_ptr<DigitalDNACollector> g_collector;
 static std::array<uint8_t, 20> g_my_address = {};
 
-DigitalDNARpc::DigitalDNARpc(DigitalDNARegistry& registry)
+DigitalDNARpc::DigitalDNARpc(IDNARegistry& registry)
     : registry_(registry) {}
 
 void DigitalDNARpc::register_commands() {
@@ -107,30 +107,36 @@ JsonObject DigitalDNARpc::cmd_registerdigitaldna(const JsonObject& params) {
 
     JsonObject response;
     switch (result) {
-        case DigitalDNARegistry::RegisterResult::SUCCESS:
+        case IDNARegistry::RegisterResult::SUCCESS:
             response["status"] = "success";
             response["address"] = address_to_hex(dna->address);
             response["message"] = "Identity registered successfully";
             break;
-        case DigitalDNARegistry::RegisterResult::ALREADY_REGISTERED:
+        case IDNARegistry::RegisterResult::ALREADY_REGISTERED:
             response["status"] = "error";
             response["error"] = "already_registered";
             response["message"] = "This address is already registered";
             break;
-        case DigitalDNARegistry::RegisterResult::SYBIL_DETECTED:
-            response["status"] = "error";
-            response["error"] = "sybil_detected";
-            response["message"] = "Similar identity already exists - potential Sybil";
+        case IDNARegistry::RegisterResult::SYBIL_FLAGGED:
+            response["status"] = "success";
+            response["address"] = address_to_hex(dna->address);
+            response["message"] = "Identity registered (advisory: similar identity exists)";
+            response["sybil_flagged"] = "true";
             break;
-        case DigitalDNARegistry::RegisterResult::INVALID_DNA:
+        case IDNARegistry::RegisterResult::INVALID_DNA:
             response["status"] = "error";
             response["error"] = "invalid_dna";
             response["message"] = "Digital DNA proof is invalid";
             break;
-        case DigitalDNARegistry::RegisterResult::COOLDOWN_ACTIVE:
+        case IDNARegistry::RegisterResult::UPDATED:
+            response["status"] = "success";
+            response["address"] = address_to_hex(dna->address);
+            response["message"] = "Identity updated with enriched dimensions";
+            break;
+        case IDNARegistry::RegisterResult::DB_ERROR:
             response["status"] = "error";
-            response["error"] = "cooldown_active";
-            response["message"] = "Registration cooldown is active";
+            response["error"] = "db_error";
+            response["message"] = "Database write failed";
             break;
     }
 

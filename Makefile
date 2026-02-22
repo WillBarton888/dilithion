@@ -182,7 +182,8 @@ DIGITAL_DNA_SOURCES := src/digital_dna/digital_dna.cpp \
                        src/digital_dna/clock_drift.cpp \
                        src/digital_dna/bandwidth_proof.cpp \
                        src/digital_dna/ml_detector.cpp \
-                       src/digital_dna/dna_registry_db.cpp
+                       src/digital_dna/dna_registry_db.cpp \
+                       src/digital_dna/trust_score.cpp
 
 # VDF (Verifiable Delay Function) sources - uses chiavdf class group VDF
 VDF_SOURCES := src/vdf/vdf.cpp \
@@ -462,6 +463,21 @@ dfmp_mik_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/dfmp_mik_tests.o $(DILITHIUM_OBJ
 ipv6_smoke_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/ipv6_smoke_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+dna_serialization_test: $(CORE_OBJECTS) $(OBJ_DIR)/digital_dna/dna_serialization_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ dna_serialization_test built successfully$(COLOR_RESET)"
+
+dna_p2p_test: $(CORE_OBJECTS) $(OBJ_DIR)/digital_dna/dna_p2p_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ dna_p2p_test built successfully$(COLOR_RESET)"
+
+dna_detection_test: $(CORE_OBJECTS) $(OBJ_DIR)/digital_dna/dna_detection_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ dna_detection_test built successfully$(COLOR_RESET)"
 
 vdf_test: $(CORE_OBJECTS) $(OBJ_DIR)/vdf/vdf_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"

@@ -91,6 +91,7 @@
 #include <filesystem>  // BUG #56: For wallet file existence check
 #include <unordered_map>  // BUG #149: For tracking requested parent blocks
 #include <mutex>  // BUG #149: For thread-safe parent tracking
+#include <random>  // Digital DNA: Random peer selection for P2P measurements
 
 #ifdef _WIN32
     #include <winsock2.h>   // For socket functions
@@ -3387,6 +3388,87 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "[BIP152] ProcessNewBlock result: " << BlockProcessResultToString(result) << std::endl;
         });
 
+        // Digital DNA P2P Handlers: Clock drift and bandwidth measurement protocol
+        // dnalping: Peer wants to measure latency -> respond with pong
+        message_processor.SetDNALatencyPingHandler([&message_processor](int peer_id, uint64_t nonce) {
+            if (g_node_context.connman) {
+                CNetMessage pong = message_processor.CreateDNALatencyPongMessage(nonce);
+                g_node_context.connman->PushMessage(peer_id, pong);
+            }
+        });
+
+        // dnalpong: Latency pong received -> feed RTT to clock drift collector
+        message_processor.SetDNALatencyPongHandler([](int peer_id, uint64_t nonce, uint64_t recv_ts_us) {
+            // RTT measured by the nonce system; for DNA latency we just log it
+            // Clock drift uses dnatsync, not dnalping/pong (those are for raw RTT only)
+            (void)peer_id; (void)nonce; (void)recv_ts_us;
+        });
+
+        // dnatsync: Time synchronization exchange for clock drift measurement
+        message_processor.SetDNATimeSyncHandler([&message_processor](int peer_id,
+            uint64_t sender_ts_us, uint64_t sender_wall_ms, uint64_t nonce, bool is_response)
+        {
+            if (is_response) {
+                // This is a response to our request - feed to collector
+                if (g_node_context.dna_collector) {
+                    // Convert peer_id to 20-byte identifier
+                    std::array<uint8_t, 20> peer_addr{};
+                    peer_addr[0] = static_cast<uint8_t>(peer_id & 0xFF);
+                    peer_addr[1] = static_cast<uint8_t>((peer_id >> 8) & 0xFF);
+
+                    auto local_now_us = static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()).count());
+                    // local_send_us was when we sent the request - approximate from nonce tracking
+                    // We use sender_ts_us as the peer's timestamp for drift calculation
+                    g_node_context.dna_collector->on_time_sync_response(
+                        peer_addr, local_now_us - 100000, sender_ts_us, local_now_us);
+                }
+            } else {
+                // Peer is requesting a time sync - respond with our timestamps
+                if (g_node_context.connman) {
+                    auto ts_us = static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()).count());
+                    auto wall_ms = static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count());
+                    CNetMessage resp = message_processor.CreateDNATimeSyncMessage(
+                        ts_us, wall_ms, nonce, true);
+                    g_node_context.connman->PushMessage(peer_id, resp);
+                }
+            }
+        });
+
+        // dnabwtest: Peer sent bandwidth test payload -> measure and respond
+        message_processor.SetDNABWTestHandler([&message_processor](int peer_id,
+            uint32_t payload_size, uint64_t nonce, uint64_t recv_timestamp_ms)
+        {
+            if (g_node_context.connman) {
+                // The recv_timestamp_ms tells us when we received the payload
+                // We can compute download throughput = payload_size / elapsed_time
+                // (elapsed time is from when peer sent to when we received, approximated)
+                double download_mbps = digital_dna::BandwidthProofCollector::compute_throughput_mbps(
+                    payload_size, 1);  // Receiver can't measure upload; we report download only
+                CNetMessage result = message_processor.CreateDNABWResultMessage(
+                    nonce, 0.0, download_mbps);
+                g_node_context.connman->PushMessage(peer_id, result);
+            }
+        });
+
+        // dnabwres: Bandwidth test result from peer
+        message_processor.SetDNABWResultHandler([](int peer_id, uint64_t nonce,
+            double upload_mbps, double download_mbps)
+        {
+            if (g_node_context.dna_collector) {
+                std::array<uint8_t, 20> peer_addr{};
+                peer_addr[0] = static_cast<uint8_t>(peer_id & 0xFF);
+                peer_addr[1] = static_cast<uint8_t>((peer_id >> 8) & 0xFF);
+                g_node_context.dna_collector->on_bandwidth_result(
+                    peer_addr, upload_mbps, download_mbps);
+            }
+        });
+
         // PEER DISCOVERY: UPnP prompt - ask user permission for automatic port mapping
         if (!config.upnp_prompted && !config.relay_only) {
             std::cout << std::endl;
@@ -4219,6 +4301,28 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
         std::cout << "  [OK] VDF cooldown chain notification callbacks registered" << std::endl;
 
+        // Digital DNA: Behavioral profile + trust scoring block hook
+        g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
+            int dnaAct = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->digitalDnaActivationHeight : 999999999;
+            if (height < dnaAct) return;
+
+            // Behavioral profile hook
+            if (g_node_context.dna_collector) {
+                g_node_context.dna_collector->on_block_received(static_cast<uint32_t>(height));
+            }
+
+            // Trust scoring: heartbeat for registered miners
+            if (g_node_context.trust_manager && g_node_context.dna_registry) {
+                std::array<uint8_t, 20> minerAddr{};
+                if (ExtractCoinbaseAddress(block, minerAddr) &&
+                    g_node_context.dna_registry->is_registered(minerAddr)) {
+                    g_node_context.trust_manager->on_heartbeat_success(
+                        minerAddr, static_cast<uint32_t>(height));
+                }
+            }
+        });
+
         // NOW start CConnman (after all interactive wallet prompts are complete)
         // This runs for BOTH normal mode and relay-only mode
         // CRITICAL: Must be after wallet init to prevent network log spam during interactive prompts
@@ -4792,12 +4896,140 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     size_t count = 0;
                                     for (const auto& tx : txs) {
                                         AnnounceTransactionToPeers(tx->GetHash(), -1, true);
+                                        // DNA behavioral: track TX relay
+                                        if (g_node_context.dna_collector) {
+                                            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                std::chrono::system_clock::now().time_since_epoch()).count();
+                                            g_node_context.dna_collector->on_tx_relayed(static_cast<uint64_t>(now_ms));
+                                        }
                                         if (++count >= 100) break;
                                     }
                                     std::cout << "[TX-RELAY] Rebroadcast " << count
                                               << " unconfirmed mempool transaction(s)" << std::endl;
                                 }
                             }
+                        }
+                    }
+
+                    // Digital DNA: Progressive registration (every ~60s)
+                    {
+                        static auto last_dna_check = std::chrono::steady_clock::now();
+                        auto now_dna = std::chrono::steady_clock::now();
+                        auto dna_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                            now_dna - last_dna_check).count();
+                        if (dna_elapsed >= 60 && g_node_context.dna_collector &&
+                            g_node_context.dna_registry) {
+                            int dnaAct = Dilithion::g_chainParams ?
+                                Dilithion::g_chainParams->digitalDnaActivationHeight : 999999999;
+                            int curHeight = g_chainstate.GetHeight();
+                            if (curHeight >= dnaAct) {
+                                last_dna_check = now_dna;
+                                auto dna_opt = g_node_context.dna_collector->get_dna();
+                                if (dna_opt) {
+                                    dna_opt->registration_height = static_cast<uint32_t>(curHeight);
+                                    if (!g_node_context.dna_registry->is_registered(dna_opt->address)) {
+                                        auto res = g_node_context.dna_registry->register_identity(*dna_opt);
+                                        if (res == digital_dna::IDNARegistry::RegisterResult::SUCCESS ||
+                                            res == digital_dna::IDNARegistry::RegisterResult::SYBIL_FLAGGED) {
+                                            int dims = 3 + (dna_opt->memory ? 1 : 0) +
+                                                (dna_opt->clock_drift ? 1 : 0) +
+                                                (dna_opt->bandwidth ? 1 : 0) +
+                                                (dna_opt->thermal ? 1 : 0) +
+                                                (dna_opt->behavioral ? 1 : 0);
+                                            std::cout << "[DNA] Registered identity at height "
+                                                      << curHeight << " (dims: " << dims
+                                                      << ")" << std::endl;
+                                            // Initialize trust score for new identity
+                                            if (g_node_context.trust_manager) {
+                                                g_node_context.trust_manager->on_registration(
+                                                    dna_opt->address, static_cast<uint32_t>(curHeight));
+                                            }
+                                        }
+                                    } else {
+                                        // Progressive enrichment: update if more dimensions
+                                        auto existing = g_node_context.dna_registry->get_identity(dna_opt->address);
+                                        if (existing) {
+                                            auto count_dims = [](const digital_dna::DigitalDNA& d) {
+                                                return 3 + (d.memory ? 1 : 0) +
+                                                    (d.clock_drift ? 1 : 0) +
+                                                    (d.bandwidth ? 1 : 0) +
+                                                    (d.thermal ? 1 : 0) +
+                                                    (d.behavioral ? 1 : 0);
+                                            };
+                                            int old_dims = count_dims(*existing);
+                                            int new_dims = count_dims(*dna_opt);
+                                            if (new_dims > old_dims) {
+                                                g_node_context.dna_registry->update_identity(*dna_opt);
+                                                std::cout << "[DNA] Updated identity: " << old_dims
+                                                          << " -> " << new_dims << " dimensions" << std::endl;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Digital DNA P2P: Periodic clock drift + bandwidth measurement initiators
+                    // Gated by DNA activation height and collector existence
+                    {
+                        static auto last_tsync = std::chrono::steady_clock::now();
+                        static auto last_bwtest = std::chrono::steady_clock::now();
+                        auto now_p2p = std::chrono::steady_clock::now();
+                        int dnaActP2P = Dilithion::g_chainParams ?
+                            Dilithion::g_chainParams->digitalDnaActivationHeight : 999999999;
+                        int curHeightP2P = g_chainstate.GetHeight();
+
+                        if (curHeightP2P >= dnaActP2P && g_node_context.dna_collector &&
+                            g_node_context.connman && g_node_context.message_processor) {
+
+                            // Collect peer IDs once for both operations
+                            auto nodes = g_node_context.connman->GetNodes();
+                            std::vector<int> peer_ids;
+                            for (auto* n : nodes) {
+                                if (n && n->IsConnected()) peer_ids.push_back(n->id);
+                            }
+
+                            // Clock drift: send dnatsync to random peer every 5 minutes
+                            auto tsync_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                                now_p2p - last_tsync).count();
+                            if (tsync_elapsed >= 300 && !peer_ids.empty()) {
+                                last_tsync = now_p2p;
+                                std::mt19937 rng(std::random_device{}());
+                                int target = peer_ids[rng() % peer_ids.size()];
+                                auto ts_us = static_cast<uint64_t>(
+                                    std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::steady_clock::now().time_since_epoch()).count());
+                                auto wall_ms = static_cast<uint64_t>(
+                                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::system_clock::now().time_since_epoch()).count());
+                                uint64_t nonce = (static_cast<uint64_t>(rng()) << 32) | rng();
+                                g_node_context.message_processor->RegisterDNANonce(nonce, target);
+                                CNetMessage msg = g_node_context.message_processor->CreateDNATimeSyncMessage(
+                                    ts_us, wall_ms, nonce, false);
+                                g_node_context.connman->PushMessage(target, msg);
+                            }
+
+                            // Bandwidth: send dnabwtest to random peer every 15 minutes
+                            auto bwtest_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                                now_p2p - last_bwtest).count();
+                            if (bwtest_elapsed >= 900 && !peer_ids.empty()) {
+                                last_bwtest = now_p2p;
+                                std::mt19937 rng(std::random_device{}());
+                                int target = peer_ids[rng() % peer_ids.size()];
+                                uint64_t nonce = (static_cast<uint64_t>(rng()) << 32) | rng();
+                                g_node_context.message_processor->RegisterDNANonce(nonce, target);
+                                // Use smaller payload for testnet (256KB) vs mainnet (1MB)
+                                bool is_testnet = Dilithion::g_chainParams &&
+                                    Dilithion::g_chainParams->digitalDnaActivationHeight == 1;
+                                uint32_t payload_sz = is_testnet ? 256 * 1024 : 1024 * 1024;
+                                CNetMessage msg = g_node_context.message_processor->CreateDNABWTestMessage(
+                                    nonce, payload_sz);
+                                g_node_context.connman->PushMessage(target, msg);
+                            }
+
+                            // Cleanup expired nonces periodically
+                            g_node_context.message_processor->CleanupDNANonces();
                         }
                     }
 
@@ -4870,7 +5102,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  [OK] Digital DNA RPC commands registered" << std::endl;
 
             // Initialize DNA collector with mining address (if wallet is loaded)
-            if (!config.relay_only && wallet.GetAddresses().size() > 0) {
+            int dnaActivation = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->digitalDnaActivationHeight : 999999999;
+            int tipHeight = g_chainstate.GetHeight();
+
+            if (!config.relay_only && wallet.GetAddresses().size() > 0 &&
+                tipHeight >= dnaActivation) {
                 std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
                 if (pubKeyHash.size() == 20) {
                     std::array<uint8_t, 20> address{};
@@ -4879,9 +5116,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Set address for RPC-initiated collection
                     digital_dna::DigitalDNARpc::set_my_address(address);
 
-                    // Create the collector (defer collection to avoid blocking startup)
-                    auto collector = std::make_unique<digital_dna::DigitalDNACollector>(address);
-                    // NOTE: start_collection() deferred - will be triggered via RPC
+                    // Create and auto-start the collector
+                    digital_dna::DigitalDNACollector::Config dna_config;
+                    dna_config.testnet = config.testnet;
+                    auto collector = std::make_unique<digital_dna::DigitalDNACollector>(address, dna_config);
+                    collector->start_collection();
                     g_node_context.dna_collector = collector.get();
                     digital_dna::DigitalDNARpc::set_collector(std::move(collector));
 
@@ -4889,7 +5128,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::ostringstream addr_hex;
                     for (int i = 0; i < 4; ++i)
                         addr_hex << std::hex << std::setfill('0') << std::setw(2) << (int)address[i];
-                    std::cout << "  [OK] Digital DNA collector started (address: "
+                    std::cout << "  [OK] Digital DNA collection started (auto, address: "
                               << addr_hex.str() << "...)" << std::endl;
                 }
             }
@@ -5606,6 +5845,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 3.2: Shutdown batch signature verifier
         std::cout << "[Shutdown] Stopping batch signature verifier..." << std::endl;
         ShutdownSignatureVerifier();
+
+        // Save trust scores before shutdown
+        if (g_node_context.trust_manager) {
+            std::string trust_path = config.datadir + "/dna_trust";
+            if (g_node_context.trust_manager->save(trust_path)) {
+                std::cout << "[Shutdown] Trust scores saved ("
+                          << g_node_context.trust_manager->count() << " identities)" << std::endl;
+            }
+        }
 
         // Phase 1.2: Shutdown NodeContext (Bitcoin Core pattern)
         std::cout << "[Shutdown] NodeContext shutdown complete" << std::endl;

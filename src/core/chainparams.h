@@ -135,6 +135,13 @@ public:
     int vdfExclusiveHeight;
     uint64_t vdfIterations;
 
+    // Digital DNA activation height
+    // Before this height: DNA collection and registration disabled
+    // After this height: DNA auto-collection starts for miners, registration active
+    // Mainnet: 999999999 (disabled until fork is scheduled)
+    // Testnet: 1 (active from near-genesis)
+    int digitalDnaActivationHeight;
+
     // Compact encoding fix activation height
     // Before this height: BigToCompact has a sign bit bug where bit 23 of the
     // mantissa collides with the sign bit, causing ~2x difficulty corruption on

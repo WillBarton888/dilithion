@@ -97,6 +97,8 @@ ChainParams ChainParams::Mainnet() {
     params.vdfExclusiveHeight  = 999999999;
     params.vdfIterations       = 200'000'000; // ~200s on reference hardware
 
+    params.digitalDnaActivationHeight = 999999999;  // Disabled until fork is scheduled
+
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
     //
@@ -210,6 +212,8 @@ ChainParams ChainParams::Testnet() {
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted
     params.vdfExclusiveHeight  = 87500;       // VDF-only after this height
     params.vdfIterations       = 10'000'000;  // ~10s on reference hardware (faster for testing)
+
+    params.digitalDnaActivationHeight = 1;    // Active from near-genesis for testing
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint

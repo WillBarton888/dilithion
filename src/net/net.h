@@ -46,6 +46,15 @@ public:
     using CmpctBlockHandler = std::function<void(int peer_id, const CBlockHeaderAndShortTxIDs&)>;
     using GetBlockTxnHandler = std::function<void(int peer_id, const BlockTransactionsRequest&)>;
     using BlockTxnHandler = std::function<void(int peer_id, const BlockTransactions&)>;
+    // Digital DNA: P2P identity measurement protocol
+    using DNALatencyPingHandler = std::function<void(int peer_id, uint64_t nonce)>;
+    using DNALatencyPongHandler = std::function<void(int peer_id, uint64_t nonce, uint64_t recv_timestamp_us)>;
+    using DNATimeSyncHandler = std::function<void(int peer_id, uint64_t sender_ts_us,
+        uint64_t sender_wall_ms, uint64_t nonce, bool is_response)>;
+    using DNABWTestHandler = std::function<void(int peer_id, uint32_t payload_size,
+        uint64_t nonce, uint64_t send_timestamp_ms)>;
+    using DNABWResultHandler = std::function<void(int peer_id, uint64_t nonce,
+        double upload_mbps, double download_mbps)>;
 
     CNetMessageProcessor(CPeerManager& peer_mgr);
 
@@ -71,6 +80,13 @@ public:
     CNetMessage CreateCmpctBlockMessage(const CBlockHeaderAndShortTxIDs& cmpctblock);
     CNetMessage CreateGetBlockTxnMessage(const BlockTransactionsRequest& req);
     CNetMessage CreateBlockTxnMessage(const BlockTransactions& resp);
+    // Digital DNA: P2P measurement messages
+    CNetMessage CreateDNALatencyPingMessage(uint64_t nonce);
+    CNetMessage CreateDNALatencyPongMessage(uint64_t nonce);
+    CNetMessage CreateDNATimeSyncMessage(uint64_t sender_ts_us, uint64_t sender_wall_ms,
+                                          uint64_t nonce, bool is_response);
+    CNetMessage CreateDNABWTestMessage(uint64_t nonce, uint32_t payload_size);
+    CNetMessage CreateDNABWResultMessage(uint64_t nonce, double upload_mbps, double download_mbps);
 
     // Register handlers
     void SetVersionHandler(VersionHandler handler) { on_version = handler; }
@@ -90,6 +106,16 @@ public:
     void SetCmpctBlockHandler(CmpctBlockHandler handler) { on_cmpctblock = handler; }
     void SetGetBlockTxnHandler(GetBlockTxnHandler handler) { on_getblocktxn = handler; }
     void SetBlockTxnHandler(BlockTxnHandler handler) { on_blocktxn = handler; }
+    // Digital DNA handler setters
+    void SetDNALatencyPingHandler(DNALatencyPingHandler handler) { on_dna_latency_ping = handler; }
+    void SetDNALatencyPongHandler(DNALatencyPongHandler handler) { on_dna_latency_pong = handler; }
+    void SetDNATimeSyncHandler(DNATimeSyncHandler handler) { on_dna_time_sync = handler; }
+    void SetDNABWTestHandler(DNABWTestHandler handler) { on_dna_bw_test = handler; }
+    void SetDNABWResultHandler(DNABWResultHandler handler) { on_dna_bw_result = handler; }
+    // DNA nonce management (public for initiator logic in node)
+    void RegisterDNANonce(uint64_t nonce, int peer_id);
+    bool ValidateDNANonce(uint64_t nonce, int peer_id);
+    void CleanupDNANonces();
 
 private:
     CPeerManager& peer_manager;
@@ -100,6 +126,16 @@ private:
     std::map<int, std::vector<int64_t>> peer_addr_timestamps;  // peer_id -> timestamps
     mutable std::mutex cs_inv_rate_limit;
     mutable std::mutex cs_addr_rate_limit;
+
+    // Digital DNA: Rate limiting and nonce tracking for DNA messages
+    std::map<int, int64_t> peer_dna_ping_timestamps;   // peer_id -> last dnalping time
+    std::map<int, int64_t> peer_dna_tsync_timestamps;  // peer_id -> last dnatsync time
+    std::map<int, int64_t> peer_dna_bwtest_timestamps; // peer_id -> last dnabwtest time
+    std::atomic<int> dna_bwtest_global_count_{0};       // Global concurrent BW tests
+    mutable std::mutex cs_dna_rate_limit;
+    // Nonce tracking: nonce -> {peer_id, send_time_ms}
+    std::map<uint64_t, std::pair<int, int64_t>> dna_pending_nonces_;
+    mutable std::mutex cs_dna_nonces;
 
     // Message handlers
     VersionHandler on_version;
@@ -119,6 +155,12 @@ private:
     CmpctBlockHandler on_cmpctblock;
     GetBlockTxnHandler on_getblocktxn;
     BlockTxnHandler on_blocktxn;
+    // Digital DNA handlers
+    DNALatencyPingHandler on_dna_latency_ping;
+    DNALatencyPongHandler on_dna_latency_pong;
+    DNATimeSyncHandler on_dna_time_sync;
+    DNABWTestHandler on_dna_bw_test;
+    DNABWResultHandler on_dna_bw_result;
 
     // Process specific message types
     bool ProcessVersionMessage(int peer_id, CDataStream& stream);
@@ -141,6 +183,12 @@ private:
     bool ProcessBlockTxnMessage(int peer_id, CDataStream& stream);
     // Mempool request handler
     bool ProcessMempoolMessage(int peer_id);
+    // Digital DNA message processing
+    bool ProcessDNALatencyPingMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNALatencyPongMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNATimeSyncMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNABWTestMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNABWResultMessage(int peer_id, CDataStream& stream);
 
     // Serialization helpers
     std::vector<uint8_t> SerializeVersionMessage(const NetProtocol::CVersionMessage& msg);

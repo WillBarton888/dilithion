@@ -280,6 +280,12 @@ CNetMessageProcessor::CNetMessageProcessor(CPeerManager& peer_mgr)
     on_cmpctblock = [](int, const CBlockHeaderAndShortTxIDs&) {};
     on_getblocktxn = [](int, const BlockTransactionsRequest&) {};
     on_blocktxn = [](int, const BlockTransactions&) {};
+    // Digital DNA handlers (no-op until wired by node)
+    on_dna_latency_ping = [](int, uint64_t) {};
+    on_dna_latency_pong = [](int, uint64_t, uint64_t) {};
+    on_dna_time_sync = [](int, uint64_t, uint64_t, uint64_t, bool) {};
+    on_dna_bw_test = [](int, uint32_t, uint64_t, uint64_t) {};
+    on_dna_bw_result = [](int, uint64_t, double, double) {};
 }
 
 bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& message) {
@@ -318,6 +324,12 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         {"cmpctblock", {88, 8 * 1024 * 1024}},       // BIP 152: Header + short IDs (min 88 bytes header)
         {"getblocktxn", {33, 50000 * 4 + 33}},       // BIP 152: block hash + varint + indices
         {"blocktxn",   {33, 8 * 1024 * 1024}},       // BIP 152: block hash + transactions
+        // Digital DNA protocol
+        {"dnalping",   {8, 8}},                        // uint64_t nonce only
+        {"dnalpong",   {8, 8}},                        // uint64_t nonce only
+        {"dnatsync",   {25, 25}},                      // ts_us(8) + wall_ms(8) + nonce(8) + is_response(1)
+        {"dnabwtest",  {12, 1048588}},                 // nonce(8) + size(4) + payload(0..1MB)
+        {"dnabwres",   {24, 24}},                      // nonce(8) + upload(8) + download(8)
     };
 
     auto it = size_limits.find(command);
@@ -380,6 +392,17 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         return ProcessBlockTxnMessage(peer_id, stream);  // BIP 152
     } else if (command == "mempool") {
         return ProcessMempoolMessage(peer_id);
+    // Digital DNA protocol messages
+    } else if (command == "dnalping") {
+        return ProcessDNALatencyPingMessage(peer_id, stream);
+    } else if (command == "dnalpong") {
+        return ProcessDNALatencyPongMessage(peer_id, stream);
+    } else if (command == "dnatsync") {
+        return ProcessDNATimeSyncMessage(peer_id, stream);
+    } else if (command == "dnabwtest") {
+        return ProcessDNABWTestMessage(peer_id, stream);
+    } else if (command == "dnabwres") {
+        return ProcessDNABWResultMessage(peer_id, stream);
     }
 
     // Unknown message type
@@ -2124,6 +2147,272 @@ CNetMessage CNetMessageProcessor::CreateBlockTxnMessage(const BlockTransactions&
     g_network_stats.bytes_sent += 24 + stream.size();
 
     return CNetMessage("blocktxn", stream.GetData());
+}
+
+// ============================================================
+// Digital DNA P2P Protocol Implementation
+// ============================================================
+
+// DNA rate limit constants
+static const int64_t DNA_PING_COOLDOWN_SEC = 10;    // 1 dnalping per peer per 10s
+static const int64_t DNA_TSYNC_COOLDOWN_SEC = 30;   // 1 dnatsync per peer per 30s
+static const int64_t DNA_BWTEST_COOLDOWN_SEC = 600;  // 1 dnabwtest per peer per 10min
+static const int DNA_BWTEST_GLOBAL_MAX = 3;           // Max 3 concurrent BW tests globally
+static const int64_t DNA_NONCE_TIMEOUT_SEC = 60;      // Nonces expire after 60s
+
+void CNetMessageProcessor::RegisterDNANonce(uint64_t nonce, int peer_id) {
+    std::lock_guard<std::mutex> lock(cs_dna_nonces);
+    int64_t now = GetTime();
+    dna_pending_nonces_[nonce] = {peer_id, now};
+}
+
+bool CNetMessageProcessor::ValidateDNANonce(uint64_t nonce, int peer_id) {
+    std::lock_guard<std::mutex> lock(cs_dna_nonces);
+    auto it = dna_pending_nonces_.find(nonce);
+    if (it == dna_pending_nonces_.end()) return false;
+    if (it->second.first != peer_id) return false;
+    int64_t now = GetTime();
+    if (now - it->second.second > DNA_NONCE_TIMEOUT_SEC) {
+        dna_pending_nonces_.erase(it);
+        return false;
+    }
+    dna_pending_nonces_.erase(it);
+    return true;
+}
+
+void CNetMessageProcessor::CleanupDNANonces() {
+    std::lock_guard<std::mutex> lock(cs_dna_nonces);
+    int64_t now = GetTime();
+    for (auto it = dna_pending_nonces_.begin(); it != dna_pending_nonces_.end();) {
+        if (now - it->second.second > DNA_NONCE_TIMEOUT_SEC) {
+            it = dna_pending_nonces_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+bool CNetMessageProcessor::ProcessDNALatencyPingMessage(int peer_id, CDataStream& stream) {
+    try {
+        // Rate limit: 1 per peer per 10s
+        {
+            std::lock_guard<std::mutex> lock(cs_dna_rate_limit);
+            int64_t now = GetTime();
+            auto& last = peer_dna_ping_timestamps[peer_id];
+            if (now - last < DNA_PING_COOLDOWN_SEC) {
+                peer_manager.Misbehaving(peer_id, 5);
+                return false;
+            }
+            last = now;
+        }
+
+        uint64_t nonce = stream.ReadUint64();
+        on_dna_latency_ping(peer_id, nonce);
+        return true;
+    } catch (const std::out_of_range&) {
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+bool CNetMessageProcessor::ProcessDNALatencyPongMessage(int peer_id, CDataStream& stream) {
+    try {
+        uint64_t nonce = stream.ReadUint64();
+
+        // Pong must match a pending nonce we sent
+        if (!ValidateDNANonce(nonce, peer_id)) {
+            peer_manager.Misbehaving(peer_id, 10);
+            return false;
+        }
+
+        // Get receive timestamp for RTT calculation
+        auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        on_dna_latency_pong(peer_id, nonce, static_cast<uint64_t>(now_us));
+        return true;
+    } catch (const std::out_of_range&) {
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+bool CNetMessageProcessor::ProcessDNATimeSyncMessage(int peer_id, CDataStream& stream) {
+    try {
+        uint64_t sender_ts_us = stream.ReadUint64();
+        uint64_t sender_wall_ms = stream.ReadUint64();
+        uint64_t nonce = stream.ReadUint64();
+        uint8_t is_response_byte = 0;
+        stream.read(&is_response_byte, 1);
+        bool is_response = (is_response_byte != 0);
+
+        if (is_response) {
+            // Response: must match a pending nonce
+            if (!ValidateDNANonce(nonce, peer_id)) {
+                peer_manager.Misbehaving(peer_id, 10);
+                return false;
+            }
+        } else {
+            // Request: rate limit
+            std::lock_guard<std::mutex> lock(cs_dna_rate_limit);
+            int64_t now = GetTime();
+            auto& last = peer_dna_tsync_timestamps[peer_id];
+            if (now - last < DNA_TSYNC_COOLDOWN_SEC) {
+                peer_manager.Misbehaving(peer_id, 5);
+                return false;
+            }
+            last = now;
+        }
+
+        on_dna_time_sync(peer_id, sender_ts_us, sender_wall_ms, nonce, is_response);
+        return true;
+    } catch (const std::out_of_range&) {
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+bool CNetMessageProcessor::ProcessDNABWTestMessage(int peer_id, CDataStream& stream) {
+    try {
+        uint64_t nonce = stream.ReadUint64();
+        uint32_t payload_size = stream.ReadUint32();
+
+        // Rate limit: 1 per peer per 10min, max 3 global
+        {
+            std::lock_guard<std::mutex> lock(cs_dna_rate_limit);
+            int64_t now = GetTime();
+            auto& last = peer_dna_bwtest_timestamps[peer_id];
+            if (now - last < DNA_BWTEST_COOLDOWN_SEC) {
+                peer_manager.Misbehaving(peer_id, 10);
+                return false;
+            }
+            if (dna_bwtest_global_count_.load() >= DNA_BWTEST_GLOBAL_MAX) {
+                // Too many concurrent tests, silently drop
+                return true;
+            }
+            last = now;
+            dna_bwtest_global_count_++;
+        }
+
+        // Get receive timestamp to measure download throughput
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+
+        on_dna_bw_test(peer_id, payload_size, nonce, static_cast<uint64_t>(now_ms));
+        dna_bwtest_global_count_--;
+        return true;
+    } catch (const std::out_of_range&) {
+        dna_bwtest_global_count_--;
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        dna_bwtest_global_count_--;
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+bool CNetMessageProcessor::ProcessDNABWResultMessage(int peer_id, CDataStream& stream) {
+    try {
+        uint64_t nonce = stream.ReadUint64();
+
+        // Must match a pending nonce
+        if (!ValidateDNANonce(nonce, peer_id)) {
+            peer_manager.Misbehaving(peer_id, 10);
+            return false;
+        }
+
+        uint64_t upload_bits = stream.ReadUint64();
+        uint64_t download_bits = stream.ReadUint64();
+        double upload_mbps, download_mbps;
+        std::memcpy(&upload_mbps, &upload_bits, 8);
+        std::memcpy(&download_mbps, &download_bits, 8);
+
+        // Sanity check values
+        if (upload_mbps < 0.0 || upload_mbps > 100000.0 ||
+            download_mbps < 0.0 || download_mbps > 100000.0) {
+            peer_manager.Misbehaving(peer_id, 10);
+            return false;
+        }
+
+        on_dna_bw_result(peer_id, nonce, upload_mbps, download_mbps);
+        return true;
+    } catch (const std::out_of_range&) {
+        peer_manager.Misbehaving(peer_id, 20);
+        return false;
+    } catch (const std::exception& e) {
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+// DNA message creation
+
+CNetMessage CNetMessageProcessor::CreateDNALatencyPingMessage(uint64_t nonce) {
+    CDataStream stream;
+    stream.WriteUint64(nonce);
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+    return CNetMessage("dnalping", stream.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateDNALatencyPongMessage(uint64_t nonce) {
+    CDataStream stream;
+    stream.WriteUint64(nonce);
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+    return CNetMessage("dnalpong", stream.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateDNATimeSyncMessage(uint64_t sender_ts_us,
+    uint64_t sender_wall_ms, uint64_t nonce, bool is_response)
+{
+    CDataStream stream;
+    stream.WriteUint64(sender_ts_us);
+    stream.WriteUint64(sender_wall_ms);
+    stream.WriteUint64(nonce);
+    uint8_t resp_byte = is_response ? 1 : 0;
+    stream.write(&resp_byte, 1);
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+    return CNetMessage("dnatsync", stream.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateDNABWTestMessage(uint64_t nonce, uint32_t payload_size) {
+    CDataStream stream;
+    stream.WriteUint64(nonce);
+    stream.WriteUint32(payload_size);
+    // Append random payload
+    std::vector<uint8_t> payload(payload_size);
+    std::mt19937 rng(static_cast<uint32_t>(nonce & 0xFFFFFFFF));
+    for (auto& b : payload) b = static_cast<uint8_t>(rng() & 0xFF);
+    stream.write(payload.data(), payload.size());
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+    return CNetMessage("dnabwtest", stream.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateDNABWResultMessage(uint64_t nonce,
+    double upload_mbps, double download_mbps)
+{
+    CDataStream stream;
+    stream.WriteUint64(nonce);
+    uint64_t upload_bits, download_bits;
+    std::memcpy(&upload_bits, &upload_mbps, 8);
+    std::memcpy(&download_bits, &download_mbps, 8);
+    stream.WriteUint64(upload_bits);
+    stream.WriteUint64(download_bits);
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+    return CNetMessage("dnabwres", stream.GetData());
 }
 
 // Serialization helpers

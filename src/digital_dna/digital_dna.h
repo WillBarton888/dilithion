@@ -128,6 +128,37 @@ struct SimilarityScore {
 };
 
 /**
+ * IDNARegistry - Common interface for Digital DNA registries.
+ *
+ * Abstracts the registry backend so RPC and node code don't depend
+ * on whether identities are stored in memory (unit tests) or LevelDB (production).
+ */
+class IDNARegistry {
+public:
+    virtual ~IDNARegistry() = default;
+
+    enum class RegisterResult {
+        SUCCESS,
+        ALREADY_REGISTERED,
+        SYBIL_FLAGGED,      // Advisory: stored but flagged
+        UPDATED,             // Progressive enrichment: existing record updated
+        INVALID_DNA,
+        DB_ERROR
+    };
+
+    virtual RegisterResult register_identity(const DigitalDNA& dna) = 0;
+    virtual RegisterResult update_identity(const DigitalDNA& dna) = 0;
+    virtual bool is_registered(const std::array<uint8_t, 20>& address) const = 0;
+    virtual std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const = 0;
+    virtual std::vector<std::pair<DigitalDNA, SimilarityScore>> find_similar(
+        const DigitalDNA& dna,
+        double threshold = SimilarityScore::SUSPICIOUS_THRESHOLD) const = 0;
+    virtual SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const = 0;
+    virtual std::vector<DigitalDNA> get_all() const = 0;
+    virtual size_t count() const = 0;
+};
+
+/**
  * Digital DNA collector.
  *
  * Collects all identity components and creates a DigitalDNA proof.
@@ -146,6 +177,11 @@ public:
         // Perspective config
         uint32_t perspective_duration_sec;
         uint32_t perspective_min_peers;
+
+        // v3.0 local dimensions
+        bool collect_memory = true;
+        bool collect_thermal = true;
+        bool testnet = false;
 
         Config()
             : latency_samples(20)
@@ -168,22 +204,44 @@ public:
     // Progress (0.0 to 1.0)
     double get_progress() const;
 
-    // Get collected DNA (only valid after collection complete)
+    // Get collected DNA (only valid after latency + timing complete)
     std::optional<DigitalDNA> get_dna() const;
 
     // Peer hooks (call from peer manager)
     void on_peer_connected(const std::array<uint8_t, 20>& peer_id);
     void on_peer_disconnected(const std::array<uint8_t, 20>& peer_id);
 
+    // Behavioral profile hooks (Phase 3)
+    void on_block_received(uint32_t height);
+    void on_tx_relayed(uint64_t timestamp_ms);
+
+    // Clock drift hooks (Phase 4 P2P)
+    void on_time_sync_response(const std::array<uint8_t, 20>& peer_id,
+        uint64_t local_send_us, uint64_t peer_timestamp_us, uint64_t local_recv_us);
+    ClockDriftCollector& get_clock_drift_collector() { return clock_drift_collector_; }
+
+    // Bandwidth measurement hooks (Phase 4 P2P)
+    void on_bandwidth_result(const std::array<uint8_t, 20>& peer_id,
+        double upload_mbps, double download_mbps);
+    BandwidthProofCollector& get_bandwidth_collector() { return bandwidth_collector_; }
+
 private:
     std::array<uint8_t, 20> address_;
     Config config_;
     bool collecting_ = false;
 
-    // Collectors
+    // Core collectors
     LatencyFingerprintCollector latency_collector_;
     TimingSignatureCollector timing_collector_;
     PerspectiveCollector perspective_collector_;
+
+    // v3.0 local dimension collectors
+    MemoryFingerprintCollector memory_collector_;
+    BehavioralProfileCollector behavioral_collector_;
+
+    // v3.0 P2P dimension collectors (fed by P2P message handlers)
+    ClockDriftCollector clock_drift_collector_;
+    BandwidthProofCollector bandwidth_collector_;
 
     // Background collection thread
     std::thread collection_thread_;
@@ -192,52 +250,36 @@ private:
     std::optional<LatencyFingerprint> latency_result_;
     std::optional<TimingSignature> timing_result_;
     std::optional<PerspectiveProof> perspective_result_;
+    std::optional<MemoryFingerprint> memory_result_;
+    std::optional<ThermalProfile> thermal_result_;
 };
 
 /**
- * Digital DNA registry.
+ * Digital DNA registry (in-memory, implements IDNARegistry).
  *
- * Stores known identities and checks for Sybils.
+ * Used for unit tests and as a simple registry backend.
+ * For production use DNARegistryDB (LevelDB-backed).
  */
-class DigitalDNARegistry {
+class DigitalDNARegistry : public IDNARegistry {
 public:
     DigitalDNARegistry();
 
-    // Register a new identity
-    enum class RegisterResult {
-        SUCCESS,
-        ALREADY_REGISTERED,
-        SYBIL_DETECTED,
-        INVALID_DNA,
-        COOLDOWN_ACTIVE
-    };
-
-    RegisterResult register_identity(const DigitalDNA& dna);
-
-    // Check if address is registered
-    bool is_registered(const std::array<uint8_t, 20>& address) const;
-
-    // Get identity by address
-    std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const;
-
-    // Find similar identities (potential Sybils)
+    // IDNARegistry implementation
+    RegisterResult register_identity(const DigitalDNA& dna) override;
+    RegisterResult update_identity(const DigitalDNA& dna) override;
+    bool is_registered(const std::array<uint8_t, 20>& address) const override;
+    std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const override;
     std::vector<std::pair<DigitalDNA, SimilarityScore>> find_similar(
         const DigitalDNA& dna,
         double threshold = SimilarityScore::SUSPICIOUS_THRESHOLD
-    ) const;
+    ) const override;
+    SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const override;
+    std::vector<DigitalDNA> get_all() const override;
+    size_t count() const override { return identities_.size(); }
 
-    // Check if two identities are likely the same person
-    SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const;
-
-    // Get all registered identities
-    std::vector<DigitalDNA> get_all() const;
-
-    // Persistence
+    // Persistence (flat file — for tests / backward compat)
     bool save(const std::string& path) const;
     bool load(const std::string& path);
-
-    // Statistics
-    size_t count() const { return identities_.size(); }
 
     // v3.0 equal-weight scoring across all available dimensions
     static SimilarityScore compute_combined_score(SimilarityScore score);

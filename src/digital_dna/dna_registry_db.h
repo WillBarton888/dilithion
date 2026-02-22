@@ -15,6 +15,7 @@
  */
 
 #include "digital_dna.h"
+#include "dna_registry_interface.h"
 #include "ml_detector.h"
 
 #include <leveldb/db.h>
@@ -26,7 +27,7 @@
 
 namespace digital_dna {
 
-class DNARegistryDB {
+class DNARegistryDB : public IDNARegistry {
 public:
     DNARegistryDB();
     ~DNARegistryDB();
@@ -48,43 +49,21 @@ public:
     /** Check if database is open */
     bool IsOpen() const;
 
-    // --- Registration ---
+    // --- IDNARegistry implementation ---
 
-    enum class RegisterResult {
-        SUCCESS,
-        ALREADY_REGISTERED,
-        SYBIL_DETECTED,
-        INVALID_DNA,
-        DB_ERROR
-    };
-
-    /**
-     * Register a new identity. Checks for Sybils before storing.
-     */
-    RegisterResult register_identity(const DigitalDNA& dna);
-
-    // --- Queries ---
-
-    /** Check if address is registered */
-    bool is_registered(const std::array<uint8_t, 20>& address) const;
-
-    /** Get identity by address */
-    std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const;
-
-    /** Find similar identities (potential Sybils) */
+    RegisterResult register_identity(const DigitalDNA& dna) override;
+    RegisterResult update_identity(const DigitalDNA& dna) override;
+    bool is_registered(const std::array<uint8_t, 20>& address) const override;
+    std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const override;
     std::vector<std::pair<DigitalDNA, SimilarityScore>> find_similar(
         const DigitalDNA& dna,
         double threshold = SimilarityScore::SUSPICIOUS_THRESHOLD
-    ) const;
+    ) const override;
+    SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const override;
+    std::vector<DigitalDNA> get_all() const override;
+    size_t count() const override;
 
-    /** Compare two identities */
-    SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const;
-
-    /** Get all registered identities */
-    std::vector<DigitalDNA> get_all() const;
-
-    /** Count of registered identities */
-    size_t count() const;
+    // --- Additional methods (not in interface) ---
 
     /** Remove an identity (for Sybil slashing or reorg undo) */
     bool remove_identity(const std::array<uint8_t, 20>& address);

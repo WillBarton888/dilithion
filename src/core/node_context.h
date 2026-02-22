@@ -35,9 +35,9 @@ class CVDFMiner;         // VDF fair mining controller
 class CCooldownTracker;  // VDF cooldown rate limiter
 
 // Digital DNA: Sybil-resistant identity system
-// Full include required because unique_ptr<DigitalDNARegistry> needs the complete type
-// for default_delete (GCC instantiates the static_assert even with user-declared dtor)
-#include <digital_dna/digital_dna.h>
+// Full include required because unique_ptr needs the complete type for default_delete
+#include <digital_dna/dna_registry_db.h>
+#include <digital_dna/trust_score.h>
 
 /**
  * NodeContext - Bitcoin Core-style global state management
@@ -86,7 +86,8 @@ struct NodeContext {
     CCooldownTracker* cooldown_tracker{nullptr}; // VDF cooldown tracker (raw ptr, owned by main)
 
     // Digital DNA: Sybil-resistant identity system
-    std::unique_ptr<digital_dna::DigitalDNARegistry> dna_registry;
+    std::unique_ptr<digital_dna::DNARegistryDB> dna_registry;
+    std::unique_ptr<digital_dna::TrustScoreManager> trust_manager;
     digital_dna::DigitalDNACollector* dna_collector{nullptr};  // Active collector (if mining)
 
     // Node state flags

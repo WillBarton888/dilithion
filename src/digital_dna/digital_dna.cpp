@@ -12,6 +12,7 @@
 #include <sstream>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 
 namespace digital_dna {
 
@@ -65,104 +66,263 @@ std::string DigitalDNA::to_json() const {
     return oss.str();
 }
 
+// ---- Serialization helpers (little-endian) ----
+
+static void write_u8(std::vector<uint8_t>& out, uint8_t v) {
+    out.push_back(v);
+}
+static void write_u32(std::vector<uint8_t>& out, uint32_t v) {
+    for (int i = 0; i < 4; i++) out.push_back(static_cast<uint8_t>(v >> (i * 8)));
+}
+static void write_u64(std::vector<uint8_t>& out, uint64_t v) {
+    for (int i = 0; i < 8; i++) out.push_back(static_cast<uint8_t>(v >> (i * 8)));
+}
+static void write_double(std::vector<uint8_t>& out, double v) {
+    uint64_t bits; std::memcpy(&bits, &v, sizeof(double)); write_u64(out, bits);
+}
+static void write_blob(std::vector<uint8_t>& out, const std::vector<uint8_t>& blob) {
+    write_u32(out, static_cast<uint32_t>(blob.size()));
+    out.insert(out.end(), blob.begin(), blob.end());
+}
+
+static bool read_u8(const std::vector<uint8_t>& data, size_t& off, uint8_t& v) {
+    if (off + 1 > data.size()) return false;
+    v = data[off++]; return true;
+}
+static bool read_u32(const std::vector<uint8_t>& data, size_t& off, uint32_t& v) {
+    if (off + 4 > data.size()) return false;
+    v = 0; for (int i = 0; i < 4; i++) v |= static_cast<uint32_t>(data[off + i]) << (i * 8);
+    off += 4; return true;
+}
+static bool read_u64(const std::vector<uint8_t>& data, size_t& off, uint64_t& v) {
+    if (off + 8 > data.size()) return false;
+    v = 0; for (int i = 0; i < 8; i++) v |= static_cast<uint64_t>(data[off + i]) << (i * 8);
+    off += 8; return true;
+}
+static bool read_double(const std::vector<uint8_t>& data, size_t& off, double& v) {
+    uint64_t bits; if (!read_u64(data, off, bits)) return false;
+    std::memcpy(&v, &bits, sizeof(double)); return true;
+}
+static bool read_blob(const std::vector<uint8_t>& data, size_t& off, std::vector<uint8_t>& blob) {
+    uint32_t len; if (!read_u32(data, off, len)) return false;
+    if (off + len > data.size()) return false;
+    blob.assign(data.begin() + off, data.begin() + off + len);
+    off += len; return true;
+}
+
+// DNA2 envelope constants
+static constexpr uint8_t DNA_MAGIC[4] = {0x44, 0x4E, 0x41, 0x32};  // "DNA2"
+static constexpr uint8_t DNA_VERSION = 0x02;
+
+// Dimension flags
+static constexpr uint8_t FLAG_MEMORY     = 0x01;
+static constexpr uint8_t FLAG_CLOCKDRIFT = 0x02;
+static constexpr uint8_t FLAG_BANDWIDTH  = 0x04;
+static constexpr uint8_t FLAG_THERMAL    = 0x08;
+static constexpr uint8_t FLAG_BEHAVIORAL = 0x10;
+
 std::vector<uint8_t> DigitalDNA::serialize() const {
     std::vector<uint8_t> data;
+    data.reserve(256);  // Typical size estimate
 
-    // Address (20 bytes)
-    data.insert(data.end(), address.begin(), address.end());
+    // ---- Envelope ----
+    data.insert(data.end(), DNA_MAGIC, DNA_MAGIC + 4);
+    write_u8(data, DNA_VERSION);
 
-    // Registration height (4 bytes)
-    for (int i = 0; i < 4; i++)
-        data.push_back(static_cast<uint8_t>(registration_height >> (i * 8)));
+    // ---- Metadata ----
+    data.insert(data.end(), address.begin(), address.end());  // 20 bytes
+    write_u32(data, registration_height);
+    write_u64(data, registration_time);
 
-    // Registration time (8 bytes)
-    for (int i = 0; i < 8; i++)
-        data.push_back(static_cast<uint8_t>(registration_time >> (i * 8)));
+    // ---- Dimension flags ----
+    uint8_t flags = 0;
+    if (memory)     flags |= FLAG_MEMORY;
+    if (clock_drift) flags |= FLAG_CLOCKDRIFT;
+    if (bandwidth)  flags |= FLAG_BANDWIDTH;
+    if (thermal)    flags |= FLAG_THERMAL;
+    if (behavioral) flags |= FLAG_BEHAVIORAL;
+    write_u8(data, flags);
 
-    // Latency - seed count (4 bytes) + median values (N seeds * 8 bytes)
-    uint32_t seed_count = static_cast<uint32_t>(latency.seed_stats.size());
-    for (int i = 0; i < 4; i++)
-        data.push_back(static_cast<uint8_t>(seed_count >> (i * 8)));
+    // ---- Core v2.0 dimensions (always present) ----
 
+    // Latency: seed_count + N * median_ms
+    write_u32(data, static_cast<uint32_t>(latency.seed_stats.size()));
     for (const auto& s : latency.seed_stats) {
-        uint64_t median_bits;
-        std::memcpy(&median_bits, &s.median_ms, sizeof(double));
-        for (int i = 0; i < 8; i++)
-            data.push_back(static_cast<uint8_t>(median_bits >> (i * 8)));
+        write_double(data, s.median_ms);
     }
 
-    // Timing - iterations per second (8 bytes)
-    uint64_t ips_bits;
-    std::memcpy(&ips_bits, &timing.iterations_per_second, sizeof(double));
-    for (int i = 0; i < 8; i++)
-        data.push_back(static_cast<uint8_t>(ips_bits >> (i * 8)));
+    // Timing: iterations_per_second
+    write_double(data, timing.iterations_per_second);
 
-    // Perspective - unique peer count and turnover rate (12 bytes)
-    uint32_t peer_count = static_cast<uint32_t>(perspective.total_unique_peers());
-    for (int i = 0; i < 4; i++)
-        data.push_back(static_cast<uint8_t>(peer_count >> (i * 8)));
+    // Perspective: peer_count + turnover_rate
+    write_u32(data, static_cast<uint32_t>(perspective.total_unique_peers()));
+    write_double(data, perspective.peer_turnover_rate());
 
-    uint64_t turnover_bits;
-    double turnover = perspective.peer_turnover_rate();
-    std::memcpy(&turnover_bits, &turnover, sizeof(double));
-    for (int i = 0; i < 8; i++)
-        data.push_back(static_cast<uint8_t>(turnover_bits >> (i * 8)));
+    // ---- Optional v3.0 dimensions (length-prefixed blobs) ----
+
+    if (memory) {
+        write_blob(data, memory->serialize());
+    }
+    if (clock_drift) {
+        write_blob(data, clock_drift->serialize());
+    }
+    if (bandwidth) {
+        write_blob(data, bandwidth->serialize());
+    }
+    if (thermal) {
+        // ThermalProfile has no serialize() — inline it
+        std::vector<uint8_t> tbuf;
+        write_u32(tbuf, static_cast<uint32_t>(thermal->speed_curve.size()));
+        for (double v : thermal->speed_curve) write_double(tbuf, v);
+        write_u32(tbuf, thermal->measurement_interval_sec);
+        write_double(tbuf, thermal->initial_speed);
+        write_double(tbuf, thermal->sustained_speed);
+        write_double(tbuf, thermal->throttle_ratio);
+        write_double(tbuf, thermal->time_to_steady_state_sec);
+        write_double(tbuf, thermal->thermal_jitter);
+        write_blob(data, tbuf);
+    }
+    if (behavioral) {
+        write_blob(data, behavioral->serialize());
+    }
 
     return data;
 }
 
-std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& data) {
-    // Minimum size: 20 (addr) + 4 (height) + 8 (time) + 4 (seed_count) + 8 (timing) + 12 (persp) = 56 bytes
+// ---- Legacy v1 deserializer (no magic, starts with 20-byte address) ----
+static std::optional<DigitalDNA> deserialize_v1(const std::vector<uint8_t>& data) {
+    // Minimum: 20 (addr) + 4 (height) + 8 (time) + 4 (seed_count) + 8 (timing) + 12 (persp) = 56
     if (data.size() < 56) return std::nullopt;
 
     DigitalDNA dna;
-    size_t offset = 0;
+    size_t off = 0;
 
-    // Address
     std::copy(data.begin(), data.begin() + 20, dna.address.begin());
-    offset += 20;
+    off += 20;
 
-    // Registration height
-    dna.registration_height = 0;
-    for (int i = 0; i < 4; i++)
-        dna.registration_height |= static_cast<uint32_t>(data[offset + i]) << (i * 8);
-    offset += 4;
+    uint32_t tmp32;
+    if (!read_u32(data, off, tmp32)) return std::nullopt;
+    dna.registration_height = tmp32;
 
-    // Registration time
-    dna.registration_time = 0;
-    for (int i = 0; i < 8; i++)
-        dna.registration_time |= static_cast<uint64_t>(data[offset + i]) << (i * 8);
-    offset += 8;
+    uint64_t tmp64;
+    if (!read_u64(data, off, tmp64)) return std::nullopt;
+    dna.registration_time = tmp64;
 
-    // Latency - seed count + median values
-    uint32_t seed_count = 0;
-    for (int i = 0; i < 4; i++)
-        seed_count |= static_cast<uint32_t>(data[offset + i]) << (i * 8);
-    offset += 4;
-
-    if (data.size() < offset + seed_count * 8 + 8 + 12) return std::nullopt;
+    uint32_t seed_count;
+    if (!read_u32(data, off, seed_count)) return std::nullopt;
+    if (seed_count > 100) return std::nullopt;  // Sanity
+    if (off + seed_count * 8 + 8 + 12 > data.size()) return std::nullopt;
 
     dna.latency.seed_stats.resize(seed_count);
     for (uint32_t s = 0; s < seed_count; s++) {
-        uint64_t median_bits = 0;
-        for (int i = 0; i < 8; i++)
-            median_bits |= static_cast<uint64_t>(data[offset + i]) << (i * 8);
-        std::memcpy(&dna.latency.seed_stats[s].median_ms, &median_bits, sizeof(double));
-        offset += 8;
+        if (!read_double(data, off, dna.latency.seed_stats[s].median_ms)) return std::nullopt;
     }
 
-    // Timing - iterations per second
-    uint64_t ips_bits = 0;
-    for (int i = 0; i < 8; i++)
-        ips_bits |= static_cast<uint64_t>(data[offset + i]) << (i * 8);
-    std::memcpy(&dna.timing.iterations_per_second, &ips_bits, sizeof(double));
-    offset += 8;
+    if (!read_double(data, off, dna.timing.iterations_per_second)) return std::nullopt;
 
-    // Perspective - peer count (simplified - full deserialization would need more data)
-    offset += 12;
+    // Perspective (simplified — v1 only stored count + turnover)
+    off += 12;
 
     dna.is_valid = true;
     return dna;
+}
+
+std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& data) {
+    if (data.size() < 5) return std::nullopt;
+
+    // Check for DNA2 magic envelope
+    if (data[0] == DNA_MAGIC[0] && data[1] == DNA_MAGIC[1] &&
+        data[2] == DNA_MAGIC[2] && data[3] == DNA_MAGIC[3]) {
+
+        size_t off = 4;
+        uint8_t version;
+        if (!read_u8(data, off, version)) return std::nullopt;
+        if (version != DNA_VERSION) return std::nullopt;  // Unknown version
+
+        DigitalDNA dna;
+
+        // Address (20 bytes)
+        if (off + 20 > data.size()) return std::nullopt;
+        std::copy(data.begin() + off, data.begin() + off + 20, dna.address.begin());
+        off += 20;
+
+        // Metadata
+        if (!read_u32(data, off, dna.registration_height)) return std::nullopt;
+        if (!read_u64(data, off, dna.registration_time)) return std::nullopt;
+
+        // Dimension flags
+        uint8_t flags;
+        if (!read_u8(data, off, flags)) return std::nullopt;
+
+        // Core v2.0: Latency
+        uint32_t seed_count;
+        if (!read_u32(data, off, seed_count)) return std::nullopt;
+        if (seed_count > 100) return std::nullopt;
+        dna.latency.seed_stats.resize(seed_count);
+        for (uint32_t s = 0; s < seed_count; s++) {
+            if (!read_double(data, off, dna.latency.seed_stats[s].median_ms)) return std::nullopt;
+        }
+
+        // Core v2.0: Timing
+        if (!read_double(data, off, dna.timing.iterations_per_second)) return std::nullopt;
+
+        // Core v2.0: Perspective
+        uint32_t peer_count;
+        if (!read_u32(data, off, peer_count)) return std::nullopt;
+        double turnover;
+        if (!read_double(data, off, turnover)) return std::nullopt;
+        // Store peer_count/turnover — perspective is partially reconstructed
+        // (full peer list not serialized, only summary stats)
+
+        // Optional v3.0 dimensions (order matches flags)
+        if (flags & FLAG_MEMORY) {
+            std::vector<uint8_t> blob;
+            if (!read_blob(data, off, blob)) return std::nullopt;
+            dna.memory = MemoryFingerprint::deserialize(blob);
+        }
+        if (flags & FLAG_CLOCKDRIFT) {
+            std::vector<uint8_t> blob;
+            if (!read_blob(data, off, blob)) return std::nullopt;
+            dna.clock_drift = ClockDriftFingerprint::deserialize(blob);
+        }
+        if (flags & FLAG_BANDWIDTH) {
+            std::vector<uint8_t> blob;
+            if (!read_blob(data, off, blob)) return std::nullopt;
+            dna.bandwidth = BandwidthFingerprint::deserialize(blob);
+        }
+        if (flags & FLAG_THERMAL) {
+            std::vector<uint8_t> blob;
+            if (!read_blob(data, off, blob)) return std::nullopt;
+            // Inline ThermalProfile deserialization
+            ThermalProfile tp;
+            size_t toff = 0;
+            uint32_t curve_count;
+            if (!read_u32(blob, toff, curve_count)) return std::nullopt;
+            if (curve_count > 10000) return std::nullopt;  // Sanity
+            tp.speed_curve.resize(curve_count);
+            for (uint32_t i = 0; i < curve_count; i++) {
+                if (!read_double(blob, toff, tp.speed_curve[i])) return std::nullopt;
+            }
+            if (!read_u32(blob, toff, tp.measurement_interval_sec)) return std::nullopt;
+            if (!read_double(blob, toff, tp.initial_speed)) return std::nullopt;
+            if (!read_double(blob, toff, tp.sustained_speed)) return std::nullopt;
+            if (!read_double(blob, toff, tp.throttle_ratio)) return std::nullopt;
+            if (!read_double(blob, toff, tp.time_to_steady_state_sec)) return std::nullopt;
+            if (!read_double(blob, toff, tp.thermal_jitter)) return std::nullopt;
+            dna.thermal = tp;
+        }
+        if (flags & FLAG_BEHAVIORAL) {
+            std::vector<uint8_t> blob;
+            if (!read_blob(data, off, blob)) return std::nullopt;
+            dna.behavioral = BehavioralProfile::deserialize(blob);
+        }
+
+        dna.is_valid = true;
+        return dna;
+    }
+
+    // No DNA2 magic — try legacy v1 format
+    return deserialize_v1(data);
 }
 
 std::array<uint8_t, 32> DigitalDNA::hash() const {
@@ -209,27 +369,46 @@ void DigitalDNACollector::start_collection() {
 
     // Run collection in background thread to avoid blocking node startup
     collection_thread_ = std::thread([this]() {
-        // Collect latency fingerprint (quick - ~30 seconds)
+        // 1. Collect latency fingerprint (~30 seconds)
         LatencyFingerprint latency;
         latency.measurement_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
 
-        latency.seed_stats.reserve(MAINNET_SEEDS.size());
-        for (size_t i = 0; i < MAINNET_SEEDS.size(); i++) {
-            latency.seed_stats.push_back(latency_collector_.measure_seed(MAINNET_SEEDS[i]));
+        // Measure against seeds (testnet or mainnet)
+        auto measure_seeds = [&](const auto& seeds) {
+            latency.seed_stats.reserve(seeds.size());
+            for (size_t i = 0; i < seeds.size(); i++) {
+                if (!collecting_) return;
+                latency.seed_stats.push_back(latency_collector_.measure_seed(seeds[i]));
+            }
+        };
+        if (config_.testnet) {
+            measure_seeds(TESTNET_SEEDS);
+        } else {
+            measure_seeds(MAINNET_SEEDS);
         }
         latency_result_ = latency;
 
-        // Collect timing signature (depends on config - typically seconds to minutes)
+        // 2. Collect timing signature (seconds to minutes)
         std::array<uint8_t, 32> challenge = {};
         for (int i = 0; i < 20; i++) {
             challenge[i] = address_[i];
         }
         timing_result_ = timing_collector_.collect(challenge);
+        if (!collecting_) return;
 
-        // Perspective collection is ongoing - call on_peer_* methods
-        // For now, we just take a snapshot
+        // 3. Derive thermal profile from timing checkpoints (zero extra cost)
+        if (config_.collect_thermal && timing_result_) {
+            thermal_result_ = derive_thermal_profile(*timing_result_, 60);
+        }
+
+        // 4. Collect memory fingerprint (~5 seconds)
+        if (config_.collect_memory && collecting_) {
+            memory_result_ = memory_collector_.collect();
+        }
+
+        // Perspective + behavioral collection are ongoing via on_peer_* / on_block_* hooks
     });
 }
 
@@ -271,8 +450,26 @@ std::optional<DigitalDNA> DigitalDNACollector::get_dna() const {
     dna.registration_time = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
-    dna.is_valid = true;
 
+    // v3.0 local dimensions (populated if collection completed)
+    dna.memory = memory_result_;
+    dna.thermal = thermal_result_;
+
+    // Behavioral profile (populated over time via on_block/on_tx hooks)
+    auto bp = behavioral_collector_.get_profile();
+    if (bp.observation_blocks > 0) {
+        dna.behavioral = bp;
+    }
+
+    // P2P dimensions (populated over time via P2P message exchanges)
+    if (clock_drift_collector_.is_ready()) {
+        dna.clock_drift = clock_drift_collector_.get_fingerprint();
+    }
+    if (bandwidth_collector_.is_ready()) {
+        dna.bandwidth = bandwidth_collector_.get_fingerprint();
+    }
+
+    dna.is_valid = true;
     return dna;
 }
 
@@ -284,28 +481,76 @@ void DigitalDNACollector::on_peer_disconnected(const std::array<uint8_t, 20>& pe
     perspective_collector_.on_peer_disconnected(peer_id);
 }
 
+void DigitalDNACollector::on_block_received(uint32_t height) {
+    behavioral_collector_.on_block_received(height);
+}
+
+void DigitalDNACollector::on_tx_relayed(uint64_t timestamp_ms) {
+    behavioral_collector_.on_tx_relayed(timestamp_ms);
+}
+
+void DigitalDNACollector::on_time_sync_response(const std::array<uint8_t, 20>& peer_id,
+    uint64_t local_send_us, uint64_t peer_timestamp_us, uint64_t local_recv_us)
+{
+    clock_drift_collector_.record_exchange(peer_id, local_send_us, peer_timestamp_us, local_recv_us);
+}
+
+void DigitalDNACollector::on_bandwidth_result(const std::array<uint8_t, 20>& peer_id,
+    double upload_mbps, double download_mbps)
+{
+    BandwidthMeasurement m;
+    m.peer_id = peer_id;
+    m.upload_mbps = upload_mbps;
+    m.download_mbps = download_mbps;
+    m.asymmetry_ratio = (download_mbps > 0.001) ? (upload_mbps / download_mbps) : 0.0;
+    m.timestamp = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    bandwidth_collector_.record_measurement(m);
+}
+
 // ============ DigitalDNARegistry ============
 
 DigitalDNARegistry::DigitalDNARegistry() {}
 
-DigitalDNARegistry::RegisterResult DigitalDNARegistry::register_identity(const DigitalDNA& dna) {
+IDNARegistry::RegisterResult DigitalDNARegistry::register_identity(const DigitalDNA& dna) {
     if (!dna.is_valid) {
         return RegisterResult::INVALID_DNA;
     }
 
-    // Check if already registered
     if (is_registered(dna.address)) {
         return RegisterResult::ALREADY_REGISTERED;
     }
 
-    // Check for Sybils
-    auto similar = find_similar(dna, SimilarityScore::SAME_IDENTITY_THRESHOLD);
-    if (!similar.empty()) {
-        return RegisterResult::SYBIL_DETECTED;
+    // Advisory Sybil check: always store, log warning if similar
+    bool sybil_flagged = false;
+    auto similar = find_similar(dna, SimilarityScore::SUSPICIOUS_THRESHOLD);
+    for (const auto& [other, score] : similar) {
+        std::ostringstream addr_a, addr_b;
+        for (int i = 0; i < 4; i++) addr_a << std::hex << std::setw(2) << std::setfill('0') << (int)dna.address[i];
+        for (int i = 0; i < 4; i++) addr_b << std::hex << std::setw(2) << std::setfill('0') << (int)other.address[i];
+        std::cout << "[DNA-SYBIL] ADVISORY: " << addr_a.str() << "... matches " << addr_b.str()
+                  << "... (" << score.verdict() << ", score=" << std::fixed << std::setprecision(3)
+                  << score.combined_score << ", dims=" << score.dimensions_scored << ")" << std::endl;
+        sybil_flagged = true;
     }
 
     identities_.push_back(dna);
-    return RegisterResult::SUCCESS;
+    return sybil_flagged ? RegisterResult::SYBIL_FLAGGED : RegisterResult::SUCCESS;
+}
+
+IDNARegistry::RegisterResult DigitalDNARegistry::update_identity(const DigitalDNA& dna) {
+    if (!dna.is_valid) {
+        return RegisterResult::INVALID_DNA;
+    }
+
+    auto it = std::find_if(identities_.begin(), identities_.end(),
+        [&](const DigitalDNA& d) { return d.address == dna.address; });
+    if (it == identities_.end()) {
+        return RegisterResult::INVALID_DNA;  // Must be registered first
+    }
+
+    *it = dna;  // Replace with enriched version
+    return RegisterResult::UPDATED;
 }
 
 bool DigitalDNARegistry::is_registered(const std::array<uint8_t, 20>& address) const {

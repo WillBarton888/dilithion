@@ -22,6 +22,7 @@
 #define DILITHION_DIGITAL_DNA_RPC_H
 
 #include "digital_dna.h"
+#include "dna_registry_interface.h"
 #include <string>
 #include <functional>
 #include <map>
@@ -41,7 +42,7 @@ using RpcHandler = std::function<JsonObject(const JsonObject& params)>;
  */
 class DigitalDNARpc {
 public:
-    DigitalDNARpc(DigitalDNARegistry& registry);
+    DigitalDNARpc(IDNARegistry& registry);
 
     // Register all RPC commands
     void register_commands();
@@ -63,7 +64,7 @@ public:
     static void set_collector(std::unique_ptr<DigitalDNACollector> collector);
 
 private:
-    DigitalDNARegistry& registry_;
+    IDNARegistry& registry_;
     std::map<std::string, RpcHandler> handlers_;
 
     // Command handlers
