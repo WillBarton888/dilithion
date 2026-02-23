@@ -1827,41 +1827,36 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
 
         auto it = mapHeaders.find(current);
         if (it == mapHeaders.end()) {
-            // BUG #178 DEBUG: Log exactly where chain walk breaks
-            std::cerr << "[GetBestChainHashAtHeight] CHAIN BREAK at height " << currentHeight
-                      << " - cannot find hash " << current.GetHex().substr(0, 16) << "..."
-                      << " (started from " << nBestHeight << ", target=" << height << ")" << std::endl;
+            // Chain walk broken - parent hash not in mapHeaders.
+            // This happens during forks when the best header's ancestry has gaps.
+            // BUG #282 FIX: Fall back to mapHeightIndex to find the target height
+            // directly, instead of returning null and causing a tight request loop.
+            static int chainBreakLogCount = 0;
+            if (chainBreakLogCount < 10) {
+                chainBreakLogCount++;
+                std::cerr << "[GetBestChainHashAtHeight] CHAIN BREAK at height " << currentHeight
+                          << " - falling back to height index for target " << height << std::endl;
+            }
 
-            // DEBUG: What hashes DO we have at this height?
-            if (g_verbose.load(std::memory_order_relaxed)) {
-                auto heightIt = mapHeightIndex.find(currentHeight);
-                if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-                    std::cerr << "[DEBUG] mapHeightIndex HAS " << heightIt->second.size()
-                              << " hash(es) at height " << currentHeight << ":" << std::endl;
-                    for (const auto& h : heightIt->second) {
-                        std::cerr << "  - " << h.GetHex().substr(0, 16) << "..." << std::endl;
-                    }
-                } else {
-                    std::cerr << "[DEBUG] mapHeightIndex has NO hashes at height " << currentHeight << std::endl;
-                }
-
-                // DEBUG: Check if the hash exists anywhere with different key (only once)
-                static int debugLogCount = 0;
-                if (debugLogCount < 3) {  // Only log first 3 breaks
-                    debugLogCount++;
-                    int foundCount = 0;
-                    for (const auto& entry : mapHeaders) {
-                        if (entry.second.height == currentHeight) {
-                            std::cerr << "[DEBUG] Found header at height " << currentHeight
-                                      << " stored under key " << entry.first.GetHex().substr(0, 16) << "..."
-                                      << " hashPrevBlock=" << entry.second.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                                      << std::endl;
-                            foundCount++;
+            // Try to find the target height via mapHeightIndex
+            auto targetIt = mapHeightIndex.find(height);
+            if (targetIt != mapHeightIndex.end() && !targetIt->second.empty()) {
+                // Find the header with the most chainwork at this height
+                uint256 bestHash;
+                uint256 bestWork;
+                for (const auto& h : targetIt->second) {
+                    auto hdrIt = mapHeaders.find(h);
+                    if (hdrIt != mapHeaders.end()) {
+                        if (bestHash.IsNull() || ChainWorkGreaterThan(hdrIt->second.chainWork, bestWork)) {
+                            bestWork = hdrIt->second.chainWork;
+                            // Return RandomX hash for peer communication
+                            bestHash = hdrIt->second.randomXHash.IsNull() ? h : hdrIt->second.randomXHash;
                         }
                     }
-                    if (foundCount == 0) {
-                        std::cerr << "[DEBUG] NO header found at height " << currentHeight << " in mapHeaders!" << std::endl;
-                    }
+                }
+                if (!bestHash.IsNull()) {
+                    m_bestChainCache[height] = bestHash;
+                    return bestHash;
                 }
             }
             break;
@@ -1897,7 +1892,26 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
     // Fully populated cache from best header to genesis
     m_bestChainCacheDirty = false;
 
-    // Height not found on best chain
+    // BUG #282 FIX: Height not found via chain walk - try mapHeightIndex as last resort
+    auto fallbackIt = mapHeightIndex.find(height);
+    if (fallbackIt != mapHeightIndex.end() && !fallbackIt->second.empty()) {
+        uint256 bestHash;
+        uint256 bestWork;
+        for (const auto& h : fallbackIt->second) {
+            auto hdrIt = mapHeaders.find(h);
+            if (hdrIt != mapHeaders.end()) {
+                if (bestHash.IsNull() || ChainWorkGreaterThan(hdrIt->second.chainWork, bestWork)) {
+                    bestWork = hdrIt->second.chainWork;
+                    bestHash = hdrIt->second.randomXHash.IsNull() ? h : hdrIt->second.randomXHash;
+                }
+            }
+        }
+        if (!bestHash.IsNull()) {
+            m_bestChainCache[height] = bestHash;
+            return bestHash;
+        }
+    }
+
     return uint256();
 }
 
