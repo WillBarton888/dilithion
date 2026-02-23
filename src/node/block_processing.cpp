@@ -620,6 +620,15 @@ BlockProcessResult ProcessNewBlock(
                 if (g_node_context.ibd_coordinator) {
                     g_node_context.ibd_coordinator->OnOrphanBlockReceived();
                 }
+                // ROOT CAUSE FIX: Mark height completed to prevent re-request loop.
+                // Without this, MarkBlockReceived (line 559) clears the tracker entry,
+                // and the next IBD tick re-requests the same orphan block every second.
+                // MarkCompleted prevents GetNextBlocksToRequest from returning this
+                // height. If a reorg makes the parent connectable, ClearAboveHeight
+                // resets completed heights during fork recovery.
+                if (g_node_context.block_tracker && parent_height > 0) {
+                    g_node_context.block_tracker->MarkCompleted(parent_height + 1);
+                }
                 return BlockProcessResult::ORPHAN;
             }
         } else {
@@ -778,6 +787,17 @@ BlockProcessResult ProcessNewBlock(
         // When parent arrives and orphan resolves via recursive ProcessNewBlock,
         // MarkBlockReceived is called in the acceptance path, clearing the tracker.
         tracker_guard.released = true;  // Prevent RAII guard from clearing tracker
+
+        // Also mark height as completed to survive the 15s in-flight timeout.
+        // Without this, RetryTimeoutsAndStalls clears the entry after 15s and
+        // the block gets re-requested, entering a 1/second loop via the blockInDb
+        // path which unconditionally calls MarkBlockReceived.
+        if (g_node_context.block_tracker && ctx.headers_manager) {
+            int orphan_parent_h = ctx.headers_manager->GetHeightForHash(block.hashPrevBlock);
+            if (orphan_parent_h > 0) {
+                g_node_context.block_tracker->MarkCompleted(orphan_parent_h + 1);
+            }
+        }
 
         // Notify IBD coordinator of orphan block for Layer 2 fork detection
         if (g_node_context.ibd_coordinator) {
