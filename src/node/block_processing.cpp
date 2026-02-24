@@ -53,6 +53,45 @@ void SetChainTipUpdateCallback(ChainTipUpdateCallback callback) {
     g_chain_tip_callback = callback;
 }
 
+/**
+ * @brief Resolve orphan children whose parent now has a CBlockIndex.
+ *
+ * When a block is added to mapBlockIndex (via fork staging or normal activation),
+ * any orphan blocks waiting for it as their parent can now be processed.
+ * This function extracts each orphan child from the pool and recursively calls
+ * ProcessNewBlock, which cascades to grandchildren automatically.
+ *
+ * Called from:
+ *   - Fork staging path (out-of-order arrivals during fork recovery)
+ *   - Fork switch success path (intermediate blocks connected during reorg)
+ *   - Normal path (existing Phase 7 orphan resolution)
+ */
+static void ResolveOrphanChildren(
+    const uint256& parentHash,
+    NodeContext& ctx,
+    CBlockchainDB& db)
+{
+    if (!ctx.orphan_manager) return;
+
+    std::vector<uint256> children = ctx.orphan_manager->GetOrphanChildren(parentHash);
+    if (children.empty()) return;
+
+    std::cout << "[ForkOrphan] Resolving " << children.size()
+              << " orphan children of " << parentHash.GetHex().substr(0, 16)
+              << "..." << std::endl;
+
+    for (const uint256& orphanHash : children) {
+        CBlock orphanBlock;
+        if (ctx.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
+            // Erase from orphan pool BEFORE processing to avoid re-entry
+            ctx.orphan_manager->EraseOrphanBlock(orphanHash);
+            uint256 orphanBlockHash = orphanBlock.GetHash();
+            std::cout << "[ForkOrphan] Processing orphan child "
+                      << orphanBlockHash.GetHex().substr(0, 16) << "..." << std::endl;
+            ProcessNewBlock(ctx, db, -1, orphanBlock, &orphanBlockHash);
+        }
+    }
+}
 
 const char* BlockProcessResultToString(BlockProcessResult result) {
     switch (result) {
@@ -915,6 +954,21 @@ BlockProcessResult ProcessNewBlock(
                     g_node_context.fork_detected.store(false);
                     g_metrics.ClearForkDetected();
 
+                    // FORK ORPHAN FIX: Sweep all blocks in the activated fork range.
+                    // TriggerChainSwitch may have activated to a tip different from
+                    // blockHash (it uses highestPrevalidatedHeight). Walk from new tip
+                    // down to fork point so intermediate blocks' orphan children get resolved.
+                    // The local `fork` shared_ptr is still valid after TriggerChainSwitch
+                    // clears m_activeFork — the shared_ptr reference keeps it alive.
+                    if (ctx.orphan_manager && fork) {
+                        int32_t forkPoint = fork->GetForkPointHeight();
+                        CBlockIndex* pSweep = g_chainstate.GetTip();
+                        while (pSweep && pSweep->nHeight > forkPoint) {
+                            ResolveOrphanChildren(pSweep->GetBlockHash(), ctx, db);
+                            pSweep = pSweep->pprev;
+                        }
+                    }
+
                     // Mark block as received
                     tracker_guard.released = true;
                     if (ctx.block_fetcher) {
@@ -937,6 +991,13 @@ BlockProcessResult ProcessNewBlock(
                           << " (stats: " << fork->GetStats() << ")"
                           << " allPrevalidated=" << (allReceivedPrevalidated ? "yes" : "no")
                           << " forkHasMoreWork=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
+
+                // FORK ORPHAN FIX: Resolve orphan children of this newly-indexed fork block.
+                // Without this, out-of-order arrivals during fork recovery leave orphans
+                // permanently stuck — no CBlockIndex, no chainwork, no switch.
+                // Each resolved child cascades through ProcessNewBlock → fork staging →
+                // its own ResolveOrphanChildren, building the full fork chain.
+                ResolveOrphanChildren(blockHash, ctx, db);
 
                 // Mark block as received
                 tracker_guard.released = true;
@@ -1031,36 +1092,9 @@ BlockProcessResult ProcessNewBlock(
             }
         }
 
-        // FORK REORG FIX: Process orphan children after successful block activation
-        // When a block validates successfully, check if any orphans were waiting for it as their parent
-        // This mirrors the logic in block_validation_queue.cpp for the async path
-        // Without this, nodes fail to reorganize to longer chains (blocks marked ORPHAN instead of connecting)
-        if (ctx.orphan_manager) {
-            std::vector<uint256> orphanChildren = ctx.orphan_manager->GetOrphanChildren(blockHash);
-            if (!orphanChildren.empty()) {
-                std::cout << "[ProcessNewBlock] Found " << orphanChildren.size()
-                          << " orphan children waiting for block " << blockHash.GetHex().substr(0, 16)
-                          << "... at height " << pblockIndexPtr->nHeight << std::endl;
-
-                // Process orphan children by recursively calling ProcessNewBlock
-                for (const uint256& orphanHash : orphanChildren) {
-                    CBlock orphanBlock;
-                    if (ctx.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
-                        // Erase from orphan pool BEFORE processing to avoid re-entry
-                        ctx.orphan_manager->EraseOrphanBlock(orphanHash);
-
-                        // Recursively process the orphan block
-                        uint256 orphanBlockHash = orphanBlock.GetHash();
-                        std::cout << "[ProcessNewBlock] Processing orphan child "
-                                  << orphanBlockHash.GetHex().substr(0, 16) << "..." << std::endl;
-
-                        BlockProcessResult orphan_result = ProcessNewBlock(ctx, db, -1, orphanBlock, &orphanBlockHash);
-                        std::cout << "[ProcessNewBlock] Orphan child result: "
-                                  << BlockProcessResultToString(orphan_result) << std::endl;
-                    }
-                }
-            }
-        }
+        // Process orphan children after successful block activation.
+        // Unified via ResolveOrphanChildren helper (same logic used in fork path).
+        ResolveOrphanChildren(blockHash, ctx, db);
 
         // Notify BlockFetcher
         tracker_guard.released = true;
