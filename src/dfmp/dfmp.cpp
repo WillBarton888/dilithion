@@ -8,8 +8,10 @@
 #include <cstring>
 #include <algorithm>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <cmath>
+#include <fstream>
 
 namespace DFMP {
 
@@ -187,6 +189,113 @@ int CHeatTracker::GetUniqueMinerCount() const {
 std::map<Identity, int> CHeatTracker::GetAllHeat() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_heatCache;  // Return a copy
+}
+
+// ============================================================================
+// HEAT TRACKER PERSISTENCE
+// ============================================================================
+// Binary format:
+//   4 bytes: magic (0x48454154 = "HEAT")
+//   4 bytes: version (1)
+//   4 bytes: tip height (for staleness detection)
+//   4 bytes: entry count
+//   For each entry:
+//     4 bytes: block height (int32_t)
+//     20 bytes: identity
+
+static const uint32_t HEAT_FILE_MAGIC = 0x48454154;  // "HEAT"
+static const uint32_t HEAT_FILE_VERSION = 1;
+
+bool CHeatTracker::SaveToFile(const std::string& path, int tipHeight) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open()) {
+        std::cerr << "[DFMP] WARNING: Cannot open heat tracker file for writing: " << path << std::endl;
+        return false;
+    }
+
+    uint32_t magic = HEAT_FILE_MAGIC;
+    uint32_t version = HEAT_FILE_VERSION;
+    int32_t tip = static_cast<int32_t>(tipHeight);
+    uint32_t count = static_cast<uint32_t>(m_window.size());
+
+    file.write(reinterpret_cast<const char*>(&magic), 4);
+    file.write(reinterpret_cast<const char*>(&version), 4);
+    file.write(reinterpret_cast<const char*>(&tip), 4);
+    file.write(reinterpret_cast<const char*>(&count), 4);
+
+    for (const auto& entry : m_window) {
+        int32_t height = static_cast<int32_t>(entry.first);
+        file.write(reinterpret_cast<const char*>(&height), 4);
+        file.write(reinterpret_cast<const char*>(entry.second.data), sizeof(entry.second.data));
+    }
+
+    if (!file.good()) {
+        std::cerr << "[DFMP] WARNING: Error writing heat tracker file: " << path << std::endl;
+        return false;
+    }
+
+    file.close();
+    return true;
+}
+
+bool CHeatTracker::LoadFromFile(const std::string& path, int expectedTipHeight) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        return false;  // File doesn't exist - normal for first run
+    }
+
+    uint32_t magic = 0, version = 0, count = 0;
+    int32_t tip = 0;
+
+    file.read(reinterpret_cast<char*>(&magic), 4);
+    file.read(reinterpret_cast<char*>(&version), 4);
+    file.read(reinterpret_cast<char*>(&tip), 4);
+    file.read(reinterpret_cast<char*>(&count), 4);
+
+    if (!file.good() || magic != HEAT_FILE_MAGIC || version != HEAT_FILE_VERSION) {
+        std::cerr << "[DFMP] Heat tracker file corrupt or wrong version, will rebuild from chain" << std::endl;
+        return false;
+    }
+
+    if (tip != static_cast<int32_t>(expectedTipHeight)) {
+        std::cout << "[DFMP] Heat tracker file stale (file tip=" << tip
+                  << ", chain tip=" << expectedTipHeight << "), will rebuild from chain" << std::endl;
+        return false;
+    }
+
+    if (count > static_cast<uint32_t>(OBSERVATION_WINDOW) + 10) {
+        std::cerr << "[DFMP] Heat tracker file has too many entries (" << count << "), will rebuild from chain" << std::endl;
+        return false;
+    }
+
+    // Clear existing state
+    m_window.clear();
+    m_heatCache.clear();
+
+    // Read entries
+    for (uint32_t i = 0; i < count; i++) {
+        int32_t height = 0;
+        Identity identity;
+
+        file.read(reinterpret_cast<char*>(&height), 4);
+        file.read(reinterpret_cast<char*>(identity.data), sizeof(identity.data));
+
+        if (!file.good()) {
+            std::cerr << "[DFMP] Heat tracker file truncated at entry " << i << ", will rebuild from chain" << std::endl;
+            m_window.clear();
+            m_heatCache.clear();
+            return false;
+        }
+
+        m_window.push_back({static_cast<int>(height), identity});
+        m_heatCache[identity]++;
+    }
+
+    return true;
 }
 
 // ============================================================================
@@ -592,7 +701,21 @@ bool InitializeDFMP(const std::string& dataDir) {
     return true;
 }
 
-void ShutdownDFMP() {
+void ShutdownDFMP(const std::string& dataDir, int tipHeight) {
+    // Persist heat trackers to disk before cleanup
+    if (!dataDir.empty() && tipHeight > 0) {
+        if (g_heatTracker) {
+            if (g_heatTracker->SaveToFile(dataDir + "/dfmp_heat.dat", tipHeight)) {
+                std::cout << "  [OK] MIK heat tracker saved to disk" << std::endl;
+            }
+        }
+        if (g_payoutHeatTracker) {
+            if (g_payoutHeatTracker->SaveToFile(dataDir + "/dfmp_payout_heat.dat", tipHeight)) {
+                std::cout << "  [OK] Payout heat tracker saved to disk" << std::endl;
+            }
+        }
+    }
+
     if (g_identityDb) {
         g_identityDb->Close();
         delete g_identityDb;

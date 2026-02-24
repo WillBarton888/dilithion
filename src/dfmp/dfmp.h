@@ -283,6 +283,26 @@ public:
      * (for distribution analysis)
      */
     std::map<Identity, int> GetAllHeat() const;
+
+    /**
+     * Persist heat tracker state to a binary file.
+     * Called during shutdown to avoid chain rebuild on next startup.
+     *
+     * @param path File path to write to
+     * @param tipHeight Current chain tip height (for staleness detection)
+     * @return true if written successfully
+     */
+    bool SaveToFile(const std::string& path, int tipHeight) const;
+
+    /**
+     * Load heat tracker state from a binary file.
+     * Called during startup as fast alternative to chain rebuild.
+     *
+     * @param path File path to read from
+     * @param expectedTipHeight Current chain tip height (reject stale data)
+     * @return true if loaded successfully and tip matches
+     */
+    bool LoadFromFile(const std::string& path, int expectedTipHeight);
 };
 
 // ============================================================================
@@ -434,8 +454,11 @@ bool InitializeDFMP(const std::string& dataDir);
 
 /**
  * Shutdown DFMP subsystem
+ *
+ * @param dataDir Data directory (for persisting heat tracker). Empty = don't persist.
+ * @param tipHeight Current chain tip height (for staleness detection on next load)
  */
-void ShutdownDFMP();
+void ShutdownDFMP(const std::string& dataDir = "", int tipHeight = 0);
 
 /**
  * Check if DFMP is initialized and ready

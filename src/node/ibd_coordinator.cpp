@@ -647,6 +647,19 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 g_metrics.ClearForkDetected();  // Clear Prometheus metrics
                 m_fork_point.store(-1);
                 m_last_cancelled_fork_point = -1;  // BUG #261: Clear cooldown
+            } else if (!ForkManager::GetInstance().HasActiveFork()) {
+                // BUG FIX: Fork switch succeeded (chain advanced past fork_point) but
+                // orphan cascade put us on a different wrong chain. With no active fork
+                // and m_fork_detected=true, all 3 detection layers are blocked by the
+                // !m_fork_detected guard. Clear m_fork_detected so Layer 1 can detect
+                // the new chain mismatch and initiate a fresh fork recovery.
+                std::cout << "[FORK-RECOVERY] Chain past fork point " << current_fork_point
+                          << " but hash mismatch at height " << chain_height
+                          << " with no active fork - clearing for re-detection" << std::endl;
+                m_fork_detected.store(false);
+                g_node_context.fork_detected.store(false);
+                g_metrics.ClearForkDetected();
+                m_fork_point.store(-1);
             }
         }
         // BUG #261: Also clear cooldown if chain advanced past the cancelled fork point
@@ -795,17 +808,84 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         }
     }
 
-    // ORPHAN SSOT: Orphans are now processed ONLY by validation queue (block_validation_queue.cpp)
-    // This periodic scan is for DIAGNOSTICS ONLY - logging orphan pool health
+    // ORPHAN RESOLUTION: Periodically check for resolvable orphans.
+    // When blocks arrive via INV before their parents during IBD, they become
+    // orphans and their heights are marked "completed" in block_tracker (to prevent
+    // re-request loops). But this also prevents GetNextBlocksToRequest from returning
+    // those heights, causing a permanent deadlock: "no suitable peers" when all
+    // orphan heights are completed but parents are already in the chain.
+    //
+    // Fix: Every 10s, if orphans exist and chain is STALLED (no progress for 30s),
+    // try to resolve orphans whose parent is the chain tip, then clear completed
+    // heights to unblock FetchBlocks.
     static auto last_orphan_scan = std::chrono::steady_clock::now();
+    static int last_orphan_scan_height = -1;
+    static auto chain_stall_start = std::chrono::steady_clock::now();
     auto now_orphan_scan = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::seconds>(now_orphan_scan - last_orphan_scan).count() >= 10) {
         last_orphan_scan = now_orphan_scan;
 
-        if (g_node_context.orphan_manager) {
-            size_t orphan_count = g_node_context.orphan_manager->GetOrphanCount();
-            if (orphan_count > 0) {
-                std::cout << "[IBD] Orphan pool: " << orphan_count << " blocks waiting for parents" << std::endl;
+        int chain_height_snap = m_chainstate.GetHeight();
+        int header_height_snap = m_node_context.headers_manager ? m_node_context.headers_manager->GetBestHeight() : 0;
+        size_t orphan_count = g_node_context.orphan_manager ? g_node_context.orphan_manager->GetOrphanCount() : 0;
+
+        // Track chain stall: reset timer when chain advances
+        if (chain_height_snap != last_orphan_scan_height) {
+            last_orphan_scan_height = chain_height_snap;
+            chain_stall_start = now_orphan_scan;
+        }
+        auto stall_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+            now_orphan_scan - chain_stall_start).count();
+
+        if (orphan_count > 0) {
+            std::cout << "[IBD] Orphan pool: " << orphan_count << " blocks waiting for parents"
+                      << " (stall=" << stall_seconds << "s)" << std::endl;
+        }
+
+        // Only attempt aggressive orphan resolution when chain is actually stalled.
+        // During normal IBD, orphans are transient (parents arrive shortly after).
+        // Clearing completed heights while the chain is progressing would drop
+        // legitimate in-flight requests and cause re-request churn.
+        static constexpr int ORPHAN_STALL_THRESHOLD_SECS = 30;
+
+        if (orphan_count > 0 && header_height_snap > chain_height_snap &&
+            stall_seconds >= ORPHAN_STALL_THRESHOLD_SECS && m_node_context.blockchain_db) {
+
+            // Try to resolve orphans whose parent is the chain tip.
+            // This handles the case where blocks arrived via INV out of order:
+            // chain tip is at H, orphan at H+1 has parent=H, but was stored as
+            // orphan before H was connected. Now H is the tip, so H+1 can connect.
+            CBlockIndex* pTip = m_chainstate.GetTip();
+            if (pTip) {
+                uint256 tipHash = pTip->GetBlockHash();
+                std::vector<uint256> children = g_node_context.orphan_manager->GetOrphanChildren(tipHash);
+                if (!children.empty()) {
+                    std::cout << "[IBD] ORPHAN-RESOLVE: Found " << children.size()
+                              << " orphan children of chain tip (height " << chain_height_snap
+                              << ") - resolving after " << stall_seconds << "s stall" << std::endl;
+                    for (const uint256& orphanHash : children) {
+                        CBlock orphanBlock;
+                        if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
+                            g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                            uint256 oHash = orphanBlock.GetHash();
+                            auto result = ProcessNewBlock(m_node_context, *m_node_context.blockchain_db,
+                                                          -1, orphanBlock, &oHash);
+                            std::cout << "[IBD] ORPHAN-RESOLVE: Block "
+                                      << oHash.GetHex().substr(0, 16) << "... result="
+                                      << BlockProcessResultToString(result) << std::endl;
+                        }
+                    }
+                }
+            }
+
+            // Clear completed heights above chain tip to unblock FetchBlocks.
+            // Without this, GetNextBlocksToRequest sees all orphan heights as
+            // "completed" and returns empty, preventing BUG #260 orphan resolution
+            // and the ORPHAN-PARENT PRIORITY code from firing.
+            // Guarded by stall check: only fires after 30s without chain progress,
+            // so normal IBD with transient orphans is not disrupted.
+            if (g_node_context.block_tracker) {
+                g_node_context.block_tracker->ClearAboveHeight(chain_height_snap);
             }
         }
     }
@@ -1389,7 +1469,14 @@ bool CIbdCoordinator::FetchBlocks() {
         // determine the correct recovery action. This fires regardless of in-flight
         // count - the logs show stalls at inflight=22+ when children arrive via INV
         // but the parent is stuck or missing.
-        if (already_have_count > 0 && header_height > chain_height) {
+        //
+        // Also trigger when orphans exist in the pool but already_have_count is 0.
+        // This happens when orphan heights are in m_completed_heights: GetNextBlocksToRequest
+        // filters them out, so blocks_to_request is empty and already_have_count stays 0.
+        // Without this, the node deadlocks: "no suitable peers" forever.
+        size_t fetch_orphan_count = g_node_context.orphan_manager ?
+            g_node_context.orphan_manager->GetOrphanCount() : 0;
+        if ((already_have_count > 0 || fetch_orphan_count > 0) && header_height > chain_height) {
             int next_needed = chain_height + 1;
             uint256 next_hash = m_node_context.headers_manager->GetRandomXHashAtHeight(next_needed);
             if (!next_hash.IsNull()) {
@@ -1429,43 +1516,66 @@ bool CIbdCoordinator::FetchBlocks() {
                         m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
                     }
                 } else {
-                    // Parent is NOT in DB. Reset validation wait timer.
+                    // Block NOT in chainstate. Reset validation wait timer.
                     m_parent_validation_wait_active = false;
                     m_waiting_parent_height = -1;
                     m_waiting_parent_hash = uint256{};
 
-                    // Check if it's tracked (in-flight).
-                    int tracking_age = g_node_context.block_tracker ?
-                        g_node_context.block_tracker->GetTrackingAge(next_needed) : -1;
-                    if (tracking_age >= 0 && tracking_age < 30) {
-                        // Parent is in-flight and hasn't been waiting too long - let it arrive.
-                        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
-                    } else {
-                        // Parent is either not tracked at all (gap!) or has been in-flight
-                        // for >30s (stale request). Force re-request it.
-                        if (tracking_age >= 30) {
-                            // Clear the stale tracking entry first
-                            g_node_context.block_tracker->RemoveTimedOut(next_needed);
+                    // ORPHAN DB FIX: Block may already be in the block DB (received as
+                    // orphan, saved to DB, but never got a CBlockIndex because parent
+                    // wasn't connected at the time). Try to re-process from DB first
+                    // to avoid an unnecessary network round-trip.
+                    bool resolved_from_db = false;
+                    if (m_node_context.blockchain_db && m_node_context.blockchain_db->BlockExists(next_hash)) {
+                        CBlock db_block;
+                        if (m_node_context.blockchain_db->ReadBlock(next_hash, db_block)) {
                             std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
-                                      << " stale in tracker (" << tracking_age << "s) - clearing and re-requesting"
-                                      << std::endl;
-                        } else {
-                            std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
-                                      << " missing from DB and tracker - force requesting from peer "
-                                      << m_blocks_sync_peer << std::endl;
-                        }
-                        // Only force-request if peer has capacity under the IBD scheduler limit
-                        if (m_blocks_sync_peer != -1) {
-                            int peer_inflight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
-                            if (peer_inflight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
-                                if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, next_needed, next_hash)) {
-                                    CNetMessage parent_msg = m_node_context.message_processor->CreateGetDataMessage(
-                                        {{NetProtocol::MSG_BLOCK_INV, next_hash}});
-                                    m_node_context.connman->PushMessage(m_blocks_sync_peer, parent_msg);
-                                }
+                                      << " found in DB - re-processing directly" << std::endl;
+                            auto result = ProcessNewBlock(m_node_context, *m_node_context.blockchain_db,
+                                                          -1, db_block, &next_hash);
+                            if (result == BlockProcessResult::ACCEPTED) {
+                                resolved_from_db = true;
+                                chain_advanced = true;
+                                std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                          << " accepted from DB" << std::endl;
                             }
                         }
-                        m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+                    }
+
+                    if (!resolved_from_db) {
+                        // Check if it's tracked (in-flight).
+                        int tracking_age = g_node_context.block_tracker ?
+                            g_node_context.block_tracker->GetTrackingAge(next_needed) : -1;
+                        if (tracking_age >= 0 && tracking_age < 30) {
+                            // Parent is in-flight and hasn't been waiting too long - let it arrive.
+                            m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+                        } else {
+                            // Parent is either not tracked at all (gap!) or has been in-flight
+                            // for >30s (stale request). Force re-request it.
+                            if (tracking_age >= 30) {
+                                // Clear the stale tracking entry first
+                                g_node_context.block_tracker->RemoveTimedOut(next_needed);
+                                std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                          << " stale in tracker (" << tracking_age << "s) - clearing and re-requesting"
+                                          << std::endl;
+                            } else {
+                                std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                          << " missing from DB and tracker - force requesting from peer "
+                                          << m_blocks_sync_peer << std::endl;
+                            }
+                            // Only force-request if peer has capacity under the IBD scheduler limit
+                            if (m_blocks_sync_peer != -1) {
+                                int peer_inflight = m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer);
+                                if (peer_inflight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+                                    if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, next_needed, next_hash)) {
+                                        CNetMessage parent_msg = m_node_context.message_processor->CreateGetDataMessage(
+                                            {{NetProtocol::MSG_BLOCK_INV, next_hash}});
+                                        m_node_context.connman->PushMessage(m_blocks_sync_peer, parent_msg);
+                                    }
+                                }
+                            }
+                            m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
+                        }
                     }
                 }
             } else {

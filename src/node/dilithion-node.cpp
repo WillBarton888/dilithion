@@ -2332,6 +2332,27 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (DFMP::g_heatTracker != nullptr) {
             CBlockIndex* pindexTip = g_chainstate.GetTip();
             if (pindexTip != nullptr && pindexTip->nHeight > 0) {
+                // Try loading persisted heat tracker from disk (fast path)
+                bool loadedFromFile = false;
+                std::string mikHeatPath = config.datadir + "/dfmp_heat.dat";
+                std::string payoutHeatPath = config.datadir + "/dfmp_payout_heat.dat";
+
+                if (DFMP::g_heatTracker->LoadFromFile(mikHeatPath, pindexTip->nHeight)) {
+                    bool payoutLoaded = !DFMP::g_payoutHeatTracker ||
+                        DFMP::g_payoutHeatTracker->LoadFromFile(payoutHeatPath, pindexTip->nHeight);
+                    if (payoutLoaded) {
+                        loadedFromFile = true;
+                        std::cout << "  [OK] Loaded heat tracker from disk ("
+                                  << DFMP::g_heatTracker->GetWindowSize() << " entries, tip="
+                                  << pindexTip->nHeight << ")" << std::endl;
+                    } else {
+                        // MIK loaded but payout failed - clear both and rebuild
+                        DFMP::g_heatTracker->Clear();
+                        std::cout << "  [INFO] Payout heat tracker file stale/missing, rebuilding both from chain" << std::endl;
+                    }
+                }
+
+                if (!loadedFromFile) {
                 std::cout << "Populating heat tracker from existing chain..." << std::endl;
 
                 // CURSOR FIX #2: Use canonical constant instead of hardcoded value
@@ -2430,12 +2451,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
                 std::cout << std::endl;
 
-                // CRITICAL: If any blocks failed, heat tracker may be incomplete
+                // FATAL: If any blocks failed to read, heat tracker is incomplete.
+                // Nodes with incomplete heat trackers compute different DFMP multipliers,
+                // causing chain splits. This is NOT recoverable without fixing the block DB.
                 if (readFailed > 0) {
-                    std::cerr << "[DFMP] CRITICAL: " << readFailed << " blocks could not be read!"
-                              << " Heat tracker is INCOMPLETE - consensus WILL diverge!" << std::endl;
-                    std::cerr << "[DFMP] Consider running with -reindex to rebuild block database." << std::endl;
+                    std::cerr << "[DFMP] FATAL: " << readFailed << " block(s) could not be read from database!" << std::endl;
+                    std::cerr << "[DFMP] Heat tracker is INCOMPLETE - node CANNOT achieve consensus." << std::endl;
+                    std::cerr << "[DFMP] This usually means block database corruption (e.g., from a crash)." << std::endl;
+                    std::cerr << "[DFMP] To fix: restart with -reindex to rebuild the block database," << std::endl;
+                    std::cerr << "[DFMP]   or delete blocks/ and chainstate/ directories and resync." << std::endl;
+                    return 1;
                 }
+                } // end if (!loadedFromFile)
             } else {
                 std::cout << "  [INFO] No existing chain - heat tracker will populate during sync" << std::endl;
             }
@@ -5896,9 +5923,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "[Shutdown] Stopping RPC server..." << std::flush;
         rpc_server.Stop();
 
-        // DFMP: Shutdown Fair Mining Protocol subsystem
+        // DFMP: Shutdown Fair Mining Protocol subsystem (persist heat trackers)
         std::cout << "  Shutting down DFMP..." << std::endl;
-        DFMP::ShutdownDFMP();
+        DFMP::ShutdownDFMP(config.datadir, g_chainstate.GetHeight());
 
         std::cout << "  Closing UTXO database..." << std::endl;
         utxo_set.Close();
