@@ -61,6 +61,7 @@ public:
     uint64_t difficultyAdjustmentV2; // Blocks between difficulty adjustments (post-fork)
     int difficultyForkHeight;       // Height at which v2 difficulty rules activate
     int difficultyMaxChange;        // Max difficulty change factor per retarget (2 = 2x, 4 = 4x)
+    int difficultyV3ForkHeight;     // Height where v3 rules activate (4x clamp, 15-block EDA threshold)
     uint32_t maxBlockSize;          // Maximum block size in bytes
 
     // Mining parameters

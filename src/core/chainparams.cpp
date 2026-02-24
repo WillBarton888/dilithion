@@ -40,7 +40,8 @@ ChainParams ChainParams::Mainnet() {
     params.difficultyAdjustment = 2016;    // ~5.6 days at 4-minute blocks (pre-fork)
     params.difficultyAdjustmentV2 = 360;   // ~1 day at 4-minute blocks (post-fork)
     params.difficultyForkHeight = 18500;   // Activate v2 difficulty at this height (moved from 20160 to fix sign bit + EDA interaction)
-    params.difficultyMaxChange = 2;        // 2x max change per retarget (post-fork)
+    params.difficultyMaxChange = 2;        // 2x max change per retarget (post-fork, pre-v3)
+    params.difficultyV3ForkHeight = 20520; // v3: 4x clamp + 1-hour EDA threshold (15 blocks)
     params.maxBlockSize = 4 * 1024 * 1024; // 4 MB (for post-quantum signatures)
 
     // Mining parameters
@@ -64,7 +65,7 @@ ChainParams ChainParams::Mainnet() {
     // PoW and MIK signature verification skipped for historical blocks during IBD.
     // This fixes IBD where identity database is empty/incomplete.
     // NOTE: Chain built with MIK bypassed - cannot be removed, only raised
-    params.dfmpAssumeValidHeight = 18500;  // Must match highest checkpoint for IBD
+    params.dfmpAssumeValidHeight = 18600;  // Covers blocks affected by v3.4.4 memory stomp crash
 
     // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
     params.dfmpV3ActivationHeight = 7000;
@@ -164,7 +165,8 @@ ChainParams ChainParams::Testnet() {
     params.difficultyAdjustment = 2016;    // Pre-fork (same as mainnet)
     params.difficultyAdjustmentV2 = 360;   // Post-fork: ~6 hours at 1-minute blocks
     params.difficultyForkHeight = 0;       // Active from genesis on testnet
-    params.difficultyMaxChange = 2;        // 2x max change per retarget
+    params.difficultyMaxChange = 2;        // 2x max change per retarget (pre-v3)
+    params.difficultyV3ForkHeight = 0;     // v3 active from genesis on testnet
     params.maxBlockSize = 4 * 1024 * 1024; // 4 MB (same as mainnet)
 
     // Mining parameters (same as mainnet)

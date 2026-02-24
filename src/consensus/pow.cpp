@@ -879,11 +879,17 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         if (nBlockTime > 0 && edaActivation >= 0 && newBlockHeight >= edaActivation) {
             int64_t blockTime = static_cast<int64_t>(Dilithion::g_chainParams->blockTime);
             int64_t gap = nBlockTime - static_cast<int64_t>(pindexLast->nTime);
-            int64_t threshold = static_cast<int64_t>(EDA_THRESHOLD_BLOCKS) * blockTime;
+            // v3 (20520+): raise EDA threshold from 6 to 15 blocks (1 hour at 240s)
+            int edaThresholdBlocks = (newBlockHeight >= Dilithion::g_chainParams->difficultyV3ForkHeight)
+                ? 15 : EDA_THRESHOLD_BLOCKS;
+            int64_t threshold = static_cast<int64_t>(edaThresholdBlocks) * blockTime;
 
             if (gap > threshold) {
                 // Calculate number of reduction steps
-                int64_t stepSize = static_cast<int64_t>(EDA_STEP_BLOCKS) * blockTime;
+                // v3: step size matches threshold (15 blocks = 1 hour per step)
+                int edaStepBlocks = (newBlockHeight >= Dilithion::g_chainParams->difficultyV3ForkHeight)
+                    ? 15 : EDA_STEP_BLOCKS;
+                int64_t stepSize = static_cast<int64_t>(edaStepBlocks) * blockTime;
                 int64_t stepsRaw = (gap - threshold) / stepSize + 1;
                 int steps = static_cast<int>(std::min(stepsRaw, static_cast<int64_t>(EDA_MAX_STEPS)));
 
@@ -988,8 +994,9 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
     // MEDIUM-C001 FIX: Remove code duplication - use CalculateNextWorkRequired()
     // This helper function handles all the difficulty calculation logic,
     // including clamping, overflow checks, and bounds validation
-    // Pre-fork: 4x max change; post-fork: configurable (2x)
-    int maxChange = useV2 ? Dilithion::g_chainParams->difficultyMaxChange : 4;
+    // Pre-fork: 4x max change; v2 (18500+): 2x; v3 (20520+): 4x
+    bool useV3 = (newBlockHeight >= Dilithion::g_chainParams->difficultyV3ForkHeight);
+    int maxChange = useV3 ? 4 : (useV2 ? Dilithion::g_chainParams->difficultyMaxChange : 4);
     uint32_t nBitsNew = CalculateNextWorkRequired(
         pindexLast->nBits,
         nActualTimespan,
