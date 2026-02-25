@@ -1070,6 +1070,15 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         return Dilithion::g_chainParams->genesisNBits;
     }
 
+    // CRASH FIX: Reject obviously invalid pointers (e.g. small integers mistaken for CBlockIndex*).
+    // Observed crash: READ at 0x5a00 (23040 = asertActivationHeight) when caller passed height as pointer.
+    const uintptr_t u = reinterpret_cast<uintptr_t>(pindexLast);
+    if (u < 0x10000) {
+        std::cerr << "[GetNextWorkRequired] CRITICAL: Invalid pindexLast 0x" << std::hex << u
+                  << " (likely height passed as pointer) — returning genesis nBits" << std::dec << std::endl;
+        return Dilithion::g_chainParams->genesisNBits;
+    }
+
     int newBlockHeight = pindexLast->nHeight + 1;
 
     // ====================================================================
