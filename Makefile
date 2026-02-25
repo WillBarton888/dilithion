@@ -29,7 +29,10 @@ CXX := g++
 # -fPIC: Position-independent code (for shared libraries)
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2 -pipe -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security
 CXXFLAGS += -DDILITHION_VERSION='"$(GIT_VERSION)"'
+# -MMD -MP: Auto-generate header dependency files (.d) so changing a .h triggers recompilation
+CXXFLAGS += -MMD -MP
 CFLAGS ?= -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security
+CFLAGS += -MMD -MP
 
 # Include paths (base)
 INCLUDES := -I src \
@@ -680,6 +683,10 @@ depends:
 	@echo "$(COLOR_BLUE)[Dilithium]$(COLOR_RESET) Building Dilithium library..."
 	@cd depends/dilithium/ref && make
 	@echo "$(COLOR_GREEN)✓ Dependencies built$(COLOR_RESET)"
+
+# Include auto-generated header dependency files (-MMD -MP)
+# These ensure that changing any .h file triggers recompilation of all .cpp files that include it
+-include $(wildcard $(OBJ_DIR)/**/*.d $(OBJ_DIR)/*.d)
 
 # ============================================================================
 # Utility Targets

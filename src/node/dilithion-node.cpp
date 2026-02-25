@@ -97,6 +97,7 @@
     #include <winsock2.h>   // For socket functions
     #include <ws2tcpip.h>   // For inet_pton
     #include <windows.h>    // For GlobalMemoryStatusEx (Bug #23 fix)
+    #include <dbghelp.h>    // For StackWalk64, SymFromAddr (crash stack traces)
 #else
     #include <arpa/inet.h>  // For inet_pton on Unix
     #include <netdb.h>      // For gethostname, getaddrinfo
@@ -157,6 +158,58 @@ static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* pExceptionInfo) {
                  << " RBX=0x" << ctx->Rbx
                  << " RCX=0x" << ctx->Rcx
                  << " RDX=0x" << ctx->Rdx << std::dec << std::endl;
+
+        // Stack trace using StackWalk64 from the exception context
+        crashLog << "Stack trace:" << std::endl;
+        {
+            HANDLE process = GetCurrentProcess();
+            HANDLE thread = GetCurrentThread();
+            SymInitialize(process, NULL, TRUE);
+
+            STACKFRAME64 sf = {};
+            sf.AddrPC.Offset = ctx->Rip;
+            sf.AddrPC.Mode = AddrModeFlat;
+            sf.AddrFrame.Offset = ctx->Rbp;
+            sf.AddrFrame.Mode = AddrModeFlat;
+            sf.AddrStack.Offset = ctx->Rsp;
+            sf.AddrStack.Mode = AddrModeFlat;
+
+            // Get module base for RVA calculation
+            HMODULE hModule = NULL;
+            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                              (LPCSTR)ctx->Rip, &hModule);
+            uintptr_t moduleBase = (uintptr_t)hModule;
+            crashLog << "Module base: 0x" << std::hex << moduleBase << std::dec << std::endl;
+
+            for (int i = 0; i < 30; i++) {
+                if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread,
+                                &sf, ctx, NULL, SymFunctionTableAccess64,
+                                SymGetModuleBase64, NULL)) {
+                    break;
+                }
+                if (sf.AddrPC.Offset == 0) break;
+
+                uintptr_t addr = sf.AddrPC.Offset;
+                uintptr_t rva = addr - moduleBase;
+
+                // Try to resolve symbol name
+                char symBuf[sizeof(SYMBOL_INFO) + 256];
+                SYMBOL_INFO* sym = (SYMBOL_INFO*)symBuf;
+                sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+                sym->MaxNameLen = 255;
+                DWORD64 displacement = 0;
+
+                if (SymFromAddr(process, addr, &displacement, sym)) {
+                    crashLog << "  [" << i << "] 0x" << std::hex << addr
+                             << " (RVA 0x" << rva << ") " << sym->Name
+                             << "+0x" << displacement << std::dec << std::endl;
+                } else {
+                    crashLog << "  [" << i << "] 0x" << std::hex << addr
+                             << " (RVA 0x" << rva << ")" << std::dec << std::endl;
+                }
+            }
+            SymCleanup(process);
+        }
 
         crashLog << "===================================" << std::endl;
         crashLog.close();
@@ -764,6 +817,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     DFMP::Identity mikIdentity = wallet.GetMIKIdentity();
     std::vector<uint8_t> mikSignature;
     std::vector<uint8_t> mikData;
+    bool mikDataIncluded = false;
 
     // Generate MIK if wallet doesn't have one
     if (mikIdentity.IsNull()) {
@@ -818,6 +872,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
                     if (regNonce != UINT64_MAX && DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, regNonce, mikData)) {
                         scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
+                        mikDataIncluded = true;
                         if (verbose) {
                             std::cout << "  MIK: Registration (first block with this identity)" << std::endl;
                         }

@@ -168,7 +168,7 @@ public:
      * @param block Full block data
      * @return true on success, false on failure
      */
-    bool ConnectTip(CBlockIndex* pindex, const CBlock& block);
+    bool ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skipValidation = false);
 
     /**
      * Disconnect a block from the active chain

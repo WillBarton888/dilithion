@@ -461,7 +461,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     return false;
                 }
 
-                if (!ConnectTip(pindexReconnect, reconnectBlock)) {
+                if (!ConnectTip(pindexReconnect, reconnectBlock, true)) {
                     std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  Block: " << pindexReconnect->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  Height: " << pindexReconnect->nHeight << std::endl;
@@ -546,7 +546,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     return false;
                 }
 
-                if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
+                if (!ConnectTip(disconnectBlocks[j], reconnectBlock, true)) {
                     std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
@@ -612,7 +612,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     return false;
                 }
 
-                if (!ConnectTip(disconnectBlocks[j], reconnectBlock)) {
+                if (!ConnectTip(disconnectBlocks[j], reconnectBlock, true)) {
                     std::cerr << "[Chain] CRITICAL: ConnectTip failed during rollback! Chain state corrupted!" << std::endl;
                     std::cerr << "  Block: " << disconnectBlocks[j]->GetBlockHash().GetHex() << std::endl;
                     std::cerr << "  RECOVERY REQUIRED: Restart node with -reindex" << std::endl;
@@ -663,7 +663,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     return true;
 }
 
-bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
+bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skipValidation) {
     if (pindex == nullptr) {
         return false;
     }
@@ -688,7 +688,11 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block) {
     // This allows fork recovery while maintaining MIK security:
     // - Fork pre-validation only checks PoW + hash match
     // - ConnectTip validates MIK when we have correct chain state
-    {
+    //
+    // skipValidation: Set during rollback reconnection. These blocks were already
+    // validated when first accepted. Re-validating during rollback can fail because
+    // the identity DB is in an inconsistent state (identities removed by DisconnectTip).
+    if (!skipValidation) {
         int dfmpActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
 
