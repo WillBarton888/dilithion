@@ -186,7 +186,22 @@ bool ForkCandidate::IsTimedOut() const
 {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_lastBlockTime);
-    return elapsed.count() >= FORK_TIMEOUT_SECONDS;
+    return elapsed.count() >= GetTimeoutSeconds();
+}
+
+int ForkCandidate::GetTimeoutSeconds() const
+{
+    int blocks_needed = m_expectedTipHeight - m_forkPointHeight;
+    return std::min(600, 60 + (blocks_needed / 10) * 5);
+}
+
+void ForkCandidate::UpdateExpectedHash(int32_t height, const uint256& newHash)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_expectedHashes.find(height);
+    if (it != m_expectedHashes.end()) {
+        it->second = newHash;
+    }
 }
 
 void ForkCandidate::TouchLastBlockTime()
@@ -299,14 +314,9 @@ std::shared_ptr<ForkCandidate> ForkManager::CreateForkCandidate(
         return nullptr;
     }
 
-    // Check reorg depth limit (MAX_REORG_DEPTH = 100 in ActivateBestChain)
-    // IMPORTANT: Reorg depth is how many blocks we need to DISCONNECT from current chain,
-    // NOT the number of blocks on the fork chain to connect.
-    int disconnectDepth = currentChainHeight - forkPointHeight;
-    if (disconnectDepth > 100) {
-        std::cerr << "[ForkManager] Reorg too deep (" << disconnectDepth << " blocks to disconnect), max is 100" << std::endl;
-        return nullptr;
-    }
+    // Deep forks (> MAX_AUTO_REORG_DEPTH) are handled by DisconnectToHeight()
+    // in AttemptForkRecovery() before reaching this point.
+    // ActivateBestChain() enforces MAX_REORG_DEPTH=100 for shallow forks.
 
     m_activeFork = std::make_shared<ForkCandidate>(forkTipHash, forkPointHeight, expectedTipHeight, expectedHashes);
 
@@ -690,7 +700,8 @@ bool ForkManager::CheckTimeout()
     }
 
     if (m_activeFork->IsTimedOut()) {
-        std::cout << "[ForkManager] Fork timed out (60s since last block)" << std::endl;
+        std::cout << "[ForkManager] Fork timed out (" << m_activeFork->GetTimeoutSeconds()
+                  << "s since last block)" << std::endl;
         return true;
     }
 

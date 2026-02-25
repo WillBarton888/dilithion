@@ -7,15 +7,6 @@
 #include <set>
 #include <vector>
 
-// Bug #191: Platform-specific terminal detection
-#ifdef _WIN32
-#include <io.h>
-#define isatty _isatty
-#define STDIN_FILENO 0
-#else
-#include <unistd.h>
-#endif
-
 #include <consensus/chain.h>
 #include <consensus/pow.h>  // BUG #245: ChainWorkGreaterThan for fork work comparison
 #include <core/chainparams.h>  // Initial header request needs genesis hash
@@ -33,6 +24,7 @@
 #include <node/fork_manager.h>  // Validate-before-disconnect fork handling
 #include <net/orphan_manager.h>  // IBD STUCK FIX #3: Periodic orphan scan
 #include <node/block_processing.h>  // BUG #260: ProcessNewBlock for orphan re-processing
+#include <node/mempool.h>  // Deep fork recovery: Clear mempool before disconnect
 #include <util/logging.h>
 #include <util/bench.h>  // Performance: Benchmarking
 #include <api/metrics.h>  // Fork detection metrics
@@ -638,8 +630,25 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     on_correct_chain = (!header_hash.IsNull() && our_hash == header_hash);
                 }
             }
+
+            // Guard against premature completion during deep resync:
+            // After DisconnectToHeight, chain_height may be just above fork_point
+            // on the correct chain, but we're not done syncing yet.
+            if (on_correct_chain && m_resync_in_progress) {
+                int header_tip = m_node_context.headers_manager ?
+                    m_node_context.headers_manager->GetBestHeight() : 0;
+                if (chain_height < header_tip - SYNC_TOLERANCE_BLOCKS) {
+                    on_correct_chain = false;  // Still syncing, not done yet
+                }
+            }
+
             if (on_correct_chain) {
                 // Actually recovered - clear fork state
+                if (m_resync_in_progress) {
+                    std::cout << "[FORK-RECOVERY] Deep resync complete: "
+                              << m_resync_fork_point << " -> " << chain_height << std::endl;
+                    m_resync_in_progress = false;
+                }
                 std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << current_fork_point
                           << " to " << chain_height << " - fork recovery complete (hash verified)" << std::endl;
                 m_fork_detected.store(false);
@@ -678,9 +687,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             auto activeFork = forkMgr.GetActiveFork();
             int receivedCount = activeFork ? activeFork->GetReceivedBlockCount() : 0;
             int cancelPoint = activeFork ? activeFork->GetForkPointHeight() : chain_height;
-            std::cout << "[IBD] Active fork timed out (60s) with " << receivedCount
+            int timeoutSecs = activeFork ? activeFork->GetTimeoutSeconds() : 60;
+            std::cout << "[IBD] Active fork timed out (" << timeoutSecs << "s) with " << receivedCount
                       << " received blocks - cancelling" << std::endl;
-            forkMgr.CancelFork("Timeout - no blocks delivered in 60s");
+            forkMgr.CancelFork("Timeout - no blocks delivered in " + std::to_string(timeoutSecs) + "s");
             forkMgr.ClearInFlightState(m_node_context, cancelPoint);
             m_fork_detected.store(false);
             g_node_context.fork_detected.store(false);
@@ -1828,185 +1838,89 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
               << " chain_height=" << chain_height << " header_height=" << header_height << std::endl;
 
     // Deep fork handling: fork exceeds MAX_AUTO_REORG_DEPTH
-    // B1: Unified deep-fork path - interactive prompt (if terminal) or checkpoint reset + shutdown (daemon)
+    // Disconnect blocks back to fork point, then re-download correct chain via normal IBD
     if (fork_depth > MAX_AUTO_REORG_DEPTH) {
         std::cout << "[FORK-RECOVERY] Deep fork detected (" << fork_depth
                   << " blocks, fork_point=" << fork_point << ")" << std::endl;
 
-        // B1: Interactive terminal - prompt user for in-place resync to fork point
-        if (isatty(STDIN_FILENO)) {
-            bool was_verbose = g_verbose.load(std::memory_order_relaxed);
-            g_verbose.store(false, std::memory_order_relaxed);
+        // Chain work check: verify header chain has more work BEFORE disconnecting
+        uint256 localChainWork;
+        CBlockIndex* pTipCheck = m_chainstate.GetTip();
+        if (pTipCheck) localChainWork = pTipCheck->nChainWork;
 
-            std::cerr << "\n[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
-            std::cerr << "[FORK-DETECT] CRITICAL: Fork too deep for automatic recovery!" << std::endl;
-            std::cerr << "[FORK-DETECT]   Fork depth: " << fork_depth << " blocks" << std::endl;
-            std::cerr << "[FORK-DETECT]   Maximum: " << MAX_AUTO_REORG_DEPTH << " blocks" << std::endl;
-            std::cerr << "[FORK-DETECT]   Detected by: " << ForkRecoveryReasonToString(reason) << std::endl;
-            std::cerr << "[FORK-DETECT] Possible causes:" << std::endl;
-            std::cerr << "[FORK-DETECT]   1. Extended network partition" << std::endl;
-            std::cerr << "[FORK-DETECT]   2. Corrupted local blockchain data" << std::endl;
-            std::cerr << "[FORK-DETECT]   3. Potential chain attack" << std::endl;
-            std::cerr << "[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "Would you like to resync from the network? This will:" << std::endl;
-            std::cerr << "  - Clear your local chain data (blocks on the fork)" << std::endl;
-            std::cerr << "  - Download the correct chain from peers" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "WALLET IMPACT:" << std::endl;
-            std::cerr << "  - Your private keys are SAFE (stored separately)" << std::endl;
-            std::cerr << "  - Mining rewards from blocks 0-" << fork_point << " are PRESERVED" << std::endl;
-            std::cerr << "  - Mining rewards from forked blocks " << (fork_point + 1) << "-" << chain_height << " will be LOST" << std::endl;
-            std::cerr << "    (These " << fork_depth << " blocks were never accepted by the network)" << std::endl;
-            std::cerr << "  - Your balance will be recalculated from the correct chain" << std::endl;
-            std::cerr << std::endl;
+        uint256 headerChainWork;
+        if (m_node_context.headers_manager)
+            headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
 
-            std::cout << "Resync from network? [Y/n]: " << std::flush;
-            std::string response;
-            std::getline(std::cin, response);
-            g_verbose.store(was_verbose, std::memory_order_relaxed);
-
-            bool user_accepted = (response.empty() || response[0] == 'Y' || response[0] == 'y');
-
-            if (user_accepted) {
-                std::cout << "\n[RESYNC] ════════════════════════════════════════════════════" << std::endl;
-                std::cout << "[RESYNC] Starting network resync..." << std::endl;
-                std::cout << "[RESYNC] Discarding " << fork_depth << " forked blocks (heights "
-                          << (fork_point + 1) << "-" << chain_height << ")" << std::endl;
-                std::cout << "[RESYNC] Preserving blocks 0-" << fork_point << " (common ancestor)" << std::endl;
-
-                m_resync_in_progress = true;
-                m_resync_fork_point = fork_point;
-                m_resync_original_height = chain_height;
-                m_resync_target_height = header_height;
-
-                // Walk backwards from current tip to find the fork point block
-                CBlockIndex* pForkPointIndex = nullptr;
-                CBlockIndex* pindex = m_chainstate.GetTip();
-                while (pindex && pindex->nHeight > fork_point) {
-                    pindex = pindex->pprev;
-                }
-                if (pindex && pindex->nHeight == fork_point) {
-                    pForkPointIndex = pindex;
-                }
-
-                if (!pForkPointIndex) {
-                    std::cerr << "[RESYNC] WARNING: Could not find block at fork point " << fork_point << std::endl;
-                    std::cerr << "[RESYNC] Falling back to genesis block" << std::endl;
-                    uint256 genesisHash = Genesis::GetGenesisHash();
-                    pForkPointIndex = m_chainstate.GetBlockIndex(genesisHash);
-                }
-
-                if (pForkPointIndex) {
-                    m_chainstate.SetTip(pForkPointIndex);
-                    std::cout << "[RESYNC] Chain reset to fork point at height " << pForkPointIndex->nHeight << std::endl;
-
-                    uint256 chainstateHashAtForkPoint = pForkPointIndex->GetBlockHash();
-                    if (m_node_context.headers_manager) {
-                        m_node_context.headers_manager->ClearAboveHeight(fork_point, chainstateHashAtForkPoint);
-                        std::cout << "[RESYNC] Headers above fork point cleared" << std::endl;
-                    }
-
-                    // Reset all fork detection state
-                    m_fork_detected.store(false);
-                    g_node_context.fork_detected.store(false);
-                    g_metrics.ClearForkDetected();
-                    m_fork_point.store(-1);
-                    m_fork_stall_cycles.store(0);
-                    m_consecutive_orphan_blocks.store(0);
-                    m_requires_reindex = false;
-
-                    // Reset IBD state for fresh sync
-                    m_state = IBDState::WAITING_FOR_PEERS;
-                    m_last_header_height = 0;
-                    m_ibd_no_peer_cycles = 0;
-                    m_headers_sync_peer = -1;
-                    m_headers_sync_last_height = 0;
-                    m_headers_in_flight = false;
-                    m_initial_request_done = false;
-
-                    std::cout << "[RESYNC] IBD state reset - will sync from peers" << std::endl;
-                    std::cout << "[RESYNC] ════════════════════════════════════════════════════\n" << std::endl;
-                    return true;
-                } else {
-                    std::cerr << "[RESYNC] ERROR: Could not find genesis block!" << std::endl;
-                    std::cerr << "[RESYNC] Please restart with --reindex flag" << std::endl;
-                }
-            } else {
-                std::cout << "\n[FORK-DETECT] Resync declined. Node will not sync until resolved." << std::endl;
-                std::cout << "[FORK-DETECT] You can restart with --reindex flag later." << std::endl;
+        if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
+            if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
+                std::cout << "[FORK-RECOVERY] Header chain has LESS work - NOT disconnecting" << std::endl;
+                m_fork_stall_cycles.store(0);
+                return false;
             }
+        }
+        // If either is null, proceed on orphan-block evidence (same rationale as shallow fork path)
 
+        std::cout << "[FORK-RECOVERY] Deep fork (" << fork_depth
+                  << " blocks) - automatic disconnect-and-resync" << std::endl;
+
+        // Clear mempool before deep disconnect: disconnecting hundreds of blocks would
+        // flood mempool with old transactions from the wrong fork (stale anyway)
+        auto* mempool = g_mempool.load();
+        if (mempool) {
+            mempool->Clear();
+            std::cout << "[FORK-RECOVERY] Mempool cleared before deep disconnect" << std::endl;
+        }
+
+        // Disconnect to fork point using proper per-block UTXO/identity/mempool undo
+        if (!m_node_context.blockchain_db) {
+            std::cerr << "[FORK-RECOVERY] No blockchain DB - cannot disconnect" << std::endl;
             m_requires_reindex = true;
-            m_fork_detected.store(true);
-            m_fork_point.store(fork_point);
-            g_metrics.SetForkDetected(true, fork_depth, fork_point);
             return false;
         }
-
-        // Non-interactive (daemon) mode: reset to checkpoint + shutdown
-        std::cerr << "[FORK-RECOVERY] Non-interactive mode - automated recovery to nearest checkpoint" << std::endl;
-
-        CBlockIndex* pResetTarget = nullptr;
-
-        if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet()) {
-            std::cout << "[RESYNC] Testnet deep fork - performing full resync from genesis" << std::endl;
-            uint256 genesisHash = Genesis::GetGenesisHash();
-            pResetTarget = m_chainstate.GetBlockIndex(genesisHash);
-        } else {
-            const Dilithion::CCheckpoint* cp = nullptr;
-            if (Dilithion::g_chainParams) {
-                cp = Dilithion::g_chainParams->GetLastCheckpoint(fork_point);
-            }
-            if (cp) {
-                std::cout << "[RESYNC] Mainnet deep fork - resetting to checkpoint at height "
-                          << cp->nHeight << std::endl;
-                pResetTarget = m_chainstate.GetBlockIndex(cp->hashBlock);
-                if (!pResetTarget) {
-                    CBlockIndex* pindex = m_chainstate.GetTip();
-                    while (pindex && pindex->nHeight > cp->nHeight) {
-                        pindex = pindex->pprev;
-                    }
-                    pResetTarget = pindex;
-                }
-            } else {
-                std::cout << "[RESYNC] No checkpoint found before fork point - full resync from genesis" << std::endl;
-                uint256 genesisHash = Genesis::GetGenesisHash();
-                pResetTarget = m_chainstate.GetBlockIndex(genesisHash);
-            }
-        }
-
-        if (pResetTarget) {
-            m_resync_in_progress = true;
-            m_resync_fork_point = fork_point;
-            m_resync_original_height = chain_height;
-            m_resync_target_height = header_height;
-
-            std::cout << "[RESYNC] Resetting chain from height " << chain_height
-                      << " to height " << pResetTarget->nHeight << std::endl;
-            std::cout << "[RESYNC] Discarding " << (chain_height - pResetTarget->nHeight)
-                      << " blocks" << std::endl;
-
-            uint256 resetHash = pResetTarget->GetBlockHash();
-            if (m_node_context.blockchain_db) {
-                m_node_context.blockchain_db->WriteBestBlock(resetHash);
-                std::cout << "[RESYNC] Persisted best block to height "
-                          << pResetTarget->nHeight << std::endl;
-            }
-
-            std::cout << "\n[RESYNC] ════════════════════════════════════════════════════" << std::endl;
-            std::cout << "[RESYNC] Deep fork recovery complete." << std::endl;
-            std::cout << "[RESYNC] Chain reset persisted to height " << pResetTarget->nHeight << std::endl;
-            std::cout << "[RESYNC] The node will now shut down. Please restart to begin re-sync." << std::endl;
-            std::cout << "[RESYNC] ════════════════════════════════════════════════════\n" << std::endl;
-
-            g_node_state.running.store(false);
-            return true;
-        } else {
-            std::cerr << "[FORK-DETECT] ERROR: Could not find reset target block!" << std::endl;
-            m_fork_stall_cycles.store(0);
+        int disconnected = m_chainstate.DisconnectToHeight(fork_point, *m_node_context.blockchain_db);
+        if (disconnected < 0) {
+            std::cerr << "[FORK-RECOVERY] Failed to disconnect - requires --reindex" << std::endl;
+            m_requires_reindex = true;
             return false;
         }
+        std::cout << "[FORK-RECOVERY] Disconnected " << disconnected
+                  << " blocks (chain now at " << m_chainstate.GetHeight() << ")" << std::endl;
+
+        // Clear stale state above fork point
+        uint256 forkPointHash;
+        CBlockIndex* pNewTip = m_chainstate.GetTip();
+        if (pNewTip) forkPointHash = pNewTip->GetBlockHash();
+
+        if (m_node_context.headers_manager)
+            m_node_context.headers_manager->ClearAboveHeight(fork_point, forkPointHash);
+        if (m_node_context.block_fetcher)
+            m_node_context.block_fetcher->ClearAboveHeight(fork_point);
+        if (g_node_context.block_tracker)
+            g_node_context.block_tracker->ClearAboveHeight(fork_point);
+
+        // Reset fork detection state
+        m_fork_detected.store(false);
+        g_node_context.fork_detected.store(false);
+        g_metrics.ClearForkDetected();
+        m_fork_point.store(-1);
+        m_fork_stall_cycles.store(0);
+        m_consecutive_orphan_blocks.store(0);
+        m_last_cancelled_fork_point = -1;
+
+        // Track resync progress
+        m_resync_in_progress = true;
+        m_resync_fork_point = fork_point;
+        m_resync_original_height = chain_height;
+        m_resync_target_height = header_height;
+
+        // Resume IBD in BLOCKS_DOWNLOAD state (peers and headers already established)
+        m_state = IBDState::BLOCKS_DOWNLOAD;
+        m_last_header_height = 0;
+
+        std::cout << "[FORK-RECOVERY] Deep resync started: downloading correct chain from height "
+                  << fork_point << std::endl;
+        return true;
     }
 
     // BUG #245 FIX: Only fork recover if incoming chain has MORE work than ours
@@ -2074,7 +1988,8 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
             // BUG #261: If fork timed out with zero received blocks, set cooldown
             int receivedCount = activeFork ? activeFork->GetReceivedBlockCount() : 0;
             int cancelPoint = activeFork ? activeFork->GetForkPointHeight() : fork_point;
-            forkMgr.CancelFork("Timeout - 60s without blocks");
+            int forkTimeout = activeFork ? activeFork->GetTimeoutSeconds() : 60;
+            forkMgr.CancelFork("Timeout - " + std::to_string(forkTimeout) + "s without blocks");
             forkMgr.ClearInFlightState(m_node_context, cancelPoint);
             m_fork_detected.store(false);
             g_node_context.fork_detected.store(false);

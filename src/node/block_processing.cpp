@@ -292,8 +292,17 @@ BlockProcessResult ProcessNewBlock(
 
                     // BUG #261 FIX: Track hash mismatches. If we keep getting blocks
                     // at expected heights but with wrong hashes, the fork candidate's
-                    // expected hash set is stale. Cancel the fork to break the loop.
+                    // expected hash set is stale. Refresh the hash if possible.
                     int mismatchCount = fork->RecordHashMismatch();
+
+                    // Refresh stale expected hash from headers manager
+                    if (ctx.headers_manager) {
+                        uint256 currentExpected = ctx.headers_manager->GetRandomXHashAtHeight(blockHeight);
+                        if (!currentExpected.IsNull()) {
+                            fork->UpdateExpectedHash(blockHeight, currentExpected);
+                        }
+                    }
+
                     if (fork->HasExcessiveHashMismatches()) {
                         std::cout << "[ProcessNewBlock] Fork has " << mismatchCount
                                   << " hash mismatches - expected hashes are STALE, cancelling fork" << std::endl;

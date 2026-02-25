@@ -15,6 +15,8 @@
 #include <iostream>
 #include <algorithm>
 #include <set>
+#include <thread>
+#include <chrono>
 
 CChainState::CChainState() : pindexTip(nullptr), pdb(nullptr), pUTXOSet(nullptr) {
 }
@@ -934,6 +936,97 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
     }
 
     return true;
+}
+
+int CChainState::DisconnectToHeight(int targetHeight, CBlockchainDB& db, int batchSize) {
+    std::unique_lock<std::recursive_mutex> lock(cs_main);
+
+    if (!pindexTip || targetHeight < 0) return -1;
+    if (pindexTip->nHeight <= targetHeight) return 0;
+
+    // Checkpoint enforcement: mirror ActivateBestChain's checkpoint logic (lines 267-281)
+    if (Dilithion::g_chainParams) {
+        const Dilithion::CCheckpoint* checkpoint = Dilithion::g_chainParams->GetLastCheckpoint(pindexTip->nHeight);
+        if (checkpoint && targetHeight < checkpoint->nHeight) {
+            std::cerr << "[DisconnectToHeight] Cannot disconnect below checkpoint "
+                      << checkpoint->nHeight << " (target=" << targetHeight << ")" << std::endl;
+            return -1;
+        }
+    }
+
+    int totalDisconnected = 0;
+    int remaining = pindexTip->nHeight - targetHeight;
+
+    // WAL: Record deep disconnect intent for crash safety
+    if (m_reorgWAL) {
+        // Build disconnect hash list for WAL
+        std::vector<uint256> disconnectHashes;
+        disconnectHashes.reserve(remaining);
+        CBlockIndex* pWalk = pindexTip;
+        while (pWalk && pWalk->nHeight > targetHeight) {
+            disconnectHashes.push_back(pWalk->GetBlockHash());
+            pWalk = pWalk->pprev;
+        }
+        uint256 forkPointHash = pWalk ? pWalk->GetBlockHash() : uint256();
+
+        m_reorgWAL->BeginReorg(forkPointHash,
+                               pindexTip->GetBlockHash(),
+                               uint256(),  // target tip unknown (IBD will find it)
+                               disconnectHashes,
+                               std::vector<uint256>());  // connect blocks unknown
+        m_reorgWAL->EnterDisconnectPhase();
+    }
+
+    while (pindexTip && pindexTip->nHeight > targetHeight) {
+        int batchCount = 0;
+
+        while (pindexTip && pindexTip->nHeight > targetHeight &&
+               (batchSize == 0 || batchCount < batchSize)) {
+
+            if (!DisconnectTip(pindexTip, false /* force_skip_utxo */)) {
+                std::cerr << "[DisconnectToHeight] DisconnectTip failed at height "
+                          << pindexTip->nHeight << std::endl;
+                if (m_reorgWAL) m_reorgWAL->AbortReorg();
+                return -1;
+            }
+
+            // Move tip to previous block
+            pindexTip = pindexTip->pprev;
+            m_cachedHeight.store(pindexTip ? pindexTip->nHeight : -1, std::memory_order_release);
+            totalDisconnected++;
+            batchCount++;
+        }
+
+        // Persist progress after each batch
+        if (pindexTip) {
+            db.WriteBestBlock(pindexTip->GetBlockHash());
+        }
+        if (m_reorgWAL) {
+            m_reorgWAL->UpdateDisconnectProgress(static_cast<uint32_t>(totalDisconnected));
+        }
+
+        // Release lock between batches to let RPC/P2P threads make progress
+        if (batchSize > 0 && pindexTip && pindexTip->nHeight > targetHeight) {
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            lock.lock();
+        }
+
+        std::cout << "[DisconnectToHeight] Progress: " << totalDisconnected << "/"
+                  << remaining << " blocks disconnected" << std::endl;
+    }
+
+    // Final persist
+    if (pindexTip) {
+        db.WriteBestBlock(pindexTip->GetBlockHash());
+    }
+
+    // WAL: Mark disconnect phase complete (connect phase handled by normal IBD)
+    if (m_reorgWAL) {
+        m_reorgWAL->CompleteReorg();
+    }
+
+    return totalDisconnected;
 }
 
 std::vector<uint256> CChainState::GetBlocksAtHeight(int height) const {

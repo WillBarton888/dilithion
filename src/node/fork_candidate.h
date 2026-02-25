@@ -212,6 +212,24 @@ public:
     uint256 GetExpectedHashAtHeight(int32_t height) const;
 
     /**
+     * @brief Update an expected hash after discovering it was stale
+     *
+     * Called when a hash mismatch occurs and the headers manager provides
+     * a fresh hash for that height. This allows the fork to recover from
+     * stale expected hashes without cancellation.
+     *
+     * @param height Block height to update
+     * @param newHash Fresh storage hash from headers manager
+     */
+    void UpdateExpectedHash(int32_t height, const uint256& newHash);
+
+    /**
+     * @brief Get dynamic timeout based on fork size
+     * @return Timeout in seconds (60s base + 5s per 10 blocks, max 600s)
+     */
+    int GetTimeoutSeconds() const;
+
+    /**
      * @brief Add a MIK identity registration to the temporary fork cache
      *
      * Called when pre-validating a registration block. Later reference blocks
@@ -250,8 +268,7 @@ private:
 
     std::chrono::steady_clock::time_point m_lastBlockTime;  // For timeout detection
 
-    static constexpr int FORK_TIMEOUT_SECONDS = 60;  // Timeout for fork completion
-    static constexpr int MAX_HASH_MISMATCHES = 3;    // Cancel fork after this many mismatches
+    static constexpr int MAX_HASH_MISMATCHES = 10;    // Cancel fork after this many mismatches
 };
 
 #endif // DILITHION_NODE_FORK_CANDIDATE_H

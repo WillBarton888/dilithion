@@ -180,6 +180,23 @@ public:
     bool DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo = false);
 
     /**
+     * Disconnect blocks from current tip down to targetHeight.
+     * Used for deep fork recovery: disconnect wrong-fork blocks, then
+     * re-download the correct chain via normal IBD.
+     *
+     * Calls DisconnectTip() per block (proper UTXO/identity/mempool undo).
+     * Enforces checkpoint validation. Batches of batchSize with lock release
+     * between batches to avoid starving RPC/P2P threads.
+     * WAL records intent for crash safety.
+     *
+     * @param targetHeight Height to disconnect down to (this block stays)
+     * @param db Database reference for persisting progress
+     * @param batchSize Blocks per batch before releasing cs_main (0 = no batching)
+     * @return Number of blocks disconnected, or -1 on failure
+     */
+    int DisconnectToHeight(int targetHeight, CBlockchainDB& db, int batchSize = 100);
+
+    /**
      * Get blockchain height (height of current tip)
      * CRITICAL-1 FIX: Now implemented in .cpp with mutex protection
      */
