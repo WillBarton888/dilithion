@@ -111,6 +111,34 @@ uint32_t CalculateNextWorkRequired(
     int maxChange = 4
 );
 
+// Forward declaration for ASERT and GetNextWorkRequired
+class CBlockIndex;
+
+/**
+ * ASERT (Absolutely Scheduled Exponential Rising Targets) difficulty algorithm
+ *
+ * Computes the next difficulty target using an exponential formula anchored
+ * to a fixed reference block. Based on Bitcoin Cash's aserti3-2d (Nov 2020).
+ *
+ * Formula: next_target = anchor_target * 2^((time_delta - blockTime * height_delta) / halflife)
+ *
+ * Uses integer-only arithmetic with 16-bit fixed-point exponent and cubic
+ * polynomial approximation of 2^x for the fractional part.
+ *
+ * Timestamp domain: raw nTime (NOT MTP). Consistent with legacy difficulty code.
+ *
+ * @param pindexPrev  The parent block (tip of the chain being extended)
+ * @param nBlockTime  Timestamp of the new block (used for logging only; difficulty
+ *                    depends on parent, not the new block's timestamp)
+ * @param pindexAnchor The anchor block (at asertActivationHeight - 1)
+ * @return The next difficulty target in compact format (nBits)
+ */
+uint32_t GetNextWorkRequiredASERT(
+    const CBlockIndex* pindexPrev,
+    int64_t nBlockTime,
+    const CBlockIndex* pindexAnchor
+);
+
 /** Check if hash is less than target (satisfies PoW) */
 bool HashLessThan(const uint256& hash, const uint256& target);
 
@@ -119,9 +147,6 @@ bool HashLessThan(const uint256& hash, const uint256& target);
  * Returns true if work1 > work2 (using big-endian comparison)
  */
 bool ChainWorkGreaterThan(const uint256& work1, const uint256& work2);
-
-// Forward declaration
-class CBlockIndex;
 
 /**
  * Calculate the next required proof-of-work difficulty

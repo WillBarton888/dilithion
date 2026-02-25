@@ -67,6 +67,7 @@ public:
      * Uses pskip pointers for efficient traversal
      */
     CBlockIndex* GetAncestor(int height);
+    const CBlockIndex* GetAncestor(int height) const;
 
     enum BlockStatus : uint32_t {
         BLOCK_VALID_UNKNOWN      = 0,

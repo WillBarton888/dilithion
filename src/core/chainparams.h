@@ -154,6 +154,42 @@ public:
     // -1 = fix disabled
     int compactEncodingFixHeight;
 
+    // ASERT (Absolutely Scheduled Exponential Rising Targets) activation height
+    //
+    // Replaces periodic retarget + EDA with a per-block exponential formula.
+    // Based on Bitcoin Cash's aserti3-2d algorithm (active since Nov 2020).
+    //
+    // Every block's target is computed from a fixed anchor block:
+    //   exponent = (time_delta - blockTime * height_delta) / halflife
+    //   next_target = anchor_target * 2^exponent
+    //
+    // Key properties:
+    //   - Path-independent: depends only on anchor + current height/time
+    //   - No oscillation: smooth exponential response to hashrate changes
+    //   - No separate EDA needed: handles hashrate drops natively
+    //   - Symmetric response to increases and decreases
+    //
+    // Anchor block: The block at (asertActivationHeight - 1).
+    //   Its nBits, nTime, and nHeight define the reference point.
+    //   Deterministic: all nodes derive the same anchor from the active chain.
+    //
+    // Timestamp domain: Uses raw nTime (same as legacy GetNextWorkRequired).
+    //   MTP validation remains separate in CheckBlockTimestamp().
+    //
+    // Pre-activation: Legacy periodic retarget + EDA rules apply unchanged.
+    // Post-activation: Only ASERT executes; EDA and periodic retarget are dead code.
+    //
+    // 999999999 = ASERT disabled
+    int asertActivationHeight;
+
+    // ASERT halflife in seconds
+    // Controls responsiveness: time for difficulty to halve/double when blocks
+    // are consistently 2x too slow/fast. Scaled from BCH's 2-day halflife
+    // proportionally to block time.
+    // Mainnet (240s blocks): 34560s = 144 blocks * 240s = 9.6 hours
+    // Testnet (60s blocks):  8640s  = 144 blocks * 60s  = 2.4 hours
+    int64_t asertHalflife;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release

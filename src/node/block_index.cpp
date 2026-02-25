@@ -257,3 +257,7 @@ CBlockIndex* CBlockIndex::GetAncestor(int height) {
 
     return pindexWalk;
 }
+
+const CBlockIndex* CBlockIndex::GetAncestor(int height) const {
+    return const_cast<CBlockIndex*>(this)->GetAncestor(height);
+}

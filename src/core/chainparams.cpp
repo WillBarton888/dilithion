@@ -93,6 +93,12 @@ ChainParams ChainParams::Mainnet() {
     // Moved from 20160 to 18500 to stop ongoing chain degradation.
     params.compactEncodingFixHeight = 18500;
 
+    // ASERT difficulty algorithm activation
+    // Replaces periodic retarget + EDA with per-block exponential adjustment.
+    // Anchor block: height 23039 (the block at activationHeight - 1).
+    params.asertActivationHeight = 23040;
+    params.asertHalflife = 34560;  // 144 blocks * 240s = 9.6 hours
+
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
@@ -211,6 +217,10 @@ ChainParams ChainParams::Testnet() {
 
     // Compact encoding fix: always active on testnet (no legacy blocks to worry about)
     params.compactEncodingFixHeight = 0;
+
+    // ASERT difficulty algorithm (disabled on testnet for now)
+    params.asertActivationHeight = 999999999;
+    params.asertHalflife = 8640;  // 144 blocks * 60s = 2.4 hours
 
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted

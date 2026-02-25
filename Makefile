@@ -556,11 +556,16 @@ eda_test:
 	@$(CXX) -std=c++17 -O2 -o $@ src/test/eda_test.cpp
 	@echo "$(COLOR_GREEN)✓ EDA test built successfully$(COLOR_RESET)"
 
+asert_test:
+	@echo "$(COLOR_BLUE)[CXX+LINK]$(COLOR_RESET) src/test/asert_test.cpp (standalone)"
+	@$(CXX) -std=c++17 -O2 -o $@ src/test/asert_test.cpp
+	@echo "$(COLOR_GREEN)✓ ASERT test built successfully$(COLOR_RESET)"
+
 # ============================================================================
 # Run Tests
 # ============================================================================
 
-test: tests test_dilithion
+test: tests test_dilithion asert_test
 	@echo "$(COLOR_YELLOW)========================================$(COLOR_RESET)"
 	@echo "$(COLOR_YELLOW)Running Boost Unit Test Suite$(COLOR_RESET)"
 	@echo "$(COLOR_YELLOW)========================================$(COLOR_RESET)"
@@ -602,6 +607,9 @@ test: tests test_dilithion
 	@echo ""
 	@echo "$(COLOR_YELLOW)Running integration tests...$(COLOR_RESET)"
 	@./integration_tests
+	@echo ""
+	@echo "$(COLOR_YELLOW)Running ASERT difficulty tests...$(COLOR_RESET)"
+	@./asert_test
 	@echo ""
 	@echo "$(COLOR_GREEN)✓ All test suites complete$(COLOR_RESET)"
 

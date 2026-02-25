@@ -835,14 +835,271 @@ uint32_t CalculateNextWorkRequired(
     return nBitsNew;
 }
 
+// ============================================================================
+// ASERT (Absolutely Scheduled Exponential Rising Targets) Difficulty Algorithm
+// ============================================================================
+//
+// Based on Bitcoin Cash's aserti3-2d, active since November 2020.
+// Reference: https://upgradespecs.bitcoincashnode.org/2020-11-15-asert/
+//
+// Every block's target is computed from a fixed anchor block:
+//   next_target = anchor_target * 2^((time_delta - blockTime * height_delta) / halflife)
+//
+// Integer implementation:
+//   1. Compute exponent in 16-bit fixed point
+//   2. Split into integer shifts + fractional part [0, 65536)
+//   3. Fractional part: cubic polynomial approximation of 2^x
+//   4. Integer part: bit-shift the result
+//
+// Polynomial coefficients for 2^x, x in [0, 1), in 65536 fixed-point:
+//   2^x ≈ 1 + 0.695502049*x + 0.226270049*x^2 + 0.078232*x^3
+//   Error < 0.013% — sufficient for difficulty targets
+//
+// These constants are derived from BCH's reference implementation.
+// The polynomial is evaluated in 48-bit fixed-point to maintain precision:
+//   factor = 65536 + ((195766423245049 * f + 971821376 * f^2 + 5127 * f^3 + 2^47) >> 48)
+// ============================================================================
+
+/**
+ * Shift a uint256 left by a given number of bits (little-endian byte layout).
+ * Returns a new uint256. Bits shifted beyond byte 31 are lost.
+ */
+static uint256 ShiftTargetLeft(const uint256& val, int shift_bits) {
+    uint256 result;
+    memset(result.data, 0, 32);
+    if (shift_bits <= 0) return val;
+    if (shift_bits >= 256) return result;  // All bits shifted out
+
+    int byte_shift = shift_bits / 8;
+    int bit_shift = shift_bits % 8;
+
+    for (int i = 31; i >= byte_shift; i--) {
+        result.data[i] = val.data[i - byte_shift] << bit_shift;
+        if (bit_shift > 0 && (i - byte_shift) > 0) {
+            result.data[i] |= val.data[i - byte_shift - 1] >> (8 - bit_shift);
+        }
+    }
+    return result;
+}
+
+/**
+ * Shift a uint256 right by a given number of bits (little-endian byte layout).
+ * Returns a new uint256. Bits shifted below byte 0 are lost.
+ */
+static uint256 ShiftTargetRight(const uint256& val, int shift_bits) {
+    uint256 result;
+    memset(result.data, 0, 32);
+    if (shift_bits <= 0) return val;
+    if (shift_bits >= 256) return result;  // All bits shifted out
+
+    int byte_shift = shift_bits / 8;
+    int bit_shift = shift_bits % 8;
+
+    for (int i = 0; i + byte_shift < 32; i++) {
+        result.data[i] = val.data[i + byte_shift] >> bit_shift;
+        if (bit_shift > 0 && (i + byte_shift + 1) < 32) {
+            result.data[i] |= val.data[i + byte_shift + 1] << (8 - bit_shift);
+        }
+    }
+    return result;
+}
+
+/**
+ * Check if a uint256 is zero (all bytes are 0).
+ */
+static bool IsTargetZero(const uint256& val) {
+    for (int i = 0; i < 32; i++) {
+        if (val.data[i] != 0) return false;
+    }
+    return true;
+}
+
+uint32_t GetNextWorkRequiredASERT(
+    const CBlockIndex* pindexPrev,
+    int64_t /* nBlockTime */,
+    const CBlockIndex* pindexAnchor
+) {
+    // Anchor block data
+    const int64_t anchor_time = static_cast<int64_t>(pindexAnchor->nTime);
+    const int anchor_height = pindexAnchor->nHeight;
+    const uint32_t anchor_nBits = pindexAnchor->header.nBits;
+
+    // Chain parameters
+    const int64_t target_spacing = static_cast<int64_t>(Dilithion::g_chainParams->blockTime);
+    const int64_t halflife = Dilithion::g_chainParams->asertHalflife;
+
+    // Parent block data (the block we're building on top of)
+    const int64_t parent_time = static_cast<int64_t>(pindexPrev->nTime);
+    const int parent_height = pindexPrev->nHeight;
+
+    // Compute time and height deltas from anchor
+    const int64_t time_delta = parent_time - anchor_time;
+    const int64_t height_delta = static_cast<int64_t>(parent_height - anchor_height);
+
+    // Compute exponent in 16-bit fixed point:
+    //   exponent = ((time_delta - target_spacing * (height_delta + 1)) << 16) / halflife
+    //
+    // The (height_delta + 1) accounts for the fact that we're computing difficulty
+    // for the NEXT block (one beyond the parent).
+    const int64_t ideal_time = target_spacing * (height_delta + 1);
+    const int64_t exponent = ((time_delta - ideal_time) * 65536) / halflife;
+
+    // Split exponent into integer shifts and fractional part.
+    // We need floor division by 65536 to get shifts, and the non-negative
+    // remainder as frac. C++ division truncates toward zero, so for negative
+    // values we must adjust to get floor semantics.
+    //
+    // Example: exponent = -3
+    //   shifts = floor(-3 / 65536) = -1
+    //   frac   = -3 - (-1 * 65536) = 65533
+    //   2^(-3/65536) = 2^(-1 + 65533/65536) ≈ 2^(-0.0000458) ≈ 0.99997
+    //
+    // This avoids implementation-defined behavior of signed right shift.
+    int64_t shifts;
+    uint16_t frac;
+    if (exponent >= 0) {
+        shifts = exponent / 65536;
+        frac = static_cast<uint16_t>(exponent % 65536);
+    } else {
+        // For negative exponent, C++ truncates toward zero.
+        // floor(-3 / 65536) = -1, but (-3) / 65536 = 0 in C++.
+        // Adjust: if there's a remainder, subtract 1 from the quotient.
+        int64_t q = exponent / 65536;
+        int64_t r = exponent % 65536;
+        if (r < 0) {
+            q -= 1;
+            r += 65536;
+        }
+        shifts = q;
+        frac = static_cast<uint16_t>(r);
+    }
+
+    // Compute 2^(frac/65536) using cubic polynomial approximation.
+    // Coefficients from BCH's aserti3-2d reference implementation:
+    //   factor = 65536 + ((c1*f + c2*f^2 + c3*f^3 + round) >> 48)
+    //
+    // Overflow analysis (frac max = 65535):
+    //   c1*f     = 195766423245049 * 65535 ≈ 1.28e19 (fits uint64)
+    //   c2*f^2   = 971821376 * 65535^2     ≈ 4.17e18 (fits uint64)
+    //   c3*f^3   = 5127 * 65535^3          ≈ 1.44e18 (fits uint64)
+    //   Sum + round                        ≈ 1.84e19 (fits uint64, max 1.84e19)
+    const uint64_t f = frac;
+    const uint64_t f2 = f * f;           // max 4.29e9
+    const uint64_t f3 = f2 * f;          // max 2.81e14
+    const uint64_t term1 = 195766423245049ULL * f;   // max ~1.28e19
+    const uint64_t term2 = 971821376ULL * f2;        // max ~4.17e18
+    const uint64_t term3 = 5127ULL * f3;             // max ~1.44e18
+    const uint64_t round = 1ULL << 47;               // rounding term
+    const uint32_t factor = 65536 + static_cast<uint32_t>((term1 + term2 + term3 + round) >> 48);
+
+    // Multiply anchor target by the polynomial factor.
+    // factor is in [65536, 131071] representing [1.0, ~2.0) in fixed-point.
+    // The multiply produces a 320-bit result; dividing by 65536 (right-shift 16)
+    // gives the fractional-adjusted target.
+    uint256 anchor_target = CompactToBig(anchor_nBits);
+
+    uint8_t product[40];
+    memset(product, 0, 40);
+    if (!Multiply256x64(anchor_target, static_cast<uint64_t>(factor), product)) {
+        // Overflow in multiply — should not happen with factor < 131072
+        std::cerr << "[ASERT] ERROR: Overflow in target * factor multiplication" << std::endl;
+        return anchor_nBits;
+    }
+
+    // Extract uint256 from product, shifted right by 16 bits (2 bytes).
+    // This divides by 65536 to remove the fixed-point scaling of factor.
+    uint256 next_target;
+    memset(next_target.data, 0, 32);
+    for (int i = 0; i < 32; i++) {
+        next_target.data[i] = product[i + 2];
+    }
+
+    // Apply integer part of the exponent via bit shifting.
+    // shifts > 0: target gets bigger (easier) — blocks behind schedule
+    // shifts < 0: target gets smaller (harder) — blocks ahead of schedule
+    if (shifts > 0) {
+        // Cap to prevent overflow — if shift would exceed 256 bits, clamp to max
+        if (shifts > 255) {
+            uint32_t result = MAX_DIFFICULTY_BITS;
+            std::cout << "[ASERT] Clamped to max difficulty (extreme positive shift)" << std::endl;
+            return result;
+        }
+        next_target = ShiftTargetLeft(next_target, static_cast<int>(shifts));
+    } else if (shifts < 0) {
+        int64_t abs_shifts = -shifts;
+        // Cap to prevent underflow — if shift would zero out all bits, clamp to min
+        if (abs_shifts > 255) {
+            std::cout << "[ASERT] Clamped to min difficulty (extreme negative shift)" << std::endl;
+            return MIN_DIFFICULTY_BITS;
+        }
+        next_target = ShiftTargetRight(next_target, static_cast<int>(abs_shifts));
+    }
+
+    // Check for zero target (underflow from right-shifting)
+    if (IsTargetZero(next_target)) {
+        std::cout << "[ASERT] Target underflowed to zero, using minimum difficulty" << std::endl;
+        return MIN_DIFFICULTY_BITS;
+    }
+
+    // Convert to compact format and apply bounds
+    uint32_t nBitsNew = BigToCompact(next_target);
+
+    // Fix sign bit collision (always active post-ASERT since compactEncodingFixHeight < asertActivationHeight)
+    nBitsNew = FixCompactEncoding(nBitsNew);
+
+    // Enforce bounds
+    if (nBitsNew < MIN_DIFFICULTY_BITS) nBitsNew = MIN_DIFFICULTY_BITS;
+    if (nBitsNew > MAX_DIFFICULTY_BITS) nBitsNew = MAX_DIFFICULTY_BITS;
+
+    // Logging
+    int newHeight = pindexPrev->nHeight + 1;
+    std::cout << "[ASERT] Height " << newHeight
+              << " | time_delta=" << time_delta << "s"
+              << " ideal=" << ideal_time << "s"
+              << " drift=" << (time_delta - ideal_time) << "s"
+              << " | shifts=" << shifts << " frac=" << frac
+              << " | anchor_nBits=0x" << std::hex << anchor_nBits
+              << " new_nBits=0x" << nBitsNew << std::dec << std::endl;
+
+    return nBitsNew;
+}
+
 uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) {
     // Genesis block (or no previous block)
     if (pindexLast == nullptr) {
         return Dilithion::g_chainParams->genesisNBits;
     }
 
-    // Get difficulty adjustment interval (fork-aware)
     int newBlockHeight = pindexLast->nHeight + 1;
+
+    // ====================================================================
+    // ASERT dispatch: if activated, use ASERT for all blocks at/above
+    // activation height. Legacy periodic retarget + EDA are dead code
+    // post-activation.
+    // ====================================================================
+    int asertActivation = Dilithion::g_chainParams->asertActivationHeight;
+    if (asertActivation > 0 && newBlockHeight >= asertActivation) {
+        // Find anchor block via skiplist (O(log N), no mutable state).
+        const int anchorHeight = asertActivation - 1;
+        const CBlockIndex* pindexAnchor = pindexLast->GetAncestor(anchorHeight);
+
+        if (pindexAnchor == nullptr) {
+            // Defensive fallback: maintain previous block's difficulty.
+            // This is fail-closed (no permissive difficulty change) rather than
+            // fail-open (returning genesis difficulty which could be wildly wrong).
+            std::cerr << "[ASERT] CRITICAL: Cannot find anchor block at height "
+                      << anchorHeight << " — using previous difficulty" << std::endl;
+            return pindexLast->header.nBits;
+        }
+        return GetNextWorkRequiredASERT(pindexLast, nBlockTime, pindexAnchor);
+    }
+
+    // ====================================================================
+    // Legacy difficulty algorithm (pre-ASERT)
+    // Periodic retarget every N blocks + Emergency Difficulty Adjustment
+    // ====================================================================
+
+    // Get difficulty adjustment interval (fork-aware)
     bool useV2 = (newBlockHeight >= Dilithion::g_chainParams->difficultyForkHeight);
     int64_t nInterval = useV2
         ? static_cast<int64_t>(Dilithion::g_chainParams->difficultyAdjustmentV2)
@@ -874,7 +1131,6 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         //     return adjusted nBits (capped at MAX_DIFFICULTY_BITS)
         //
         int edaActivation = Dilithion::g_chainParams->edaActivationHeight;
-        int newBlockHeight = pindexLast->nHeight + 1;
 
         if (nBlockTime > 0 && edaActivation >= 0 && newBlockHeight >= edaActivation) {
             int64_t blockTime = static_cast<int64_t>(Dilithion::g_chainParams->blockTime);
