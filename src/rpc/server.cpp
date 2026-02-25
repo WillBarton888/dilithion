@@ -3922,6 +3922,18 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
             throw std::runtime_error("Failed to get MIK public key for registration");
         }
         std::cout << "[RPC] MIK not registered - will include full pubkey in coinbase" << std::endl;
+
+        // DFMP v3.0: Mine registration PoW nonce (required at/above v3 activation height)
+        int dfmpV3Height = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpV3ActivationHeight : 0;
+        if (static_cast<int>(nHeight) >= dfmpV3Height) {
+            std::cout << "[RPC] Mining registration PoW (this may take 10-15 minutes)..." << std::endl;
+            uint64_t regNonce = 0;
+            if (!DFMP::MineRegistrationPoW(mikData.pubkey, DFMP::REGISTRATION_POW_BITS, regNonce)) {
+                throw std::runtime_error("Failed to mine registration PoW nonce");
+            }
+            mikData.registrationNonce = regNonce;
+        }
     }
 
     // Sign with MIK (commits to prevHash, height, timestamp)

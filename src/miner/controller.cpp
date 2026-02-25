@@ -704,12 +704,12 @@ CTransactionRef CMiningController::CreateCoinbaseTransaction(
     coinbaseIn.scriptSig.insert(coinbaseIn.scriptSig.end(),
                                  coinbaseMsg.begin(), coinbaseMsg.end());
 
-    // DFMP v2.0: Add MIK data to scriptSig if present
+    // DFMP v2.0/v3.0: Add MIK data to scriptSig if present
     if (mikData.hasMIK) {
         std::vector<uint8_t> mikScriptData;
         if (mikData.isRegistration) {
-            // Registration format: [marker][type][pubkey][signature]
-            if (!DFMP::BuildMIKScriptSigRegistration(mikData.pubkey, mikData.signature, mikScriptData)) {
+            // DFMP v3.0: Registration format with PoW nonce: [marker][type][pubkey][signature][nonce]
+            if (!DFMP::BuildMIKScriptSigRegistration(mikData.pubkey, mikData.signature, mikData.registrationNonce, mikScriptData)) {
                 throw std::runtime_error("Failed to build MIK registration scriptSig data");
             }
         } else {

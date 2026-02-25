@@ -860,6 +860,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                                 s_regNonceMined.store(true);
                             } else {
                                 std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
+                                regNonce = UINT64_MAX;  // Sentinel: skip registration (prevents nonce=0 template)
                             }
                             s_regPowInProgress.store(false);
                         } else {

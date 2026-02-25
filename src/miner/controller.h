@@ -38,6 +38,9 @@ struct CMIKCoinbaseData {
 
     /** MIK signature (3309 bytes) */
     std::vector<uint8_t> signature;
+
+    /** DFMP v3.0: Registration PoW nonce (only for registration blocks) */
+    uint64_t registrationNonce = 0;
 };
 
 /**
