@@ -249,8 +249,10 @@ bool CTransaction::CheckBasicStructure() const {
     
     // Coinbase transactions have special rules
     if (IsCoinBase()) {
-        // Coinbase scriptSig must be between 2 and 100 bytes
-        if (vin[0].scriptSig.size() < 2 || vin[0].scriptSig.size() > 100) {
+        // Coinbase scriptSig must be between 2 and 6000 bytes
+        // DFMP v2.0: Increased from 100 to 6000 to accommodate MIK data
+        // MIK registration: marker(1) + type(1) + pubkey(1952) + signature(3309) = 5263 bytes
+        if (vin[0].scriptSig.size() < 2 || vin[0].scriptSig.size() > 6000) {
             return false;
         }
     } else {

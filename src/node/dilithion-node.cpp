@@ -882,6 +882,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 // MIK already registered - use reference format
                 if (DFMP::BuildMIKScriptSigReference(mikIdentity, mikSignature, mikData)) {
                     scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
+                    mikDataIncluded = true;
                     if (verbose) {
                         std::cout << "  MIK: Reference (identity already registered)" << std::endl;
                     }
@@ -892,6 +893,22 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         }
     } else {
         std::cerr << "[Mining] WARNING: No MIK identity in wallet" << std::endl;
+    }
+
+    // BUG #257 FIX: Refuse to build template without MIK data for post-assume-valid heights.
+    // Race condition: if registration PoW is in progress on another thread, MIK data
+    // is skipped (regNonce = UINT64_MAX sentinel). Mining with such a template produces
+    // blocks that fail CheckProofOfWorkDFMP() with "Missing or malformed MIK data".
+    // Return nullopt so the miner keeps its previous valid template.
+    if (!mikDataIncluded && Dilithion::g_chainParams) {
+        int assumeValidHeight = Dilithion::g_chainParams->dfmpAssumeValidHeight;
+        if (static_cast<int>(nHeight) > assumeValidHeight) {
+            std::cerr << "[Mining] WARNING: Template rejected - no MIK data for height "
+                      << nHeight << " (required above assume-valid height " << assumeValidHeight << ")" << std::endl;
+            std::cerr << "[Mining] This can happen during MIK registration PoW mining. "
+                      << "Template will be rebuilt once registration completes." << std::endl;
+            return std::nullopt;
+        }
     }
 
     coinbaseIn.scriptSig = scriptSig;
