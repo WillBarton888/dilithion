@@ -5785,15 +5785,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 // ========================================================================
-                // Fork detection: Pause mining during fork resolution
+                // Fork detection: Pause RandomX mining during fork resolution
                 // ========================================================================
                 // When a competing chain is detected (headers with unknown parent),
-                // pause mining to avoid wasting hashpower on potentially orphaned blocks.
-                // Mining resumes automatically when fork is resolved.
-                if (g_node_context.fork_detected.load() && (miner.IsMining() || vdf_miner.IsRunning()) && !mining_paused_fork) {
-                    std::cout << "[Mining] PAUSING: Fork detected - resolving competing chain..." << std::endl;
+                // pause RandomX mining to avoid wasting hashpower on potentially orphaned blocks.
+                // VDF miner is NOT stopped: VDF blocks are deterministic (no wasted work),
+                // sequential (can't parallelize), and can help resolve the fork by advancing
+                // the chain. Stopping VDF miners during fork detection caused chain stalls
+                // when multiple VDF miners produced simultaneous blocks.
+                if (g_node_context.fork_detected.load() && miner.IsMining() && !mining_paused_fork) {
+                    std::cout << "[Mining] PAUSING RandomX: Fork detected - resolving competing chain..." << std::endl;
                     std::cout << "[Mining] Mining will resume automatically when fork is resolved" << std::endl;
-                    if (vdf_miner.IsRunning()) vdf_miner.Stop();
                     miner.StopMining();
                     mining_paused_fork = true;
                 }
