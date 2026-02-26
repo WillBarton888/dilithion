@@ -408,6 +408,28 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
         return false;
     }
 
+    // Step 2b: Validate nBits matches expected ASERT difficulty
+    // Without this check, blocks with wrong difficulty (easier nBits) pass PoW
+    // validation but diverge from consensus.
+    {
+        CBlockIndex* pindexParent = g_chainstate.GetTip();
+        // If the fork block's parent height is below current tip, find the right ancestor
+        if (pindexParent && pindexParent->nHeight >= forkBlock.height) {
+            pindexParent = pindexParent->GetAncestor(forkBlock.height - 1);
+        }
+        if (pindexParent && pindexParent->nHeight == forkBlock.height - 1) {
+            uint32_t expectedNBits = GetNextWorkRequired(pindexParent, forkBlock.block.nTime);
+            if (forkBlock.block.nBits != expectedNBits) {
+                forkBlock.status = ForkBlockStatus::INVALID;
+                forkBlock.invalidReason = "Wrong difficulty (nBits mismatch)";
+                std::cerr << "[ForkManager] Block " << forkBlock.height
+                          << " nBits mismatch: block=0x" << std::hex << forkBlock.block.nBits
+                          << " expected=0x" << expectedNBits << std::dec << std::endl;
+                return false;
+            }
+        }
+    }
+
     forkBlock.status = ForkBlockStatus::POW_VALID;
 
     // Step 3: Validate MIK using fork identity cache
