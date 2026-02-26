@@ -411,21 +411,26 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
     // Step 2b: Validate nBits matches expected ASERT difficulty
     // Without this check, blocks with wrong difficulty (easier nBits) pass PoW
     // validation but diverge from consensus.
+    // Skip for blocks at or below checkpoint height (those blocks are trusted).
     {
-        CBlockIndex* pindexParent = g_chainstate.GetTip();
-        // If the fork block's parent height is below current tip, find the right ancestor
-        if (pindexParent && pindexParent->nHeight >= forkBlock.height) {
-            pindexParent = pindexParent->GetAncestor(forkBlock.height - 1);
-        }
-        if (pindexParent && pindexParent->nHeight == forkBlock.height - 1) {
-            uint32_t expectedNBits = GetNextWorkRequired(pindexParent, forkBlock.block.nTime);
-            if (forkBlock.block.nBits != expectedNBits) {
-                forkBlock.status = ForkBlockStatus::INVALID;
-                forkBlock.invalidReason = "Wrong difficulty (nBits mismatch)";
-                std::cerr << "[ForkManager] Block " << forkBlock.height
-                          << " nBits mismatch: block=0x" << std::hex << forkBlock.block.nBits
-                          << " expected=0x" << expectedNBits << std::dec << std::endl;
-                return false;
+        int highestCheckpoint = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
+        if (forkBlock.height > highestCheckpoint) {
+            CBlockIndex* pindexParent = g_chainstate.GetTip();
+            // If the fork block's parent height is below current tip, find the right ancestor
+            if (pindexParent && pindexParent->nHeight >= forkBlock.height) {
+                pindexParent = pindexParent->GetAncestor(forkBlock.height - 1);
+            }
+            if (pindexParent && pindexParent->nHeight == forkBlock.height - 1) {
+                uint32_t expectedNBits = GetNextWorkRequired(pindexParent, forkBlock.block.nTime);
+                if (forkBlock.block.nBits != expectedNBits) {
+                    forkBlock.status = ForkBlockStatus::INVALID;
+                    forkBlock.invalidReason = "Wrong difficulty (nBits mismatch)";
+                    std::cerr << "[ForkManager] Block " << forkBlock.height
+                              << " nBits mismatch: block=0x" << std::hex << forkBlock.block.nBits
+                              << " expected=0x" << expectedNBits << std::dec << std::endl;
+                    return false;
+                }
             }
         }
     }
