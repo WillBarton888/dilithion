@@ -56,7 +56,11 @@ double CalculateFeeRate(CAmount fee_paid, size_t tx_size) {
 }
 
 size_t EstimateDilithiumTxSize(size_t num_inputs, size_t num_outputs, size_t extra_data_size) {
-    return 42 + (num_inputs * 3782) + (num_outputs * 40) + extra_data_size;
+    // Base: version(4) + input_count_varint(1) + output_count_varint(1) + locktime(4) = 10
+    // Per input: prevout_txid(32) + prevout_n(4) + scriptSig_varint(3) + scriptSig(5265) + sequence(4) = 5308
+    //   scriptSig = sig_len(2) + Dilithium3_sig(3309) + pk_len(2) + Dilithium3_pk(1952) = 5265
+    // Per output: value(8) + scriptPubKey_varint(1) + P2PKH_scriptPubKey(25) = 34
+    return 10 + (num_inputs * 5308) + (num_outputs * 34) + extra_data_size;
 }
 
 }

@@ -3507,12 +3507,35 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
         return false;
     }
 
-    // Select coins
+    // Select coins with iterative fee adjustment
+    // More inputs = larger tx = higher fee, which may require more inputs
     std::vector<CWalletTx> selected_coins;
     CAmount total_selected = 0;
 
     if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error)) {
         return false;
+    }
+
+    // Recalculate fee based on actual input count (converges in 1-2 iterations)
+    for (int iter = 0; iter < 5; ++iter) {
+        size_t num_outputs = 2; // recipient + potential change
+        size_t est_size = Consensus::EstimateDilithiumTxSize(selected_coins.size(), num_outputs);
+        CAmount needed_fee = Consensus::CalculateMinFee(est_size);
+
+        if (needed_fee <= fee) break; // Current fee is sufficient
+
+        fee = needed_fee;
+        total_needed = amount + fee;
+        if (total_needed < amount) {
+            error = "Amount + fee overflow";
+            return false;
+        }
+
+        selected_coins.clear();
+        total_selected = 0;
+        if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error)) {
+            return false;
+        }
     }
 
     // WALLET-006 FIX: Lock selected coins to prevent concurrent transaction conflicts

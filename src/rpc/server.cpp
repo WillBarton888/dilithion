@@ -2166,8 +2166,7 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
         throw std::runtime_error("Invalid Dilithion address: " + address_str);
     }
 
-    // Create transaction with size-based fee estimation (two-pass)
-    // Pass 1: Estimate fee assuming 2 inputs (covers ~90% of transactions)
+    // Create transaction - fee is auto-adjusted internally based on actual input count
     unsigned int currentHeight = m_chainstate->GetHeight();
     size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
     CAmount fee = Consensus::CalculateMinFee(est_size);
@@ -2177,19 +2176,6 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
     if (!m_wallet->CreateTransaction(recipient_address, amount, fee,
                                      *m_utxo_set, currentHeight, tx, error)) {
         throw std::runtime_error("Failed to create transaction: " + error);
-    }
-
-    // Pass 2: Check actual tx size and rebuild if fee doesn't match
-    size_t actual_size = tx->GetSerializedSize();
-    CAmount exact_fee = Consensus::CalculateMinFee(actual_size);
-    if (fee != exact_fee) {
-        // Rebuild with exact fee for the actual transaction size
-        tx.reset();
-        fee = exact_fee;
-        if (!m_wallet->CreateTransaction(recipient_address, amount, fee,
-                                         *m_utxo_set, currentHeight, tx, error)) {
-            throw std::runtime_error("Failed to create transaction: " + error);
-        }
     }
 
     // Send transaction
@@ -2264,9 +2250,37 @@ std::string CRPCServer::RPC_EstimateSendFee(const std::string& params) {
         throw std::runtime_error("Invalid Dilithion address: " + address_str);
     }
 
-    // Estimate fee based on likely tx size (use 2-input estimate, then refine)
-    size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
-    CAmount fee = Consensus::CalculateMinFee(est_size);
+    // Estimate fee by doing a dry-run coin selection to count actual inputs needed
+    size_t est_inputs = 2;
+    CAmount fee = Consensus::CalculateMinFee(Consensus::EstimateDilithiumTxSize(2, 2));
+
+    if (m_chainstate) {
+        unsigned int currentHeight = m_chainstate->GetHeight();
+        // Iteratively select coins and refine fee estimate
+        for (int iter = 0; iter < 5; ++iter) {
+            std::vector<CWalletTx> est_coins;
+            CAmount est_total = 0;
+            std::string est_error;
+            CAmount total_needed = amount + fee;
+            if (m_wallet->SelectCoins(total_needed, est_coins, est_total,
+                                      *m_utxo_set, currentHeight, est_error)) {
+                size_t est_size = Consensus::EstimateDilithiumTxSize(est_coins.size(), 2);
+                CAmount needed_fee = Consensus::CalculateMinFee(est_size);
+                if (needed_fee <= fee) {
+                    // Fee is sufficient for this input count
+                    est_inputs = est_coins.size();
+                    break;
+                }
+                fee = needed_fee;
+                est_inputs = est_coins.size();
+            } else {
+                break; // Insufficient funds, will be caught below
+            }
+        }
+    }
+
+    // Final fee based on estimated input count
+    fee = Consensus::CalculateMinFee(Consensus::EstimateDilithiumTxSize(est_inputs, 2));
 
     // Check balance
     CAmount balance = m_wallet->GetBalance();

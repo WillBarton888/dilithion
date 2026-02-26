@@ -23,9 +23,9 @@ const OP_HASH160 = 0xA9;
 const OP_EQUALVERIFY = 0x88;
 const OP_CHECKSIG = 0xAC;
 
-// Fee calculation constants
-const MIN_FEE_RATE = 500;       // ions per KB
-const DEFAULT_FEE_RATE = 1000;  // ions per KB
+// Fee calculation constants (must match consensus: FEE_PER_BYTE = 5 ions/byte = 5000 ions/KB)
+const MIN_FEE_RATE = 5000;      // ions per KB (consensus minimum)
+const DEFAULT_FEE_RATE = 5000;  // ions per KB (matches FEE_PER_BYTE * 1000)
 const DUST_THRESHOLD = 546;     // Minimum output value (ions)
 
 /**

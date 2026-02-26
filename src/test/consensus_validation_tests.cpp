@@ -239,17 +239,19 @@ BOOST_AUTO_TEST_CASE(estimate_dilithium_tx_size) {
 
     // Test single input, single output (typical payment)
     size_t est_size = EstimateDilithiumTxSize(1, 1, 0);
-    // Formula: 42 + (1 * 3782) + (1 * 40) + 0 = 3864 bytes
-    BOOST_CHECK_EQUAL(est_size, 42 + 3782 + 40);
+    // Formula: 10 + (1 * 5308) + (1 * 34) + 0 = 5352 bytes
+    // Per input: prevout(36) + varint(3) + scriptSig(5265) + sequence(4) = 5308
+    //   scriptSig: sig_len(2) + Dilithium3_sig(3309) + pk_len(2) + pk(1952) = 5265
+    BOOST_CHECK_EQUAL(est_size, 10 + 5308 + 34);
 
     // Test multiple inputs/outputs
     est_size = EstimateDilithiumTxSize(2, 2, 0);
-    // Formula: 42 + (2 * 3782) + (2 * 40) + 0 = 7686 bytes
-    BOOST_CHECK_EQUAL(est_size, 42 + (2 * 3782) + (2 * 40));
+    // Formula: 10 + (2 * 5308) + (2 * 34) + 0 = 10694 bytes
+    BOOST_CHECK_EQUAL(est_size, 10 + (2 * 5308) + (2 * 34));
 
     // Test with extra data
     est_size = EstimateDilithiumTxSize(1, 1, 100);
-    BOOST_CHECK_EQUAL(est_size, 42 + 3782 + 40 + 100);
+    BOOST_CHECK_EQUAL(est_size, 10 + 5308 + 34 + 100);
 }
 
 // ============================================================================
@@ -540,15 +542,15 @@ BOOST_AUTO_TEST_CASE(estimate_dilithium_tx_size_multiple_scenarios) {
 
     // Single input/output (minimum transaction)
     size_t min_size = EstimateDilithiumTxSize(1, 1, 0);
-    BOOST_CHECK_EQUAL(min_size, 42 + 3782 + 40);  // 3864 bytes
+    BOOST_CHECK_EQUAL(min_size, 10 + 5308 + 34);  // 5352 bytes
 
     // Typical payment (2 inputs, 2 outputs - payment + change)
     size_t typical = EstimateDilithiumTxSize(2, 2, 0);
-    BOOST_CHECK_EQUAL(typical, 42 + (2 * 3782) + (2 * 40));  // 7686 bytes
+    BOOST_CHECK_EQUAL(typical, 10 + (2 * 5308) + (2 * 34));  // 10694 bytes
 
     // Large transaction (10 inputs, 10 outputs)
     size_t large = EstimateDilithiumTxSize(10, 10, 0);
-    BOOST_CHECK_EQUAL(large, 42 + (10 * 3782) + (10 * 40));  // 38,262 bytes
+    BOOST_CHECK_EQUAL(large, 10 + (10 * 5308) + (10 * 34));  // 53420 bytes
 }
 
 /**
