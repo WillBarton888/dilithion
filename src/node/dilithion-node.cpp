@@ -87,6 +87,7 @@
 #include <atomic>
 #include <optional>
 #include <queue>  // CRITICAL-2 FIX: For iterative orphan resolution
+#include <deque>  // Tip divergence: Rolling window for self-mined block ratio
 #include <set>  // BUG #109 FIX: For tracking spent outpoints in block template
 #include <filesystem>  // BUG #56: For wallet file existence check
 #include <unordered_map>  // BUG #149: For tracking requested parent blocks
@@ -5458,6 +5459,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         static constexpr int SOLO_WARNING_THRESHOLD = 5;   // Warn after 5 consecutive self-mined blocks
         static constexpr int SOLO_PAUSE_THRESHOLD = 10;    // Pause after 10 consecutive self-mined blocks
 
+        // Tip divergence detection state - compares our tip hash vs peers' tips
+        // Catches the case where we have peers but are on a different chain
+        static auto divergence_since = std::chrono::steady_clock::time_point{};
+        static bool mining_paused_tip_divergence = false;
+        static bool tip_divergence_warned = false;
+        static auto last_divergence_check = std::chrono::steady_clock::now();
+        static constexpr int TIP_CHECK_INTERVAL_S = 30;    // Check every 30 seconds
+        static constexpr int TIP_DIVERGE_WARN_S = 120;     // Warn after 2 minutes
+        static constexpr int TIP_DIVERGE_PAUSE_S = 300;    // Pause after 5 minutes
+        static constexpr int TIP_FRESHNESS_S = 300;        // Ignore stale peer data (>5 min old)
+
+        // Rolling window for self-mined block ratio (Phase 3)
+        struct RecentBlock { bool self_mined; };
+        static std::deque<RecentBlock> recent_blocks;
+        static constexpr size_t RECENT_BLOCK_WINDOW = 20;
+        static constexpr float SOLO_WARN_RATIO = 0.80f;
+        static constexpr float SOLO_PAUSE_RATIO = 0.90f;
+
         // Main loop
         while (g_node_state.running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -5493,7 +5512,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // Restart mining if appropriate (skip if paused or VDF miner handles itself)
                 if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()
                     && !mining_paused_no_peers && !mining_paused_fork && !mining_paused_consensus_fork
-                    && !vdf_miner.IsRunning()) {
+                    && !mining_paused_tip_divergence && !vdf_miner.IsRunning()) {
 
                     if (shouldUseVDF(next_height)) {
                         // Switch to VDF mining (if not already running)
@@ -5845,8 +5864,44 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 }
 
                                 if (!tipMinerPkh.empty() && !ourPkh.empty()) {
-                                    if (tipMinerPkh == ourPkh) {
-                                        // We mined this block
+                                    bool is_self_mined = (tipMinerPkh == ourPkh);
+
+                                    // Rolling window: track self-mined ratio over last N blocks
+                                    recent_blocks.push_back({is_self_mined});
+                                    if (recent_blocks.size() > RECENT_BLOCK_WINDOW) {
+                                        recent_blocks.pop_front();
+                                    }
+
+                                    // Check rolling window ratio (independent of sequential counter)
+                                    if (recent_blocks.size() >= 10) {
+                                        int self_count = 0;
+                                        for (const auto& rb : recent_blocks) {
+                                            if (rb.self_mined) self_count++;
+                                        }
+                                        float ratio = static_cast<float>(self_count) / static_cast<float>(recent_blocks.size());
+                                        size_t peer_cnt = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
+
+                                        if (ratio >= SOLO_PAUSE_RATIO && peer_cnt > 0
+                                            && !mining_paused_consensus_fork) {
+                                            std::cout << std::endl;
+                                            std::cout << "[Mining] WARNING: " << static_cast<int>(ratio * 100)
+                                                      << "% of last " << recent_blocks.size()
+                                                      << " blocks are self-mined (with " << peer_cnt << " peers)" << std::endl;
+                                            std::cout << "[Mining] This strongly suggests a fork - pausing mining" << std::endl;
+                                            std::cout << std::endl;
+                                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
+                                            if (miner.IsMining()) miner.StopMining();
+                                            mining_paused_consensus_fork = true;
+                                        } else if (ratio >= SOLO_WARN_RATIO && peer_cnt > 0
+                                                   && !solo_warning_shown) {
+                                            std::cout << "[Mining] WARNING: " << static_cast<int>(ratio * 100)
+                                                      << "% of last " << recent_blocks.size()
+                                                      << " blocks are self-mined" << std::endl;
+                                        }
+                                    }
+
+                                    if (is_self_mined) {
+                                        // Sequential counter (existing logic)
                                         consecutive_self_mined++;
 
                                         if (consecutive_self_mined >= SOLO_PAUSE_THRESHOLD
@@ -5912,6 +5967,137 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ========================================================================
+            // Tip Divergence Detection: Compare our chain tip vs peers' chain tips
+            // ========================================================================
+            // Detects when our tip hash diverges from all connected peers, even when
+            // peers are connected and some blocks arrive. This catches the case where
+            // we're mining on a minority fork (e.g. Captain Brown's scenario: 3 peers
+            // connected, 26 blocks mined, 0 on main chain).
+            {
+                auto now_div = std::chrono::steady_clock::now();
+                auto secs_since_check = std::chrono::duration_cast<std::chrono::seconds>(
+                    now_div - last_divergence_check).count();
+
+                if (secs_since_check >= TIP_CHECK_INTERVAL_S
+                    && g_node_state.mining_enabled.load()
+                    && !IsInitialBlockDownload()) {
+
+                    last_divergence_check = now_div;
+
+                    CBlockIndex* pTip = g_chainstate.GetTip();
+                    if (pTip && g_node_context.peer_manager) {
+                        uint256 our_hash = pTip->GetBlockHash();
+                        int our_height = pTip->nHeight;
+
+                        auto connected_peers = g_node_context.peer_manager->GetConnectedPeers();
+                        int peers_with_data = 0;
+                        int peers_at_our_level = 0;
+                        int peers_agree = 0;
+
+                        for (const auto& peer : connected_peers) {
+                            if (peer->best_known_hash.IsNull()) continue;
+
+                            // Skip peers with stale tip data
+                            auto tip_age = std::chrono::duration_cast<std::chrono::seconds>(
+                                now_div - peer->last_tip_update).count();
+                            if (tip_age > TIP_FRESHNESS_S) continue;
+
+                            peers_with_data++;
+
+                            // Only compare peers within ±2 of our height
+                            if (std::abs(peer->best_known_height - our_height) <= 2) {
+                                peers_at_our_level++;
+
+                                if (peer->best_known_hash == our_hash) {
+                                    peers_agree++;
+                                } else {
+                                    // Check if peer is slightly behind us on the same chain
+                                    CBlockIndex* pidx = g_chainstate.GetBlockIndex(peer->best_known_hash);
+                                    if (pidx && pidx->nHeight <= pTip->nHeight) {
+                                        CBlockIndex* atHeight = pTip->GetAncestor(pidx->nHeight);
+                                        if (atHeight == pidx) {
+                                            peers_agree++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Only assess if we have meaningful data
+                        if (peers_with_data >= 1 && peers_at_our_level >= 1) {
+                            if (peers_agree == 0) {
+                                // DIVERGENCE: No peer at our height shares our chain
+                                if (divergence_since == std::chrono::steady_clock::time_point{}) {
+                                    divergence_since = now_div;
+                                }
+                                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                                    now_div - divergence_since).count();
+
+                                if (elapsed >= TIP_DIVERGE_PAUSE_S && !mining_paused_tip_divergence) {
+                                    std::cout << std::endl;
+                                    std::cout << "[Mining] ================================================" << std::endl;
+                                    std::cout << "[Mining] CRITICAL: Chain tip differs from ALL peers" << std::endl;
+                                    std::cout << "[Mining] for " << elapsed << " seconds (" << peers_at_our_level
+                                              << " peers at height ~" << our_height << ", 0 agree)" << std::endl;
+                                    std::cout << "[Mining] You appear to be mining on a MINORITY FORK" << std::endl;
+                                    std::cout << "[Mining] Mined blocks will NOT be accepted by the network" << std::endl;
+                                    std::cout << "[Mining] ================================================" << std::endl;
+                                    std::cout << "[Mining] Mining PAUSED - will resume when chain agreement is restored" << std::endl;
+                                    std::cout << "[Mining] Please check your version at dilithion.org" << std::endl;
+                                    std::cout << "[Mining] ================================================" << std::endl;
+                                    std::cout << std::endl;
+
+                                    if (vdf_miner.IsRunning()) vdf_miner.Stop();
+                                    if (miner.IsMining()) miner.StopMining();
+                                    mining_paused_tip_divergence = true;
+                                    g_node_context.tip_diverged.store(true);
+
+                                } else if (elapsed >= TIP_DIVERGE_WARN_S && !tip_divergence_warned) {
+                                    std::cout << std::endl;
+                                    std::cout << "[Mining] WARNING: No peers share your chain tip for "
+                                              << elapsed << " seconds" << std::endl;
+                                    std::cout << "[Mining] " << peers_at_our_level << " peer(s) at height ~"
+                                              << our_height << " have different chain tips" << std::endl;
+                                    std::cout << "[Mining] If this persists, mining will be paused in "
+                                              << (TIP_DIVERGE_PAUSE_S - elapsed) << "s" << std::endl;
+                                    std::cout << std::endl;
+                                    tip_divergence_warned = true;
+                                }
+                            } else {
+                                // Agreement found - clear divergence state
+                                if (mining_paused_tip_divergence) {
+                                    std::cout << std::endl;
+                                    std::cout << "[Mining] ================================================" << std::endl;
+                                    std::cout << "[Mining] Peer chain agreement restored! (" << peers_agree
+                                              << "/" << peers_at_our_level << " peers agree)" << std::endl;
+                                    std::cout << "[Mining] Resuming mining..." << std::endl;
+                                    std::cout << "[Mining] ================================================" << std::endl;
+                                    std::cout << std::endl;
+
+                                    mining_paused_tip_divergence = false;
+                                    g_node_context.tip_diverged.store(false);
+
+                                    unsigned int resume_height = pTip->nHeight + 1;
+                                    if (shouldUseVDF(resume_height) && !vdf_miner.IsRunning()) {
+                                        vdf_miner.Start();
+                                        std::cout << "[Mining] VDF mining resumed after tip divergence resolved" << std::endl;
+                                    } else if (!shouldUseVDF(resume_height) && g_node_state.mining_enabled.load()) {
+                                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
+                                        if (templateOpt) {
+                                            miner.StartMining(*templateOpt);
+                                            std::cout << "[Mining] Mining resumed after tip divergence resolved" << std::endl;
+                                        }
+                                    }
+                                }
+                                divergence_since = std::chrono::steady_clock::time_point{};
+                                tip_divergence_warned = false;
                             }
                         }
                     }

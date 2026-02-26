@@ -1991,11 +1991,19 @@ std::string CRPCServer::RPC_GetBalance(const std::string& params) {
     // For future: transactions with 0 confirmations
     CAmount unconfirmedBalance = 0;
 
+    // Chain health: check if our tip diverges from peers
+    bool tipDiverged = g_node_context.tip_diverged.load();
+
     std::ostringstream oss;
     oss << "{";
     oss << "\"balance\":" << FormatAmount(balance) << ",";
     oss << "\"unconfirmed_balance\":" << FormatAmount(unconfirmedBalance) << ",";
-    oss << "\"immature_balance\":" << FormatAmount(immatureBalance);
+    oss << "\"immature_balance\":" << FormatAmount(immatureBalance) << ",";
+    oss << "\"chain_health\":\"" << (tipDiverged ? "DIVERGED" : "OK") << "\"";
+    if (tipDiverged) {
+        oss << ",\"chain_warning\":\"Your chain tip differs from the network. "
+            << "Mined coins may not be valid on the main chain.\"";
+    }
     oss << "}";
     return oss.str();
 }

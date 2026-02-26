@@ -971,6 +971,12 @@ int CHeadersManager::GetBestHeight() const
     return nBestHeight;
 }
 
+uint256 CHeadersManager::GetBestHash() const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    return m_chainTipsTracker.GetBestTip();
+}
+
 bool CHeadersManager::IsHeaderSyncInProgress() const
 {
     std::lock_guard<std::mutex> lock(cs_headers);
@@ -2916,13 +2922,14 @@ void CHeadersManager::HeaderProcessorThread()
         }
 
         if (success) {
-            // Update peer's best known height (was previously in P2P handler)
+            // Update peer's best known tip (height + hash) for fork divergence detection
             int bestHeight = GetBestHeight();
+            uint256 bestHash = GetBestHash();
             std::cout << "[HeadersManager] Headers processed. Best height: " << bestHeight << std::endl;
 
-            // Update peer height tracking for FetchBlocks
+            // Update peer tip tracking for FetchBlocks and fork detection
             if (g_node_context.peer_manager) {
-                g_node_context.peer_manager->UpdatePeerBestKnownHeight(pending.peer_id, bestHeight);
+                g_node_context.peer_manager->UpdatePeerBestKnownTip(pending.peer_id, bestHeight, bestHash);
             }
         } else {
             std::cerr << "[HeadersManager] Failed to process headers from peer "

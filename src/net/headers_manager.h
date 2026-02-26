@@ -280,6 +280,13 @@ public:
      */
     int GetBestHeight() const;
 
+    /**
+     * @brief Get best header hash (from chain tips tracker)
+     *
+     * @return Hash of best validated header tip
+     */
+    uint256 GetBestHash() const;
+
     /** @brief Get total headers ever processed (monotonic counter for fork catch-up tracking) */
     uint64_t GetProcessedCount() const { return m_headers_processed_count.load(); }
 

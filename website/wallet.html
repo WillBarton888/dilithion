@@ -703,6 +703,9 @@
                 </div>
             </div>
 
+            <!-- Chain Health Warning Banner -->
+            <div id="chainWarning" style="display:none; color:#ff4444; background:#1a0000; padding:12px 16px; margin-bottom:16px; border:1px solid #ff4444; border-radius:8px; font-weight:600;"></div>
+
             <!-- Node Wallet Security Card (Dashboard) -->
             <div class="card" id="dashboardWalletSecurity" style="margin-bottom: 16px; display: none;">
                 <div class="card-title">
@@ -1950,6 +1953,16 @@
                         document.getElementById('matureBalance').textContent = mature.toFixed(8);
                         document.getElementById('immatureBalance').textContent = immature.toFixed(8);
                         document.getElementById('availableForSend').textContent = mature.toFixed(8);
+
+                        // Chain health warning
+                        const chainHealth = nodeBalance.chain_health || 'OK';
+                        const warningEl = document.getElementById('chainWarning');
+                        if (chainHealth === 'DIVERGED') {
+                            warningEl.style.display = 'block';
+                            warningEl.textContent = nodeBalance.chain_warning || 'Your chain tip differs from the network. Mined coins may not be valid on the main chain.';
+                        } else {
+                            warningEl.style.display = 'none';
+                        }
                     } catch (e) {
                         console.error('[Balance] RPC error:', e.message);
                         // Connection loss is handled centrally in rpcCall()

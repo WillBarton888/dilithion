@@ -537,6 +537,7 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/ibd_coordinator_tests.o \
 	$(OBJ_DIR)/test/misbehavior_scoring_tests.o \
 	$(OBJ_DIR)/test/ibd_functional_tests.o \
+	$(OBJ_DIR)/test/fork_detection_tests.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
 # Link test objects + full library (CORE_OBJECTS) to avoid hand-picked object drift

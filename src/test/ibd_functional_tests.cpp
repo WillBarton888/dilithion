@@ -31,12 +31,15 @@
 #include <net/protocol.h>
 #include <node/block_validation_queue.h>
 #include <primitives/block.h>
+#include <core/chainparams.h>
 #include <iostream>
 
 BOOST_AUTO_TEST_SUITE(ibd_functional_tests)
 
 BOOST_AUTO_TEST_CASE(test_ibd_coordinator_integration) {
     // Test that IBD coordinator integrates correctly with all components
+    if (!Dilithion::g_chainParams)
+        Dilithion::g_chainParams = new Dilithion::ChainParams();
     CChainState chainstate;
     NodeContext node_context;
 
@@ -154,13 +157,13 @@ BOOST_AUTO_TEST_CASE(test_block_fetcher_receive) {
     BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 2);
 
     // Receive first block
-    BOOST_CHECK(fetcher.OnBlockReceived(peer_id, 100));
+    BOOST_CHECK(fetcher.OnBlockReceived(peer_id, 100, hash1));
     BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 1);
     BOOST_CHECK(!fetcher.IsHeightInFlight(100));
     BOOST_CHECK(fetcher.IsHeightInFlight(101));
 
     // Receive second block
-    BOOST_CHECK(fetcher.OnBlockReceived(peer_id, 101));
+    BOOST_CHECK(fetcher.OnBlockReceived(peer_id, 101, hash2));
     BOOST_CHECK_EQUAL(fetcher.GetInFlightCount(), 0);
 
     // Restore previous tracker
@@ -169,6 +172,8 @@ BOOST_AUTO_TEST_CASE(test_block_fetcher_receive) {
 
 BOOST_AUTO_TEST_CASE(test_headers_manager_basic) {
     // Test basic headers manager functionality
+    if (!Dilithion::g_chainParams)
+        Dilithion::g_chainParams = new Dilithion::ChainParams();
     CHeadersManager manager;
 
     // HeadersManager now auto-adds genesis in constructor, so best height is 0

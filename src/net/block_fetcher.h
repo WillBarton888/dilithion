@@ -75,10 +75,11 @@ public:
     bool RequestBlockFromPeer(NodeId peer_id, int height, const uint256& hash);
 
     /**
-     * @brief Called when a block is received (by height)
+     * @brief Called when a block is received (by height + hash)
      * Delegates to CBlockTracker::OnBlockReceivedByHeight()
+     * Also updates peer's best known tip for fork divergence detection.
      */
-    bool OnBlockReceived(NodeId peer_id, int height);
+    bool OnBlockReceived(NodeId peer_id, int height, const uint256& hash);
 
     /**
      * @brief Get blocks that have stalled (no response within timeout)

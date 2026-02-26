@@ -146,7 +146,7 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
     return g_node_context.block_tracker->AddBlock(height, hash, peer_id);
 }
 
-bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
+bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height, const uint256& hash)
 {
     std::lock_guard<std::mutex> lock(cs_fetcher);
 
@@ -162,11 +162,12 @@ bool CBlockFetcher::OnBlockReceived(NodeId peer_id, int height)
         nBlocksReceivedTotal++;
         lastBlockReceived = std::chrono::steady_clock::now();
 
-        // BUG #254 FIX: Update peer's best known height (Bitcoin-style tracking)
+        // BUG #254 FIX: Update peer's best known tip (Bitcoin-style tracking)
         // When a peer sends us a block at height N, they have blocks up to N.
-        // This ensures ibd_coordinator's peer_height check stays current.
+        // This ensures ibd_coordinator's peer_height check stays current
+        // and fork divergence detection has hash data to compare.
         if (m_peer_manager && peer_id >= 0) {
-            m_peer_manager->UpdatePeerBestKnownHeight(peer_id, height);
+            m_peer_manager->UpdatePeerBestKnownTip(peer_id, height, hash);
         }
     }
 

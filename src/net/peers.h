@@ -54,6 +54,8 @@ public:
     std::string user_agent;          // Peer client version
     int start_height;                // Peer's blockchain height at VERSION time (never updated)
     int best_known_height;           // Best block height we KNOW peer has (updated on headers)
+    uint256 best_known_hash;         // Best block hash we KNOW peer has (updated on headers)
+    std::chrono::steady_clock::time_point last_tip_update;  // When best_known_hash was last set
     bool relay;                      // Whether peer relays transactions
 
     // DoS protection
@@ -403,6 +405,9 @@ public:
     // Update peer's best known height (called when we receive headers from them)
     // This tracks what blocks the peer actually has, updated as we learn more
     void UpdatePeerBestKnownHeight(int peer_id, int height);
+
+    // Update peer's best known tip (height + hash) for fork divergence detection
+    void UpdatePeerBestKnownTip(int peer_id, int height, const uint256& hash);
 
     // Lifecycle callbacks
     bool OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred);

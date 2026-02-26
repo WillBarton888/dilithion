@@ -1272,6 +1272,25 @@ void CPeerManager::UpdatePeerBestKnownHeight(int peer_id, int height)
     }
 }
 
+void CPeerManager::UpdatePeerBestKnownTip(int peer_id, int height, const uint256& hash)
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    auto it = peers.find(peer_id);
+    if (it == peers.end()) {
+        return;  // Peer not found
+    }
+
+    CPeer* peer = it->second.get();
+
+    // Only update if new height is higher (consistent with UpdatePeerBestKnownHeight)
+    if (height > peer->best_known_height) {
+        peer->best_known_height = height;
+        peer->best_known_hash = hash;
+        peer->last_tip_update = std::chrono::steady_clock::now();
+    }
+}
+
 bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred)
 {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
@@ -1307,6 +1326,7 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
     peer->m_stalling_since = now;
     peer->m_downloading_since = now;
     peer->m_last_block_announcement = now;
+    peer->last_tip_update = now;  // Initialize so peer isn't excluded as stale before first HEADERS
     peer->lastSuccessTime = now;
     peer->lastStallTime = now;
 

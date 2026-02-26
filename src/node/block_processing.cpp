@@ -468,7 +468,7 @@ BlockProcessResult ProcessNewBlock(
             tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                ctx.block_fetcher->OnBlockReceived(peer_id, blockHeight);
+                ctx.block_fetcher->OnBlockReceived(peer_id, blockHeight, blockHash);
             }
 
             return BlockProcessResult::INVALID_POW;
@@ -582,7 +582,7 @@ BlockProcessResult ProcessNewBlock(
             // BUG #167 FIX: Use per-block tracking
             tracker_guard.released = true;
             if (ctx.block_fetcher) {
-                ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
+                ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight, blockHash);
             }
             return BlockProcessResult::ALREADY_HAVE;
         }
@@ -610,7 +610,7 @@ BlockProcessResult ProcessNewBlock(
             tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
+                ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight, blockHash);
             }
             return BlockProcessResult::ACCEPTED;
         } else {
@@ -618,7 +618,7 @@ BlockProcessResult ProcessNewBlock(
             tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight);
+                ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight, blockHash);
             }
             return BlockProcessResult::VALIDATION_ERROR;
         }
@@ -929,7 +929,7 @@ BlockProcessResult ProcessNewBlock(
             // IBD HANG FIX: Mark block as received IMMEDIATELY
             tracker_guard.released = true;
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-            ctx.block_fetcher->OnBlockReceived(peer_id, expected_height);
+            ctx.block_fetcher->OnBlockReceived(peer_id, expected_height, blockHash);
             auto handler_end = std::chrono::steady_clock::now();
             auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
             std::cout << "[ProcessNewBlock] EXIT (async) total=" << handler_ms << "ms" << std::endl;
@@ -1007,7 +1007,7 @@ BlockProcessResult ProcessNewBlock(
                     tracker_guard.released = true;
                     if (ctx.block_fetcher) {
                         ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                        ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
+                        ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight, blockHash);
                     }
 
                     auto handler_end = std::chrono::steady_clock::now();
@@ -1037,7 +1037,7 @@ BlockProcessResult ProcessNewBlock(
                 tracker_guard.released = true;
                 if (ctx.block_fetcher) {
                     ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-                    ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
+                    ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight, blockHash);
                 }
 
                 auto handler_end = std::chrono::steady_clock::now();
@@ -1134,7 +1134,7 @@ BlockProcessResult ProcessNewBlock(
         tracker_guard.released = true;
         if (ctx.block_fetcher) {
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
-            ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight);
+            ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight, blockHash);
         }
 
         return BlockProcessResult::ACCEPTED;
