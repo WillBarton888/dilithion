@@ -284,7 +284,7 @@ private:
     // Without this, the node loops: create fork → mismatches → cancel → create again
     int m_last_cancelled_fork_point{-1};
     std::chrono::steady_clock::time_point m_fork_cancel_time;
-    static constexpr int FORK_COOLDOWN_SECS = 300;  // 5 minutes before retrying same fork point
+    static constexpr int FORK_COOLDOWN_SECS = 60;  // 1 minute before retrying same fork point (was 300s, too long for VDF block times)
 
     // Issue #11 FIX: Request tracking as member variables (not static)
     int m_last_request_trigger{-1};

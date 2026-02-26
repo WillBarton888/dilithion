@@ -671,11 +671,16 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 m_fork_point.store(-1);
             }
         }
-        // BUG #261: Also clear cooldown if chain advanced past the cancelled fork point
-        if (m_last_cancelled_fork_point >= 0 && chain_height > m_last_cancelled_fork_point) {
-            m_last_cancelled_fork_point = -1;
-        }
     }
+
+    // BUG #261: Clear cooldown if chain advanced past the cancelled fork point.
+    // CRITICAL: This MUST run unconditionally (outside the if/else-if/else above).
+    // Previously it was inside the "chain advancing" else branch, which never executes
+    // when the chain is stalled on a fork — exactly when cooldown clearance is needed.
+    if (m_last_cancelled_fork_point >= 0 && chain_height > m_last_cancelled_fork_point) {
+        m_last_cancelled_fork_point = -1;
+    }
+
     m_last_checked_chain_height = chain_height;
 
     // FORK TIMEOUT CHECK: Check active fork timeout independently of detection layers.
