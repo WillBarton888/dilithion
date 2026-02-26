@@ -205,6 +205,18 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // Skip TRUE duplicates (same hash already exists)
         if (mapHeaders.find(storageHash) != mapHeaders.end()) {
             auto it = mapHeaders.find(storageHash);
+            // BUG FIX: Recalculate chainwork if pprev gives higher work.
+            // Stale headers stored with pprev=NULL have tiny chainwork.
+            if (pprev) {
+                uint256 newChainWork = CalculateChainWork(header, pprev);
+                if (ChainWorkGreaterThan(newChainWork, it->second.chainWork)) {
+                    it->second.chainWork = newChainWork;
+                    int newHeight = pprev->height + 1;
+                    if (it->second.height != newHeight) {
+                        it->second.height = newHeight;
+                    }
+                }
+            }
             pprev = &it->second;
             prevHash = storageHash;
             heightStart = it->second.height;
@@ -712,7 +724,21 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
     // Check if we already have this header
     auto it = mapHeaders.find(hash);
     if (it != mapHeaders.end()) {
-        // Already have header - just update best header tracking
+        // BUG FIX: Recalculate chainwork if parent is now available.
+        // Headers stored from a previous sync may have pprev=NULL (tiny chainwork)
+        // because their parent wasn't in mapHeaders at the time. Now during chain
+        // loading, the parent IS available. Recalculate and update if higher.
+        auto parentIt = mapHeaders.find(header.hashPrevBlock);
+        if (parentIt != mapHeaders.end()) {
+            uint256 newChainWork = CalculateChainWork(header, &parentIt->second);
+            if (ChainWorkGreaterThan(newChainWork, it->second.chainWork)) {
+                it->second.chainWork = newChainWork;
+                int newHeight = parentIt->second.height + 1;
+                if (it->second.height != newHeight) {
+                    it->second.height = newHeight;
+                }
+            }
+        }
         UpdateBestHeader(hash);
         return;
     }
@@ -2448,11 +2474,23 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
                 // Skip TRUE duplicates (same hash already exists)
                 if (mapHeaders.find(storageHash) != mapHeaders.end()) {
-                    // BUG FIX: Still update best header for existing headers!
-                    // After restart, nBestHeight may be stale while headers exist.
-                    // This ensures best header tracking catches up to stored headers.
+                    // BUG FIX: Recalculate chainwork if pprev gives higher work.
+                    // Headers stored from a previous sync may have pprev=NULL (tiny
+                    // chainwork) because their parent wasn't in mapHeaders at the time.
+                    // Now pprev is available — recalculate and update if higher.
+                    auto& stored = mapHeaders[storageHash];
+                    if (pprev) {
+                        uint256 newChainWork = CalculateChainWork(headers[batchStart + i], pprev);
+                        if (ChainWorkGreaterThan(newChainWork, stored.chainWork)) {
+                            stored.chainWork = newChainWork;
+                            int newHeight = pprev->height + 1;
+                            if (stored.height != newHeight) {
+                                stored.height = newHeight;
+                            }
+                        }
+                    }
                     UpdateBestHeader(storageHash);
-                    pprev = &mapHeaders[storageHash];
+                    pprev = &stored;
                     prevHash = storageHash;
                     continue;
                 }
