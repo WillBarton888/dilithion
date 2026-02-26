@@ -897,6 +897,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             if (g_node_context.block_tracker) {
                 g_node_context.block_tracker->ClearAboveHeight(chain_height_snap);
             }
+
+            // Reset capacity stall counter after clearing orphan deadlock.
+            // Without this, the counter accumulated during the orphan stall
+            // carries over and immediately disconnects the next peer before
+            // it has a chance to deliver the re-requested blocks.
+            m_consecutive_capacity_stalls = 0;
         }
     }
 
@@ -994,6 +1000,7 @@ bool CIbdCoordinator::FetchBlocks() {
 
                     m_blocks_sync_peer = better_peer_id;
                     m_blocks_sync_peer_consecutive_timeouts = 0;
+                    m_consecutive_capacity_stalls = 0;  // New peer gets full stall window
                     should_reselect = false;  // Already switched
                 }
             }
@@ -1111,6 +1118,7 @@ bool CIbdCoordinator::FetchBlocks() {
         if (best_peer != -1) {
             m_blocks_sync_peer = best_peer;
             m_blocks_sync_peer_consecutive_timeouts = 0;  // Reset timeout counter for new peer
+            m_consecutive_capacity_stalls = 0;  // Reset capacity stall counter - new peer gets full window
             std::cout << "[IBD] Selected blocks sync peer " << m_blocks_sync_peer
                       << " (height=" << best_height << ")" << std::endl;
         } else {
