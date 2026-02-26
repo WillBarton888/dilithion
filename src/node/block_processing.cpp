@@ -478,6 +478,31 @@ BlockProcessResult ProcessNewBlock(
     }
 
     // =========================================================================
+    // PHASE 2.25: TIMESTAMP VALIDATION (consensus fork at timestampValidationHeight)
+    // Validates block timestamp against future-time limit and median-time-past.
+    // Pre-fork (< timestampValidationHeight): skipped (historical blocks not affected).
+    // Post-fork (>= timestampValidationHeight): rejects blocks with timestamp > now + 600s or <= MTP.
+    // Block at timestampValidationHeight (24500 mainnet) is the first to use the 600s limit.
+    // Orphan blocks (no parent) skip validation — re-validated when parent connects.
+    // =========================================================================
+    {
+        int tsValHeight = (Dilithion::g_chainParams)
+            ? Dilithion::g_chainParams->timestampValidationHeight : 999999999;
+
+        CBlockIndex* pParentTS = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+        int tsBlockHeight = (pParentTS != nullptr) ? pParentTS->nHeight + 1 : currentChainHeight + 1;
+
+        if (pParentTS != nullptr && tsBlockHeight >= tsValHeight) {
+            if (!CheckBlockTimestamp(block, pParentTS, tsBlockHeight)) {
+                std::cerr << "[ProcessNewBlock] REJECTED: Block at height " << tsBlockHeight
+                          << " failed timestamp validation" << std::endl;
+                g_metrics.RecordInvalidBlock();
+                return BlockProcessResult::VALIDATION_ERROR;
+            }
+        }
+    }
+
+    // =========================================================================
     // PHASE 2.5: COINBASE TAX VALIDATION (MAINNET ONLY)
     // Validates that coinbase includes required Dev Fund & Dev Reward outputs
     // =========================================================================

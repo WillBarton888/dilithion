@@ -197,8 +197,11 @@ static const size_t SHA3_256_SIZE = 32;
 // Time Constants
 //==============================================================================
 
-/** Maximum future block timestamp (2 hours) */
+/** Maximum future block timestamp (2 hours) — used pre-fork */
 static const int64_t MAX_FUTURE_BLOCK_TIME = 2 * 60 * 60;
+
+/** Reduced future block timestamp limit post-fork (10 minutes) */
+static const int64_t MAX_FUTURE_BLOCK_TIME_V2 = 10 * 60;
 
 /** Maximum block timestamp drift (median time of past 11 blocks) */
 static const int MEDIAN_TIME_SPAN = 11;

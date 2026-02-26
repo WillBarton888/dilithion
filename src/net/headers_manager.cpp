@@ -568,8 +568,8 @@ bool CHeadersManager::ValidateHeader(const CBlockHeader& header, const CBlockHea
 
     const HeaderWithChainWork* pprevData = &parentIt->second;
 
-    // 2. Check timestamp is valid
-    if (!CheckTimestamp(header, pprevData)) {
+    // 2. Check timestamp is valid (fork-aware: 600s limit post-timestampValidationHeight)
+    if (!CheckTimestamp(header, pprevData, pprevData->height + 1)) {
         return false;
     }
 
@@ -1655,12 +1655,18 @@ bool CHeadersManager::CheckProofOfWork(const uint256& hash, uint32_t nBits) cons
     return ::CheckProofOfWork(hash, nBits);
 }
 
-bool CHeadersManager::CheckTimestamp(const CBlockHeader& header, const HeaderWithChainWork* pprev) const
+bool CHeadersManager::CheckTimestamp(const CBlockHeader& header, const HeaderWithChainWork* pprev, int headerHeight) const
 {
-    // 1. Check not too far in future (2 hours)
+    // 1. Check not too far in future
+    // Fork-aware: 600s post-fork (timestampValidationHeight), 7200s pre-fork
     // CID 1675246 FIX: Safe 64-to-32 bit time conversion (valid until 2106)
     uint32_t now = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);
-    if (header.nTime > now + MAX_HEADERS_AGE_SECONDS) {
+    int tsValHeight = (Dilithion::g_chainParams)
+        ? Dilithion::g_chainParams->timestampValidationHeight : 999999999;
+    uint32_t maxFuture = (headerHeight >= 0 && headerHeight >= tsValHeight)
+        ? static_cast<uint32_t>(Consensus::MAX_FUTURE_BLOCK_TIME_V2)   // 600s post-fork
+        : MAX_HEADERS_AGE_SECONDS;                                      // 7200s pre-fork
+    if (header.nTime > now + maxFuture) {
         return false;
     }
 
@@ -1988,7 +1994,7 @@ uint256 CHeadersManager::AddChainWork(const uint256& blockProof, const uint256& 
 // BUG #125: Async Header Validation
 // ============================================================================
 
-bool CHeadersManager::QuickValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev) const
+bool CHeadersManager::QuickValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev, int headerHeight) const
 {
     // Quick structural validation - NO RandomX PoW check
     // This runs in <1ms per header
@@ -2007,10 +2013,16 @@ bool CHeadersManager::QuickValidateHeader(const CBlockHeader& header, const CBlo
 
     // 3. If we have a parent, check timestamp validity
     if (pprev != nullptr) {
-        // Check not too far in future (2 hours)
+        // Fork-aware: 600s post-fork (timestampValidationHeight), 7200s pre-fork
         uint32_t now = static_cast<uint32_t>(std::time(nullptr) & 0xFFFFFFFF);
-        if (header.nTime > now + MAX_HEADERS_AGE_SECONDS) {
-            std::cerr << "[HeadersManager] Quick validate FAILED: timestamp too far in future" << std::endl;
+        int tsValHeight = (Dilithion::g_chainParams)
+            ? Dilithion::g_chainParams->timestampValidationHeight : 999999999;
+        uint32_t maxFuture = (headerHeight >= 0 && headerHeight >= tsValHeight)
+            ? static_cast<uint32_t>(Consensus::MAX_FUTURE_BLOCK_TIME_V2)   // 600s post-fork
+            : MAX_HEADERS_AGE_SECONDS;                                      // 7200s pre-fork
+        if (header.nTime > now + maxFuture) {
+            std::cerr << "[HeadersManager] Quick validate FAILED: timestamp too far in future"
+                      << " (limit: " << maxFuture << "s)" << std::endl;
             return false;
         }
     }
@@ -2450,8 +2462,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
                 }
 
-                // Quick validate (structure only - fast)
-                if (!QuickValidateHeader(header, pprev ? &pprev->header : nullptr)) {
+                // Quick validate (structure only - fast, fork-aware timestamp limit)
+                if (!QuickValidateHeader(header, pprev ? &pprev->header : nullptr, expectedHeight)) {
                     return false;
                 }
 

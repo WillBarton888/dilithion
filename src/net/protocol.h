@@ -18,8 +18,8 @@ static const uint32_t TESTNET_MAGIC = 0xDAB5BFFA;
 static const uint32_t REGTEST_MAGIC = 0xFABFB5DA;
 
 /** Protocol version */
-static const int PROTOCOL_VERSION = 70005;          // v3.4.0: Difficulty adjustment fork
-static const int MIN_PEER_PROTO_VERSION = 70004;    // Require v3.3.0+ (DFMP v3.3 consensus)
+static const int PROTOCOL_VERSION = 70006;          // v3.6.0: Timestamp validation hard fork
+static const int MIN_PEER_PROTO_VERSION = 70005;    // Require v3.4.0+ (ASERT difficulty)
 
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;

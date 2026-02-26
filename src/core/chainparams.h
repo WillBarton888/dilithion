@@ -190,6 +190,12 @@ public:
     // Testnet (60s blocks):  8640s  = 144 blocks * 60s  = 2.4 hours
     int64_t asertHalflife;
 
+    // Timestamp validation hard fork
+    // Activates CheckBlockTimestamp() in ProcessNewBlock and reduces
+    // MAX_FUTURE_BLOCK_TIME from 7200s to 600s. Also re-anchors ASERT
+    // at (timestampValidationHeight - 1) to eliminate accumulated drift.
+    int timestampValidationHeight;
+
     // MAINNET SECURITY: Checkpoints to prevent deep reorganizations
     // Testnet: empty (no checkpoint protection, allows testing reorgs)
     // Mainnet: populated after launch, updated with each software release

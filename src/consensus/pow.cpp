@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <consensus/pow.h>
+#include <consensus/params.h>      // Consensus::MAX_FUTURE_BLOCK_TIME, MAX_FUTURE_BLOCK_TIME_V2
 #include <consensus/vdf_validation.h>
 #include <consensus/validation.h>  // DFMP: For DeserializeBlockTransactions
 #include <node/block_index.h>
@@ -1082,20 +1083,32 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
     int newBlockHeight = pindexLast->nHeight + 1;
 
     // ====================================================================
-    // ASERT dispatch: if activated, use ASERT for all blocks at/above
-    // activation height. Legacy periodic retarget + EDA are dead code
-    // post-activation.
+    // ASERT dispatch: v2 re-anchor at timestamp validation fork,
+    // v1 original anchor for blocks 23040 to fork height.
+    // Legacy periodic retarget + EDA are dead code post-ASERT activation.
     // ====================================================================
+    if (!Dilithion::g_chainParams) {
+        return pindexLast->header.nBits;
+    }
+    int tsValHeight = Dilithion::g_chainParams->timestampValidationHeight;
     int asertActivation = Dilithion::g_chainParams->asertActivationHeight;
-    if (asertActivation > 0 && newBlockHeight >= asertActivation) {
-        // Find anchor block via skiplist (O(log N), no mutable state).
+
+    if (tsValHeight > 0 && newBlockHeight >= tsValHeight) {
+        // ASERT v2: re-anchored at fork height to eliminate accumulated drift
+        // from timestamp manipulation in the pre-fork era.
+        const int anchorHeight = tsValHeight - 1;
+        const CBlockIndex* pindexAnchor = pindexLast->GetAncestor(anchorHeight);
+        if (pindexAnchor == nullptr) {
+            std::cerr << "[ASERT-v2] CRITICAL: Cannot find anchor block at height "
+                      << anchorHeight << " — using previous difficulty" << std::endl;
+            return pindexLast->header.nBits;
+        }
+        return GetNextWorkRequiredASERT(pindexLast, nBlockTime, pindexAnchor);
+    } else if (asertActivation > 0 && newBlockHeight >= asertActivation) {
+        // ASERT v1: original anchor (pre-fork blocks between 23040 and tsValHeight)
         const int anchorHeight = asertActivation - 1;
         const CBlockIndex* pindexAnchor = pindexLast->GetAncestor(anchorHeight);
-
         if (pindexAnchor == nullptr) {
-            // Defensive fallback: maintain previous block's difficulty.
-            // This is fail-closed (no permissive difficulty change) rather than
-            // fail-open (returning genesis difficulty which could be wildly wrong).
             std::cerr << "[ASERT] CRITICAL: Cannot find anchor block at height "
                       << anchorHeight << " — using previous difficulty" << std::endl;
             return pindexLast->header.nBits;
@@ -1313,7 +1326,7 @@ int64_t GetMedianTimePast(const CBlockIndex* pindex) {
     return vTimes[vTimes.size() / 2];
 }
 
-bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPrev) {
+bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPrev, int blockHeight) {
     // P4-CONS-010 FIX: Reject zero timestamp (invalid for non-genesis blocks)
     // A block with timestamp 0 (Jan 1, 1970) is invalid
     if (block.nTime == 0) {
@@ -1321,14 +1334,22 @@ bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPre
         return false;
     }
 
-    // Rule 1: Block time must not be more than 2 hours in the future
-    // This prevents timestamp attacks and ensures nodes have reasonable clocks
-    int64_t nMaxFutureBlockTime = GetTime() + 2 * 60 * 60; // 2 hours
+    // Rule 1: Block time must not be too far in the future
+    // Fork-aware: post-timestampValidationHeight uses 600s (10 min),
+    // pre-fork uses 7200s (2 hours) for backward compatibility with IBD.
+    int tsValHeight = (Dilithion::g_chainParams)
+        ? Dilithion::g_chainParams->timestampValidationHeight : 999999999;
+    int64_t maxFuture = (blockHeight >= 0 && blockHeight >= tsValHeight)
+        ? Consensus::MAX_FUTURE_BLOCK_TIME_V2   // 600 seconds (10 minutes)
+        : Consensus::MAX_FUTURE_BLOCK_TIME;     // 7200 seconds (2 hours)
+
+    int64_t nMaxFutureBlockTime = GetTime() + maxFuture;
 
     if (static_cast<int64_t>(block.nTime) > nMaxFutureBlockTime) {
         std::cerr << "CheckBlockTimestamp(): block timestamp too far in future"
                   << " (block time: " << block.nTime
-                  << ", max allowed: " << nMaxFutureBlockTime << ")" << std::endl;
+                  << ", max allowed: " << nMaxFutureBlockTime
+                  << ", limit: " << maxFuture << "s)" << std::endl;
         return false;
     }
 

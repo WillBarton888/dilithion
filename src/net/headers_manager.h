@@ -138,7 +138,7 @@ public:
      * @param pprev Parent header (nullptr for genesis)
      * @return true if structure is valid
      */
-    bool QuickValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev) const;
+    bool QuickValidateHeader(const CBlockHeader& header, const CBlockHeader* pprev, int headerHeight = -1) const;
 
     /**
      * @brief Full validation - RandomX PoW check only (50-250ms per header)
@@ -869,14 +869,15 @@ private:
      * @brief Check if header timestamp is valid
      *
      * Rules:
-     * - Not more than 2 hours in future
+     * - Not more than MAX_FUTURE_BLOCK_TIME in future (7200s pre-fork, 600s post-fork)
      * - Greater than median of last 11 blocks
      *
      * @param header Header to check
      * @param pprev Parent header
+     * @param headerHeight Height of this header (-1 = use pre-fork 7200s limit)
      * @return true if timestamp valid
      */
-    bool CheckTimestamp(const CBlockHeader& header, const HeaderWithChainWork* pprev) const;
+    bool CheckTimestamp(const CBlockHeader& header, const HeaderWithChainWork* pprev, int headerHeight = -1) const;
 
     /**
      * @brief Get median timestamp of last N blocks

@@ -99,6 +99,10 @@ ChainParams ChainParams::Mainnet() {
     params.asertActivationHeight = 23040;
     params.asertHalflife = 34560;  // 144 blocks * 240s = 9.6 hours
 
+    // Timestamp validation hard fork: enforce CheckBlockTimestamp in block processing,
+    // reduce future time limit from 2h to 10min, re-anchor ASERT at this height.
+    params.timestampValidationHeight = 24500;
+
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
@@ -223,6 +227,9 @@ ChainParams ChainParams::Testnet() {
     // ASERT difficulty algorithm (disabled on testnet for now)
     params.asertActivationHeight = 999999999;
     params.asertHalflife = 8640;  // 144 blocks * 60s = 2.4 hours
+
+    // Timestamp validation: active from genesis on testnet
+    params.timestampValidationHeight = 0;
 
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted

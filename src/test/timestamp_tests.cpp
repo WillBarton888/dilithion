@@ -2,6 +2,8 @@
 // Distributed under the MIT software license
 
 #include <consensus/pow.h>
+#include <consensus/params.h>
+#include <core/chainparams.h>
 #include <node/block_index.h>
 #include <util/time.h>
 #include <iostream>
@@ -228,6 +230,67 @@ void TestRealisticChain() {
     std::cout << "  ✓ Attack with future timestamp rejected" << std::endl;
 }
 
+/**
+ * Test: Post-fork timestamp validation (600s limit at timestampValidationHeight)
+ *
+ * Verifies that after the timestamp validation fork, blocks with timestamps
+ * >10 minutes in the future are rejected, while the pre-fork 2-hour limit
+ * still applies for blocks below the activation height.
+ */
+void TestPostForkTimestamp() {
+    std::cout << "\nTesting post-fork timestamp validation (600s limit)..." << std::endl;
+
+    // Set up g_chainParams with a known activation height
+    Dilithion::ChainParams testParams;
+    testParams.timestampValidationHeight = 24500;
+    Dilithion::ChainParams* prevParams = Dilithion::g_chainParams;
+    Dilithion::g_chainParams = &testParams;
+
+    // Create a minimal parent block
+    CBlockIndex parent;
+    parent.nHeight = 24499;  // Parent of the first post-fork block
+    parent.nTime = GetTime() - 240;
+    parent.pprev = nullptr;
+
+    CBlockHeader block;
+    int64_t now = GetTime();
+    int postForkHeight = 24500;  // First block to use 600s limit
+    int preForkHeight = 24499;   // Last block to use 7200s limit
+
+    // Test 1: Post-fork block 11 minutes in future (should REJECT — over 600s)
+    block.nTime = now + 660;
+    assert(CheckBlockTimestamp(block, &parent, postForkHeight) == false);
+    std::cout << "  ✓ Post-fork: block +660s (11 min) in future rejected" << std::endl;
+
+    // Test 2: Post-fork block 9 minutes in future (should ACCEPT — under 600s)
+    block.nTime = now + 540;
+    assert(CheckBlockTimestamp(block, &parent, postForkHeight) == true);
+    std::cout << "  ✓ Post-fork: block +540s (9 min) in future accepted" << std::endl;
+
+    // Test 3: Post-fork block 1 hour in future (should REJECT)
+    block.nTime = now + 3600;
+    assert(CheckBlockTimestamp(block, &parent, postForkHeight) == false);
+    std::cout << "  ✓ Post-fork: block +3600s (1 hour) in future rejected" << std::endl;
+
+    // Test 4: Pre-fork block 1 hour in future (should ACCEPT — under 7200s)
+    block.nTime = now + 3600;
+    assert(CheckBlockTimestamp(block, &parent, preForkHeight) == true);
+    std::cout << "  ✓ Pre-fork: block +3600s (1 hour) in future accepted" << std::endl;
+
+    // Test 5: Pre-fork block 3 hours in future (should REJECT — over 7200s)
+    block.nTime = now + 3 * 60 * 60;
+    assert(CheckBlockTimestamp(block, &parent, preForkHeight) == false);
+    std::cout << "  ✓ Pre-fork: block +10800s (3 hours) in future rejected" << std::endl;
+
+    // Test 6: Default blockHeight (-1) uses pre-fork 7200s limit (backward compat)
+    block.nTime = now + 3600;
+    assert(CheckBlockTimestamp(block, &parent) == true);
+    std::cout << "  ✓ Default (no height): block +3600s accepted (pre-fork 7200s limit)" << std::endl;
+
+    // Restore previous g_chainParams
+    Dilithion::g_chainParams = prevParams;
+}
+
 int main() {
     std::cout << "======================================" << std::endl;
     std::cout << "Block Timestamp Validation Tests" << std::endl;
@@ -241,31 +304,35 @@ int main() {
         TestGenesisBlockTimestamp();
         TestEdgeCases();
         TestRealisticChain();
+        TestPostForkTimestamp();
 
         std::cout << std::endl;
         std::cout << "======================================" << std::endl;
-        std::cout << "✅ All timestamp validation tests passed!" << std::endl;
+        std::cout << "All timestamp validation tests passed!" << std::endl;
         std::cout << "======================================" << std::endl;
         std::cout << std::endl;
 
         std::cout << "Components Validated:" << std::endl;
-        std::cout << "  ✓ Median-time-past calculation" << std::endl;
-        std::cout << "  ✓ Future timestamp rejection (> 2 hours)" << std::endl;
-        std::cout << "  ✓ Median-time-past comparison" << std::endl;
-        std::cout << "  ✓ Genesis block handling" << std::endl;
-        std::cout << "  ✓ Edge cases" << std::endl;
-        std::cout << "  ✓ Realistic chain scenarios" << std::endl;
+        std::cout << "  - Median-time-past calculation" << std::endl;
+        std::cout << "  - Future timestamp rejection (> 2 hours pre-fork)" << std::endl;
+        std::cout << "  - Future timestamp rejection (> 600s post-fork)" << std::endl;
+        std::cout << "  - Median-time-past comparison" << std::endl;
+        std::cout << "  - Genesis block handling" << std::endl;
+        std::cout << "  - Edge cases" << std::endl;
+        std::cout << "  - Realistic chain scenarios" << std::endl;
+        std::cout << "  - Post-fork 600s limit enforcement" << std::endl;
         std::cout << std::endl;
 
         std::cout << "Consensus Rules Enforced:" << std::endl;
-        std::cout << "  ✓ Block time must not be > 2 hours in future" << std::endl;
-        std::cout << "  ✓ Block time must be > median-time-past" << std::endl;
-        std::cout << "  ✓ Prevents timestamp manipulation attacks" << std::endl;
+        std::cout << "  - Block time must not be > 2 hours in future (pre-fork)" << std::endl;
+        std::cout << "  - Block time must not be > 600s in future (post-fork)" << std::endl;
+        std::cout << "  - Block time must be > median-time-past" << std::endl;
+        std::cout << "  - Prevents timestamp manipulation attacks" << std::endl;
         std::cout << std::endl;
 
         return 0;
     } catch (const std::exception& e) {
-        std::cerr << "❌ Test failed: " << e.what() << std::endl;
+        std::cerr << "Test failed: " << e.what() << std::endl;
         return 1;
     }
 }

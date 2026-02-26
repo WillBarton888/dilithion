@@ -171,13 +171,15 @@ int64_t GetMedianTimePast(const CBlockIndex* pindex);
  * Validate block timestamp according to consensus rules
  *
  * Rules:
- * 1. Block time must not be more than 2 hours in the future
+ * 1. Block time must not be more than MAX_FUTURE_BLOCK_TIME in the future
+ *    (post-fork at timestampValidationHeight: 600s; pre-fork: 7200s)
  * 2. Block time must be greater than median-time-past
  *
  * @param block The block header to validate
  * @param pindexPrev The previous block index (nullptr for genesis)
+ * @param blockHeight Block height for fork-aware limit (-1 = use pre-fork 7200s limit)
  * @return true if timestamp is valid, false otherwise
  */
-bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPrev);
+bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPrev, int blockHeight = -1);
 
 #endif // DILITHION_CONSENSUS_POW_H
