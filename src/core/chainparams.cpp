@@ -135,6 +135,8 @@ ChainParams ChainParams::Mainnet() {
     params.checkpoints.emplace_back(18500, uint256S("0000000c9cbfc8c909156c22b37437183ece80257851d5dc324312497d3f2a37"));
     // Checkpoint at height 23000 - pre-ASERT activation (protects all pre-ASERT history)
     params.checkpoints.emplace_back(23000, uint256S("00000a5bbef0e203c6b013976bbe4a3afc401975d5d4405298691d6620f47fa6"));
+    // Checkpoint at height 24476 - covers blocks with stale nBits accepted via fork switch path
+    params.checkpoints.emplace_back(24476, uint256S("000007289cc3fdbe88a572d84f974a49fb962eda7412312c28930153ae52d611"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)
