@@ -591,24 +591,23 @@ a.hash:hover {
 /* --- Copy Toast Notification --- */
 .copy-toast {
     position: fixed;
-    bottom: 32px;
-    left: 50%;
-    transform: translateX(-50%) translateY(20px);
+    transform: translateX(-50%) translateY(0);
     background: var(--accent);
     color: #000;
     font-weight: 600;
-    font-size: 0.875rem;
-    padding: 10px 24px;
-    border-radius: 8px;
+    font-size: 0.75rem;
+    padding: 5px 12px;
+    border-radius: 6px;
     opacity: 0;
     transition: opacity 0.3s, transform 0.3s;
     z-index: 9999;
     pointer-events: none;
+    white-space: nowrap;
 }
 
 .copy-toast.show {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateX(-50%) translateY(-100%);
 }
 
 /* --- Block Navigation --- */

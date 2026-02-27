@@ -225,7 +225,7 @@ function fallbackCopy(text) {
     document.body.removeChild(ta);
 }
 
-function showCopyToast() {
+function showCopyToast(btn) {
     // Remove any existing toast
     const existing = document.querySelector('.copy-toast');
     if (existing) existing.remove();
@@ -234,6 +234,12 @@ function showCopyToast() {
     toast.className = 'copy-toast';
     toast.textContent = 'Copied!';
     document.body.appendChild(toast);
+
+    // Position near the button
+    const rect = btn.getBoundingClientRect();
+    toast.style.left = rect.left + rect.width / 2 + 'px';
+    toast.style.top = rect.top - 8 + 'px';
+
     // Trigger reflow then animate in
     toast.offsetHeight;
     toast.classList.add('show');
@@ -256,7 +262,7 @@ document.addEventListener('click', function(e) {
     copyToClipboard(text).then(() => {
         btn.innerHTML = ICONS.check;
         btn.classList.add('copied');
-        showCopyToast();
+        showCopyToast(btn);
         setTimeout(() => {
             btn.innerHTML = ICONS.copy;
             btn.classList.remove('copied');
