@@ -5891,7 +5891,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                                       << " blocks are self-mined (with " << peer_cnt << " peers)" << std::endl;
                                             std::cout << "[Mining] This strongly suggests a fork - pausing mining" << std::endl;
                                             std::cout << std::endl;
-                                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             if (miner.IsMining()) miner.StopMining();
                                             mining_paused_consensus_fork = true;
                                         } else if (ratio >= SOLO_WARN_RATIO && peer_cnt > 0
@@ -5921,7 +5920,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << "[Mining] Mining will resume when blocks from other miners arrive" << std::endl;
                                             std::cout << "[Mining] ================================================" << std::endl;
                                             std::cout << std::endl;
-                                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             if (miner.IsMining()) miner.StopMining();
                                             mining_paused_consensus_fork = true;
                                         } else if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD
@@ -6056,7 +6054,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     std::cout << "[Mining] ================================================" << std::endl;
                                     std::cout << std::endl;
 
-                                    if (vdf_miner.IsRunning()) vdf_miner.Stop();
+                                    // Only stop RandomX miner during tip divergence.
+                                    // VDF miner continues: deterministic blocks can resolve
+                                    // the divergence by advancing the chain.
                                     if (miner.IsMining()) miner.StopMining();
                                     mining_paused_tip_divergence = true;
                                     g_node_context.tip_diverged.store(true);
