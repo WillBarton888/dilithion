@@ -2583,17 +2583,31 @@
         }
 
         // Copy address
-        function copyAddress() {
+        async function copyAddress() {
             const address = document.getElementById('receiveAddress').textContent;
-            navigator.clipboard.writeText(address).then(() => {
-                const btn = document.getElementById('copyBtn');
-                btn.textContent = 'Copied!';
-                btn.classList.add('copied');
-                setTimeout(() => {
-                    btn.textContent = 'Copy';
-                    btn.classList.remove('copied');
-                }, 2000);
-            });
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(address);
+                } else {
+                    throw new Error('no clipboard API');
+                }
+            } catch (e) {
+                const ta = document.createElement('textarea');
+                ta.value = address;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            const btn = document.getElementById('copyBtn');
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
         }
 
         // Mnemonic auto-hide timeout
