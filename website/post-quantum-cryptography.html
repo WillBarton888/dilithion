@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="What is post-quantum cryptography (PQC)? Learn how CRYSTALS-Dilithium, lattice-based signatures, and NIST standards protect Dilithion from quantum computer attacks.">
+    <meta name="keywords" content="post quantum cryptography, PQC explained, CRYSTALS-Dilithium, lattice-based cryptography, NIST PQC standard, FIPS 204, ML-DSA, quantum resistant signatures, dilithion PQC, quantum proof cryptography">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="Dilithion">
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://dilithion.org/post-quantum-cryptography.html">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="256x256" href="dilithion-logo-256.png">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Post-Quantum Cryptography Explained | Dilithion">
+    <meta property="og:description" content="What is PQC? How CRYSTALS-Dilithium and lattice-based cryptography protect cryptocurrency from quantum attacks.">
+    <meta property="og:image" content="https://dilithion.org/dilithion-logo-256.png">
+    <meta property="og:url" content="https://dilithion.org/post-quantum-cryptography.html">
+    <meta property="og:type" content="article">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Post-Quantum Cryptography Explained | Dilithion">
+    <meta name="twitter:description" content="What is PQC? How CRYSTALS-Dilithium and lattice-based cryptography protect cryptocurrency from quantum attacks.">
+
+    <title>Post-Quantum Cryptography Explained | Dilithion</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css?v=5">
+
+    <!-- Article Schema -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Post-Quantum Cryptography Explained: How Dilithion Uses NIST Standards",
+      "description": "A comprehensive guide to post-quantum cryptography, CRYSTALS-Dilithium, lattice-based signatures, and how Dilithion implements NIST PQC standards.",
+      "author": {
+        "@type": "Organization",
+        "name": "Dilithion"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Dilithion",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://dilithion.org/dilithion-logo-256.png"
+        }
+      },
+      "datePublished": "2026-02-17",
+      "dateModified": "2026-02-17",
+      "mainEntityOfPage": "https://dilithion.org/post-quantum-cryptography.html"
+    }
+    </script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" style="display: flex; align-items: center; text-decoration: none; color: inherit;">
+                    <img src="dilithion-logo-256.png" alt="Dilithion Logo" class="nav-logo">
+                    <div class="nav-text">
+                        <h1>DILITHION</h1>
+                        <span class="tagline">Post-Quantum Cryptocurrency</span>
+                    </div>
+                </a>
+            </div>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="quantum-security.html">Quantum Security</a>
+                <a href="post-quantum-cryptography.html">PQC Explained</a>
+                <a href="mainnet.html">Mainnet</a>
+                <a href="WHITEPAPER.html">Whitepaper</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero" style="padding: 120px 0 60px 0;">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">Post-Quantum Cryptography<br><span class="gradient-text">Explained</span></h1>
+                <p class="hero-subtitle">How NIST-standardized lattice-based cryptography keeps Dilithion safe from quantum computers.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Content -->
+    <section style="padding: 60px 0; background: var(--bg-dark);">
+        <div class="container" style="max-width: 800px;">
+
+            <article>
+                <h2 style="color: var(--primary-color); margin-bottom: 20px;">What is Post-Quantum Cryptography?</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    <strong style="color: var(--text-primary);">Post-quantum cryptography (PQC)</strong> refers to cryptographic algorithms that are secure against attacks by both classical computers and quantum computers. These algorithms use mathematical problems that remain hard even when an adversary has access to a large-scale quantum computer.
+                </p>
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    Unlike quantum cryptography (which uses quantum mechanics to encrypt), PQC runs on <em>regular computers</em> but uses math problems that quantum computers cannot efficiently solve.
+                </p>
+
+                <h2 style="color: var(--primary-color); margin: 40px 0 20px;">The NIST Post-Quantum Standardization</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    In 2016, the U.S. <strong style="color: var(--text-primary);">National Institute of Standards and Technology (NIST)</strong> launched a global competition to select post-quantum cryptographic algorithms. After 8 years and 3 rounds of evaluation involving hundreds of researchers worldwide:
+                </p>
+
+                <div class="specs-grid" style="margin: 30px 0;">
+                    <div class="spec-row">
+                        <div class="spec-label">FIPS 203 (ML-KEM)</div>
+                        <div class="spec-value">CRYSTALS-Kyber - Key Encapsulation</div>
+                    </div>
+                    <div class="spec-row" style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3);">
+                        <div class="spec-label" style="color: var(--primary-color); font-weight: 700;">FIPS 204 (ML-DSA)</div>
+                        <div class="spec-value" style="color: var(--text-primary); font-weight: 600;">CRYSTALS-Dilithium - Digital Signatures (Used by Dilithion)</div>
+                    </div>
+                    <div class="spec-row">
+                        <div class="spec-label">FIPS 205 (SLH-DSA)</div>
+                        <div class="spec-value">SPHINCS+ - Hash-based Signatures (backup)</div>
+                    </div>
+                    <div class="spec-row">
+                        <div class="spec-label">FIPS 206 (FN-DSA)</div>
+                        <div class="spec-value">FALCON - Compact Lattice Signatures</div>
+                    </div>
+                </div>
+
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    Dilithion uses <strong style="color: var(--primary-color);">CRYSTALS-Dilithium3 (FIPS 204 / ML-DSA-65)</strong>, the primary standard NIST selected for digital signatures. This is the same algorithm being adopted by governments, banks, and defense organizations worldwide.
+                </p>
+
+                <h2 style="color: var(--primary-color); margin: 40px 0 20px;">How CRYSTALS-Dilithium Works</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    Dilithium is a <strong style="color: var(--text-primary);">lattice-based signature scheme</strong> built on the Module Learning With Errors (Module-LWE) and Module Short Integer Solution (Module-SIS) problems. Here's the intuition:
+                </p>
+
+                <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 24px; margin: 30px 0;">
+                    <h3 style="color: var(--text-primary); margin-bottom: 15px;">The Lattice Problem (Simplified)</h3>
+                    <p style="color: var(--text-secondary); line-height: 1.8; margin-bottom: 15px;">
+                        Imagine a grid (lattice) of points in very high-dimensional space. Given a random point near the lattice, finding the closest lattice point is extremely hard - even for quantum computers. This is analogous to finding a needle in a haystack where the haystack has millions of dimensions.
+                    </p>
+                    <p style="color: var(--text-secondary); line-height: 1.8;">
+                        Dilithium uses this hardness to create signatures: the signer knows a "shortcut" (the private key) that makes it easy to produce valid signatures, but without the shortcut, forging a signature requires solving the hard lattice problem.
+                    </p>
+                </div>
+
+                <h3 style="color: var(--text-primary); margin: 30px 0 15px;">Dilithium3 Parameters in Dilithion</h3>
+                <div class="specs-grid" style="margin: 20px 0;">
+                    <div class="spec-row">
+                        <div class="spec-label">Security Level</div>
+                        <div class="spec-value">NIST Level 3 (~192-bit classical security)</div>
+                    </div>
+                    <div class="spec-row">
+                        <div class="spec-label">Public Key Size</div>
+                        <div class="spec-value">1,952 bytes</div>
+                    </div>
+                    <div class="spec-row">
+                        <div class="spec-label">Signature Size</div>
+                        <div class="spec-value">3,293 bytes</div>
+                    </div>
+                    <div class="spec-row">
+                        <div class="spec-label">Private Key Size</div>
+                        <div class="spec-value">4,000 bytes</div>
+                    </div>
+                    <div class="spec-row">
+                        <div class="spec-label">Signing Speed</div>
+                        <div class="spec-value">~500,000 signatures/second on modern CPU</div>
+                    </div>
+                    <div class="spec-row">
+                        <div class="spec-label">Verification Speed</div>
+                        <div class="spec-value">~250,000 verifications/second on modern CPU</div>
+                    </div>
+                </div>
+
+                <h2 style="color: var(--primary-color); margin: 40px 0 20px;">PQC Approaches Compared</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    There are several families of post-quantum cryptography. Here's how they compare:
+                </p>
+
+                <div style="overflow-x: auto; margin: 30px 0;">
+                    <table style="width: 100%; border-collapse: collapse; color: var(--text-secondary);">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--border-color);">
+                                <th style="padding: 12px; text-align: left; color: var(--text-primary);">Approach</th>
+                                <th style="padding: 12px; text-align: left; color: var(--text-primary);">Example</th>
+                                <th style="padding: 12px; text-align: left; color: var(--text-primary);">Pros</th>
+                                <th style="padding: 12px; text-align: left; color: var(--text-primary);">Cons</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="border-bottom: 1px solid var(--border-color); background: rgba(99, 102, 241, 0.1);">
+                                <td style="padding: 12px;"><strong style="color: var(--primary-color);">Lattice-based</strong></td>
+                                <td style="padding: 12px;">Dilithium, Kyber</td>
+                                <td style="padding: 12px;">Fast, compact, well-studied</td>
+                                <td style="padding: 12px;">Larger signatures than ECDSA</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                <td style="padding: 12px;">Hash-based</td>
+                                <td style="padding: 12px;">SPHINCS+, XMSS</td>
+                                <td style="padding: 12px;">Conservative security assumptions</td>
+                                <td style="padding: 12px;">Large signatures, stateful (XMSS)</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                <td style="padding: 12px;">Code-based</td>
+                                <td style="padding: 12px;">McEliece</td>
+                                <td style="padding: 12px;">Oldest PQC scheme (1978)</td>
+                                <td style="padding: 12px;">Very large public keys (~1 MB)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 12px;">Multivariate</td>
+                                <td style="padding: 12px;">Rainbow (broken)</td>
+                                <td style="padding: 12px;">Small signatures</td>
+                                <td style="padding: 12px;">Several schemes broken, less trusted</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    Dilithion chose <strong style="color: var(--text-primary);">lattice-based cryptography</strong> because it offers the best balance of security, performance, and signature size. It's also the approach NIST selected as its primary standard, meaning it has undergone the most rigorous public review.
+                </p>
+
+                <h2 style="color: var(--primary-color); margin: 40px 0 20px;">Why "Dilithion"?</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    The name "Dilithion" is derived from <strong style="color: var(--text-primary);">CRYSTALS-Dilithium</strong>, the NIST post-quantum signature standard at the heart of the protocol. Just as the cryptographic algorithm provides quantum-resistant security, Dilithion brings that protection to a complete cryptocurrency ecosystem with mining, wallets, and peer-to-peer transactions.
+                </p>
+
+                <h2 style="color: var(--primary-color); margin: 40px 0 20px;">The Complete Quantum-Resistant Stack</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 1.1rem; line-height: 1.8;">
+                    Post-quantum security requires more than just changing the signature algorithm. Dilithion uses quantum-resistant primitives throughout:
+                </p>
+
+                <div style="display: grid; gap: 16px; margin: 30px 0;">
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                        <h4 style="color: var(--primary-color); margin-bottom: 8px;">Transaction Signatures</h4>
+                        <p style="color: var(--text-secondary);">CRYSTALS-Dilithium3 (FIPS 204) - Every transaction is signed with a quantum-resistant lattice-based signature.</p>
+                    </div>
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                        <h4 style="color: var(--primary-color); margin-bottom: 8px;">Hashing (SHA-3)</h4>
+                        <p style="color: var(--text-secondary);">Keccak-256 for address generation and block hashing. SHA-3 offers quantum resistance with 256-bit security against Grover's algorithm.</p>
+                    </div>
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                        <h4 style="color: var(--primary-color); margin-bottom: 8px;">Proof-of-Work (RandomX)</h4>
+                        <p style="color: var(--text-secondary);">CPU-optimized, ASIC-resistant mining algorithm. Keeps mining decentralized and accessible to everyone.</p>
+                    </div>
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px;">
+                        <h4 style="color: var(--primary-color); margin-bottom: 8px;">HD Wallet (BIP39/BIP44)</h4>
+                        <p style="color: var(--text-secondary);">Hierarchical deterministic wallet with 12-word mnemonic seed phrases, generating quantum-resistant Dilithium key pairs.</p>
+                    </div>
+                </div>
+
+                <div style="text-align: center; margin: 40px 0;">
+                    <a href="/#downloads" class="btn btn-primary" style="font-size: 1.1rem; padding: 16px 32px;">Try Dilithion - Download Free</a>
+                    <p style="color: var(--text-muted); margin-top: 12px;">Quantum-resistant cryptocurrency you can mine with any CPU.</p>
+                </div>
+
+                <!-- Related Pages -->
+                <div style="border-top: 1px solid var(--border-color); padding-top: 30px; margin-top: 40px;">
+                    <h3 style="color: var(--text-primary); margin-bottom: 15px;">Continue Reading</h3>
+                    <ul style="list-style: none; padding: 0;">
+                        <li style="margin-bottom: 10px;"><a href="quantum-security.html" style="color: var(--primary-color); text-decoration: none; font-size: 1.05rem;">Why Quantum Computers Threaten Cryptocurrency &rarr;</a></li>
+                        <li style="margin-bottom: 10px;"><a href="mainnet.html" style="color: var(--primary-color); text-decoration: none; font-size: 1.05rem;">Dilithion Mainnet Details &rarr;</a></li>
+                        <li style="margin-bottom: 10px;"><a href="WHITEPAPER.html" style="color: var(--primary-color); text-decoration: none; font-size: 1.05rem;">Read the Technical Whitepaper &rarr;</a></li>
+                    </ul>
+                </div>
+            </article>
+
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2025-2026 Dilithion. Open-source post-quantum cryptocurrency. <a href="index.html" style="color: var(--primary-color);">Back to Home</a></p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
