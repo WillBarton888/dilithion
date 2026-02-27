@@ -201,11 +201,17 @@ async function apiFetch(endpoint) {
 }
 
 function copyToClipboard(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-    } else {
-        fallbackCopy(text);
-    }
+    return new Promise((resolve) => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(resolve).catch(() => {
+                fallbackCopy(text);
+                resolve();
+            });
+        } else {
+            fallbackCopy(text);
+            resolve();
+        }
+    });
 }
 
 function fallbackCopy(text) {
@@ -219,21 +225,44 @@ function fallbackCopy(text) {
     document.body.removeChild(ta);
 }
 
-function makeCopyButton(text) {
-    return `<button class="copy-btn" onclick="handleCopy(this, '${escapeHtml(text)}')" title="Copy to clipboard">${ICONS.copy}</button>`;
+function showCopyToast() {
+    // Remove any existing toast
+    const existing = document.querySelector('.copy-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'copy-toast';
+    toast.textContent = 'Copied!';
+    document.body.appendChild(toast);
+    // Trigger reflow then animate in
+    toast.offsetHeight;
+    toast.classList.add('show');
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 1500);
 }
 
-function handleCopy(btn, text) {
-    copyToClipboard(text);
-    btn.innerHTML = ICONS.check;
-    btn.classList.add('copied');
-    setTimeout(() => {
-        btn.innerHTML = ICONS.copy;
-        btn.classList.remove('copied');
-    }, 2000);
+function makeCopyButton(text) {
+    return `<button class="copy-btn" data-copy="${escapeHtml(text)}" title="Copy to clipboard">${ICONS.copy}</button>`;
 }
-// Expose globally for inline onclick
-window.handleCopy = handleCopy;
+
+// Event delegation for all copy buttons - more robust than inline onclick
+document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.copy-btn');
+    if (!btn || !btn.dataset.copy) return;
+
+    const text = btn.dataset.copy;
+    copyToClipboard(text).then(() => {
+        btn.innerHTML = ICONS.check;
+        btn.classList.add('copied');
+        showCopyToast();
+        setTimeout(() => {
+            btn.innerHTML = ICONS.copy;
+            btn.classList.remove('copied');
+        }, 2000);
+    });
+});
 
 function breadcrumb(items) {
     const parts = items.map((item, i) => {
