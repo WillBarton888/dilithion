@@ -413,7 +413,13 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
     if (peer->Misbehaving(score)) {
         // Ban peer if threshold exceeded
         std::lock_guard<std::recursive_mutex> lock(cs_peers);
-        int64_t ban_until = GetTime() + DEFAULT_BAN_TIME;
+
+        // Use shorter ban time for outdated protocol version (10 min vs 1 hour)
+        // These are legitimate miners who just need to update, not attackers
+        int64_t ban_time = (type == MisbehaviorType::INVALID_PROTOCOL_VERSION)
+                           ? PROTOCOL_VERSION_BAN_TIME : DEFAULT_BAN_TIME;
+
+        int64_t ban_until = GetTime() + ban_time;
         peer->Ban(ban_until);
 
         // BUG FIX: Get IP from peer first, fall back to CNode if peer's addr is null
@@ -434,13 +440,21 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
             }
         }
 
-        banman.Ban(ip, DEFAULT_BAN_TIME, BanReason::NodeMisbehaving,
+        banman.Ban(ip, ban_time, BanReason::NodeMisbehaving,
                    type, peer->misbehavior_score);
 
-        std::cout << "[BAN] Peer " << peer_id << " (" << ip
-                  << ") banned for " << (DEFAULT_BAN_TIME / 3600) << "h - "
-                  << MisbehaviorTypeToString(type)
-                  << " (score: " << peer->misbehavior_score << ")" << std::endl;
+        // Format ban duration for display
+        if (ban_time >= 3600) {
+            std::cout << "[BAN] Peer " << peer_id << " (" << ip
+                      << ") banned for " << (ban_time / 3600) << "h - "
+                      << MisbehaviorTypeToString(type)
+                      << " (score: " << peer->misbehavior_score << ")" << std::endl;
+        } else {
+            std::cout << "[BAN] Peer " << peer_id << " (" << ip
+                      << ") banned for " << (ban_time / 60) << "min - "
+                      << MisbehaviorTypeToString(type)
+                      << " (score: " << peer->misbehavior_score << ")" << std::endl;
+        }
     }
 }
 

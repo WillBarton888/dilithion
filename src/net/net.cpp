@@ -531,18 +531,22 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             std::cout << "[P2P] This peer is running outdated software with incompatible" << std::endl;
             std::cout << "[P2P] consensus rules, which causes fork creation on the network." << std::endl;
             std::cout << "[P2P] " << std::endl;
-            std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
+            std::cout << "[P2P] Your IP will be temporarily banned for 10 minutes." << std::endl;
+            std::cout << "[P2P] " << std::endl;
+            std::cout << "[P2P] HOW TO FIX:" << std::endl;
             std::cout << "[P2P] 1. Download the latest version from https://dilithion.org" << std::endl;
             std::cout << "[P2P] 2. Stop your node" << std::endl;
-            std::cout << "[P2P] 3. Replace the binary and restart" << std::endl;
+            std::cout << "[P2P] 3. Delete blocks/ and chainstate/ (keep wallet.dat!)" << std::endl;
+            std::cout << "[P2P] 4. Download the bootstrap from the releases page" << std::endl;
+            std::cout << "[P2P] 5. Extract bootstrap and restart with the new binary" << std::endl;
             std::cout << "[P2P] ================================================\n" << std::endl;
-            // A4: Send reject message so the peer knows WHY they were banned
+            // Send reject message so the peer knows WHY they were banned
             SendRejectMessage(peer_id, "version",
                 "Outdated protocol version " + std::to_string(msg.version) +
                 " (minimum: " + std::to_string(NetProtocol::MIN_PEER_PROTO_VERSION) +
-                "). Upgrade at https://dilithion.org",
+                "). Banned for 10 minutes. Upgrade at https://dilithion.org",
                 REJECT_OBSOLETE);
-            // A4: Use 100 for immediate ban persistence (was 50)
+            // Ban for 10 minutes (not 1 hour) - these are miners who need to update, not attackers
             peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_PROTOCOL_VERSION);
             return false;
         }
