@@ -585,6 +585,7 @@ a.hash:hover {
 .copy-btn svg {
     width: 14px;
     height: 14px;
+    pointer-events: none;
 }
 
 /* --- Copy Toast Notification --- */
