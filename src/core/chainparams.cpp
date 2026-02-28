@@ -243,7 +243,7 @@ ChainParams ChainParams::Testnet() {
     params.vdfIterations       = 10'000'000;  // ~10s on reference hardware (faster for testing)
 
     // VDF Lottery: "lowest output wins"
-    params.vdfLotteryActivationHeight = 87250;
+    params.vdfLotteryActivationHeight = 87240;
     params.vdfLotteryGracePeriod = 30;  // 30 seconds (faster for testing)
 
     params.digitalDnaActivationHeight = 1;    // Active from near-genesis for testing
