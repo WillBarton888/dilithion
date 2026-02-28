@@ -9,6 +9,7 @@
 #include <vdf/cooldown_tracker.h>
 #include <consensus/vdf_validation.h>
 #include <primitives/block.h>
+#include <uint256.h>
 
 #include <atomic>
 #include <thread>
@@ -16,6 +17,7 @@
 #include <functional>
 #include <condition_variable>
 #include <array>
+#include <utility>
 
 /**
  * VDF Mining Controller
@@ -61,9 +63,13 @@ public:
 
     /**
      * Signal that a new block has arrived.
-     * Aborts any in-progress VDF computation and restarts on the new epoch.
+     * VDF Lottery: If the new block is at the SAME height we're computing for,
+     * don't abort — our output may be lower and win the lottery.
+     * If at a different height, abort and restart on the new epoch.
+     *
+     * @param newTipHeight Height of the new chain tip (-1 = always abort)
      */
-    void OnNewBlock();
+    void OnNewBlock(int newTipHeight = -1);
 
     /**
      * Check if VDF miner is running.
@@ -98,6 +104,15 @@ public:
      * If set, the miner will skip rounds when in cooldown.
      */
     void SetCooldownTracker(CCooldownTracker* tracker);
+
+    /**
+     * VDF Lottery: Set provider for current tip's VDF output.
+     * Used for pre-submission comparison — miner checks if its output is
+     * lower than the current tip before submitting (optimization to avoid
+     * unnecessary block construction + relay).
+     */
+    using TipOutputProvider = std::function<std::pair<int, uint256>()>;
+    void SetTipOutputProvider(TipOutputProvider provider);
 
     /**
      * Get the number of VDF blocks found.
@@ -150,6 +165,7 @@ private:
     // Callbacks
     BlockFoundCallback m_blockFoundCallback;
     TemplateProvider m_templateProvider;
+    TipOutputProvider m_tipOutputProvider;
     std::mutex m_callbackMutex;
 
     // Stats

@@ -497,6 +497,11 @@ vdf_miner_test: $(CORE_OBJECTS) $(OBJ_DIR)/miner/vdf_miner_test.o $(DILITHIUM_OB
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ vdf_miner_test built successfully$(COLOR_RESET)"
 
+vdf_lottery_test: $(CORE_OBJECTS) $(OBJ_DIR)/vdf/vdf_lottery_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ vdf_lottery_test built successfully$(COLOR_RESET)"
+
 test_passphrase_validator: $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/test_passphrase_validator.o
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)

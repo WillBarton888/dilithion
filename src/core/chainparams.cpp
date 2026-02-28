@@ -108,6 +108,10 @@ ChainParams ChainParams::Mainnet() {
     params.vdfExclusiveHeight  = 999999999;
     params.vdfIterations       = 200'000'000; // ~200s on reference hardware
 
+    // VDF Lottery: "lowest output wins" (disabled until fork is scheduled)
+    params.vdfLotteryActivationHeight = 999999999;
+    params.vdfLotteryGracePeriod = 60;  // 60 seconds
+
     params.digitalDnaActivationHeight = 999999999;  // Disabled until fork is scheduled
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
@@ -237,6 +241,10 @@ ChainParams ChainParams::Testnet() {
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted
     params.vdfExclusiveHeight  = 87500;       // VDF-only after this height
     params.vdfIterations       = 10'000'000;  // ~10s on reference hardware (faster for testing)
+
+    // VDF Lottery: "lowest output wins"
+    params.vdfLotteryActivationHeight = 87250;
+    params.vdfLotteryGracePeriod = 30;  // 30 seconds (faster for testing)
 
     params.digitalDnaActivationHeight = 1;    // Active from near-genesis for testing
 

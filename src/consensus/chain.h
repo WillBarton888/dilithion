@@ -12,6 +12,7 @@
 #include <mutex>
 #include <functional>
 #include <atomic>
+#include <chrono>
 
 // Forward declarations
 class CBlockchainDB;
@@ -76,6 +77,17 @@ private:
     std::vector<BlockDisconnectCallback> m_blockDisconnectCallbacks;
 
 public:
+    // VDF Lottery: Track when the first VDF block at the current tip height was accepted.
+    // Used to enforce the grace period — replacements only allowed within this window.
+    // INVARIANT: These are only modified under cs_main (ActivateBestChain holds the lock).
+    // The first block at a height always enters via Case 2 (extending tip), which sets
+    // these values. Subsequent siblings enter Case 2.5 (lottery comparison) and read them.
+    // Replacements do NOT reset the accept time — the grace window is anchored to the
+    // first block at a height to prevent infinite replacement chains.
+    std::chrono::steady_clock::time_point m_vdfTipAcceptTime{};
+    int m_vdfTipAcceptHeight{-1};
+
+
     CChainState();
     ~CChainState();
 
@@ -122,6 +134,12 @@ public:
     void SetTip(CBlockIndex* pindex);
 
     /**
+     * Test-only: Set tip without mapBlockIndex invariant check.
+     * Used by unit tests that construct CBlockIndex objects directly.
+     */
+    void SetTipForTest(CBlockIndex* pindex) { pindexTip = pindex; }
+
+    /**
      * Add block index to in-memory map
      * HIGH-C001 FIX: Now takes unique_ptr for automatic ownership transfer
      */
@@ -159,6 +177,13 @@ public:
      * @return true if block successfully activated (may or may not cause reorg)
      */
     bool ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block, bool& reorgOccurred);
+
+    /**
+     * VDF Lottery: Check if a competing VDF block should replace the current tip.
+     * Returns true if pindexNew has a lower vdfOutput (big-endian) AND we're within grace period.
+     * Uses HashLessThan() for consensus-safe comparison (NOT uint256::operator<).
+     */
+    bool ShouldReplaceVDFTip(CBlockIndex* pindexNew) const;
 
     /**
      * Connect a block to the active chain

@@ -1076,6 +1076,28 @@ BlockProcessResult ProcessNewBlock(
             if (g_chain_tip_callback) {
                 g_chain_tip_callback(db, g_chainstate.GetHeight(), true /* is_reorg */);
             }
+
+            // VDF LOTTERY RELAY FIX: Relay the block that just became tip via reorg.
+            // Without this, VDF lottery winners are never propagated to peers.
+            // Only relay when the arriving block IS the new tip (not deep reorgs
+            // where the tip may be different from the submitted block).
+            if (g_chainstate.GetTip() == pblockIndexPtr) {
+                if (ctx.peer_manager && ctx.async_broadcaster) {
+                    auto connected_peers = ctx.peer_manager->GetConnectedPeers();
+                    std::vector<int> relay_peer_ids;
+                    for (const auto& peer : connected_peers) {
+                        if (peer && peer->IsHandshakeComplete() && peer->id != peer_id) {
+                            relay_peer_ids.push_back(peer->id);
+                        }
+                    }
+                    if (!relay_peer_ids.empty()) {
+                        if (ctx.async_broadcaster->BroadcastBlock(blockHash, block, relay_peer_ids)) {
+                            std::cout << "[ProcessNewBlock] Relaying lottery-winning block to "
+                                      << relay_peer_ids.size() << " peer(s)" << std::endl;
+                        }
+                    }
+                }
+            }
         } else {
             std::cout << "[ProcessNewBlock] Block activated successfully" << std::endl;
             g_metrics.blocks_accepted_total++;

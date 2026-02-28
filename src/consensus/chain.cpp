@@ -142,6 +142,63 @@ CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
     return pindex1;  // Common ancestor
 }
 
+// ---------------------------------------------------------------------------
+// VDF Lottery: ShouldReplaceVDFTip
+// ---------------------------------------------------------------------------
+
+bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
+{
+    // Must have chain params with lottery enabled
+    if (!Dilithion::g_chainParams)
+        return false;
+    if (pindexNew->nHeight < Dilithion::g_chainParams->vdfLotteryActivationHeight)
+        return false;
+
+    // Both blocks must be VDF (version >= 4)
+    if (pindexNew->nVersion < 4 || pindexTip->nVersion < 4)
+        return false;
+
+    // Must be at same height with same parent (sibling blocks)
+    if (pindexNew->nHeight != pindexTip->nHeight)
+        return false;
+    if (pindexNew->pprev != pindexTip->pprev)
+        return false;
+
+    // Compare vdfOutput using HashLessThan (big-endian, consensus-safe)
+    // CRITICAL: Do NOT use uint256::operator< — it's little-endian (memcmp)
+    // and only suitable for STL containers, not consensus comparisons.
+    const uint256& newOutput = pindexNew->header.vdfOutput;
+    const uint256& tipOutput = pindexTip->header.vdfOutput;
+
+    if (newOutput.IsNull() || tipOutput.IsNull())
+        return false;
+
+    if (!HashLessThan(newOutput, tipOutput))
+        return false;  // New output is not lower -> no replacement
+
+    // Grace period check
+    if (m_vdfTipAcceptHeight != pindexTip->nHeight)
+        return false;  // No accept time for this height
+
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        now - m_vdfTipAcceptTime).count();
+    int gracePeriod = Dilithion::g_chainParams->vdfLotteryGracePeriod;
+
+    if (elapsed > gracePeriod) {
+        std::cout << "[VDF Lottery] Lower output arrived but grace period expired ("
+                  << elapsed << "s > " << gracePeriod << "s)" << std::endl;
+        return false;
+    }
+
+    std::cout << "[VDF Lottery] Lower VDF output found! Replacing tip." << std::endl;
+    std::cout << "  Current tip output: " << tipOutput.GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "  New block output:   " << newOutput.GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "  Grace remaining: " << (gracePeriod - elapsed) << "s" << std::endl;
+
+    return true;
+}
+
 bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block, bool& reorgOccurred) {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
     // This protects pindexTip, mapBlockIndex, and all chain operations
@@ -207,6 +264,16 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         // BUG #74 FIX: Update atomic cached height
         m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
 
+        // VDF Lottery: Record when this height's first VDF block was accepted.
+        // This starts the grace period clock. Only set here (Case 2), not in
+        // Case 2.5 (lottery replacement), to anchor the deadline to the first arrival.
+        if (pindexNew->nVersion >= 4 &&
+            Dilithion::g_chainParams &&
+            pindexNew->nHeight >= Dilithion::g_chainParams->vdfLotteryActivationHeight) {
+            m_vdfTipAcceptTime = std::chrono::steady_clock::now();
+            m_vdfTipAcceptHeight = pindexNew->nHeight;
+        }
+
         // Persist to database
         if (pdb != nullptr) {
             bool success = pdb->WriteBestBlock(pindexNew->GetBlockHash());
@@ -215,6 +282,41 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         }
 
         // Bug #40 fix: Notify registered callbacks of tip update
+        NotifyTipUpdate(pindexTip);
+
+        return true;
+    }
+
+    // Case 2.5: VDF Lottery — competing VDF block at same height with lower output
+    if (ShouldReplaceVDFTip(pindexNew)) {
+        std::cout << "[Chain] VDF LOTTERY REPLACEMENT — 1-block reorg" << std::endl;
+
+        // Disconnect current tip
+        if (!DisconnectTip(pindexTip)) {
+            std::cerr << "[Chain] ERROR: Failed to disconnect tip for VDF replacement" << std::endl;
+            return false;
+        }
+
+        // Connect new block (shares same parent as old tip)
+        if (!ConnectTip(pindexNew, block)) {
+            std::cerr << "[Chain] CRITICAL: Failed to connect VDF replacement block" << std::endl;
+            std::cerr << "[Chain] Chain is in intermediate state (tip disconnected)." << std::endl;
+            // NOTE: This is the same failure mode as any reorg ConnectTip failure
+            // in Case 3. The chain is in an inconsistent state and will need a restart.
+            return false;
+        }
+
+        pindexTip = pindexNew;
+        m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
+
+        // Do NOT reset m_vdfTipAcceptTime — the grace window is anchored to
+        // the FIRST block at this height, preventing infinite replacement chains.
+
+        if (pdb != nullptr) {
+            pdb->WriteBestBlock(pindexNew->GetBlockHash());
+        }
+
+        reorgOccurred = true;
         NotifyTipUpdate(pindexTip);
 
         return true;

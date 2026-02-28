@@ -136,6 +136,13 @@ public:
     int vdfExclusiveHeight;
     uint64_t vdfIterations;
 
+    // VDF Lottery parameters
+    // vdfLotteryActivationHeight: Height at which "lowest output wins" activates
+    // vdfLotteryGracePeriod: Seconds after first block at a height during which
+    //                        a lower-output VDF block can replace the tip
+    int vdfLotteryActivationHeight;
+    int vdfLotteryGracePeriod;   // seconds
+
     // Digital DNA activation height
     // Before this height: DNA collection and registration disabled
     // After this height: DNA auto-collection starts for miners, registration active

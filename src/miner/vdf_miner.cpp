@@ -3,6 +3,7 @@
 
 #include <miner/vdf_miner.h>
 #include <vdf/coinbase_vdf.h>
+#include <consensus/pow.h>  // HashLessThan for VDF lottery comparison
 #include <crypto/sha3.h>
 #include <util/logging.h>
 
@@ -39,8 +40,17 @@ void CVDFMiner::Stop()
     m_currentHeight = 0;
 }
 
-void CVDFMiner::OnNewBlock()
+void CVDFMiner::OnNewBlock(int newTipHeight)
 {
+    // VDF Lottery: If the new block is at the SAME height we're computing for,
+    // don't abort. Our VDF output may be lower and win the lottery.
+    if (newTipHeight > 0 && newTipHeight == static_cast<int>(m_currentHeight.load())) {
+        std::cout << "[VDF Miner] Competing block at height " << newTipHeight
+                  << " — continuing computation (lottery)" << std::endl;
+        return;
+    }
+
+    // Different height: standard epoch change (abort current work)
     {
         std::lock_guard<std::mutex> lock(m_epochMutex);
         m_epochChanged = true;
@@ -73,6 +83,11 @@ void CVDFMiner::SetIterations(uint64_t iterations)
 void CVDFMiner::SetCooldownTracker(CCooldownTracker* tracker)
 {
     m_cooldownTracker = tracker;
+}
+
+void CVDFMiner::SetTipOutputProvider(TipOutputProvider provider)
+{
+    m_tipOutputProvider = std::move(provider);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +212,37 @@ void CVDFMiner::MiningLoop()
             std::lock_guard<std::mutex> lock(m_epochMutex);
             m_epochChanged = false;
             continue;
+        }
+
+        // ---------------------------------------------------------------
+        // 7b. VDF Lottery: Pre-submission output comparison
+        // ---------------------------------------------------------------
+        // If a competing block arrived at the same height during our computation,
+        // only submit if our VDF output is lower (we'd win the lottery).
+        // NOTE: There's an inherent race between this check and actual submission —
+        // the tip could change between here and ActivateBestChain. That's fine:
+        // ActivateBestChain does the authoritative comparison. This is just an
+        // optimization to avoid unnecessary block construction + relay.
+        if (m_tipOutputProvider) {
+            auto [tipHeight, tipVdfOutput] = m_tipOutputProvider();
+            if (tipHeight == static_cast<int>(height) && !tipVdfOutput.IsNull()) {
+                uint256 ourOutput;
+                std::memcpy(ourOutput.data, result.output.data(), 32);
+                if (!HashLessThan(ourOutput, tipVdfOutput)) {
+                    std::cout << "[VDF Miner] Our output is NOT lower than tip — skipping"
+                              << std::endl;
+                    std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::unique_lock<std::mutex> lk(m_epochMutex);
+                    m_epochCV.wait_for(lk, std::chrono::seconds(10),
+                        [this] { return m_epochChanged || !m_running; });
+                    m_epochChanged = false;
+                    continue;
+                }
+                std::cout << "[VDF Miner] Our output is LOWER than tip — submitting!" << std::endl;
+                std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
+            }
         }
 
         // ---------------------------------------------------------------
