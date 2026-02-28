@@ -49,7 +49,9 @@
 
 // NET-003 FIX: Define consensus limits to prevent integer overflow in vector resize
 // These prevent DoS attacks via malicious size values causing heap corruption
-static const uint64_t MAX_BLOCK_TRANSACTIONS = 100000;  // Max transactions per block
+// Note: vtx is a byte vector (serialized tx data), so this limits BYTES not tx count.
+// Must be >= consensus MAX_BLOCK_SIZE (1 MB) to accept all valid blocks.
+static const uint64_t MAX_BLOCK_VTX_BYTES = 4 * 1024 * 1024;  // 4 MB (matches storage layer)
 static const uint64_t MAX_TX_INPUTS = 10000;            // Max inputs per transaction
 static const uint64_t MAX_TX_OUTPUTS = 10000;           // Max outputs per transaction
 static const uint64_t MAX_SCRIPT_SIZE = 10000;          // Max script size in bytes
@@ -681,6 +683,13 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
             on_verack(peer_id);
         }
 
+        // Mark address as good in AddrMan NOW that handshake is verified.
+        // This is the correct place (not at ConnectNode time) because we've
+        // confirmed the peer is a real Dilithion node via VERSION+VERACK exchange.
+        if (node) {
+            peer_manager.MarkAddressGood(node->addr);
+        }
+
         LogPrintf(NET, INFO, "Handshake complete with peer %d (version=%d, height=%d)",
                   peer_id, peer->version, peer->start_height);
     }
@@ -1136,11 +1145,11 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
         uint64_t vtx_size = stream.ReadCompactSize();
 
         // NET-003 FIX: Validate size before resize to prevent integer overflow
-        if (vtx_size > MAX_BLOCK_TRANSACTIONS) {
+        if (vtx_size > MAX_BLOCK_VTX_BYTES) {
             // NET-011 FIX: Penalize peer for sending invalid block
-            SendRejectMessage(peer_id, "block", "Block transaction count exceeds limit");
+            SendRejectMessage(peer_id, "block", "Block vtx data exceeds maximum size (" + std::to_string(vtx_size) + " bytes)");
             peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
-            throw std::runtime_error("Block transaction count exceeds limit");
+            throw std::runtime_error("Block vtx data exceeds maximum size");
         }
 
         block.vtx.resize(vtx_size);
