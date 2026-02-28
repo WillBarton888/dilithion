@@ -1391,6 +1391,17 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
 
 void CPeerManager::OnPeerDisconnected(int peer_id)
 {
+    // Track failed connections in AddrMan so stale addresses get evicted.
+    // If handshake never completed, this was a failed connection attempt.
+    // For inbound peers whose address isn't in AddrMan, Attempt() is a no-op.
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        auto it = peers.find(peer_id);
+        if (it != peers.end() && it->second->state != CPeer::STATE_HANDSHAKE_COMPLETE) {
+            MarkAddressTried(it->second->addr);
+        }
+    }
+
     // Re-queue any in-flight blocks from this peer (legacy tracking)
     GetAndClearPeerBlocks(peer_id);
 

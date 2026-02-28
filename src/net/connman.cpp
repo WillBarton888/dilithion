@@ -298,36 +298,8 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
         return nullptr;
     }
 
-    // FIX: Check for duplicate connection (already connected to this IP)
-    {
-        std::lock_guard<std::mutex> lock(cs_vNodes);
-        for (const auto& node : m_nodes) {
-            if (node && !node->fDisconnect.load()) {
-                if (node->addr.ToStringIP() == ip_str) {
-                    LogPrintf(NET, WARN, "[CConnman] Skipping duplicate outbound to %s (already connected)\n", ip_str.c_str());
-                    return nullptr;
-                }
-            }
-        }
-    }
-
-    // Check connection limits
-    {
-        std::lock_guard<std::mutex> lock(cs_vNodes);
-        size_t outbound_count = 0;
-        for (const auto& node : m_nodes) {
-            if (!node->fInbound) {
-                outbound_count++;
-            }
-        }
-        if (outbound_count >= static_cast<size_t>(m_options.nMaxOutbound)) {
-            LogPrintf(NET, WARN, "[CConnman] Outbound connection limit reached (%zu/%d)\n",
-                      outbound_count, m_options.nMaxOutbound);
-            return nullptr;
-        }
-    }
-
-    // Create socket matching address family (AF_INET for IPv4, AF_INET6 for IPv6)
+    // Step 1: Create socket and initiate async TCP connect BEFORE locking.
+    // This avoids holding cs_vNodes during potentially slow syscalls.
     int family = CSock::DetectFamily(ip_str);
     if (family == 0) {
         LogPrintf(NET, ERROR, "[CConnman] Invalid address family for %s\n", ip_str.c_str());
@@ -340,7 +312,6 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
         return nullptr;
     }
 
-    // Set non-blocking
     if (!CSock::SetNonBlocking(sock)) {
         LogPrintf(NET, ERROR, "[CConnman] ConnectNode: Failed to set non-blocking for %s:%d\n",
                   ip_str.c_str(), addr.port);
@@ -348,7 +319,6 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
         return nullptr;
     }
 
-    // Connect using family-aware sockaddr
     struct sockaddr_storage ss;
     socklen_t ss_len;
     if (!CSock::FillSockAddr(ip_str, addr.port, ss, ss_len)) {
@@ -376,31 +346,57 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     }
 #endif
 
-    // Phase 2: Create CNode directly (CConnman owns nodes)
-    int node_id = m_next_node_id++;
-    auto node = std::make_unique<CNode>(node_id, addr, false);  // false = outbound
-    CNode* pnode = node.get();
-
-    // Set socket and state
-    pnode->SetSocket(static_cast<int>(sock));
-    pnode->state.store(CNode::STATE_CONNECTING);
-
-    // Add to m_nodes
+    // Step 2: ATOMIC check-and-add under a SINGLE lock acquisition.
+    // This fixes the TOCTOU race where ThreadOpenConnections and the P2P
+    // maintenance thread both pass the duplicate check before either adds
+    // the node, creating 2 outbound connections to the same seed.
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
-        // FIX: Register BEFORE adding to m_nodes to prevent race condition
-        // BUG #148 ROOT CAUSE FIX: Check return value (banned IP check)
+
+        // Check for duplicate connection (already connected to this IP)
+        for (const auto& node : m_nodes) {
+            if (node && !node->fDisconnect.load()) {
+                if (node->addr.ToStringIP() == ip_str) {
+                    LogPrintf(NET, WARN, "[CConnman] Skipping duplicate outbound to %s (already connected)\n", ip_str.c_str());
+                    CSock::Close(sock);
+                    return nullptr;
+                }
+            }
+        }
+
+        // Check connection limits
+        size_t outbound_count = 0;
+        for (const auto& node : m_nodes) {
+            if (!node->fInbound) {
+                outbound_count++;
+            }
+        }
+        if (outbound_count >= static_cast<size_t>(m_options.nMaxOutbound)) {
+            LogPrintf(NET, WARN, "[CConnman] Outbound connection limit reached (%zu/%d)\n",
+                      outbound_count, m_options.nMaxOutbound);
+            CSock::Close(sock);
+            return nullptr;
+        }
+
+        // Create CNode and add to m_nodes (still holding lock)
+        int node_id = m_next_node_id++;
+        auto node = std::make_unique<CNode>(node_id, addr, false);  // false = outbound
+        CNode* pnode = node.get();
+
+        pnode->SetSocket(static_cast<int>(sock));
+        pnode->state.store(CNode::STATE_CONNECTING);
+
         if (!m_peer_manager->RegisterNode(node_id, pnode, addr, false)) {
             LogPrintf(NET, WARN, "[CConnman] Not connecting to banned IP %s\n", ip_str.c_str());
             // node destructor closes socket
             return nullptr;
         }
         m_nodes.push_back(std::move(node));
-    }
 
-    LogPrintf(NET, INFO, "[CConnman] Connecting to %s:%d (node %d)\n",
-              ip_str.c_str(), addr.port, pnode->id);
-    return pnode;
+        LogPrintf(NET, INFO, "[CConnman] Connecting to %s:%d (node %d)\n",
+                  ip_str.c_str(), addr.port, pnode->id);
+        return pnode;
+    }
 }
 
 bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtocol::CAddress& addr) {
@@ -945,7 +941,8 @@ void CConnman::ThreadOpenConnections() {
                 // Note: Connection is async - STATE_CONNECTING until TCP handshake completes
                 // Don't mark as "connected" yet - SocketHandler will log when connection succeeds
                 connected_ips.insert(std::move(seed_ip));  // Move instead of copy (perf fix)
-                m_peer_manager->MarkAddressGood(seed_addr);
+                // NOTE: Do NOT call MarkAddressGood here - handshake hasn't completed yet.
+                // Good is called after VERACK (ProcessVerackMessage).
             }
         }
 
@@ -985,7 +982,10 @@ void CConnman::ThreadOpenConnections() {
                               ip_str.c_str(), pnode->id);
                     connections_made++;
                     connected_ips.insert(std::move(ip_str));  // Move instead of copy (perf fix)
-                    m_peer_manager->MarkAddressGood(addr);
+                    // NOTE: Do NOT call MarkAddressGood here!
+                    // ConnectNode only creates a socket - TCP hasn't completed yet.
+                    // MarkAddressGood resets nAttempts=0, preventing stale address eviction.
+                    // Good is called after VERACK handshake completes (ProcessVerackMessage).
                 }
             }
 

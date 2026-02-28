@@ -4930,72 +4930,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             try {
                 std::cout << "  [OK] P2P maintenance thread started" << std::endl;
 
-                int cycles_without_peers = 0;
-                auto last_reconnect_attempt = std::chrono::steady_clock::now();
-
                 while (g_node_state.running) {
                     try {
-                    // Phase 5: Proactive outbound connections handled by CConnman::ThreadOpenConnections
-                    // This thread handles reactive reconnection and other maintenance
-                    // Ping/pong is handled automatically by message handlers
-
-                    // BUG #49: Check if we need to reconnect to seed nodes
-                    size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
-
-                    if (peer_count == 0) {
-                        cycles_without_peers++;
-
-                        // Attempt reconnection every 60 seconds when isolated
-                        auto now = std::chrono::steady_clock::now();
-                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_reconnect_attempt);
-
-                        if (elapsed.count() >= 60) {
-                            std::cout << "[P2P-Maintenance] No peers connected - attempting to reconnect to seed nodes..." << std::endl;
-                            last_reconnect_attempt = now;
-
-                            // Get seed nodes from peer manager
-                            auto seed_nodes = g_node_context.peer_manager ? g_node_context.peer_manager->GetSeedNodes() : std::vector<NetProtocol::CAddress>();
-
-                            // Try to connect to each seed node
-                            int successful_connections = 0;
-                            for (const auto& seed_addr : seed_nodes) {
-                                try {
-                                    std::string ip_str = seed_addr.ToStringIP();
-                                    uint16_t port = seed_addr.port;
-
-                                    std::cout << "[P2P-Maintenance] Attempting connection to seed " << ip_str << ":" << port << std::endl;
-
-                                    // Phase 5: Use CConnman to connect and send VERSION
-                                    int peer_id = ConnectAndHandshake(seed_addr);
-                                    if (peer_id >= 0) {
-                                        std::cout << "[P2P-Maintenance] Connected to seed node (peer_id=" << peer_id << ")" << std::endl;
-                                        std::cout << "[P2P-Maintenance] Sent VERSION to peer " << peer_id << std::endl;
-                                        successful_connections++;
-                                    } else {
-                                        std::cout << "[P2P-Maintenance] Failed to connect to seed " << ip_str << ":" << port << std::endl;
-                                    }
-                                } catch (const std::exception& e) {
-                                    std::cerr << "[P2P-Maintenance] Exception connecting to seed: " << e.what() << std::endl;
-                                }
-                            }
-
-                            if (successful_connections > 0) {
-                                std::cout << "[P2P-Maintenance] Reconnected to " << successful_connections << " seed node(s)" << std::endl;
-                                cycles_without_peers = 0;
-                            } else {
-                                std::cout << "[P2P-Maintenance] Could not reconnect to any seed nodes" << std::endl;
-                            }
-                        }
-                    } else {
-                        if (cycles_without_peers > 0) {
-                            std::cout << "[P2P-Maintenance] Peer connectivity restored (" << peer_count << " peers)" << std::endl;
-                            cycles_without_peers = 0;
-                        }
-                    }
-
-                    // NOTE: Outbound connections are handled by CConnman::ThreadOpenConnections()
-                    // which runs in a dedicated thread. Do NOT duplicate that logic here
-                    // as it causes multiple connections to the same peer.
+                    // Seed reconnection is handled entirely by CConnman::ThreadOpenConnections()
+                    // which runs every 60 seconds in a dedicated thread. Do NOT duplicate
+                    // that logic here — it caused a TOCTOU race creating 2 outbound connections
+                    // per seed, exhausting the per-IP inbound limit and blocking new nodes.
 
                     // BUG #49: Decay misbehavior scores (reduce by 1 point per minute)
                     // This happens every 30 seconds, so decay by 0.5 points
