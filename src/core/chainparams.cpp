@@ -240,7 +240,7 @@ ChainParams ChainParams::Testnet() {
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted
     params.vdfExclusiveHeight  = 87500;       // VDF-only after this height
-    params.vdfIterations       = 10'000'000;  // ~10s on reference hardware (faster for testing)
+    params.vdfIterations       = 1'000'000;   // ~20s on VPS (fast enough for lottery competition)
 
     // VDF Lottery: "lowest output wins"
     params.vdfLotteryActivationHeight = 87240;
