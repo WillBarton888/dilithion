@@ -8,6 +8,7 @@
 #include <cstring>
 #include <algorithm>
 #include <iostream>
+#include <chrono>
 
 // Dilithium3 reference implementation
 extern "C" {
@@ -494,6 +495,7 @@ bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, u
     preimage.resize(MIK_PUBKEY_SIZE + 8);  // Reserve space for nonce
 
     uint8_t hash[32];
+    auto start_time = std::chrono::steady_clock::now();
 
     for (uint64_t n = 0; n < UINT64_MAX; n++) {
         // Write nonce bytes (little-endian)
@@ -525,14 +527,26 @@ bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, u
 
         if (found && zeroBits >= requiredBits) {
             nonce = n;
-            std::cout << "[DFMP v3.0] Registration PoW found: nonce=" << n
-                      << " (" << zeroBits << " zero bits)" << std::endl;
+            auto total_elapsed = std::chrono::steady_clock::now() - start_time;
+            auto total_sec = std::chrono::duration_cast<std::chrono::seconds>(total_elapsed).count();
+            std::cout << "  [Mining] Registration PoW complete (nonce=" << n
+                      << ", " << zeroBits << " zero bits, " << total_sec << "s)" << std::endl;
             return true;
         }
 
-        // Log progress every 10M iterations
-        if (n % 10000000 == 0 && n > 0) {
-            std::cout << "[DFMP v3.0] Registration PoW mining... " << n << " hashes tried" << std::endl;
+        // Log progress every 5M iterations with elapsed time and ETA
+        if (n % 5000000 == 0 && n > 0) {
+            auto elapsed = std::chrono::steady_clock::now() - start_time;
+            auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+            double rate = (elapsed_sec > 0) ? static_cast<double>(n) / elapsed_sec : 0;
+            int64_t expected_total = 1LL << requiredBits;  // 2^28 ≈ 268M for 28 bits
+            int64_t remaining_sec = (rate > 0) ? static_cast<int64_t>((expected_total - static_cast<int64_t>(n)) / rate) : 0;
+            if (remaining_sec < 0) remaining_sec = 0;
+            int eta_min = static_cast<int>(remaining_sec / 60);
+            int eta_sec = static_cast<int>(remaining_sec % 60);
+            std::cout << "  [Mining] Registration PoW: " << (n / 1000000) << "M hashes"
+                      << " (elapsed: " << elapsed_sec << "s"
+                      << ", ~" << eta_min << "m " << eta_sec << "s remaining)" << std::endl;
         }
     }
 

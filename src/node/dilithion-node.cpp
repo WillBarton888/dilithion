@@ -688,6 +688,85 @@ struct NodeConfig {
 static CTransactionRef g_currentCoinbase;
 static std::mutex g_coinbaseMutex;
 
+// File-scope MIK registration PoW cache
+// Shared between EnsureMIKRegistered() and BuildMiningTemplate()
+static uint64_t s_cachedRegNonce = 0;
+static std::atomic<bool> s_regNonceMined{false};
+static std::atomic<bool> s_regPowInProgress{false};
+static DFMP::Identity s_regNonceIdentity;
+
+/**
+ * Ensure MIK identity is registered before mining begins.
+ * This is a one-time operation for new miners (~10-15 minutes).
+ * Must be called before BuildMiningTemplate() on the startup path
+ * so the user sees clear progress instead of cryptic template errors.
+ *
+ * @param wallet Reference to wallet (for MIK identity)
+ * @param nextHeight The height of the next block to be mined
+ * @return true if registration is complete (or not needed), false on failure
+ */
+bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
+    // Guard: identity DB must be available
+    if (!DFMP::g_identityDb) return true;
+
+    // Guard: DFMP v3 PoW only required at/above activation height
+    if (!Dilithion::g_chainParams ||
+        static_cast<int>(nextHeight) < Dilithion::g_chainParams->dfmpV3ActivationHeight) {
+        return true;
+    }
+
+    // Get or generate MIK identity
+    DFMP::Identity identity = wallet.GetMIKIdentity();
+    if (identity.IsNull()) {
+        if (!wallet.GenerateMIK()) {
+            std::cerr << "[Mining] WARNING: Failed to generate miner identity" << std::endl;
+            return false;
+        }
+        identity = wallet.GetMIKIdentity();
+        std::cout << "[Mining] Generated new miner identity: " << identity.GetHex() << std::endl;
+    }
+
+    // Already registered in identity DB?
+    if (DFMP::g_identityDb->HasMIKPubKey(identity)) return true;
+
+    // Already cached from a previous call?
+    if (s_regNonceMined.load() && s_regNonceIdentity == identity) return true;
+
+    // Get public key for PoW
+    std::vector<uint8_t> mikPubkey;
+    if (!wallet.GetMIKPubKey(mikPubkey)) {
+        std::cerr << "[Mining] WARNING: Failed to get MIK public key (wallet may be locked)" << std::endl;
+        return false;
+    }
+
+    // Mine registration PoW with clear messaging
+    std::cout << std::endl;
+    std::cout << "  [Mining] First-time setup: Registering miner identity..." << std::endl;
+    std::cout << "  [Mining] This is a one-time process. Mining starts automatically after." << std::endl;
+    std::cout << std::endl;
+
+    if (!s_regPowInProgress.exchange(true)) {
+        uint64_t nonce = 0;
+        if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce)) {
+            s_cachedRegNonce = nonce;
+            s_regNonceIdentity = identity;
+            s_regNonceMined.store(true);
+            s_regPowInProgress.store(false);
+            std::cout << std::endl;
+            std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
+            std::cout << std::endl;
+            return true;
+        } else {
+            s_regPowInProgress.store(false);
+            std::cerr << "[Mining] WARNING: Failed to mine registration PoW" << std::endl;
+            return false;
+        }
+    } else {
+        // Shouldn't happen at startup (single-threaded), but handle defensively
+        return true;
+    }
+}
+
 /**
  * Build mining template for next block
  * @param blockchain Reference to blockchain database
@@ -861,10 +940,8 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                     // Thread-safety: atomic flag prevents duplicate PoW mining when
                     // BuildMiningTemplate is called concurrently (e.g. main thread
                     // startup + chain tip callback from P2P thread)
-                    static uint64_t s_cachedRegNonce = 0;
-                    static std::atomic<bool> s_regNonceMined{false};
-                    static std::atomic<bool> s_regPowInProgress{false};
-                    static DFMP::Identity s_regNonceIdentity;
+                    // NOTE: s_cachedRegNonce, s_regNonceMined, s_regPowInProgress,
+                    // s_regNonceIdentity are file-scope (shared with EnsureMIKRegistered)
                     uint64_t regNonce = 0;
                     if (Dilithion::g_chainParams && nHeight >= Dilithion::g_chainParams->dfmpV3ActivationHeight) {
                         if (s_regNonceMined.load() && s_regNonceIdentity == mikIdentity) {
@@ -5382,6 +5459,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                 std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
+                // Ensure MIK identity is registered before mining
+                // (one-time ~10-15 min PoW for new miners — blocks main thread)
+                if (!EnsureMIKRegistered(wallet, current_height + 1)) {
+                    std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
+                }
+
                 if (shouldUseVDF(current_height + 1)) {
                     // VDF mining mode
                     std::cout << "  [VDF] VDF mining active (activation height: " << vdf_activation << ")" << std::endl;
@@ -5401,9 +5484,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // RandomX mining mode
                     auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
                     if (!templateOpt) {
-                        std::cerr << "ERROR: Failed to build mining template" << std::endl;
-                        std::cerr << "Blockchain may not be initialized. Cannot start mining." << std::endl;
-                        return 1;
+                        // Retry up to 3 times (safety net — registration should already be done)
+                        for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
+                            std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
+                            std::this_thread::sleep_for(std::chrono::seconds(1));
+                            templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                        }
+                        if (!templateOpt) {
+                            std::cerr << "ERROR: Failed to build mining template after retries" << std::endl;
+                            return 1;
+                        }
                     }
 
                     miner.StartMining(*templateOpt);
@@ -5581,6 +5671,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                     std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
+                    // Ensure MIK identity is registered before mining
+                    if (!EnsureMIKRegistered(wallet, current_height + 1)) {
+                        std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
+                    }
+
                     if (shouldUseVDF(current_height + 1)) {
                         std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
                         std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
@@ -5593,12 +5688,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         mining_deferred_for_ibd = false;
                     } else {
                         auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                        if (!templateOpt) {
+                            // Retry up to 3 times with 1s delays
+                            for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
+                                std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
+                                std::this_thread::sleep_for(std::chrono::seconds(1));
+                                templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                            }
+                        }
                         if (templateOpt) {
                             miner.StartMining(*templateOpt);
                             std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
                             mining_deferred_for_ibd = false;
                         } else {
-                            std::cerr << "[ERROR] Failed to build mining template!" << std::endl;
+                            std::cerr << "[ERROR] Failed to build mining template after retries!" << std::endl;
                         }
                     }
                 } else if (ibd_progress_counter % 10 == 0) {
