@@ -86,6 +86,7 @@ public:
     const int id;                           // Unique node ID
     NetProtocol::CAddress addr;             // Remote address
     bool fInbound = false;                  // True if inbound connection
+    bool fManual = false;                   // True if --connect/--addnode/RPC addnode (Bitcoin Core pattern)
 
     //
     // Connection state

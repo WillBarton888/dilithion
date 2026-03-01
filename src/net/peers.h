@@ -114,8 +114,11 @@ public:
     static constexpr int STALL_THRESHOLD = 500;  // Increased from 100 for slow IBD connections
     static constexpr auto STALL_FORGIVENESS_TIMEOUT = std::chrono::minutes(5);
 
-    std::chrono::seconds GetBlockTimeout() const {
-        int timeout_seconds = 10 << std::min(nStallingCount, 5);
+    std::chrono::seconds GetBlockTimeout(bool isManual = false) const {
+        // Manual peers (--connect/--addnode) get 3x base timeout to avoid
+        // disconnecting relay peers that are busy serving multiple IBD miners
+        int base = isManual ? 30 : 10;
+        int timeout_seconds = base << std::min(nStallingCount, 5);
         return std::chrono::seconds(timeout_seconds);
     }
 

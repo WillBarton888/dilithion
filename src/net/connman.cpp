@@ -285,14 +285,15 @@ void CConnman::Interrupt() {
     m_blocks_cv.notify_all();
 }
 
-CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
+CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr, bool manual) {
     // Phase 2: Implement outbound connection
 
     // Extract IP string from address (supports both IPv4 and IPv6)
     std::string ip_str = addr.ToStringIP();
 
-    // Prevent self-connection: check if target is our own IP (any port)
-    if (IsOurAddress(addr)) {
+    // Prevent self-connection: check if target is our own IP AND our listen port
+    // Different ports on the same IP are different nodes (e.g. multiple nodes behind NAT)
+    if (IsOurAddress(addr) && addr.port == m_options.nListenPort) {
         LogPrintf(NET, WARN, "[CConnman] Preventing self-connection to %s:%d\n",
                   ip_str.c_str(), addr.port);
         return nullptr;
@@ -353,11 +354,14 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
 
-        // Check for duplicate connection (already connected to this IP)
+        // Check for duplicate connection
+        // For outbound: skip if we already have an outbound to this ip:port
+        // Inbound connections from the same IP don't block new outbound to different ports
         for (const auto& node : m_nodes) {
-            if (node && !node->fDisconnect.load()) {
-                if (node->addr.ToStringIP() == ip_str) {
-                    LogPrintf(NET, WARN, "[CConnman] Skipping duplicate outbound to %s (already connected)\n", ip_str.c_str());
+            if (node && !node->fDisconnect.load() && !node->fInbound) {
+                if (node->addr.ToStringIP() == ip_str && node->addr.port == addr.port) {
+                    LogPrintf(NET, WARN, "[CConnman] Skipping duplicate outbound to %s:%d (already connected)\n",
+                              ip_str.c_str(), addr.port);
                     CSock::Close(sock);
                     return nullptr;
                 }
@@ -382,6 +386,7 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr) {
         int node_id = m_next_node_id++;
         auto node = std::make_unique<CNode>(node_id, addr, false);  // false = outbound
         CNode* pnode = node.get();
+        pnode->fManual = manual;
 
         pnode->SetSocket(static_cast<int>(sock));
         pnode->state.store(CNode::STATE_CONNECTING);
@@ -439,8 +444,8 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
 
     // Per-IP connection limit with outbound duplicate prevention
     // Rule 1: If we already have an OUTBOUND to this IP, reject inbound (same node, wasteful)
-    // Rule 2: Allow up to 2 INBOUND from same IP (NAT: multiple nodes behind one router)
-    static constexpr int MAX_INBOUND_PER_IP = 2;
+    // Rule 2: Allow up to nMaxInboundPerIP INBOUND from same IP (NAT: multiple nodes behind one router)
+    const int max_per_ip = m_options.nMaxInboundPerIP;
     {
         std::lock_guard<std::mutex> lock(cs_vNodes);
         bool has_outbound = false;
@@ -461,9 +466,9 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
                       ip_str.c_str());
             return false;
         }
-        if (inbound_count >= MAX_INBOUND_PER_IP) {
+        if (inbound_count >= max_per_ip) {
             LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d inbound connections, max %d per IP)\n",
-                      ip_str.c_str(), inbound_count, MAX_INBOUND_PER_IP);
+                      ip_str.c_str(), inbound_count, max_per_ip);
             return false;
         }
     }
@@ -885,6 +890,33 @@ void CConnman::BlocksWorkerThread() {
     LogPrintf(NET, INFO, "[CConnman] BlocksWorkerThread stopped\n");
 }
 
+void CConnman::AddManualNode(const NetProtocol::CAddress& addr) {
+    std::lock_guard<std::mutex> lock(cs_manual_nodes);
+    std::string ip = addr.ToStringIP();
+    // Avoid duplicates — compare by ip:port (not just IP)
+    // Supports multiple manual nodes on the same IP with different ports
+    for (const auto& existing : m_manual_nodes) {
+        if (existing.ToStringIP() == ip && existing.port == addr.port) {
+            return;
+        }
+    }
+    m_manual_nodes.push_back(addr);
+    LogPrintf(NET, INFO, "[CConnman] Added manual node %s:%d (auto-reconnect enabled)\n",
+              ip.c_str(), addr.port);
+}
+
+void CConnman::RemoveManualNode(const std::string& ip_str) {
+    std::lock_guard<std::mutex> lock(cs_manual_nodes);
+    m_manual_nodes.erase(
+        std::remove_if(m_manual_nodes.begin(), m_manual_nodes.end(),
+            [&ip_str](const NetProtocol::CAddress& a) {
+                return a.ToStringIP() == ip_str;
+            }),
+        m_manual_nodes.end());
+    LogPrintf(NET, INFO, "[CConnman] Removed manual node %s (auto-reconnect disabled)\n",
+              ip_str.c_str());
+}
+
 void CConnman::ThreadOpenConnections() {
     LogPrintf(NET, INFO, "[CConnman] ThreadOpenConnections started\n");
 
@@ -907,12 +939,16 @@ void CConnman::ThreadOpenConnections() {
         }
 
         // Get currently connected peer IPs (both inbound AND outbound)
+        // connected_ips: IP-only for seed/AddrMan dedup (one connection per IP)
+        // connected_endpoints: ip:port for manual node reconnect (supports multiple ports per IP)
         std::set<std::string> connected_ips;
+        std::set<std::string> connected_endpoints;
         {
             std::lock_guard<std::mutex> lock(cs_vNodes);
             for (const auto& node : m_nodes) {
                 if (node && !node->fDisconnect.load()) {
                     connected_ips.insert(node->addr.ToStringIP());
+                    connected_endpoints.insert(node->addr.ToStringIP() + ":" + std::to_string(node->addr.port));
                 }
             }
         }
@@ -992,6 +1028,28 @@ void CConnman::ThreadOpenConnections() {
             if (connections_made > 0) {
                 LogPrintf(NET, INFO, "[CConnman] Made %zu new outbound connection(s) from AddrMan\n",
                           connections_made);
+            }
+        }
+
+        // PHASE 3: Auto-reconnect manual nodes (Bitcoin Core pattern)
+        // --connect, --addnode, and RPC addnode peers are automatically reconnected
+        // Uses ip:port matching (not just IP) to support multiple manual nodes on same IP
+        {
+            std::lock_guard<std::mutex> lock(cs_manual_nodes);
+            for (const auto& manual_addr : m_manual_nodes) {
+                std::string manual_ip = manual_addr.ToStringIP();
+                std::string manual_endpoint = manual_ip + ":" + std::to_string(manual_addr.port);
+                if (connected_endpoints.count(manual_endpoint)) {
+                    continue;  // Already connected to this ip:port
+                }
+
+                LogPrintf(NET, INFO, "[CConnman] Auto-reconnecting manual node %s:%d\n",
+                          manual_ip.c_str(), manual_addr.port);
+                CNode* pnode = ConnectNode(manual_addr, true);
+                if (pnode) {
+                    connected_endpoints.insert(std::move(manual_endpoint));
+                    connected_ips.insert(std::move(manual_ip));
+                }
             }
         }
     }
@@ -1098,8 +1156,8 @@ void CConnman::SocketHandler() {
 
             // Per-IP connection limit with outbound duplicate prevention
             // Rule 1: If we already have an OUTBOUND to this IP, reject (same node, wasteful)
-            // Rule 2: Allow up to 2 INBOUND from same IP (NAT: multiple nodes behind one router)
-            static constexpr int MAX_INBOUND_PER_IP = 2;
+            // Rule 2: Allow up to nMaxInboundPerIP INBOUND from same IP (NAT: multiple nodes behind one router)
+            const int max_per_ip = m_options.nMaxInboundPerIP;
             {
                 std::lock_guard<std::mutex> lock(cs_vNodes);
 
@@ -1123,9 +1181,9 @@ void CConnman::SocketHandler() {
                     continue;  // Skip to next pending connection
                 }
 
-                if (inbound_count >= MAX_INBOUND_PER_IP) {
+                if (inbound_count >= max_per_ip) {
                     LogPrintf(NET, WARN, "[CConnman] Rejecting inbound from %s (%d inbound connections, max %d per IP)\n",
-                              ip_str, inbound_count, MAX_INBOUND_PER_IP);
+                              ip_str, inbound_count, max_per_ip);
                     // Node destructor will close socket
                     continue;  // Skip to next pending connection
                 }

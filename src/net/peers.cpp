@@ -794,9 +794,16 @@ bool CPeerManager::EvictPeersIfNeeded() {
             continue;
         }
 
+        // Never evict manual peers (Bitcoin Core pattern)
+        // --connect, --addnode, and RPC addnode peers are protected from eviction
+        CNode* node = GetNode(peer_id);
+        if (node && node->fManual) {
+            continue;
+        }
+
         // Calculate eviction score (higher = more likely to evict)
         int score = peer->misbehavior_score;
-        
+
         // Prefer to evict peers with no recent activity (no messages in last 5 minutes)
         if (peer->last_recv > 0 && (now - peer->last_recv) > 5 * 60) {
             score += 50;  // Inactive peer
@@ -850,6 +857,7 @@ void CPeerManager::PeriodicMaintenance() {
         static const int64_t HANDSHAKE_TIMEOUT = 60;  // BUG #148: Reduced from 300s
         int64_t now = GetTime();
 
+        static const int64_t MANUAL_HANDSHAKE_TIMEOUT = 120;  // Manual peers get 2x timeout
         std::vector<int> peers_to_disconnect;
         for (const auto& pair : peers) {
             CPeer* peer = pair.second.get();
@@ -857,8 +865,10 @@ void CPeerManager::PeriodicMaintenance() {
                 peer->state == CPeer::STATE_CONNECTED ||
                 peer->state == CPeer::STATE_VERSION_SENT) {
                 // Peer is in handshake state
+                CNode* node = GetNode(peer->id);
+                int64_t timeout = (node && node->fManual) ? MANUAL_HANDSHAKE_TIMEOUT : HANDSHAKE_TIMEOUT;
                 int64_t age = now - peer->connect_time;
-                if (age > HANDSHAKE_TIMEOUT) {
+                if (age > timeout) {
                     peers_to_disconnect.push_back(peer->id);
                 }
             }
@@ -1129,7 +1139,9 @@ std::vector<int> CPeerManager::CheckForStallingPeers()
         // Check oldest block in flight
         const QueuedBlock& oldest = peer->vBlocksInFlight.front();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - oldest.time);
-        auto timeout = peer->GetBlockTimeout();
+        CNode* node = GetNode(pair.first);
+        bool isManual = (node && node->fManual);
+        auto timeout = peer->GetBlockTimeout(isManual);
 
         if (elapsed > timeout) {
             peer->nStallingCount++;

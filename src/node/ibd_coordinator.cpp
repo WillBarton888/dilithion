@@ -745,7 +745,12 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         // peer reconnects fresh through the normal connection cycle.
         if (m_last_hang_cause == HangCause::PEERS_AT_CAPACITY) {
             m_consecutive_capacity_stalls++;
-            if (m_consecutive_capacity_stalls >= MAX_CAPACITY_STALLS_BEFORE_CLEAR &&
+            // Manual peers (--connect/--addnode) get 3x tolerance before disconnect
+            // They may be slow when serving multiple concurrent IBD miners
+            CNode* sync_node = (m_node_context.connman && m_blocks_sync_peer != -1)
+                ? m_node_context.connman->GetNode(m_blocks_sync_peer) : nullptr;
+            int max_stalls = (sync_node && sync_node->fManual) ? 45 : MAX_CAPACITY_STALLS_BEFORE_CLEAR;
+            if (m_consecutive_capacity_stalls >= max_stalls &&
                 m_blocks_sync_peer != -1) {
                 std::cout << "[IBD] Peer " << m_blocks_sync_peer
                           << " at capacity for " << m_consecutive_capacity_stalls
@@ -2171,8 +2176,11 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
         m_headers_sync_last_processed = m_node_context.headers_manager->GetProcessedCount();
 
         // Calculate timeout: base + 1ms per missing header (Bitcoin Core style)
+        // Manual peers (--connect/--addnode) get extended base timeout
+        CNode* hdr_sync_node = m_node_context.connman ? m_node_context.connman->GetNode(best_peer) : nullptr;
+        int hdr_base_secs = (hdr_sync_node && hdr_sync_node->fManual) ? 120 : HEADERS_SYNC_TIMEOUT_BASE_SECS;
         int headers_missing = best_height - m_headers_sync_last_height;
-        int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
+        int timeout_ms = hdr_base_secs * 1000 +
                          headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
         m_headers_sync_timeout = std::chrono::steady_clock::now() +
                                  std::chrono::milliseconds(timeout_ms);
@@ -2186,6 +2194,10 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
     if (m_headers_sync_peer == -1) {
         return true;  // No sync peer, nothing to check
     }
+
+    // Manual peers (--connect/--addnode) get extended base timeout (120s vs 45s)
+    CNode* hdr_sync_node = m_node_context.connman ? m_node_context.connman->GetNode(m_headers_sync_peer) : nullptr;
+    int hdr_base_secs = (hdr_sync_node && hdr_sync_node->fManual) ? 120 : HEADERS_SYNC_TIMEOUT_BASE_SECS;
 
     // Skip stall check if already synced (header_height >= peer_height)
     if (m_node_context.headers_manager && m_node_context.peer_manager) {
@@ -2218,7 +2230,7 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
                                         : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
         int headers_missing = peer_height - current_height;
         if (headers_missing > 0) {
-            int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
+            int timeout_ms = hdr_base_secs * 1000 +
                              headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
             m_headers_sync_timeout = now + std::chrono::milliseconds(timeout_ms);
         }
@@ -2238,7 +2250,7 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
                                             : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
             int headers_missing = peer_height - current_height;
             if (headers_missing > 0) {
-                int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
+                int timeout_ms = hdr_base_secs * 1000 +
                                  headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
                 m_headers_sync_timeout = now + std::chrono::milliseconds(timeout_ms);
             }

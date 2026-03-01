@@ -32,6 +32,7 @@ struct CConnmanOptions {
     int nMaxOutbound = 8;
     int nMaxInbound = 117;
     int nMaxTotal = 125;
+    int nMaxInboundPerIP = 2;  // Max inbound connections per IP (Monero pattern, default 2)
     std::vector<NetProtocol::CAddress> vSeedNodes;
     bool fListen = true;
     uint16_t nListenPort = 18444;
@@ -96,9 +97,23 @@ public:
     /**
      * Initiate outbound connection
      * @param addr Address to connect to
+     * @param manual True for --connect/--addnode/RPC addnode peers (Bitcoin Core pattern)
      * @return CNode pointer on success, nullptr on failure
      */
-    CNode* ConnectNode(const NetProtocol::CAddress& addr);
+    CNode* ConnectNode(const NetProtocol::CAddress& addr, bool manual = false);
+
+    /**
+     * Add a manual node for auto-reconnect tracking
+     * Manual nodes are automatically reconnected if they disconnect (Bitcoin Core pattern)
+     * @param addr Address of the manual node
+     */
+    void AddManualNode(const NetProtocol::CAddress& addr);
+
+    /**
+     * Remove a manual node from auto-reconnect tracking
+     * @param ip_str IP string of the node to remove
+     */
+    void RemoveManualNode(const std::string& ip_str);
 
     /**
      * Accept inbound connection
@@ -357,6 +372,12 @@ private:
     //
 
     CConnmanOptions m_options;
+
+    // Manual node tracking for auto-reconnect (Bitcoin Core pattern)
+    // Nodes added via --connect, --addnode, or RPC addnode are automatically
+    // reconnected if they disconnect
+    std::vector<NetProtocol::CAddress> m_manual_nodes;
+    mutable std::mutex cs_manual_nodes;
 
     // Local addresses (for self-connection prevention)
     mutable std::mutex cs_localAddresses;

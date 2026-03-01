@@ -242,11 +242,11 @@ extern NodeContext g_node_context;
 // BUG #139 FIX: Don't send VERSION here - SocketHandler will send it
 // after connection completes (STATE_CONNECTING -> STATE_CONNECTED)
 // Can be called from any thread since it uses g_node_context
-static int ConnectAndHandshake(const NetProtocol::CAddress& addr) {
+static int ConnectAndHandshake(const NetProtocol::CAddress& addr, bool manual = false) {
     if (!g_node_context.connman || !g_node_context.peer_manager) {
         return -1;
     }
-    CNode* pnode = g_node_context.connman->ConnectNode(addr);
+    CNode* pnode = g_node_context.connman->ConnectNode(addr, manual);
     if (!pnode) {
         return -1;
     }
@@ -440,6 +440,7 @@ struct NodeConfig {
     std::string external_ip = "";   // --externalip: Manual external IP (for manual port forwarding)
     bool public_api = false;        // --public-api: Enable public REST API for light wallets (seed nodes only)
     int max_connections = 0;         // --maxconnections: Maximum peer connections (0 = default 125)
+    int max_connections_per_ip = 2;  // --max-connections-per-ip: Max inbound per IP (default 2, range 1-64)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -599,6 +600,20 @@ struct NodeConfig {
                     return false;
                 }
             }
+            else if (arg.find("--max-connections-per-ip=") == 0) {
+                // Max inbound connections per IP (for NAT: multiple nodes behind one router)
+                try {
+                    int val = std::stoi(arg.substr(25));
+                    if (val < 1 || val > 64) {
+                        std::cerr << "Error: Invalid max-connections-per-ip (must be 1-64): " << arg << std::endl;
+                        return false;
+                    }
+                    max_connections_per_ip = val;
+                } catch (const std::exception& e) {
+                    std::cerr << "Error: Invalid max-connections-per-ip format: " << arg << std::endl;
+                    return false;
+                }
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -642,6 +657,8 @@ struct NodeConfig {
         std::cout << "  --no-upnp             Disable UPnP (don't prompt)" << std::endl;
         std::cout << "  --externalip=<ip>     Your public IP (for manual port forwarding)" << std::endl;
         std::cout << "  --maxconnections=<n>  Maximum peer connections (default: 125)" << std::endl;
+        std::cout << "  --max-connections-per-ip=<n>" << std::endl;
+        std::cout << "                        Max inbound connections per IP (default: 2, range: 1-64)" << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -2637,6 +2654,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         connman_opts.nMaxInbound = 117;
         connman_opts.nMaxTotal = 125;
         connman_opts.upnp_enabled = config.upnp_enabled;  // UPnP automatic port mapping
+        connman_opts.nMaxInboundPerIP = config.max_connections_per_ip;  // Per-IP limit (default 2)
 
         // Apply --maxconnections override if specified
         if (config.max_connections > 0) {
@@ -4858,7 +4876,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return true;
         };
 
-        // Initiate outbound connections for --connect nodes
+        // Initiate outbound connections for --connect nodes (manual=true for auto-reconnect)
         if (!config.connect_nodes.empty()) {
             std::cout << "Initiating outbound connections..." << std::endl;
             for (const auto& node_addr : config.connect_nodes) {
@@ -4871,18 +4889,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     continue;
                 }
 
-                // Phase 5: Use CConnman to connect and send VERSION
-                int peer_id = ConnectAndHandshake(addr);
+                // Register for auto-reconnect (Bitcoin Core manual connection pattern)
+                g_node_context.connman->AddManualNode(addr);
+
+                // Phase 5: Use CConnman to connect (manual=true for eviction protection)
+                int peer_id = ConnectAndHandshake(addr, true);
                 if (peer_id >= 0) {
-                    std::cout << "    [OK] Initiated connection to " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
+                    std::cout << "    [OK] Initiated connection to " << node_addr << " (peer_id=" << peer_id << ", manual)" << std::endl;
                     std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
                 } else {
-                    std::cout << "    [FAIL] Failed to connect to " << node_addr << std::endl;
+                    std::cout << "    [FAIL] Failed to connect to " << node_addr << " (will auto-reconnect)" << std::endl;
                 }
             }
         }
 
-        // Add additional nodes (non-exclusive)
+        // Add additional nodes (non-exclusive, manual=true for auto-reconnect)
         if (!config.add_nodes.empty()) {
             std::cout << "Adding additional peer nodes..." << std::endl;
             for (const auto& node_addr : config.add_nodes) {
@@ -4895,13 +4916,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     continue;
                 }
 
-                // Phase 5: Use CConnman to initiate connection
-                int peer_id = ConnectAndHandshake(addr);
+                // Register for auto-reconnect (Bitcoin Core manual connection pattern)
+                g_node_context.connman->AddManualNode(addr);
+
+                // Phase 5: Use CConnman to initiate connection (manual=true)
+                int peer_id = ConnectAndHandshake(addr, true);
                 if (peer_id >= 0) {
-                    std::cout << "    [OK] Added node " << node_addr << " (peer_id=" << peer_id << ")" << std::endl;
+                    std::cout << "    [OK] Added node " << node_addr << " (peer_id=" << peer_id << ", manual)" << std::endl;
                     std::cout << "    [INFO] VERSION will be sent after connection completes" << std::endl;
                 } else {
-                    std::cout << "    [FAIL] Failed to add node " << node_addr << std::endl;
+                    std::cout << "    [FAIL] Failed to add node " << node_addr << " (will auto-reconnect)" << std::endl;
                 }
             }
         }
@@ -5292,6 +5316,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             std::cout << "Mining enabled - checking sync status..." << std::endl;
+
+            // Wait for --connect peers to handshake before checking IBD
+            // Without this, fresh --mine --connect=relay nodes see connections=0 and
+            // incorrectly start mining on their own chain (Bitcoin Core pattern)
+            if (config.start_mining && !config.connect_nodes.empty()) {
+                std::cout << "  [SYNC] Waiting for --connect peers to handshake..." << std::endl;
+                bool handshake_ok = false;
+                for (int i = 0; i < 40; i++) {  // 40 x 250ms = 10s max
+                    if (g_node_context.peer_manager && g_node_context.peer_manager->HasCompletedHandshakes()) {
+                        std::cout << "  [OK] Peer handshake complete" << std::endl;
+                        handshake_ok = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                }
+                if (!handshake_ok) {
+                    std::cout << "  [WARN] No handshakes completed after 10s (peers will auto-reconnect)" << std::endl;
+                }
+            }
 
             // BUG #52 FIX: Check IBD before starting mining (Bitcoin pattern)
             // This prevents fresh nodes from mining on their own chain before syncing

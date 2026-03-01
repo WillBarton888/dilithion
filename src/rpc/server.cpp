@@ -4742,7 +4742,10 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
             throw std::runtime_error("Connection manager not initialized");
         }
 
-        // Find node by IP address
+        // Stop auto-reconnect for this node (Bitcoin Core pattern)
+        g_node_context.connman->RemoveManualNode(ip_str);
+
+        // Find node by IP address and disconnect
         auto nodes = g_node_context.connman->GetNodes();
         bool found = false;
         for (CNode* node : nodes) {
@@ -4776,14 +4779,19 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
         throw std::runtime_error("Connection manager not initialized");
     }
 
-    // Connect to peer
-    CNode* pnode = g_node_context.connman->ConnectNode(addr);
+    // "add": manual=true with auto-reconnect. "onetry": manual=true but no auto-reconnect.
+    if (command == "add") {
+        g_node_context.connman->AddManualNode(addr);
+    }
+
+    // Connect to peer (manual=true for eviction protection)
+    CNode* pnode = g_node_context.connman->ConnectNode(addr, true);
 
     if (!pnode) {
         throw std::runtime_error("Failed to connect to node: " + node_str);
     }
 
-    std::cout << "[RPC] addnode: Connected to " << node_str << " (node_id=" << pnode->id << ")" << std::endl;
+    std::cout << "[RPC] addnode: Connected to " << node_str << " (node_id=" << pnode->id << ", manual)" << std::endl;
 
     return "null";  // Success
 }
