@@ -747,7 +747,7 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
 
     if (!s_regPowInProgress.exchange(true)) {
         uint64_t nonce = 0;
-        if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce)) {
+        if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce, &g_node_state.running)) {
             s_cachedRegNonce = nonce;
             s_regNonceIdentity = identity;
             s_regNonceMined.store(true);
@@ -758,7 +758,11 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
             return true;
         } else {
             s_regPowInProgress.store(false);
-            std::cerr << "[Mining] WARNING: Failed to mine registration PoW" << std::endl;
+            if (!g_node_state.running) {
+                std::cout << "[Mining] Registration PoW cancelled (shutting down)" << std::endl;
+            } else {
+                std::cerr << "[Mining] WARNING: Failed to mine registration PoW" << std::endl;
+            }
             return false;
         }
     } else {
@@ -949,7 +953,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                         } else if (!s_regPowInProgress.exchange(true)) {
                             // We acquired the lock - mine the PoW
                             std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
-                            if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce)) {
+                            if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce, &g_node_state.running)) {
                                 s_cachedRegNonce = regNonce;
                                 s_regNonceIdentity = mikIdentity;
                                 s_regNonceMined.store(true);

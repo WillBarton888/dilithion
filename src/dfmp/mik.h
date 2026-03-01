@@ -328,14 +328,17 @@ bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, i
  * Mine registration proof-of-work nonce (DFMP v3.0)
  *
  * Finds a nonce such that SHA3-256(pubkey || nonce) has >= requiredBits leading zero bits.
- * This is computationally expensive (~10-15 minutes for 28 bits with reference SHA3).
+ * This is computationally expensive (~10-15 minutes for 28 bits on a fast CPU,
+ * up to 60+ minutes on slower hardware due to probabilistic variance).
  *
  * @param pubkey MIK public key (1,952 bytes)
  * @param requiredBits Number of leading zero bits required
  * @param[out] nonce Output nonce that satisfies the PoW requirement
- * @return true if nonce found
+ * @param running Optional pointer to a running flag; if it becomes false, mining aborts
+ * @return true if nonce found, false if aborted or failed
  */
-bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce);
+bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce,
+                          const std::atomic<bool>* running = nullptr);
 
 // ============================================================================
 // DFMP V2.0 CONSTANTS

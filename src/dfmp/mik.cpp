@@ -5,10 +5,12 @@
 #include <crypto/sha3.h>
 #include <wallet/crypter.h>  // For memory_cleanse()
 
+#include <atomic>
 #include <cstring>
 #include <algorithm>
-#include <iostream>
 #include <chrono>
+#include <iomanip>
+#include <iostream>
 
 // Dilithium3 reference implementation
 extern "C" {
@@ -483,7 +485,8 @@ bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, i
     return zeroBits >= requiredBits;
 }
 
-bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce) {
+bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce,
+                          const std::atomic<bool>* running) {
     if (pubkey.size() != MIK_PUBKEY_SIZE || requiredBits <= 0) {
         return false;
     }
@@ -496,8 +499,15 @@ bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, u
 
     uint8_t hash[32];
     auto start_time = std::chrono::steady_clock::now();
+    int64_t expected_total = 1LL << requiredBits;  // 2^28 ≈ 268M for 28 bits
 
     for (uint64_t n = 0; n < UINT64_MAX; n++) {
+        // Check for shutdown every 1M iterations
+        if ((n & 0xFFFFF) == 0 && n > 0 && running && !running->load(std::memory_order_relaxed)) {
+            std::cout << "  [Mining] Registration PoW interrupted by shutdown" << std::endl;
+            return false;
+        }
+
         // Write nonce bytes (little-endian)
         for (int i = 0; i < 8; i++) {
             preimage[MIK_PUBKEY_SIZE + i] = static_cast<uint8_t>((n >> (i * 8)) & 0xFF);
@@ -529,7 +539,7 @@ bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, u
             nonce = n;
             auto total_elapsed = std::chrono::steady_clock::now() - start_time;
             auto total_sec = std::chrono::duration_cast<std::chrono::seconds>(total_elapsed).count();
-            std::cout << "  [Mining] Registration PoW complete (nonce=" << n
+            std::cout << "  [Mining] Registration PoW complete! (nonce=" << n
                       << ", " << zeroBits << " zero bits, " << total_sec << "s)" << std::endl;
             return true;
         }
@@ -539,14 +549,24 @@ bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, u
             auto elapsed = std::chrono::steady_clock::now() - start_time;
             auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
             double rate = (elapsed_sec > 0) ? static_cast<double>(n) / elapsed_sec : 0;
-            int64_t expected_total = 1LL << requiredBits;  // 2^28 ≈ 268M for 28 bits
-            int64_t remaining_sec = (rate > 0) ? static_cast<int64_t>((expected_total - static_cast<int64_t>(n)) / rate) : 0;
-            if (remaining_sec < 0) remaining_sec = 0;
-            int eta_min = static_cast<int>(remaining_sec / 60);
-            int eta_sec = static_cast<int>(remaining_sec % 60);
-            std::cout << "  [Mining] Registration PoW: " << (n / 1000000) << "M hashes"
-                      << " (elapsed: " << elapsed_sec << "s"
-                      << ", ~" << eta_min << "m " << eta_sec << "s remaining)" << std::endl;
+            int64_t hashes_done = static_cast<int64_t>(n);
+
+            if (hashes_done < expected_total) {
+                // Before expected average: show ETA
+                int64_t remaining_sec = (rate > 0) ? static_cast<int64_t>((expected_total - hashes_done) / rate) : 0;
+                int eta_min = static_cast<int>(remaining_sec / 60);
+                int eta_sec = static_cast<int>(remaining_sec % 60);
+                std::cout << "  [Mining] Registration PoW: " << (n / 1000000) << "M hashes"
+                          << " (elapsed: " << elapsed_sec << "s"
+                          << ", ~" << eta_min << "m " << eta_sec << "s remaining)" << std::endl;
+            } else {
+                // Past expected average: show multiplier and reassurance
+                double multiple = static_cast<double>(hashes_done) / expected_total;
+                std::cout << "  [Mining] Registration PoW: " << (n / 1000000) << "M hashes"
+                          << " (elapsed: " << elapsed_sec << "s"
+                          << ", " << std::fixed << std::setprecision(1) << multiple
+                          << "x avg — still searching, this is normal)" << std::endl;
+            }
         }
     }
 
