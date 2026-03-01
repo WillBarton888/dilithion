@@ -236,6 +236,16 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         return false;
     }
 
+    // VDF LOTTERY DEBUG: Log vdfOutput at ActivateBestChain entry
+    if (pindexNew->nVersion >= 4 && pindexTip != nullptr) {
+        std::cout << "[VDF-DEBUG-ABC] new.h=" << pindexNew->nHeight
+                  << " new.vdfOut=" << pindexNew->header.vdfOutput.GetHex().substr(0, 16)
+                  << " tip.h=" << pindexTip->nHeight
+                  << " tip.vdfOut=" << pindexTip->header.vdfOutput.GetHex().substr(0, 16)
+                  << " block.vdfOut=" << block.vdfOutput.GetHex().substr(0, 16)
+                  << std::endl;
+    }
+
     // MAINNET SECURITY: Validate block against checkpoint if one exists at this height
     // This ensures we never accept a block with a hash that doesn't match a checkpoint.
     // Testnet has no checkpoints, so this check will always pass on testnet.

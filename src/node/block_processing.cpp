@@ -729,6 +729,14 @@ BlockProcessResult ProcessNewBlock(
     pblockIndex->phashBlock = blockHash;
     pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
+    // VDF LOTTERY DEBUG: Verify vdfOutput survives CBlockIndex construction
+    if (block.IsVDFBlock()) {
+        std::cout << "[VDF-DEBUG] Block v=" << block.nVersion
+                  << " vdfOutput(block)=" << block.vdfOutput.GetHex().substr(0, 16)
+                  << " vdfOutput(index)=" << pblockIndex->header.vdfOutput.GetHex().substr(0, 16)
+                  << std::endl;
+    }
+
     // Link to parent block
     pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
     if (pblockIndex->pprev == nullptr) {
