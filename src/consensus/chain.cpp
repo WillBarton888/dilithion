@@ -149,20 +149,35 @@ CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
 bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
 {
     // Must have chain params with lottery enabled
-    if (!Dilithion::g_chainParams)
+    if (!Dilithion::g_chainParams) {
+        std::cout << "[VDF Lottery] SKIP: no chain params" << std::endl;
         return false;
-    if (pindexNew->nHeight < Dilithion::g_chainParams->vdfLotteryActivationHeight)
-        return false;
+    }
+    if (pindexNew->nHeight < Dilithion::g_chainParams->vdfLotteryActivationHeight) {
+        return false;  // Pre-activation — silent skip (too noisy)
+    }
 
     // Both blocks must be VDF (version >= 4)
-    if (pindexNew->nVersion < 4 || pindexTip->nVersion < 4)
+    if (pindexNew->nVersion < 4 || pindexTip->nVersion < 4) {
+        std::cout << "[VDF Lottery] SKIP: non-VDF block (new v=" << pindexNew->nVersion
+                  << ", tip v=" << pindexTip->nVersion << ")" << std::endl;
         return false;
+    }
 
     // Must be at same height with same parent (sibling blocks)
-    if (pindexNew->nHeight != pindexTip->nHeight)
+    if (pindexNew->nHeight != pindexTip->nHeight) {
+        std::cout << "[VDF Lottery] SKIP: different height (new=" << pindexNew->nHeight
+                  << ", tip=" << pindexTip->nHeight << ")" << std::endl;
         return false;
-    if (pindexNew->pprev != pindexTip->pprev)
+    }
+    if (pindexNew->pprev != pindexTip->pprev) {
+        std::cout << "[VDF Lottery] SKIP: different parent (new->pprev="
+                  << (pindexNew->pprev ? pindexNew->pprev->GetBlockHash().GetHex().substr(0, 16) : "null")
+                  << ", tip->pprev="
+                  << (pindexTip->pprev ? pindexTip->pprev->GetBlockHash().GetHex().substr(0, 16) : "null")
+                  << ") at height " << pindexNew->nHeight << std::endl;
         return false;
+    }
 
     // Compare vdfOutput using HashLessThan (big-endian, consensus-safe)
     // CRITICAL: Do NOT use uint256::operator< — it's little-endian (memcmp)
@@ -170,15 +185,25 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
     const uint256& newOutput = pindexNew->header.vdfOutput;
     const uint256& tipOutput = pindexTip->header.vdfOutput;
 
-    if (newOutput.IsNull() || tipOutput.IsNull())
+    if (newOutput.IsNull() || tipOutput.IsNull()) {
+        std::cout << "[VDF Lottery] SKIP: null output (new=" << newOutput.IsNull()
+                  << ", tip=" << tipOutput.IsNull() << ")" << std::endl;
         return false;
+    }
 
-    if (!HashLessThan(newOutput, tipOutput))
-        return false;  // New output is not lower -> no replacement
+    if (!HashLessThan(newOutput, tipOutput)) {
+        std::cout << "[VDF Lottery] SKIP: new output is NOT lower (new="
+                  << newOutput.GetHex().substr(0, 16) << ", tip="
+                  << tipOutput.GetHex().substr(0, 16) << ")" << std::endl;
+        return false;
+    }
 
     // Grace period check
-    if (m_vdfTipAcceptHeight != pindexTip->nHeight)
-        return false;  // No accept time for this height
+    if (m_vdfTipAcceptHeight != pindexTip->nHeight) {
+        std::cout << "[VDF Lottery] SKIP: accept height mismatch (accept="
+                  << m_vdfTipAcceptHeight << ", tip=" << pindexTip->nHeight << ")" << std::endl;
+        return false;
+    }
 
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -330,16 +355,67 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
     // Compare chain work
     if (!ChainWorkGreaterThan(pindexNew->nChainWork, pindexTip->nChainWork)) {
-        std::cout << "  Current work: " << pindexTip->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "  New work:     " << pindexNew->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
+        // Case 3b: VDF Lottery tiebreaker for equal-work forks
+        // When two VDF chains at the same height have equal chainwork,
+        // the chain tip with the LOWER VDF output wins.
+        // This is how divergent VDF forks converge — without this,
+        // equal-work VDF forks never resolve (first-to-arrive always wins).
+        bool vdfTiebreak = false;
+        if (Dilithion::g_chainParams &&
+            pindexNew->nHeight >= Dilithion::g_chainParams->vdfLotteryActivationHeight &&
+            pindexNew->nHeight == pindexTip->nHeight &&
+            pindexNew->nVersion >= 4 && pindexTip->nVersion >= 4) {
 
-        // Block is valid but not on best chain - it's an orphan
-        // Still save it to database, but don't activate it
-        return true;  // Not an error - block is valid, just not best chain
+            const uint256& newOutput = pindexNew->header.vdfOutput;
+            const uint256& tipOutput = pindexTip->header.vdfOutput;
+
+            if (!newOutput.IsNull() && !tipOutput.IsNull() &&
+                HashLessThan(newOutput, tipOutput)) {
+
+                // Grace period check — only allow tiebreak within window
+                // For fork convergence, use the current time minus a generous window
+                // since we may not have accept time for a fork tip from a different chain
+                bool withinGrace = true;
+                if (m_vdfTipAcceptHeight == pindexTip->nHeight) {
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        now - m_vdfTipAcceptTime).count();
+                    int gracePeriod = Dilithion::g_chainParams->vdfLotteryGracePeriod;
+                    if (elapsed > gracePeriod) {
+                        std::cout << "[VDF Lottery] Fork tiebreak: lower output but grace expired ("
+                                  << elapsed << "s > " << gracePeriod << "s)" << std::endl;
+                        withinGrace = false;
+                    }
+                }
+
+                if (withinGrace) {
+                    std::cout << "[VDF Lottery] FORK TIEBREAK — equal work, lower VDF output wins!" << std::endl;
+                    std::cout << "  Tip output:   " << tipOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cout << "  New output:    " << newOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                    vdfTiebreak = true;
+                }
+            } else {
+                std::cout << "[VDF Lottery] Fork: equal work at height " << pindexNew->nHeight
+                          << " but new output NOT lower (new="
+                          << pindexNew->header.vdfOutput.GetHex().substr(0, 16)
+                          << ", tip=" << pindexTip->header.vdfOutput.GetHex().substr(0, 16)
+                          << ")" << std::endl;
+            }
+        }
+
+        if (!vdfTiebreak) {
+            std::cout << "  Current work: " << pindexTip->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout << "  New work:     " << pindexNew->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
+
+            // Block is valid but not on best chain - it's an orphan
+            // Still save it to database, but don't activate it
+            return true;  // Not an error - block is valid, just not best chain
+        }
+        // Fall through to reorg logic below (vdfTiebreak == true)
     }
 
-    // New chain has more work - REORGANIZATION REQUIRED
-    std::cout << "[Chain] ⚠️  NEW CHAIN HAS MORE WORK - REORGANIZING" << std::endl;
+    // New chain wins - REORGANIZATION REQUIRED (either more work or VDF tiebreak)
+    std::cout << "[Chain] REORGANIZING to better chain" << std::endl;
     std::cout << "  Current work: " << pindexTip->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
     std::cout << "  New work:     " << pindexNew->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
 
