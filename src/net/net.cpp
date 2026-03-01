@@ -83,7 +83,7 @@ static const int64_t CONNECTION_COOLDOWN_SECONDS = 30;
 static std::map<int, std::set<uint256>> g_peer_served_blocks;
 static std::mutex cs_served_blocks;
 static const size_t MAX_SERVED_BLOCKS_TRACK = 500;  // Track last N served blocks per peer
-static const int DUPLICATE_GETDATA_PENALTY = 2;     // Misbehavior points per duplicate request
+static const int DUPLICATE_GETDATA_PENALTY = 0;     // Log only, no misbehavior (IBD nodes legitimately re-request blocks)
 
 // NET-013 FIX: Maximum size for rate limit maps to prevent memory exhaustion
 static const size_t MAX_RATE_LIMIT_MAP_SIZE = 1000;

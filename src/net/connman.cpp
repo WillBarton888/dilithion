@@ -137,8 +137,8 @@ bool CConnman::Start(CPeerManager& peer_mgr, CNetMessageProcessor& msg_proc, con
             return false;
         }
 
-        // Listen
-        if (listen(m_listen_socket, 10) < 0) {
+        // Listen — use SOMAXCONN to handle connection bursts from many miners
+        if (listen(m_listen_socket, SOMAXCONN) < 0) {
             LogPrintf(NET, ERROR, "[CConnman] Failed to listen on socket\n");
             CSock::Close(m_listen_socket);
             return false;
