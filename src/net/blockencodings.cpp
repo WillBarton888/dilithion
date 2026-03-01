@@ -574,7 +574,7 @@ bool PartiallyDownloadedBlock::GetBlock(CBlock& block) const
         return false;
     }
 
-    // Copy header
+    // Copy header (all fields including VDF extension)
     block.SetNull();
     block.nVersion = header.nVersion;
     block.hashPrevBlock = header.hashPrevBlock;
@@ -582,6 +582,9 @@ bool PartiallyDownloadedBlock::GetBlock(CBlock& block) const
     block.nTime = header.nTime;
     block.nBits = header.nBits;
     block.nNonce = header.nNonce;
+    // VDF extension fields (version >= 4)
+    block.vdfOutput = header.vdfOutput;
+    block.vdfProofHash = header.vdfProofHash;
 
     // Serialize transactions into block.vtx format
     SerializeTransactionsToVtx(txn_available, block.vtx);
