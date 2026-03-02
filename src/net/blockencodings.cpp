@@ -199,6 +199,11 @@ CBlockHeaderAndShortTxIDs::CBlockHeaderAndShortTxIDs(const CBlock& block, bool u
     header.nTime = block.nTime;
     header.nBits = block.nBits;
     header.nNonce = block.nNonce;
+    // VDF extension fields (version >= 4)
+    if (block.nVersion >= 4) {
+        header.vdfOutput = block.vdfOutput;
+        header.vdfProofHash = block.vdfProofHash;
+    }
 
     // Generate random nonce for short ID calculation
     std::random_device rd;
@@ -329,6 +334,11 @@ std::vector<uint8_t> CBlockHeaderAndShortTxIDs::Serialize() const
     result.insert(result.end(), ptr, ptr + 4);
     ptr = reinterpret_cast<const uint8_t*>(&header.nNonce);
     result.insert(result.end(), ptr, ptr + 4);
+    // VDF extension fields (version >= 4): 32 bytes vdfOutput + 32 bytes vdfProofHash
+    if (header.nVersion >= 4) {
+        result.insert(result.end(), header.vdfOutput.data, header.vdfOutput.data + 32);
+        result.insert(result.end(), header.vdfProofHash.data, header.vdfProofHash.data + 32);
+    }
 
     // Nonce (8 bytes)
     ptr = reinterpret_cast<const uint8_t*>(&nonce);
@@ -391,6 +401,14 @@ bool CBlockHeaderAndShortTxIDs::Deserialize(const uint8_t* data, size_t len)
     offset += 4;
     memcpy(&header.nNonce, data + offset, 4);
     offset += 4;
+    // VDF extension fields (version >= 4): 32 bytes vdfOutput + 32 bytes vdfProofHash
+    if (header.nVersion >= 4) {
+        if (offset + 64 > len) return false;
+        memcpy(header.vdfOutput.data, data + offset, 32);
+        offset += 32;
+        memcpy(header.vdfProofHash.data, data + offset, 32);
+        offset += 32;
+    }
 
     // Nonce
     memcpy(&nonce, data + offset, 8);
