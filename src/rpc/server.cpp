@@ -2817,7 +2817,7 @@ std::string CRPCServer::RPC_GetBlockchainInfo(const std::string& params) {
 
     std::ostringstream oss;
     oss << "{";
-    oss << "\"chain\":\"" << (m_testnet ? "testnet" : "main") << "\",";
+    oss << "\"chain\":\"" << (Dilithion::g_chainParams ? Dilithion::g_chainParams->GetNetworkName() : (m_testnet ? "testnet" : "main")) << "\",";
     oss << "\"blocks\":" << height << ",";
     oss << "\"bestblockhash\":\"" << bestBlockHash.GetHex() << "\",";
     oss << "\"difficulty\":" << std::fixed << std::setprecision(8) << difficulty << ",";
