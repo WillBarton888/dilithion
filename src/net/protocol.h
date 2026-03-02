@@ -16,6 +16,7 @@ namespace NetProtocol {
 static const uint32_t MAINNET_MAGIC = 0xD1714102;  // "DIL" + version
 static const uint32_t TESTNET_MAGIC = 0xDAB5BFFA;
 static const uint32_t REGTEST_MAGIC = 0xFABFB5DA;
+static const uint32_t DILV_MAGIC    = 0xD17FD100;  // DilV chain
 
 /** Protocol version */
 static const int PROTOCOL_VERSION = 70006;          // v3.6.0: Timestamp validation hard fork
@@ -24,6 +25,7 @@ static const int MIN_PEER_PROTO_VERSION = 70005;    // Require v3.4.0+ (ASERT di
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;
 static const uint16_t TESTNET_PORT = 18444;
+static const uint16_t DILV_PORT    = 9444;
 
 /** Message size limits */
 static const unsigned int MAX_MESSAGE_SIZE = 32 * 1024 * 1024;  // 32 MB

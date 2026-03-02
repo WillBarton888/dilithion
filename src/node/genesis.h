@@ -18,8 +18,10 @@
  */
 namespace Genesis {
 
-// Genesis block version (constant across all networks)
+// Genesis block version for RandomX chains (mainnet/testnet)
 const int32_t VERSION = 1;
+
+// DilV genesis uses VDF_VERSION (4) — defined in block.h
 
 /**
  * Create the genesis block
@@ -53,6 +55,24 @@ uint256 GetGenesisHash();
  * @return true if the block is the genesis block
  */
 bool IsGenesisBlock(const CBlock& block);
+
+/**
+ * Create the DilV genesis block (VDF chain)
+ *
+ * Unlike the RandomX genesis, the DilV genesis is a VDF block (version 4)
+ * with a pre-computed VDF proof. The proof is hardcoded after being computed
+ * once using the genesis VDF computation tool.
+ *
+ * The genesis block has:
+ * - Version 4 (VDF_VERSION)
+ * - Pre-computed vdfOutput and vdfProofHash in the header
+ * - VDF proof embedded in coinbase scriptSig
+ * - 100 DilV (10,000,000,000 ions) block reward
+ * - No MIK (genesis is exempt from MIK requirement)
+ *
+ * @return The DilV genesis block
+ */
+CBlock CreateDilVGenesisBlock();
 
 /**
  * Mine the genesis block

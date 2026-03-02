@@ -2,6 +2,7 @@
 // Distributed under the MIT software license
 
 #include <util/system.h>
+#include <core/chainparams.h>
 #include <iostream>
 #include <cstdlib>
 #include <sys/stat.h>
@@ -144,6 +145,32 @@ std::string GetDataDir(bool testnet) {
 #else
     return home + "/.dilithion-testnet";
 #endif
+}
+
+std::string GetDataDir(Dilithion::Network network) {
+    if (network == Dilithion::TESTNET) {
+        return GetDataDir(true);
+    }
+    if (network == Dilithion::DILV) {
+        // Check for environment variable override
+        const char* env_datadir = std::getenv("DILITHION_DATADIR");
+        if (env_datadir) {
+            std::string path(env_datadir);
+            if (IsPathSafe(path)) {
+                return path + "-dilv";
+            }
+            std::cerr << "WARNING: DILITHION_DATADIR contains unsafe path, ignoring" << std::endl;
+        }
+
+        std::string home = GetHomeDir();
+#ifdef _WIN32
+        return home + "\\.dilv";
+#else
+        return home + "/.dilv";
+#endif
+    }
+    // MAINNET (default)
+    return GetDataDir();
 }
 
 bool EnsureDataDirExists(const std::string& path) {

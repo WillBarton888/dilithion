@@ -7,6 +7,7 @@
 #include <crypto/sha3.h>
 #include <consensus/pow.h>
 #include <core/chainparams.h>
+#include <vdf/coinbase_vdf.h>
 
 #include <cstring>
 #include <iostream>
@@ -89,12 +90,114 @@ CBlock CreateGenesisBlock() {
     return genesis;
 }
 
+CBlock CreateDilVGenesisBlock() {
+    // Ensure chain parameters are initialized
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized. Call InitChainParams() first.");
+    }
+
+    CBlock genesis;
+
+    // DilV genesis is a VDF block (version 4)
+    genesis.nVersion = CBlockHeader::VDF_VERSION;
+    genesis.hashPrevBlock = uint256();  // All zeros (no previous block)
+    genesis.nTime = Dilithion::g_chainParams->genesisTime;
+    genesis.nBits = Dilithion::g_chainParams->genesisNBits;
+    genesis.nNonce = 0;  // nNonce is vestigial for VDF blocks
+
+    // =========================================================================
+    // Pre-computed VDF proof for genesis block
+    // =========================================================================
+    // Challenge = SHA3-256(zeros_32 || height_0_le32 || address_20_zeros) = 56-byte preimage
+    // Computed with 500,000 iterations of chiavdf squaring
+    //
+    // These values are computed once by the dilv-genesis-vdf tool and hardcoded here.
+    // Challenge: 37d87925f453b19faae61935631462157c0168e14f0f819ec032e4b8b5eb2322
+    // =========================================================================
+
+    // VDF output (32 bytes) — result of 500,000 squarings
+    static const uint8_t vdfOutputBytes[32] = {
+        0xde, 0xab, 0x28, 0xaf, 0x3c, 0x2b, 0x26, 0xf8, 0x61, 0x5b, 0xff, 0xf1, 0x54, 0x78, 0x94, 0x3b,
+        0x77, 0x23, 0xc5, 0x88, 0x86, 0x4c, 0xc4, 0xcc, 0xdf, 0xce, 0x71, 0x62, 0xd1, 0x1d, 0xc1, 0x86
+    };
+    std::memcpy(genesis.vdfOutput.data, vdfOutputBytes, 32);
+
+    // VDF proof hash (32 bytes) — SHA3-256(proof_bytes)
+    static const uint8_t vdfProofHashBytes[32] = {
+        0x44, 0xc4, 0x9e, 0x17, 0x02, 0xb3, 0x04, 0xea, 0x8a, 0x49, 0x92, 0x1c, 0x1e, 0x4a, 0x56, 0xcb,
+        0x6a, 0x16, 0x67, 0x88, 0xd2, 0xb3, 0x04, 0xf5, 0x9a, 0x88, 0x4f, 0xf8, 0x4a, 0x56, 0xb1, 0x91
+    };
+    std::memcpy(genesis.vdfProofHash.data, vdfProofHashBytes, 32);
+
+    // =========================================================================
+    // Coinbase transaction: 100 DilV to unspendable address
+    // =========================================================================
+    CTransaction coinbaseTx;
+    coinbaseTx.nVersion = 1;
+
+    // Input: Null prevout (standard for coinbase)
+    coinbaseTx.vin.resize(1);
+    coinbaseTx.vin[0].prevout.SetNull();
+    coinbaseTx.vin[0].nSequence = 0xFFFFFFFF;
+
+    // scriptSig: Height (0) + genesis message + VDF proof
+    std::vector<uint8_t> scriptSigData;
+    scriptSigData.push_back(0);  // Height 0 for genesis
+    const std::string& genesisMsg = Dilithion::g_chainParams->genesisCoinbaseMsg;
+    scriptSigData.insert(scriptSigData.end(), genesisMsg.begin(), genesisMsg.end());
+    coinbaseTx.vin[0].scriptSig = scriptSigData;
+
+    // Embed the pre-computed VDF proof into the coinbase scriptSig
+    // 200-byte Wesolowski proof from dilv-genesis-vdf tool
+    static const uint8_t genesisVdfProofBytes[200] = {
+        0x01, 0x00, 0x0d, 0xa0, 0xff, 0x96, 0xa4, 0x30, 0xec, 0x38, 0x55, 0x9a, 0xed, 0xa6, 0xf2, 0xaa,
+        0xd9, 0xcd, 0x68, 0x62, 0x9e, 0x32, 0x20, 0x43, 0x9b, 0xe2, 0xad, 0x4e, 0x20, 0x40, 0x80, 0x93,
+        0xe1, 0x17, 0x97, 0xfd, 0xfc, 0x38, 0xee, 0x49, 0x96, 0xc6, 0x15, 0x99, 0xee, 0xc7, 0x34, 0x49,
+        0xc4, 0x00, 0xf4, 0x43, 0x19, 0xc7, 0x4b, 0xb3, 0x25, 0xd9, 0xea, 0xf9, 0x69, 0x47, 0x4a, 0x5a,
+        0x85, 0x02, 0xe7, 0x3c, 0xf6, 0xa2, 0x59, 0x70, 0xc8, 0xe4, 0x55, 0x7d, 0x56, 0xaa, 0xb4, 0x27,
+        0xac, 0x43, 0x35, 0x6a, 0x8d, 0x35, 0x8f, 0xc0, 0x64, 0x01, 0xc7, 0xed, 0xef, 0x95, 0x0d, 0xae,
+        0x7a, 0x0c, 0x01, 0x00, 0x00, 0x00, 0xcc, 0x5a, 0x1e, 0x6c, 0x91, 0xf3, 0x0d, 0xe5, 0x87, 0x03,
+        0x09, 0x5b, 0x8b, 0x48, 0x68, 0xca, 0xe2, 0xc8, 0x21, 0xa1, 0x3e, 0x29, 0xb9, 0x57, 0x0a, 0x84,
+        0x2d, 0x3a, 0xf5, 0x66, 0x90, 0x6e, 0x49, 0xc3, 0xc3, 0x7b, 0x26, 0x4c, 0x6f, 0x92, 0x0f, 0x22,
+        0xaf, 0x85, 0xdc, 0xe8, 0x9c, 0xaa, 0xb2, 0x65, 0x16, 0x42, 0x6c, 0x9e, 0xc3, 0x1d, 0x2c, 0x90,
+        0x2e, 0xd7, 0x0f, 0xb8, 0x5d, 0x42, 0x25, 0x0b, 0x5e, 0x85, 0xb3, 0x6a, 0x9b, 0x1a, 0xcd, 0x59,
+        0xad, 0x17, 0x33, 0x91, 0x44, 0x49, 0x04, 0x98, 0x21, 0x41, 0xb1, 0x6e, 0x5e, 0x6e, 0x8f, 0x2a,
+        0xa1, 0xff, 0xd5, 0xa5, 0x31, 0x3a, 0x01, 0x00
+    };
+    std::vector<uint8_t> genesisVdfProof(genesisVdfProofBytes, genesisVdfProofBytes + 200);
+    CoinbaseVDF::EmbedProof(coinbaseTx.vin[0], genesisVdfProof);
+
+    // Output: 100 DilV (10 billion ions)
+    coinbaseTx.vout.resize(1);
+    coinbaseTx.vout[0].nValue = 100ULL * 100000000ULL;  // 100 DilV
+
+    // scriptPubKey: OP_RETURN (unspendable)
+    // Genesis coins are traditionally unspendable
+    coinbaseTx.vout[0].scriptPubKey.push_back(0x6a);  // OP_RETURN opcode
+
+    coinbaseTx.nLockTime = 0;
+
+    // Serialize the transaction
+    std::vector<uint8_t> serializedTx = coinbaseTx.Serialize();
+
+    // Store transaction with count prefix
+    genesis.vtx.clear();
+    genesis.vtx.push_back(1);  // Transaction count = 1
+    genesis.vtx.insert(genesis.vtx.end(), serializedTx.begin(), serializedTx.end());
+
+    // Merkle root = hash of the single transaction
+    genesis.hashMerkleRoot = coinbaseTx.GetHash();
+
+    return genesis;
+}
+
 uint256 GetGenesisHash() {
     static uint256 hash;
     static bool initialized = false;
 
     if (!initialized) {
-        CBlock genesis = CreateGenesisBlock();
+        CBlock genesis = (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) ?
+            CreateDilVGenesisBlock() : CreateGenesisBlock();
         hash = genesis.GetHash();
         initialized = true;
     }
@@ -108,14 +211,20 @@ bool IsGenesisBlock(const CBlock& block) {
         throw std::runtime_error("Chain parameters not initialized");
     }
 
-    // Check all genesis block fields
-    if (block.nVersion != VERSION) return false;
+    // DilV genesis is version 4 (VDF), regular genesis is version 1
+    if (Dilithion::g_chainParams->IsDilV()) {
+        if (block.nVersion != CBlockHeader::VDF_VERSION) return false;
+    } else {
+        if (block.nVersion != VERSION) return false;
+    }
+
     if (!block.hashPrevBlock.IsNull()) return false;
     if (block.nTime != Dilithion::g_chainParams->genesisTime) return false;
     if (block.nBits != Dilithion::g_chainParams->genesisNBits) return false;
 
     // Check merkle root matches expected
-    CBlock genesis = CreateGenesisBlock();
+    CBlock genesis = Dilithion::g_chainParams->IsDilV() ?
+        CreateDilVGenesisBlock() : CreateGenesisBlock();
     if (!(block.hashMerkleRoot == genesis.hashMerkleRoot)) return false;
 
     return true;

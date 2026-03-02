@@ -2,20 +2,16 @@
 // Distributed under the MIT software license
 
 /**
- * Dilithion Node - Main Application
+ * DilV Node - VDF Lottery Payment Chain
  *
- * Integrates all components:
- * - Phase 1: Blockchain storage, mempool, fees
- * - Phase 2: P2P networking
- * - Phase 3: Mining
- * - Phase 4: Wallet, RPC server
+ * A standalone binary for the DilV chain (VDF-only consensus).
+ * No RandomX mining — all blocks use VDF lottery from genesis.
  *
  * Usage:
- *   dilithion-node [options]
- *     --datadir=<path>      Data directory (default: ~/.dilithion)
- *     --rpcport=<port>      RPC server port (default: 8332)
- *     --mine                Start mining automatically
- *     --threads=<n>         Mining threads (default: auto-detect)
+ *   dilv-node [options]
+ *     --datadir=<path>      Data directory (default: ~/.dilv)
+ *     --rpcport=<port>      RPC server port (default: 9332)
+ *     --mine                Start VDF mining automatically
  */
 
 #include <node/blockchain_storage.h>
@@ -44,7 +40,8 @@
 #include <api/http_server.h>
 #include <api/cached_stats.h>
 #include <api/metrics.h>
-#include <miner/controller.h>
+// DilV: No RandomX mining controller needed — VDF-only chain
+// #include <miner/controller.h>
 #include <miner/vdf_miner.h>
 #include <vdf/vdf.h>
 #include <vdf/cooldown_tracker.h>
@@ -62,7 +59,8 @@
 #include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
-#include <crypto/randomx_hash.h>
+// DilV: No RandomX — VDF-only chain
+// #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
 #include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
 #include <util/pidfile.h>  // STRESS TEST FIX: Stale lock detection
@@ -114,10 +112,10 @@
 // CRASH HANDLER: Log crash info to file before terminating
 static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* pExceptionInfo) {
     // Get data directory for crash log
-    std::string crashLogPath = "dilithion_crash.log";
+    std::string crashLogPath = "dilv_crash.log";
     char* appdata = std::getenv("APPDATA");
     if (appdata) {
-        crashLogPath = std::string(appdata) + "\\.dilithion\\crash.log";
+        crashLogPath = std::string(appdata) + "\\.dilv\\crash.log";
     }
 
     std::ofstream crashLog(crashLogPath, std::ios::app);
@@ -264,7 +262,7 @@ struct NodeState {
     std::string mining_address_override;       // --mining-address=Dxxx (empty = use wallet default)
     bool rotate_mining_address{false};         // --rotate-mining-address (new HD address per block)
     CRPCServer* rpc_server = nullptr;
-    CMiningController* miner = nullptr;
+    // DilV: No RandomX CMiningController — VDF miner only
     CWallet* wallet = nullptr;
     CSocket* p2p_socket = nullptr;
     CHttpServer* http_server = nullptr;
@@ -407,9 +405,7 @@ void SignalHandler(int signal) {
             g_node_state.rpc_server->Stop();
             std::cout << " ✓" << std::endl;
         }
-    if (g_node_state.miner) {
-        g_node_state.miner->StopMining();
-    }
+    // DilV: No RandomX miner — VDF miner stops via running flag
     if (g_node_state.p2p_socket) {
         g_node_state.p2p_socket->Close();
     }
@@ -420,10 +416,11 @@ void SignalHandler(int signal) {
 
 // Parse command line arguments
 struct NodeConfig {
-    bool testnet = false;
-    std::string datadir = "";       // Will be set based on network
-    uint16_t rpcport = 0;           // Will be set based on network
-    uint16_t p2pport = 0;           // Will be set based on network
+    // DilV: No testnet flag — DilV is its own standalone network
+    bool testnet = false;  // Always false for DilV (kept for compatibility with shared code)
+    std::string datadir = "";       // Will be set to ~/.dilv
+    uint16_t rpcport = 0;           // Will be set to 9332
+    uint16_t p2pport = 0;           // Will be set to 9444
     bool start_mining = false;
     int mining_threads = 0;         // 0 = auto-detect
     std::string mining_address_override = "";  // --mining-address=Dxxx (empty = use wallet)
@@ -447,7 +444,8 @@ struct NodeConfig {
             std::string arg(argv[i]);
 
             if (arg == "--testnet") {
-                testnet = true;
+                std::cerr << "Error: DilV node does not support --testnet (DilV is its own network)" << std::endl;
+                return false;
             }
             else if (arg.find("--datadir=") == 0) {
                 datadir = arg.substr(10);
@@ -626,26 +624,22 @@ struct NodeConfig {
     }
 
     void PrintUsage(const char* program) {
-        std::cout << "Dilithion Node - Post-Quantum Cryptocurrency" << std::endl;
+        std::cout << "DilV Node - Quantum-Resistant VDF Payment Chain" << std::endl;
         std::cout << std::endl;
         std::cout << "Usage: " << program << " [options]" << std::endl;
         std::cout << std::endl;
-        std::cout << "\033[1;32mQUICK START (Beginners):\033[0m" << std::endl;
-        std::cout << "  " << program << "              No arguments = Auto-start testnet mining!" << std::endl;
-        std::cout << "                            • Testnet mode" << std::endl;
-        std::cout << "                            • Auto-connect to seed node" << std::endl;
-        std::cout << "                            • Auto-detect CPU threads" << std::endl;
-        std::cout << "                            • Start mining immediately" << std::endl;
+        std::cout << "\033[1;32mQUICK START:\033[0m" << std::endl;
+        std::cout << "  " << program << "              No arguments = Auto-start VDF mining!" << std::endl;
+        std::cout << "                            • Auto-connect to seed nodes" << std::endl;
+        std::cout << "                            • Start VDF mining immediately" << std::endl;
         std::cout << std::endl;
         std::cout << "Options:" << std::endl;
-        std::cout << "  --testnet             Use testnet (production difficulty, ~60s blocks)" << std::endl;
-        std::cout << "  --datadir=<path>      Data directory (default: network-specific)" << std::endl;
-        std::cout << "  --port=<port>         P2P network port (default: network-specific)" << std::endl;
-        std::cout << "  --rpcport=<port>      RPC server port (default: network-specific)" << std::endl;
+        std::cout << "  --datadir=<path>      Data directory (default: ~/.dilv)" << std::endl;
+        std::cout << "  --port=<port>         P2P network port (default: 9444)" << std::endl;
+        std::cout << "  --rpcport=<port>      RPC server port (default: 9332)" << std::endl;
         std::cout << "  --connect=<ip:port>   Connect to node (disables DNS seeds)" << std::endl;
         std::cout << "  --addnode=<ip:port>   Add node to connect to (repeatable)" << std::endl;
-        std::cout << "  --mine                Start mining automatically" << std::endl;
-        std::cout << "  --threads=<n|auto>    Mining threads (number or 'auto' to detect)" << std::endl;
+        std::cout << "  --mine                Start VDF mining automatically" << std::endl;
         std::cout << "  --mining-address=<addr> Send mining rewards to this address" << std::endl;
         std::cout << "  --rotate-mining-address Use a new HD address for each mined block" << std::endl;
         std::cout << "  --restore-mnemonic=\"words\" Restore wallet from 24-word recovery phrase" << std::endl;
@@ -662,22 +656,19 @@ struct NodeConfig {
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
-        std::cout << "  Configuration file: dilithion.conf (in data directory)" << std::endl;
-        std::cout << "  Environment variables: DILITHION_* (e.g., DILITHION_RPCPORT=8332)" << std::endl;
-        std::cout << "  Priority: Command-line > Environment > Config file > Default" << std::endl;
+        std::cout << "  Configuration file: dilv.conf (in data directory)" << std::endl;
+        std::cout << "  Priority: Command-line > Config file > Default" << std::endl;
         std::cout << std::endl;
         std::cout << "Network Defaults:" << std::endl;
-        std::cout << "  Mainnet:  datadir=.dilithion         port=8444  rpcport=8332" << std::endl;
-        std::cout << "  Testnet:  datadir=.dilithion-testnet port=18444 rpcport=18332" << std::endl;
+        std::cout << "  DilV:  datadir=.dilv  port=9444  rpcport=9332" << std::endl;
         std::cout << std::endl;
         std::cout << "Examples:" << std::endl;
-        std::cout << "  " << program << "                                                    (Quick start mainnet)" << std::endl;
-        std::cout << "  " << program << " --mine --threads=auto                               (Mainnet mining)" << std::endl;
-        std::cout << "  " << program << " --testnet --mine                                    (Testnet mining)" << std::endl;
-        std::cout << "  " << program << " --testnet --addnode=134.122.4.164:18444 --mine     (Testnet with seed)" << std::endl;
+        std::cout << "  " << program << "                                    (Quick start)" << std::endl;
+        std::cout << "  " << program << " --mine                             (Start VDF mining)" << std::endl;
+        std::cout << "  " << program << " --relay-only --public-api          (Seed node)" << std::endl;
         std::cout << std::endl;
         std::cout << "Post-Quantum Security Stack:" << std::endl;
-        std::cout << "  Mining:      RandomX (CPU-friendly, ASIC-resistant)" << std::endl;
+        std::cout << "  Consensus:   VDF Lottery (fair, deterministic, single-threaded)" << std::endl;
         std::cout << "  Signatures:  CRYSTALS-Dilithium3 (NIST PQC standard)" << std::endl;
         std::cout << "  Hashing:     SHA-3/Keccak-256 (quantum-resistant)" << std::endl;
         std::cout << std::endl;
@@ -1199,7 +1190,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
         std::cout << "[Mining] Coinbase outputs: " << coinbaseTx.vout.size()
                   << " (miner=" << minerAmount/100000000.0
-                  << " DIL, devFund=" << devFundAmount/100000000.0
+                  << " DilV, devFund=" << devFundAmount/100000000.0
                   << " DIL -> DJrywx..., devReward=" << devRewardAmount/100000000.0
                   << " DIL -> DRne9y...)" << std::endl;
     }
@@ -1505,19 +1496,17 @@ int main(int argc, char* argv[]) {
     NodeConfig config;
 
     if (quick_start_mode) {
-        // Smart defaults - MAINNET by default
+        // Smart defaults - DilV
         std::cout << "\033[1;32m" << std::endl;  // Green bold
         std::cout << "======================================" << std::endl;
-        std::cout << "  DILITHION QUICK START MODE" << std::endl;
+        std::cout << "  DILV QUICK START MODE" << std::endl;
         std::cout << "======================================" << std::endl;
         std::cout << "\033[0m" << std::endl;  // Reset color
         std::cout << "No arguments detected - using defaults:" << std::endl;
-        std::cout << "  • Network:    MAINNET (real coins with value)" << std::endl;
-        std::cout << "  • Seed node:  138.197.68.128:8444 (NYC - official)" << std::endl;
-        std::cout << "  • Mining:     ENABLED" << std::endl;
-        std::cout << "  • Threads:    AUTO-DETECT (50-75% of your CPU)" << std::endl;
+        std::cout << "  • Network:    DilV (VDF lottery payment chain)" << std::endl;
+        std::cout << "  • Seed node:  138.197.68.128:9444 (NYC - official)" << std::endl;
+        std::cout << "  • Mining:     ENABLED (VDF, single-threaded)" << std::endl;
         std::cout << std::endl;
-        std::cout << "For testnet (practice coins), run: " << argv[0] << " --testnet" << std::endl;
         std::cout << "To customize settings, run: " << argv[0] << " --help" << std::endl;
         std::cout << "To stop mining anytime: Press Ctrl+C" << std::endl;
         std::cout << std::endl;
@@ -1525,23 +1514,20 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::seconds(3));
         std::cout << std::endl;
 
-        // Apply smart defaults - MAINNET
-        config.testnet = false;
+        // Apply smart defaults - DilV
         config.start_mining = true;
-        config.mining_threads = 0;  // 0 = auto-detect
-        config.add_nodes.push_back("138.197.68.128:8444");  // NYC mainnet seed node
+        config.add_nodes.push_back("138.197.68.128:9444");  // NYC DilV seed node
     }
     else if (!config.ParseArgs(argc, argv)) {
         config.PrintUsage(argv[0]);
         return 1;
     }
 
-    // Phase 10: Load configuration from dilithion.conf
-    // Determine initial data directory based on command-line testnet flag
-    // (Config file may override testnet, but we need initial location to load config)
+    // Load configuration from dilv.conf
+    // DilV always uses its own data directory (no testnet variant)
     std::string initial_datadir = config.datadir;
     if (initial_datadir.empty()) {
-        initial_datadir = GetDefaultDataDir(config.testnet);
+        initial_datadir = GetDataDir(Dilithion::DILV);
     }
     
     // Load config file from initial datadir
@@ -1555,21 +1541,15 @@ int main(int argc, char* argv[]) {
     // Apply config file and environment variable settings (only if not set via command-line)
     // Priority: Command-line > Environment > Config file > Default
     
-    // Testnet (only if not set via command-line)
-    // Note: This may change the datadir location, but we've already loaded config from initial location
-    if (!config.testnet) {
-        config.testnet = config_parser.GetBool("testnet", false);
-    }
-    
+    // DilV: No testnet override — DilV is its own network
+
     // Data directory (only if not set via command-line)
-    // If testnet changed, update datadir accordingly
     if (config.datadir.empty()) {
         std::string conf_datadir = config_parser.GetString("datadir", "");
         if (!conf_datadir.empty()) {
             config.datadir = conf_datadir;
         } else {
-            // Use default based on current testnet setting
-            config.datadir = GetDefaultDataDir(config.testnet);
+            config.datadir = GetDataDir(Dilithion::DILV);
         }
     }
     
@@ -1664,19 +1644,14 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "======================================" << std::endl;
-    std::cout << "Dilithion Node" << std::endl;
-    std::cout << "Post-Quantum Cryptocurrency" << std::endl;
+    std::cout << "DilV Node" << std::endl;
+    std::cout << "Quantum-Resistant VDF Payment Chain" << std::endl;
     std::cout << "======================================" << std::endl;
     std::cout << std::endl;
 
-    // Initialize chain parameters based on network
-    if (config.testnet) {
-        Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::Testnet());
-        std::cout << "Network: TESTNET (production difficulty, ~60s blocks)" << std::endl;
-    } else {
-        Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::Mainnet());
-        std::cout << "Network: MAINNET" << std::endl;
-    }
+    // Initialize chain parameters — always DilV
+    Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::DilV());
+    std::cout << "Network: DILV (VDF lottery, ~45s blocks)" << std::endl;
 
     // Phase 10: Set default datadir, ports from chain params if not specified
     // (Config file values already applied above, now apply chain params as final fallback)
@@ -1694,7 +1669,7 @@ int main(int argc, char* argv[]) {
     if (!CLogger::GetInstance().Initialize(config.datadir)) {
         std::cerr << "Warning: Failed to initialize logging system" << std::endl;
     }
-    LogPrintf(ALL, INFO, "Dilithion Node starting");
+    LogPrintf(ALL, INFO, "DilV Node starting");
     LogPrintf(ALL, INFO, "Data directory: %s", config.datadir.c_str());
     LogPrintf(ALL, INFO, "P2P port: %d", config.p2pport);
     LogPrintf(ALL, INFO, "RPC port: %d", config.rpcport);
@@ -1702,10 +1677,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Data directory: " << config.datadir << std::endl;
     std::cout << "P2P port: " << config.p2pport << std::endl;
     std::cout << "RPC port: " << config.rpcport << std::endl;
-    std::cout << "Difficulty fork: height " << Dilithion::g_chainParams->difficultyForkHeight
-              << " (interval " << Dilithion::g_chainParams->difficultyAdjustment
-              << " -> " << Dilithion::g_chainParams->difficultyAdjustmentV2
-              << ", max change " << Dilithion::g_chainParams->difficultyMaxChange << "x)" << std::endl;
+    std::cout << "VDF iterations: " << Dilithion::g_chainParams->vdfIterations << std::endl;
+    std::cout << "Block time target: ~" << Dilithion::g_chainParams->blockTime << "s" << std::endl;
 
     if (!config.connect_nodes.empty()) {
         std::cout << "Connect to: ";
@@ -1890,79 +1863,14 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "  [OK] Chain state initialized" << std::endl;
 
-        // Initialize RandomX (required for block hashing)
-        std::cout << "Initializing RandomX..." << std::endl;
-        const char* rx_key = "Dilithion-RandomX-v1";
-
-        // Auto-detect RAM to choose appropriate RandomX mode
-        // LIGHT mode: ~256MB RAM, ~3-10 H/s (works on 2GB nodes)
-        // FULL mode: ~2.5GB RAM, ~100 H/s (requires 4GB+ nodes)
-        size_t total_ram_mb = 0;
-
-#ifdef _WIN32
-        // Windows: Use GlobalMemoryStatusEx()
-        MEMORYSTATUSEX memInfo;
-        memInfo.dwLength = sizeof(MEMORYSTATUSEX);
-        if (GlobalMemoryStatusEx(&memInfo)) {
-            total_ram_mb = memInfo.ullTotalPhys / (1024 * 1024);  // Convert bytes to MB
-        }
-#else
-        // Linux: Read /proc/meminfo
-        std::ifstream meminfo("/proc/meminfo");
-        if (meminfo.is_open()) {
-            std::string line;
-            while (std::getline(meminfo, line)) {
-                if (line.substr(0, 9) == "MemTotal:") {
-                    size_t ram_kb = std::stoull(line.substr(9));
-                    total_ram_mb = ram_kb / 1024;
-                    break;
-                }
-            }
-            meminfo.close();
-        }
-#endif
-
-        // ========================================================================
-        // BUG #55 FIX: Monero-Style Dual-Mode RandomX Architecture
-        // ========================================================================
-        // Following Monero's proven pattern for instant node startup:
-        // - LIGHT mode (256MB): Used for ALL block validation - instant startup
-        // - FULL mode (2GB): Used ONLY for mining - async background init
-        //
-        // This allows nodes to:
-        // 1. Start validating blocks immediately (LIGHT mode)
-        // 2. Mining starts with LIGHT mode, upgrades to FULL when ready
-        // 3. No more 30-60s hang on high-RAM nodes like NYC (3.9GB)
-        // ========================================================================
-        std::cout << "  Detected RAM: " << total_ram_mb << " MB" << std::endl;
-
-        // Step 1: Always initialize LIGHT mode first for validation (fast, 1-2 seconds)
-        std::cout << "  Initializing validation mode (LIGHT)..." << std::endl;
-        randomx_init_validation_mode(rx_key, strlen(rx_key));
-        // Validation mode is now ready - node can verify blocks immediately
-
-        // Step 2: Check if FULL mode will be available (RAM >= 3GB)
-        // NOTE: Actual mining init is deferred until AFTER sync completes (BUG #97 fix)
-        bool full_mode_available = (total_ram_mb >= 3072);
-        if (config.start_mining && full_mode_available) {
-            std::cout << "  Mining mode: FULL (will initialize after sync)" << std::endl;
-        } else if (config.start_mining) {
-            std::cout << "  Mining mode: LIGHT only (RAM < 3GB)" << std::endl;
-        }
-
-        // Step 3: For 8GB+ systems, start FULL mode init NOW for faster IBD verification
-        // This makes IBD ~20x faster since FULL mode verifies at ~100 H/s vs ~5 H/s
-        if (total_ram_mb >= 8192) {
-            std::cout << "  Starting FULL mode init for faster IBD (8GB+ RAM detected)..." << std::endl;
-            randomx_init_mining_mode_async(rx_key, strlen(rx_key));
-        }
-
-        // NO WAIT - node continues immediately, can validate blocks right away
+        // DilV: No RandomX initialization — VDF-only chain
+        // Block hashing uses SHA3 (FastHash), no RandomX needed
+        std::cout << "  [OK] DilV uses VDF consensus (no RandomX initialization needed)" << std::endl;
 
         // Load and verify genesis block
 load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
-        std::cout << "[1/6] Loading genesis block..." << std::flush;
-        CBlock genesis = Genesis::CreateGenesisBlock();
+        std::cout << "[1/6] Loading DilV genesis block..." << std::flush;
+        CBlock genesis = Genesis::CreateDilVGenesisBlock();
 
         if (!Genesis::IsGenesisBlock(genesis)) {
             ErrorMessage error = CErrorFormatter::ValidationError("genesis block", 
@@ -2387,12 +2295,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  [OK] Chain integrity validation passed" << std::endl;
         }
 
-        // Set network magic for P2P protocol
-        if (config.testnet) {
-            NetProtocol::g_network_magic = NetProtocol::TESTNET_MAGIC;
-        } else {
-            NetProtocol::g_network_magic = NetProtocol::MAINNET_MAGIC;
-        }
+        // Set network magic for P2P protocol — DilV uses its own unique magic
+        NetProtocol::g_network_magic = NetProtocol::DILV_MAGIC;
 
         // Phase 2: Initialize P2P networking (prepare for later)
         std::cout << "Initializing P2P components..." << std::endl;
@@ -2450,15 +2354,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Without the IBD check, BuildMiningTemplate runs on every block during sync,
             // and at height 7000+ triggers MineRegistrationPoW which blocks the processing
             // thread for ~10-15 minutes, stalling IBD.
-            if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()
-                && !IsInitialBlockDownload()) {
+            // DilV: VDF miner handles tip changes via OnNewBlock() — no template updates needed
+            if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()) {
                 std::cout << "[Mining] " << (is_reorg ? "Reorg" : "New tip")
-                          << " detected - updating template immediately..." << std::endl;
-                auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false, g_node_state.mining_address_override);
-                if (templateOpt) {
-                    g_node_state.miner->UpdateTemplate(*templateOpt);
-                    std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
-                }
+                          << " detected at height " << new_height << std::endl;
+                // VDF miner picks up new tip automatically via main loop's OnNewBlock call
             }
         });
         std::cout << "  [OK] Mining template update callback registered" << std::endl;
@@ -2798,7 +2698,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Create and start HTTP API server for dashboard
         // Use port 18334 for testnet, 8334 for mainnet (Bitcoin convention)
-        int api_port = config.testnet ? 18334 : 8334;
+        int api_port = 9334;  // DilV REST API port
         CHttpServer http_server(api_port);
         g_node_state.http_server = &http_server;
 
@@ -2845,7 +2745,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Set stats handler that returns cached statistics as JSON (never blocks)
-        std::string network_name = config.testnet ? "testnet" : "mainnet";
+        std::string network_name = "dilv";
         http_server.SetStatsHandler([&cached_stats, network_name]() -> std::string {
             return cached_stats.ToJSON(network_name);
         });
@@ -3745,21 +3645,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // NOTE: CConnman::Start is DELAYED until after wallet initialization
         // This ensures interactive prompts happen before network threads start outputting logs
 
-        // Phase 3: Initialize mining controller
-        std::cout << "Initializing mining controller..." << std::endl;
-        int mining_threads = config.mining_threads > 0 ?
-                            config.mining_threads :
-                            std::thread::hardware_concurrency();
-        CMiningController miner(mining_threads);
-        g_node_state.miner = &miner;
-        std::cout << "  [OK] Mining controller initialized (" << mining_threads << " threads)" << std::endl;
-
-        // Phase 3b: Initialize VDF mining subsystem
+        // DilV: VDF-only mining — no RandomX CMiningController needed
+        std::cout << "Initializing VDF mining subsystem..." << std::endl;
         bool vdf_available = vdf::init();
         if (vdf_available) {
             std::cout << "  [OK] VDF library initialized (" << vdf::version() << ")" << std::endl;
         } else {
-            std::cout << "  [--] VDF library not available (VDF mining disabled)" << std::endl;
+            std::cerr << "  [ERROR] VDF library not available — DilV requires VDF!" << std::endl;
+            delete Dilithion::g_chainParams;
+            return 1;
         }
 
         CCooldownTracker cooldown_tracker;
@@ -3852,10 +3746,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         }
 
-        // Helper lambda: check if VDF mining should be used at given height
-        auto shouldUseVDF = [&vdf_available, &vdf_activation](uint32_t height) -> bool {
-            return vdf_available && static_cast<int>(height) >= vdf_activation;
-        };
+        // DilV: VDF mining is always used — no height-based switching needed
 
         // Phase 4: Initialize wallet (before mining callback setup)
         // BUG #56 FIX: Full wallet persistence with Bitcoin Core pattern
@@ -4288,11 +4179,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 int64_t total = mature + immature;
                 std::cout << "  [OK] Full scan complete" << std::endl;
                 std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
-                          << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
+                          << (static_cast<double>(mature) / 100000000.0) << " DilV" << std::endl;
                 std::cout << "       Immature (coinbase): " << std::fixed << std::setprecision(8)
-                          << (static_cast<double>(immature) / 100000000.0) << " DIL" << std::endl;
+                          << (static_cast<double>(immature) / 100000000.0) << " DilV" << std::endl;
                 std::cout << "       Total: " << std::fixed << std::setprecision(8)
-                          << (static_cast<double>(total) / 100000000.0) << " DIL" << std::endl;
+                          << (static_cast<double>(total) / 100000000.0) << " DilV" << std::endl;
                 std::cout.flush();
             } else {
                 std::cerr << "  WARNING: Rescan failed" << std::endl;
@@ -4310,11 +4201,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 int64_t total = mature + immature;
                 std::cout << "  [OK] Incremental scan complete" << std::endl;
                 std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
-                          << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
+                          << (static_cast<double>(mature) / 100000000.0) << " DilV" << std::endl;
                 std::cout << "       Immature (coinbase): " << std::fixed << std::setprecision(8)
-                          << (static_cast<double>(immature) / 100000000.0) << " DIL" << std::endl;
+                          << (static_cast<double>(immature) / 100000000.0) << " DilV" << std::endl;
                 std::cout << "       Total: " << std::fixed << std::setprecision(8)
-                          << (static_cast<double>(total) / 100000000.0) << " DIL" << std::endl;
+                          << (static_cast<double>(total) / 100000000.0) << " DilV" << std::endl;
                 std::cout.flush();
             } else {
                 std::cerr << "  WARNING: Rescan failed" << std::endl;
@@ -4328,11 +4219,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             int64_t total = mature + immature;
             std::cout << "  [OK] Wallet already synced to chain tip" << std::endl;
             std::cout << "       Mature (spendable): " << std::fixed << std::setprecision(8)
-                      << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
+                      << (static_cast<double>(mature) / 100000000.0) << " DilV" << std::endl;
             std::cout << "       Immature (coinbase): " << std::fixed << std::setprecision(8)
-                      << (static_cast<double>(immature) / 100000000.0) << " DIL" << std::endl;
+                      << (static_cast<double>(immature) / 100000000.0) << " DilV" << std::endl;
             std::cout << "       Total: " << std::fixed << std::setprecision(8)
-                      << (static_cast<double>(total) / 100000000.0) << " DIL" << std::endl;
+                      << (static_cast<double>(total) / 100000000.0) << " DilV" << std::endl;
             std::cout.flush();
         }
 
@@ -4564,254 +4455,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Path for persistent blocks-mined counter
         std::string blocksMined_path = config.datadir + "/blocks_mined.dat";
 
-        // Set up block found callback to save mined blocks and credit wallet
-        miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set, blocksMined_path](const CBlock& block) {
-            // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
-            if (!g_node_state.running) {
-                // Shutting down - discard this block to prevent race condition
-                return;
-            }
+        // DilV: No RandomX miner callback — VDF miner callback only
 
-            uint256 blockHash = block.GetHash();
-            std::cout << std::endl;
-            std::cout << "======================================" << std::endl;
-            std::cout << "[OK] BLOCK FOUND!" << std::endl;
-            std::cout << "======================================" << std::endl;
-            std::cout << "Block hash: " << blockHash.GetHex() << std::endl;
-            std::cout << "Block time: " << block.nTime << std::endl;
-            std::cout << "Nonce: " << block.nNonce << std::endl;
-            // CID 1675194 FIX: Save and restore ostream format state to prevent affecting subsequent output
-            std::ios_base::fmtflags oldFlags = std::cout.flags();
-            std::cout << "Difficulty: 0x" << std::hex << block.nBits;
-            std::cout.flags(oldFlags);  // Restore original format flags
-            std::cout << std::endl;
-            std::cout << "======================================" << std::endl;
-            std::cout << std::endl;
-
-            // BUG #84 FIX: Extract coinbase from actual block, not global
-            // Race condition: g_currentCoinbase might be overwritten by template updates
-            // before the block is found, causing hash mismatch between wallet and UTXO set
-            CTransactionRef coinbase;
-            {
-                CBlockValidator validator;
-                std::vector<CTransactionRef> transactions;
-                std::string error;
-                if (validator.DeserializeBlockTransactions(block, transactions, error) && !transactions.empty()) {
-                    coinbase = transactions[0];  // Coinbase is always first transaction
-                } else {
-                    std::cerr << "[Wallet] ERROR: Failed to deserialize coinbase from block: " << error << std::endl;
-                }
-            }
-
-            // BUG #95 FIX: Wallet crediting moved to AFTER chain tip decision below
-            // Only credit when block actually becomes chain tip, not for orphaned/stale blocks
-
-            // Save block to blockchain database
-            if (!blockchain.WriteBlock(blockHash, block)) {
-                std::cerr << "[Blockchain] ERROR: Failed to save block to database!" << std::endl;
-                return;
-            }
-            std::cout << "[Blockchain] Block saved to database" << std::endl;
-
-            // Create block index with proper chain linkage
-            // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
-            auto pblockIndex = std::make_unique<CBlockIndex>(block);
-            pblockIndex->phashBlock = blockHash;
-            pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
-
-            // Link to parent block
-            pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
-            if (pblockIndex->pprev == nullptr) {
-                std::cerr << "[Blockchain] ERROR: Cannot find parent block "
-                          << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-                // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
-                return;
-            }
-
-            // Calculate height and chain work
-            pblockIndex->nHeight = pblockIndex->pprev->nHeight + 1;
-            pblockIndex->BuildChainWork();
-
-            std::cout << "[Blockchain] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
-
-            // Save block index to database
-            if (!blockchain.WriteBlockIndex(blockHash, *pblockIndex)) {
-                std::cerr << "[Blockchain] ERROR: Failed to save block index" << std::endl;
-                // HIGH-C001 FIX: No manual delete needed - smart pointer auto-destructs
-                return;
-            }
-
-            // Add to chain state memory map (transfer ownership with std::move)
-            if (!g_chainstate.AddBlockIndex(blockHash, std::move(pblockIndex))) {
-                std::cerr << "[Blockchain] ERROR: Failed to add block to chain state" << std::endl;
-                // HIGH-C001 FIX: No manual delete needed - ownership transferred
-                return;
-            }
-
-            // HIGH-C001 FIX: After move, retrieve pointer from chain state
-            CBlockIndex* pblockIndexPtr = g_chainstate.GetBlockIndex(blockHash);
-            if (pblockIndexPtr == nullptr) {
-                std::cerr << "[Blockchain] CRITICAL ERROR: Block index not found after adding!" << std::endl;
-                return;
-            }
-
-            // Activate best chain (handles reorg if needed)
-            bool reorgOccurred = false;
-            if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
-                if (reorgOccurred) {
-                    std::cout << "[Blockchain] ⚠️  CHAIN REORGANIZATION occurred during mining!" << std::endl;
-                    std::cout << "  Our mined block triggered a reorg" << std::endl;
-                    std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
-                              << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
-
-                    // Stop mining - need to reassess chain state
-                    g_node_state.new_block_found = true;
-                } else if (g_chainstate.GetTip() == pblockIndexPtr) {
-                    std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
-
-                    // Persist total blocks mined counter
-                    if (g_node_state.rpc_server) {
-                        uint64_t total = g_node_state.rpc_server->IncrementTotalBlocksMined();
-                        std::ofstream ofs(blocksMined_path, std::ios::trunc);
-                        if (ofs) ofs << total;
-                    }
-
-                    // BUG #95 FIX: Only credit wallet when block actually becomes chain tip
-                    // This prevents crediting for orphaned/stale blocks on competing chains
-                    if (coinbase && !coinbase->vout.empty()) {
-                        const CTxOut& coinbaseOut = coinbase->vout[0];
-                        std::vector<uint8_t> pubkey_hash = WalletCrypto::ExtractPubKeyHash(coinbaseOut.scriptPubKey);
-                        std::vector<uint8_t> our_hash = wallet.GetPubKeyHash();
-
-                        if (!pubkey_hash.empty() && pubkey_hash == our_hash) {
-                            CDilithiumAddress our_address = wallet.GetNewAddress();
-                            wallet.AddTxOut(coinbase->GetHash(), 0, coinbaseOut.nValue, our_address, pblockIndexPtr->nHeight, true);  // true = coinbase
-
-                            double amountDIL = static_cast<double>(coinbaseOut.nValue) / 100000000.0;
-                            std::cout << "[Wallet] Coinbase credited: " << std::fixed << std::setprecision(8)
-                                      << amountDIL << " DIL (immature for 100 blocks)" << std::endl;
-
-                            // Get current height for maturity calculation
-                            unsigned int current_height = static_cast<unsigned int>(g_chainstate.GetHeight());
-
-                            // BUG #114 FIX: Use GetAvailableBalance() for consistency with RPC
-                            // Mature balance (spendable) - verified against UTXO set
-                            int64_t mature_balance = wallet.GetAvailableBalance(utxo_set, current_height);
-                            double matureDIL = static_cast<double>(mature_balance) / 100000000.0;
-
-                            // Immature balance (coinbase not yet mature)
-                            int64_t immature_balance = wallet.GetImmatureBalance(utxo_set, current_height);
-                            double immatureDIL = static_cast<double>(immature_balance) / 100000000.0;
-
-                            // Total balance
-                            int64_t total_balance = mature_balance + immature_balance;
-                            double totalDIL = static_cast<double>(total_balance) / 100000000.0;
-
-                            std::cout << "[Wallet] Balance: " << std::fixed << std::setprecision(8)
-                                      << matureDIL << " DIL (mature/spendable)" << std::endl;
-                            std::cout << "[Wallet]          " << std::fixed << std::setprecision(8)
-                                      << immatureDIL << " DIL (immature coinbase)" << std::endl;
-                            std::cout << "[Wallet]          " << std::fixed << std::setprecision(8)
-                                      << totalDIL << " DIL (total)" << std::endl;
-                        }
-                    }
-
-                    // BUG #32 FIX: Immediately update mining template for locally mined blocks
-                    // BUG #65 FIX: Skip IBD check for locally mined blocks - we KNOW we're at chain tip
-                    // because we just mined this block ourselves. The IBD check fails when peers
-                    // are connected but haven't completed handshake (version=0), which incorrectly
-                    // prevents mining from resuming after finding a block.
-                    bool immediate_update_succeeded = false;
-                    if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()) {
-                        std::cout << "[Mining] Locally mined block became new tip - updating template immediately..." << std::endl;
-                        auto templateOpt = BuildMiningTemplate(blockchain, *g_node_state.wallet, false, g_node_state.mining_address_override);
-                        if (templateOpt) {
-                            g_node_state.miner->UpdateTemplate(*templateOpt);
-                            std::cout << "[Mining] Template updated to height " << templateOpt->nHeight << std::endl;
-                            immediate_update_succeeded = true;
-                        } else {
-                            std::cerr << "[Mining] ERROR: Immediate template build failed" << std::endl;
-                        }
-                    }
-
-                    // Broadcast block to network (P2P block relay) - Using async broadcaster
-                    auto connected_peers = g_node_context.peer_manager->GetConnectedPeers();
-
-                    if (!connected_peers.empty()) {
-                        // Collect peer IDs with completed handshakes
-                        std::vector<int> peer_ids;
-                        for (const auto& peer : connected_peers) {
-                            if (peer && peer->IsHandshakeComplete()) {
-                                peer_ids.push_back(peer->id);
-                            }
-                        }
-
-                        if (!peer_ids.empty()) {
-                            // DEBUG: Log which peers we're broadcasting to
-                            if (g_verbose.load(std::memory_order_relaxed)) {
-                                std::cout << "[P2P-DEBUG] Broadcasting block to peers: ";
-                                for (int id : peer_ids) {
-                                    auto peer = g_node_context.peer_manager->GetPeer(id);
-                                    std::cout << id;
-                                    if (peer) {
-                                        std::cout << "(" << peer->addr.ToStringIP() << ")";
-                                    }
-                                    std::cout << " ";
-                                }
-                                std::cout << std::endl;
-                            }
-
-                            // Queue block broadcast asynchronously (non-blocking!)
-                            // BIP 130: Pass header to enable HEADERS vs INV routing by peer preference
-                            if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, block, peer_ids)) {
-                                std::cout << "[P2P] Queued block broadcast to " << peer_ids.size()
-                                          << " peer(s) (async)" << std::endl;
-                            } else {
-                                std::cerr << "[P2P] ERROR: Failed to queue block broadcast" << std::endl;
-                            }
-                        } else {
-                            std::cout << "[P2P] WARNING: No peers with completed handshakes" << std::endl;
-                        }
-                    } else {
-                        std::cout << "[P2P] WARNING: No connected peers to broadcast block" << std::endl;
-                    }
-
-                    // Check if VDF mining should activate for next height.
-                    // The immediate update path only updates the RandomX template,
-                    // so we must force the main loop handler to run for VDF switching.
-                    unsigned int next_h = pblockIndexPtr->nHeight + 1;
-                    int vdf_act = Dilithion::g_chainParams ?
-                        Dilithion::g_chainParams->vdfActivationHeight : 999999999;
-                    if (static_cast<int>(next_h) >= vdf_act) {
-                        std::cout << "[Mining] VDF activation height reached (next=" << next_h
-                                  << ", activation=" << vdf_act << ") - signaling main loop" << std::endl;
-                        g_node_state.new_block_found = true;
-                    } else if (!immediate_update_succeeded) {
-                        // BUG #65 FIX: Only signal main loop if immediate update failed
-                        g_node_state.new_block_found = true;
-                    }
-                } else {
-                    // Stale block - another miner found a block at the same height
-                    // This is normal in a multi-miner network (race condition)
-                    std::cout << "[Blockchain] STALE BLOCK: Another miner found block at same height first" << std::endl;
-                    std::cout << "  Your block is valid but was beaten by: "
-                              << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
-                              << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
-                    std::cout << "  This is normal - continuing to mine on new tip" << std::endl;
-
-                    // Update template and continue mining
-                    g_node_state.new_block_found = true;
-                }
-            } else {
-                std::cerr << "[Blockchain] ERROR: Failed to activate mined block in chain" << std::endl;
-            }
-        });
-
-        // Set up VDF miner callbacks (same block found handler, plus template provider)
+        // Set up VDF miner block found callback
         vdf_miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set, blocksMined_path](const CBlock& block) {
-            // Reuse the same block processing logic as RandomX miner.
-            // The block found callback above (for RandomX) handles saving, chain activation,
-            // wallet crediting, etc. We replicate the reference to the same callback.
             if (!g_node_state.running) return;
 
             uint256 blockHash = block.GetHash();
@@ -5264,7 +4911,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register components with RPC server
         rpc_server.RegisterWallet(&wallet);
-        rpc_server.RegisterMiner(&miner);
+        // DilV: No RandomX miner to register — RPC mining commands use VDF miner
+        // rpc_server.RegisterMiner(&miner);  // CMiningController not used in DilV
         rpc_server.RegisterBlockchain(&blockchain);
         rpc_server.RegisterChainState(&g_chainstate);
         rpc_server.RegisterMempool(&mempool);
@@ -5436,82 +5084,28 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             } else if (config.start_mining) {
                 std::cout << "  [OK] Already synced with network" << std::endl;
 
-                // BUG #72 FIX: Wait for FULL mode before starting mining threads
-                // Following XMRig's proven pattern: "dataset ready" before thread creation
-                // Mining threads created in LIGHT mode get LIGHT VMs and never upgrade
-                if (!randomx_is_mining_mode_ready()) {
-                    // BUG #98 FIX: Must INITIALIZE FULL mode before waiting for it!
-                    // The "already synced" path was waiting but never calling init_mining_mode_async
-                    std::cout << "  Initializing RandomX mining mode (FULL)..." << std::endl;
-                    randomx_init_mining_mode_async(rx_key, strlen(rx_key));
-                    std::cout << "  [WAIT] Waiting for RandomX FULL mode..." << std::endl;
-                    auto wait_start = std::chrono::steady_clock::now();
-                    while (!randomx_is_mining_mode_ready() && g_node_state.running) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                        auto elapsed = std::chrono::steady_clock::now() - wait_start;
-                        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > 600) {
-                            std::cerr << "  [WARN] FULL mode init timeout (10min), starting with LIGHT mode" << std::endl;
-                            break;
-                        }
-                        // Show progress every 60 seconds
-                        auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
-                        if (elapsed_sec > 0 && elapsed_sec % 60 == 0) {
-                            std::cout << "  [WAIT] Still initializing FULL mode... (" << elapsed_sec << "s)" << std::endl;
-                        }
-                    }
-                    auto wait_time = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::steady_clock::now() - wait_start).count();
-                    std::cout << "  [OK] Mining mode ready (FULL, " << wait_time << "s)" << std::endl;
-                } else {
-                    std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
-                }
-
-                // Now safe to start mining (synced with network)
+                // DilV: No RandomX initialization needed — VDF-only
                 unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                 std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
                 // Ensure MIK identity is registered before mining
-                // (one-time ~10-15 min PoW for new miners — blocks main thread)
                 if (!EnsureMIKRegistered(wallet, current_height + 1)) {
                     std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
                 }
 
-                if (shouldUseVDF(current_height + 1)) {
-                    // VDF mining mode
-                    std::cout << "  [VDF] VDF mining active (activation height: " << vdf_activation << ")" << std::endl;
-                    std::cout << "  [VDF] Iterations: " << vdf_iterations << std::endl;
+                // DilV: Always VDF mining
+                std::cout << "  [VDF] VDF mining active" << std::endl;
+                std::cout << "  [VDF] Iterations: " << vdf_iterations << std::endl;
 
-                    // Set miner address from wallet
-                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                    if (pubKeyHash.size() >= 20) {
-                        std::array<uint8_t, 20> addr{};
-                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                        vdf_miner.SetMinerAddress(addr);
-                    }
-
-                    vdf_miner.Start();
-                    std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
-                } else {
-                    // RandomX mining mode
-                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                    if (!templateOpt) {
-                        // Retry up to 3 times (safety net — registration should already be done)
-                        for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
-                            std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
-                            std::this_thread::sleep_for(std::chrono::seconds(1));
-                            templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                        }
-                        if (!templateOpt) {
-                            std::cerr << "ERROR: Failed to build mining template after retries" << std::endl;
-                            return 1;
-                        }
-                    }
-
-                    miner.StartMining(*templateOpt);
-
-                    std::cout << "  [OK] RandomX mining started with " << mining_threads << " threads" << std::endl;
-                    std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
+                std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                if (pubKeyHash.size() >= 20) {
+                    std::array<uint8_t, 20> addr{};
+                    std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                    vdf_miner.SetMinerAddress(addr);
                 }
+
+                vdf_miner.Start();
+                std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
             }
         }
 
@@ -5577,7 +5171,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_state.new_block_found.load()) {
                 std::cout << "[Mining] New block found, updating template..." << std::endl;
 
-                // Determine current height for VDF/RandomX decision
+                // Determine current height for VDF mining
                 unsigned int next_height = g_chainstate.GetTip() ?
                     g_chainstate.GetTip()->nHeight + 1 : 1;
 
@@ -5587,57 +5181,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // abort (new height) or continue (same height — lottery opportunity)
                     int newTipHeight = g_chainstate.GetHeight();
                     vdf_miner.OnNewBlock(newTipHeight);
-                } else if (miner.IsMining()) {
-                    // ========================================================================
-                    // BUG #109 FIX: Stop mining and WAIT for threads to fully stop
-                    // ========================================================================
-                    miner.StopMining();
-                    int wait_count = 0;
-                    while (miner.IsMining() && wait_count < 20) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                        wait_count++;
-                    }
-                    if (wait_count >= 20) {
-                        std::cerr << "[Mining] WARNING: Mining threads slow to stop" << std::endl;
-                    }
                 }
-                // Additional small delay to ensure any in-flight block submission completes
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                // DilV: VDF miner handles new blocks via OnNewBlock() above
+                // No RandomX template rebuild needed
 
-                // Restart mining if appropriate (skip if paused or VDF miner handles itself)
+                // Resume VDF mining if it was paused and conditions allow
                 if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()
                     && !mining_paused_no_peers && !mining_paused_fork && !mining_paused_consensus_fork
                     && !mining_paused_tip_divergence && !vdf_miner.IsRunning()) {
 
-                    if (shouldUseVDF(next_height)) {
-                        // Switch to VDF mining (if not already running)
-                        std::cout << "[Mining] Switching to VDF mining at height " << next_height << std::endl;
-                        std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                        if (pubKeyHash.size() >= 20) {
-                            std::array<uint8_t, 20> addr{};
-                            std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                            vdf_miner.SetMinerAddress(addr);
-                        }
-                        vdf_miner.Start();
-                    } else {
-                        // RandomX mining: rebuild template and restart
-                        std::optional<CBlockTemplate> templateOpt;
-                        constexpr int MAX_TEMPLATE_RETRIES = 3;
-                        for (int attempt = 1; attempt <= MAX_TEMPLATE_RETRIES; attempt++) {
-                            templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                            if (templateOpt) break;
-                            std::cerr << "[Mining] Template build failed (attempt " << attempt << "/" << MAX_TEMPLATE_RETRIES << ")" << std::endl;
-                            if (attempt < MAX_TEMPLATE_RETRIES) {
-                                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                            }
-                        }
-                        if (templateOpt) {
-                            miner.StartMining(*templateOpt);
-                            std::cout << "[Mining] Resumed mining on block height " << templateOpt->nHeight << std::endl;
-                        } else {
-                            std::cerr << "[ERROR] Failed to build mining template after " << MAX_TEMPLATE_RETRIES << " attempts!" << std::endl;
-                        }
+                    std::cout << "[Mining] Resuming VDF mining at height " << next_height << std::endl;
+                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                    if (pubKeyHash.size() >= 20) {
+                        std::array<uint8_t, 20> addr{};
+                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                        vdf_miner.SetMinerAddress(addr);
                     }
+                    vdf_miner.Start();
                 }
 
                 // Clear flag
@@ -5648,36 +5208,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // BUG #54 FIX: Deferred mining startup after IBD
             // ========================================
             // If mining was deferred due to IBD, check if we can start now
-            if (mining_deferred_for_ibd && !miner.IsMining() && !vdf_miner.IsRunning()) {
+            if (mining_deferred_for_ibd && !vdf_miner.IsRunning()) {
                 static int ibd_progress_counter = 0;
                 ibd_progress_counter++;
 
                 if (!IsInitialBlockDownload()) {
-                    // IBD complete - start mining!
+                    // IBD complete - start VDF mining!
                     std::cout << "[5/6] IBD sync complete!" << std::endl;
-                    std::cout << "[6/6] Starting mining..." << std::endl;
-
-                    // BUG #97 FIX: Initialize mining mode AFTER sync completes (not during startup)
-                    // This prevents "[MINING] Initializing dataset..." messages during wallet setup
-                    if (!randomx_is_mining_mode_ready()) {
-                        std::cout << "  Initializing RandomX mining mode (FULL)..." << std::endl;
-                        randomx_init_mining_mode_async(rx_key, strlen(rx_key));
-                        std::cout << "  [WAIT] Waiting for dataset initialization..." << std::endl;
-                        auto wait_start = std::chrono::steady_clock::now();
-                        while (!randomx_is_mining_mode_ready() && g_node_state.running) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                            auto elapsed = std::chrono::steady_clock::now() - wait_start;
-                            if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > 120) {
-                                std::cerr << "  [WARN] FULL mode init timeout, starting with LIGHT mode" << std::endl;
-                                break;
-                            }
-                        }
-                        auto wait_time = std::chrono::duration_cast<std::chrono::seconds>(
-                            std::chrono::steady_clock::now() - wait_start).count();
-                        std::cout << "  [OK] Mining mode ready (FULL, " << wait_time << "s)" << std::endl;
-                    } else {
-                        std::cout << "  [OK] Mining mode ready (FULL mode)" << std::endl;
-                    }
+                    std::cout << "[6/6] Starting VDF mining..." << std::endl;
 
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                     std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
@@ -5687,34 +5225,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
                     }
 
-                    if (shouldUseVDF(current_height + 1)) {
-                        std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
-                        std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                        if (pubKeyHash.size() >= 20) {
-                            std::array<uint8_t, 20> addr{};
-                            std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                            vdf_miner.SetMinerAddress(addr);
-                        }
-                        vdf_miner.Start();
-                        mining_deferred_for_ibd = false;
-                    } else {
-                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                        if (!templateOpt) {
-                            // Retry up to 3 times with 1s delays
-                            for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
-                                std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
-                                std::this_thread::sleep_for(std::chrono::seconds(1));
-                                templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                            }
-                        }
-                        if (templateOpt) {
-                            miner.StartMining(*templateOpt);
-                            std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
-                            mining_deferred_for_ibd = false;
-                        } else {
-                            std::cerr << "[ERROR] Failed to build mining template after retries!" << std::endl;
-                        }
+                    // DilV: Always VDF mining
+                    std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
+                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                    if (pubKeyHash.size() >= 20) {
+                        std::array<uint8_t, 20> addr{};
+                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                        vdf_miner.SetMinerAddress(addr);
                     }
+                    vdf_miner.Start();
+                    mining_deferred_for_ibd = false;
                 } else if (ibd_progress_counter % 10 == 0) {
                     // Show progress every 10 seconds
                     int height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
@@ -5749,75 +5269,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cerr << "[MAIN-LOOP-DEBUG] Tick() returned, loop iteration #" << main_loop_count << std::endl;
             }
 
-            // Print mining stats every 10 seconds if mining
-            // BUG #181 FIX: Use miner.IsMining() instead of config.start_mining
-            // config.start_mining is only true for --mine flag. If mining was started
-            // via RPC (startmining) or wallet UI, template refresh and mempool tx
-            // inclusion never fired, causing transactions to never be mined.
-            if (miner.IsMining() && ++counter % 10 == 0) {
-                auto stats = miner.GetStats();
-                std::cout << "[Mining] Hash rate: " << miner.GetHashRate() << " H/s, "
-                         << "Total hashes: " << stats.nHashesComputed << std::endl;
-
+            // DilV: VDF mining stats every 10 seconds
+            if (vdf_miner.IsRunning() && ++counter % 10 == 0) {
                 // Update mining metrics for Prometheus
-                g_metrics.mining_active.store(miner.IsMining() ? 1 : 0);
-                g_metrics.hashrate.store(miner.GetHashRate());
-                g_metrics.hashes_total.store(stats.nHashesComputed);
-
-                // ========================================================================
-                // BUG #109 FIX: Periodic template refresh to include mempool transactions
-                // ========================================================================
-                // Previously, templates were only rebuilt when a new block was found.
-                // This caused transactions to never be mined because the miner kept
-                // using stale templates without mempool transactions.
-                //
-                // Now we refresh the template every 10 seconds if:
-                // 1. Mining is active
-                // 2. Mempool has transactions
-                // 3. We're not in IBD
-                //
-                // This is similar to Bitcoin Core's getblocktemplate behavior.
-                // Template refresh temporarily disabled for deadlock diagnosis.
-                // The initial template built at mining start already includes
-                // minimum difficulty for overdue blocks on testnet.
-                // TODO: Re-enable once deadlock root cause is identified.
-                if (miner.IsMining()) {
-                    bool shouldRefresh = false;
-
-                    // Refresh for mempool transactions
-                    CTxMemPool* mempool = g_mempool.load();
-                    if (mempool && mempool->Size() > 0) {
-                        std::cout << "[Mining] Mempool has " << mempool->Size()
-                                  << " tx(s), refreshing template..." << std::endl;
-                        shouldRefresh = true;
-                    }
-
-                    // EDA template refresh: rebuild template every 60s so EDA difficulty
-                    // steps down as the gap grows. Without this, the miner uses stale nBits
-                    // from when the template was first built and never benefits from further
-                    // EDA reductions.
-                    static auto lastEdaRefresh = std::chrono::steady_clock::now();
-                    if (!shouldRefresh && Dilithion::g_chainParams) {
-                        int64_t blockTime = static_cast<int64_t>(Dilithion::g_chainParams->blockTime);
-                        int64_t edaThreshold = 6 * blockTime;  // Same as EDA_THRESHOLD_BLOCKS * blockTime
-                        CBlockIndex* pTip = g_chainstate.GetTip();
-                        if (pTip) {
-                            int64_t gap = static_cast<int64_t>(std::time(nullptr)) - static_cast<int64_t>(pTip->nTime);
-                            auto timeSinceRefresh = std::chrono::steady_clock::now() - lastEdaRefresh;
-                            if (gap > edaThreshold && timeSinceRefresh > std::chrono::seconds(60)) {
-                                shouldRefresh = true;
-                                lastEdaRefresh = std::chrono::steady_clock::now();
-                            }
-                        }
-                    }
-
-                    if (shouldRefresh) {
-                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                        if (templateOpt) {
-                            miner.UpdateTemplate(*templateOpt);
-                        }
-                    }
-                }
+                g_metrics.mining_active.store(1);
+                // DilV VDF mining is single-threaded, no hash rate to report
 
                 // ========================================================================
                 // BUG #49 + BUG #180: Solo mining prevention with 120s grace period
@@ -5835,11 +5291,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (no_peers_since == std::chrono::steady_clock::time_point{}) {
                         // Just lost peers - start the countdown
                         no_peers_since = now;
-                        if (miner.IsMining()) {
+                        if (vdf_miner.IsRunning()) {
                             std::cout << "[Mining] WARNING: No connected peers - " << SOLO_MINING_GRACE_PERIOD_SECONDS
                                       << "s grace period started" << std::endl;
                         }
-                    } else if (miner.IsMining() && !mining_paused_no_peers) {
+                    } else if (vdf_miner.IsRunning() && !mining_paused_no_peers) {
                         // Check if grace period expired
                         auto seconds_without_peers = std::chrono::duration_cast<std::chrono::seconds>(now - no_peers_since).count();
 
@@ -5847,8 +5303,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             // Grace period expired - pause mining
                             std::cout << "[Mining] PAUSING: No peers for " << seconds_without_peers << " seconds" << std::endl;
                             std::cout << "[Mining] Mining will resume automatically when a peer connects" << std::endl;
-                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
-                            miner.StopMining();
+                            vdf_miner.Stop();
                             mining_paused_no_peers = true;
                         } else {
                             // Still in grace period - show countdown every 30 seconds
@@ -5862,7 +5317,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 } else {
                     // Have peers - reset countdown and resume if paused
                     if (no_peers_since != std::chrono::steady_clock::time_point{}) {
-                        if (miner.IsMining() || mining_paused_no_peers) {
+                        if (vdf_miner.IsRunning() || mining_paused_no_peers) {
                             std::cout << "[Mining] Peer connected - grace period cancelled" << std::endl;
                         }
                         no_peers_since = std::chrono::steady_clock::time_point{};
@@ -5870,63 +5325,33 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
 
                     if (mining_paused_no_peers) {
-                        // Was paused due to no peers - resume mining
-                        std::cout << "[Mining] Peer connectivity restored - resuming mining" << std::endl;
+                        // Was paused due to no peers - resume VDF mining
+                        std::cout << "[Mining] Peer connectivity restored - resuming VDF mining" << std::endl;
                         mining_paused_no_peers = false;
 
-                        // Rebuild template and restart mining
-                        unsigned int resume_height = g_chainstate.GetTip() ?
-                            g_chainstate.GetTip()->nHeight + 1 : 1;
-                        if (shouldUseVDF(resume_height) && !vdf_miner.IsRunning()) {
+                        if (!vdf_miner.IsRunning()) {
                             vdf_miner.Start();
                             std::cout << "[Mining] VDF mining resumed" << std::endl;
-                        } else if (!shouldUseVDF(resume_height)) {
-                            auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                            if (templateOpt) {
-                                miner.StartMining(*templateOpt);
-                                std::cout << "[Mining] Mining resumed with fresh template" << std::endl;
-                            } else {
-                                std::cerr << "[Mining] ERROR: Failed to build template for resume" << std::endl;
-                            }
                         }
                     }
                 }
 
                 // ========================================================================
-                // Fork detection: Pause RandomX mining during fork resolution
+                // Fork detection: DilV VDF blocks are deterministic, not paused
                 // ========================================================================
-                // When a competing chain is detected (headers with unknown parent),
-                // pause RandomX mining to avoid wasting hashpower on potentially orphaned blocks.
-                // VDF miner is NOT stopped: VDF blocks are deterministic (no wasted work),
-                // sequential (can't parallelize), and can help resolve the fork by advancing
-                // the chain. Stopping VDF miners during fork detection caused chain stalls
-                // when multiple VDF miners produced simultaneous blocks.
-                if (g_node_context.fork_detected.load() && miner.IsMining() && !mining_paused_fork) {
-                    std::cout << "[Mining] PAUSING RandomX: Fork detected - resolving competing chain..." << std::endl;
-                    std::cout << "[Mining] Mining will resume automatically when fork is resolved" << std::endl;
-                    miner.StopMining();
+                // VDF blocks don't waste work (no parallelizable hashpower).
+                // But we still track fork state for logging purposes.
+                if (g_node_context.fork_detected.load() && !mining_paused_fork) {
+                    std::cout << "[Mining] Fork detected - VDF mining continues (deterministic, no wasted work)" << std::endl;
                     mining_paused_fork = true;
                 }
 
-                // Resume mining when fork is resolved
                 if (mining_paused_fork && !g_node_context.fork_detected.load()) {
-                    std::cout << "[Mining] Fork resolved - resuming mining" << std::endl;
+                    std::cout << "[Mining] Fork resolved" << std::endl;
                     mining_paused_fork = false;
-
-                    // Rebuild template and restart mining
-                    unsigned int fork_resume_height = g_chainstate.GetTip() ?
-                        g_chainstate.GetTip()->nHeight + 1 : 1;
-                    if (shouldUseVDF(fork_resume_height) && !vdf_miner.IsRunning()) {
+                    if (!vdf_miner.IsRunning() && g_node_state.mining_enabled.load()) {
                         vdf_miner.Start();
                         std::cout << "[Mining] VDF mining resumed after fork resolution" << std::endl;
-                    } else if (!shouldUseVDF(fork_resume_height)) {
-                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                        if (templateOpt) {
-                            miner.StartMining(*templateOpt);
-                            std::cout << "[Mining] Mining resumed with fresh template after fork resolution" << std::endl;
-                        } else {
-                            std::cerr << "[Mining] ERROR: Failed to build template after fork resolution" << std::endl;
-                        }
                     }
                 }
             }
@@ -5938,7 +5363,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // other miners - a strong signal of a consensus fork. Our blocks are
             // valid locally but rejected by the network, causing wasted work.
             // Runs every iteration (cheap hash comparison, heavy work only on tip change).
-            // Placed OUTSIDE the miner.IsMining() block so resume works when paused.
+            // Placed OUTSIDE the VDF miner check block so resume works when paused.
             {
                 CBlockIndex* tipIndex = g_chainstate.GetTip();
                 if (tipIndex && g_node_state.mining_enabled.load()) {
@@ -5999,7 +5424,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                                       << " blocks are self-mined (with " << peer_cnt << " peers)" << std::endl;
                                             std::cout << "[Mining] This strongly suggests a fork - pausing mining" << std::endl;
                                             std::cout << std::endl;
-                                            if (miner.IsMining()) miner.StopMining();
+                                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             mining_paused_consensus_fork = true;
                                         } else if (ratio >= SOLO_WARN_RATIO && peer_cnt > 0
                                                    && !solo_warning_shown) {
@@ -6028,7 +5453,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << "[Mining] Mining will resume when blocks from other miners arrive" << std::endl;
                                             std::cout << "[Mining] ================================================" << std::endl;
                                             std::cout << std::endl;
-                                            if (miner.IsMining()) miner.StopMining();
+                                            if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             mining_paused_consensus_fork = true;
                                         } else if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD
                                                    && !solo_warning_shown) {
@@ -6059,18 +5484,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << std::endl;
                                             mining_paused_consensus_fork = false;
 
-                                            unsigned int resume_height = tipIndex->nHeight + 1;
-                                            if (shouldUseVDF(resume_height) && !vdf_miner.IsRunning()) {
+                                            // DilV: Resume VDF mining
+                                            if (!vdf_miner.IsRunning()) {
                                                 vdf_miner.Start();
                                                 std::cout << "[Mining] VDF mining resumed after consensus fork resolved" << std::endl;
-                                            } else if (!shouldUseVDF(resume_height)) {
-                                                auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                                                if (templateOpt) {
-                                                    miner.StartMining(*templateOpt);
-                                                    std::cout << "[Mining] Mining resumed after consensus fork resolved" << std::endl;
-                                                } else {
-                                                    std::cerr << "[Mining] ERROR: Failed to build template for consensus fork resume" << std::endl;
-                                                }
                                             }
                                         }
                                     }
@@ -6162,10 +5579,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     std::cout << "[Mining] ================================================" << std::endl;
                                     std::cout << std::endl;
 
-                                    // Only stop RandomX miner during tip divergence.
-                                    // VDF miner continues: deterministic blocks can resolve
-                                    // the divergence by advancing the chain.
-                                    if (miner.IsMining()) miner.StopMining();
+                                    // DilV: VDF mining continues during tip divergence
+                                    // (deterministic blocks can resolve the divergence)
                                     mining_paused_tip_divergence = true;
                                     g_node_context.tip_diverged.store(true);
 
@@ -6194,16 +5609,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     mining_paused_tip_divergence = false;
                                     g_node_context.tip_diverged.store(false);
 
-                                    unsigned int resume_height = pTip->nHeight + 1;
-                                    if (shouldUseVDF(resume_height) && !vdf_miner.IsRunning()) {
+                                    // DilV: Resume VDF mining
+                                    if (!vdf_miner.IsRunning() && g_node_state.mining_enabled.load()) {
                                         vdf_miner.Start();
                                         std::cout << "[Mining] VDF mining resumed after tip divergence resolved" << std::endl;
-                                    } else if (!shouldUseVDF(resume_height) && g_node_state.mining_enabled.load()) {
-                                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, false, config.mining_address_override);
-                                        if (templateOpt) {
-                                            miner.StartMining(*templateOpt);
-                                            std::cout << "[Mining] Mining resumed after tip divergence resolved" << std::endl;
-                                        }
                                     }
                                 }
                                 divergence_since = std::chrono::steady_clock::time_point{};
@@ -6227,11 +5636,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             vdf_miner.Stop();
             std::cout << " done" << std::endl;
         }
-        if (miner.IsMining()) {
-            std::cout << "[Shutdown] Stopping mining..." << std::flush;
-            miner.StopMining();
-            std::cout << " done" << std::endl;
-        }
+        // DilV: No RandomX miner to stop (VDF miner already stopped above)
         if (vdf_available) {
             vdf::shutdown();
         }

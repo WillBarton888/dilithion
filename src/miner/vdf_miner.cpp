@@ -42,6 +42,9 @@ void CVDFMiner::Stop()
 
 void CVDFMiner::OnNewBlock(int newTipHeight)
 {
+    // Record when we learned about this height change (for minimum block time)
+    m_lastHeightChangeTime = std::chrono::steady_clock::now();
+
     // VDF Lottery: If the new block is at the SAME height we're computing for,
     // don't abort. Our VDF output may be lower and win the lottery.
     if (newTipHeight > 0 && newTipHeight == static_cast<int>(m_currentHeight.load())) {
@@ -90,6 +93,11 @@ void CVDFMiner::SetTipOutputProvider(TipOutputProvider provider)
     m_tipOutputProvider = std::move(provider);
 }
 
+void CVDFMiner::SetMinBlockTime(int seconds)
+{
+    m_minBlockTimeSec = seconds;
+}
+
 // ---------------------------------------------------------------------------
 // Main mining loop
 // ---------------------------------------------------------------------------
@@ -99,6 +107,37 @@ void CVDFMiner::MiningLoop()
     std::cout << "[VDF Miner] Started (iterations=" << m_iterations << ")" << std::endl;
 
     while (m_running) {
+        // ---------------------------------------------------------------
+        // 0. Minimum block time wait
+        // ---------------------------------------------------------------
+        // Wait until vdfMinBlockTime seconds have elapsed since the last
+        // height change. This ensures all miners (fast and slow) finish
+        // their current-height VDF and participate in the lottery before
+        // the chain advances to the next height.
+        if (m_minBlockTimeSec > 0 && !m_firstRound) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                now - m_lastHeightChangeTime).count();
+            int remaining = m_minBlockTimeSec - static_cast<int>(elapsed);
+
+            if (remaining > 0) {
+                std::cout << "[VDF Miner] Waiting " << remaining
+                          << "s (min block time " << m_minBlockTimeSec << "s)"
+                          << std::endl;
+                std::unique_lock<std::mutex> lock(m_epochMutex);
+                m_epochCV.wait_for(lock, std::chrono::seconds(remaining),
+                    [this] { return m_epochChanged || !m_running; });
+
+                // If epoch changed during wait, restart loop (re-check wait)
+                if (m_epochChanged) {
+                    m_epochChanged = false;
+                    continue;
+                }
+                if (!m_running) break;
+            }
+        }
+        m_firstRound = false;
+
         // ---------------------------------------------------------------
         // 1. Get a fresh block template
         // ---------------------------------------------------------------
@@ -263,12 +302,17 @@ void CVDFMiner::MiningLoop()
 
                 m_blockFoundCallback(block);
                 m_blocksFound++;
+
+                // Record submission time as height change (our own block advances chain)
+                m_lastHeightChangeTime = std::chrono::steady_clock::now();
             }
         }
 
-        // Wait for the block to be processed before starting next round
+        // Wait for epoch change. Step 0 at the top of the loop handles
+        // the minimum block time delay, so we just need to wait for
+        // notification here.
         std::unique_lock<std::mutex> lock(m_epochMutex);
-        m_epochCV.wait_for(lock, std::chrono::seconds(10),
+        m_epochCV.wait_for(lock, std::chrono::seconds(5),
             [this] { return m_epochChanged || !m_running; });
         m_epochChanged = false;
     }

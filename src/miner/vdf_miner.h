@@ -12,6 +12,7 @@
 #include <uint256.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <mutex>
 #include <functional>
@@ -106,6 +107,12 @@ public:
     void SetCooldownTracker(CCooldownTracker* tracker);
 
     /**
+     * Set minimum block time from chainparams.
+     * Miners wait this many seconds after a height change before starting next VDF.
+     */
+    void SetMinBlockTime(int seconds);
+
+    /**
      * VDF Lottery: Set provider for current tip's VDF output.
      * Used for pre-submission comparison — miner checks if its output is
      * lower than the current tip before submitting (optimization to avoid
@@ -161,6 +168,11 @@ private:
     Address m_minerAddress{};
     uint64_t m_iterations{200'000'000};
     CCooldownTracker* m_cooldownTracker{nullptr};
+
+    // Minimum block time enforcement
+    int m_minBlockTimeSec{0};                              // 0 = disabled
+    std::chrono::steady_clock::time_point m_lastHeightChangeTime{};
+    bool m_firstRound{true};  // Skip wait on first round after start
 
     // Callbacks
     BlockFoundCallback m_blockFoundCallback;

@@ -1071,6 +1071,13 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         return Dilithion::g_chainParams->genesisNBits;
     }
 
+    // DilV: VDF chain uses fixed nBits (no difficulty retargeting)
+    // VDF lottery uses lowest-output-wins, not hash-under-target.
+    // nBits is vestigial for serialization compatibility.
+    if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
+        return Dilithion::g_chainParams->genesisNBits;
+    }
+
     // CRASH FIX: Reject obviously invalid pointers (e.g. small integers mistaken for CBlockIndex*).
     // Observed crash: READ at 0x5a00 (23040 = asertActivationHeight) when caller passed height as pointer.
     const uintptr_t u = reinterpret_cast<uintptr_t>(pindexLast);

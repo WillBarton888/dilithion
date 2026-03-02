@@ -10,7 +10,8 @@ namespace Dilithion {
 
 enum Network {
     MAINNET,
-    TESTNET
+    TESTNET,
+    DILV        // DilV: VDF lottery payment chain
 };
 
 /**
@@ -143,6 +144,13 @@ public:
     int vdfLotteryActivationHeight;
     int vdfLotteryGracePeriod;   // seconds
 
+    // VDF Minimum Block Time (seconds)
+    // After the chain advances to a new height, miners wait this long before
+    // starting the next VDF computation. Ensures all miners finish current-height
+    // VDF and participate in the lottery before the chain moves on.
+    // 0 = no minimum (legacy behavior)
+    int vdfMinBlockTime;
+
     // Digital DNA activation height
     // Before this height: DNA collection and registration disabled
     // After this height: DNA auto-collection starts for miners, registration active
@@ -218,14 +226,21 @@ public:
     // Factory methods
     static ChainParams Mainnet();
     static ChainParams Testnet();
+    static ChainParams DilV();
 
     // Helper methods
     const char* GetNetworkName() const {
-        return network == MAINNET ? "mainnet" : "testnet";
+        switch (network) {
+            case MAINNET: return "mainnet";
+            case TESTNET: return "testnet";
+            case DILV:    return "dilv";
+            default:      return "unknown";
+        }
     }
 
     bool IsMainnet() const { return network == MAINNET; }
     bool IsTestnet() const { return network == TESTNET; }
+    bool IsDilV() const { return network == DILV; }
 
     /**
      * MAINNET SECURITY: Get the last checkpoint at or before given height

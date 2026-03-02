@@ -15,14 +15,15 @@
 #include <iostream>
 
 uint64_t CBlockValidator::CalculateBlockSubsidy(uint32_t nHeight) {
-    // Initial subsidy: 50 DIL = 50 * COIN = 50 * 100,000,000 ions
-    uint64_t nSubsidy = 50 * COIN;
+    // Use chain params for reward and halving interval (supports DIL and DilV)
+    uint64_t nSubsidy = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->initialReward : 50 * COIN;
 
-    // Halving interval: 210,000 blocks (same as Bitcoin)
-    const uint32_t nHalvingInterval = 210000;
+    uint64_t nHalvingInterval = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->halvingInterval : 210000;
 
     // Number of halvings that have occurred
-    uint32_t nHalvings = nHeight / nHalvingInterval;
+    uint32_t nHalvings = static_cast<uint32_t>(nHeight / nHalvingInterval);
 
     // Subsidy goes to zero after 64 halvings (very far in future)
     if (nHalvings >= 64) {

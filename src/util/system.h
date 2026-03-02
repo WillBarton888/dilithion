@@ -5,6 +5,7 @@
 #define DILITHION_UTIL_SYSTEM_H
 
 #include <string>
+#include <core/chainparams.h>
 
 /**
  * Get the default data directory for Dilithion
@@ -26,6 +27,17 @@ std::string GetDataDir();
  * - Testnet: ~/.dilithion-testnet
  */
 std::string GetDataDir(bool testnet);
+
+/**
+ * Get the default data directory for a specific network type
+ *
+ * @param network Network type (MAINNET, TESTNET, or DILV)
+ * Returns:
+ * - MAINNET: ~/.dilithion
+ * - TESTNET: ~/.dilithion-testnet
+ * - DILV:    ~/.dilv
+ */
+std::string GetDataDir(Dilithion::Network network);
 
 /**
  * Ensure data directory exists, creating it if necessary

@@ -41,7 +41,8 @@ CHeadersManager::CHeadersManager()
 
     // BUG FIX: Add genesis to mapHeaders so block 1 can accumulate chain work properly
     // Without this, block 1's pprev is nullptr and chainWork doesn't include genesis work
-    CBlock genesis = Genesis::CreateGenesisBlock();
+    CBlock genesis = (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) ?
+        Genesis::CreateDilVGenesisBlock() : Genesis::CreateGenesisBlock();
     uint256 genesisHash = genesis.GetHash();
     uint256 genesisWork = GetBlockWork(genesis.nBits);
 

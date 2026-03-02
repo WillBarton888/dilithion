@@ -554,10 +554,56 @@ void CPeerManager::InitializeSeedNodes() {
 
     seed_nodes.clear();
 
-    // Check if we're on mainnet or testnet
+    // Check which network we're on
     bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
+    bool isDilV = Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV();
 
-    if (isTestnet) {
+    if (isDilV) {
+        // ============================================
+        // DILV SEED NODES (same servers, port 9444)
+        // ============================================
+        dns_seeds = {
+            "seed-dilv.dilithion.org",
+            "seed-dilv1.dilithion.org",
+            "seed-dilv2.dilithion.org",
+        };
+
+        // DILV SEED NODE #1: NYC (DigitalOcean NYC3)
+        // IP: 138.197.68.128, Port: 9444
+        NetProtocol::CAddress seed_nyc;
+        seed_nyc.services = NetProtocol::NODE_NETWORK;
+        seed_nyc.SetIPv4(0x8AC54480);  // 138.197.68.128
+        seed_nyc.port = NetProtocol::DILV_PORT;
+        seed_nyc.time = GetTime();
+        seed_nodes.push_back(seed_nyc);
+
+        // DILV SEED NODE #2: London (DigitalOcean LON1)
+        // IP: 167.172.56.119, Port: 9444
+        NetProtocol::CAddress seed_london;
+        seed_london.services = NetProtocol::NODE_NETWORK;
+        seed_london.SetIPv4(0xA7AC3877);  // 167.172.56.119
+        seed_london.port = NetProtocol::DILV_PORT;
+        seed_london.time = GetTime();
+        seed_nodes.push_back(seed_london);
+
+        // DILV SEED NODE #3: Singapore (DigitalOcean SGP1)
+        // IP: 165.22.103.114, Port: 9444
+        NetProtocol::CAddress seed_singapore;
+        seed_singapore.services = NetProtocol::NODE_NETWORK;
+        seed_singapore.SetIPv4(0xA5166772);  // 165.22.103.114
+        seed_singapore.port = NetProtocol::DILV_PORT;
+        seed_singapore.time = GetTime();
+        seed_nodes.push_back(seed_singapore);
+
+        // DILV SEED NODE #4: Sydney (DigitalOcean SYD1)
+        // IP: 134.199.159.83, Port: 9444
+        NetProtocol::CAddress seed_sydney;
+        seed_sydney.services = NetProtocol::NODE_NETWORK;
+        seed_sydney.SetIPv4(0x86C79F53);  // 134.199.159.83
+        seed_sydney.port = NetProtocol::DILV_PORT;
+        seed_sydney.time = GetTime();
+        seed_nodes.push_back(seed_sydney);
+    } else if (isTestnet) {
         // ============================================
         // TESTNET SEED NODES
         // ============================================

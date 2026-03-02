@@ -106,11 +106,12 @@ ChainParams ChainParams::Mainnet() {
     // VDF Fair Mining (not yet scheduled for mainnet)
     params.vdfActivationHeight = 999999999;   // Disabled until fork is scheduled
     params.vdfExclusiveHeight  = 999999999;
-    params.vdfIterations       = 200'000'000; // ~200s on reference hardware
+    params.vdfIterations       = 5'000'000;   // ~44s fast, ~110s slow (fairness via minBlockTime)
 
     // VDF Lottery: "lowest output wins" (disabled until fork is scheduled)
     params.vdfLotteryActivationHeight = 999999999;
     params.vdfLotteryGracePeriod = 60;  // 60 seconds
+    params.vdfMinBlockTime = 180;       // 3 minutes: ensures all miners finish VDF
 
     params.digitalDnaActivationHeight = 999999999;  // Disabled until fork is scheduled
 
@@ -245,6 +246,7 @@ ChainParams ChainParams::Testnet() {
     // VDF Lottery: "lowest output wins"
     params.vdfLotteryActivationHeight = 87240;
     params.vdfLotteryGracePeriod = 30;  // 30 seconds (faster for testing)
+    params.vdfMinBlockTime = 25;        // 25 seconds minimum between blocks
 
     params.digitalDnaActivationHeight = 1;    // Active from near-genesis for testing
 
@@ -265,6 +267,97 @@ ChainParams ChainParams::Testnet() {
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after testnet has established blocks)
+    params.defaultAssumeValid = "";
+
+    return params;
+}
+
+ChainParams ChainParams::DilV() {
+    ChainParams params;
+    params.network = DILV;
+
+    // Network identification
+    // Unique magic for DilV chain — prevents cross-chain message contamination
+    params.networkMagic = 0xD17FD100;
+
+    // Chain ID for replay protection
+    // Different from mainnet (1) and testnet (1001) to prevent cross-chain tx replay
+    params.chainID = 2;
+
+    // Genesis block parameters (VDF genesis — pre-computed)
+    // Genesis VDF proof computed by dilv-genesis-vdf tool
+    params.genesisTime = 1772496000;  // March 3, 2026 00:00:00 UTC
+    params.genesisNonce = 0;          // Not used for VDF blocks (nonce is vestigial)
+    params.genesisNBits = 0x1d00ffff; // Fixed — VDF uses lowest-output-wins, not hash-under-target
+    params.genesisHash = "3e9a5bfb202db1de714e493fecd165a2fc1aa1df9415606c6c833cff25e5711e";
+    params.genesisCoinbaseMsg = "DilV Genesis - Quantum-Resistant Payments";
+
+    // Network ports (unique to DilV)
+    params.p2pPort = 9444;
+    params.rpcPort = 9332;
+
+    // Data directory — separate from DIL and testnet
+    params.dataDir = GetDataDir(DILV);
+
+    // Consensus parameters
+    params.blockTime = 45;                     // ~45-second target block time
+    params.halvingInterval = 1050000;          // ~1.5 years at 45s blocks, yields ~210M total supply
+    params.difficultyAdjustment = 0;           // Unused — VDF doesn't use difficulty retargeting
+    params.difficultyAdjustmentV2 = 0;         // Unused
+    params.difficultyForkHeight = 999999999;   // Disabled
+    params.difficultyMaxChange = 0;            // Unused
+    params.difficultyV3ForkHeight = 999999999; // Disabled
+    params.maxBlockSize = 4 * 1024 * 1024;     // 4 MB (same as DIL — room for Dilithium signatures)
+
+    // Mining parameters
+    params.initialReward = 100ULL * 100000000ULL; // 100 DilV per block (in ions)
+
+    // VDF chain: no RandomX minimum difficulty blocks
+    params.fPowAllowMinDifficultyBlocks = false;
+
+    // EDA disabled — not applicable to VDF consensus
+    params.edaActivationHeight = -1;
+
+    // DFMP (Fair Mining Protocol) — active from genesis
+    // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
+    // MIK required from block 1 onward
+    params.dfmpActivationHeight = 0;
+    params.dfmpAssumeValidHeight = 0;  // Validate everything from start (fresh chain)
+
+    // All DFMP versions active from genesis — use modern rules from day one
+    params.dfmpV3ActivationHeight = 0;
+    params.dfmpDynamicScalingHeight = 0;
+    params.dfmpV31ActivationHeight = 0;
+    params.dfmpV32ActivationHeight = 0;
+    params.dfmpV33ActivationHeight = 0;
+
+    // Compact encoding fix: active from genesis
+    params.compactEncodingFixHeight = 0;
+
+    // ASERT: disabled — VDF uses lottery (lowest output wins), not difficulty retargeting
+    params.asertActivationHeight = 999999999;
+    params.asertHalflife = 0;  // Unused
+
+    // Timestamp validation: active from genesis
+    params.timestampValidationHeight = 0;
+
+    // VDF: active from genesis — DilV is a VDF-only chain
+    params.vdfActivationHeight = 0;
+    params.vdfExclusiveHeight  = 0;            // No RandomX blocks ever accepted
+    params.vdfIterations       = 500000;       // 500K iterations (~4-8s compute time)
+
+    // VDF Lottery: active from genesis
+    params.vdfLotteryActivationHeight = 0;
+    params.vdfLotteryGracePeriod = 12;         // 12 seconds for slower miners to submit
+    params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
+
+    // Digital DNA: active from genesis
+    params.digitalDnaActivationHeight = 0;
+
+    // No checkpoints (new chain, no history yet)
+    // Checkpoints will be added after DilV chain has established blocks
+
+    // No assume-valid yet
     params.defaultAssumeValid = "";
 
     return params;
