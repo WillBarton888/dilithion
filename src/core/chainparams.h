@@ -151,6 +151,15 @@ public:
     // 0 = no minimum (legacy behavior)
     int vdfMinBlockTime;
 
+    // Script V2 activation height
+    // Before this height: Only standard P2PKH scripts are accepted
+    // After this height: All script types (HTLC, multisig, etc.) are valid
+    // This gates new script types while the interpreter handles all scripts
+    // DIL mainnet: 999999999 (disabled until fork is scheduled)
+    // DIL testnet: 0 (immediate)
+    // DilV: 0 (from genesis)
+    int scriptV2ActivationHeight;
+
     // Digital DNA activation height
     // Before this height: DNA collection and registration disabled
     // After this height: DNA auto-collection starts for miners, registration active

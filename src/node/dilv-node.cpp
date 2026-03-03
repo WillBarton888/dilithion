@@ -1101,7 +1101,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             const uint64_t MAX_REASONABLE_FEE = 10 * COIN;
             if (txFee > MAX_REASONABLE_FEE) {
                 std::cerr << "[Mining] Rejecting tx " << tx->GetHash().GetHex().substr(0, 16)
-                          << "... from template: fee too high (" << txFee << " ions)" << std::endl;
+                          << "... from template: fee too high (" << txFee << " volts)" << std::endl;
                 continue;
             }
 
@@ -1118,7 +1118,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
         if (!selectedTxs.empty()) {
             std::cout << "[Mining] Including " << selectedTxs.size()
-                      << " mempool transactions, fees: " << totalFees << " ions" << std::endl;
+                      << " mempool transactions, fees: " << totalFees << " volts" << std::endl;
         }
     }
 
@@ -4933,6 +4933,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterX402Facilitator(&x402_facilitator);  // x402 payment protocol
         rpc_server.SetTestnet(config.testnet);
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
+        rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
 
         // Register Digital DNA RPC commands
         std::unique_ptr<digital_dna::DigitalDNARpc> dna_rpc;

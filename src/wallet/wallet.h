@@ -1253,6 +1253,31 @@ public:
                           std::string& error);
 
     /**
+     * Create a transaction with a custom scriptPubKey (e.g., HTLC).
+     *
+     * Same as CreateTransaction but accepts raw script bytes instead of address.
+     * Used by HTLC RPC commands to lock funds in HTLC contracts.
+     *
+     * @param scriptPubKey Raw locking script bytes
+     * @param amount Amount to lock (in ions/volts)
+     * @param fee Transaction fee
+     * @param utxo_set UTXO set for coin selection
+     * @param current_height Current blockchain height
+     * @param nLockTime Transaction nLockTime (0 = none)
+     * @param tx_out Output parameter for created transaction
+     * @param error Error message if creation fails
+     * @return true if transaction created successfully
+     */
+    bool CreateTransactionToScript(const std::vector<uint8_t>& scriptPubKey,
+                                   CAmount amount,
+                                   CAmount fee,
+                                   class CUTXOSet& utxo_set,
+                                   unsigned int current_height,
+                                   uint32_t nLockTime,
+                                   CTransactionRef& tx_out,
+                                   std::string& error);
+
+    /**
      * Sign all inputs of a transaction
      *
      * For each input:

@@ -3695,6 +3695,140 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
     return true;
 }
 
+bool CWallet::CreateTransactionToScript(const std::vector<uint8_t>& scriptPubKey,
+                                         CAmount amount,
+                                         CAmount fee,
+                                         CUTXOSet& utxo_set,
+                                         unsigned int current_height,
+                                         uint32_t nLockTime,
+                                         CTransactionRef& tx_out,
+                                         std::string& error) {
+    if (scriptPubKey.empty()) {
+        error = "Empty scriptPubKey";
+        return false;
+    }
+    if (amount <= 0) {
+        error = "Invalid amount (must be positive)";
+        return false;
+    }
+    if (fee < MIN_RELAY_FEE) {
+        error = "Fee below minimum relay fee";
+        return false;
+    }
+
+    if (IsCrypted() && IsLocked()) {
+        error = "Wallet is encrypted and locked";
+        return false;
+    }
+
+    CAmount total_needed = amount + fee;
+    if (total_needed < amount) {
+        error = "Amount + fee overflow";
+        return false;
+    }
+
+    // Select coins
+    std::vector<CWalletTx> selected_coins;
+    CAmount total_selected = 0;
+    if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error)) {
+        return false;
+    }
+
+    // Recalculate fee based on actual input count
+    for (int iter = 0; iter < 5; ++iter) {
+        size_t num_outputs = 2;
+        size_t est_size = Consensus::EstimateDilithiumTxSize(selected_coins.size(), num_outputs);
+        CAmount needed_fee = Consensus::CalculateMinFee(est_size);
+        if (needed_fee <= fee) break;
+        fee = needed_fee;
+        total_needed = amount + fee;
+        if (total_needed < amount) {
+            error = "Amount + fee overflow";
+            return false;
+        }
+        selected_coins.clear();
+        total_selected = 0;
+        if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error)) {
+            return false;
+        }
+    }
+
+    // Lock selected coins
+    for (const CWalletTx& wtx : selected_coins) {
+        LockCoin(COutPoint(wtx.txid, wtx.vout));
+    }
+
+    // Build transaction
+    CTransaction tx;
+    tx.nVersion = 2;  // Version 2 for script V2 / BIP-68 support
+    tx.nLockTime = nLockTime;
+
+    for (const CWalletTx& wtx : selected_coins) {
+        COutPoint outpoint(wtx.txid, wtx.vout);
+        CTxIn txin(outpoint);
+        if (nLockTime > 0) {
+            txin.nSequence = CTxIn::SEQUENCE_FINAL - 1;  // Enable nLockTime
+        }
+        tx.vin.push_back(std::move(txin));
+    }
+
+    // Output: the custom script (HTLC)
+    CTxOut txout_script(amount, scriptPubKey);
+    tx.vout.push_back(std::move(txout_script));
+
+    // Change output
+    CAmount change = total_selected - total_needed;
+    if (change >= DUST_THRESHOLD) {
+        std::vector<uint8_t> change_hash;
+        if (IsHDWallet()) {
+            CDilithiumAddress change_address = GetChangeAddress();
+            if (!change_address.IsValid()) {
+                error = "Failed to generate HD change address";
+                for (const CWalletTx& wtx : selected_coins) {
+                    UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+                }
+                return false;
+            }
+            change_hash = GetPubKeyHashFromAddress(change_address);
+        } else {
+            change_hash = GetPubKeyHash();
+            if (change_hash.empty()) {
+                error = "Failed to get wallet public key hash for change";
+                for (const CWalletTx& wtx : selected_coins) {
+                    UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+                }
+                return false;
+            }
+        }
+        std::vector<uint8_t> change_script = WalletCrypto::CreateScriptPubKey(change_hash);
+        CTxOut txout_change(change, std::move(change_script));
+        tx.vout.push_back(std::move(txout_change));
+    }
+
+    // Sign inputs (all are standard P2PKH from our wallet)
+    if (!SignTransaction(tx, utxo_set, error)) {
+        for (const CWalletTx& wtx : selected_coins) {
+            UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+        }
+        return false;
+    }
+
+    // Validate
+    CTransactionValidator validator;
+    CAmount calculated_fee = 0;
+    std::string validation_error;
+    if (!validator.CheckTransaction(tx, utxo_set, current_height, calculated_fee, validation_error)) {
+        error = "Transaction validation failed: " + validation_error;
+        for (const CWalletTx& wtx : selected_coins) {
+            UnlockCoin(COutPoint(wtx.txid, wtx.vout));
+        }
+        return false;
+    }
+
+    tx_out = MakeTransactionRef(std::move(tx));
+    return true;
+}
+
 bool CWallet::SignTransaction(CTransaction& tx, CUTXOSet& utxo_set, std::string& error) {
     // BUG #74 FIX: Three-phase signing to avoid holding lock during CPU-intensive operations
     // Following Bitcoin Core pattern: collect data under lock, release, sign, re-acquire

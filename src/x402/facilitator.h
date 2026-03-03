@@ -25,11 +25,11 @@ namespace x402 {
  * REST API endpoints (mounted under /x402/):
  *
  *   POST /x402/verify    - Verify a payment without broadcasting
- *                          Body: {"rawTransaction":"hex", "recipient":"addr", "amount":ions}
+ *                          Body: {"rawTransaction":"hex", "recipient":"addr", "amount":volts}
  *                          Returns: VerifyResult JSON
  *
  *   POST /x402/settle    - Verify + broadcast a payment
- *                          Body: {"rawTransaction":"hex", "recipient":"addr", "amount":ions}
+ *                          Body: {"rawTransaction":"hex", "recipient":"addr", "amount":volts}
  *                          Returns: SettlementResult JSON
  *
  *   GET  /x402/supported - List supported schemes, networks, assets

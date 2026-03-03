@@ -31,6 +31,9 @@
 #include <dfmp/mik.h>   // DFMP v2.0: Mining Identity Key
 #include <dfmp/identity_db.h>  // DFMP v2.0: Identity database
 #include <core/chainparams.h>  // For Dilithion::g_chainParams
+#include <script/htlc.h>        // HTLC script templates
+#include <script/script.h>      // CScript, opcodes
+#include <script/atomic_swap.h> // Atomic swap state machine
 #include <util/strencodings.h>
 #include <util/error_format.h>  // UX: Better error messages
 #include <set>
@@ -250,6 +253,18 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["checkblockdb"] = [this](const std::string& p) { return RPC_CheckBlockDB(p); };
     m_handlers["scanblockdb"] = [this](const std::string& p) { return RPC_ScanBlockDB(p); };
     m_handlers["requestblocks"] = [this](const std::string& p) { return RPC_RequestBlocks(p); };
+
+    // HTLC (Hash Time-Locked Contract) commands
+    m_handlers["generatepreimage"] = [this](const std::string& p) { return RPC_GeneratePreimage(p); };
+    m_handlers["createhtlc"] = [this](const std::string& p) { return RPC_CreateHTLC(p); };
+    m_handlers["claimhtlc"] = [this](const std::string& p) { return RPC_ClaimHTLC(p); };
+    m_handlers["refundhtlc"] = [this](const std::string& p) { return RPC_RefundHTLC(p); };
+    m_handlers["decodehtlc"] = [this](const std::string& p) { return RPC_DecodeHTLC(p); };
+
+    // Atomic swap orchestration
+    m_handlers["initiateswap"] = [this](const std::string& p) { return RPC_InitiateSwap(p); };
+    m_handlers["acceptswap"] = [this](const std::string& p) { return RPC_AcceptSwap(p); };
+    m_handlers["listswaps"] = [this](const std::string& p) { return RPC_ListSwaps(p); };
 }
 
 CRPCServer::~CRPCServer() {
@@ -1880,8 +1895,8 @@ std::string CRPCServer::SerializeResponse(const RPCResponse& response) {
 // ============================================================================
 
 /**
- * Format amount from ions to DIL with proper decimal places
- * 1 DIL = 100,000,000 ions (like Bitcoin satoshis)
+ * Format amount from smallest unit to coin with proper decimal places
+ * DIL: 1 DIL = 100,000,000 ions | DilV: 1 DilV = 100,000,000 volts
  */
 std::string CRPCServer::FormatAmount(CAmount amount) const {
     const CAmount COIN = 100000000;
@@ -2148,7 +2163,7 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
                     // MEDIUM-004: Use SafeParseDouble to prevent RPC crashes from malformed input
                     // Max supply is 21 million DIL, so 21000000.0 is a reasonable upper bound
                     double amt_dbl = SafeParseDouble(params.substr(num_start, num_end - num_start), 0.0, 21000000.0);
-                    amount = static_cast<CAmount>(amt_dbl * 100000000);  // Convert DIL to ions
+                    amount = static_cast<CAmount>(amt_dbl * 100000000);  // Convert to smallest unit (ions/volts)
                 }
             }
         }
@@ -4487,6 +4502,16 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"listbanned - List all banned IPs\",";
     oss << "\"clearbanned - Clear all banned IPs\",";
 
+    // HTLC and atomic swap commands
+    oss << "\"generatepreimage - Generate a random preimage and its SHA3-256 hash\",";
+    oss << "\"createhtlc - Create and broadcast an HTLC transaction\",";
+    oss << "\"claimhtlc - Claim an HTLC by revealing the preimage\",";
+    oss << "\"refundhtlc - Refund an expired HTLC\",";
+    oss << "\"decodehtlc - Decode an HTLC output from the UTXO set\",";
+    oss << "\"initiateswap - Start a cross-chain atomic swap (generates preimage + HTLC)\",";
+    oss << "\"acceptswap - Accept a swap by creating a matching HTLC on our chain\",";
+    oss << "\"listswaps - List all known atomic swaps and their states\",";
+
     oss << "\"help - This help message\",";
     oss << "\"stop - Stop the Dilithion node\"";
 
@@ -5590,7 +5615,7 @@ std::string CRPCServer::RPC_VerifyX402Payment(const std::string& params) {
         }
     }
     if (amount <= 0) {
-        throw std::runtime_error("Amount must be positive (in ions)");
+        throw std::runtime_error("Amount must be positive (in volts)");
     }
 
     x402::VerifyResult result;
@@ -5636,7 +5661,7 @@ std::string CRPCServer::RPC_SettleX402Payment(const std::string& params) {
             try { amount = std::stoll(params.substr(numStart)); } catch (...) {}
         }
     }
-    if (amount <= 0) throw std::runtime_error("Amount must be positive (in ions)");
+    if (amount <= 0) throw std::runtime_error("Amount must be positive (in volts)");
 
     x402::SettlementResult result;
     m_x402_facilitator->GetVMA().SettlePayment(rawTx, recipient, amount, result);
@@ -5656,4 +5681,1093 @@ std::string CRPCServer::RPC_GetX402Info(const std::string& params) {
     info.micropaymentThreshold = m_x402_facilitator->GetVMA().GetMicropaymentThreshold();
     info.vmaEnabled = true;
     return info.ToJSON();
+}
+
+// ============================================================================
+// Data directory / swap store
+// ============================================================================
+
+void CRPCServer::SetDataDir(const std::string& dataDir) {
+    m_dataDir = dataDir;
+    if (!m_dataDir.empty()) {
+        std::string swap_file = m_dataDir + "/swaps.json";
+        m_swapStore.SetPath(swap_file);
+        m_swapStore.Load();
+    }
+}
+
+// ============================================================================
+// HTLC (Hash Time-Locked Contract) RPC Commands
+// ============================================================================
+
+std::string CRPCServer::RPC_GeneratePreimage(const std::string& params) {
+    // No parameters needed
+    std::vector<uint8_t> preimage = GeneratePreimage();
+    std::vector<uint8_t> hash = HashPreimage(preimage);
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"preimage\":\"" << HexStr(preimage) << "\",";
+    oss << "\"hash\":\"" << HexStr(hash) << "\"";
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_CreateHTLC(const std::string& params) {
+    if (!m_wallet) throw std::runtime_error("Wallet not initialized");
+    if (!m_mempool) throw std::runtime_error("Mempool not initialized");
+    if (!m_utxo_set) throw std::runtime_error("UTXO set not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+
+    if (m_wallet->IsCrypted() && m_wallet->IsLocked()) {
+        throw std::runtime_error("Wallet is encrypted and locked. Unlock with walletpassphrase first.");
+    }
+
+    // Check script V2 activation
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized");
+    }
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    if (static_cast<int>(currentHeight) < Dilithion::g_chainParams->scriptV2ActivationHeight) {
+        throw std::runtime_error("HTLC not yet activated (activates at height " +
+            std::to_string(Dilithion::g_chainParams->scriptV2ActivationHeight) + ")");
+    }
+
+    // Parse parameters: {"amount": 1.5, "recipient_address": "D...", "hash_lock": "hex64", "timeout_blocks": 144}
+    // Also supports array: [amount, "recipient_address", "hash_lock_hex", timeout_blocks]
+    double amount_dbl = 0;
+    std::string recipient_str;
+    std::string hash_lock_hex;
+    uint32_t timeout_blocks = 0;
+
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 4) {
+                if (arr[0].is_number()) amount_dbl = arr[0].get<double>();
+                if (arr[1].is_string()) recipient_str = arr[1].get<std::string>();
+                if (arr[2].is_string()) hash_lock_hex = arr[2].get<std::string>();
+                if (arr[3].is_number()) timeout_blocks = arr[3].get<uint32_t>();
+            }
+        } catch (const nlohmann::json::parse_error&) {}
+    }
+
+    if (amount_dbl == 0) {
+        // Object format
+        size_t pos;
+        pos = params.find("\"amount\"");
+        if (pos != std::string::npos) {
+            size_t colon = params.find(":", pos);
+            size_t num_start = colon + 1;
+            while (num_start < params.size() && isspace(params[num_start])) num_start++;
+            size_t num_end = num_start;
+            while (num_end < params.size() && (isdigit(params[num_end]) || params[num_end] == '.')) num_end++;
+            if (num_end > num_start) {
+                amount_dbl = SafeParseDouble(params.substr(num_start, num_end - num_start), 0.0, 21000000.0);
+            }
+        }
+
+        pos = params.find("\"recipient_address\"");
+        if (pos != std::string::npos) {
+            size_t colon = params.find(":", pos);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                recipient_str = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+
+        pos = params.find("\"hash_lock\"");
+        if (pos != std::string::npos) {
+            size_t colon = params.find(":", pos);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                hash_lock_hex = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+
+        pos = params.find("\"timeout_blocks\"");
+        if (pos != std::string::npos) {
+            size_t colon = params.find(":", pos);
+            size_t num_start = colon + 1;
+            while (num_start < params.size() && isspace(params[num_start])) num_start++;
+            size_t num_end = num_start;
+            while (num_end < params.size() && isdigit(params[num_end])) num_end++;
+            if (num_end > num_start) {
+                timeout_blocks = SafeParseUInt32(params.substr(num_start, num_end - num_start), 1, 100000);
+            }
+        }
+    }
+
+    if (amount_dbl <= 0) throw std::runtime_error("Missing or invalid amount");
+    if (recipient_str.empty()) throw std::runtime_error("Missing recipient_address");
+    if (hash_lock_hex.empty()) throw std::runtime_error("Missing hash_lock");
+    if (timeout_blocks == 0) throw std::runtime_error("Missing or invalid timeout_blocks");
+
+    CAmount amount = static_cast<CAmount>(amount_dbl * 100000000);
+    if (amount <= 0) throw std::runtime_error("Amount must be positive");
+    if (amount < DUST_THRESHOLD) throw std::runtime_error("Amount below dust threshold");
+
+    // Parse hash_lock
+    std::vector<uint8_t> hash_lock = ParseHex(hash_lock_hex);
+    if (hash_lock.size() != 32) {
+        throw std::runtime_error("hash_lock must be 64 hex characters (32 bytes)");
+    }
+
+    // Validate recipient address and extract pubkey hash
+    CDilithiumAddress recipient_address;
+    if (!ValidateAddress(recipient_str, recipient_address)) {
+        throw std::runtime_error("Invalid recipient address: " + recipient_str);
+    }
+    std::vector<uint8_t> claim_pubkey_hash = CWallet::GetPubKeyHashFromAddress(recipient_address);
+    if (claim_pubkey_hash.size() != 20) {
+        throw std::runtime_error("Failed to extract recipient pubkey hash");
+    }
+
+    // Get our refund address (sender's address)
+    std::vector<uint8_t> refund_pubkey_hash = m_wallet->GetPubKeyHash();
+    if (refund_pubkey_hash.size() != 20) {
+        throw std::runtime_error("Failed to get wallet pubkey hash for refund");
+    }
+
+    // Build HTLC parameters
+    uint32_t timeout_height = currentHeight + timeout_blocks;
+    HTLCParameters htlc_params;
+    htlc_params.hash_lock = hash_lock;
+    htlc_params.claim_pubkey_hash = claim_pubkey_hash;
+    htlc_params.refund_pubkey_hash = refund_pubkey_hash;
+    htlc_params.timeout_height = timeout_height;
+
+    // Create HTLC locking script
+    CScript htlc_script = CreateHTLCScript(htlc_params);
+    std::vector<uint8_t> scriptPubKey(htlc_script.begin(), htlc_script.end());
+
+    // Estimate fee
+    size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
+    CAmount fee = Consensus::CalculateMinFee(est_size);
+
+    // Create transaction with HTLC scriptPubKey
+    CTransactionRef tx;
+    std::string error;
+    if (!m_wallet->CreateTransactionToScript(scriptPubKey, amount, fee, *m_utxo_set, currentHeight, 0, tx, error)) {
+        throw std::runtime_error("Failed to create HTLC transaction: " + error);
+    }
+
+    // Broadcast
+    if (!m_wallet->SendTransaction(tx, *m_mempool, *m_utxo_set, currentHeight, error)) {
+        throw std::runtime_error("Failed to broadcast HTLC transaction: " + error);
+    }
+
+    // Calculate actual fee
+    CAmount actual_fee = 0;
+    for (const auto& vin : tx->vin) {
+        CUTXOEntry entry;
+        if (m_utxo_set->GetUTXO(vin.prevout, entry)) {
+            actual_fee += entry.out.nValue;
+        }
+    }
+    for (const auto& vout : tx->vout) {
+        actual_fee -= vout.nValue;
+    }
+
+    uint256 txid = tx->GetHash();
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"txid\":\"" << txid.GetHex() << "\",";
+    oss << "\"timeout_height\":" << timeout_height << ",";
+    oss << "\"amount\":" << FormatAmount(amount) << ",";
+    oss << "\"fee\":" << FormatAmount(actual_fee > 0 ? actual_fee : fee);
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ClaimHTLC(const std::string& params) {
+    if (!m_wallet) throw std::runtime_error("Wallet not initialized");
+    if (!m_mempool) throw std::runtime_error("Mempool not initialized");
+    if (!m_utxo_set) throw std::runtime_error("UTXO set not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+
+    if (m_wallet->IsCrypted() && m_wallet->IsLocked()) {
+        throw std::runtime_error("Wallet is encrypted and locked. Unlock with walletpassphrase first.");
+    }
+
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized");
+    }
+
+    // Parse parameters: {"htlc_txid": "hex", "htlc_vout": 0, "preimage": "hex"}
+    std::string txid_hex;
+    uint32_t vout_n = 0;
+    std::string preimage_hex;
+
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 3) {
+                if (arr[0].is_string()) txid_hex = arr[0].get<std::string>();
+                if (arr[1].is_number()) vout_n = arr[1].get<uint32_t>();
+                if (arr[2].is_string()) preimage_hex = arr[2].get<std::string>();
+            }
+        } catch (const nlohmann::json::parse_error&) {}
+    }
+
+    if (txid_hex.empty()) {
+        size_t pos = params.find("\"htlc_txid\"");
+        if (pos != std::string::npos) {
+            size_t colon = params.find(":", pos);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                txid_hex = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+
+        size_t pos2 = params.find("\"htlc_vout\"");
+        if (pos2 != std::string::npos) {
+            size_t colon = params.find(":", pos2);
+            size_t num_start = colon + 1;
+            while (num_start < params.size() && isspace(params[num_start])) num_start++;
+            size_t num_end = num_start;
+            while (num_end < params.size() && isdigit(params[num_end])) num_end++;
+            if (num_end > num_start)
+                vout_n = SafeParseUInt32(params.substr(num_start, num_end - num_start), 0, UINT32_MAX);
+        }
+
+        size_t pos3 = params.find("\"preimage\"");
+        if (pos3 != std::string::npos) {
+            size_t colon = params.find(":", pos3);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                preimage_hex = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+    }
+
+    if (txid_hex.empty()) throw std::runtime_error("Missing htlc_txid");
+    if (preimage_hex.empty()) throw std::runtime_error("Missing preimage");
+
+    // Parse txid
+    if (txid_hex.length() != 64) throw std::runtime_error("htlc_txid must be 64 hex characters");
+    uint256 htlc_txid;
+    htlc_txid.SetHex(txid_hex);
+
+    // Parse preimage
+    std::vector<uint8_t> preimage = ParseHex(preimage_hex);
+    if (preimage.size() != 32) {
+        throw std::runtime_error("preimage must be 64 hex characters (32 bytes)");
+    }
+
+    // Look up the HTLC UTXO
+    COutPoint htlc_outpoint(htlc_txid, vout_n);
+    CUTXOEntry htlc_entry;
+    if (!m_utxo_set->GetUTXO(htlc_outpoint, htlc_entry)) {
+        throw std::runtime_error("HTLC UTXO not found (txid:" + txid_hex + " vout:" + std::to_string(vout_n) + ")");
+    }
+
+    // Decode HTLC script
+    CScript htlc_script(htlc_entry.out.scriptPubKey.begin(), htlc_entry.out.scriptPubKey.end());
+    HTLCParameters htlc_params;
+    if (!DecodeHTLCScript(htlc_script, htlc_params)) {
+        throw std::runtime_error("Output is not a valid HTLC script");
+    }
+
+    // Verify preimage matches hash_lock
+    std::vector<uint8_t> preimage_hash = HashPreimage(preimage);
+    if (preimage_hash != htlc_params.hash_lock) {
+        throw std::runtime_error("Preimage does not match HTLC hash_lock");
+    }
+
+    // Find our key matching claim_pubkey_hash
+    CKey claim_key;
+    bool found_key = false;
+    {
+        // Iterate wallet addresses to find key matching claim_pubkey_hash
+        std::vector<CDilithiumAddress> addresses = m_wallet->GetAddresses();
+        for (const auto& addr : addresses) {
+            CKey key;
+            if (m_wallet->GetKey(addr, key)) {
+                std::vector<uint8_t> key_hash = WalletCrypto::HashPubKey(key.vchPubKey);
+                if (key_hash == htlc_params.claim_pubkey_hash) {
+                    claim_key = key;
+                    found_key = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (!found_key) {
+        throw std::runtime_error("Wallet does not contain the claim key for this HTLC");
+    }
+
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    CAmount htlc_amount = htlc_entry.out.nValue;
+
+    // Build the claim transaction
+    CTransaction claim_tx;
+    claim_tx.nVersion = 2;
+    claim_tx.nLockTime = 0;
+
+    CTxIn claim_input(htlc_outpoint);
+    claim_tx.vin.push_back(std::move(claim_input));
+
+    // Output: send to our wallet (P2PKH)
+    std::vector<uint8_t> our_hash = m_wallet->GetPubKeyHash();
+    if (our_hash.empty()) throw std::runtime_error("Failed to get wallet address");
+    std::vector<uint8_t> output_script = WalletCrypto::CreateScriptPubKey(our_hash);
+
+    // Calculate fee for HTLC claim tx (~5400 bytes: sig + pubkey + preimage + opcode)
+    size_t est_claim_size = Consensus::EstimateDilithiumTxSize(1, 1) + 40; // Extra for preimage + opcodes
+    CAmount claim_fee = Consensus::CalculateMinFee(est_claim_size);
+    CAmount claim_output = htlc_amount - claim_fee;
+    if (claim_output <= 0) throw std::runtime_error("HTLC amount too small to cover claim fee");
+
+    CTxOut claim_output_tx(claim_output, std::move(output_script));
+    claim_tx.vout.push_back(std::move(claim_output_tx));
+
+    // Sign: compute signature message (same algorithm as wallet SignTransaction)
+    uint256 signing_hash = claim_tx.GetSigningHash();
+    uint32_t chain_id = Dilithion::g_chainParams->chainID;
+    uint32_t version = claim_tx.nVersion;
+
+    std::vector<uint8_t> sig_message;
+    sig_message.reserve(44);
+    sig_message.insert(sig_message.end(), signing_hash.begin(), signing_hash.end());
+    // Input index = 0 (4 bytes LE)
+    sig_message.push_back(0); sig_message.push_back(0); sig_message.push_back(0); sig_message.push_back(0);
+    // Version (4 bytes LE)
+    sig_message.push_back(static_cast<uint8_t>(version & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
+    // Chain ID (4 bytes LE)
+    sig_message.push_back(static_cast<uint8_t>(chain_id & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 8) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 16) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 24) & 0xFF));
+
+    // SHA3-256 the message
+    uint8_t sig_hash[32];
+    SHA3_256(sig_message.data(), sig_message.size(), sig_hash);
+
+    // Sign with Dilithium3
+    std::vector<uint8_t> signature;
+    if (!WalletCrypto::Sign(claim_key, sig_hash, 32, signature)) {
+        throw std::runtime_error("Failed to sign HTLC claim transaction");
+    }
+
+    // Build HTLC claim scriptSig: <signature> <pubkey> <preimage> OP_TRUE
+    CScript claim_scriptSig = CreateHTLCClaimScript(signature, claim_key.vchPubKey, preimage);
+    claim_tx.vin[0].scriptSig = std::vector<uint8_t>(claim_scriptSig.begin(), claim_scriptSig.end());
+
+    // Broadcast
+    CTransactionRef claim_ref = MakeTransactionRef(std::move(claim_tx));
+    std::string error;
+    if (!m_wallet->SendTransaction(claim_ref, *m_mempool, *m_utxo_set, currentHeight, error)) {
+        throw std::runtime_error("Failed to broadcast claim transaction: " + error);
+    }
+
+    uint256 claim_txid = claim_ref->GetHash();
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"txid\":\"" << claim_txid.GetHex() << "\",";
+    oss << "\"preimage\":\"" << HexStr(preimage) << "\",";
+    oss << "\"amount\":" << FormatAmount(claim_output);
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_RefundHTLC(const std::string& params) {
+    if (!m_wallet) throw std::runtime_error("Wallet not initialized");
+    if (!m_mempool) throw std::runtime_error("Mempool not initialized");
+    if (!m_utxo_set) throw std::runtime_error("UTXO set not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+
+    if (m_wallet->IsCrypted() && m_wallet->IsLocked()) {
+        throw std::runtime_error("Wallet is encrypted and locked. Unlock with walletpassphrase first.");
+    }
+
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized");
+    }
+
+    // Parse parameters: {"htlc_txid": "hex", "htlc_vout": 0}
+    std::string txid_hex;
+    uint32_t vout_n = 0;
+
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 2) {
+                if (arr[0].is_string()) txid_hex = arr[0].get<std::string>();
+                if (arr[1].is_number()) vout_n = arr[1].get<uint32_t>();
+            }
+        } catch (const nlohmann::json::parse_error&) {}
+    }
+
+    if (txid_hex.empty()) {
+        size_t pos = params.find("\"htlc_txid\"");
+        if (pos != std::string::npos) {
+            size_t colon = params.find(":", pos);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                txid_hex = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+
+        size_t pos2 = params.find("\"htlc_vout\"");
+        if (pos2 != std::string::npos) {
+            size_t colon = params.find(":", pos2);
+            size_t num_start = colon + 1;
+            while (num_start < params.size() && isspace(params[num_start])) num_start++;
+            size_t num_end = num_start;
+            while (num_end < params.size() && isdigit(params[num_end])) num_end++;
+            if (num_end > num_start)
+                vout_n = SafeParseUInt32(params.substr(num_start, num_end - num_start), 0, UINT32_MAX);
+        }
+    }
+
+    if (txid_hex.empty()) throw std::runtime_error("Missing htlc_txid");
+
+    // Parse txid
+    if (txid_hex.length() != 64) throw std::runtime_error("htlc_txid must be 64 hex characters");
+    uint256 htlc_txid;
+    htlc_txid.SetHex(txid_hex);
+
+    // Look up the HTLC UTXO
+    COutPoint htlc_outpoint(htlc_txid, vout_n);
+    CUTXOEntry htlc_entry;
+    if (!m_utxo_set->GetUTXO(htlc_outpoint, htlc_entry)) {
+        throw std::runtime_error("HTLC UTXO not found (txid:" + txid_hex + " vout:" + std::to_string(vout_n) + ")");
+    }
+
+    // Decode HTLC script
+    CScript htlc_script(htlc_entry.out.scriptPubKey.begin(), htlc_entry.out.scriptPubKey.end());
+    HTLCParameters htlc_params;
+    if (!DecodeHTLCScript(htlc_script, htlc_params)) {
+        throw std::runtime_error("Output is not a valid HTLC script");
+    }
+
+    // Check timeout has passed
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    if (currentHeight < htlc_params.timeout_height) {
+        throw std::runtime_error("HTLC timeout not yet reached (current: " +
+            std::to_string(currentHeight) + ", timeout: " +
+            std::to_string(htlc_params.timeout_height) + ", blocks remaining: " +
+            std::to_string(htlc_params.timeout_height - currentHeight) + ")");
+    }
+
+    // Find our key matching refund_pubkey_hash
+    CKey refund_key;
+    bool found_key = false;
+    {
+        std::vector<CDilithiumAddress> addresses = m_wallet->GetAddresses();
+        for (const auto& addr : addresses) {
+            CKey key;
+            if (m_wallet->GetKey(addr, key)) {
+                std::vector<uint8_t> key_hash = WalletCrypto::HashPubKey(key.vchPubKey);
+                if (key_hash == htlc_params.refund_pubkey_hash) {
+                    refund_key = key;
+                    found_key = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (!found_key) {
+        throw std::runtime_error("Wallet does not contain the refund key for this HTLC");
+    }
+
+    CAmount htlc_amount = htlc_entry.out.nValue;
+
+    // Build the refund transaction
+    // nLockTime must be >= timeout_height for OP_CHECKLOCKTIMEVERIFY to pass
+    CTransaction refund_tx;
+    refund_tx.nVersion = 2;
+    refund_tx.nLockTime = htlc_params.timeout_height;
+
+    CTxIn refund_input(htlc_outpoint);
+    refund_input.nSequence = CTxIn::SEQUENCE_FINAL - 1;  // Enable nLockTime
+    refund_tx.vin.push_back(std::move(refund_input));
+
+    // Output: send to our wallet (P2PKH)
+    std::vector<uint8_t> our_hash = m_wallet->GetPubKeyHash();
+    if (our_hash.empty()) throw std::runtime_error("Failed to get wallet address");
+    std::vector<uint8_t> output_script = WalletCrypto::CreateScriptPubKey(our_hash);
+
+    // Fee
+    size_t est_size = Consensus::EstimateDilithiumTxSize(1, 1);
+    CAmount refund_fee = Consensus::CalculateMinFee(est_size);
+    CAmount refund_output = htlc_amount - refund_fee;
+    if (refund_output <= 0) throw std::runtime_error("HTLC amount too small to cover refund fee");
+
+    CTxOut refund_output_tx(refund_output, std::move(output_script));
+    refund_tx.vout.push_back(std::move(refund_output_tx));
+
+    // Sign
+    uint256 signing_hash = refund_tx.GetSigningHash();
+    uint32_t chain_id = Dilithion::g_chainParams->chainID;
+    uint32_t version = refund_tx.nVersion;
+
+    std::vector<uint8_t> sig_message;
+    sig_message.reserve(44);
+    sig_message.insert(sig_message.end(), signing_hash.begin(), signing_hash.end());
+    sig_message.push_back(0); sig_message.push_back(0); sig_message.push_back(0); sig_message.push_back(0);
+    sig_message.push_back(static_cast<uint8_t>(version & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>(chain_id & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 8) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 16) & 0xFF));
+    sig_message.push_back(static_cast<uint8_t>((chain_id >> 24) & 0xFF));
+
+    uint8_t sig_hash[32];
+    SHA3_256(sig_message.data(), sig_message.size(), sig_hash);
+
+    std::vector<uint8_t> signature;
+    if (!WalletCrypto::Sign(refund_key, sig_hash, 32, signature)) {
+        throw std::runtime_error("Failed to sign HTLC refund transaction");
+    }
+
+    // Build HTLC refund scriptSig: <signature> <pubkey> OP_FALSE
+    CScript refund_scriptSig = CreateHTLCRefundScript(signature, refund_key.vchPubKey);
+    refund_tx.vin[0].scriptSig = std::vector<uint8_t>(refund_scriptSig.begin(), refund_scriptSig.end());
+
+    // Broadcast
+    CTransactionRef refund_ref = MakeTransactionRef(std::move(refund_tx));
+    std::string error;
+    if (!m_wallet->SendTransaction(refund_ref, *m_mempool, *m_utxo_set, currentHeight, error)) {
+        throw std::runtime_error("Failed to broadcast refund transaction: " + error);
+    }
+
+    uint256 refund_txid = refund_ref->GetHash();
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"txid\":\"" << refund_txid.GetHex() << "\",";
+    oss << "\"amount\":" << FormatAmount(refund_output);
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_DecodeHTLC(const std::string& params) {
+    if (!m_utxo_set) throw std::runtime_error("UTXO set not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+
+    // Parse parameters: {"htlc_txid": "hex", "vout": 0}
+    std::string txid_hex;
+    uint32_t vout_n = 0;
+
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 2) {
+                if (arr[0].is_string()) txid_hex = arr[0].get<std::string>();
+                if (arr[1].is_number()) vout_n = arr[1].get<uint32_t>();
+            }
+        } catch (const nlohmann::json::parse_error&) {}
+    }
+
+    if (txid_hex.empty()) {
+        size_t pos = params.find("\"htlc_txid\"");
+        if (pos != std::string::npos) {
+            size_t colon = params.find(":", pos);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                txid_hex = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+
+        size_t pos2 = params.find("\"vout\"");
+        if (pos2 != std::string::npos) {
+            size_t colon = params.find(":", pos2);
+            size_t num_start = colon + 1;
+            while (num_start < params.size() && isspace(params[num_start])) num_start++;
+            size_t num_end = num_start;
+            while (num_end < params.size() && isdigit(params[num_end])) num_end++;
+            if (num_end > num_start)
+                vout_n = SafeParseUInt32(params.substr(num_start, num_end - num_start), 0, UINT32_MAX);
+        }
+    }
+
+    if (txid_hex.empty()) throw std::runtime_error("Missing htlc_txid");
+
+    if (txid_hex.length() != 64) throw std::runtime_error("htlc_txid must be 64 hex characters");
+    uint256 htlc_txid;
+    htlc_txid.SetHex(txid_hex);
+
+    // Look up UTXO
+    COutPoint outpoint(htlc_txid, vout_n);
+    CUTXOEntry entry;
+    if (!m_utxo_set->GetUTXO(outpoint, entry)) {
+        throw std::runtime_error("UTXO not found (txid:" + txid_hex + " vout:" + std::to_string(vout_n) + ")");
+    }
+
+    // Decode HTLC
+    CScript script(entry.out.scriptPubKey.begin(), entry.out.scriptPubKey.end());
+    HTLCParameters htlc_params;
+    if (!DecodeHTLCScript(script, htlc_params)) {
+        throw std::runtime_error("Output is not a valid HTLC script");
+    }
+
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    bool can_refund = currentHeight >= htlc_params.timeout_height;
+
+    unsigned int confirmations = 0;
+    if (entry.nHeight > 0 && currentHeight >= entry.nHeight) {
+        confirmations = currentHeight - entry.nHeight + 1;
+    }
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"hash_lock\":\"" << HexStr(htlc_params.hash_lock) << "\",";
+    oss << "\"claim_pubkey_hash\":\"" << HexStr(htlc_params.claim_pubkey_hash) << "\",";
+    oss << "\"refund_pubkey_hash\":\"" << HexStr(htlc_params.refund_pubkey_hash) << "\",";
+    oss << "\"timeout_height\":" << htlc_params.timeout_height << ",";
+    oss << "\"amount\":" << FormatAmount(entry.out.nValue) << ",";
+    oss << "\"can_refund\":" << (can_refund ? "true" : "false") << ",";
+    oss << "\"confirmations\":" << confirmations;
+    oss << "}";
+    return oss.str();
+}
+
+// ============================================================================
+// Atomic Swap RPC Commands (high-level orchestration)
+// ============================================================================
+
+// Default timeout constants (blocks)
+static const uint32_t SWAP_INITIATOR_TIMEOUT_BLOCKS = 384;  // ~4.8h at 45s/block
+static const uint32_t SWAP_RESPONDER_TIMEOUT_BLOCKS = 192;  // ~2.4h at 45s/block (must be < initiator's)
+
+static std::string FormatSwapInfo(const SwapInfo& s, const std::string& amount_label) {
+    auto fmt_amount = [&](CAmount a) {
+        std::ostringstream o;
+        CAmount COIN = 100000000;
+        o << (a / COIN) << "." << std::setfill('0') << std::setw(8) << (a % COIN);
+        return o.str();
+    };
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"swap_id\":\"" << s.swap_id << "\",";
+    oss << "\"role\":\"" << SwapRoleStr(s.role) << "\",";
+    oss << "\"state\":\"" << SwapStateStr(s.state) << "\",";
+    oss << "\"our_chain\":\"" << s.our_chain << "\",";
+    oss << "\"their_chain\":\"" << s.their_chain << "\",";
+    oss << "\"our_amount\":" << fmt_amount(s.our_amount) << ",";
+    oss << "\"their_amount\":" << fmt_amount(s.their_amount) << ",";
+    oss << "\"our_htlc_txid\":\"" << s.our_htlc_txid << "\",";
+    oss << "\"their_htlc_txid\":\"" << s.their_htlc_txid << "\",";
+    oss << "\"our_timeout\":" << s.our_timeout << ",";
+    oss << "\"their_timeout\":" << s.their_timeout << ",";
+    oss << "\"hash_lock\":\"" << HexStr(s.hash_lock) << "\",";
+    oss << "\"our_claim_address\":\"" << s.our_claim_address << "\",";
+    oss << "\"their_claim_address\":\"" << s.their_claim_address << "\",";
+    oss << "\"created_at\":" << s.created_at;
+    // Only include preimage if it's been revealed (non-empty) and not zero
+    if (!s.preimage.empty()) {
+        oss << ",\"preimage\":\"" << HexStr(s.preimage) << "\"";
+    }
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_InitiateSwap(const std::string& params) {
+    if (!m_wallet) throw std::runtime_error("Wallet not initialized");
+    if (!m_mempool) throw std::runtime_error("Mempool not initialized");
+    if (!m_utxo_set) throw std::runtime_error("UTXO set not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+
+    if (m_wallet->IsCrypted() && m_wallet->IsLocked()) {
+        throw std::runtime_error("Wallet is encrypted and locked. Unlock with walletpassphrase first.");
+    }
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized");
+    }
+
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    if (static_cast<int>(currentHeight) < Dilithion::g_chainParams->scriptV2ActivationHeight) {
+        throw std::runtime_error("Atomic swaps not yet activated on this chain");
+    }
+
+    // Parse parameters: object or array
+    // {"their_chain":"dil", "send_amount":1.5, "receive_amount":100.0,
+    //  "their_claim_address":"D...", "our_claim_address":"D...", "timeout_blocks":384}
+    std::string their_chain;
+    double send_amount_dbl = 0;
+    double receive_amount_dbl = 0;
+    std::string their_claim_address;  // Their DilV address (claims our locked DilV)
+    std::string our_claim_address;    // Our DIL address (metadata, we claim their DIL)
+    uint32_t timeout_blocks = SWAP_INITIATOR_TIMEOUT_BLOCKS;
+
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 4) {
+                if (arr[0].is_string()) their_chain = arr[0].get<std::string>();
+                if (arr[1].is_number()) send_amount_dbl = arr[1].get<double>();
+                if (arr[2].is_number()) receive_amount_dbl = arr[2].get<double>();
+                if (arr[3].is_string()) their_claim_address = arr[3].get<std::string>();
+                if (arr.size() >= 5 && arr[4].is_string()) our_claim_address = arr[4].get<std::string>();
+                if (arr.size() >= 6 && arr[5].is_number()) timeout_blocks = arr[5].get<uint32_t>();
+            }
+        } catch (const nlohmann::json::parse_error&) {}
+    }
+
+    if (their_chain.empty()) {
+        auto parse_str = [&](const std::string& key, std::string& out) {
+            size_t p = params.find("\"" + key + "\"");
+            if (p == std::string::npos) return;
+            size_t colon = params.find(":", p);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                out = params.substr(q1 + 1, q2 - q1 - 1);
+        };
+        auto parse_dbl = [&](const std::string& key, double& out) {
+            size_t p = params.find("\"" + key + "\"");
+            if (p == std::string::npos) return;
+            size_t colon = params.find(":", p);
+            size_t ns = colon + 1;
+            while (ns < params.size() && isspace(params[ns])) ns++;
+            size_t ne = ns;
+            while (ne < params.size() && (isdigit(params[ne]) || params[ne] == '.')) ne++;
+            if (ne > ns) out = SafeParseDouble(params.substr(ns, ne - ns), 0.0, 21000000.0);
+        };
+        auto parse_uint = [&](const std::string& key, uint32_t& out) {
+            size_t p = params.find("\"" + key + "\"");
+            if (p == std::string::npos) return;
+            size_t colon = params.find(":", p);
+            size_t ns = colon + 1;
+            while (ns < params.size() && isspace(params[ns])) ns++;
+            size_t ne = ns;
+            while (ne < params.size() && isdigit(params[ne])) ne++;
+            if (ne > ns) out = SafeParseUInt32(params.substr(ns, ne - ns), 1, 100000);
+        };
+        parse_str("their_chain", their_chain);
+        parse_dbl("send_amount", send_amount_dbl);
+        parse_dbl("receive_amount", receive_amount_dbl);
+        parse_str("their_claim_address", their_claim_address);
+        parse_str("our_claim_address", our_claim_address);
+        parse_uint("timeout_blocks", timeout_blocks);
+    }
+
+    if (their_chain.empty())         throw std::runtime_error("Missing their_chain (e.g. \"dil\")");
+    if (send_amount_dbl <= 0)        throw std::runtime_error("Missing or invalid send_amount");
+    if (receive_amount_dbl <= 0)     throw std::runtime_error("Missing or invalid receive_amount");
+    if (their_claim_address.empty()) throw std::runtime_error("Missing their_claim_address");
+    if (timeout_blocks < 10)         throw std::runtime_error("timeout_blocks must be >= 10");
+
+    CAmount send_amount    = static_cast<CAmount>(send_amount_dbl * 100000000);
+    CAmount receive_amount = static_cast<CAmount>(receive_amount_dbl * 100000000);
+
+    if (send_amount <= 0) throw std::runtime_error("send_amount must be positive");
+    if (send_amount < DUST_THRESHOLD) throw std::runtime_error("send_amount below dust threshold");
+
+    // Validate their_claim_address (must be a valid DilV address)
+    CDilithiumAddress claim_addr;
+    if (!ValidateAddress(their_claim_address, claim_addr)) {
+        throw std::runtime_error("Invalid their_claim_address: " + their_claim_address);
+    }
+    std::vector<uint8_t> claim_pubkey_hash = CWallet::GetPubKeyHashFromAddress(claim_addr);
+    if (claim_pubkey_hash.size() != 20) {
+        throw std::runtime_error("Failed to extract pubkey hash from their_claim_address");
+    }
+
+    // Our refund address (our wallet address on this chain)
+    std::vector<uint8_t> refund_pubkey_hash = m_wallet->GetPubKeyHash();
+    if (refund_pubkey_hash.size() != 20) {
+        throw std::runtime_error("Failed to get wallet pubkey hash");
+    }
+
+    // Get our refund address string
+    CDilithiumAddress our_default_addr;
+    {
+        std::vector<CDilithiumAddress> addrs = m_wallet->GetAddresses();
+        if (!addrs.empty()) our_default_addr = addrs[0];
+    }
+    std::string our_refund_address = our_default_addr.IsValid() ? our_default_addr.ToString() : "";
+
+    // Generate preimage
+    std::vector<uint8_t> preimage = GeneratePreimage();
+    std::vector<uint8_t> hash_lock = HashPreimage(preimage);
+
+    // Swap ID: first 8 bytes of preimage, hex-encoded (16 chars)
+    std::string swap_id = HexStr(std::vector<uint8_t>(preimage.begin(), preimage.begin() + 8));
+
+    // Create HTLC locking script
+    uint32_t timeout_height = currentHeight + timeout_blocks;
+    HTLCParameters htlc_params;
+    htlc_params.hash_lock           = hash_lock;
+    htlc_params.claim_pubkey_hash   = claim_pubkey_hash;
+    htlc_params.refund_pubkey_hash  = refund_pubkey_hash;
+    htlc_params.timeout_height      = timeout_height;
+
+    CScript htlc_script = CreateHTLCScript(htlc_params);
+    std::vector<uint8_t> scriptPubKey(htlc_script.begin(), htlc_script.end());
+
+    // Create and broadcast the HTLC funding transaction
+    size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
+    CAmount fee = Consensus::CalculateMinFee(est_size);
+    CTransactionRef tx;
+    std::string error;
+    if (!m_wallet->CreateTransactionToScript(scriptPubKey, send_amount, fee, *m_utxo_set, currentHeight, 0, tx, error)) {
+        throw std::runtime_error("Failed to create HTLC transaction: " + error);
+    }
+    if (!m_wallet->SendTransaction(tx, *m_mempool, *m_utxo_set, currentHeight, error)) {
+        throw std::runtime_error("Failed to broadcast HTLC transaction: " + error);
+    }
+
+    std::string htlc_txid = tx->GetHash().GetHex();
+
+    // Record swap state
+    int64_t now = static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+
+    SwapInfo swap;
+    swap.swap_id             = swap_id;
+    swap.role                = SwapRole::INITIATOR;
+    swap.state               = SwapState::HTLC_FUNDED;
+    swap.our_chain           = (Dilithion::g_chainParams->network == Dilithion::DILV) ? "dilv" : "dil";
+    swap.their_chain         = their_chain;
+    swap.our_amount          = send_amount;
+    swap.their_amount        = receive_amount;
+    swap.our_htlc_txid       = htlc_txid;
+    swap.our_timeout         = timeout_height;
+    swap.their_timeout       = 0;
+    swap.preimage            = preimage;
+    swap.hash_lock           = hash_lock;
+    swap.our_refund_address  = our_refund_address;
+    swap.our_claim_address   = our_claim_address;
+    swap.their_claim_address = their_claim_address;
+    swap.created_at          = now;
+
+    m_swapStore.AddSwap(swap);
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"swap_id\":\"" << swap_id << "\",";
+    oss << "\"hash_lock\":\"" << HexStr(hash_lock) << "\",";
+    oss << "\"htlc_txid\":\"" << htlc_txid << "\",";
+    oss << "\"timeout_height\":" << timeout_height << ",";
+    oss << "\"send_amount\":" << FormatAmount(send_amount) << ",";
+    oss << "\"instructions\":\"Share hash_lock and htlc_txid with counterparty. "
+        << "They should run: acceptswap \\\"" << HexStr(hash_lock) << "\\\" "
+        << receive_amount_dbl << " \\\"" << htlc_txid << "\\\" 0 "
+        << "\\\"<their_claim_address>\\\" " << (timeout_blocks / 2) << "\"";
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_AcceptSwap(const std::string& params) {
+    if (!m_wallet) throw std::runtime_error("Wallet not initialized");
+    if (!m_mempool) throw std::runtime_error("Mempool not initialized");
+    if (!m_utxo_set) throw std::runtime_error("UTXO set not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+
+    if (m_wallet->IsCrypted() && m_wallet->IsLocked()) {
+        throw std::runtime_error("Wallet is encrypted and locked. Unlock with walletpassphrase first.");
+    }
+    if (!Dilithion::g_chainParams) {
+        throw std::runtime_error("Chain parameters not initialized");
+    }
+
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    if (static_cast<int>(currentHeight) < Dilithion::g_chainParams->scriptV2ActivationHeight) {
+        throw std::runtime_error("Atomic swaps not yet activated on this chain");
+    }
+
+    // Parameters:
+    // {"hash_lock":"hex", "amount":1.5, "their_htlc_txid":"hex",
+    //  "their_htlc_vout":0, "their_claim_address":"D...", "timeout_blocks":192,
+    //  "their_chain":"dil", "receive_amount":100.0}
+    std::string hash_lock_hex;
+    double amount_dbl = 0;
+    std::string their_htlc_txid;
+    uint32_t their_htlc_vout = 0;
+    std::string their_claim_address;  // Initiator's DilV address (claims our locked DilV)
+    uint32_t timeout_blocks = SWAP_RESPONDER_TIMEOUT_BLOCKS;
+    std::string their_chain;
+    double receive_amount_dbl = 0;
+
+    if (!params.empty() && params[0] == '[') {
+        try {
+            nlohmann::json arr = nlohmann::json::parse(params);
+            if (arr.is_array() && arr.size() >= 6) {
+                if (arr[0].is_string()) hash_lock_hex = arr[0].get<std::string>();
+                if (arr[1].is_number()) amount_dbl = arr[1].get<double>();
+                if (arr[2].is_string()) their_htlc_txid = arr[2].get<std::string>();
+                if (arr[3].is_number()) their_htlc_vout = arr[3].get<uint32_t>();
+                if (arr[4].is_string()) their_claim_address = arr[4].get<std::string>();
+                if (arr[5].is_number()) timeout_blocks = arr[5].get<uint32_t>();
+                if (arr.size() >= 7 && arr[6].is_string()) their_chain = arr[6].get<std::string>();
+                if (arr.size() >= 8 && arr[7].is_number()) receive_amount_dbl = arr[7].get<double>();
+            }
+        } catch (const nlohmann::json::parse_error&) {}
+    }
+
+    if (hash_lock_hex.empty()) {
+        auto parse_str = [&](const std::string& key, std::string& out) {
+            size_t p = params.find("\"" + key + "\"");
+            if (p == std::string::npos) return;
+            size_t colon = params.find(":", p);
+            size_t q1 = params.find("\"", colon);
+            size_t q2 = params.find("\"", q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos)
+                out = params.substr(q1 + 1, q2 - q1 - 1);
+        };
+        auto parse_dbl = [&](const std::string& key, double& out) {
+            size_t p = params.find("\"" + key + "\"");
+            if (p == std::string::npos) return;
+            size_t colon = params.find(":", p);
+            size_t ns = colon + 1;
+            while (ns < params.size() && isspace(params[ns])) ns++;
+            size_t ne = ns;
+            while (ne < params.size() && (isdigit(params[ne]) || params[ne] == '.')) ne++;
+            if (ne > ns) out = SafeParseDouble(params.substr(ns, ne - ns), 0.0, 21000000.0);
+        };
+        auto parse_uint = [&](const std::string& key, uint32_t& out) {
+            size_t p = params.find("\"" + key + "\"");
+            if (p == std::string::npos) return;
+            size_t colon = params.find(":", p);
+            size_t ns = colon + 1;
+            while (ns < params.size() && isspace(params[ns])) ns++;
+            size_t ne = ns;
+            while (ne < params.size() && isdigit(params[ne])) ne++;
+            if (ne > ns) out = SafeParseUInt32(params.substr(ns, ne - ns), 0, UINT32_MAX);
+        };
+        parse_str("hash_lock", hash_lock_hex);
+        parse_dbl("amount", amount_dbl);
+        parse_str("their_htlc_txid", their_htlc_txid);
+        parse_uint("their_htlc_vout", their_htlc_vout);
+        parse_str("their_claim_address", their_claim_address);
+        parse_uint("timeout_blocks", timeout_blocks);
+        parse_str("their_chain", their_chain);
+        parse_dbl("receive_amount", receive_amount_dbl);
+    }
+
+    if (hash_lock_hex.empty())       throw std::runtime_error("Missing hash_lock");
+    if (amount_dbl <= 0)             throw std::runtime_error("Missing or invalid amount");
+    if (their_htlc_txid.empty())     throw std::runtime_error("Missing their_htlc_txid");
+    if (their_claim_address.empty()) throw std::runtime_error("Missing their_claim_address");
+    if (timeout_blocks < 10)         throw std::runtime_error("timeout_blocks must be >= 10");
+
+    // Parse hash_lock
+    std::vector<uint8_t> hash_lock = ParseHex(hash_lock_hex);
+    if (hash_lock.size() != 32) {
+        throw std::runtime_error("hash_lock must be 64 hex characters (32 bytes)");
+    }
+
+    CAmount amount = static_cast<CAmount>(amount_dbl * 100000000);
+    if (amount <= 0) throw std::runtime_error("amount must be positive");
+    if (amount < DUST_THRESHOLD) throw std::runtime_error("amount below dust threshold");
+
+    // Validate their_claim_address
+    CDilithiumAddress claim_addr;
+    if (!ValidateAddress(their_claim_address, claim_addr)) {
+        throw std::runtime_error("Invalid their_claim_address: " + their_claim_address);
+    }
+    std::vector<uint8_t> claim_pubkey_hash = CWallet::GetPubKeyHashFromAddress(claim_addr);
+    if (claim_pubkey_hash.size() != 20) {
+        throw std::runtime_error("Failed to extract pubkey hash from their_claim_address");
+    }
+
+    // Our refund address
+    std::vector<uint8_t> refund_pubkey_hash = m_wallet->GetPubKeyHash();
+    if (refund_pubkey_hash.size() != 20) {
+        throw std::runtime_error("Failed to get wallet pubkey hash");
+    }
+    std::string our_refund_address;
+    {
+        std::vector<CDilithiumAddress> addrs = m_wallet->GetAddresses();
+        if (!addrs.empty()) our_refund_address = addrs[0].ToString();
+    }
+
+    // Build HTLC
+    uint32_t timeout_height = currentHeight + timeout_blocks;
+    HTLCParameters htlc_params;
+    htlc_params.hash_lock          = hash_lock;
+    htlc_params.claim_pubkey_hash  = claim_pubkey_hash;
+    htlc_params.refund_pubkey_hash = refund_pubkey_hash;
+    htlc_params.timeout_height     = timeout_height;
+
+    CScript htlc_script = CreateHTLCScript(htlc_params);
+    std::vector<uint8_t> scriptPubKey(htlc_script.begin(), htlc_script.end());
+
+    size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
+    CAmount fee = Consensus::CalculateMinFee(est_size);
+    CTransactionRef tx;
+    std::string error;
+    if (!m_wallet->CreateTransactionToScript(scriptPubKey, amount, fee, *m_utxo_set, currentHeight, 0, tx, error)) {
+        throw std::runtime_error("Failed to create HTLC transaction: " + error);
+    }
+    if (!m_wallet->SendTransaction(tx, *m_mempool, *m_utxo_set, currentHeight, error)) {
+        throw std::runtime_error("Failed to broadcast HTLC transaction: " + error);
+    }
+
+    std::string htlc_txid = tx->GetHash().GetHex();
+
+    // Generate a swap ID from hash_lock (first 8 bytes)
+    std::string swap_id = HexStr(std::vector<uint8_t>(hash_lock.begin(), hash_lock.begin() + 8));
+
+    // Persist swap state
+    int64_t now = static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+
+    SwapInfo swap;
+    swap.swap_id             = swap_id;
+    swap.role                = SwapRole::RESPONDER;
+    swap.state               = SwapState::HTLC_FUNDED;
+    swap.our_chain           = (Dilithion::g_chainParams->network == Dilithion::DILV) ? "dilv" : "dil";
+    swap.their_chain         = their_chain;
+    swap.our_amount          = amount;
+    swap.their_amount        = static_cast<CAmount>(receive_amount_dbl * 100000000);
+    swap.our_htlc_txid       = htlc_txid;
+    swap.their_htlc_txid     = their_htlc_txid;
+    swap.their_htlc_vout     = their_htlc_vout;
+    swap.our_timeout         = timeout_height;
+    swap.their_timeout       = 0;
+    swap.hash_lock           = hash_lock;
+    swap.our_refund_address  = our_refund_address;
+    swap.their_claim_address = their_claim_address;
+    swap.created_at          = now;
+
+    m_swapStore.AddSwap(swap);
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"swap_id\":\"" << swap_id << "\",";
+    oss << "\"htlc_txid\":\"" << htlc_txid << "\",";
+    oss << "\"timeout_height\":" << timeout_height << ",";
+    oss << "\"amount\":" << FormatAmount(amount);
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ListSwaps(const std::string& params) {
+    // Optional: filter by state name
+    // {"state":"htlc_funded"} or [] or {}
+    int state_filter = -1;
+
+    size_t p = params.find("\"state\"");
+    if (p != std::string::npos) {
+        size_t colon = params.find(":", p);
+        size_t q1 = params.find("\"", colon);
+        size_t q2 = params.find("\"", q1 + 1);
+        if (q1 != std::string::npos && q2 != std::string::npos) {
+            std::string state_str = params.substr(q1 + 1, q2 - q1 - 1);
+            SwapState s = ParseSwapState(state_str);
+            state_filter = static_cast<int>(s);
+        }
+    }
+
+    std::vector<SwapInfo> swaps = m_swapStore.ListSwaps(state_filter);
+
+    std::ostringstream oss;
+    oss << "{\"swaps\":[";
+    for (size_t i = 0; i < swaps.size(); i++) {
+        if (i > 0) oss << ",";
+        oss << FormatSwapInfo(swaps[i], "");
+    }
+    oss << "],\"count\":" << swaps.size() << "}";
+    return oss.str();
 }

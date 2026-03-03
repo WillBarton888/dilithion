@@ -27,7 +27,7 @@ static const char* NETWORK_ID = "dilv:mainnet";
 static const char* ASSET_ID = "DILV";  // Native coin
 
 // Payment tiers for Verified Mempool Acceptance
-static const int64_t MICROPAYMENT_THRESHOLD = 100000000;  // 1 DilV (in ions)
+static const int64_t MICROPAYMENT_THRESHOLD = 100000000;  // 1 DilV (in volts)
 
 /**
  * ResourceInfo — describes the resource being purchased
@@ -45,7 +45,7 @@ struct PaymentOption {
     std::string scheme;      // "exact" (fixed amount)
     std::string network;     // "dilv:mainnet"
     std::string asset;       // "DILV"
-    int64_t amount;          // Amount in ions (1 DilV = 100,000,000 ions)
+    int64_t amount;          // Amount in volts (1 DilV = 100,000,000 volts)
     std::string recipient;   // DilV address (Base58Check)
     int64_t timeout;         // Payment validity window (seconds)
 };
@@ -97,7 +97,7 @@ struct VerifyResult {
     bool valid;              // Payment is valid
     std::string reason;      // Human-readable reason (if invalid)
     std::string payerAddress;// Payer's DilV address
-    int64_t amount;          // Verified amount (ions)
+    int64_t amount;          // Verified amount (volts)
 
     std::string ToJSON() const;
 };

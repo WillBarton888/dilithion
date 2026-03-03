@@ -240,8 +240,8 @@ bool CVerifiedMempoolAcceptance::VerifyPaymentOutput(const CTransaction& tx,
     if (totalToRecipient < amount) {
         std::ostringstream oss;
         oss << "Insufficient payment: expected " << amount
-            << " ions to " << recipient
-            << ", found " << totalToRecipient << " ions";
+            << " volts to " << recipient
+            << ", found " << totalToRecipient << " volts";
         error = oss.str();
         return false;
     }

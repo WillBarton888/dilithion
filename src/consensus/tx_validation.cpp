@@ -4,6 +4,8 @@
 #include <consensus/tx_validation.h>
 #include <consensus/fees.h>
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch sig verification
+#include <script/script.h>
+#include <script/interpreter.h>
 #include <crypto/sha3.h>
 #include <core/chainparams.h>
 #include <util/time.h>  // P3-C1: For GetTime() in locktime validation
@@ -225,6 +227,51 @@ bool CTransactionValidator::CheckTransactionInputs(const CTransaction& tx, CUTXO
         }
     }
 
+    // BIP-68: Relative locktime enforcement (requires tx version >= 2)
+    // Each input's nSequence can encode a relative lock:
+    //   Bit 31 (disable): If set, no relative lock enforced for this input
+    //   Bit 22 (type):    If set, time-based (units of 512s); otherwise block-based
+    //   Bits 0-15 (value): Lock duration (blocks or 512-second intervals)
+    if (tx.nVersion >= 2) {
+        for (size_t i = 0; i < tx.vin.size(); ++i) {
+            uint32_t nSequence = tx.vin[i].nSequence;
+
+            // Bit 31 set = disable relative locktime for this input
+            if (nSequence & (1U << 31))
+                continue;
+
+            // Look up the UTXO to get its creation height
+            CUTXOEntry entry;
+            if (!utxoSet.GetUTXO(tx.vin[i].prevout, entry)) {
+                continue;  // Will be caught by later validation
+            }
+
+            static const uint32_t SEQUENCE_LOCKTIME_TYPE_FLAG = (1U << 22);
+            static const uint32_t SEQUENCE_LOCKTIME_MASK = 0x0000ffff;
+
+            uint32_t requiredValue = nSequence & SEQUENCE_LOCKTIME_MASK;
+
+            if (nSequence & SEQUENCE_LOCKTIME_TYPE_FLAG) {
+                // Time-based: units of 512 seconds
+                // Not yet fully supported (requires MTP tracking per UTXO)
+                // For now, block-based relative locks are the primary use case
+                // Time-based locks will be added when UTXO creation timestamps are tracked
+            } else {
+                // Block-based: must have waited N blocks since UTXO was created
+                uint32_t heightDiff = currentHeight - entry.nHeight;
+                if (heightDiff < requiredValue) {
+                    char buf[256];
+                    snprintf(buf, sizeof(buf),
+                             "BIP-68 relative locktime not satisfied for input %zu "
+                             "(need %u blocks, have %u)",
+                             i, requiredValue, heightDiff);
+                    error = buf;
+                    return false;
+                }
+            }
+        }
+    }
+
     // Check coinbase maturity
     if (!CheckCoinbaseMaturity(tx, utxoSet, currentHeight, error)) {
         return false;
@@ -279,14 +326,6 @@ bool CTransactionValidator::CheckTransactionInputs(const CTransaction& tx, CUTXO
 // Script Verification (Full Dilithium Signature Verification)
 // ============================================================================
 
-// Dilithium3 external API
-extern "C" {
-    int pqcrystals_dilithium3_ref_verify(const uint8_t *sig, size_t siglen,
-                                         const uint8_t *m, size_t mlen,
-                                         const uint8_t *ctx, size_t ctxlen,
-                                         const uint8_t *pk);
-}
-
 bool CTransactionValidator::VerifyScript(const CTransaction& tx,
                                           size_t inputIdx,
                                           const std::vector<uint8_t>& scriptSig,
@@ -294,353 +333,70 @@ bool CTransactionValidator::VerifyScript(const CTransaction& tx,
                                           std::string& error) const
 {
     // ========================================================================
-    // 1. Validate P2PKH scriptPubKey structure
-    // ========================================================================
-    // P2PKH scriptPubKey format: OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
-    // Standard size: 1 + 1 + 1 + 20 + 1 + 1 = 25 bytes
-    // But Dilithium uses SHA3-256, so hash is 32 bytes: 1 + 1 + 1 + 32 + 1 + 1 = 37 bytes
-
-    // SCRIPT-001 FIX: Safe bounds checking for scriptPubKey validation
-    // Check size first, then validate opcodes separately to avoid out-of-bounds access
-
-    // SCRIPT-011 FIX: Comprehensive scriptPubKey size validation
-    // Reject scripts that are too small, too large, or unexpected sizes
-    if (scriptPubKey.size() < 25) {
-        error = "scriptPubKey too small (minimum 25 bytes for P2PKH)";
-        return false;
-    }
-    if (scriptPubKey.size() > 10000) {
-        error = "scriptPubKey too large (DoS protection)";
-        return false;
-    }
-    // Only accept 25-byte P2PKH
-    if (scriptPubKey.size() != 25) {
-        error = "scriptPubKey must be 25 bytes (P2PKH)";
-        return false;
-    }
-
-    // Validate P2PKH: OP_DUP OP_HASH160 <20> <hash20> OP_EQUALVERIFY OP_CHECKSIG
-    if (scriptPubKey[0] != 0x76 || scriptPubKey[1] != 0xa9 || scriptPubKey[2] != 0x14 ||
-        scriptPubKey[23] != 0x88 || scriptPubKey[24] != 0xac) {
-        error = "Invalid P2PKH script format";
-        return false;
-    }
-
-    // ========================================================================
-    // 2. Parse scriptSig to extract signature and public key
-    // ========================================================================
-    // scriptSig format: [sig_size(2)] [signature] [pubkey_size(2)] [pubkey]
-
-    // Expected size: 2 + DILITHIUM3_SIG_SIZE + 2 + DILITHIUM3_PK_SIZE = 5265 bytes
-    const size_t DILITHIUM3_SIG_SIZE = 3309;
-    const size_t DILITHIUM3_PK_SIZE = 1952;
-    const size_t EXPECTED_SCRIPTSIG_SIZE = 2 + DILITHIUM3_SIG_SIZE + 2 + DILITHIUM3_PK_SIZE;
-
-    // SCRIPT-012 FIX: Maximum scriptSig size check (DoS protection)
-    // Reject oversized scriptSig immediately to prevent memory exhaustion attacks.
-    // Maximum reasonable size is 10KB (expected is 5265 bytes).
-    // This prevents attackers from submitting transactions with multi-megabyte scriptSig.
-    if (scriptSig.size() > 10000) {
-        error = "scriptSig exceeds maximum size (10000 bytes, DoS protection)";
-        return false;
-    }
-
-    if (scriptSig.size() != EXPECTED_SCRIPTSIG_SIZE) {
-        char buf[256];
-        snprintf(buf, sizeof(buf), "scriptSig must be exactly %zu bytes, got %zu",
-                 EXPECTED_SCRIPTSIG_SIZE, scriptSig.size());
-        error = buf;
-        return false;
-    }
-
-    // Extract signature size (little-endian 16-bit)
-    size_t pos = 0;
-    uint16_t sig_size = scriptSig[pos] | (scriptSig[pos + 1] << 8);
-    pos += 2;
-
-    // Validate signature size
-    if (sig_size != DILITHIUM3_SIG_SIZE) {
-        char buf[256];
-        snprintf(buf, sizeof(buf), "Invalid Dilithium3 signature size: %u (expected %zu)",
-                 sig_size, DILITHIUM3_SIG_SIZE);
-        error = buf;
-        return false;
-    }
-
-    // Ensure we have enough data for signature
-    if (pos + sig_size + 2 > scriptSig.size()) {
-        error = "scriptSig too short for signature data";
-        return false;
-    }
-
-    // Extract signature
-    std::vector<uint8_t> signature(scriptSig.begin() + pos, scriptSig.begin() + pos + sig_size);
-    pos += sig_size;
-
-    // SCRIPT-005 FIX: Basic signature malleability check
-    // Check for obviously malformed signatures (all zeros, all ones)
-    // Full canonical signature validation would require understanding Dilithium3 signature format
-    bool sigAllZeros = true;
-    bool sigAllOnes = true;
-    for (size_t i = 0; i < signature.size() && (sigAllZeros || sigAllOnes); ++i) {
-        if (signature[i] != 0x00) sigAllZeros = false;
-        if (signature[i] != 0xFF) sigAllOnes = false;
-    }
-
-    if (sigAllZeros) {
-        error = "Dilithium3 signature cannot be all zeros (malleability check)";
-        return false;
-    }
-
-    if (sigAllOnes) {
-        error = "Dilithium3 signature cannot be all ones (malleability check)";
-        return false;
-    }
-
-    // NOTE: Full signature canonicalization requires:
-    // - Dilithium3 signatures have (z, h, c) components
-    // - z: polynomial vector with coefficients in [-gamma1, gamma1]
-    // - h: hint bits indicating positions
-    // - c: challenge hash
-    // - Must verify z coefficients are in canonical range (not gamma1+1, etc.)
-    // - Must verify hint bits h are minimally encoded
-    // - This requires access to Dilithium3 signature internals
-    // - Consider implementing pqcrystals_dilithium3_ref_signature_is_canonical() check
-
-    // Extract public key size (little-endian 16-bit)
-    uint16_t pk_size = scriptSig[pos] | (scriptSig[pos + 1] << 8);
-    pos += 2;
-
-    // Validate public key size
-    if (pk_size != DILITHIUM3_PK_SIZE) {
-        char buf[256];
-        snprintf(buf, sizeof(buf), "Invalid Dilithium3 public key size: %u (expected %zu)",
-                 pk_size, DILITHIUM3_PK_SIZE);
-        error = buf;
-        return false;
-    }
-
-    // Ensure we have enough data for public key
-    if (pos + pk_size != scriptSig.size()) {
-        error = "scriptSig size mismatch (extra or missing data)";
-        return false;
-    }
-
-    // Extract public key
-    std::vector<uint8_t> pubkey(scriptSig.begin() + pos, scriptSig.begin() + pos + pk_size);
-
-    // SCRIPT-004 FIX: Validate Dilithium3 public key structure
-    // Check for obviously invalid keys (all zeros, all ones, etc.)
-    // Full cryptographic validation would require Dilithium3 library internals
-    bool allZeros = true;
-    bool allOnes = true;
-    for (size_t i = 0; i < pubkey.size() && (allZeros || allOnes); ++i) {
-        if (pubkey[i] != 0x00) allZeros = false;
-        if (pubkey[i] != 0xFF) allOnes = false;
-    }
-
-    if (allZeros) {
-        error = "Dilithium3 public key cannot be all zeros";
-        return false;
-    }
-
-    if (allOnes) {
-        error = "Dilithium3 public key cannot be all ones";
-        return false;
-    }
-
-    // Note: Full structural validation of Dilithium3 public key would require:
-    // - Validating rho (seed) component
-    // - Validating t1 (polynomial vector) component
-    // - Checking polynomial coefficients are in valid range
-    // - Verifying packing format matches specification
-    // This requires access to Dilithium3 internals or a dedicated validation API
-
-    // ========================================================================
-    // 3. Verify public key hash matches scriptPubKey
+    // Script Interpreter-Based Verification (Phase 6)
+    //
+    // Replaces the previous hardcoded P2PKH validation with a general-purpose
+    // Bitcoin-compatible script interpreter. The interpreter evaluates the same
+    // P2PKH opcodes (OP_DUP, OP_HASH160, OP_EQUALVERIFY, OP_CHECKSIG) via a
+    // stack machine, and also supports HTLC, multisig, and other script types
+    // when scriptV2 is activated.
+    //
+    // SIGNATURE MESSAGE (44 bytes):
+    //   tx_signing_hash(32) + input_idx(4) + version(4) + chain_id(4)
+    //   Hashed with SHA3-256 before Dilithium3 verification.
+    //
+    // SECURITY: Chain ID prevents cross-chain replay (EIP-155 style).
+    //           Input index prevents cross-input replay.
+    //           Version field prevents cross-version replay.
     // ========================================================================
 
-    // SCRIPT-006 FIX: Validate pubkey data before hashing
-    if (pubkey.data() == nullptr || pubkey.empty()) {
-        error = "Internal error: public key data is null or empty";
+    // DoS protection: reject oversized scripts
+    if (scriptPubKey.size() > MAX_SCRIPT_SIZE) {
+        error = "scriptPubKey exceeds maximum size (DoS protection)";
+        return false;
+    }
+    if (scriptSig.size() > MAX_SCRIPT_SIZE) {
+        error = "scriptSig exceeds maximum size (DoS protection)";
         return false;
     }
 
-    // BUG #75 FIX: Hash the public key with DOUBLE SHA3-256 (matches wallet HashPubKey)
-    // The wallet uses: SHA3_256(SHA3_256(pubkey))[0:20]
-    // This must match for signature verification to succeed
-    uint8_t hash1[32];
-    SHA3_256(pubkey.data(), pubkey.size(), hash1);
-    uint8_t computed_hash[32];
-    SHA3_256(hash1, 32, computed_hash);
+    // Build CScript for scriptPubKey (already in opcode format)
+    CScript pubkey(scriptPubKey.begin(), scriptPubKey.end());
 
-    // Extract expected 20-byte hash from scriptPubKey (starts at byte 3)
-    const uint8_t* expected_hash = scriptPubKey.data() + 3;
+    // Build CScript for scriptSig, converting legacy format if needed
+    // Legacy format: [2-byte LE sig_size][sig(3309)][2-byte LE pk_size][pk(1952)] = 5265 bytes
+    // New format: [OP_PUSHDATA2][size LE][sig][OP_PUSHDATA2][size LE][pk] = 5267 bytes
+    CScript sig;
+    if (IsLegacyScriptSig(scriptSig)) {
+        // Convert legacy 2-byte-LE-prefix format to Bitcoin-standard push opcodes
+        sig.push_back(OP_PUSHDATA2);
+        sig.push_back(static_cast<uint8_t>(DILITHIUM3_SIG_SIZE & 0xff));
+        sig.push_back(static_cast<uint8_t>((DILITHIUM3_SIG_SIZE >> 8) & 0xff));
+        sig.insert(sig.end(),
+                   scriptSig.begin() + 2,
+                   scriptSig.begin() + 2 + DILITHIUM3_SIG_SIZE);
 
-    // Compare first 20 bytes of computed hash
-    if (memcmp(computed_hash, expected_hash, 20) != 0) {
-        error = "Public key hash does not match scriptPubKey";
-        return false;
+        sig.push_back(OP_PUSHDATA2);
+        sig.push_back(static_cast<uint8_t>(DILITHIUM3_PK_SIZE & 0xff));
+        sig.push_back(static_cast<uint8_t>((DILITHIUM3_PK_SIZE >> 8) & 0xff));
+        sig.insert(sig.end(),
+                   scriptSig.begin() + 2 + DILITHIUM3_SIG_SIZE + 2,
+                   scriptSig.end());
+    } else {
+        // Already in push-opcode format (new transactions)
+        sig.assign(scriptSig.begin(), scriptSig.end());
     }
 
-    // ========================================================================
-    // 4. Construct signature message (same as signing)
-    // ========================================================================
-    //
-    // SCRIPT-013: SIGNATURE COVERAGE DOCUMENTATION
-    //
-    // This section documents what transaction data is covered by the Dilithium3
-    // signature and the security implications of the signature scheme.
-    //
-    // SIGNATURE MESSAGE COMPONENTS (40 bytes total):
-    // ┌────────────────────┬──────────────────────────────────────────────┐
-    // │ Field              │ Size  │ Coverage                               │
-    // ├────────────────────┼───────┼────────────────────────────────────────┤
-    // │ Transaction Hash   │ 32 B  │ Covers ALL tx data (inputs, outputs,   │
-    // │                    │       │ version, locktime) via SHA3-256        │
-    // ├────────────────────┼───────┼────────────────────────────────────────┤
-    // │ Input Index        │  4 B  │ Binds signature to specific input      │
-    // │                    │       │ (prevents cross-input replay)          │
-    // ├────────────────────┼───────┼────────────────────────────────────────┤
-    // │ Transaction Version│  4 B  │ Prevents signature reuse across        │
-    // │                    │       │ different tx versions (upgrade safety) │
-    // └────────────────────┴───────┴────────────────────────────────────────┘
-    //
-    // WHAT IS COVERED (via transaction hash):
-    // ✓ All transaction inputs (prevout hash, index, sequence)
-    // ✓ All transaction outputs (value, scriptPubKey)
-    // ✓ Transaction version (nVersion)
-    // ✓ Transaction locktime (nLockTime)
-    // ✓ All scriptSig data (signatures and public keys of all inputs)
-    //
-    // WHAT IS NOT COVERED:
-    // ✗ Block height or timestamp (signature is block-independent)
-    // ✗ Block hash (signature can be included in any valid block)
-    // ✗ Mempool state (signature doesn't commit to ordering)
-    //
-    // SECURITY PROPERTIES:
-    // 1. **Non-malleability**: Transaction hash includes all scriptSig data,
-    //    so signature cannot be modified without invalidating the hash.
-    //
-    // 2. **Input binding**: Input index prevents signature from being replayed
-    //    to spend different inputs in the same transaction.
-    //
-    // 3. **Version isolation**: Transaction version prevents signatures from
-    //    being reused if transaction format changes in future versions.
-    //
-    // 4. **SIGHASH_ALL semantics**: This signature scheme is equivalent to
-    //    Bitcoin's SIGHASH_ALL - signs all inputs and outputs. No support for
-    //    partial signing (SIGHASH_SINGLE, SIGHASH_ANYONECANPAY) currently.
-    //
-    // ATTACK MITIGATIONS:
-    // - Signature replay attack: PREVENTED by input index binding
-    // - Transaction malleability: PREVENTED by signing complete tx hash
-    // - Cross-version attacks: PREVENTED by including tx version
-    // - Cross-chain replay: PREVENTED by including chain ID (EIP-155 style)
-    //
-    // FUTURE CONSIDERATIONS:
-    // - Support for partial signatures (SIGHASH flags) if needed
-    // - Consider block height commitment for time-locked transactions
-    // - Additional chain parameters if multiple forks emerge
-    //
-    // ========================================================================
+    // Construct signature checker with chain ID for cross-chain replay protection
+    uint32_t chain_id = Dilithion::g_chainParams ? Dilithion::g_chainParams->chainID : 1;
+    TransactionSignatureChecker checker(tx, static_cast<unsigned int>(inputIdx), chain_id);
 
-    // BUG #86 FIX: Use GetSigningHash() which excludes scriptSig
-    // This ensures verification uses the same hash that was used during signing
-    uint256 tx_hash = tx.GetSigningHash();
+    // Verification flags
+    unsigned int flags = SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY
+                       | SCRIPT_VERIFY_CHECKSEQUENCEVERIFY;
 
-    // SCRIPT-007 FIX: Transaction hash validation
-    // uint256 is guaranteed to be 32 bytes by its class definition (uint8_t data[32])
-    // This ensures signature message construction uses the correct hash size
-
-    // VULN-003 FIX: Canonical signature message construction
-    // CHAIN-ID FIX: Added chain ID to prevent cross-chain replay attacks
-    // Create signature message: tx_hash + input_index + tx_version + chain_id
-    // - tx_version prevents cross-version signature reuse
-    // - chain_id prevents cross-chain replay (mainnet <-> testnet)
-    std::vector<uint8_t> sig_message;
-    sig_message.reserve(32 + 4 + 4 + 4);  // hash + index + version + chainID
-
-    sig_message.insert(sig_message.end(), tx_hash.begin(), tx_hash.end());
-
-    // SCRIPT-002 FIX: Validate inputIdx before casting to prevent integer truncation
-    // Prevents signature replay across inputs when index exceeds uint32_t range
-    if (inputIdx > UINT32_MAX) {
-        error = "Input index exceeds maximum (uint32_t overflow)";
-        return false;
-    }
-
-    // Add input index (4 bytes, little-endian)
-    uint32_t input_idx = static_cast<uint32_t>(inputIdx);
-    sig_message.push_back(static_cast<uint8_t>(input_idx & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((input_idx >> 8) & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((input_idx >> 16) & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((input_idx >> 24) & 0xFF));
-
-    // SCRIPT-009 FIX: Validate transaction version before using in signature context
-    // Context data validation ensures all signature message components are valid.
-    // Version 0 is invalid, and version must be within consensus range (1-255).
-    // This prevents malformed transactions from being used in signature verification.
-    if (tx.nVersion == 0 || tx.nVersion > 255) {
-        error = "Invalid transaction version in signature context";
-        return false;
-    }
-
-    // VULN-003 FIX: Add transaction version to prevent signature replay across versions
-    uint32_t version = tx.nVersion;
-    sig_message.push_back(static_cast<uint8_t>(version & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((version >> 8) & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((version >> 16) & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((version >> 24) & 0xFF));
-
-    // CHAIN-ID FIX: Add chain ID to prevent cross-chain replay attacks (EIP-155 style)
-    // This prevents transactions signed on testnet from being replayed on mainnet and vice versa.
-    // Mainnet Chain ID = 1, Testnet Chain ID = 1001
-    if (Dilithion::g_chainParams == nullptr) {
-        error = "Internal error: Chain parameters not initialized";
-        return false;
-    }
-    uint32_t chain_id = Dilithion::g_chainParams->chainID;
-    sig_message.push_back(static_cast<uint8_t>(chain_id & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((chain_id >> 8) & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((chain_id >> 16) & 0xFF));
-    sig_message.push_back(static_cast<uint8_t>((chain_id >> 24) & 0xFF));
-
-    // VULN-003 FIX: Validate message construction
-    // CHAIN-ID FIX: Updated from 40 to 44 bytes (added 4-byte chain ID)
-    if (sig_message.size() != 44) {  // 32 (hash) + 4 (index) + 4 (version) + 4 (chainID)
-        error = "Internal error: Invalid signature message size";
-        return false;
-    }
-
-    // SCRIPT-006 FIX: Validate sig_message data before hashing
-    if (sig_message.data() == nullptr || sig_message.empty()) {
-        error = "Internal error: signature message data is null or empty";
-        return false;
-    }
-
-    // Hash the signature message with SHA3-256
-    uint8_t sig_hash[32];
-    SHA3_256(sig_message.data(), sig_message.size(), sig_hash);
-
-    // ========================================================================
-    // 5. Verify Dilithium3 signature
-    // ========================================================================
-
-    int verify_result = pqcrystals_dilithium3_ref_verify(
-        signature.data(), signature.size(),  // Signature
-        sig_hash, 32,                        // Message (signature hash)
-        nullptr, 0,                          // No context
-        pubkey.data()                        // Public key
-    );
-
-    if (verify_result != 0) {
-        error = "Dilithium signature verification failed";
-        return false;
-    }
-
-    // Success! Signature is cryptographically valid
-    return true;
+    // Evaluate scripts through the interpreter
+    return ::VerifyScript(sig, pubkey, flags, checker, error);
 }
 
 // ============================================================================
@@ -672,9 +428,38 @@ bool CTransactionValidator::CheckTransaction(const CTransaction& tx, CUTXOSet& u
             return false;
         }
 
+        // Script V2 activation check: before activation height, only P2PKH is allowed.
+        // The interpreter handles all scripts, but new types are gated by this check.
+        if (Dilithion::g_chainParams &&
+            static_cast<int>(currentHeight) < Dilithion::g_chainParams->scriptV2ActivationHeight) {
+            for (size_t i = 0; i < tx.vout.size(); ++i) {
+                CScript spk(tx.vout[i].scriptPubKey.begin(), tx.vout[i].scriptPubKey.end());
+                if (!spk.IsPayToPublicKeyHash() && !spk.IsUnspendable()) {
+                    error = "Non-P2PKH scripts not activated until height " +
+                            std::to_string(Dilithion::g_chainParams->scriptV2ActivationHeight);
+                    return false;
+                }
+            }
+        }
+
         // Phase 3.2: Use batch verification for multi-input transactions
-        // Batch verification provides ~3-4x speedup by verifying signatures in parallel
-        bool use_batch = g_signature_verifier != nullptr &&
+        // Batch verification provides ~3-4x speedup by verifying signatures in parallel.
+        // Only used when ALL inputs spend P2PKH UTXOs (legacy format).
+        // Non-P2PKH scripts (HTLC, etc.) fall through to sequential interpreter path.
+        bool all_p2pkh = true;
+        for (size_t i = 0; i < tx.vin.size(); ++i) {
+            CUTXOEntry entry;
+            if (utxoSet.GetUTXO(tx.vin[i].prevout, entry)) {
+                CScript spk(entry.out.scriptPubKey.begin(), entry.out.scriptPubKey.end());
+                if (!spk.IsPayToPublicKeyHash() || !IsLegacyScriptSig(tx.vin[i].scriptSig)) {
+                    all_p2pkh = false;
+                    break;
+                }
+            }
+        }
+
+        bool use_batch = all_p2pkh &&
+                         g_signature_verifier != nullptr &&
                          g_signature_verifier->IsRunning() &&
                          tx.vin.size() >= 2;
 
@@ -732,36 +517,38 @@ bool CTransactionValidator::IsStandardTransaction(const CTransaction& tx) const
         }
     }
 
-    // MEDIUM-C005 FIX: Accept both SHA3-256 (37 bytes) and legacy (25 bytes) P2PKH
-    // This aligns with VerifyScript() which accepts both formats for backward compatibility
+    // Script standardness check
+    // Post-scriptV2 activation: also accept HTLC, OP_RETURN, and other recognized types
+    bool scriptV2Active = Dilithion::g_chainParams &&
+                          Dilithion::g_chainParams->scriptV2ActivationHeight == 0;
+
     for (const auto& txout : tx.vout) {
+        CScript spk(txout.scriptPubKey.begin(), txout.scriptPubKey.end());
+
+        if (spk.IsPayToPublicKeyHash()) {
+            continue;  // Standard P2PKH (25 bytes)
+        }
+
+        if (spk.IsUnspendable()) {
+            continue;  // OP_RETURN is always standard
+        }
+
+        if (scriptV2Active && spk.IsHTLC()) {
+            continue;  // HTLC is standard post-activation
+        }
+
+        // Legacy 37-byte SHA3-256 P2PKH (backward compat)
         size_t scriptSize = txout.scriptPubKey.size();
-
-        // Accept both SHA3-256 P2PKH (37 bytes) and legacy P2PKH (25 bytes)
-        if (scriptSize != 37 && scriptSize != 25) {
-            return false;
+        if (scriptSize == 37 &&
+            txout.scriptPubKey[0] == 0x76 &&
+            txout.scriptPubKey[1] == 0xa9 &&
+            txout.scriptPubKey[2] == 0x20 &&
+            txout.scriptPubKey[35] == 0x88 &&
+            txout.scriptPubKey[36] == 0xac) {
+            continue;
         }
 
-        // Validate P2PKH structure based on size
-        if (scriptSize == 37) {
-            // SHA3-256 P2PKH: OP_DUP OP_HASH256 <32-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-            if (txout.scriptPubKey[0] != 0x76 ||  // OP_DUP
-                txout.scriptPubKey[1] != 0xa9 ||  // OP_HASH256 (SHA3-256)
-                txout.scriptPubKey[2] != 0x20 ||  // Push 32 bytes
-                txout.scriptPubKey[35] != 0x88 || // OP_EQUALVERIFY
-                txout.scriptPubKey[36] != 0xac) { // OP_CHECKSIG
-                return false;
-            }
-        } else {  // scriptSize == 25
-            // Legacy P2PKH: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-            if (txout.scriptPubKey[0] != 0x76 ||  // OP_DUP
-                txout.scriptPubKey[1] != 0xa9 ||  // OP_HASH160
-                txout.scriptPubKey[2] != 0x14 ||  // Push 20 bytes
-                txout.scriptPubKey[23] != 0x88 || // OP_EQUALVERIFY
-                txout.scriptPubKey[24] != 0xac) { // OP_CHECKSIG
-                return false;
-            }
-        }
+        return false;  // Non-standard script type
     }
 
     return true;

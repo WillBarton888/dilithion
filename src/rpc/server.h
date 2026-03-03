@@ -17,6 +17,7 @@
 // Forward declaration for x402 facilitator
 namespace x402 { class CFacilitator; }
 #include <digital_dna/digital_dna_rpc.h>
+#include <script/atomic_swap.h>
 
 #include <string>
 #include <sstream>
@@ -141,6 +142,12 @@ private:
 
     // Network configuration
     bool m_testnet{false};
+
+    // Data directory (for swap state persistence)
+    std::string m_dataDir;
+
+    // Atomic swap state store
+    SwapStore m_swapStore;
 
     // Persistent total blocks mined counter (loaded from file, survives restarts)
     std::atomic<uint64_t> m_totalBlocksMined{0};
@@ -354,6 +361,18 @@ private:
     std::string RPC_ScanBlockDB(const std::string& params);
     std::string RPC_RequestBlocks(const std::string& params);
 
+    // HTLC (Hash Time-Locked Contract) methods
+    std::string RPC_GeneratePreimage(const std::string& params);
+    std::string RPC_CreateHTLC(const std::string& params);
+    std::string RPC_ClaimHTLC(const std::string& params);
+    std::string RPC_RefundHTLC(const std::string& params);
+    std::string RPC_DecodeHTLC(const std::string& params);
+
+    // Atomic swap orchestration (high-level)
+    std::string RPC_InitiateSwap(const std::string& params);
+    std::string RPC_AcceptSwap(const std::string& params);
+    std::string RPC_ListSwaps(const std::string& params);
+
     // Helper functions
     std::string FormatAmount(CAmount amount) const;
     bool ValidateAddress(const std::string& addressStr, CDilithiumAddress& addressOut) const;
@@ -414,6 +433,13 @@ public:
      * Set testnet mode
      */
     void SetTestnet(bool testnet) { m_testnet = testnet; }
+
+    /**
+     * Set data directory (for swap state persistence).
+     * Must be called before Start().
+     */
+    void SetDataDir(const std::string& dataDir);
+
 
     /** Set total blocks mined (loaded from persistent file on startup) */
     void SetTotalBlocksMined(uint64_t count) { m_totalBlocksMined.store(count); }

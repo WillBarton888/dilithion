@@ -253,6 +253,11 @@ X402_SOURCES := src/x402/x402_types.cpp \
                 src/x402/vma.cpp \
                 src/x402/facilitator.cpp
 
+# Script system (Bitcoin-compatible script interpreter + HTLC + atomic swaps)
+SCRIPT_SOURCES := src/script/interpreter.cpp \
+                  src/script/htlc.cpp \
+                  src/script/atomic_swap.cpp
+
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp \
                   src/wallet/passphrase_validator.cpp \
@@ -291,6 +296,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(RPC_SOURCES) \
                 $(API_SOURCES) \
                 $(X402_SOURCES) \
+                $(SCRIPT_SOURCES) \
                 $(UTIL_SOURCES) \
                 $(WALLET_SOURCES)
 

@@ -113,6 +113,9 @@ ChainParams ChainParams::Mainnet() {
     params.vdfLotteryGracePeriod = 60;  // 60 seconds
     params.vdfMinBlockTime = 180;       // 3 minutes: ensures all miners finish VDF
 
+    // Script V2 (HTLC, multisig, etc.): disabled until fork is scheduled
+    params.scriptV2ActivationHeight = 999999999;
+
     params.digitalDnaActivationHeight = 999999999;  // Disabled until fork is scheduled
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
@@ -248,6 +251,9 @@ ChainParams ChainParams::Testnet() {
     params.vdfLotteryGracePeriod = 30;  // 30 seconds (faster for testing)
     params.vdfMinBlockTime = 25;        // 25 seconds minimum between blocks
 
+    // Script V2 (HTLC, multisig, etc.): active from genesis on testnet
+    params.scriptV2ActivationHeight = 0;
+
     params.digitalDnaActivationHeight = 1;    // Active from near-genesis for testing
 
     // TESTNET: Checkpoints for IBD optimization
@@ -310,7 +316,7 @@ ChainParams ChainParams::DilV() {
     params.maxBlockSize = 4 * 1024 * 1024;     // 4 MB (same as DIL — room for Dilithium signatures)
 
     // Mining parameters
-    params.initialReward = 100ULL * 100000000ULL; // 100 DilV per block (in ions)
+    params.initialReward = 100ULL * 100000000ULL; // 100 DilV per block (in volts: 1 DilV = 100,000,000 volts)
 
     // VDF chain: no RandomX minimum difficulty blocks
     params.fPowAllowMinDifficultyBlocks = false;
@@ -350,6 +356,9 @@ ChainParams ChainParams::DilV() {
     params.vdfLotteryActivationHeight = 0;
     params.vdfLotteryGracePeriod = 12;         // 12 seconds for slower miners to submit
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
+
+    // Script V2 (HTLC, multisig, etc.): active from genesis on DilV
+    params.scriptV2ActivationHeight = 0;
 
     // Digital DNA: active from genesis
     params.digitalDnaActivationHeight = 0;
