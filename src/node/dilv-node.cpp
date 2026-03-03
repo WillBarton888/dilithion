@@ -1192,8 +1192,8 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         std::cout << "[Mining] Coinbase outputs: " << coinbaseTx.vout.size()
                   << " (miner=" << minerAmount/100000000.0
                   << " DilV, devFund=" << devFundAmount/100000000.0
-                  << " DIL -> DJrywx..., devReward=" << devRewardAmount/100000000.0
-                  << " DIL -> DRne9y...)" << std::endl;
+                  << " DilV -> DJrywx..., devReward=" << devRewardAmount/100000000.0
+                  << " DilV -> DRne9y...)" << std::endl;
     }
 
     // Store coinbase transaction globally for callback access

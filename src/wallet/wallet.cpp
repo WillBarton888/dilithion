@@ -631,13 +631,14 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                                 snprintf(rewardStr, sizeof(rewardStr), "%.8f", rewardDIL);
                                 snprintf(balanceStr, sizeof(balanceStr), "%.8f", balanceDIL);
 
+                                const char* coinLabel = (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) ? "DilV" : "DIL";
                                 std::cout << "\n"
                                     << "============================================================\n"
                                     << "  MINING REWARD CREDITED!\n"
                                     << "============================================================\n"
                                     << "  Block Height:    " << height << "\n"
-                                    << "  Reward:          +" << rewardStr << " DIL\n"
-                                    << "  New Balance:     " << balanceStr << " DIL\n"
+                                    << "  Reward:          +" << rewardStr << " " << coinLabel << "\n"
+                                    << "  New Balance:     " << balanceStr << " " << coinLabel << "\n"
                                     << "  Address:         " << addr.ToString() << "\n"
                                     << "============================================================"
                                     << std::endl;
