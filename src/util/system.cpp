@@ -24,17 +24,17 @@
  */
 static std::string GetHomeDir() {
 #ifdef _WIN32
-    // Windows: Use USERPROFILE environment variable
+    // Windows: Use APPDATA (standard convention, matches Bitcoin Core)
+    // This gives C:\Users\<user>\AppData\Roaming — the correct place for app data on Windows
+    const char* appdata = std::getenv("APPDATA");
+    if (appdata) {
+        return std::string(appdata);
+    }
+
+    // Fallback: USERPROFILE
     const char* userprofile = std::getenv("USERPROFILE");
     if (userprofile) {
         return std::string(userprofile);
-    }
-
-    // Fallback: Use HOMEDRIVE + HOMEPATH
-    const char* homedrive = std::getenv("HOMEDRIVE");
-    const char* homepath = std::getenv("HOMEPATH");
-    if (homedrive && homepath) {
-        return std::string(homedrive) + std::string(homepath);
     }
 
     // Last resort: C:\Users\<username>
