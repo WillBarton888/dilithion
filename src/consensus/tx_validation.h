@@ -159,10 +159,14 @@ public:
      * - Scripts are standard types
      * - Transaction size is reasonable
      *
-     * @param tx The transaction to check
+     * @param tx            The transaction to check
+     * @param currentHeight Current chain height (used to check scriptV2ActivationHeight).
+     *                      Defaults to 0, which is conservative: only chains where
+     *                      scriptV2ActivationHeight == 0 (DilV, testnet) will accept HTLCs.
      * @return true if transaction is standard
      */
-    bool IsStandardTransaction(const CTransaction& tx) const;
+    bool IsStandardTransaction(const CTransaction& tx,
+                               unsigned int currentHeight = 0) const;
 
     /**
      * GetTransactionWeight

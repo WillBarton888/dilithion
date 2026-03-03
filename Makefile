@@ -402,7 +402,7 @@ dilv-genesis-vdf: $(CORE_OBJECTS) $(OBJ_DIR)/tools/dilv_genesis_vdf.o $(DILITHIU
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests test_passphrase_validator
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests test_passphrase_validator script_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
@@ -488,6 +488,11 @@ dfmp_mik_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/dfmp_mik_tests.o $(DILITHIUM_OBJ
 ipv6_smoke_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/ipv6_smoke_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+script_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/script_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ script_tests built successfully$(COLOR_RESET)"
 
 dna_serialization_test: $(CORE_OBJECTS) $(OBJ_DIR)/digital_dna/dna_serialization_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
@@ -642,6 +647,9 @@ test: tests test_dilithion asert_test
 	@echo "$(COLOR_YELLOW)Running ASERT difficulty tests...$(COLOR_RESET)"
 	@./asert_test
 	@echo ""
+	@echo "$(COLOR_YELLOW)Running Phase 6 script system tests...$(COLOR_RESET)"
+	@./script_tests
+	@echo ""
 	@echo "$(COLOR_GREEN)✓ All test suites complete$(COLOR_RESET)"
 
 # ============================================================================
@@ -665,13 +673,14 @@ $(OBJ_DIR)/api \
 $(OBJ_DIR)/vdf \
 $(OBJ_DIR)/chiavdf \
 $(OBJ_DIR)/digital_dna \
+$(OBJ_DIR)/script \
 $(OBJ_DIR)/tools \
 $(OBJ_DIR)/test \
 $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/tools $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/tools $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 

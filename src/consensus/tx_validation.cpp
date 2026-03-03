@@ -496,7 +496,8 @@ bool CTransactionValidator::CheckTransaction(const CTransaction& tx, CUTXOSet& u
 // Additional Validation Helpers
 // ============================================================================
 
-bool CTransactionValidator::IsStandardTransaction(const CTransaction& tx) const
+bool CTransactionValidator::IsStandardTransaction(const CTransaction& tx,
+                                                   unsigned int currentHeight) const
 {
     // Check transaction version (currently only version 1 is standard)
     if (tx.nVersion != 1) {
@@ -520,7 +521,8 @@ bool CTransactionValidator::IsStandardTransaction(const CTransaction& tx) const
     // Script standardness check
     // Post-scriptV2 activation: also accept HTLC, OP_RETURN, and other recognized types
     bool scriptV2Active = Dilithion::g_chainParams &&
-                          Dilithion::g_chainParams->scriptV2ActivationHeight == 0;
+                          (currentHeight >= static_cast<unsigned int>(
+                               Dilithion::g_chainParams->scriptV2ActivationHeight));
 
     for (const auto& txout : tx.vout) {
         CScript spk(txout.scriptPubKey.begin(), txout.scriptPubKey.end());
