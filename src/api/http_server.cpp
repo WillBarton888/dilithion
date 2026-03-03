@@ -282,8 +282,8 @@ void CHttpServer::HandleRequest(SOCKET client_socket) {
         return;
     }
 
-    // Handle REST API requests for light wallet (/api/v1/*)
-    if (path.rfind("/api/v1/", 0) == 0) {
+    // Handle REST API requests for light wallet (/api/v1/*) and x402 facilitator (/x402/*)
+    if (path.rfind("/api/v1/", 0) == 0 || path.rfind("/x402/", 0) == 0) {
         if (m_rest_api_handler) {
             try {
                 // Extract request body for POST requests
