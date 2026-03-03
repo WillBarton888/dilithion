@@ -249,6 +249,10 @@ RPC_SOURCES := src/rpc/server.cpp \
 API_SOURCES := src/api/http_server.cpp \
                src/api/cached_stats.cpp
 
+X402_SOURCES := src/x402/x402_types.cpp \
+                src/x402/vma.cpp \
+                src/x402/facilitator.cpp
+
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp \
                   src/wallet/passphrase_validator.cpp \
@@ -286,6 +290,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(PRIMITIVES_SOURCES) \
                 $(RPC_SOURCES) \
                 $(API_SOURCES) \
+                $(X402_SOURCES) \
                 $(UTIL_SOURCES) \
                 $(WALLET_SOURCES)
 

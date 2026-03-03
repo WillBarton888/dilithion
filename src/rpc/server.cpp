@@ -18,6 +18,7 @@
 #include <node/mempool.h>
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
+#include <x402/facilitator.h>  // x402 payment facilitator
 #include <consensus/params.h>
 #include <consensus/chain.h>
 #include <consensus/fees.h>
@@ -230,6 +231,11 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getrawtransaction"] = [this](const std::string& p) { return RPC_GetRawTransaction(p); };
     m_handlers["decoderawtransaction"] = [this](const std::string& p) { return RPC_DecodeRawTransaction(p); };
     m_handlers["addnode"] = [this](const std::string& p) { return RPC_AddNode(p); };
+
+    // x402 payment methods (DilV only)
+    m_handlers["verifyx402payment"] = [this](const std::string& p) { return RPC_VerifyX402Payment(p); };
+    m_handlers["settlex402payment"] = [this](const std::string& p) { return RPC_SettleX402Payment(p); };
+    m_handlers["getx402info"] = [this](const std::string& p) { return RPC_GetX402Info(p); };
 
     // Ban management
     m_handlers["setban"] = [this](const std::string& p) { return RPC_SetBan(p); };
@@ -5524,4 +5530,130 @@ std::string CRPCServer::RPC_RequestBlocks(const std::string& params) {
     oss << "]}";
 
     return oss.str();
+}
+
+// ============================================================================
+// x402 Payment Protocol RPC Methods
+// ============================================================================
+
+std::string CRPCServer::RPC_VerifyX402Payment(const std::string& params) {
+    if (!m_x402_facilitator) {
+        throw std::runtime_error("x402 facilitator not available (DilV only)");
+    }
+
+    // Parse params: {"rawTransaction":"hex", "recipient":"addr", "amount":ions}
+    std::string rawTx, recipient;
+    int64_t amount = 0;
+
+    // Extract rawTransaction
+    size_t pos = params.find("\"rawTransaction\"");
+    if (pos == std::string::npos) {
+        pos = params.find("\"rawtx\"");  // Also accept short form
+    }
+    if (pos != std::string::npos) {
+        size_t colon = params.find(':', pos);
+        size_t q1 = params.find('"', colon);
+        size_t q2 = params.find('"', q1 + 1);
+        if (q1 != std::string::npos && q2 != std::string::npos) {
+            rawTx = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+    }
+    if (rawTx.empty()) {
+        throw std::runtime_error("Missing rawTransaction parameter");
+    }
+
+    // Extract recipient
+    pos = params.find("\"recipient\"");
+    if (pos != std::string::npos) {
+        size_t colon = params.find(':', pos);
+        size_t q1 = params.find('"', colon);
+        size_t q2 = params.find('"', q1 + 1);
+        if (q1 != std::string::npos && q2 != std::string::npos) {
+            recipient = params.substr(q1 + 1, q2 - q1 - 1);
+        }
+    }
+    if (recipient.empty()) {
+        throw std::runtime_error("Missing recipient parameter");
+    }
+
+    // Extract amount
+    pos = params.find("\"amount\"");
+    if (pos != std::string::npos) {
+        size_t colon = params.find(':', pos);
+        size_t numStart = params.find_first_not_of(" \t\n\r", colon + 1);
+        if (numStart != std::string::npos) {
+            try {
+                amount = std::stoll(params.substr(numStart));
+            } catch (...) {
+                throw std::runtime_error("Invalid amount parameter");
+            }
+        }
+    }
+    if (amount <= 0) {
+        throw std::runtime_error("Amount must be positive (in ions)");
+    }
+
+    x402::VerifyResult result;
+    m_x402_facilitator->GetVMA().VerifyPayment(rawTx, recipient, amount, result);
+    return result.ToJSON();
+}
+
+std::string CRPCServer::RPC_SettleX402Payment(const std::string& params) {
+    if (!m_x402_facilitator) {
+        throw std::runtime_error("x402 facilitator not available (DilV only)");
+    }
+
+    // Parse params (same format as verify)
+    std::string rawTx, recipient;
+    int64_t amount = 0;
+
+    size_t pos = params.find("\"rawTransaction\"");
+    if (pos == std::string::npos) pos = params.find("\"rawtx\"");
+    if (pos != std::string::npos) {
+        size_t colon = params.find(':', pos);
+        size_t q1 = params.find('"', colon);
+        size_t q2 = params.find('"', q1 + 1);
+        if (q1 != std::string::npos && q2 != std::string::npos)
+            rawTx = params.substr(q1 + 1, q2 - q1 - 1);
+    }
+    if (rawTx.empty()) throw std::runtime_error("Missing rawTransaction parameter");
+
+    pos = params.find("\"recipient\"");
+    if (pos != std::string::npos) {
+        size_t colon = params.find(':', pos);
+        size_t q1 = params.find('"', colon);
+        size_t q2 = params.find('"', q1 + 1);
+        if (q1 != std::string::npos && q2 != std::string::npos)
+            recipient = params.substr(q1 + 1, q2 - q1 - 1);
+    }
+    if (recipient.empty()) throw std::runtime_error("Missing recipient parameter");
+
+    pos = params.find("\"amount\"");
+    if (pos != std::string::npos) {
+        size_t colon = params.find(':', pos);
+        size_t numStart = params.find_first_not_of(" \t\n\r", colon + 1);
+        if (numStart != std::string::npos) {
+            try { amount = std::stoll(params.substr(numStart)); } catch (...) {}
+        }
+    }
+    if (amount <= 0) throw std::runtime_error("Amount must be positive (in ions)");
+
+    x402::SettlementResult result;
+    m_x402_facilitator->GetVMA().SettlePayment(rawTx, recipient, amount, result);
+    return result.ToJSON();
+}
+
+std::string CRPCServer::RPC_GetX402Info(const std::string& params) {
+    if (!m_x402_facilitator) {
+        throw std::runtime_error("x402 facilitator not available (DilV only)");
+    }
+
+    x402::FacilitatorInfo info;
+    info.version = "2.0";
+    info.schemes = {"exact"};
+    info.networks = {x402::NETWORK_ID};
+    info.assets = {x402::ASSET_ID};
+    info.micropaymentThreshold = m_x402_facilitator->GetVMA().GetMicropaymentThreshold();
+    info.vmaEnabled = true;
+    return info.ToJSON();
 }

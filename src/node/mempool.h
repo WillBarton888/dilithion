@@ -143,6 +143,13 @@ public:
     MempoolMetrics GetMetrics() const;
 
     /**
+     * x402 VMA: Check if an outpoint is spent by a mempool transaction
+     * @param outpoint The outpoint to check
+     * @return true if spent by a transaction in the mempool
+     */
+    bool IsSpent(const COutPoint& outpoint) const;
+
+    /**
      * Phase 3.3: Get transactions older than specified age for rebroadcast
      * @param age_seconds Minimum age in seconds
      * @return Vector of transactions older than age_seconds

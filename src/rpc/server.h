@@ -13,6 +13,9 @@
 #include <rpc/ssl_wrapper.h>
 #include <rpc/websocket.h>
 #include <rpc/rest_api.h>
+
+// Forward declaration for x402 facilitator
+namespace x402 { class CFacilitator; }
 #include <digital_dna/digital_dna_rpc.h>
 
 #include <string>
@@ -134,6 +137,7 @@ private:
     class CBlockchainDB* m_blockchain;
     class CUTXOSet* m_utxo_set;
     class CChainState* m_chainstate;
+    x402::CFacilitator* m_x402_facilitator{nullptr};
 
     // Network configuration
     bool m_testnet{false};
@@ -269,6 +273,11 @@ private:
     std::string RPC_ListTransactions(const std::string& params);
     std::string RPC_GetMempoolInfo(const std::string& params);
 
+    // x402 payment methods (DilV only — requires m_x402_facilitator)
+    std::string RPC_VerifyX402Payment(const std::string& params);
+    std::string RPC_SettleX402Payment(const std::string& params);
+    std::string RPC_GetX402Info(const std::string& params);
+
     // Blockchain query methods
     std::string RPC_GetBlockchainInfo(const std::string& params);
     std::string RPC_GetBlockTrackerInfo(const std::string& params);
@@ -395,6 +404,11 @@ public:
      * Register chain state instance
      */
     void RegisterChainState(class CChainState* chainstate) { m_chainstate = chainstate; }
+
+    /**
+     * Register x402 facilitator instance (DilV only)
+     */
+    void RegisterX402Facilitator(x402::CFacilitator* facilitator) { m_x402_facilitator = facilitator; }
 
     /**
      * Set testnet mode

@@ -770,6 +770,11 @@ bool CTxMemPool::Exists(const uint256& txid) const {
     return mapTx.count(txid) > 0;
 }
 
+bool CTxMemPool::IsSpent(const COutPoint& outpoint) const {
+    std::lock_guard<std::mutex> lock(cs);
+    return mapSpentOutpoints.count(outpoint) > 0;
+}
+
 bool CTxMemPool::GetTx(const uint256& txid, CTxMemPoolEntry& entry) const {
     std::lock_guard<std::mutex> lock(cs);
     auto it = mapTx.find(txid);

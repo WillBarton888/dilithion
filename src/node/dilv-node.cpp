@@ -49,6 +49,7 @@
 #include <wallet/wallet.h>
 #include <rpc/server.h>
 #include <rpc/rest_api.h>  // REST API for light wallet
+#include <x402/facilitator.h>  // x402 payment facilitator
 #include <core/chainparams.h>
 #include <consensus/pow.h>
 #include <consensus/chain.h>
@@ -2792,13 +2793,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rest_api.RegisterChainState(&g_chainstate);
         // Note: Rate limiter is optional for HTTP server (RPC server has its own)
 
+        // x402 Payment Facilitator — enables HTTP 402 micropayments on DilV
+        static x402::CFacilitator x402_facilitator;
+        x402_facilitator.RegisterUTXOSet(&utxo_set);
+        x402_facilitator.RegisterMempool(&mempool);
+        x402_facilitator.RegisterChainState(&g_chainstate);
+
         http_server.SetRestApiHandler([](const std::string& method,
                                          const std::string& path,
                                          const std::string& body,
                                          const std::string& clientIP) -> std::string {
+            // Route x402 requests to the facilitator
+            if (x402::CFacilitator::IsX402Request(path)) {
+                return x402_facilitator.HandleRequest(method, path, body, clientIP);
+            }
+            // Route REST API requests to the standard handler
             return rest_api.HandleRequest(method, path, body, clientIP);
         });
         std::cout << "[HttpServer] REST API enabled for light wallet support" << std::endl;
+        std::cout << "[HttpServer] x402 facilitator enabled at /x402/" << std::endl;
 
         // BUG #140 FIX: Make HTTP server failure non-fatal
         // The stats endpoint is optional - core P2P functionality should continue
@@ -4917,6 +4930,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterChainState(&g_chainstate);
         rpc_server.RegisterMempool(&mempool);
         rpc_server.RegisterUTXOSet(&utxo_set);
+        rpc_server.RegisterX402Facilitator(&x402_facilitator);  // x402 payment protocol
         rpc_server.SetTestnet(config.testnet);
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
 
