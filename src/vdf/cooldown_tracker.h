@@ -19,9 +19,9 @@
  *   50 miners  → 45 blocks  (max ~2.2% share,  fair = 2%)
  *  100 miners  → 90 blocks  (max ~1.1% share,  fair = 1%)
  *
- * This allows a small buffer above fair share (generous at low miner
- * counts, tight at high counts) while the VDF lottery itself ensures
- * actual distribution stays close to fair.
+ * With MIN_COOLDOWN=0, a solo miner (n=1..3) gets cooldown=0 — they can
+ * mine every block unimpeded, keeping the chain alive during the early
+ * network phase.  Cooldown kicks in from n=4 onwards.
  *
  * Thread-safe: all public methods acquire m_mutex.
  */
@@ -30,12 +30,23 @@ public:
     using Address = std::array<uint8_t, 20>;
 
     // Consensus-level bounds.
-    static constexpr int MIN_COOLDOWN = 2;    // blocks (floor for very small networks)
+    static constexpr int MIN_COOLDOWN = 0;    // blocks (0 = solo miners never stall)
     static constexpr int MAX_COOLDOWN = 100;  // blocks
-    static constexpr int ACTIVE_WINDOW = 360; // blocks (~24 hours at 4-min mainnet blocks)
+
+    // Default active window — kept for backward compatibility.
+    // DIL mainnet/testnet: 360 blocks (~24h at 240s/block)
+    // DilV: pass 1920 to constructor   (~24h at 45s/block)
+    static constexpr int ACTIVE_WINDOW = 360;
+
+    /** Constructor.  activeWindow sets how many recent blocks define "active miners". */
+    explicit CCooldownTracker(int activeWindow = ACTIVE_WINDOW)
+        : m_activeWindow(activeWindow) {}
 
     /** Compute cooldown from active miner count. */
     static int CalculateCooldown(int activeMiners);
+
+    /** Active window size this instance was constructed with. */
+    int GetActiveWindow() const { return m_activeWindow; }
 
     // --- Query interface ---
 
@@ -64,6 +75,8 @@ public:
 
 private:
     mutable std::mutex m_mutex;
+
+    int m_activeWindow{ACTIVE_WINDOW};  // how many blocks back to count active miners
 
     // address → height of most recent win
     std::map<Address, int> m_lastWinHeight;

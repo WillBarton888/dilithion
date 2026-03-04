@@ -3762,7 +3762,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  [--] VDF library not available (VDF mining disabled)" << std::endl;
         }
 
-        CCooldownTracker cooldown_tracker;
+        int vdf_cooldown_window = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->vdfCooldownActiveWindow : CCooldownTracker::ACTIVE_WINDOW;
+        CCooldownTracker cooldown_tracker(vdf_cooldown_window);
         g_node_context.cooldown_tracker = &cooldown_tracker;
 
         CVDFMiner vdf_miner;
@@ -3783,13 +3785,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Populate cooldown tracker from existing chain on startup.
         //
         // Without this, the tracker starts empty after every restart, meaning
-        // cooldown is effectively disabled for ACTIVE_WINDOW (360) blocks.
+        // cooldown is effectively disabled for vdfCooldownActiveWindow blocks.
         // Pattern follows the DFMP heat tracker population (lines 2330-2440).
         // =========================================================================
         if (g_node_context.cooldown_tracker != nullptr) {
             CBlockIndex* pindexTip = g_chainstate.GetTip();
             if (pindexTip != nullptr && pindexTip->nHeight > 0) {
-                const int windowSize = CCooldownTracker::ACTIVE_WINDOW;
+                const int windowSize = cooldown_tracker.GetActiveWindow();
                 int startHeight = std::max(vdf_activation, pindexTip->nHeight - windowSize + 1);
 
                 // Only attempt population if we're past VDF activation

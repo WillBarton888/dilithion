@@ -613,11 +613,26 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
 
                             // Notify user when mining reward is credited
                             if (tx.IsCoinBase()) {
-                                // Calculate new balance (unlocked - we hold cs_wallet)
+                                // Calculate new balance — use UTXO-validated sum to
+                                // exclude stale entries from other chains (e.g. DIL
+                                // transactions cached in wallet.dat on a DilV node).
                                 int64_t newBalance = 0;
-                                for (const auto& pair : mapWalletTx) {
-                                    if (!pair.second.fSpent) {
-                                        newBalance += pair.second.nValue;
+                                if (m_utxo_set_ref) {
+                                    // UTXO-validated: only counts outputs present in this chain
+                                    for (const auto& pair : mapWalletTx) {
+                                        if (pair.second.fSpent) continue;
+                                        COutPoint op(pair.second.txid, pair.second.vout);
+                                        CUTXOEntry ent;
+                                        if (m_utxo_set_ref->GetUTXO(op, ent)) {
+                                            newBalance += pair.second.nValue;
+                                        }
+                                    }
+                                } else {
+                                    // Fallback (no UTXO ref set): raw sum — may include stale entries
+                                    for (const auto& pair : mapWalletTx) {
+                                        if (!pair.second.fSpent) {
+                                            newBalance += pair.second.nValue;
+                                        }
                                     }
                                 }
 
@@ -3145,8 +3160,11 @@ bool CWallet::ScanUTXOs(CUTXOSet& global_utxo_set) {
                     AddTxOutUnlocked(outpoint.hash, outpoint.n, entry.out.nValue, addr, entry.nHeight, entry.fCoinBase);
                     utxosFound++;
 
-                    std::cout << "[Wallet] Found UTXO: " << outpoint.hash.GetHex().substr(0, 16)
-                              << ":" << outpoint.n << " (" << entry.out.nValue << " ions)" << std::endl;
+                    {
+                        const char* unitLabel = (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) ? "volts" : "ions";
+                        std::cout << "[Wallet] Found UTXO: " << outpoint.hash.GetHex().substr(0, 16)
+                                  << ":" << outpoint.n << " (" << entry.out.nValue << " " << unitLabel << ")" << std::endl;
+                    }
                     break;
                 }
             }
@@ -3172,7 +3190,8 @@ CAmount CWallet::GetAvailableBalance(CUTXOSet& utxo_set, unsigned int current_he
     CAmount balance = 0;
 
     // Coinbase maturity requirement
-    const unsigned int COINBASE_MATURITY = 100;
+    const unsigned int COINBASE_MATURITY = Dilithion::g_chainParams
+        ? static_cast<unsigned int>(Dilithion::g_chainParams->coinbaseMaturity) : 100;
 
     for (const auto& pair : mapWalletTx) {
         const CWalletTx& wtx = pair.second;
@@ -3214,7 +3233,8 @@ CAmount CWallet::GetImmatureBalance(CUTXOSet& utxo_set, unsigned int current_hei
     CAmount immatureBalance = 0;
 
     // Coinbase maturity requirement
-    const unsigned int COINBASE_MATURITY = 100;
+    const unsigned int COINBASE_MATURITY = Dilithion::g_chainParams
+        ? static_cast<unsigned int>(Dilithion::g_chainParams->coinbaseMaturity) : 100;
 
     for (const auto& pair : mapWalletTx) {
         const CWalletTx& wtx = pair.second;
@@ -3250,7 +3270,8 @@ std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned 
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     std::vector<CWalletTx> unspent;
-    const unsigned int COINBASE_MATURITY = 100;
+    const unsigned int COINBASE_MATURITY = Dilithion::g_chainParams
+        ? static_cast<unsigned int>(Dilithion::g_chainParams->coinbaseMaturity) : 100;
 
     for (const auto& pair : mapWalletTx) {
         const CWalletTx& wtx = pair.second;

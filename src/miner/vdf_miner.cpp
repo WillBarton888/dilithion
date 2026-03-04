@@ -180,9 +180,12 @@ void CVDFMiner::MiningLoop()
                       << " (current: " << height << ", cooldown: " << cd << " blocks)"
                       << std::endl;
 
-            // Wait for new block
+            // Wait for new block, or timeout after 2 minutes so a solo miner
+            // (cooldown=0 with MIN_COOLDOWN=0) never deadlocks if it somehow
+            // enters this branch due to a stale cached miner count.
             std::unique_lock<std::mutex> lock(m_epochMutex);
-            m_epochCV.wait(lock, [this] { return m_epochChanged || !m_running; });
+            m_epochCV.wait_for(lock, std::chrono::seconds(120),
+                               [this] { return m_epochChanged || !m_running; });
             m_epochChanged = false;
             continue;
         }

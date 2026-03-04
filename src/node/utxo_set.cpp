@@ -3,6 +3,7 @@
 
 #include <node/utxo_set.h>
 #include <consensus/validation.h>
+#include <core/chainparams.h>
 #include <crypto/sha3.h>  // P1-3: For undo data integrity checksum
 #include <leveldb/write_batch.h>
 #include <leveldb/options.h>
@@ -936,9 +937,12 @@ bool CUTXOSet::IsCoinBaseMature(const COutPoint& outpoint, uint32_t currentHeigh
         return true;
     }
 
-    // Coinbase requires COINBASE_MATURITY confirmations
-    // currentHeight must be at least (entry.nHeight + COINBASE_MATURITY)
-    if (currentHeight < entry.nHeight + COINBASE_MATURITY) {
+    // Coinbase requires coinbaseMaturity confirmations (chain-specific)
+    // currentHeight must be at least (entry.nHeight + coinbaseMaturity)
+    unsigned int coinbaseMaturity = Dilithion::g_chainParams
+        ? static_cast<unsigned int>(Dilithion::g_chainParams->coinbaseMaturity)
+        : COINBASE_MATURITY;
+    if (currentHeight < entry.nHeight + coinbaseMaturity) {
         return false;
     }
 

@@ -112,6 +112,8 @@ ChainParams ChainParams::Mainnet() {
     params.vdfLotteryActivationHeight = 999999999;
     params.vdfLotteryGracePeriod = 60;  // 60 seconds
     params.vdfMinBlockTime = 180;       // 3 minutes: ensures all miners finish VDF
+    params.vdfCooldownActiveWindow = 360; // 360 × 240s ≈ 24 hours
+    params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): disabled until fork is scheduled
     params.scriptV2ActivationHeight = 999999999;
@@ -250,6 +252,8 @@ ChainParams ChainParams::Testnet() {
     params.vdfLotteryActivationHeight = 87240;
     params.vdfLotteryGracePeriod = 30;  // 30 seconds (faster for testing)
     params.vdfMinBlockTime = 25;        // 25 seconds minimum between blocks
+    params.vdfCooldownActiveWindow = 360; // 360 × 60s ≈ 6 hours (fast testnet)
+    params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on testnet
     params.scriptV2ActivationHeight = 0;
@@ -356,6 +360,8 @@ ChainParams ChainParams::DilV() {
     params.vdfLotteryActivationHeight = 0;
     params.vdfLotteryGracePeriod = 12;         // 12 seconds for slower miners to submit
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
+    params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
+    params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on DilV
     params.scriptV2ActivationHeight = 0;

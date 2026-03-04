@@ -653,11 +653,14 @@ bool CTransactionValidator::CheckCoinbaseMaturity(const CTransaction& tx, CUTXOS
         if (entry.fCoinBase) {
             uint32_t confirmations = currentHeight - entry.nHeight;
 
-            if (confirmations < TxValidation::COINBASE_MATURITY) {
+            unsigned int coinbaseMaturity = Dilithion::g_chainParams
+                ? static_cast<unsigned int>(Dilithion::g_chainParams->coinbaseMaturity)
+                : TxValidation::COINBASE_MATURITY;
+            if (confirmations < coinbaseMaturity) {
                 char buf[256];
                 snprintf(buf, sizeof(buf),
                          "Coinbase output not mature (height: %u, current: %u, confirmations: %u, required: %u)",
-                         entry.nHeight, currentHeight, confirmations, TxValidation::COINBASE_MATURITY);
+                         entry.nHeight, currentHeight, confirmations, coinbaseMaturity);
                 error = buf;
                 return false;
             }

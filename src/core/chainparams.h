@@ -151,6 +151,18 @@ public:
     // 0 = no minimum (legacy behavior)
     int vdfMinBlockTime;
 
+    // VDF cooldown active window (blocks)
+    // How many recent blocks to scan when counting "active miners" for the
+    // cooldown formula.  Should approximate 24 hours of blocks.
+    // DIL mainnet/testnet: 360  (360 × 240s ≈ 24h)
+    // DilV:               1920  (1920 × 45s  ≈ 24h)
+    int vdfCooldownActiveWindow;
+
+    // Coinbase maturity (blocks before mining rewards are spendable)
+    // DIL mainnet/testnet: 100 (PoW reorg safety)
+    // DilV: 6 (VDF is deterministic/sequential — reorgs are virtually impossible)
+    int coinbaseMaturity;
+
     // Script V2 activation height
     // Before this height: Only standard P2PKH scripts are accepted
     // After this height: All script types (HTLC, multisig, etc.) are valid

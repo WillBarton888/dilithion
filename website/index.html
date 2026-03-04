@@ -273,7 +273,8 @@
             <div class="nav-links" id="navLinks">
                 <a href="#dashboard">Dashboard</a>
                 <a href="#getting-started">Get Started</a>
-                <a href="#downloads">Download</a>
+                <a href="#downloads">Download DIL</a>
+                <a href="#dilv-downloads" style="color: #06b6d4;">⚡ DilV</a>
                 <a href="mining-calculator.html" target="_blank">Mining Calculator</a>
                 <a href="wallet.html" target="_blank">Web Wallet</a>
                 <a href="http://explorer.dilithion.org" target="_blank">Explorer</a>
@@ -783,6 +784,120 @@
         </div>
     </section>
 
+    <!-- DilV Downloads -->
+    <section id="dilv-downloads" class="downloads" style="background: linear-gradient(135deg, #060f1e 0%, #0a1628 50%, #06101f 100%);">
+        <div class="container">
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 8px;">
+                <h2 class="section-title" style="margin-bottom: 0;">Download DilV</h2>
+                <span style="background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; font-size: 0.75rem; font-weight: 700; padding: 4px 12px; border-radius: 20px; letter-spacing: 0.05em;">NEW</span>
+            </div>
+            <p class="section-subtitle">The fast-payments companion chain to Dilithion — VDF-based, quantum-resistant, ~45s blocks</p>
+
+            <div class="download-notice" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(8, 145, 178, 0.1)); border-left: 4px solid #06b6d4; padding: 20px; margin-bottom: 30px; border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #06b6d4;">⚡ DilV Mainnet — All Platforms!</h3>
+                <p><strong>DilV</strong> is the fast-payments companion chain to Dilithion (DIL). It uses VDF (Verifiable Delay Function) consensus — fair, sequential computation that no GPU or ASIC can accelerate. Any CPU competes equally.</p>
+                <p style="background: rgba(6, 182, 212, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;">
+                    <strong>⚡ ~45s blocks</strong> &nbsp;•&nbsp;
+                    <strong>🧠 ~512 MB RAM</strong> (vs 2.5 GB for DIL) &nbsp;•&nbsp;
+                    <strong>🔐 Quantum-resistant (Dilithium3)</strong> &nbsp;•&nbsp;
+                    <strong>💸 x402 micropayments</strong>
+                </p>
+                <p><strong>Exchange rate:</strong> ~10 DilV = 1 DIL &nbsp;•&nbsp; <strong>Block reward:</strong> 100 DilV &nbsp;•&nbsp; <strong>Max supply:</strong> 210 million DilV &nbsp;•&nbsp; <strong>P2P port:</strong> 9444</p>
+                <p><strong>Easy start:</strong> Download, extract, and run! One-click launcher scripts included.</p>
+            </div>
+
+            <div class="download-grid">
+                <div class="download-card" style="border-color: rgba(6, 182, 212, 0.3);">
+                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-windows"/></svg></div>
+                    <h3>Windows</h3>
+                    <p>Windows 10/11 (64-bit x86-64)</p>
+                    <div style="display: flex; gap: 10px; margin: 15px 0;">
+                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: linear-gradient(135deg, #0891b2, #0e7490);">Download ZIP</a>
+                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                    </div>
+                    <span class="version" style="color: #06b6d4;">dilv-mainnet • x64 • Runtime DLLs included</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-DILV-MINING.bat, SETUP-DILV.bat, dilv-node.exe, check-wallet-balance.exe, Runtime DLLs</p>
+                    <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
+                        <strong style="color: #22c55e;">✓ No dependencies needed!</strong> All DLLs bundled. Double-click START-DILV-MINING.bat to begin.
+                    </p>
+                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
+                        Wallet stored at: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">%APPDATA%\.dilv\</code>
+                    </p>
+                </div>
+
+                <div class="download-card" style="border-color: rgba(6, 182, 212, 0.3);">
+                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-linux"/></svg></div>
+                    <h3>Linux</h3>
+                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64)</p>
+                    <div style="display: flex; gap: 10px; margin: 15px 0;">
+                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: linear-gradient(135deg, #0891b2, #0e7490);">Download TAR.GZ</a>
+                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                    </div>
+                    <span class="version" style="color: #06b6d4;">dilv-mainnet • x64 • Bundled libraries</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: dilv-node, check-wallet-balance, run-node.sh wrapper, start-dilv-mining.sh, setup-dilv.sh</p>
+                    <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
+                        <strong style="color: #22c55e;">✓ Libraries bundled!</strong> Just extract and run <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">./start-dilv-mining.sh</code>
+                    </p>
+                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
+                        Optional: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo apt install libleveldb-dev libgmp-dev</code>
+                    </p>
+                </div>
+
+                <div class="download-card" style="border-color: rgba(6, 182, 212, 0.3);">
+                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-macos"/></svg></div>
+                    <h3>macOS</h3>
+                    <p>macOS 10.15+ (Apple Silicon &amp; Intel)</p>
+                    <div style="display: flex; gap: 10px; margin: 15px 0;">
+                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: linear-gradient(135deg, #0891b2, #0e7490);">Download TAR.GZ</a>
+                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
+                    </div>
+                    <span class="version" style="color: #06b6d4;">dilv-mainnet • x64 • Homebrew deps</span>
+                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: dilv-node, check-wallet-balance, start-dilv-mining.sh, setup-dilv.sh</p>
+                    <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
+                        <strong>Requires (install first):</strong><br>
+                        <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">brew install leveldb gmp openssl miniupnpc</code>
+                    </p>
+                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
+                        <span style="color: #f59e0b;">⚠️ macOS Gatekeeper:</span> Right-click → Open, or System Settings → Privacy &amp; Security → Allow Anyway
+                    </p>
+                </div>
+            </div>
+
+            <div style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(8, 145, 178, 0.08)); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 8px; padding: 20px; margin: 30px 0;">
+                <h3 style="margin-top: 0; color: #06b6d4;">⚡ What is DilV?</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 16px;">
+                    <div>
+                        <strong style="color: #06b6d4;">VDF Consensus</strong>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">Sequential computation — no GPU or ASIC advantage. Every CPU competes equally on speed.</p>
+                    </div>
+                    <div>
+                        <strong style="color: #06b6d4;">Fast Payments</strong>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">~45 second blocks with VMA (Verified Mempool Acceptance) for near-instant small payments.</p>
+                    </div>
+                    <div>
+                        <strong style="color: #06b6d4;">x402 Micropayments</strong>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">Built-in HTTP 402 payment protocol for AI agent and machine-to-machine payments.</p>
+                    </div>
+                    <div>
+                        <strong style="color: #06b6d4;">Atomic Swaps (Phase 6)</strong>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">Trustless DIL ↔ DilV exchange via HTLC scripts. No exchange, no counterparty risk.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="build-from-source">
+                <h3>Build DilV from Source</h3>
+                <p>Compile the DilV node from the same repository as Dilithion:</p>
+                <div class="code-block">
+                    <code>git clone --recursive https://github.com/dilithion/dilithion.git<br>
+                    cd dilithion<br>
+                    make dilv-node check-wallet-balance</code>
+                </div>
+                <a href="https://github.com/dilithion/dilithion" target="_blank" class="btn btn-secondary">View on GitHub</a>
+            </div>
+        </div>
+    </section>
+
     <!-- Technical Specifications -->
     <section class="specifications">
         <div class="container">
@@ -1070,6 +1185,7 @@
                         <li><a href="mining-calculator.html" target="_blank">Mining Calculator</a></li>
                         <li><a href="http://explorer.dilithion.org" target="_blank">Block Explorer</a></li>
                         <li><a href="https://github.com/dilithion/dilithion/releases/latest" target="_blank">Latest Release (v3.6.4)</a></li>
+                        <li><a href="#dilv-downloads">⚡ DilV Downloads</a></li>
                         <li><a href="WHITEPAPER.html" target="_blank">Whitepaper (HTML)</a></li>
                         <li><a href="https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md" target="_blank">Whitepaper (Markdown)</a></li>
                         <li><a href="https://github.com/dilithion/dilithion" target="_blank">GitHub Repository</a></li>

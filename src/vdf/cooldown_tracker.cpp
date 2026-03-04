@@ -52,8 +52,8 @@ void CCooldownTracker::OnBlockConnected(int height, const Address& winner)
     m_lastWinHeight[winner] = height;
     m_heightToWinner[height] = winner;
 
-    // Evict entries outside the active window [height - ACTIVE_WINDOW + 1, height].
-    int cutoff = height - ACTIVE_WINDOW + 1;
+    // Evict entries outside the active window [height - m_activeWindow + 1, height].
+    int cutoff = height - m_activeWindow + 1;
     auto it = m_heightToWinner.begin();
     while (it != m_heightToWinner.end() && it->first < cutoff) {
         // Only remove from m_lastWinHeight if this was their most recent win.
@@ -114,7 +114,7 @@ void CCooldownTracker::RecalcActiveMiners(int height) const
     if (m_cachedAtHeightMut == height)
         return;
 
-    int cutoff = height - ACTIVE_WINDOW + 1;
+    int cutoff = height - m_activeWindow + 1;
     std::set<Address> unique;
     for (auto it = m_heightToWinner.lower_bound(cutoff);
          it != m_heightToWinner.end() && it->first <= height; ++it) {

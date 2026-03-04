@@ -269,6 +269,9 @@ private:
     std::string m_walletFile;  // Current wallet file path
     bool m_autoSave;           // Auto-save after changes
 
+    // UTXO set reference for balance validation in callbacks
+    class CUTXOSet* m_utxo_set_ref{nullptr};
+
     // ============================================================================
     // BUG #56 FIX: Best Block Tracking (Bitcoin Core Pattern - PR #30221)
     // ============================================================================
@@ -987,6 +990,7 @@ public:
      * Enable/disable auto-save
      */
     void SetAutoSave(bool enabled) { m_autoSave = enabled; }
+    void SetUTXOSetRef(class CUTXOSet* utxo_set) { m_utxo_set_ref = utxo_set; }
 
     /**
      * Clear all wallet data

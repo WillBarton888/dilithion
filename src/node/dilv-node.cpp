@@ -1257,10 +1257,13 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
     // DFMP v2.0: Apply difficulty penalty based on MIK identity
     // New miners get 3.0x penalty that decays over 360 blocks
+    // DilV: DFMP heat penalty is disabled — VDF lottery + cooldown tracker already
+    // ensure fairness. Heat penalty only penalises the sole miner keeping the chain alive.
     int dfmpActivationHeight = Dilithion::g_chainParams ?
         Dilithion::g_chainParams->dfmpActivationHeight : 0;
+    bool isDilV = Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV();
 
-    if (nHeight >= static_cast<uint32_t>(dfmpActivationHeight) && !mikIdentity.IsNull()) {
+    if (!isDilV && nHeight >= static_cast<uint32_t>(dfmpActivationHeight) && !mikIdentity.IsNull()) {
         // Get first-seen height (-1 for new identity)
         int firstSeen = -1;
         if (DFMP::g_identityDb != nullptr) {
@@ -3669,7 +3672,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return 1;
         }
 
-        CCooldownTracker cooldown_tracker;
+        int vdf_cooldown_window = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->vdfCooldownActiveWindow : CCooldownTracker::ACTIVE_WINDOW;
+        CCooldownTracker cooldown_tracker(vdf_cooldown_window);
         g_node_context.cooldown_tracker = &cooldown_tracker;
 
         CVDFMiner vdf_miner;
@@ -3690,13 +3695,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Populate cooldown tracker from existing chain on startup.
         //
         // Without this, the tracker starts empty after every restart, meaning
-        // cooldown is effectively disabled for ACTIVE_WINDOW (360) blocks.
+        // cooldown is effectively disabled for vdfCooldownActiveWindow blocks.
         // Pattern follows the DFMP heat tracker population (lines 2330-2440).
         // =========================================================================
         if (g_node_context.cooldown_tracker != nullptr) {
             CBlockIndex* pindexTip = g_chainstate.GetTip();
             if (pindexTip != nullptr && pindexTip->nHeight > 0) {
-                const int windowSize = CCooldownTracker::ACTIVE_WINDOW;
+                const int windowSize = cooldown_tracker.GetActiveWindow();
                 int startHeight = std::max(vdf_activation, pindexTip->nHeight - windowSize + 1);
 
                 // Only attempt population if we're past VDF activation
@@ -4160,6 +4165,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         wallet.SetWalletFile(wallet_path);
         std::cout << "  [OK] Auto-save enabled" << std::endl;
         std::cout.flush();
+
+        // Give wallet a UTXO set reference so mining notifications show chain-validated balance
+        wallet.SetUTXOSetRef(g_utxo_set.load());
 
         // BUG #56 FIX: Register wallet callbacks with chain state (Bitcoin Core pattern)
         // Wallet will receive blockConnected/blockDisconnected notifications automatically
@@ -5379,7 +5387,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // valid locally but rejected by the network, causing wasted work.
             // Runs every iteration (cheap hash comparison, heavy work only on tip change).
             // Placed OUTSIDE the VDF miner check block so resume works when paused.
-            {
+            //
+            // DilV: Disabled. Solo mining is the expected early-stage mode on DilV —
+            // VDF lottery + cooldown tracker handle fairness. Fork detection via solo
+            // mining ratio is a RandomX/PoW concept and produces false positives here.
+            if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
+                // No-op: fork detection not applicable to VDF solo mining
+            } else {
                 CBlockIndex* tipIndex = g_chainstate.GetTip();
                 if (tipIndex && g_node_state.mining_enabled.load()) {
                     uint256 tipHash = tipIndex->GetBlockHash();
@@ -5511,7 +5525,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
                     }
                 }
-            }
+            } // end else (non-DilV fork detection)
 
             // ========================================================================
             // Tip Divergence Detection: Compare our chain tip vs peers' chain tips
