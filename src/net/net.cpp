@@ -118,8 +118,8 @@ void SendRejectMessage(int peer_id, const std::string& command, const std::strin
     payload.push_back(reason_len);
     payload.insert(payload.end(), reason.begin(), reason.begin() + reason_len);
 
-    CSerializedNetMsg reject_msg("reject", std::move(payload));
-    g_node_context.connman->PushMessage(peer_id, std::move(reject_msg));
+    CNetMessage reject_msg("reject", payload);
+    g_node_context.connman->PushMessage(peer_id, reject_msg);
 }
 
 /**
@@ -844,8 +844,9 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
 bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
     try {
         // NET-006 FIX: Rate limiting for INV messages
-        // Allow max 10 INV messages per second per peer
-        const int64_t MAX_INV_PER_SECOND = 10;
+        // Raised to 200 to tolerate old-code nodes with large mempools rebroadcasting.
+        // New code (v3.6.9+) batches INVs so this limit is rarely hit.
+        const int64_t MAX_INV_PER_SECOND = 200;
         const int64_t RATE_LIMIT_WINDOW = 1;  // 1 second
 
         int64_t now = GetTime();

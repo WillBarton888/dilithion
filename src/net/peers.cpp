@@ -1404,32 +1404,25 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
 
     // Send mempool INV to newly connected peer so they learn about pending transactions.
     // Without this, peers that connect after a tx was broadcast never learn about it.
-    // Batches INV messages (max 1000 per message) to handle large mempools.
+    // RATE-LIMITED: Only send up to 8 INVs per connect to avoid triggering DoS bans
+    // on the remote peer. The periodic rebroadcast (every 60s) will catch the rest.
     {
         extern std::atomic<CTxMemPool*> g_mempool;
         auto* mempool = g_mempool.load();
         if (mempool && g_node_context.connman && g_node_context.message_processor) {
             auto txs = mempool->GetOrderedTxs();
             if (!txs.empty()) {
-                size_t total_sent = 0;
+                const size_t MAX_INV_ON_CONNECT = 8;
+                size_t to_send = std::min(txs.size(), MAX_INV_ON_CONNECT);
                 std::vector<NetProtocol::CInv> inv_vec;
-                inv_vec.reserve(std::min(txs.size(), (size_t)1000));
-                for (const auto& tx : txs) {
-                    inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, tx->GetHash()));
-                    if (inv_vec.size() >= 1000) {
-                        CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
-                        g_node_context.connman->PushMessage(peer_id, inv_msg);
-                        total_sent += inv_vec.size();
-                        inv_vec.clear();
-                    }
+                inv_vec.reserve(to_send);
+                for (size_t i = 0; i < to_send; i++) {
+                    inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, txs[i]->GetHash()));
                 }
-                if (!inv_vec.empty()) {
-                    CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
-                    g_node_context.connman->PushMessage(peer_id, inv_msg);
-                    total_sent += inv_vec.size();
-                }
-                std::cout << "[TX-RELAY] Sent " << total_sent
-                          << " mempool tx INV(s) to new peer " << peer_id << std::endl;
+                CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
+                g_node_context.connman->PushMessage(peer_id, inv_msg);
+                std::cout << "[TX-RELAY] Sent " << to_send
+                          << " of " << txs.size() << " mempool tx INV(s) to new peer " << peer_id << std::endl;
             }
         }
     }
