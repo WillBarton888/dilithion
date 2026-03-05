@@ -118,7 +118,12 @@ bool CTransactionValidator::CheckTransactionBasic(const CTransaction& tx, std::s
         // - Witness data field (like SegWit)
         // - Off-chain storage with on-chain hash commitments
         //
-        // Current policy: ALL outputs must have nValue > 0
+        // OP_RETURN outputs are exempt from value checks (used for bridge metadata)
+        if (!txout.scriptPubKey.empty() && txout.scriptPubKey[0] == 0x6a) {
+            continue;  // OP_RETURN: zero-value data carrier, not stored in UTXO set
+        }
+
+        // Current policy: ALL non-OP_RETURN outputs must have nValue > 0
         if (txout.nValue <= 0) {
             error = "Transaction output value must be positive";
             return false;
@@ -511,8 +516,12 @@ bool CTransactionValidator::IsStandardTransaction(const CTransaction& tx,
     }
 
     // Check output values meet dust threshold (0.00001 DIL = 1000 ions)
+    // OP_RETURN outputs are exempt (allowed to have zero value for data embedding)
     const CAmount dustThreshold = 1000;
     for (const auto& txout : tx.vout) {
+        if (!txout.scriptPubKey.empty() && txout.scriptPubKey[0] == 0x6a) {
+            continue;  // OP_RETURN: zero-value allowed
+        }
         if (txout.nValue < dustThreshold) {
             return false;
         }

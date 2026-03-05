@@ -769,7 +769,8 @@ void CRPCServer::HandleClient(int clientSocket) {
     size_t totalRead = 0;
     bool requestComplete = false;
 
-    // Read in chunks until we have complete HTTP request (headers + body)
+    // Phase 1: Read until we find the end of HTTP headers (\r\n\r\n)
+    size_t headerEndPos = std::string::npos;
     while (totalRead < MAX_REQUEST_SIZE && !requestComplete) {
         char chunk[CHUNK_SIZE];
         int bytesRead = socket_read(clientSocket, chunk, sizeof(chunk));
@@ -788,7 +789,7 @@ void CRPCServer::HandleClient(int clientSocket) {
         buffer.insert(buffer.end(), chunk, chunk + bytesRead);
         totalRead += bytesRead;
 
-        // Check if we have complete HTTP request (headers end with \r\n\r\n)
+        // Check if we have complete HTTP headers (end with \r\n\r\n)
         // CID 1675184 FIX: Pre-compute all bounds to prevent any overflow in loop
         // Validate bytesRead before casting to prevent integer overflow
         const size_t bufSize = buffer.size();
@@ -796,7 +797,7 @@ void CRPCServer::HandleClient(int clientSocket) {
             // CID 1675184 FIX: Safe cast - bytesRead is int and we verified > 0 above
             // A positive int is always safely castable to size_t
             size_t bytesReadSize = static_cast<size_t>(bytesRead);
-            
+
             // CID 1675184 FIX: Check for overflow in bytesReadSize + 3 before subtraction
             // This prevents overflowed constant from being used in arithmetic
             size_t searchStart = 0;
@@ -808,21 +809,57 @@ void CRPCServer::HandleClient(int clientSocket) {
                 }
             }
             // If overflow would occur, searchStart remains 0 (search from beginning)
-            
+
             // Pre-compute max index where [i+3] is valid - bufSize >= 4 guaranteed above
             const size_t maxIdx = bufSize - 4;
             for (size_t i = searchStart; i <= maxIdx; i++) {
                 if (buffer[i] == '\r' && buffer[i+1] == '\n' &&
                     buffer[i+2] == '\r' && buffer[i+3] == '\n') {
                     requestComplete = true;
+                    headerEndPos = i + 4;
                     break;
                 }
                 // Also check for \n\n (less common but valid) - [i+1] valid since i <= bufSize-4
                 if (buffer[i] == '\n' && buffer[i+1] == '\n') {
                     requestComplete = true;
+                    headerEndPos = i + 2;
                     break;
                 }
             }
+        }
+    }
+
+    // Phase 2: If headers found, check Content-Length and read remaining body
+    if (requestComplete && headerEndPos != std::string::npos) {
+        // Extract Content-Length from headers
+        std::string headers(buffer.data(), headerEndPos);
+        size_t contentLength = 0;
+        size_t clPos = headers.find("Content-Length:");
+        if (clPos == std::string::npos) {
+            clPos = headers.find("content-length:");
+        }
+        if (clPos != std::string::npos) {
+            size_t valStart = clPos + 15;  // strlen("Content-Length:")
+            while (valStart < headers.size() && headers[valStart] == ' ') valStart++;
+            size_t valEnd = headers.find("\r\n", valStart);
+            if (valEnd == std::string::npos) valEnd = headers.find("\n", valStart);
+            if (valEnd != std::string::npos) {
+                contentLength = std::stoul(headers.substr(valStart, valEnd - valStart));
+            }
+        }
+
+        // Read remaining body bytes if needed
+        size_t bodyBytesRead = buffer.size() - headerEndPos;
+        size_t totalNeeded = headerEndPos + contentLength;
+        if (totalNeeded > MAX_REQUEST_SIZE) totalNeeded = MAX_REQUEST_SIZE;
+
+        while (buffer.size() < totalNeeded) {
+            char chunk[CHUNK_SIZE];
+            int bytesRead = socket_read(clientSocket, chunk, sizeof(chunk));
+            if (bytesRead <= 0) break;
+            buffer.insert(buffer.end(), chunk, chunk + bytesRead);
+            totalRead += bytesRead;
+            if (totalRead >= MAX_REQUEST_SIZE) break;
         }
     }
 
