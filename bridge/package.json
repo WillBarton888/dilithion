@@ -1,0 +1,20 @@
+{
+  "name": "dilithion-bridge",
+  "version": "1.0.0",
+  "description": "Bridge contracts for wDIL and wDilV on Base",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:wdil:sepolia": "hardhat run scripts/deploy-wdil.js --network baseSepolia",
+    "deploy:wdilv:sepolia": "hardhat run scripts/deploy-wdilv.js --network baseSepolia",
+    "deploy:wdil:mainnet": "hardhat run scripts/deploy-wdil.js --network baseMainnet",
+    "deploy:wdilv:mainnet": "hardhat run scripts/deploy-wdilv.js --network baseMainnet",
+    "verify": "hardhat run scripts/verify.js"
+  },
+  "devDependencies": {
+    "hardhat": "^2.22.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.1.0",
+    "dotenv": "^16.4.0"
+  }
+}

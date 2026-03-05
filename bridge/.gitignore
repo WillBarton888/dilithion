@@ -1,0 +1,8 @@
+node_modules/
+artifacts/
+cache/
+typechain-types/
+.env
+bridge_state.db
+__pycache__/
+*.pyc
