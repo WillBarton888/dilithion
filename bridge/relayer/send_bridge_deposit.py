@@ -81,8 +81,7 @@ def build_op_return_script(data: bytes) -> bytes:
 
 
 def build_raw_transaction(
-    utxo_txid: str,
-    utxo_vout: int,
+    inputs: list,
     bridge_address: str,
     deposit_amount_sats: int,
     change_address: str,
@@ -90,7 +89,10 @@ def build_raw_transaction(
     op_return_data: bytes,
     op_return_value: int = 50000,
 ) -> bytes:
-    """Build an unsigned raw transaction with bridge deposit + OP_RETURN + change."""
+    """Build an unsigned raw transaction with multiple inputs, bridge deposit + OP_RETURN + change.
+
+    inputs: list of (txid_hex, vout) tuples
+    """
 
     tx = bytearray()
 
@@ -98,32 +100,24 @@ def build_raw_transaction(
     tx += uint32_le(1)
 
     # Input count
-    tx += compact_size(1)
+    tx += compact_size(len(inputs))
 
-    # Input: prevout hash (32 bytes, internal byte order = reversed hex)
-    txid_bytes = bytes.fromhex(utxo_txid)
-    # In Bitcoin serialization, txid is stored in internal byte order (reversed)
-    # But Dilithion might store it as-is. Let me check...
-    # The UTXO txid from listunspent is the display hex. In Bitcoin, the hash
-    # stored in prevout is the actual hash bytes (which displays reversed).
-    # Let's try reversed first (Bitcoin convention).
-    tx += bytes(reversed(txid_bytes))
-
-    # Input: prevout index (4 bytes)
-    tx += uint32_le(utxo_vout)
-
-    # Input: scriptSig (empty for unsigned tx)
-    tx += compact_size(0)
-
-    # Input: sequence
-    tx += uint32_le(0xFFFFFFFF)
+    for txid_hex, vout in inputs:
+        # Input: prevout hash (reversed for internal byte order)
+        txid_bytes = bytes.fromhex(txid_hex)
+        tx += bytes(reversed(txid_bytes))
+        # Input: prevout index (4 bytes)
+        tx += uint32_le(vout)
+        # Input: scriptSig (empty for unsigned tx)
+        tx += compact_size(0)
+        # Input: sequence
+        tx += uint32_le(0xFFFFFFFF)
 
     # Output count (3: bridge payment + OP_RETURN + change)
     tx += compact_size(3)
 
     # Output 1: Payment to bridge address
     bridge_payload = base58check_decode(bridge_address)
-    bridge_version = bridge_payload[0]
     bridge_pubkey_hash = bridge_payload[1:]
     bridge_script = build_p2pkh_script(bridge_pubkey_hash)
 
@@ -132,8 +126,6 @@ def build_raw_transaction(
     tx += bridge_script
 
     # Output 2: OP_RETURN with bridge metadata
-    # Use dust-threshold value (50000 ions) instead of zero to pass consensus
-    # on nodes that haven't yet upgraded to the OP_RETURN exemption
     op_return_script = build_op_return_script(op_return_data)
     tx += uint64_le(op_return_value)
     tx += compact_size(len(op_return_script))
@@ -155,62 +147,81 @@ def build_raw_transaction(
 
 
 def main():
+    import argparse
     from dilithion_rpc import DilithionRPC
 
-    # Configuration
-    BRIDGE_ADDRESS = "DUJzPMZYD1H1Dvvy8Wo3eQx8Phy99Baemo"
-    BASE_ADDRESS = "0x758F0063417E13Ab20C360454AA95C3dD5e7ffB7"
-    DEPOSIT_AMOUNT_DIL = 1.0  # 1 DIL test deposit
-    FEE_DIL = 0.001  # 0.001 DIL fee
+    parser = argparse.ArgumentParser(description="Send bridge deposit with OP_RETURN")
+    parser.add_argument("--chain", choices=["dil", "dilv"], required=True)
+    parser.add_argument("--amount", type=float, required=True, help="Amount in coins")
+    parser.add_argument("--base-address", required=True, help="Base L2 destination (0x...)")
+    parser.add_argument("--auto", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--max-inputs", type=int, default=50, help="Max UTXOs to use (default: 50)")
+    args = parser.parse_args()
 
-    DEPOSIT_AMOUNT_SATS = int(DEPOSIT_AMOUNT_DIL * 1e8)
-    FEE_SATS = int(FEE_DIL * 1e8)
+    CHAIN_CONFIG = {
+        "dil":  {"bridge": "DPW8h76TAGwj569LgbdLCAFUcgixMuoBWc", "rpc_port": 8332, "coin": "DIL"},
+        "dilv": {"bridge": "DESyLBcZYDU1jrE2o1GuQkdiuiwk2An6Sn", "rpc_port": 9332, "coin": "DilV"},
+    }
+    cfg = CHAIN_CONFIG[args.chain]
+
+    BRIDGE_ADDRESS = cfg["bridge"]
+    BASE_ADDRESS = args.base_address
+    DEPOSIT_AMOUNT_COINS = args.amount
+    FEE_COINS = 0.01
+    COIN = cfg["coin"]
+
+    DEPOSIT_AMOUNT_SATS = int(DEPOSIT_AMOUNT_COINS * 1e8)
+    FEE_SATS = int(FEE_COINS * 1e8)
+    OP_RETURN_VALUE = 50000  # 0.0005 coins (burned, unspendable)
 
     # Connect to node
-    rpc = DilithionRPC("http://127.0.0.1:8332", "rpc", "rpc", "dil")
+    rpc = DilithionRPC(f"http://127.0.0.1:{cfg['rpc_port']}", "rpc", "rpc", args.chain)
 
-    # Find a suitable UTXO
+    # Find suitable UTXOs (select largest first until we have enough)
     utxos = rpc._call("listunspent")
     print(f"Found {len(utxos)} UTXOs")
 
-    # Find one large enough (skip UTXOs already spent in mempool)
-    SKIP_TXIDS = {"856f147a8c327ad95a903b03511adeac45670506f8d39dcd4926b3a66b598d00"}
-    selected_utxo = None
+    # Convert amounts and sort by size (largest first)
     for utxo in utxos:
-        if utxo["txid"] in SKIP_TXIDS:
-            continue
         amount = utxo["amount"]
-        # Amount might be in DIL (float) or satoshis (int)
         if isinstance(amount, float) and amount < 10000:
-            amount_sats = int(round(amount * 1e8))
+            utxo["amount_sats"] = int(round(amount * 1e8))
         else:
-            amount_sats = int(amount)
+            utxo["amount_sats"] = int(amount)
+    utxos.sort(key=lambda u: u["amount_sats"], reverse=True)
 
-        needed = DEPOSIT_AMOUNT_SATS + FEE_SATS + 50000 + 1000  # deposit + fee + OP_RETURN + dust
-        if amount_sats >= needed:
-            selected_utxo = utxo
-            selected_utxo["amount_sats"] = amount_sats
+    # Select UTXOs until we have enough
+    needed = DEPOSIT_AMOUNT_SATS + FEE_SATS + OP_RETURN_VALUE + 1000  # extra buffer
+    selected = []
+    total_sats = 0
+    for utxo in utxos:
+        if len(selected) >= args.max_inputs:
+            break
+        selected.append(utxo)
+        total_sats += utxo["amount_sats"]
+        if total_sats >= needed:
             break
 
-    if not selected_utxo:
-        print("ERROR: No UTXO large enough found!")
+    if total_sats < needed:
+        print(f"ERROR: Insufficient funds! Have {total_sats/1e8:.8f}, need {needed/1e8:.8f} {COIN}")
+        print(f"  Selected {len(selected)} UTXOs (max {args.max_inputs})")
         sys.exit(1)
 
-    print(f"\nSelected UTXO:")
-    print(f"  txid: {selected_utxo['txid']}")
-    print(f"  vout: {selected_utxo['vout']}")
-    print(f"  amount: {selected_utxo['amount']} DIL ({selected_utxo['amount_sats']} sats)")
-    print(f"  address: {selected_utxo['address']}")
+    print(f"\nSelected {len(selected)} UTXOs totaling {total_sats/1e8:.8f} {COIN}")
+    for i, u in enumerate(selected[:5]):
+        print(f"  [{i+1}] {u['txid'][:16]}... vout={u['vout']} amount={u['amount_sats']/1e8:.8f}")
+    if len(selected) > 5:
+        print(f"  ... and {len(selected)-5} more")
 
-    change_address = selected_utxo["address"]  # Send change back to same address
-    OP_RETURN_VALUE = 50000  # 0.0005 DIL dust threshold (burned, unspendable)
-    change_sats = selected_utxo["amount_sats"] - DEPOSIT_AMOUNT_SATS - OP_RETURN_VALUE - FEE_SATS
+    change_address = selected[0]["address"]
+    change_sats = total_sats - DEPOSIT_AMOUNT_SATS - OP_RETURN_VALUE - FEE_SATS
 
     print(f"\nTransaction plan:")
-    print(f"  Deposit: {DEPOSIT_AMOUNT_DIL} DIL -> {BRIDGE_ADDRESS}")
+    print(f"  Deposit: {DEPOSIT_AMOUNT_COINS} {COIN} -> {BRIDGE_ADDRESS}")
     print(f"  OP_RETURN: DBRG + {BASE_ADDRESS}")
-    print(f"  Change: {change_sats / 1e8:.8f} DIL -> {change_address}")
-    print(f"  Fee: {FEE_DIL} DIL")
+    print(f"  Change: {change_sats / 1e8:.8f} {COIN} -> {change_address}")
+    print(f"  Fee: {FEE_COINS} {COIN}")
+    print(f"  Inputs: {len(selected)}")
 
     # Build OP_RETURN data: DBRG tag (4 bytes) + Base address (20 bytes)
     bridge_tag = b"DBRG"
@@ -218,10 +229,10 @@ def main():
     op_return_data = bridge_tag + base_addr_bytes
     print(f"\n  OP_RETURN data ({len(op_return_data)} bytes): {op_return_data.hex()}")
 
-    # Build raw transaction
+    # Build raw transaction with multiple inputs
+    input_list = [(u["txid"], u["vout"]) for u in selected]
     raw_tx = build_raw_transaction(
-        utxo_txid=selected_utxo["txid"],
-        utxo_vout=selected_utxo["vout"],
+        inputs=input_list,
         bridge_address=BRIDGE_ADDRESS,
         deposit_amount_sats=DEPOSIT_AMOUNT_SATS,
         change_address=change_address,
@@ -234,9 +245,9 @@ def main():
     print(f"\nRaw unsigned transaction ({len(raw_tx)} bytes):")
     print(f"  {raw_hex[:80]}...")
 
-    # Sign the transaction
-    print("\nSigning transaction...")
-    sign_result = rpc._call("signrawtransaction", {"hex": raw_hex})
+    # Sign the transaction (longer timeout for multi-input Dilithium sigs)
+    print(f"\nSigning transaction ({len(selected)} inputs)...")
+    sign_result = rpc._call("signrawtransaction", {"hex": raw_hex}, timeout=120)
     print(f"  Sign result: complete={sign_result.get('complete')}")
 
     if not sign_result.get("complete"):
@@ -245,25 +256,32 @@ def main():
         sys.exit(1)
 
     signed_hex = sign_result["hex"]
-    print(f"  Signed tx size: {len(signed_hex) // 2} bytes")
+    signed_size = len(signed_hex) // 2
+    print(f"  Signed tx size: {signed_size} bytes ({signed_size/1024:.1f} KB)")
+
+    if signed_size > 1000000:
+        print(f"ERROR: Signed tx exceeds 1MB limit! Use fewer inputs (--max-inputs).")
+        sys.exit(1)
 
     # Ask for confirmation before broadcasting
     print(f"\n{'='*60}")
     print(f"READY TO BROADCAST bridge deposit transaction:")
-    print(f"  Amount: {DEPOSIT_AMOUNT_DIL} DIL")
+    print(f"  Amount: {DEPOSIT_AMOUNT_COINS} {COIN}")
     print(f"  To: {BRIDGE_ADDRESS}")
     print(f"  Base address: {BASE_ADDRESS}")
-    print(f"  Fee: {FEE_DIL} DIL")
+    print(f"  Fee: {FEE_COINS} {COIN}")
+    print(f"  Tx size: {signed_size/1024:.1f} KB ({len(selected)} inputs)")
     print(f"{'='*60}")
 
-    confirm = input("\nType 'yes' to broadcast: ")
-    if confirm.strip().lower() != "yes":
-        print("Aborted.")
-        sys.exit(0)
+    if not args.auto:
+        confirm = input("\nType 'yes' to broadcast: ")
+        if confirm.strip().lower() != "yes":
+            print("Aborted.")
+            sys.exit(0)
 
-    # Broadcast
+    # Broadcast (longer timeout for validation of multi-input tx)
     print("\nBroadcasting transaction...")
-    result = rpc._call("sendrawtransaction", {"hex": signed_hex})
+    result = rpc._call("sendrawtransaction", {"hex": signed_hex}, timeout=120)
     print(f"\nTransaction broadcast! Result: {result}")
 
 

@@ -146,10 +146,14 @@ class BridgeRelayer:
     def run(self):
         """Main polling loop."""
         logger.info("Bridge relayer starting...")
+        logger.info(f"  Network:  {config.NETWORK.upper()}")
         logger.info(f"  DIL RPC:  {config.DIL_RPC_URL}")
         logger.info(f"  DilV RPC: {config.DILV_RPC_URL}")
         logger.info(f"  Base RPC: {config.BASE_RPC_URL}")
         logger.info(f"  Dry run:  {self.dry_run}")
+        if config.NETWORK == "mainnet" and "sepolia" in config.BASE_RPC_URL:
+            logger.error("NETWORK=mainnet but BASE_RPC_URL points to Sepolia! Aborting.")
+            return
 
         self._check_connections()
 

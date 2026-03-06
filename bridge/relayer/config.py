@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 # Load .env from bridge/ directory
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
+# ── Network selection ────────────────────────────────────────────────
+# "mainnet" or "testnet" — controls defaults and validation
+NETWORK = os.getenv("NETWORK", "testnet")
+
 # ── Dilithion chain RPC ──────────────────────────────────────────────
 DIL_RPC_URL  = os.getenv("DIL_RPC_URL",  "http://127.0.0.1:8332")
 DILV_RPC_URL = os.getenv("DILV_RPC_URL", "http://127.0.0.1:9332")
@@ -13,7 +17,8 @@ RPC_USER     = os.getenv("RPC_USER",     "rpc")
 RPC_PASSWORD = os.getenv("RPC_PASSWORD", "rpc")
 
 # ── Base chain ───────────────────────────────────────────────────────
-BASE_RPC_URL       = os.getenv("BASE_RPC_URL", "https://sepolia.base.org")
+_default_base_rpc = "https://mainnet.base.org" if NETWORK == "mainnet" else "https://sepolia.base.org"
+BASE_RPC_URL       = os.getenv("BASE_RPC_URL", _default_base_rpc)
 BRIDGE_PRIVATE_KEY = os.getenv("DEPLOYER_PRIVATE_KEY", "")
 
 # ── Deployed contract addresses ──────────────────────────────────────

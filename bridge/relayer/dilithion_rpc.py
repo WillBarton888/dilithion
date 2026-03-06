@@ -28,7 +28,7 @@ class DilithionRPC:
         cred = base64.b64encode(f"{user}:{password}".encode()).decode()
         self._auth_header = f"Basic {cred}"
 
-    def _call(self, method: str, params=None):
+    def _call(self, method: str, params=None, timeout: int = 30):
         """Make a JSON-RPC 2.0 call with a fresh socket each time."""
         self._id += 1
         payload = json.dumps({
@@ -50,7 +50,7 @@ class DilithionRPC:
         ).encode() + payload
 
         try:
-            sock = socket.create_connection((self._host, self._port), timeout=30)
+            sock = socket.create_connection((self._host, self._port), timeout=timeout)
             sock.sendall(request)
 
             chunks = []
