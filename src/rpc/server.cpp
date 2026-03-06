@@ -757,10 +757,10 @@ void CRPCServer::HandleClient(int clientSocket) {
     }
 
     // RPC-003 FIX: Separate HTTP and JSON-RPC body size limits
-    // HTTP headers: 1MB max (prevents header exhaustion)
-    // JSON-RPC body: 64KB max (prevents JSON parsing DoS)
-    const size_t MAX_REQUEST_SIZE = 1024 * 1024;  // 1MB for HTTP (headers + body)
-    const size_t MAX_JSONRPC_BODY_SIZE = 64 * 1024;  // 64KB for JSON-RPC body only
+    // Dilithium sigs are ~3.7KB per input, so a 50-input tx = ~370KB signed hex
+    // = ~740KB JSON body. 2MB allows headroom for larger consolidation txs.
+    const size_t MAX_REQUEST_SIZE = 2 * 1024 * 1024;  // 2MB for HTTP (headers + body)
+    const size_t MAX_JSONRPC_BODY_SIZE = 2 * 1024 * 1024;  // 2MB for JSON-RPC body
     const size_t CHUNK_SIZE = 4096;
 
     std::vector<char> buffer;

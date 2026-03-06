@@ -5061,7 +5061,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                     // Periodic transaction rebroadcast (every 60 seconds)
                     // Only rebroadcast txs older than 2 minutes (already had a chance to propagate).
-                    // Cap at 100 per cycle to avoid flooding large mempools.
+                    // BATCHED: Send up to 8 txs per cycle as a single INV message per peer
+                    // to stay well under the INV rate limit (10 messages/sec) on the receiving side.
                     {
                         static auto last_tx_rebroadcast = std::chrono::steady_clock::now();
                         auto now = std::chrono::steady_clock::now();
@@ -5069,19 +5070,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (elapsed >= 60) {
                             last_tx_rebroadcast = now;
                             auto* mempool = g_mempool.load();
-                            if (mempool) {
+                            if (mempool && g_node_context.peer_manager && g_node_context.connman && g_node_context.message_processor) {
                                 auto txs = mempool->GetUnconfirmedOlderThan(120);
                                 if (!txs.empty()) {
+                                    const size_t MAX_REBROADCAST = 8;
+                                    std::vector<NetProtocol::CInv> inv_vec;
                                     size_t count = 0;
                                     for (const auto& tx : txs) {
-                                        AnnounceTransactionToPeers(tx->GetHash(), -1, true);
-                                        // DNA behavioral: track TX relay
+                                        inv_vec.push_back(NetProtocol::CInv(NetProtocol::MSG_TX_INV, tx->GetHash()));
                                         if (auto coll = g_node_context.GetDNACollector()) {
                                             auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                 std::chrono::system_clock::now().time_since_epoch()).count();
                                             coll->on_tx_relayed(static_cast<uint64_t>(now_ms));
                                         }
-                                        if (++count >= 100) break;
+                                        if (++count >= MAX_REBROADCAST) break;
+                                    }
+                                    // Send single batched INV to all peers
+                                    if (!inv_vec.empty()) {
+                                        CNetMessage inv_msg = g_node_context.message_processor->CreateInvMessage(inv_vec);
+                                        auto peers = g_node_context.peer_manager->GetConnectedPeers();
+                                        for (const auto& peer : peers) {
+                                            if (peer->IsHandshakeComplete() && peer->relay) {
+                                                g_node_context.connman->PushMessage(peer->id, inv_msg);
+                                            }
+                                        }
                                     }
                                     std::cout << "[TX-RELAY] Rebroadcast " << count
                                               << " unconfirmed mempool transaction(s)" << std::endl;
