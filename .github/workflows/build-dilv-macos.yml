@@ -1,0 +1,79 @@
+name: Build DilV macOS Release
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags (same tags as DIL releases)
+
+jobs:
+  build-dilv-macos:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Checkout submodules
+      run: |
+        git submodule update --init depends/chiavdf
+        git submodule update --init depends/dilithium
+        # RandomX not needed for dilv-node but init to avoid any Makefile errors
+        git submodule update --init depends/randomx || true
+
+    - name: Install dependencies
+      run: |
+        brew install leveldb cmake openssl miniupnpc gmp
+
+    - name: Build RandomX (for shared Makefile compatibility)
+      run: |
+        cd depends/randomx
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(sysctl -n hw.ncpu)
+
+    - name: Build dilv-node
+      run: |
+        OPENSSL_PREFIX=$(brew --prefix openssl@3 2>/dev/null || brew --prefix openssl 2>/dev/null || echo "/opt/homebrew/opt/openssl@3")
+        MINIUPNPC_PREFIX=$(brew --prefix miniupnpc)
+        GMP_PREFIX=$(brew --prefix gmp)
+        export CPPFLAGS="-I$OPENSSL_PREFIX/include -I$MINIUPNPC_PREFIX/include -I$GMP_PREFIX/include"
+        export LDFLAGS="-L$OPENSSL_PREFIX/lib -Ldepends/randomx/build -L$(brew --prefix leveldb)/lib -L$MINIUPNPC_PREFIX/lib -L$GMP_PREFIX/lib"
+        export CFLAGS="-I$OPENSSL_PREFIX/include -I$MINIUPNPC_PREFIX/include -I$GMP_PREFIX/include"
+        export CXXFLAGS="-std=c++17 -I$OPENSSL_PREFIX/include -I$MINIUPNPC_PREFIX/include -I$GMP_PREFIX/include"
+        make clean
+        make dilv-node check-wallet-balance -j$(sysctl -n hw.ncpu) CXXFLAGS="$CXXFLAGS" CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
+        ls -lh dilv-node check-wallet-balance
+
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+        else
+          VERSION="v1.0.0"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+
+    - name: Create release package
+      env:
+        VERSION: ${{ steps.get_version.outputs.version }}
+      run: |
+        chmod +x package-dilv-macos-release.sh
+        ./package-dilv-macos-release.sh
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dilv-${{ steps.get_version.outputs.version }}-mainnet-macos-x64
+        path: releases/dilv-${{ steps.get_version.outputs.version }}-mainnet-macos-x64.tar.gz
+
+    - name: Upload to release (if tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: releases/dilv-${{ steps.get_version.outputs.version }}-mainnet-macos-x64.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
