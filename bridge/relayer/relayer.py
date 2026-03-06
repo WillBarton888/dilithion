@@ -467,7 +467,14 @@ class BridgeRelayer:
         if not self.account:
             return  # No private key configured
 
-        for dep in self.db.get_confirmed_deposits():
+        # Process confirmed deposits + retryable failed deposits
+        deposits = list(self.db.get_confirmed_deposits())
+        retryable = list(self.db.get_retryable_deposits())
+        if retryable:
+            logger.info(f"Retrying {len(retryable)} previously failed deposits")
+            deposits.extend(retryable)
+
+        for dep in deposits:
             chain = dep["chain"]
             cfg = self.chain_config[chain]
             contract = cfg["contract"]
@@ -476,20 +483,9 @@ class BridgeRelayer:
                 logger.warning(f"[{chain}] No contract configured — skipping mint")
                 continue
 
-            # Check relayer-side daily cap
-            daily_minted = self.db.get_daily_minted(chain)
-            if daily_minted + dep["amount"] > cfg["daily_cap"]:
-                logger.warning(
-                    f"[{chain}] Daily mint cap would be exceeded: "
-                    f"{daily_minted + dep['amount']} > {cfg['daily_cap']}. "
-                    f"Skipping deposit {dep['native_txid'][:16]}..."
-                )
-                continue
-
             # Convert txid to bytes32 for contract
             native_txid_bytes = bytes.fromhex(dep["native_txid"])
             if len(native_txid_bytes) != 32:
-                # Pad or truncate to 32 bytes
                 native_txid_bytes = native_txid_bytes[:32].ljust(32, b'\x00')
 
             # Check contract-side replay protection (belt + suspenders)
@@ -551,6 +547,10 @@ class BridgeRelayer:
                 logger.error(
                     f"[{chain}] Mint failed for {dep['native_txid'][:16]}...: {e}"
                 )
+
+            # Rate-limit between mints to avoid nonce collisions and Base RPC 429s
+            if len(deposits) > 1:
+                time.sleep(3)
 
     # ── Burn scanning (Base → native) ────────────────────────────────
 

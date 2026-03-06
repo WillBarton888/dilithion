@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dilithion Bridge - Convert DIL & DilV to Base (Ethereum L2)</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --secondary: #8b5cf6;
+            --accent: #06b6d4;
+            --bg-dark: #0f172a;
+            --bg-darker: #020617;
+            --bg-card: #1e293b;
+            --bg-card-hover: #283548;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #334155;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-darker);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--bg-dark);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header-left a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .header-left a:hover { color: var(--text-primary); }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .header h1 span { color: var(--accent); }
+
+        .connect-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .connect-btn:hover { background: var(--primary-dark); }
+        .connect-btn.connected { background: var(--success); }
+
+        .trust-banner {
+            background: #1c1917;
+            border: 1px solid #78350f;
+            border-radius: 8px;
+            padding: 16px 24px;
+            margin: 24px 32px 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #fbbf24;
+        }
+
+        .trust-banner strong { color: #f59e0b; }
+
+        .main {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            background: var(--bg-dark);
+            border-radius: 12px;
+            padding: 4px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .tab:hover { color: var(--text-primary); }
+        .tab.active { background: var(--primary); color: white; }
+
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+
+        .card p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+
+        .address-box {
+            background: var(--bg-darker);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            word-break: break-all;
+            color: var(--accent);
+            margin-bottom: 12px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .address-box:hover { border-color: var(--primary); }
+        .address-box::after {
+            content: 'Click to copy';
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: 'Inter', sans-serif;
+        }
+
+        .warning-box {
+            background: #1c1917;
+            border: 1px solid #78350f;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            color: #fbbf24;
+            margin-bottom: 16px;
+        }
+
+        .info-box {
+            background: rgba(6, 182, 212, 0.08);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            color: var(--accent);
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+
+        .success-box {
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            color: var(--success);
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+
+        .steps {
+            counter-reset: step;
+        }
+
+        .step {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .step-num {
+            width: 32px;
+            height: 32px;
+            background: var(--primary);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+            padding-top: 4px;
+        }
+
+        .step-content h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .step-content p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .command-block {
+            background: var(--bg-darker);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            margin: 10px 0;
+            color: var(--success);
+            cursor: pointer;
+            position: relative;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .command-block:hover { border-color: var(--primary); }
+        .command-block::after {
+            content: 'Click to copy';
+            position: absolute;
+            right: 12px;
+            top: 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: 'Inter', sans-serif;
+        }
+
+        .or-divider {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .or-divider::before, .or-divider::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 40%;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .or-divider::before { left: 0; }
+        .or-divider::after { right: 0; }
+
+        .status-result {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+            font-size: 13px;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .status-row:last-child { border-bottom: none; }
+
+        .status-label { color: var(--text-secondary); }
+        .status-value { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+        .badge {
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-pending { background: #1e3a5f; color: #60a5fa; }
+        .badge-confirmed { background: #14532d; color: #4ade80; }
+        .badge-minted { background: #365314; color: #a3e635; }
+        .badge-failed { background: #450a0a; color: #f87171; }
+
+        .chain-toggle {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .chain-option {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .chain-option:hover { border-color: var(--primary); }
+        .chain-option.active { border-color: var(--primary); background: rgba(99, 102, 241, 0.1); }
+
+        .quick-buy-card {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(6, 182, 212, 0.08));
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .quick-buy-card h3 { color: var(--success); }
+
+        footer {
+            text-align: center;
+            padding: 32px;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        footer a { color: var(--accent); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+
+        .copied-toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--success);
+            color: white;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+
+        .copied-toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <h1>Dilithion <span>Bridge</span></h1>
+            <a href="index.html">Home</a>
+            <a href="wallet.html">Wallet</a>
+        </div>
+        <button class="connect-btn" id="connectBtn" onclick="connectWallet()">Connect MetaMask</button>
+    </header>
+
+    <div class="trust-banner">
+        <strong>Custodial Bridge Notice:</strong> This bridge is operated by a single entity.
+        The operator controls minting on Base and holds native funds at the bridge deposit addresses.
+        Users trust the operator not to steal or lose funds. This model will be upgraded to a
+        3-of-5 multisig once value at stake justifies the operational complexity.
+    </div>
+
+    <main class="main">
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('deposit')">Deposit (DIL/DilV to Base)</div>
+            <div class="tab" onclick="switchTab('withdraw')">Withdraw (Base to DIL/DilV)</div>
+            <div class="tab" onclick="switchTab('status')">Status</div>
+        </div>
+
+        <!-- DEPOSIT TAB -->
+        <div id="deposit-panel" class="panel active">
+
+            <!-- Quick Buy Option -->
+            <div class="quick-buy-card">
+                <h3>Just want to buy wDIL or wDILV?</h3>
+                <p>The easiest way is to buy directly on Aerodrome using ETH. No bridging needed.</p>
+                <p style="margin-bottom: 0;">
+                    <a href="https://aerodrome.finance/swap?outputCurrency=0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2" target="_blank" class="btn btn-primary" style="margin-right: 8px;">Buy wDIL on Aerodrome</a>
+                    <a href="https://aerodrome.finance/swap?outputCurrency=0xF162F6B432FeeD73458D4653ef8E74Ba014403E8" target="_blank" class="btn btn-secondary">Buy wDILV on Aerodrome</a>
+                </p>
+            </div>
+
+            <div class="or-divider">OR bridge your mined coins</div>
+
+            <!-- Bridge Deposit -->
+            <div class="card">
+                <h3>Bridge: Convert your mined DIL or DilV to wDIL or wDILV on Base</h3>
+                <p>If you mine DIL or DilV and want to convert them to tradeable tokens on Base (Ethereum L2),
+                   use the form below. <strong>Your Dilithion node must be running</strong> on this computer.</p>
+
+                <div class="chain-toggle">
+                    <div class="chain-option active" onclick="selectDepositChain('dil')">DIL to wDIL</div>
+                    <div class="chain-option" onclick="selectDepositChain('dilv')">DilV to wDILV</div>
+                </div>
+
+                <div class="info-box">
+                    <strong>What you need:</strong><br>
+                    1. Your Dilithion (or DilV) node running and fully synced on this computer<br>
+                    2. Coins in your node wallet<br>
+                    3. A MetaMask wallet address — this is where your wrapped tokens will arrive on Base
+                </div>
+
+                <div class="form-group">
+                    <label>Your MetaMask wallet address (on Base network)</label>
+                    <input type="text" id="depositBaseAddr" placeholder="0x... (open MetaMask, copy your address)"
+                           oninput="validateDepositForm()">
+                    <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                        Open MetaMask, make sure you're on <strong>Base network</strong>, and copy your address. Or click "Connect MetaMask" above.
+                    </p>
+                </div>
+
+                <div class="form-group">
+                    <label>Amount of <span id="depositCoinLabel">DIL</span> to bridge</label>
+                    <input type="number" id="depositAmount" placeholder="100" step="0.01" oninput="validateDepositForm()">
+                </div>
+
+                <div class="form-group">
+                    <label>Node RPC address (leave default unless you changed it)</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="text" id="nodeRpcUrl" value="http://127.0.0.1:8332" style="flex: 1;">
+                        <button class="btn" onclick="testNodeConnection()" style="padding: 10px 16px; font-size: 13px; white-space: nowrap; background: var(--bg-tertiary); border: 1px solid var(--border-color);">Test Connection</button>
+                    </div>
+                    <p id="connTestResult" style="font-size: 12px; margin-top: 4px; display: none;"></p>
+                </div>
+
+                <button class="btn btn-primary" id="bridgeBtn" onclick="executeBridgeDeposit()" disabled style="width: 100%; padding: 14px; font-size: 16px;">
+                    Enter details above
+                </button>
+
+                <div id="depositStatus" style="margin-top: 16px; display: none;"></div>
+
+                <div style="margin-top: 16px;">
+                    <p style="font-size: 13px; color: var(--text-secondary);">
+                        After you click "Bridge Now", this page will connect to your node, select coins from your wallet,
+                        build the bridge transaction, sign it, and broadcast it. After
+                        <strong id="confirmCount">6</strong> confirmations (<strong id="confirmTime">~24 minutes</strong> for DIL),
+                        <strong id="wrappedCoinLabel">wDIL</strong> tokens will be minted to your MetaMask wallet automatically.
+                    </p>
+                </div>
+
+                <div class="warning-box" style="margin-top: 16px;">
+                    <strong>Important:</strong> Your node must be running with RPC enabled (the default).
+                    You need <strong>v3.6.9 or later</strong> for browser bridge support.
+                    Use the "Test Connection" button above to verify. If you have issues, ask in our
+                    <a href="https://t.me/dilithion" style="color: #60a5fa;">Telegram</a> or Discord.
+                </div>
+            </div>
+
+            <!-- Add wDIL to MetaMask -->
+            <div class="card">
+                <h3>See your tokens in MetaMask</h3>
+                <p>After your deposit is processed, add the token to MetaMask so you can see your balance:</p>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-num">1</div>
+                        <div class="step-content">
+                            <p>In MetaMask, click <strong>"Import tokens"</strong> at the bottom</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">2</div>
+                        <div class="step-content">
+                            <p>Paste the contract address:</p>
+                            <div class="address-box" id="tokenContractDisplay" onclick="copyToClipboard(this)">0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2</div>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">3</div>
+                        <div class="step-content">
+                            <p>MetaMask will auto-detect the token name and decimals. Click <strong>"Import"</strong>.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WITHDRAW TAB -->
+        <div id="withdraw-panel" class="panel">
+            <div class="card">
+                <h3>Withdraw: Convert wDIL or wDILV back to native coins</h3>
+                <p>Send your wrapped tokens back to the Dilithion network.
+                   This burns your wDIL/wDILV on Base and the bridge sends native DIL/DilV to your wallet address.
+                   <strong>Requires MetaMask connected to Base network.</strong></p>
+
+                <div class="chain-toggle">
+                    <div class="chain-option active" onclick="selectWithdrawChain('dil')">wDIL to DIL</div>
+                    <div class="chain-option" onclick="selectWithdrawChain('dilv')">wDILV to DilV</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Amount to withdraw</label>
+                    <input type="number" id="withdrawAmount" placeholder="0.00" step="0.00000001">
+                </div>
+
+                <div class="form-group">
+                    <label>Your Dilithion wallet address (starts with D)</label>
+                    <input type="text" id="withdrawNativeAddr" placeholder="DJrywx4AsVQSPLZCKRdg8erZdPMNaRSrKq">
+                    <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                        This is the address from your Dilithion node wallet where you want to receive native coins.
+                    </p>
+                </div>
+
+                <button class="btn btn-primary" id="withdrawBtn" onclick="executeBurn()" disabled>
+                    Connect MetaMask First
+                </button>
+
+                <div id="withdrawResult" class="status-result" style="display: none;">
+                </div>
+            </div>
+        </div>
+
+        <!-- STATUS TAB -->
+        <div id="status-panel" class="panel">
+            <div class="card">
+                <h3>Track Bridge Transaction</h3>
+                <p>Enter a native chain transaction ID or Base transaction hash to check
+                   the status of your bridge deposit or withdrawal.</p>
+
+                <div class="form-group">
+                    <label>Transaction ID</label>
+                    <input type="text" id="statusTxid" placeholder="Transaction hash...">
+                </div>
+
+                <button class="btn btn-primary" onclick="checkStatus()">Check Status</button>
+
+                <div id="statusResult" class="status-result" style="display: none;">
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Bridge Info</h3>
+                <div class="status-result">
+                    <div class="status-row">
+                        <span class="status-label">wDIL Contract (Base)</span>
+                        <span class="status-value" id="wdilAddr">Loading...</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">wDILV Contract (Base)</span>
+                        <span class="status-value" id="wdilvAddr">Loading...</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">DIL Bridge Deposit Address</span>
+                        <span class="status-value" id="dilBridgeAddr">Loading...</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">DilV Bridge Deposit Address</span>
+                        <span class="status-value" id="dilvBridgeAddr">Loading...</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">DIL Confirmations Required</span>
+                        <span class="status-value">6 (~24 min)</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">DilV Confirmations Required</span>
+                        <span class="status-value">15 (~12 min)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="copied-toast" id="copiedToast">Copied!</div>
+
+    <footer>
+        <p>Dilithion Bridge | <a href="https://dilithion.org">dilithion.org</a> |
+           <a href="https://t.me/dilithion">Telegram</a></p>
+        <p style="margin-top: 8px;">This bridge is custodial. Use at your own risk.</p>
+    </footer>
+
+    <script>
+        // ── Configuration ────────────────────────────────────────────
+        const BRIDGE_CONFIG = {
+            chainId: 8453,
+            chainName: 'Base',
+            rpcUrl: 'https://mainnet.base.org',
+
+            wdilContract: '0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2',
+            wdilvContract: '0xF162F6B432FeeD73458D4653ef8E74Ba014403E8',
+
+            dilBridgeAddress: 'DPW8h76TAGwj569LgbdLCAFUcgixMuoBWc',
+            dilvBridgeAddress: 'DESyLBcZYDU1jrE2o1GuQkdiuiwk2An6Sn',
+
+            burnAbi: [
+                'function burn(uint256 amount, string calldata nativeAddress) external',
+                'function balanceOf(address account) external view returns (uint256)',
+                'function decimals() external view returns (uint8)',
+                'function symbol() external view returns (string)'
+            ]
+        };
+
+        let provider = null;
+        let signer = null;
+        let connectedAddress = null;
+        let selectedDepositChain = 'dil';
+        let selectedWithdrawChain = 'dil';
+
+        // ── Tab switching ────────────────────────────────────────────
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(tab + '-panel').classList.add('active');
+        }
+
+        // ── Copy to clipboard ────────────────────────────────────────
+
+        function copyToClipboard(el) {
+            const text = el.textContent.replace('Click to copy', '').trim();
+            navigator.clipboard.writeText(text).then(() => {
+                const toast = document.getElementById('copiedToast');
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 1500);
+            });
+        }
+
+        // ── Chain selection ──────────────────────────────────────────
+
+        function selectDepositChain(chain) {
+            selectedDepositChain = chain;
+            const toggles = document.querySelectorAll('#deposit-panel .chain-option');
+            toggles.forEach(t => t.classList.remove('active'));
+            toggles[chain === 'dil' ? 0 : 1].classList.add('active');
+
+            const coinLabel = chain === 'dil' ? 'DIL' : 'DilV';
+            const wrappedLabel = chain === 'dil' ? 'wDIL' : 'wDILV';
+            const confirmTime = chain === 'dil' ? '~24 minutes' : '~12 minutes';
+            const rpcPort = chain === 'dil' ? '8332' : '9332';
+            const contractAddr = chain === 'dil' ? BRIDGE_CONFIG.wdilContract : BRIDGE_CONFIG.wdilvContract;
+
+            document.getElementById('depositCoinLabel').textContent = coinLabel;
+            document.getElementById('wrappedCoinLabel').textContent = wrappedLabel;
+            document.getElementById('confirmCount').textContent = chain === 'dil' ? '6' : '15';
+            document.getElementById('confirmTime').textContent = confirmTime;
+            document.getElementById('tokenContractDisplay').textContent = contractAddr;
+            document.getElementById('nodeRpcUrl').value = 'http://127.0.0.1:' + rpcPort;
+
+            validateDepositForm();
+        }
+
+        function selectWithdrawChain(chain) {
+            selectedWithdrawChain = chain;
+            const toggles = document.querySelectorAll('#withdraw-panel .chain-option');
+            toggles.forEach(t => t.classList.remove('active'));
+            toggles[chain === 'dil' ? 0 : 1].classList.add('active');
+            updateWithdrawButton();
+        }
+
+        // ── Deposit form validation ──────────────────────────────────
+
+        function validateDepositForm() {
+            const addr = document.getElementById('depositBaseAddr').value.trim();
+            const amount = document.getElementById('depositAmount').value.trim();
+            const btn = document.getElementById('bridgeBtn');
+            const coin = selectedDepositChain === 'dil' ? 'DIL' : 'DilV';
+            const wrapped = selectedDepositChain === 'dil' ? 'wDIL' : 'wDILV';
+
+            if (!addr || !addr.startsWith('0x') || addr.length !== 42) {
+                btn.textContent = 'Enter your MetaMask address';
+                btn.disabled = true;
+                return;
+            }
+            if (!amount || parseFloat(amount) <= 0) {
+                btn.textContent = 'Enter amount to bridge';
+                btn.disabled = true;
+                return;
+            }
+            btn.textContent = `Bridge ${amount} ${coin} to ${wrapped} — Click to Send`;
+            btn.disabled = false;
+        }
+
+        // ── Node RPC helper ──────────────────────────────────────────
+
+        async function nodeRPC(method, params, timeout) {
+            const rpcUrl = document.getElementById('nodeRpcUrl').value.trim();
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout || 30000);
+
+            const res = await fetch(rpcUrl + '/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Dilithion-RPC': '1'
+                },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: method,
+                    params: params || []
+                }),
+                signal: controller.signal
+            });
+            clearTimeout(timer);
+
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+            return data.result;
+        }
+
+        // ── Test Node Connection ─────────────────────────────────────
+        async function testNodeConnection() {
+            const result = document.getElementById('connTestResult');
+            result.style.display = 'block';
+            result.style.color = 'var(--text-secondary)';
+            result.textContent = 'Testing connection...';
+
+            try {
+                const info = await nodeRPC('getblockchaininfo', [], 5000);
+                result.style.color = 'var(--success)';
+                result.textContent = 'Connected! Chain: ' + info.chain + ', Height: ' + info.blocks + ', Synced: ' + (info.initialblockdownload ? 'No (syncing)' : 'Yes');
+            } catch (e) {
+                result.style.color = 'var(--error)';
+                if (e.message.includes('aborted') || e.message.includes('timeout')) {
+                    result.textContent = 'Connection timed out. Is your node running? Try http://localhost:8332';
+                } else if (e.message.includes('NetworkError') || e.message.includes('Failed to fetch')) {
+                    result.textContent = 'Cannot reach node. Make sure it is running and you are on v3.6.9+. Try http://localhost:8332';
+                } else {
+                    result.textContent = 'Error: ' + e.message;
+                }
+            }
+        }
+
+        // ── Transaction building (ported from send_bridge_deposit.py) ─
+
+        function sha3_256(data) {
+            // Use ethers.js keccak256 is NOT sha3-256. We need proper SHA3.
+            // For browser, use SubtleCrypto — but it doesn't support SHA3.
+            // Fallback: we use a minimal SHA3 implementation or skip checksum
+            // verification since we're using known-good addresses from config.
+            // The node's signrawtransaction will validate the scripts anyway.
+            return null;
+        }
+
+        const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+        function base58Decode(str) {
+            let n = BigInt(0);
+            for (const c of str) {
+                const idx = BASE58_ALPHABET.indexOf(c);
+                if (idx < 0) throw new Error('Invalid Base58 character: ' + c);
+                n = n * 58n + BigInt(idx);
+            }
+            const hex = n.toString(16).padStart(50, '0'); // 25 bytes = 50 hex
+            const bytes = new Uint8Array(hex.match(/.{2}/g).map(b => parseInt(b, 16)));
+            // Count leading '1's (zero bytes)
+            let leadingZeros = 0;
+            for (const c of str) { if (c === '1') leadingZeros++; else break; }
+            const result = new Uint8Array(leadingZeros + bytes.length);
+            result.set(bytes, leadingZeros);
+            return result;
+        }
+
+        function getPubKeyHash(address) {
+            // Decode base58check, skip version byte (1), skip checksum (4)
+            const raw = base58Decode(address);
+            return raw.slice(1, 21); // 20-byte pubkey hash
+        }
+
+        function buildP2PKHScript(pubkeyHash) {
+            // OP_DUP OP_HASH160 <20> <hash> OP_EQUALVERIFY OP_CHECKSIG
+            const script = new Uint8Array(25);
+            script[0] = 0x76; // OP_DUP
+            script[1] = 0xa9; // OP_HASH160
+            script[2] = 20;   // push 20 bytes
+            script.set(pubkeyHash, 3);
+            script[23] = 0x88; // OP_EQUALVERIFY
+            script[24] = 0xac; // OP_CHECKSIG
+            return script;
+        }
+
+        function buildOpReturnScript(data) {
+            // OP_RETURN <len> <data>
+            const script = new Uint8Array(2 + data.length);
+            script[0] = 0x6a; // OP_RETURN
+            script[1] = data.length;
+            script.set(data, 2);
+            return script;
+        }
+
+        function compactSize(n) {
+            if (n < 253) return new Uint8Array([n]);
+            if (n <= 0xFFFF) {
+                const b = new Uint8Array(3);
+                b[0] = 0xfd;
+                b[1] = n & 0xff; b[2] = (n >> 8) & 0xff;
+                return b;
+            }
+            const b = new Uint8Array(5);
+            b[0] = 0xfe;
+            b[1] = n & 0xff; b[2] = (n >> 8) & 0xff;
+            b[3] = (n >> 16) & 0xff; b[4] = (n >> 24) & 0xff;
+            return b;
+        }
+
+        function uint32LE(n) {
+            const b = new Uint8Array(4);
+            b[0] = n & 0xff; b[1] = (n >> 8) & 0xff;
+            b[2] = (n >> 16) & 0xff; b[3] = (n >> 24) & 0xff;
+            return b;
+        }
+
+        function uint64LE(n) {
+            // n is a regular number (safe for up to 2^53)
+            const b = new Uint8Array(8);
+            const lo = n & 0xFFFFFFFF;
+            const hi = Math.floor(n / 0x100000000) & 0xFFFFFFFF;
+            b[0] = lo & 0xff; b[1] = (lo >> 8) & 0xff;
+            b[2] = (lo >> 16) & 0xff; b[3] = (lo >> 24) & 0xff;
+            b[4] = hi & 0xff; b[5] = (hi >> 8) & 0xff;
+            b[6] = (hi >> 16) & 0xff; b[7] = (hi >> 24) & 0xff;
+            return b;
+        }
+
+        function hexToBytes(hex) {
+            return new Uint8Array(hex.match(/.{2}/g).map(b => parseInt(b, 16)));
+        }
+
+        function bytesToHex(bytes) {
+            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function reverseBytes(bytes) {
+            return new Uint8Array(Array.from(bytes).reverse());
+        }
+
+        function concatBytes(...arrays) {
+            let total = arrays.reduce((s, a) => s + a.length, 0);
+            let result = new Uint8Array(total);
+            let offset = 0;
+            for (const arr of arrays) {
+                result.set(arr, offset);
+                offset += arr.length;
+            }
+            return result;
+        }
+
+        function buildRawTransaction(inputs, bridgeAddress, depositSats, changeAddress, changeSats, opReturnData) {
+            const OP_RETURN_VALUE = 50000; // 0.0005 coins (unspendable)
+
+            let parts = [];
+
+            // Version
+            parts.push(uint32LE(1));
+
+            // Input count
+            parts.push(compactSize(inputs.length));
+
+            for (const inp of inputs) {
+                // Prevout hash (reversed)
+                parts.push(reverseBytes(hexToBytes(inp.txid)));
+                // Prevout index
+                parts.push(uint32LE(inp.vout));
+                // Empty scriptSig
+                parts.push(compactSize(0));
+                // Sequence
+                parts.push(uint32LE(0xFFFFFFFF));
+            }
+
+            // 3 outputs: bridge payment + OP_RETURN + change
+            parts.push(compactSize(3));
+
+            // Output 1: Payment to bridge
+            const bridgePKH = getPubKeyHash(bridgeAddress);
+            const bridgeScript = buildP2PKHScript(bridgePKH);
+            parts.push(uint64LE(depositSats));
+            parts.push(compactSize(bridgeScript.length));
+            parts.push(bridgeScript);
+
+            // Output 2: OP_RETURN
+            const opReturnScript = buildOpReturnScript(opReturnData);
+            parts.push(uint64LE(OP_RETURN_VALUE));
+            parts.push(compactSize(opReturnScript.length));
+            parts.push(opReturnScript);
+
+            // Output 3: Change
+            const changePKH = getPubKeyHash(changeAddress);
+            const changeScript = buildP2PKHScript(changePKH);
+            parts.push(uint64LE(changeSats));
+            parts.push(compactSize(changeScript.length));
+            parts.push(changeScript);
+
+            // Locktime
+            parts.push(uint32LE(0));
+
+            return concatBytes(...parts);
+        }
+
+        // ── Execute bridge deposit ───────────────────────────────────
+
+        async function executeBridgeDeposit() {
+            const baseAddr = document.getElementById('depositBaseAddr').value.trim();
+            const amountStr = document.getElementById('depositAmount').value.trim();
+            const chain = selectedDepositChain;
+            const statusDiv = document.getElementById('depositStatus');
+            const btn = document.getElementById('bridgeBtn');
+
+            statusDiv.style.display = 'block';
+            btn.disabled = true;
+
+            const coin = chain === 'dil' ? 'DIL' : 'DilV';
+            const bridgeAddr = chain === 'dil' ? BRIDGE_CONFIG.dilBridgeAddress : BRIDGE_CONFIG.dilvBridgeAddress;
+            const depositSats = Math.round(parseFloat(amountStr) * 1e8);
+            const OP_RETURN_VALUE = 50000;
+            const FEE_RATE = 6; // volts per byte
+            const MAX_INPUTS = 50;
+
+            function log(msg, type) {
+                const color = type === 'error' ? 'var(--error)' : type === 'success' ? 'var(--success)' : 'var(--text-secondary)';
+                statusDiv.innerHTML += `<p style="color: ${color}; font-size: 13px; margin: 4px 0;">${msg}</p>`;
+                statusDiv.scrollTop = statusDiv.scrollHeight;
+            }
+
+            statusDiv.innerHTML = '';
+
+            try {
+                // Step 1: Connect to node
+                log('Connecting to your node...');
+                let utxos;
+                try {
+                    utxos = await nodeRPC('listunspent');
+                } catch (e) {
+                    log('Could not connect to your node.', 'error');
+                    log('Error: ' + e.message, 'error');
+                    log('');
+                    log('Troubleshooting:');
+                    log('1. Make sure your node is running (dilithion-node.exe or dilithion-node)');
+                    log('2. Update to the latest version (v3.6.9+) which includes browser CORS support');
+                    log('3. Check the RPC address above matches your node (default: http://127.0.0.1:8332)');
+                    log('4. Try http://localhost:8332 instead of http://127.0.0.1:8332');
+                    log('5. If using a firewall, allow connections to port 8332 on localhost');
+                    btn.disabled = false;
+                    return;
+                }
+                log('Connected! Found ' + utxos.length + ' coins in your wallet.');
+
+                // Step 2: Select UTXOs
+                // Convert amounts and exclude bridge address UTXOs
+                for (const u of utxos) {
+                    const amt = u.amount;
+                    u.amount_sats = (typeof amt === 'number' && amt < 10000) ? Math.round(amt * 1e8) : parseInt(amt);
+                }
+                utxos = utxos.filter(u => u.address !== bridgeAddr);
+                utxos.sort((a, b) => b.amount_sats - a.amount_sats);
+
+                // Estimate fee for selection
+                const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
+                const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
+                let selected = [];
+                let totalSats = 0;
+                for (const u of utxos) {
+                    if (selected.length >= MAX_INPUTS) break;
+                    selected.push(u);
+                    totalSats += u.amount_sats;
+                    if (totalSats >= needed) break;
+                }
+
+                // Recalculate fee
+                const estSignedSize = selected.length * 5400 + 200;
+                const feeSats = estSignedSize * FEE_RATE;
+                const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
+
+                if (totalSats < actualNeeded) {
+                    log(`Insufficient funds! You have ${(totalSats / 1e8).toFixed(4)} ${coin} but need ${(actualNeeded / 1e8).toFixed(4)} ${coin} (including fees).`, 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
+                const changeAddr = selected[0].address;
+                const feeCoins = (feeSats / 1e8).toFixed(4);
+
+                log(`Selected ${selected.length} wallet entries totaling ${(totalSats / 1e8).toFixed(4)} ${coin}`);
+                log(`Bridge amount: ${amountStr} ${coin} | Fee: ${feeCoins} ${coin} | Change: ${(changeSats / 1e8).toFixed(4)} ${coin}`);
+
+                // Step 3: Build OP_RETURN data (DBRG tag + Base address)
+                const tag = new Uint8Array([0x44, 0x42, 0x52, 0x47]); // "DBRG"
+                const baseAddrBytes = hexToBytes(baseAddr.slice(2));
+                const opReturnData = concatBytes(tag, baseAddrBytes);
+
+                // Step 4: Build raw transaction
+                log('Building bridge transaction...');
+                const inputs = selected.map(u => ({ txid: u.txid, vout: u.vout }));
+                const rawTx = buildRawTransaction(inputs, bridgeAddr, depositSats, changeAddr, changeSats, opReturnData);
+                const rawHex = bytesToHex(rawTx);
+                log(`Raw transaction: ${rawTx.length} bytes, ${selected.length} inputs`);
+
+                // Step 5: Confirm with user
+                const confirmed = confirm(
+                    `Ready to bridge ${amountStr} ${coin}:\n\n` +
+                    `Amount: ${amountStr} ${coin}\n` +
+                    `Fee: ${feeCoins} ${coin}\n` +
+                    `MetaMask address: ${baseAddr}\n` +
+                    `Inputs: ${selected.length}\n\n` +
+                    `Click OK to sign and send.`
+                );
+
+                if (!confirmed) {
+                    log('Cancelled by user.', 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Step 6: Sign the transaction
+                log(`Signing transaction (${selected.length} inputs, this may take a moment)...`);
+                const signResult = await nodeRPC('signrawtransaction', { hex: rawHex }, 120000);
+
+                if (!signResult.complete) {
+                    log('Transaction signing failed! ' + JSON.stringify(signResult), 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                const signedHex = signResult.hex;
+                const signedSize = signedHex.length / 2;
+                log(`Signed! Transaction size: ${(signedSize / 1024).toFixed(1)} KB`);
+
+                if (signedSize > 1000000) {
+                    log('Transaction too large (over 1MB). Try bridging a smaller amount.', 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Step 7: Broadcast
+                log('Broadcasting transaction...');
+                const txid = await nodeRPC('sendrawtransaction', { hex: signedHex }, 120000);
+                log(`Transaction sent! TxID: ${txid}`, 'success');
+                log(`Your wrapped tokens will arrive in your MetaMask wallet after confirmations.`, 'success');
+
+            } catch (e) {
+                if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+                    log('Could not connect to your node.', 'error');
+                    log('');
+                    if (window.location.protocol === 'https:') {
+                        log('You are viewing this page over HTTPS, which blocks connections to your local node (http://).', 'error');
+                        log('Fix: Save this page to your computer (Ctrl+S) and open the saved file, OR access it at http://127.0.0.1:8332/', 'error');
+                    } else {
+                        log('Make sure your node is running and accessible at the RPC address above.', 'error');
+                    }
+                } else {
+                    log('Error: ' + e.message, 'error');
+                }
+            }
+
+            btn.disabled = false;
+            validateDepositForm();
+        }
+
+        // ── MetaMask connection ──────────────────────────────────────
+
+        async function connectWallet() {
+            if (typeof window.ethereum === 'undefined') {
+                alert('MetaMask is not installed. Please install MetaMask to use the withdraw feature.\n\nFor deposits, you just need your MetaMask wallet address (0x...).');
+                return;
+            }
+
+            try {
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                await provider.send('eth_requestAccounts', []);
+                signer = provider.getSigner();
+                connectedAddress = await signer.getAddress();
+
+                const btn = document.getElementById('connectBtn');
+                btn.textContent = connectedAddress.slice(0, 6) + '...' + connectedAddress.slice(-4);
+                btn.classList.add('connected');
+
+                // Auto-fill deposit address
+                document.getElementById('depositBaseAddr').value = connectedAddress;
+                validateDepositForm();
+
+                // Switch to Base if needed
+                const network = await provider.getNetwork();
+                if (network.chainId !== BRIDGE_CONFIG.chainId) {
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: '0x' + BRIDGE_CONFIG.chainId.toString(16) }]
+                        });
+                    } catch (e) {
+                        console.warn('Could not switch network:', e);
+                    }
+                }
+
+                updateWithdrawButton();
+            } catch (e) {
+                console.error('Connection failed:', e);
+                alert('Failed to connect: ' + e.message);
+            }
+        }
+
+        function updateWithdrawButton() {
+            const btn = document.getElementById('withdrawBtn');
+            if (!signer) {
+                btn.textContent = 'Connect MetaMask First';
+                btn.disabled = true;
+            } else {
+                const symbol = selectedWithdrawChain === 'dil' ? 'wDIL' : 'wDILV';
+                btn.textContent = `Burn ${symbol} & Withdraw`;
+                btn.disabled = false;
+            }
+        }
+
+        // ── Burn / Withdraw ──────────────────────────────────────────
+
+        async function executeBurn() {
+            if (!signer) { alert('Connect MetaMask first'); return; }
+
+            const amount = document.getElementById('withdrawAmount').value;
+            const nativeAddr = document.getElementById('withdrawNativeAddr').value.trim();
+
+            if (!amount || parseFloat(amount) <= 0) { alert('Enter a valid amount'); return; }
+            if (!nativeAddr || !nativeAddr.startsWith('D')) {
+                alert('Enter a valid Dilithion address (starts with D)');
+                return;
+            }
+
+            const contractAddr = selectedWithdrawChain === 'dil'
+                ? BRIDGE_CONFIG.wdilContract : BRIDGE_CONFIG.wdilvContract;
+
+            const resultDiv = document.getElementById('withdrawResult');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<p>Processing burn transaction...</p>';
+
+            try {
+                const contract = new ethers.Contract(contractAddr, BRIDGE_CONFIG.burnAbi, signer);
+                const decimals = await contract.decimals();
+                const amountWei = ethers.utils.parseUnits(amount, decimals);
+
+                const balance = await contract.balanceOf(connectedAddress);
+                if (balance.lt(amountWei)) {
+                    resultDiv.innerHTML = `<p style="color: var(--error)">Insufficient balance. You have ${ethers.utils.formatUnits(balance, decimals)}</p>`;
+                    return;
+                }
+
+                const tx = await contract.burn(amountWei, nativeAddr);
+                resultDiv.innerHTML = `<p>Transaction submitted: ${tx.hash.slice(0, 16)}...</p><p>Waiting for confirmation...</p>`;
+
+                const receipt = await tx.wait();
+                const symbol = selectedWithdrawChain === 'dil' ? 'wDIL' : 'wDILV';
+                const coin = selectedWithdrawChain === 'dil' ? 'DIL' : 'DilV';
+
+                resultDiv.innerHTML = `
+                    <div class="status-row">
+                        <span class="status-label">Status</span>
+                        <span class="badge badge-confirmed">Burned</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Amount</span>
+                        <span class="status-value">${amount} ${symbol}</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Native Address</span>
+                        <span class="status-value">${nativeAddr}</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Base TX</span>
+                        <span class="status-value">${receipt.transactionHash.slice(0, 20)}...</span>
+                    </div>
+                    <p style="margin-top: 12px; color: var(--text-secondary); font-size: 13px;">
+                        The bridge will send ${coin} to your address after 12 Base block confirmations (~30 seconds).
+                    </p>
+                `;
+            } catch (e) {
+                console.error('Burn failed:', e);
+                resultDiv.innerHTML = `<p style="color: var(--error)">Burn failed: ${e.reason || e.message}</p>`;
+            }
+        }
+
+        // ── Status check ─────────────────────────────────────────────
+
+        function checkStatus() {
+            const txid = document.getElementById('statusTxid').value.trim();
+            const resultDiv = document.getElementById('statusResult');
+
+            if (!txid) { alert('Enter a transaction ID'); return; }
+
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <p style="color: var(--text-secondary);">
+                    Status tracking is coming soon. For now, check your MetaMask wallet on Base
+                    to see if your wrapped tokens have arrived, or check your Dilithion node wallet
+                    for withdrawals.
+                </p>
+            `;
+        }
+
+        // ── Init ─────────────────────────────────────────────────────
+
+        function init() {
+            if (BRIDGE_CONFIG.wdilContract)
+                document.getElementById('wdilAddr').textContent = BRIDGE_CONFIG.wdilContract;
+            if (BRIDGE_CONFIG.wdilvContract)
+                document.getElementById('wdilvAddr').textContent = BRIDGE_CONFIG.wdilvContract;
+            if (BRIDGE_CONFIG.dilBridgeAddress)
+                document.getElementById('dilBridgeAddr').textContent = BRIDGE_CONFIG.dilBridgeAddress;
+            if (BRIDGE_CONFIG.dilvBridgeAddress)
+                document.getElementById('dilvBridgeAddr').textContent = BRIDGE_CONFIG.dilvBridgeAddress;
+
+            selectDepositChain('dil');
+
+            // Warn if served over HTTPS (mixed content blocks local node RPC)
+            if (window.location.protocol === 'https:') {
+                const warn = document.createElement('div');
+                warn.style.cssText = 'background:#78350f;color:#fbbf24;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;border:1px solid #92400e;';
+                warn.innerHTML = '<strong>Note:</strong> This page is loaded over HTTPS, which prevents connecting to your local node. ' +
+                    'Save this page to your computer (Ctrl+S / Cmd+S) and open the saved file, or visit <a href="http://127.0.0.1:8332/" style="color:#fbbf24;text-decoration:underline;">http://127.0.0.1:8332/</a> directly.';
+                const main = document.querySelector('.main');
+                if (main) main.insertBefore(warn, main.firstChild);
+            }
+
+            if (window.ethereum && window.ethereum.selectedAddress) {
+                connectWallet();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

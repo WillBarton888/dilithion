@@ -32,6 +32,7 @@ class StateDB:
                 mint_txid TEXT,
                 status TEXT DEFAULT 'pending',
                 error_msg TEXT,
+                retry_count INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(native_txid, native_vout)
@@ -67,6 +68,16 @@ class StateDB:
             );
         """)
         self.conn.commit()
+        self._migrate()
+
+    def _migrate(self):
+        """Add columns that may not exist in older DBs."""
+        try:
+            self.conn.execute("SELECT retry_count FROM deposits LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE deposits ADD COLUMN retry_count INTEGER DEFAULT 0")
+            self.conn.commit()
+            logger.info("Migrated deposits table: added retry_count column")
 
     # ── Sync state ───────────────────────────────────────────────────
 
@@ -158,10 +169,22 @@ class StateDB:
     def mark_deposit_failed(self, deposit_id: int, error: str):
         self.conn.execute(
             """UPDATE deposits SET status = 'failed', error_msg = ?,
+               retry_count = COALESCE(retry_count, 0) + 1,
                updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
             (error, deposit_id)
         )
         self.conn.commit()
+
+    def get_retryable_deposits(self, max_retries: int = 3,
+                               cooldown_minutes: int = 5):
+        """Get failed deposits eligible for retry (under max retries, past cooldown)."""
+        return self.conn.execute(
+            """SELECT * FROM deposits
+               WHERE status = 'failed'
+                 AND COALESCE(retry_count, 0) < ?
+                 AND updated_at <= datetime('now', ?)""",
+            (max_retries, f'-{cooldown_minutes} minutes')
+        ).fetchall()
 
     def mark_deposits_reorged(self, chain: str, min_height: int):
         """Mark all deposits at or above min_height as reorged."""
