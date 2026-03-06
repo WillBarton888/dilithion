@@ -9,10 +9,12 @@ const API_BASE = '/api';
 const REFRESH_INTERVAL = 10000;
 const ITEMS_PER_PAGE = 20;
 const IONS_PER_DIL = 100000000;
+const COLLAPSE_THRESHOLD = 5; // Show expand button when inputs/outputs exceed this
 
 // --- State ---
 let refreshTimer = null;
 let currentRoute = '';
+let sortState = {}; // { tableId: { column: idx, ascending: bool } }
 
 // --- SVG Icons ---
 const ICONS = {
@@ -281,6 +283,113 @@ function breadcrumb(items) {
 }
 
 // ============================================================
+// Sortable Tables
+// ============================================================
+
+function makeSortableHeader(tableId, columns) {
+    const state = sortState[tableId];
+    return columns.map((col, idx) => {
+        if (!col.sortable) {
+            return `<th class="${col.align || ''}">${escapeHtml(col.label)}</th>`;
+        }
+        const isActive = state && state.column === idx;
+        const arrow = isActive ? (state.ascending ? ' ▲' : ' ▼') : '';
+        const cls = [col.align || '', 'sortable-th', isActive ? 'sort-active' : ''].filter(Boolean).join(' ');
+        return `<th class="${cls}" data-table="${escapeHtml(tableId)}" data-col="${idx}">${escapeHtml(col.label)}${arrow}</th>`;
+    }).join('');
+}
+
+function sortTableRows(tableId, colIdx, getValue) {
+    const prev = sortState[tableId];
+    const ascending = (prev && prev.column === colIdx) ? !prev.ascending : false;
+    sortState[tableId] = { column: colIdx, ascending };
+
+    const table = document.querySelector(`[data-sort-table="${tableId}"]`);
+    if (!table) return;
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a, b) => {
+        const va = getValue(a, colIdx);
+        const vb = getValue(b, colIdx);
+        if (va < vb) return ascending ? -1 : 1;
+        if (va > vb) return ascending ? 1 : -1;
+        return 0;
+    });
+
+    for (const row of rows) tbody.appendChild(row);
+
+    // Update header arrows
+    const thead = table.querySelector('thead tr');
+    if (thead) {
+        thead.querySelectorAll('th.sortable-th').forEach(th => {
+            const ci = parseInt(th.dataset.col, 10);
+            const base = th.textContent.replace(/\s*[▲▼]$/, '');
+            const isActive = ci === colIdx;
+            th.textContent = base + (isActive ? (ascending ? ' ▲' : ' ▼') : '');
+            th.classList.toggle('sort-active', isActive);
+        });
+    }
+}
+
+// Event delegation for sortable headers
+document.addEventListener('click', function(e) {
+    const th = e.target.closest('.sortable-th');
+    if (!th) return;
+    const tableId = th.dataset.table;
+    const colIdx = parseInt(th.dataset.col, 10);
+    if (isNaN(colIdx)) return;
+
+    sortTableRows(tableId, colIdx, (row, ci) => {
+        const cell = row.children[ci];
+        if (!cell) return '';
+        // Use data-sort-value if present, else parse text
+        if (cell.dataset.sortValue !== undefined) {
+            const num = parseFloat(cell.dataset.sortValue);
+            return isNaN(num) ? cell.dataset.sortValue : num;
+        }
+        const num = parseFloat(cell.textContent.replace(/[^0-9.\-]/g, ''));
+        if (!isNaN(num)) return num;
+        return cell.textContent.trim().toLowerCase();
+    });
+});
+
+// ============================================================
+// Collapsible Sections
+// ============================================================
+
+document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.expand-btn');
+    if (!btn) return;
+    const target = btn.dataset.target;
+    const container = document.getElementById(target);
+    if (!container) return;
+    const isHidden = container.style.display === 'none';
+    container.style.display = isHidden ? '' : 'none';
+    btn.textContent = isHidden ? btn.dataset.lessText : btn.dataset.moreText;
+});
+
+// ============================================================
+// Transaction Type Detection
+// ============================================================
+
+function detectTxType(tx) {
+    const isCoinbase = tx.vin && tx.vin.length > 0 && (tx.vin[0].coinbase || tx.vin[0].txid === '0000000000000000000000000000000000000000000000000000000000000000');
+    if (isCoinbase) return { type: 'coinbase', label: 'Coinbase', badge: 'badge-success', icon: ICONS.pickaxe };
+
+    const inputCount = tx.vin ? tx.vin.length : 0;
+    const outputCount = tx.vout ? tx.vout.length : 0;
+
+    // Consolidation: many inputs → 1-2 outputs
+    if (inputCount > 5 && outputCount <= 2) {
+        return { type: 'consolidation', label: 'Consolidation', badge: 'badge-info', icon: '' };
+    }
+
+    return { type: 'transfer', label: 'Transfer', badge: 'badge-muted', icon: '' };
+}
+
+// ============================================================
 // View: Home
 // ============================================================
 
@@ -311,11 +420,20 @@ async function renderHome() {
         html += '</div>';
 
         // Latest blocks
+        const homeCols = [
+            { label: 'Height', sortable: true },
+            { label: 'Hash', sortable: false },
+            { label: 'Time', sortable: true },
+            { label: 'Miner', sortable: false },
+            { label: 'Txs', sortable: true, align: 'center' },
+            { label: 'Reward', sortable: true, align: 'right' },
+        ];
+
         html += '<div class="card">';
         html += '<div class="card-header"><h2>Latest Blocks</h2><a href="#/blocks" class="card-action">View all blocks &rarr;</a></div>';
         html += '<div class="card-body-flush"><div class="table-container">';
-        html += '<table class="data-table">';
-        html += '<thead><tr><th>Height</th><th>Hash</th><th>Time</th><th>Miner</th><th class="center">Txs</th><th class="right">Reward</th></tr></thead>';
+        html += '<table class="data-table" data-sort-table="homeblocks">';
+        html += '<thead><tr>' + makeSortableHeader('homeblocks', homeCols) + '</tr></thead>';
         html += '<tbody>';
 
         for (const block of blocks) {
@@ -327,12 +445,12 @@ async function renderHome() {
             const reward = extractReward(block);
 
             html += '<tr>';
-            html += `<td><a href="#/block/${height}">${formatNumber(height)}</a></td>`;
+            html += `<td data-sort-value="${height}"><a href="#/block/${height}">${formatNumber(height)}</a></td>`;
             html += `<td><a href="#/block/${escapeHtml(hash)}" class="hash">${escapeHtml(formatHash(hash, 10))}</a></td>`;
-            html += `<td title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
+            html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
             html += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 8))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
-            html += `<td class="center">${txCount}</td>`;
-            html += `<td class="right amount">${escapeHtml(formatAmount(reward))} DIL</td>`;
+            html += `<td class="center" data-sort-value="${txCount}">${txCount}</td>`;
+            html += `<td class="right amount" data-sort-value="${reward || 0}">${escapeHtml(formatAmount(reward))} DIL</td>`;
             html += '</tr>';
         }
 
@@ -534,11 +652,13 @@ async function renderBlock(id) {
                     if (addr && !addrs.includes(addr)) addrs.push(addr);
                 }
                 if (addrs.length > 0) {
-                    fromHtml = addrs.map(a =>
+                    fromHtml = addrs.slice(0, 3).map(a =>
                         `<a href="#/address/${escapeHtml(a)}" class="address">${escapeHtml(formatHash(a, 8))}</a>`
                     ).join(', ');
+                    if (addrs.length > 3) fromHtml += ` <span class="text-dim">+${addrs.length - 3} more</span>`;
                 } else {
-                    fromHtml = '<span class="text-dim">N/A</span>';
+                    // No prevout data - show input count as context
+                    fromHtml = `<span class="text-muted">${tx.vin.length} input${tx.vin.length !== 1 ? 's' : ''}</span>`;
                 }
             }
 
@@ -584,6 +704,72 @@ function detailRow(label, valueHtml) {
 // View: Transaction Detail
 // ============================================================
 
+function renderTxIoItem(addr, val, hasValue) {
+    let html = '<div class="tx-io-item">';
+    if (addr) {
+        html += `<a href="#/address/${escapeHtml(addr)}" class="address">${escapeHtml(formatHash(addr, 10))}</a>`;
+    } else {
+        html += '<span class="text-dim">OP_RETURN / Unreadable</span>';
+    }
+    if (hasValue) {
+        html += `<span class="amount">${escapeHtml(formatAmount(val))} DIL</span>`;
+    }
+    return html + '</div>';
+}
+
+function renderTxInputItem(vin) {
+    const addr = vin.prevout?.scriptPubKey?.address || vin.address || null;
+    const val = vin.prevout?.value || vin.value || 0;
+    const hasValue = !!(vin.prevout?.value || vin.value);
+
+    // If we have address and value, show normally
+    if (addr && hasValue) {
+        return renderTxIoItem(addr, val, true);
+    }
+
+    // No prevout data - show a reference link to the source transaction
+    const srcTxid = vin.txid;
+    const srcVout = vin.vout;
+    if (srcTxid && srcTxid !== '0000000000000000000000000000000000000000000000000000000000000000') {
+        let html = '<div class="tx-io-item tx-io-item-ref">';
+        html += `<a href="#/tx/${escapeHtml(srcTxid)}" class="hash" title="View source transaction">${escapeHtml(formatHash(srcTxid, 8))}:${srcVout}</a>`;
+        if (hasValue) {
+            html += `<span class="amount">${escapeHtml(formatAmount(val))} DIL</span>`;
+        } else {
+            html += `<span class="amount text-dim">view tx &#8594;</span>`;
+        }
+        html += '</div>';
+        return html;
+    }
+
+    return renderTxIoItem(addr, val, hasValue);
+}
+
+function renderCollapsibleItems(items, containerId, renderFn) {
+    if (items.length <= COLLAPSE_THRESHOLD) {
+        return items.map(renderFn).join('');
+    }
+
+    let html = '';
+    // Show first few items
+    for (let i = 0; i < COLLAPSE_THRESHOLD; i++) {
+        html += renderFn(items[i]);
+    }
+
+    // Expand button
+    const remaining = items.length - COLLAPSE_THRESHOLD;
+    html += `<button class="expand-btn" data-target="${escapeHtml(containerId)}" data-more-text="Show all ${items.length} items" data-less-text="Show less">Show all ${items.length} items (+${remaining} more)</button>`;
+
+    // Hidden items
+    html += `<div id="${escapeHtml(containerId)}" style="display:none">`;
+    for (let i = COLLAPSE_THRESHOLD; i < items.length; i++) {
+        html += renderFn(items[i]);
+    }
+    html += '</div>';
+
+    return html;
+}
+
 async function renderTransaction(txid) {
     setTitle('Transaction ' + formatHash(txid, 12));
     showLoading();
@@ -596,8 +782,27 @@ async function renderTransaction(txid) {
         const realTxid = tx.txid || tx.hash || txid;
         setTitle('TX ' + formatHash(realTxid, 10));
 
-        const isCoinbase = tx.vin && tx.vin.length > 0 && (tx.vin[0].coinbase || tx.vin[0].txid === '0000000000000000000000000000000000000000000000000000000000000000');
+        const txType = detectTxType(tx);
+        const isCoinbase = txType.type === 'coinbase';
         const confirmations = tx.confirmations || 0;
+
+        // Pre-calculate totals
+        let totalIn = 0;
+        let hasInputValues = false;
+        if (!isCoinbase && tx.vin) {
+            for (const vin of tx.vin) {
+                const val = vin.prevout?.value || vin.value || 0;
+                if (val > 0) hasInputValues = true;
+                totalIn += val;
+            }
+        }
+        let totalOut = 0;
+        if (tx.vout) {
+            for (const vout of tx.vout) {
+                totalOut += vout.value || 0;
+            }
+        }
+        const fee = isCoinbase ? 0 : (hasInputValues ? Math.max(0, totalIn - totalOut) : 0);
 
         let html = '';
 
@@ -610,12 +815,14 @@ async function renderTransaction(txid) {
         // Main card
         html += '<div class="card">';
         html += '<div class="card-header"><h2>Transaction Details</h2>';
+        html += '<div class="card-header-badges">';
+        html += `<span class="badge ${txType.badge}">${txType.icon ? txType.icon + ' ' : ''}${escapeHtml(txType.label)}</span>`;
         if (confirmations > 0) {
-            html += `<span class="badge badge-success">Confirmed (${formatNumber(confirmations)} confirmations)</span>`;
+            html += `<span class="badge badge-success">Confirmed (${formatNumber(confirmations)})</span>`;
         } else {
             html += '<span class="badge badge-warning">Pending</span>';
         }
-        html += '</div>';
+        html += '</div></div>';
 
         // Detail grid
         html += '<div class="detail-grid">';
@@ -637,30 +844,38 @@ async function renderTransaction(txid) {
 
         // Inputs / Outputs visualization
         html += '<div class="card">';
-        html += '<div class="card-header"><h2>Inputs &amp; Outputs</h2></div>';
+
+        // Summary bar at top showing totals
+        html += '<div class="tx-summary-top">';
+        if (isCoinbase) {
+            html += `<div class="tx-summary-item"><span class="tx-summary-label">Type</span><span class="tx-summary-value">${ICONS.pickaxe} New coins mined</span></div>`;
+            html += `<div class="tx-summary-item"><span class="tx-summary-label">Reward</span><span class="tx-summary-value">${escapeHtml(formatAmount(totalOut))} DIL</span></div>`;
+        } else {
+            const inputLabel = tx.vin ? `${tx.vin.length} Input${tx.vin.length !== 1 ? 's' : ''}` : '0 Inputs';
+            const outputLabel = tx.vout ? `${tx.vout.length} Output${tx.vout.length !== 1 ? 's' : ''}` : '0 Outputs';
+            html += `<div class="tx-summary-item"><span class="tx-summary-label">${escapeHtml(inputLabel)}</span>`;
+            if (hasInputValues) {
+                html += `<span class="tx-summary-value">${escapeHtml(formatAmount(totalIn))} DIL</span>`;
+            }
+            html += '</div>';
+            html += `<div class="tx-summary-arrow">${ICONS.arrow}</div>`;
+            html += `<div class="tx-summary-item"><span class="tx-summary-label">${escapeHtml(outputLabel)}</span><span class="tx-summary-value">${escapeHtml(formatAmount(totalOut))} DIL</span></div>`;
+            if (hasInputValues && fee > 0) {
+                html += `<div class="tx-summary-item"><span class="tx-summary-label">Fee</span><span class="tx-summary-value">${escapeHtml(formatAmount(fee))} DIL</span></div>`;
+            }
+        }
+        html += '</div>';
+
         html += '<div class="card-body">';
         html += '<div class="tx-io">';
 
         // Inputs
         html += '<div class="tx-io-inputs">';
-        html += '<div class="tx-io-label">Inputs</div>';
+        html += `<div class="tx-io-label">Inputs${!isCoinbase && tx.vin ? ' (' + tx.vin.length + ')' : ''}</div>`;
         if (isCoinbase) {
             html += '<div class="tx-io-item"><span class="coinbase-label">' + ICONS.pickaxe + ' Coinbase (Newly Generated Coins)</span></div>';
         } else if (tx.vin) {
-            let totalIn = 0;
-            for (const vin of tx.vin) {
-                const addr = vin.prevout?.scriptPubKey?.address || vin.address || null;
-                const val = vin.prevout?.value || vin.value || 0;
-                totalIn += val;
-                html += '<div class="tx-io-item">';
-                if (addr) {
-                    html += `<a href="#/address/${escapeHtml(addr)}" class="address">${escapeHtml(formatHash(addr, 10))}</a>`;
-                } else {
-                    html += '<span class="text-dim">Unknown</span>';
-                }
-                html += `<span class="amount">${escapeHtml(formatAmount(val))} DIL</span>`;
-                html += '</div>';
-            }
+            html += renderCollapsibleItems(tx.vin, 'tx-inputs-more', renderTxInputItem);
         }
         html += '</div>';
 
@@ -669,46 +884,38 @@ async function renderTransaction(txid) {
 
         // Outputs
         html += '<div class="tx-io-outputs">';
-        html += '<div class="tx-io-label">Outputs</div>';
-        let totalOut = 0;
+        html += `<div class="tx-io-label">Outputs${tx.vout ? ' (' + tx.vout.length + ')' : ''}</div>`;
         if (tx.vout) {
-            for (const vout of tx.vout) {
+            html += renderCollapsibleItems(tx.vout, 'tx-outputs-more', (vout) => {
                 const addr = vout.address || vout.scriptPubKey?.address || vout.scriptPubKey?.addresses?.[0] || null;
                 const val = vout.value || 0;
-                totalOut += val;
-                html += '<div class="tx-io-item">';
-                if (addr) {
-                    html += `<a href="#/address/${escapeHtml(addr)}" class="address">${escapeHtml(formatHash(addr, 10))}</a>`;
-                } else {
-                    html += '<span class="text-dim">OP_RETURN / Unknown</span>';
-                }
-                html += `<span class="amount">${escapeHtml(formatAmount(val))} DIL</span>`;
-                html += '</div>';
-            }
+                return renderTxIoItem(addr, val, true);
+            });
         }
         html += '</div>';
         html += '</div>'; // tx-io
         html += '</div>'; // card-body
 
-        // Summary bar
-        let totalIn = 0;
-        if (!isCoinbase && tx.vin) {
-            for (const vin of tx.vin) {
-                totalIn += vin.prevout?.value || vin.value || 0;
-            }
-        }
-        const fee = isCoinbase ? 0 : Math.max(0, totalIn - totalOut);
-
+        // Summary bar at bottom
         html += '<div class="summary-bar">';
-        if (!isCoinbase) {
+        if (!isCoinbase && hasInputValues) {
             html += `<span><span class="label">Total Input: </span><span class="value">${escapeHtml(formatAmount(totalIn))} DIL</span></span>`;
         }
         html += `<span><span class="label">Total Output: </span><span class="value">${escapeHtml(formatAmount(totalOut))} DIL</span></span>`;
-        if (!isCoinbase) {
+        if (!isCoinbase && hasInputValues && fee > 0) {
             html += `<span><span class="label">Fee: </span><span class="value">${escapeHtml(formatAmount(fee))} DIL</span></span>`;
         }
         html += '</div>';
         html += '</div>';
+
+        // Explanation for consolidation transactions
+        if (txType.type === 'consolidation') {
+            html += '<div class="card"><div class="info-text">';
+            html += '<strong>What is a consolidation transaction?</strong> This transaction combines many small inputs (UTXOs) into fewer, larger outputs. ';
+            html += 'This is normal housekeeping &mdash; like exchanging a pile of small coins for a few large bills. ';
+            html += 'All inputs come from previous transactions on the blockchain. No new coins are created.';
+            html += '</div></div>';
+        }
 
         getApp().innerHTML = html;
 
@@ -760,24 +967,31 @@ async function renderAddress(addr) {
 
         // UTXO table
         if (utxoList.length > 0) {
+            const utxoCols = [
+                { label: 'TxID', sortable: false },
+                { label: 'Output Index', sortable: true, align: 'center' },
+                { label: 'Amount', sortable: true, align: 'right' },
+                { label: 'Confirmations', sortable: true, align: 'center' },
+            ];
+
             html += '<div class="card">';
             html += `<div class="card-header"><h2>UTXOs (${utxoList.length})</h2></div>`;
             html += '<div class="card-body-flush"><div class="table-container">';
-            html += '<table class="data-table">';
-            html += '<thead><tr><th>TxID</th><th class="center">Output Index</th><th class="right">Amount</th><th class="center">Confirmations</th></tr></thead>';
+            html += '<table class="data-table" data-sort-table="utxos">';
+            html += '<thead><tr>' + makeSortableHeader('utxos', utxoCols) + '</tr></thead>';
             html += '<tbody>';
 
             for (const utxo of utxoList) {
                 const utxoTxid = utxo.txid || utxo.tx_hash || '';
                 const voutIdx = utxo.vout != null ? utxo.vout : (utxo.tx_pos != null ? utxo.tx_pos : '');
                 const amount = utxo.value != null ? utxo.value : (utxo.amount || 0);
-                const confs = utxo.confirmations || '';
+                const confs = utxo.confirmations || 0;
 
                 html += '<tr>';
                 html += `<td><a href="#/tx/${escapeHtml(utxoTxid)}" class="hash">${escapeHtml(formatHash(utxoTxid, 12))}</a></td>`;
-                html += `<td class="center">${escapeHtml(String(voutIdx))}</td>`;
-                html += `<td class="right amount">${escapeHtml(formatAmount(amount))} DIL</td>`;
-                html += `<td class="center">${confs ? escapeHtml(formatNumber(confs)) : '<span class="text-dim">N/A</span>'}</td>`;
+                html += `<td class="center" data-sort-value="${voutIdx}">${escapeHtml(String(voutIdx))}</td>`;
+                html += `<td class="right amount" data-sort-value="${amount}">${escapeHtml(formatAmount(amount))} DIL</td>`;
+                html += `<td class="center" data-sort-value="${confs}">${confs ? escapeHtml(formatNumber(confs)) : '<span class="text-dim">N/A</span>'}</td>`;
                 html += '</tr>';
             }
 
@@ -812,10 +1026,20 @@ async function renderBlockList(page) {
 
         html += '<div class="page-header"><h1>All Blocks</h1><p>' + formatNumber(totalHeight + 1) + ' blocks on the Dilithion blockchain</p></div>';
 
+        const blkCols = [
+            { label: 'Height', sortable: true },
+            { label: 'Hash', sortable: false },
+            { label: 'Time', sortable: true },
+            { label: 'Miner', sortable: false },
+            { label: 'Txs', sortable: true, align: 'center' },
+            { label: 'Reward', sortable: true, align: 'right' },
+            { label: 'Size', sortable: true, align: 'right' },
+        ];
+
         html += '<div class="card">';
         html += '<div class="card-body-flush"><div class="table-container">';
-        html += '<table class="data-table">';
-        html += '<thead><tr><th>Height</th><th>Hash</th><th>Time</th><th>Miner</th><th class="center">Txs</th><th class="right">Reward</th><th class="right">Size</th></tr></thead>';
+        html += '<table class="data-table" data-sort-table="blocklist">';
+        html += '<thead><tr>' + makeSortableHeader('blocklist', blkCols) + '</tr></thead>';
         html += '<tbody>';
 
         for (const block of blocks) {
@@ -827,13 +1051,13 @@ async function renderBlockList(page) {
             const reward = extractReward(block);
 
             html += '<tr>';
-            html += `<td><a href="#/block/${height}">${formatNumber(height)}</a></td>`;
+            html += `<td data-sort-value="${height}"><a href="#/block/${height}">${formatNumber(height)}</a></td>`;
             html += `<td><a href="#/block/${escapeHtml(hash)}" class="hash">${escapeHtml(formatHash(hash, 8))}</a></td>`;
-            html += `<td title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
+            html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
             html += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 6))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
-            html += `<td class="center">${txCount}</td>`;
-            html += `<td class="right amount">${reward != null ? escapeHtml(formatAmount(reward)) + ' DIL' : ''}</td>`;
-            html += `<td class="right text-muted">${block.size ? escapeHtml(formatSize(block.size)) : ''}</td>`;
+            html += `<td class="center" data-sort-value="${txCount}">${txCount}</td>`;
+            html += `<td class="right amount" data-sort-value="${reward || 0}">${reward != null ? escapeHtml(formatAmount(reward)) + ' DIL' : ''}</td>`;
+            html += `<td class="right text-muted" data-sort-value="${block.size || 0}">${block.size ? escapeHtml(formatSize(block.size)) : ''}</td>`;
             html += '</tr>';
         }
 
