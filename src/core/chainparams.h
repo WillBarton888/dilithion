@@ -11,7 +11,7 @@ namespace Dilithion {
 enum Network {
     MAINNET,
     TESTNET,
-    DILV        // DilV: VDF lottery payment chain
+    DILV        // DilV: VDF distribution payment chain
 };
 
 /**
@@ -137,7 +137,7 @@ public:
     int vdfExclusiveHeight;
     uint64_t vdfIterations;
 
-    // VDF Lottery parameters
+    // VDF Distribution parameters
     // vdfLotteryActivationHeight: Height at which "lowest output wins" activates
     // vdfLotteryGracePeriod: Seconds after first block at a height during which
     //                        a lower-output VDF block can replace the tip
@@ -147,7 +147,7 @@ public:
     // VDF Minimum Block Time (seconds)
     // After the chain advances to a new height, miners wait this long before
     // starting the next VDF computation. Ensures all miners finish current-height
-    // VDF and participate in the lottery before the chain moves on.
+    // VDF and participate in the distribution before the chain moves on.
     // 0 = no minimum (legacy behavior)
     int vdfMinBlockTime;
 

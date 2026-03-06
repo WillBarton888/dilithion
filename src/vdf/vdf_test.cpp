@@ -134,8 +134,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Lottery simulation
-    std::cout << "=== LOTTERY SIMULATION ===\n\n";
+    // Distribution simulation
+    std::cout << "=== DISTRIBUTION SIMULATION ===\n\n";
     std::cout << "Simulating 3 miners competing for a block...\n\n";
 
     std::array<uint8_t, 32> prev_hash = {};

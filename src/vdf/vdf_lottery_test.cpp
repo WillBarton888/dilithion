@@ -1,5 +1,5 @@
 /**
- * VDF Lottery unit tests.
+ * VDF Distribution unit tests.
  *
  * Tests the "lowest VDF output wins" mechanism:
  *   - ShouldReplaceVDFTip with lower/higher/equal outputs
@@ -422,7 +422,7 @@ static void test_accept_time_not_set()
 
 int main()
 {
-    std::cout << "VDF Lottery Tests" << std::endl;
+    std::cout << "VDF Distribution Tests" << std::endl;
     std::cout << "=================" << std::endl;
     std::cout << std::endl;
 

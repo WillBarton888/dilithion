@@ -266,7 +266,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             if (parentIt != mapHeaders.end()) {
                 pprev = &parentIt->second;
             } else {
-                // FORK DETECTED: Parent not found - this is a competing chain
+                // Parent not found - this is a competing chain (fork on PoW, normal on VDF)
 
                 // STALE FORK FILTER: If the expected height is far below our chain tip,
                 // this fork can never trigger an automatic reorg (MAX_AUTO_REORG_DEPTH=100).
@@ -1958,10 +1958,18 @@ void CHeadersManager::AddToHeightIndex(const uint256& hash, int height)
 {
     mapHeightIndex[height].insert(hash);
 
-    // FORK DETECTION: Log when multiple headers exist at same height
+    // Log when multiple headers exist at same height
     if (mapHeightIndex[height].size() > 1) {
-        std::cout << "[HeadersManager] FORK DETECTED at height " << height
-                  << " - " << mapHeightIndex[height].size() << " competing headers" << std::endl;
+        size_t count = mapHeightIndex[height].size();
+        if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
+            // DilV: competing VDF blocks at same height is normal — all miners produce one
+            std::cout << "[HeadersManager] VDF competition at height " << height
+                      << " - " << count << " competing blocks. Determining lowest hash." << std::endl;
+        } else {
+            // DIL (PoW): multiple headers at same height is an actual fork
+            std::cout << "[HeadersManager] FORK DETECTED at height " << height
+                      << " - " << count << " competing headers" << std::endl;
+        }
     }
 }
 

@@ -141,7 +141,7 @@ VDFResult compute(
     }
 
     // Hash the y form (first CHIAVDF_FORM_SIZE bytes) to get deterministic 32-byte output
-    // This output is used for lottery comparison (lower value wins the block)
+    // This output is used for distribution comparison (lower value wins the block)
     SHA3_256(proof_result.data, CHIAVDF_FORM_SIZE, result.output.data());
 
     // Store the full proof blob (y + proof = 200 bytes for 1024-bit discriminant)

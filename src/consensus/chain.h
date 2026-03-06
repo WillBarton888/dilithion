@@ -77,11 +77,11 @@ private:
     std::vector<BlockDisconnectCallback> m_blockDisconnectCallbacks;
 
 public:
-    // VDF Lottery: Track when the first VDF block at the current tip height was accepted.
+    // VDF Distribution: Track when the first VDF block at the current tip height was accepted.
     // Used to enforce the grace period — replacements only allowed within this window.
     // INVARIANT: These are only modified under cs_main (ActivateBestChain holds the lock).
     // The first block at a height always enters via Case 2 (extending tip), which sets
-    // these values. Subsequent siblings enter Case 2.5 (lottery comparison) and read them.
+    // these values. Subsequent siblings enter Case 2.5 (distribution comparison) and read them.
     // Replacements do NOT reset the accept time — the grace window is anchored to the
     // first block at a height to prevent infinite replacement chains.
     std::chrono::steady_clock::time_point m_vdfTipAcceptTime{};
@@ -179,7 +179,7 @@ public:
     bool ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block, bool& reorgOccurred);
 
     /**
-     * VDF Lottery: Check if a competing VDF block should replace the current tip.
+     * VDF Distribution: Check if a competing VDF block should replace the current tip.
      * Returns true if pindexNew has a lower vdfOutput (big-endian) AND we're within grace period.
      * Uses HashLessThan() for consensus-safe comparison (NOT uint256::operator<).
      */

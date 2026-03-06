@@ -108,7 +108,7 @@ ChainParams ChainParams::Mainnet() {
     params.vdfExclusiveHeight  = 999999999;
     params.vdfIterations       = 5'000'000;   // ~44s fast, ~110s slow (fairness via minBlockTime)
 
-    // VDF Lottery: "lowest output wins" (disabled until fork is scheduled)
+    // VDF Distribution: "lowest output wins" (disabled until fork is scheduled)
     params.vdfLotteryActivationHeight = 999999999;
     params.vdfLotteryGracePeriod = 60;  // 60 seconds
     params.vdfMinBlockTime = 180;       // 3 minutes: ensures all miners finish VDF
@@ -246,9 +246,9 @@ ChainParams ChainParams::Testnet() {
     // VDF Fair Mining (testnet activation)
     params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted
     params.vdfExclusiveHeight  = 87500;       // VDF-only after this height
-    params.vdfIterations       = 1'000'000;   // ~20s on VPS (fast enough for lottery competition)
+    params.vdfIterations       = 1'000'000;   // ~20s on VPS (fast enough for distribution competition)
 
-    // VDF Lottery: "lowest output wins"
+    // VDF Distribution: "lowest output wins"
     params.vdfLotteryActivationHeight = 87240;
     params.vdfLotteryGracePeriod = 30;  // 30 seconds (faster for testing)
     params.vdfMinBlockTime = 25;        // 25 seconds minimum between blocks
@@ -344,7 +344,7 @@ ChainParams ChainParams::DilV() {
     // Compact encoding fix: active from genesis
     params.compactEncodingFixHeight = 0;
 
-    // ASERT: disabled — VDF uses lottery (lowest output wins), not difficulty retargeting
+    // ASERT: disabled — VDF uses distribution (lowest output wins), not difficulty retargeting
     params.asertActivationHeight = 999999999;
     params.asertHalflife = 0;  // Unused
 
@@ -356,7 +356,7 @@ ChainParams ChainParams::DilV() {
     params.vdfExclusiveHeight  = 0;            // No RandomX blocks ever accepted
     params.vdfIterations       = 500000;       // 500K iterations (~4-8s compute time)
 
-    // VDF Lottery: active from genesis
+    // VDF Distribution: active from genesis
     params.vdfLotteryActivationHeight = 0;
     params.vdfLotteryGracePeriod = 12;         // 12 seconds for slower miners to submit
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks

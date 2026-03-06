@@ -4920,7 +4920,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return BuildMiningTemplate(blockchain, wallet, false, g_node_state.mining_address_override);
         });
 
-        // VDF Lottery: Provide current tip's VDF output for pre-submission comparison.
+        // VDF Distribution: Provide current tip's VDF output for pre-submission comparison.
         // GetTip() acquires cs_main internally, so this is thread-safe.
         vdf_miner.SetTipOutputProvider([]() -> std::pair<int, uint256> {
             auto* tip = g_chainstate.GetTip();
@@ -5597,8 +5597,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 if (vdf_miner.IsRunning()) {
                     // VDF mining mode: signal epoch change (VDF miner handles restart internally)
-                    // VDF Lottery: pass current tip height so miner can decide whether to
-                    // abort (new height) or continue (same height — lottery opportunity)
+                    // VDF Distribution: pass current tip height so miner can decide whether to
+                    // abort (new height) or continue (same height — distribution opportunity)
                     int newTipHeight = g_chainstate.GetHeight();
                     vdf_miner.OnNewBlock(newTipHeight);
                 } else if (miner.IsMining()) {

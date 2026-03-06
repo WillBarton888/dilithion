@@ -64,8 +64,8 @@ public:
 
     /**
      * Signal that a new block has arrived.
-     * VDF Lottery: If the new block is at the SAME height we're computing for,
-     * don't abort — our output may be lower and win the lottery.
+     * VDF Distribution: If the new block is at the SAME height we're computing for,
+     * don't abort — our output may be lower and win the distribution.
      * If at a different height, abort and restart on the new epoch.
      *
      * @param newTipHeight Height of the new chain tip (-1 = always abort)
@@ -113,7 +113,7 @@ public:
     void SetMinBlockTime(int seconds);
 
     /**
-     * VDF Lottery: Set provider for current tip's VDF output.
+     * VDF Distribution: Set provider for current tip's VDF output.
      * Used for pre-submission comparison — miner checks if its output is
      * lower than the current tip before submitting (optimization to avoid
      * unnecessary block construction + relay).

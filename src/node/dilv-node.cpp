@@ -2,10 +2,10 @@
 // Distributed under the MIT software license
 
 /**
- * DilV Node - VDF Lottery Payment Chain
+ * DilV Node - VDF Distribution Payment Chain
  *
  * A standalone binary for the DilV chain (VDF-only consensus).
- * No RandomX mining — all blocks use VDF lottery from genesis.
+ * No RandomX mining — all blocks use VDF distribution from genesis.
  *
  * Usage:
  *   dilv-node [options]
@@ -669,7 +669,7 @@ struct NodeConfig {
         std::cout << "  " << program << " --relay-only --public-api          (Seed node)" << std::endl;
         std::cout << std::endl;
         std::cout << "Post-Quantum Security Stack:" << std::endl;
-        std::cout << "  Consensus:   VDF Lottery (fair, deterministic, single-threaded)" << std::endl;
+        std::cout << "  Consensus:   VDF Distribution (fair, deterministic, single-threaded)" << std::endl;
         std::cout << "  Signatures:  CRYSTALS-Dilithium3 (NIST PQC standard)" << std::endl;
         std::cout << "  Hashing:     SHA-3/Keccak-256 (quantum-resistant)" << std::endl;
         std::cout << std::endl;
@@ -1257,7 +1257,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
     // DFMP v2.0: Apply difficulty penalty based on MIK identity
     // New miners get 3.0x penalty that decays over 360 blocks
-    // DilV: DFMP heat penalty is disabled — VDF lottery + cooldown tracker already
+    // DilV: DFMP heat penalty is disabled — VDF distribution + cooldown tracker already
     // ensure fairness. Heat penalty only penalises the sole miner keeping the chain alive.
     int dfmpActivationHeight = Dilithion::g_chainParams ?
         Dilithion::g_chainParams->dfmpActivationHeight : 0;
@@ -1507,7 +1507,7 @@ int main(int argc, char* argv[]) {
         std::cout << "======================================" << std::endl;
         std::cout << "\033[0m" << std::endl;  // Reset color
         std::cout << "No arguments detected - using defaults:" << std::endl;
-        std::cout << "  • Network:    DilV (VDF lottery payment chain)" << std::endl;
+        std::cout << "  • Network:    DilV (VDF distribution payment chain)" << std::endl;
         std::cout << "  • Seed node:  138.197.68.128:9444 (NYC - official)" << std::endl;
         std::cout << "  • Mining:     ENABLED (VDF, single-threaded)" << std::endl;
         std::cout << std::endl;
@@ -1655,7 +1655,7 @@ int main(int argc, char* argv[]) {
 
     // Initialize chain parameters — always DilV
     Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::DilV());
-    std::cout << "Network: DILV (VDF lottery, ~45s blocks)" << std::endl;
+    std::cout << "Network: DILV (VDF distribution, ~45s blocks)" << std::endl;
 
     // Phase 10: Set default datadir, ports from chain params if not specified
     // (Config file values already applied above, now apply chain params as final fallback)
@@ -3667,7 +3667,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (vdf_available) {
             std::cout << "  [OK] VDF library initialized (" << vdf::version() << ")" << std::endl;
         } else {
-            std::cerr << "  [ERROR] VDF library not available — DilV requires VDF!" << std::endl;
+            std::cerr << "  [ERROR] VDF library not available -- DilV requires VDF!" << std::endl;
             delete Dilithion::g_chainParams;
             return 1;
         }
@@ -4586,7 +4586,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             return BuildMiningTemplate(blockchain, wallet, false, g_node_state.mining_address_override);
         });
 
-        // VDF Lottery: Provide current tip's VDF output for pre-submission comparison.
+        // VDF Distribution: Provide current tip's VDF output for pre-submission comparison.
         // GetTip() acquires cs_main internally, so this is thread-safe.
         vdf_miner.SetTipOutputProvider([]() -> std::pair<int, uint256> {
             auto* tip = g_chainstate.GetTip();
@@ -5212,8 +5212,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                 if (vdf_miner.IsRunning()) {
                     // VDF mining mode: signal epoch change (VDF miner handles restart internally)
-                    // VDF Lottery: pass current tip height so miner can decide whether to
-                    // abort (new height) or continue (same height — lottery opportunity)
+                    // VDF Distribution: pass current tip height so miner can decide whether to
+                    // abort (new height) or continue (same height — distribution opportunity)
                     int newTipHeight = g_chainstate.GetHeight();
                     vdf_miner.OnNewBlock(newTipHeight);
                 }
@@ -5401,7 +5401,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Placed OUTSIDE the VDF miner check block so resume works when paused.
             //
             // DilV: Disabled. Solo mining is the expected early-stage mode on DilV —
-            // VDF lottery + cooldown tracker handle fairness. Fork detection via solo
+            // VDF distribution + cooldown tracker handle fairness. Fork detection via solo
             // mining ratio is a RandomX/PoW concept and produces false positives here.
             if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
                 // No-op: fork detection not applicable to VDF solo mining

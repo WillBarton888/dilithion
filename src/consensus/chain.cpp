@@ -143,14 +143,14 @@ CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
 }
 
 // ---------------------------------------------------------------------------
-// VDF Lottery: ShouldReplaceVDFTip
+// VDF Distribution: ShouldReplaceVDFTip
 // ---------------------------------------------------------------------------
 
 bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
 {
-    // Must have chain params with lottery enabled
+    // Must have chain params with distribution enabled
     if (!Dilithion::g_chainParams) {
-        std::cout << "[VDF Lottery] SKIP: no chain params" << std::endl;
+        std::cout << "[VDF Distribution] SKIP: no chain params" << std::endl;
         return false;
     }
     if (pindexNew->nHeight < Dilithion::g_chainParams->vdfLotteryActivationHeight) {
@@ -159,19 +159,19 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
 
     // Both blocks must be VDF (version >= 4)
     if (pindexNew->nVersion < 4 || pindexTip->nVersion < 4) {
-        std::cout << "[VDF Lottery] SKIP: non-VDF block (new v=" << pindexNew->nVersion
+        std::cout << "[VDF Distribution] SKIP: non-VDF block (new v=" << pindexNew->nVersion
                   << ", tip v=" << pindexTip->nVersion << ")" << std::endl;
         return false;
     }
 
     // Must be at same height with same parent (sibling blocks)
     if (pindexNew->nHeight != pindexTip->nHeight) {
-        std::cout << "[VDF Lottery] SKIP: different height (new=" << pindexNew->nHeight
+        std::cout << "[VDF Distribution] SKIP: different height (new=" << pindexNew->nHeight
                   << ", tip=" << pindexTip->nHeight << ")" << std::endl;
         return false;
     }
     if (pindexNew->pprev != pindexTip->pprev) {
-        std::cout << "[VDF Lottery] SKIP: different parent (new->pprev="
+        std::cout << "[VDF Distribution] SKIP: different parent (new->pprev="
                   << (pindexNew->pprev ? pindexNew->pprev->GetBlockHash().GetHex().substr(0, 16) : "null")
                   << ", tip->pprev="
                   << (pindexTip->pprev ? pindexTip->pprev->GetBlockHash().GetHex().substr(0, 16) : "null")
@@ -186,13 +186,13 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
     const uint256& tipOutput = pindexTip->header.vdfOutput;
 
     if (newOutput.IsNull() || tipOutput.IsNull()) {
-        std::cout << "[VDF Lottery] SKIP: null output (new=" << newOutput.IsNull()
+        std::cout << "[VDF Distribution] SKIP: null output (new=" << newOutput.IsNull()
                   << ", tip=" << tipOutput.IsNull() << ")" << std::endl;
         return false;
     }
 
     if (!HashLessThan(newOutput, tipOutput)) {
-        std::cout << "[VDF Lottery] SKIP: new output is NOT lower (new="
+        std::cout << "[VDF Distribution] SKIP: new output is NOT lower (new="
                   << newOutput.GetHex().substr(0, 16) << ", tip="
                   << tipOutput.GetHex().substr(0, 16) << ")" << std::endl;
         return false;
@@ -200,7 +200,7 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
 
     // Grace period check
     if (m_vdfTipAcceptHeight != pindexTip->nHeight) {
-        std::cout << "[VDF Lottery] SKIP: accept height mismatch (accept="
+        std::cout << "[VDF Distribution] SKIP: accept height mismatch (accept="
                   << m_vdfTipAcceptHeight << ", tip=" << pindexTip->nHeight << ")" << std::endl;
         return false;
     }
@@ -211,12 +211,12 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
     int gracePeriod = Dilithion::g_chainParams->vdfLotteryGracePeriod;
 
     if (elapsed > gracePeriod) {
-        std::cout << "[VDF Lottery] Lower output arrived but grace period expired ("
+        std::cout << "[VDF Distribution] Lower output arrived but grace period expired ("
                   << elapsed << "s > " << gracePeriod << "s)" << std::endl;
         return false;
     }
 
-    std::cout << "[VDF Lottery] Lower VDF output found! Replacing tip." << std::endl;
+    std::cout << "[VDF Distribution] Lower VDF output found! Replacing tip." << std::endl;
     std::cout << "  Current tip output: " << tipOutput.GetHex().substr(0, 16) << "..." << std::endl;
     std::cout << "  New block output:   " << newOutput.GetHex().substr(0, 16) << "..." << std::endl;
     std::cout << "  Grace remaining: " << (gracePeriod - elapsed) << "s" << std::endl;
@@ -236,7 +236,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         return false;
     }
 
-    // VDF LOTTERY DEBUG: Log vdfOutput at ActivateBestChain entry
+    // VDF DISTRIBUTION DEBUG: Log vdfOutput at ActivateBestChain entry
     if (pindexNew->nVersion >= 4 && pindexTip != nullptr) {
         std::cout << "[VDF-DEBUG-ABC] new.h=" << pindexNew->nHeight
                   << " new.vdfOut=" << pindexNew->header.vdfOutput.GetHex().substr(0, 16)
@@ -299,9 +299,9 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         // BUG #74 FIX: Update atomic cached height
         m_cachedHeight.store(pindexNew->nHeight, std::memory_order_release);
 
-        // VDF Lottery: Record when this height's first VDF block was accepted.
+        // VDF Distribution: Record when this height's first VDF block was accepted.
         // This starts the grace period clock. Only set here (Case 2), not in
-        // Case 2.5 (lottery replacement), to anchor the deadline to the first arrival.
+        // Case 2.5 (distribution replacement), to anchor the deadline to the first arrival.
         if (pindexNew->nVersion >= 4 &&
             Dilithion::g_chainParams &&
             pindexNew->nHeight >= Dilithion::g_chainParams->vdfLotteryActivationHeight) {
@@ -322,9 +322,9 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         return true;
     }
 
-    // Case 2.5: VDF Lottery — competing VDF block at same height with lower output
+    // Case 2.5: VDF Distribution — competing VDF block at same height with lower output
     if (ShouldReplaceVDFTip(pindexNew)) {
-        std::cout << "[Chain] VDF LOTTERY REPLACEMENT — 1-block reorg" << std::endl;
+        std::cout << "[Chain] VDF DISTRIBUTION REPLACEMENT -- 1-block reorg" << std::endl;
 
         // Disconnect current tip
         if (!DisconnectTip(pindexTip)) {
@@ -365,7 +365,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
     // Compare chain work
     if (!ChainWorkGreaterThan(pindexNew->nChainWork, pindexTip->nChainWork)) {
-        // Case 3b: VDF Lottery tiebreaker for equal-work forks
+        // Case 3b: VDF Distribution tiebreaker for equal-work forks
         // When two VDF chains at the same height have equal chainwork,
         // the chain tip with the LOWER VDF output wins.
         // This is how divergent VDF forks converge — without this,
@@ -392,20 +392,20 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                         now - m_vdfTipAcceptTime).count();
                     int gracePeriod = Dilithion::g_chainParams->vdfLotteryGracePeriod;
                     if (elapsed > gracePeriod) {
-                        std::cout << "[VDF Lottery] Fork tiebreak: lower output but grace expired ("
+                        std::cout << "[VDF Distribution] Fork tiebreak: lower output but grace expired ("
                                   << elapsed << "s > " << gracePeriod << "s)" << std::endl;
                         withinGrace = false;
                     }
                 }
 
                 if (withinGrace) {
-                    std::cout << "[VDF Lottery] FORK TIEBREAK — equal work, lower VDF output wins!" << std::endl;
+                    std::cout << "[VDF Distribution] FORK TIEBREAK -- equal work, lower VDF output wins!" << std::endl;
                     std::cout << "  Tip output:   " << tipOutput.GetHex().substr(0, 16) << "..." << std::endl;
                     std::cout << "  New output:    " << newOutput.GetHex().substr(0, 16) << "..." << std::endl;
                     vdfTiebreak = true;
                 }
             } else {
-                std::cout << "[VDF Lottery] Fork: equal work at height " << pindexNew->nHeight
+                std::cout << "[VDF Distribution] Fork: equal work at height " << pindexNew->nHeight
                           << " but new output NOT lower (new="
                           << pindexNew->header.vdfOutput.GetHex().substr(0, 16)
                           << ", tip=" << pindexTip->header.vdfOutput.GetHex().substr(0, 16)

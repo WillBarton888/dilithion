@@ -729,7 +729,7 @@ BlockProcessResult ProcessNewBlock(
     pblockIndex->phashBlock = blockHash;
     pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
-    // VDF LOTTERY DEBUG: Verify vdfOutput survives CBlockIndex construction
+    // VDF DISTRIBUTION DEBUG: Verify vdfOutput survives CBlockIndex construction
     if (block.IsVDFBlock()) {
         std::cout << "[VDF-DEBUG] Block v=" << block.nVersion
                   << " vdfOutput(block)=" << block.vdfOutput.GetHex().substr(0, 16)
@@ -1085,8 +1085,8 @@ BlockProcessResult ProcessNewBlock(
                 g_chain_tip_callback(db, g_chainstate.GetHeight(), true /* is_reorg */);
             }
 
-            // VDF LOTTERY RELAY FIX: Relay the block that just became tip via reorg.
-            // Without this, VDF lottery winners are never propagated to peers.
+            // VDF DISTRIBUTION RELAY FIX: Relay the block that just became tip via reorg.
+            // Without this, VDF distribution winners are never propagated to peers.
             // Only relay when the arriving block IS the new tip (not deep reorgs
             // where the tip may be different from the submitted block).
             if (g_chainstate.GetTip() == pblockIndexPtr) {
@@ -1100,7 +1100,7 @@ BlockProcessResult ProcessNewBlock(
                     }
                     if (!relay_peer_ids.empty()) {
                         if (ctx.async_broadcaster->BroadcastBlock(blockHash, block, relay_peer_ids)) {
-                            std::cout << "[ProcessNewBlock] Relaying lottery-winning block to "
+                            std::cout << "[ProcessNewBlock] Relaying distribution-winning block to "
                                       << relay_peer_ids.size() << " peer(s)" << std::endl;
                         }
                     }

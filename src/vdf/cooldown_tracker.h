@@ -8,7 +8,7 @@
 #include <cstdint>
 
 /**
- * CCooldownTracker - VDF lottery rate limiter.
+ * CCooldownTracker - VDF distribution rate limiter.
  *
  * After a miner wins a block, they enter a cooldown period during which
  * they cannot win again.  The cooldown length scales with the number of

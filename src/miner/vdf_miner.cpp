@@ -3,7 +3,7 @@
 
 #include <miner/vdf_miner.h>
 #include <vdf/coinbase_vdf.h>
-#include <consensus/pow.h>  // HashLessThan for VDF lottery comparison
+#include <consensus/pow.h>  // HashLessThan for VDF distribution comparison
 #include <crypto/sha3.h>
 #include <util/logging.h>
 
@@ -45,11 +45,11 @@ void CVDFMiner::OnNewBlock(int newTipHeight)
     // Record when we learned about this height change (for minimum block time)
     m_lastHeightChangeTime = std::chrono::steady_clock::now();
 
-    // VDF Lottery: If the new block is at the SAME height we're computing for,
-    // don't abort. Our VDF output may be lower and win the lottery.
+    // VDF Distribution: If the new block is at the SAME height we're computing for,
+    // don't abort. Our VDF output may be lower and win the distribution.
     if (newTipHeight > 0 && newTipHeight == static_cast<int>(m_currentHeight.load())) {
         std::cout << "[VDF Miner] Competing block at height " << newTipHeight
-                  << " — continuing computation (lottery)" << std::endl;
+                  << " -- continuing computation (distribution)" << std::endl;
         return;
     }
 
@@ -112,7 +112,7 @@ void CVDFMiner::MiningLoop()
         // ---------------------------------------------------------------
         // Wait until vdfMinBlockTime seconds have elapsed since the last
         // height change. This ensures all miners (fast and slow) finish
-        // their current-height VDF and participate in the lottery before
+        // their current-height VDF and participate in the distribution before
         // the chain advances to the next height.
         if (m_minBlockTimeSec > 0 && !m_firstRound) {
             auto now = std::chrono::steady_clock::now();
@@ -257,10 +257,10 @@ void CVDFMiner::MiningLoop()
         }
 
         // ---------------------------------------------------------------
-        // 7b. VDF Lottery: Pre-submission output comparison
+        // 7b. VDF Distribution: Pre-submission output comparison
         // ---------------------------------------------------------------
         // If a competing block arrived at the same height during our computation,
-        // only submit if our VDF output is lower (we'd win the lottery).
+        // only submit if our VDF output is lower (we'd win the distribution).
         // NOTE: There's an inherent race between this check and actual submission —
         // the tip could change between here and ActivateBestChain. That's fine:
         // ActivateBestChain does the authoritative comparison. This is just an
@@ -271,7 +271,7 @@ void CVDFMiner::MiningLoop()
                 uint256 ourOutput;
                 std::memcpy(ourOutput.data, result.output.data(), 32);
                 if (!HashLessThan(ourOutput, tipVdfOutput)) {
-                    std::cout << "[VDF Miner] Our output is NOT lower than tip — skipping"
+                    std::cout << "[VDF Miner] Our output is NOT lower than tip -- skipping"
                               << std::endl;
                     std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
                     std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
@@ -281,7 +281,7 @@ void CVDFMiner::MiningLoop()
                     m_epochChanged = false;
                     continue;
                 }
-                std::cout << "[VDF Miner] Our output is LOWER than tip — submitting!" << std::endl;
+                std::cout << "[VDF Miner] Our output is LOWER than tip -- submitting!" << std::endl;
                 std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
                 std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
             }

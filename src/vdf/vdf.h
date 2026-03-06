@@ -1,7 +1,7 @@
 /**
  * Dilithion VDF (Verifiable Delay Function) Interface
  *
- * Provides time-locked computation for fair mining lottery.
+ * Provides time-locked computation for fair mining distribution.
  * Uses Chia's class group VDF implementation (chiavdf).
  *
  * Key properties:
@@ -104,7 +104,7 @@ std::array<uint8_t, 32> compute_challenge(
  * Compare two VDF outputs to determine winner.
  *
  * The miner with the LOWEST output wins the block.
- * This creates a fair lottery where each miner has equal probability.
+ * This creates a fair distribution where each miner has equal probability.
  *
  * @return -1 if a < b, 0 if a == b, 1 if a > b
  */
