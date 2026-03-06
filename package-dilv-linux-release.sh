@@ -37,7 +37,7 @@ chmod +x "${RELEASE_DIR}/check-wallet-balance"
 
 # Copy required shared libraries
 echo "[3/5] Copying required shared libraries..."
-for lib in libleveldb.so.1d libsnappy.so.1 libgmp.so.10 libgmpxx.so.4; do
+for lib in libleveldb.so.1d libsnappy.so.1 libgmp.so.10 libgmpxx.so.4 libminiupnpc.so.17; do
     for dir in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /usr/local/lib; do
         if [ -f "$dir/$lib" ]; then
             cp "$dir/$lib" "${RELEASE_DIR}/lib/"
