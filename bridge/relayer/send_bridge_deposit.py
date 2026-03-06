@@ -167,12 +167,11 @@ def main():
     BRIDGE_ADDRESS = cfg["bridge"]
     BASE_ADDRESS = args.base_address
     DEPOSIT_AMOUNT_COINS = args.amount
-    FEE_COINS = 0.01
     COIN = cfg["coin"]
 
     DEPOSIT_AMOUNT_SATS = int(DEPOSIT_AMOUNT_COINS * 1e8)
-    FEE_SATS = int(FEE_COINS * 1e8)
     OP_RETURN_VALUE = 50000  # 0.0005 coins (burned, unspendable)
+    # Fee calculated dynamically after input selection (see below)
 
     # Connect to node
     rpc = DilithionRPC(f"http://127.0.0.1:{cfg['rpc_port']}", "rpc", "rpc", args.chain)
@@ -182,16 +181,21 @@ def main():
     print(f"Found {len(utxos)} UTXOs")
 
     # Convert amounts and sort by size (largest first)
+    # IMPORTANT: Exclude UTXOs at the bridge address to avoid spending previous deposits
     for utxo in utxos:
         amount = utxo["amount"]
         if isinstance(amount, float) and amount < 10000:
             utxo["amount_sats"] = int(round(amount * 1e8))
         else:
             utxo["amount_sats"] = int(amount)
+    utxos = [u for u in utxos if u.get("address") != BRIDGE_ADDRESS]
     utxos.sort(key=lambda u: u["amount_sats"], reverse=True)
+    print(f"  ({len(utxos)} UTXOs after excluding bridge address)")
 
-    # Select UTXOs until we have enough
-    needed = DEPOSIT_AMOUNT_SATS + FEE_SATS + OP_RETURN_VALUE + 1000  # extra buffer
+    # Select UTXOs until we have enough (use conservative fee estimate for selection)
+    FEE_RATE = 6  # volts per byte (min relay fee is 5, use 6 for safety)
+    est_fee_sats = args.max_inputs * 5400 * FEE_RATE  # ~5400 bytes per Dilithium-signed input
+    needed = DEPOSIT_AMOUNT_SATS + est_fee_sats + OP_RETURN_VALUE + 1000  # extra buffer
     selected = []
     total_sats = 0
     for utxo in utxos:
@@ -202,9 +206,17 @@ def main():
         if total_sats >= needed:
             break
 
-    if total_sats < needed:
-        print(f"ERROR: Insufficient funds! Have {total_sats/1e8:.8f}, need {needed/1e8:.8f} {COIN}")
+    # Recalculate fee based on actual number of inputs selected
+    # Each Dilithium-signed input is ~5,324 bytes, plus ~200 bytes overhead
+    est_signed_size = len(selected) * 5400 + 200
+    FEE_SATS = est_signed_size * FEE_RATE
+    FEE_COINS = FEE_SATS / 1e8
+    actual_needed = DEPOSIT_AMOUNT_SATS + FEE_SATS + OP_RETURN_VALUE
+
+    if total_sats < actual_needed:
+        print(f"ERROR: Insufficient funds! Have {total_sats/1e8:.8f}, need {actual_needed/1e8:.8f} {COIN}")
         print(f"  Selected {len(selected)} UTXOs (max {args.max_inputs})")
+        print(f"  Estimated fee: {FEE_COINS:.8f} {COIN} ({est_signed_size} bytes @ {FEE_RATE} volts/byte)")
         sys.exit(1)
 
     print(f"\nSelected {len(selected)} UTXOs totaling {total_sats/1e8:.8f} {COIN}")
@@ -213,14 +225,19 @@ def main():
     if len(selected) > 5:
         print(f"  ... and {len(selected)-5} more")
 
+    # Use a non-bridge address for change (first selected UTXO's address is safe
+    # since we already excluded bridge address UTXOs from selection)
     change_address = selected[0]["address"]
+    if change_address == BRIDGE_ADDRESS:
+        print("ERROR: Change address is the bridge address! This should not happen.")
+        sys.exit(1)
     change_sats = total_sats - DEPOSIT_AMOUNT_SATS - OP_RETURN_VALUE - FEE_SATS
 
     print(f"\nTransaction plan:")
     print(f"  Deposit: {DEPOSIT_AMOUNT_COINS} {COIN} -> {BRIDGE_ADDRESS}")
     print(f"  OP_RETURN: DBRG + {BASE_ADDRESS}")
     print(f"  Change: {change_sats / 1e8:.8f} {COIN} -> {change_address}")
-    print(f"  Fee: {FEE_COINS} {COIN}")
+    print(f"  Fee: {FEE_COINS:.8f} {COIN} (est {est_signed_size/1024:.0f} KB @ {FEE_RATE} volts/byte)")
     print(f"  Inputs: {len(selected)}")
 
     # Build OP_RETURN data: DBRG tag (4 bytes) + Base address (20 bytes)

@@ -31,7 +31,7 @@ DILV_BRIDGE_ADDRESS = os.getenv("DILV_BRIDGE_ADDRESS", "")
 
 # ── Confirmation thresholds ──────────────────────────────────────────
 DIL_CONFIRMATIONS  = int(os.getenv("DIL_CONFIRMATIONS",  "6"))    # ~24 min
-DILV_CONFIRMATIONS = int(os.getenv("DILV_CONFIRMATIONS", "15"))   # ~12 min
+DILV_CONFIRMATIONS = int(os.getenv("DILV_CONFIRMATIONS", "3"))    # ~2 min (VDF makes deep forks near-impossible)
 BASE_CONFIRMATIONS = int(os.getenv("BASE_CONFIRMATIONS", "12"))   # ~24 sec
 
 # ── Safety limits (relayer-side, independent of contract limits) ─────
