@@ -244,20 +244,12 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             }
             // BUG FIX: Look up genesis in mapHeaders to get cumulative chain work
             // Previously set pprev = nullptr, causing chainWork to not accumulate
-            std::cout << "[HeadersManager] DEBUG: Looking up genesis " << genesisHash.GetHex().substr(0, 16)
-                      << " in mapHeaders (size=" << mapHeaders.size() << ")" << std::endl << std::flush;
             auto genesisIt = mapHeaders.find(genesisHash);
-            std::cout << "[HeadersManager] DEBUG: find result = " << (genesisIt != mapHeaders.end() ? "FOUND" : "NOT_FOUND") << std::endl << std::flush;
             if (genesisIt != mapHeaders.end()) {
                 pprev = &genesisIt->second;
-                std::string genesisWorkHex = pprev->chainWork.GetHex();
-                std::cout << "[HeadersManager] Genesis found in mapHeaders, chainWork="
-                          << genesisWorkHex.substr(genesisWorkHex.length() > 16 ? genesisWorkHex.length() - 16 : 0)
-                          << " height=" << pprev->height << std::endl;
             } else {
                 // Genesis not in mapHeaders yet - use nullptr (first block case)
                 pprev = nullptr;
-                std::cout << "[HeadersManager] Genesis NOT found in mapHeaders, pprev=NULL" << std::endl;
             }
         }
         // Direct parent lookup (hashPrevBlock = parent's RandomX hash = parent's storage hash)
@@ -338,13 +330,6 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         mapHeaders[storageHash] = headerData;
         AddToHeightIndex(storageHash, height);
 
-        // DEBUG: Log storage details near height 5547
-        if (g_verbose.load(std::memory_order_relaxed) && height >= 5545 && height <= 5550) {
-            std::cerr << "[DEBUG-STORE] height=" << height
-                      << " storageHash=" << storageHash.GetHex().substr(0, 16) << "..."
-                      << " hashPrevBlock=" << header.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                      << std::endl;
-        }
         UpdateChainTips(storageHash);
         UpdateBestHeader(storageHash);
 
@@ -379,12 +364,10 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         }
     }
 
-    // IBD DEBUG: Log summary after processing headers
-    std::cout << "[HeadersManager] ProcessHeaders complete: peer=" << peer
-              << " processed=" << headers.size()
-              << " nBestHeight=" << nBestHeight
-              << " mapHeaders.size=" << mapHeaders.size()
-              << " mapHeightIndex.size=" << mapHeightIndex.size() << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[HeadersManager] ProcessHeaders: " << headers.size()
+                  << " headers, best=" << nBestHeight << std::endl;
+    }
 
     // Bug #150: Trigger periodic orphan pruning
     m_headers_since_last_prune += headers.size();
@@ -772,17 +755,6 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
     // Calculate chain work
     uint256 chainWork = CalculateChainWork(header, pprev);
 
-    // DEBUG: Log OnBlockActivated chainWork calculation (show LSB)
-    static int activate_log_count = 0;
-    if (activate_log_count++ < 10 || height > 23000) {
-        std::string hex = chainWork.GetHex();
-        std::cout << "[DEBUG-ACTIVATE] height=" << height
-                  << " chainWork(LSB)=" << hex.substr(hex.length() > 16 ? hex.length() - 16 : 0)
-                  << " isNull=" << (chainWork.IsNull() ? "yes" : "no")
-                  << " pprev=" << (pprev ? "found" : "NULL")
-                  << std::endl;
-    }
-
     // Store header
     HeaderWithChainWork headerData(header, height);
     headerData.chainWork = chainWork;
@@ -845,11 +817,6 @@ std::vector<uint256> CHeadersManager::GetLocatorImpl(const uint256& hashTip, CBl
 
     // Start from the HIGHER of the two to avoid re-requesting headers
     int startHeight = std::max(chainstateHeight, headersHeight);
-
-    // DEBUG: Locator state
-    std::cout << "[GetLocator] chainstateHeight=" << chainstateHeight
-              << " headersHeight=" << headersHeight << " nBestHeight=" << nBestHeight
-              << " startHeight=" << startHeight << " pTip=" << (pTip ? "valid" : "null") << std::endl;
 
     if (startHeight > 0) {
         int height = startHeight;
@@ -1616,12 +1583,6 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
     // Uses same logic as CBlockIndex::GetBlockProof()
     // Bug #47 Fix: Use consensus CompactToBig instead of custom GetTarget
 
-    // DEBUG: Log nBits input
-    static int blockwork_log_count = 0;
-    if (blockwork_log_count++ < 5) {
-        std::cout << "[DEBUG-BLOCKWORK] nBits=" << std::hex << nBits << std::dec << std::endl;
-    }
-
     uint256 target = CompactToBig(nBits);
     uint256 proof;
     memset(proof.data, 0, 32);
@@ -1665,13 +1626,6 @@ uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
     // Store the work value at the appropriate byte position
     for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
         proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
-    }
-
-    // DEBUG: Log result (show last 16 chars which are LSB)
-    if (blockwork_log_count <= 5) {
-        std::string hex = proof.GetHex();
-        std::cout << "[DEBUG-BLOCKWORK] result(LSB)=" << hex.substr(hex.length() > 16 ? hex.length() - 16 : 0)
-                  << " work_byte_pos=" << work_byte_pos << std::endl;
     }
 
     return proof;
@@ -2078,18 +2032,6 @@ bool CHeadersManager::FullValidateHeader(const CBlockHeader& header, int height)
     // the highest checkpoint. These headers are trusted by the hardcoded checkpoint.
     // This dramatically speeds up IBD (~100ms -> <1ms per header for checkpointed blocks).
 
-    // DEBUG: Log checkpoint check (first 10 headers only)
-    static int debug_count = 0;
-    if (g_verbose.load(std::memory_order_relaxed) && debug_count < 10) {
-        debug_count++;
-        std::cout << "[DEBUG] FullValidateHeader height=" << height
-                  << " g_chainParams=" << (Dilithion::g_chainParams ? "SET" : "NULL");
-        if (Dilithion::g_chainParams) {
-            std::cout << " highestCheckpoint=" << Dilithion::g_chainParams->GetHighestCheckpointHeight();
-        }
-        std::cout << std::endl;
-    }
-
     if (Dilithion::g_chainParams) {
         int highestCheckpoint = Dilithion::g_chainParams->GetHighestCheckpointHeight();
         if (highestCheckpoint >= 0 && height <= highestCheckpoint) {
@@ -2214,26 +2156,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     return true;  // Not an error, just nothing useful to process
                 }
             } else {
-                // DEBUG: Check what heights we have and their hashes
                 std::cerr << "[HeadersManager] ORPHAN: Parent " << headers[0].hashPrevBlock.GetHex().substr(0, 16)
-                          << " not found" << std::endl;
-
-                // Log some of the existing hashes near expected height for debugging
-                int expectedParentHeight = nBestHeight;  // Best guess
-                std::cerr << "[HeadersManager] DEBUG: nBestHeight=" << nBestHeight
-                          << " mapHeaders.size=" << mapHeaders.size() << std::endl;
-
-                auto heightIt = mapHeightIndex.find(expectedParentHeight);
-                if (heightIt != mapHeightIndex.end() && !heightIt->second.empty()) {
-                    uint256 storedHash = *heightIt->second.begin();
-                    std::cerr << "[HeadersManager] DEBUG: At height " << expectedParentHeight
-                              << " stored hash=" << storedHash.GetHex().substr(0, 16) << "..." << std::endl;
-                    std::cerr << "[HeadersManager] DEBUG: hashPrevBlock=" << headers[0].hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-                    std::cerr << "[HeadersManager] DEBUG: Match=" << (storedHash == headers[0].hashPrevBlock ? "YES" : "NO") << std::endl;
-                } else {
-                    std::cerr << "[HeadersManager] DEBUG: No headers at height " << expectedParentHeight << std::endl;
-                }
-
+                          << " not found (best=" << nBestHeight << ")" << std::endl;
                 return false;
             }
         }
@@ -2468,14 +2392,6 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     auto existingIt = mapHeaders.find(existingHash);
                     if (existingIt != mapHeaders.end()) {
                         // DEBUG: Log checkpoint optimization with work info
-                        static int ckpt_log_count = 0;
-                        if (ckpt_log_count++ < 20 || expectedHeight == checkpointHeight) {
-                            std::string workHex = existingIt->second.chainWork.GetHex();
-                            std::cout << "[DEBUG-CKPT] height=" << expectedHeight
-                                      << " using existing pprev work(LSB)="
-                                      << workHex.substr(workHex.length() > 16 ? workHex.length() - 16 : 0)
-                                      << std::endl;
-                        }
                         // BUG FIX: Update best header for existing checkpoint headers too
                         UpdateBestHeader(existingHash);
                         pprev = &existingIt->second;
@@ -2523,22 +2439,6 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 // Calculate height and chain work
                 int height = pprev ? (pprev->height + 1) : 1;
                 uint256 chainWork = CalculateChainWork(header, pprev);
-
-                // DEBUG: Log chainWork at storage time - show byte[8] (MSB of work)
-                static int storage_log_count = 0;
-                if (g_verbose.load(std::memory_order_relaxed) &&
-                    (storage_log_count++ % 500 == 0 || height > 23000 || (height >= 11920 && height <= 11930))) {
-                    std::cout << "[DEBUG-STORE] height=" << height
-                              << " byte8=0x" << std::hex << (int)chainWork.data[8] << std::dec
-                              << " byte7=0x" << std::hex << (int)chainWork.data[7] << std::dec;
-                    if (pprev) {
-                        std::cout << " pprev_byte8=0x" << std::hex << (int)pprev->chainWork.data[8] << std::dec
-                                  << " pprev_byte7=0x" << std::hex << (int)pprev->chainWork.data[7] << std::dec;
-                    } else {
-                        std::cout << " pprev=NULL";
-                    }
-                    std::cout << std::endl;
-                }
 
                 // Store header
                 HeaderWithChainWork headerData(header, height);

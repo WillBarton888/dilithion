@@ -398,7 +398,7 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     }
 
     if (reorgOccurred) {
-        std::cout << "[ValidationQueue] ⚠️  CHAIN REORGANIZATION occurred at height " << expected_height << std::endl;
+        std::cout << "[ValidationQueue] CHAIN REORGANIZATION occurred at height " << expected_height << std::endl;
     }
 
     // A1 FIX: Notify IBD coordinator that a block connected successfully

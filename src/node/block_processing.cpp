@@ -224,11 +224,6 @@ BlockProcessResult ProcessNewBlock(
                 int32_t forkPoint = fork->GetForkPointHeight();
                 int32_t forkTip = fork->GetExpectedTipHeight();
 
-                // BUG #256 DEBUG: Log height calculation for fork block matching
-                std::cout << "[ProcessNewBlock] Fork check: blockHeight=" << blockHeight
-                          << " forkRange=[" << (forkPoint + 1) << "," << forkTip << "]"
-                          << " hash=" << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
-
                 // Check if this block belongs to the fork using hash verification
                 // IsExpectedBlock checks both height range AND hash match (if expected hashes available)
                 bool inForkRange = (blockHeight > forkPoint && blockHeight <= forkTip);
@@ -729,13 +724,7 @@ BlockProcessResult ProcessNewBlock(
     pblockIndex->phashBlock = blockHash;
     pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
 
-    // VDF DISTRIBUTION DEBUG: Verify vdfOutput survives CBlockIndex construction
-    if (block.IsVDFBlock()) {
-        std::cout << "[VDF-DEBUG] Block v=" << block.nVersion
-                  << " vdfOutput(block)=" << block.vdfOutput.GetHex().substr(0, 16)
-                  << " vdfOutput(index)=" << pblockIndex->header.vdfOutput.GetHex().substr(0, 16)
-                  << std::endl;
-    }
+
 
     // Link to parent block
     pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);

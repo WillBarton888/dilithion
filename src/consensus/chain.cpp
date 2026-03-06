@@ -12,6 +12,7 @@
 #include <dfmp/identity_db.h>     // Identity undo during reorg
 #include <dfmp/mik.h>             // MIK parsing for identity undo
 #include <util/assert.h>
+#include <util/logging.h>
 #include <iostream>
 #include <algorithm>
 #include <set>
@@ -149,35 +150,15 @@ CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
 bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
 {
     // Must have chain params with distribution enabled
-    if (!Dilithion::g_chainParams) {
-        std::cout << "[VDF Distribution] SKIP: no chain params" << std::endl;
-        return false;
-    }
-    if (pindexNew->nHeight < Dilithion::g_chainParams->vdfLotteryActivationHeight) {
-        return false;  // Pre-activation — silent skip (too noisy)
-    }
+    if (!Dilithion::g_chainParams) return false;
+    if (pindexNew->nHeight < Dilithion::g_chainParams->vdfLotteryActivationHeight) return false;
 
     // Both blocks must be VDF (version >= 4)
-    if (pindexNew->nVersion < 4 || pindexTip->nVersion < 4) {
-        std::cout << "[VDF Distribution] SKIP: non-VDF block (new v=" << pindexNew->nVersion
-                  << ", tip v=" << pindexTip->nVersion << ")" << std::endl;
-        return false;
-    }
+    if (pindexNew->nVersion < 4 || pindexTip->nVersion < 4) return false;
 
     // Must be at same height with same parent (sibling blocks)
-    if (pindexNew->nHeight != pindexTip->nHeight) {
-        std::cout << "[VDF Distribution] SKIP: different height (new=" << pindexNew->nHeight
-                  << ", tip=" << pindexTip->nHeight << ")" << std::endl;
-        return false;
-    }
-    if (pindexNew->pprev != pindexTip->pprev) {
-        std::cout << "[VDF Distribution] SKIP: different parent (new->pprev="
-                  << (pindexNew->pprev ? pindexNew->pprev->GetBlockHash().GetHex().substr(0, 16) : "null")
-                  << ", tip->pprev="
-                  << (pindexTip->pprev ? pindexTip->pprev->GetBlockHash().GetHex().substr(0, 16) : "null")
-                  << ") at height " << pindexNew->nHeight << std::endl;
-        return false;
-    }
+    if (pindexNew->nHeight != pindexTip->nHeight) return false;
+    if (pindexNew->pprev != pindexTip->pprev) return false;
 
     // Compare vdfOutput using HashLessThan (big-endian, consensus-safe)
     // CRITICAL: Do NOT use uint256::operator< — it's little-endian (memcmp)
@@ -185,41 +166,21 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
     const uint256& newOutput = pindexNew->header.vdfOutput;
     const uint256& tipOutput = pindexTip->header.vdfOutput;
 
-    if (newOutput.IsNull() || tipOutput.IsNull()) {
-        std::cout << "[VDF Distribution] SKIP: null output (new=" << newOutput.IsNull()
-                  << ", tip=" << tipOutput.IsNull() << ")" << std::endl;
-        return false;
-    }
-
-    if (!HashLessThan(newOutput, tipOutput)) {
-        std::cout << "[VDF Distribution] SKIP: new output is NOT lower (new="
-                  << newOutput.GetHex().substr(0, 16) << ", tip="
-                  << tipOutput.GetHex().substr(0, 16) << ")" << std::endl;
-        return false;
-    }
+    if (newOutput.IsNull() || tipOutput.IsNull()) return false;
+    if (!HashLessThan(newOutput, tipOutput)) return false;
 
     // Grace period check
-    if (m_vdfTipAcceptHeight != pindexTip->nHeight) {
-        std::cout << "[VDF Distribution] SKIP: accept height mismatch (accept="
-                  << m_vdfTipAcceptHeight << ", tip=" << pindexTip->nHeight << ")" << std::endl;
-        return false;
-    }
+    if (m_vdfTipAcceptHeight != pindexTip->nHeight) return false;
 
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         now - m_vdfTipAcceptTime).count();
     int gracePeriod = Dilithion::g_chainParams->vdfLotteryGracePeriod;
 
-    if (elapsed > gracePeriod) {
-        std::cout << "[VDF Distribution] Lower output arrived but grace period expired ("
-                  << elapsed << "s > " << gracePeriod << "s)" << std::endl;
-        return false;
-    }
+    if (elapsed > gracePeriod) return false;
 
-    std::cout << "[VDF Distribution] Lower VDF output found! Replacing tip." << std::endl;
-    std::cout << "  Current tip output: " << tipOutput.GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  New block output:   " << newOutput.GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  Grace remaining: " << (gracePeriod - elapsed) << "s" << std::endl;
+    std::cout << "[VDF Distribution] Lower output wins -- replacing tip (grace: "
+              << (gracePeriod - elapsed) << "s remaining)" << std::endl;
 
     return true;
 }
@@ -234,16 +195,6 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     if (pindexNew == nullptr) {
         std::cerr << "[Chain] ERROR: ActivateBestChain called with nullptr" << std::endl;
         return false;
-    }
-
-    // VDF DISTRIBUTION DEBUG: Log vdfOutput at ActivateBestChain entry
-    if (pindexNew->nVersion >= 4 && pindexTip != nullptr) {
-        std::cout << "[VDF-DEBUG-ABC] new.h=" << pindexNew->nHeight
-                  << " new.vdfOut=" << pindexNew->header.vdfOutput.GetHex().substr(0, 16)
-                  << " tip.h=" << pindexTip->nHeight
-                  << " tip.vdfOut=" << pindexTip->header.vdfOutput.GetHex().substr(0, 16)
-                  << " block.vdfOut=" << block.vdfOutput.GetHex().substr(0, 16)
-                  << std::endl;
     }
 
     // MAINNET SECURITY: Validate block against checkpoint if one exists at this height
@@ -400,34 +351,20 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
                 if (withinGrace) {
                     std::cout << "[VDF Distribution] FORK TIEBREAK -- equal work, lower VDF output wins!" << std::endl;
-                    std::cout << "  Tip output:   " << tipOutput.GetHex().substr(0, 16) << "..." << std::endl;
-                    std::cout << "  New output:    " << newOutput.GetHex().substr(0, 16) << "..." << std::endl;
                     vdfTiebreak = true;
                 }
-            } else {
-                std::cout << "[VDF Distribution] Fork: equal work at height " << pindexNew->nHeight
-                          << " but new output NOT lower (new="
-                          << pindexNew->header.vdfOutput.GetHex().substr(0, 16)
-                          << ", tip=" << pindexTip->header.vdfOutput.GetHex().substr(0, 16)
-                          << ")" << std::endl;
             }
         }
 
         if (!vdfTiebreak) {
-            std::cout << "  Current work: " << pindexTip->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
-            std::cout << "  New work:     " << pindexNew->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
-
             // Block is valid but not on best chain - it's an orphan
-            // Still save it to database, but don't activate it
             return true;  // Not an error - block is valid, just not best chain
         }
         // Fall through to reorg logic below (vdfTiebreak == true)
     }
 
     // New chain wins - REORGANIZATION REQUIRED (either more work or VDF tiebreak)
-    std::cout << "[Chain] REORGANIZING to better chain" << std::endl;
-    std::cout << "  Current work: " << pindexTip->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
-    std::cout << "  New work:     " << pindexNew->nChainWork.GetHex().substr(0, 16) << "..." << std::endl;
+    std::cout << "[Chain] REORGANIZING to better chain at height " << pindexNew->nHeight << std::endl;
 
     // Find fork point
     CBlockIndex* pindexFork = FindFork(pindexTip, pindexNew);
@@ -471,7 +408,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     }
 
     if (reorg_depth > 10) {
-        std::cout << "[Chain] ⚠️  WARNING: Deep reorganization (" << reorg_depth << " blocks)" << std::endl;
+        std::cout << "[Chain] WARNING: Deep reorganization (" << reorg_depth << " blocks)" << std::endl;
     }
 
     // Build list of blocks to disconnect (from current tip back to fork point)
@@ -503,8 +440,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     // Reverse connect list so we connect from fork point -> new tip
     std::reverse(connectBlocks.begin(), connectBlocks.end());
 
-    std::cout << "  Disconnect " << disconnectBlocks.size() << " block(s)" << std::endl;
-    std::cout << "  Connect " << connectBlocks.size() << " block(s)" << std::endl;
+    std::cout << "  Disconnect " << disconnectBlocks.size() << ", connect " << connectBlocks.size() << " block(s)" << std::endl;
 
     // ============================================================================
     // DFMP FORK FIX: Skip reorg if any block in connect path is already invalid
@@ -517,9 +453,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     for (const auto* pindexCheck : connectBlocks) {
         if (pindexCheck->IsInvalid()) {
             std::cout << "[Chain] Skipping reorg: block at height " << pindexCheck->nHeight
-                      << " is marked invalid (status=" << pindexCheck->nStatus << ")" << std::endl;
-            std::cout << "[Chain] This fork contains blocks that failed DFMP consensus validation." << std::endl;
-            std::cout << "[Chain] The fork miner may be running incompatible software." << std::endl;
+                      << " is marked invalid" << std::endl;
             return true;  // Not an error - our chain is valid, fork is not
         }
     }
@@ -574,8 +508,10 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         }
     }
 
-    std::cout << "[Chain] ✅ PRE-VALIDATION PASSED: All " << (disconnectBlocks.size() + connectBlocks.size())
-              << " blocks can be loaded" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[Chain] Pre-validation passed: all " << (disconnectBlocks.size() + connectBlocks.size())
+                  << " blocks loadable" << std::endl;
+    }
 
     // ============================================================================
     // P1-4 FIX: Write-Ahead Logging for Crash-Safe Reorganization
@@ -837,7 +773,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         pdb->WriteBestBlock(pindexNew->GetBlockHash());
     }
 
-    std::cout << "[Chain] ✅ REORGANIZATION COMPLETE" << std::endl;
+    std::cout << "[Chain] Reorganization complete" << std::endl;
     std::cout << "  New tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
               << " (height " << pindexTip->nHeight << ")" << std::endl;
 
@@ -967,14 +903,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         std::string error;
 
         if (validator.DeserializeBlockTransactions(block, block_txs, error)) {
-            size_t mempoolSizeBefore = pMemPool->Size();
             pMemPool->RemoveConfirmedTxs(block_txs);
-            size_t mempoolSizeAfter = pMemPool->Size();
-
-            if (mempoolSizeBefore != mempoolSizeAfter) {
-                std::cout << "[Chain] BUG #109: Removed " << (mempoolSizeBefore - mempoolSizeAfter)
-                          << " confirmed tx from mempool (height " << pindex->nHeight << ")" << std::endl;
-            }
         } else {
             std::cerr << "[Chain] WARNING: Failed to deserialize block txs for mempool cleanup: " << error << std::endl;
         }
@@ -1053,10 +982,7 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
                             int firstSeen = DFMP::g_identityDb->GetFirstSeen(identity);
                             if (firstSeen == pindex->nHeight) {
                                 // Identity was introduced at this height - safe to remove
-                                if (DFMP::g_identityDb->RemoveMIKPubKey(identity)) {
-                                    std::cout << "[Chain] Removed MIK identity (undo): "
-                                              << identity.GetHex() << " (first-seen=" << firstSeen << ")" << std::endl;
-                                }
+                                DFMP::g_identityDb->RemoveMIKPubKey(identity);
                                 DFMP::g_identityDb->RemoveFirstSeen(identity);
                             }
                             // If firstSeen != height, identity was introduced earlier - keep it
@@ -1200,8 +1126,10 @@ int CChainState::DisconnectToHeight(int targetHeight, CBlockchainDB& db, int bat
             lock.lock();
         }
 
-        std::cout << "[DisconnectToHeight] Progress: " << totalDisconnected << "/"
-                  << remaining << " blocks disconnected" << std::endl;
+        if (totalDisconnected % 100 == 0 || totalDisconnected == remaining) {
+            std::cout << "[DisconnectToHeight] Progress: " << totalDisconnected << "/"
+                      << remaining << " blocks disconnected" << std::endl;
+        }
     }
 
     // Final persist

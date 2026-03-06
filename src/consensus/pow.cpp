@@ -12,6 +12,7 @@
 #include <dfmp/dfmp.h>
 #include <dfmp/identity_db.h>
 #include <dfmp/mik.h>  // DFMP v2.0: Mining Identity Key
+#include <util/logging.h>
 #include <algorithm>
 #include <vector>
 #include <cstring>
@@ -32,17 +33,6 @@ bool HashLessThan(const uint256& hash, const uint256& target) {
 bool ChainWorkGreaterThan(const uint256& work1, const uint256& work2) {
     // Compare chain work as big-endian (most significant byte first)
     // Returns true if work1 > work2
-
-    // DEBUG: Log comparison
-    static int cmp_log_count = 0;
-    if (cmp_log_count++ % 5000 == 0) {
-        std::cout << "[DEBUG-CMP] work1_bytes[8-1]: ";
-        for (int j = 8; j >= 1; j--) printf("%02x", work1.data[j]);
-        std::cout << " vs work2_bytes[8-1]: ";
-        for (int j = 8; j >= 1; j--) printf("%02x", work2.data[j]);
-        std::cout << std::endl;
-    }
-
     for (int i = 31; i >= 0; i--) {
         if (work1.data[i] > work2.data[i])
             return true;
@@ -539,17 +529,11 @@ bool CheckProofOfWorkDFMP(
                 payoutHeatMult = DFMP::GetHeatMultiplier_V33(payoutHeat);
             }
 
-            std::cout << "[DFMP v3.3] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
-                      << " firstSeen=" << firstSeen
-                      << " effFirstSeen=" << effectiveFirstSeen
-                      << " mikBlocks=" << blocksInWindow
-                      << " miners=" << uniqueMiners
-                      << " freeTier=12 (fixed)"
-                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
-                      << " mikHeat=" << heatMult << "x"
-                      << " payoutHeat=" << payoutHeatMult << "x"
-                      << " total=" << multiplier << "x"
-                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[DFMP v3.3] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
+                          << " total=" << multiplier << "x"
+                          << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            }
 
         } else if (height >= dfmpV32ActivationHeight) {
             double maturityMult = DFMP::GetPendingPenalty_V32(height, effectiveFirstSeen);
@@ -573,17 +557,10 @@ bool CheckProofOfWorkDFMP(
                 effectiveFreeForLog = std::max(DFMP::FREE_TIER_THRESHOLD_V32, DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
             }
 
-            std::cout << "[DFMP v3.2] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
-                      << " firstSeen=" << firstSeen
-                      << " effFirstSeen=" << effectiveFirstSeen
-                      << " mikBlocks=" << blocksInWindow
-                      << " miners=" << uniqueMiners
-                      << " freeTier=" << effectiveFreeForLog
-                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
-                      << " mikHeat=" << heatMult << "x"
-                      << " payoutHeat=" << payoutHeatMult << "x"
-                      << " total=" << multiplier << "x"
-                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[DFMP v3.2] Block " << height
+                          << " total=" << multiplier << "x" << std::endl;
+            }
 
         } else if (height >= dfmpV31ActivationHeight) {
             double maturityMult = DFMP::GetPendingPenalty_V31(height, effectiveFirstSeen);
@@ -607,17 +584,10 @@ bool CheckProofOfWorkDFMP(
                 effectiveFreeForLog = std::max(DFMP::FREE_TIER_THRESHOLD_V31, DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
             }
 
-            std::cout << "[DFMP v3.1] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
-                      << " firstSeen=" << firstSeen
-                      << " effFirstSeen=" << effectiveFirstSeen
-                      << " mikBlocks=" << blocksInWindow
-                      << " miners=" << uniqueMiners
-                      << " freeTier=" << effectiveFreeForLog
-                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
-                      << " mikHeat=" << heatMult << "x"
-                      << " payoutHeat=" << payoutHeatMult << "x"
-                      << " total=" << multiplier << "x"
-                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[DFMP v3.1] Block " << height
+                          << " total=" << multiplier << "x" << std::endl;
+            }
 
         } else if (height >= dfmpV3ActivationHeight) {
             double maturityMult = DFMP::GetPendingPenalty(height, effectiveFirstSeen);
@@ -641,28 +611,18 @@ bool CheckProofOfWorkDFMP(
                 effectiveFreeForLog = std::max(DFMP::FREE_TIER_THRESHOLD, DFMP::OBSERVATION_WINDOW / std::max(1, uniqueMiners));
             }
 
-            std::cout << "[DFMP v3.0] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
-                      << " firstSeen=" << firstSeen
-                      << " effFirstSeen=" << effectiveFirstSeen
-                      << " mikBlocks=" << blocksInWindow
-                      << " miners=" << uniqueMiners
-                      << " freeTier=" << effectiveFreeForLog
-                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
-                      << " mikHeat=" << heatMult << "x"
-                      << " payoutHeat=" << payoutHeatMult << "x"
-                      << " total=" << multiplier << "x"
-                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[DFMP v3.0] Block " << height
+                          << " total=" << multiplier << "x" << std::endl;
+            }
         } else {
             double maturityMult = DFMP::GetMaturityPenalty_V2(height, firstSeen);
             double heatMult = DFMP::GetHeatPenalty_V2(blocksInWindow);
 
-            std::cout << "[DFMP v2.0] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
-                      << " firstSeen=" << firstSeen
-                      << " blocks=" << blocksInWindow
-                      << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
-                      << " heat=" << heatMult << "x"
-                      << " total=" << multiplier << "x"
-                      << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[DFMP v2.0] Block " << height
+                          << " total=" << multiplier << "x" << std::endl;
+            }
         }
     }
 
@@ -1052,16 +1012,6 @@ uint32_t GetNextWorkRequiredASERT(
     if (nBitsNew < MIN_DIFFICULTY_BITS) nBitsNew = MIN_DIFFICULTY_BITS;
     if (nBitsNew > MAX_DIFFICULTY_BITS) nBitsNew = MAX_DIFFICULTY_BITS;
 
-    // Logging
-    int newHeight = pindexPrev->nHeight + 1;
-    std::cout << "[ASERT] Height " << newHeight
-              << " | time_delta=" << time_delta << "s"
-              << " ideal=" << ideal_time << "s"
-              << " drift=" << (time_delta - ideal_time) << "s"
-              << " | shifts=" << shifts << " frac=" << frac
-              << " | anchor_nBits=0x" << std::hex << anchor_nBits
-              << " new_nBits=0x" << nBitsNew << std::dec << std::endl;
-
     return nBitsNew;
 }
 
@@ -1206,12 +1156,8 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
                     edaBits = MIN_DIFFICULTY_BITS;
                 }
 
-                std::cout << "[EDA] Emergency difficulty adjustment at height " << newBlockHeight << std::endl;
-                std::cout << "  Gap: " << gap << "s (threshold: " << threshold << "s)" << std::endl;
-                std::cout << "  Steps: " << steps << " (target *= " << EDA_REDUCTION_NUMERATOR
-                          << "/" << EDA_REDUCTION_DENOMINATOR << " per step)" << std::endl;
-                std::cout << "  Normal nBits: 0x" << std::hex << prevBits << std::endl;
-                std::cout << "  EDA nBits:    0x" << edaBits << std::dec << std::endl;
+                std::cout << "[EDA] Emergency difficulty adjustment at height " << newBlockHeight
+                          << " (gap=" << gap << "s, steps=" << steps << ")" << std::endl;
 
                 return edaBits;
             }
@@ -1295,12 +1241,11 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         nBitsNew = FixCompactEncoding(nBitsNew);
     }
 
-    std::cout << "[Difficulty] Adjustment at height " << newBlockHeight
-              << " (v" << (useV2 ? "2" : "1") << ", interval=" << nInterval
-              << ", max_change=" << maxChange << "x)" << std::endl;
-    std::cout << "  Actual time: " << nActualTimespan << "s, Expected: " << nTargetTimespan << "s" << std::endl;
-    std::cout << "  Old difficulty: 0x" << std::hex << pindexLast->nBits << std::endl;
-    std::cout << "  New difficulty: 0x" << nBitsNew << std::dec << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[Difficulty] Height " << newBlockHeight
+                  << " actual=" << nActualTimespan << "s expected=" << nTargetTimespan << "s"
+                  << " nBits=0x" << std::hex << nBitsNew << std::dec << std::endl;
+    }
 
     return nBitsNew;
 }

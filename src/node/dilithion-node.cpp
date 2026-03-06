@@ -4661,10 +4661,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (reorgOccurred) {
-                    std::cout << "[Blockchain] ⚠️  CHAIN REORGANIZATION occurred during mining!" << std::endl;
-                    std::cout << "  Our mined block triggered a reorg" << std::endl;
-                    std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
-                              << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
+                    std::cout << "[Blockchain] CHAIN REORGANIZATION occurred during mining (new tip height "
+                              << g_chainstate.GetHeight() << ")" << std::endl;
 
                     // Stop mining - need to reassess chain state
                     g_node_state.new_block_found = true;
