@@ -317,13 +317,13 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         {"block",      {80, 8 * 1024 * 1024}},       // Min 80 bytes header, max 8MB blocks
         {"tx",         {60, 1 * 1024 * 1024}},       // Min 60 bytes, max 1MB transactions
         {"getheaders", {33, 8236}},                  // Min 33 bytes (empty locator + stop hash), max ~8KB
-        {"headers",    {1, 2000 * 81 + 9}},           // Max 2000 headers * 81 bytes + 9 byte varint count
+        {"headers",    {1, 2000 * 145 + 9}},          // Max 2000 headers * 145 bytes (144 VDF + 1 tx count) + 9 varint
         {"getblocks",  {36, 8236}},                  // Similar to getheaders
         {"mempool",    {0, 0}},                      // Empty message
         {"reject",     {1, 1024}},                   // Variable, max 1KB for reject messages
         {"sendheaders", {0, 0}},                     // BIP 130: Empty message (signal only)
         {"sendcmpct", {9, 9}},                       // BIP 152: bool (1) + uint64_t (8) = 9 bytes
-        {"cmpctblock", {88, 8 * 1024 * 1024}},       // BIP 152: Header + short IDs (min 88 bytes header)
+        {"cmpctblock", {80, 8 * 1024 * 1024}},       // BIP 152: Header + short IDs (min ~header size)
         {"getblocktxn", {33, 50000 * 4 + 33}},       // BIP 152: block hash + varint + indices
         {"blocktxn",   {33, 8 * 1024 * 1024}},       // BIP 152: block hash + transactions
         // Digital DNA protocol
