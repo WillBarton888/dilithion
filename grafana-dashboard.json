@@ -85,7 +85,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "max(dilithion_block_height{network=\"$network\"})",
+          "expr": "max(dilithion_block_height{network=\"$network\", chain=~\"$chain\"})",
           "instant": true,
           "legendFormat": "",
           "refId": "A"
@@ -145,7 +145,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "count(dilithion_info{network=\"$network\"})",
+          "expr": "count(dilithion_info{network=\"$network\", chain=~\"$chain\"})",
           "instant": true,
           "legendFormat": "",
           "refId": "A"
@@ -205,7 +205,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "sum(dilithion_peer_count{network=\"$network\"})",
+          "expr": "sum(dilithion_peer_count{network=\"$network\", chain=~\"$chain\"})",
           "instant": true,
           "legendFormat": "",
           "refId": "A"
@@ -269,7 +269,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "max(dilithion_fork_detected{network=\"$network\"})",
+          "expr": "max(dilithion_fork_detected{network=\"$network\", chain=~\"$chain\"})",
           "instant": true,
           "legendFormat": "",
           "refId": "A"
@@ -337,7 +337,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "sum(dilithion_invalid_blocks_total{network=\"$network\"})",
+          "expr": "sum(dilithion_invalid_blocks_total{network=\"$network\", chain=~\"$chain\"})",
           "instant": true,
           "legendFormat": "",
           "refId": "A"
@@ -405,7 +405,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "sum(dilithion_peer_bans_total{network=\"$network\"})",
+          "expr": "sum(dilithion_peer_bans_total{network=\"$network\", chain=~\"$chain\"})",
           "instant": true,
           "legendFormat": "",
           "refId": "A"
@@ -510,7 +510,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "dilithion_block_height{network=\"$network\"}",
+          "expr": "dilithion_block_height{network=\"$network\", chain=~\"$chain\"}",
           "legendFormat": "{{node}} ({{location}})",
           "refId": "A"
         }
@@ -601,7 +601,7 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "dilithion_peer_count{network=\"$network\"}",
+          "expr": "dilithion_peer_count{network=\"$network\", chain=~\"$chain\"}",
           "legendFormat": "{{node}} ({{location}})",
           "refId": "A"
         }
@@ -694,7 +694,7 @@
       "targets": [
         {
           "editorMode": "builder",
-          "expr": "dilithion_headers_height{network=\"$network\"}",
+          "expr": "dilithion_headers_height{network=\"$network\", chain=~\"$chain\"}",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -846,17 +846,17 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "sum(dilithion_invalid_blocks_total{network=\"$network\"})",
+          "expr": "sum(dilithion_invalid_blocks_total{network=\"$network\", chain=~\"$chain\"})",
           "legendFormat": "invalid_blocks",
           "refId": "A"
         },
         {
-          "expr": "sum(dilithion_peer_bans_total{network=\"$network\"})",
+          "expr": "sum(dilithion_peer_bans_total{network=\"$network\", chain=~\"$chain\"})",
           "legendFormat": "peer_bans",
           "refId": "B"
         },
         {
-          "expr": "sum(dilithion_invalid_headers_total{network=\"$network\"})",
+          "expr": "sum(dilithion_invalid_headers_total{network=\"$network\", chain=~\"$chain\"})",
           "legendFormat": "invalid_headers",
           "refId": "C"
         }
@@ -948,12 +948,12 @@
       "pluginVersion": "12.4.0-20781422371.patch2",
       "targets": [
         {
-          "expr": "sum(dilithion_reorgs_total{network=\"$network\"})",
+          "expr": "sum(dilithion_reorgs_total{network=\"$network\", chain=~\"$chain\"})",
           "legendFormat": "reorgs",
           "refId": "A"
         },
         {
-          "expr": "sum(dilithion_orphan_blocks_total{network=\"$network\"})",
+          "expr": "sum(dilithion_orphan_blocks_total{network=\"$network\", chain=~\"$chain\"})",
           "legendFormat": "orphan_blocks",
           "refId": "B"
         }
@@ -1058,12 +1058,12 @@
       "pluginVersion": "12.4.0-20160616057",
       "targets": [
         {
-          "expr": "rate(dilithion_bytes_received_total{network=\"$network\"}[5m])",
+          "expr": "rate(dilithion_bytes_received_total{network=\"$network\", chain=~\"$chain\"}[5m])",
           "legendFormat": "{{node}} received",
           "refId": "A"
         },
         {
-          "expr": "rate(dilithion_bytes_sent_total{network=\"$network\"}[5m])",
+          "expr": "rate(dilithion_bytes_sent_total{network=\"$network\", chain=~\"$chain\"}[5m])",
           "legendFormat": "{{node}} sent",
           "refId": "B"
         }
@@ -1155,17 +1155,17 @@
       "pluginVersion": "12.4.0-20160616057",
       "targets": [
         {
-          "expr": "rate(dilithion_messages_received_total{type=\"block\",network=\"$network\"}[5m]) * 60",
+          "expr": "rate(dilithion_messages_received_total{type=\"block\",network=\"$network\", chain=~\"$chain\"}[5m]) * 60",
           "legendFormat": "blocks/min",
           "refId": "A"
         },
         {
-          "expr": "rate(dilithion_messages_received_total{type=\"tx\",network=\"$network\"}[5m]) * 60",
+          "expr": "rate(dilithion_messages_received_total{type=\"tx\",network=\"$network\", chain=~\"$chain\"}[5m]) * 60",
           "legendFormat": "txs/min",
           "refId": "B"
         },
         {
-          "expr": "rate(dilithion_messages_received_total{type=\"headers\",network=\"$network\"}[5m]) * 60",
+          "expr": "rate(dilithion_messages_received_total{type=\"headers\",network=\"$network\", chain=~\"$chain\"}[5m]) * 60",
           "legendFormat": "headers/min",
           "refId": "C"
         }
@@ -1269,12 +1269,12 @@
       "pluginVersion": "12.4.0-20160616057",
       "targets": [
         {
-          "expr": "dilithion_blocks_accepted_total{network=\"$network\"}",
+          "expr": "dilithion_blocks_accepted_total{network=\"$network\", chain=~\"$chain\"}",
           "legendFormat": "{{node}} accepted",
           "refId": "A"
         },
         {
-          "expr": "dilithion_blocks_validated_total{network=\"$network\"}",
+          "expr": "dilithion_blocks_validated_total{network=\"$network\", chain=~\"$chain\"}",
           "legendFormat": "{{node}} validated",
           "refId": "B"
         }
@@ -1366,7 +1366,7 @@
       "pluginVersion": "12.4.0-20160616057",
       "targets": [
         {
-          "expr": "dilithion_block_validation_ms{network=\"$network\"}",
+          "expr": "dilithion_block_validation_ms{network=\"$network\", chain=~\"$chain\"}",
           "legendFormat": "{{node}}",
           "refId": "A"
         }
@@ -1459,7 +1459,7 @@
       "pluginVersion": "12.4.0-20160616057",
       "targets": [
         {
-          "expr": "dilithion_info{network=\"$network\"}",
+          "expr": "dilithion_info{network=\"$network\", chain=~\"$chain\"}",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1523,6 +1523,39 @@
         "queryValue": "",
         "skipUrlSync": false,
         "type": "custom"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Chain",
+        "multi": false,
+        "name": "chain",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "DIL",
+            "value": "dil"
+          },
+          {
+            "selected": false,
+            "text": "DilV",
+            "value": "dilv"
+          }
+        ],
+        "query": ".*,dil,dilv",
+        "queryValue": "",
+        "skipUrlSync": false,
+        "type": "custom"
       }
     ]
   },
@@ -1532,8 +1565,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Dilithion Network Monitor (Mainnet/Testnet)",
+  "title": "Dilithion Network Monitor (DIL + DilV)",
   "uid": "dilithion-network",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }

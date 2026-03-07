@@ -140,6 +140,11 @@ a:hover {
     background: var(--accent-dim);
 }
 
+.chain-toggle button { font-family: var(--font-body); }
+.chain-toggle button.active { background: var(--accent) !important; color: white !important; }
+.chain-toggle button:not(.active) { background: transparent !important; color: var(--text-muted) !important; }
+.chain-toggle button:not(.active):hover { color: var(--text-primary) !important; }
+
 .navbar-right {
     flex: 1;
     max-width: 480px;

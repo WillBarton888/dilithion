@@ -61,7 +61,9 @@ if ($height !== null) {
 
 // Latest blocks list with pagination
 // Try cache first (skip if nocache=1, used by cache update service)
-$cacheFile = __DIR__ . '/../cache/latest-blocks.json';
+$chainConfig = getChainConfig();
+$cacheSuffix = $chainConfig['chain'] === 'dilv' ? '-dilv' : '';
+$cacheFile = __DIR__ . "/../cache/latest-blocks{$cacheSuffix}.json";
 $noCache = isset($_GET['nocache']) && $_GET['nocache'] === '1';
 
 if (!$noCache && $page === 1 && file_exists($cacheFile)) {

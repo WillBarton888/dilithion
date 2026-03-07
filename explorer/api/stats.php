@@ -12,8 +12,10 @@
 
 require_once __DIR__ . "/rpc.php";
 
-// File-based cache (10 second TTL)
-$cacheFile = __DIR__ . "/../cache/stats.json";
+// Chain-specific cache files
+$config = getChainConfig();
+$chainSuffix = $config['chain'] === 'dilv' ? '-dilv' : '';
+$cacheFile = __DIR__ . "/../cache/stats{$chainSuffix}.json";
 if (file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
     if ($cacheAge < 10) {
@@ -48,7 +50,7 @@ $mikInfo = dilithionRPC("getmikdistribution");
 if ($mikInfo !== null && isset($mikInfo["total_supply"])) {
     $supply = $mikInfo["total_supply"];
 } else {
-    $supply = $height * 50;
+    $supply = $height * $config['reward'];
 }
 
 // Calculate average block time from last 10 blocks
@@ -71,15 +73,15 @@ if ($height >= 10) {
     }
 }
 
-// Estimate network hashrate from difficulty and average block time
+// Estimate network hashrate (RandomX only, not applicable for VDF)
 $difficulty = $blockchainInfo["difficulty"] ?? 0;
-if ($difficulty > 0 && $avgBlockTime !== null && $avgBlockTime > 0) {
+if ($config['chain'] === 'dil' && $difficulty > 0 && $avgBlockTime !== null && $avgBlockTime > 0) {
     $networkHashps = $difficulty * 10922.667 / $avgBlockTime;
 }
 
 // Get holder count (cached separately for 60s - expensive UTXO scan)
 $holders = null;
-$holderCacheFile = __DIR__ . "/../cache/holders.json";
+$holderCacheFile = __DIR__ . "/../cache/holders{$chainSuffix}.json";
 $holderCacheValid = false;
 if (file_exists($holderCacheFile)) {
     $holderCacheAge = time() - filemtime($holderCacheFile);
@@ -113,6 +115,9 @@ $result = [
     "chain" => $blockchainInfo["chain"] ?? "main",
     "chainTips" => $chainTips ?? [],
     "bestblockhash" => $blockchainInfo["bestblockhash"] ?? null,
+    "unit" => $config['unit'],
+    "chainName" => $config['name'],
+    "consensusType" => $config['chain'] === 'dilv' ? 'VDF' : 'RandomX',
 ];
 
 // Write cache

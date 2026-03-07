@@ -11,6 +11,31 @@ const ITEMS_PER_PAGE = 20;
 const IONS_PER_DIL = 100000000;
 const COLLAPSE_THRESHOLD = 5; // Show expand button when inputs/outputs exceed this
 
+// --- Chain state ---
+let activeChain = localStorage.getItem('explorerChain') || 'dil';
+let UNIT = activeChain === 'dilv' ? 'DilV' : 'DIL';
+let BLOCK_REWARD_FALLBACK = activeChain === 'dilv' ? 100 : 50;
+
+function switchExplorerChain(chain) {
+    activeChain = chain;
+    UNIT = chain === 'dilv' ? 'DilV' : 'DIL';
+    BLOCK_REWARD_FALLBACK = chain === 'dilv' ? 100 : 50;
+    localStorage.setItem('explorerChain', chain);
+    // Update toggle buttons
+    const dilBtn = document.getElementById('chainBtnDil');
+    const dilvBtn = document.getElementById('chainBtnDilv');
+    if (dilBtn && dilvBtn) {
+        dilBtn.classList.toggle('active', chain === 'dil');
+        dilvBtn.classList.toggle('active', chain === 'dilv');
+    }
+    // Update title
+    const titleEl = document.querySelector('.navbar-title');
+    if (titleEl) titleEl.textContent = chain === 'dilv' ? 'DILV EXPLORER' : 'DILITHION EXPLORER';
+    document.title = chain === 'dilv' ? 'DilV Explorer' : 'Dilithion Explorer';
+    // Re-render current route
+    router.route();
+}
+
 // --- State ---
 let refreshTimer = null;
 let currentRoute = '';
@@ -194,7 +219,8 @@ function updateNavLinks(hash) {
 }
 
 async function apiFetch(endpoint) {
-    const response = await fetch(API_BASE + endpoint);
+    const sep = endpoint.includes('?') ? '&' : '?';
+    const response = await fetch(API_BASE + endpoint + sep + 'chain=' + activeChain);
     if (!response.ok) {
         const errorData = await response.json().catch(() => null);
         throw new Error(errorData?.error || 'API error: ' + response.status);
@@ -411,9 +437,10 @@ async function renderHome() {
         // Stats bar
         html += '<div class="stats-bar">';
         html += statCard('Block Height', formatNumber(stats.blocks || blocksRes.totalHeight || 0));
-        html += statCard('Hashrate', formatHashRate(stats.networkhashps));
+        html += statCard(stats.consensusType === 'VDF' ? 'Consensus' : 'Hashrate',
+            stats.consensusType === 'VDF' ? 'VDF (Proof of Time)' : formatHashRate(stats.networkhashps));
         html += statCard('Difficulty', stats.difficulty ? Number(stats.difficulty).toFixed(4) : 'N/A');
-        html += statCard('Supply', stats.supply ? formatNumber(Math.floor(stats.supply)) + ' DIL' : 'N/A');
+        html += statCard('Supply', stats.supply ? formatNumber(Math.floor(stats.supply)) + ' ' + UNIT : 'N/A');
         html += statCard('Avg Block Time', stats.avgBlockTime ? stats.avgBlockTime.toFixed(0) + 's' : 'N/A');
         html += statCard('Holders', stats.holders != null ? formatNumber(stats.holders) : 'N/A');
         html += statCard('Peers', stats.connections != null ? formatNumber(stats.connections) : 'N/A');
@@ -450,7 +477,7 @@ async function renderHome() {
             html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
             html += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 8))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
             html += `<td class="center" data-sort-value="${txCount}">${txCount}</td>`;
-            html += `<td class="right amount" data-sort-value="${reward || 0}">${escapeHtml(formatAmount(reward))} DIL</td>`;
+            html += `<td class="right amount" data-sort-value="${reward || 0}">${escapeHtml(formatAmount(reward))} ${UNIT}</td>`;
             html += '</tr>';
         }
 
@@ -471,9 +498,10 @@ async function renderHome() {
                 const statsEl = document.querySelector('.stats-bar');
                 if (statsEl) {
                     statsEl.innerHTML = statCard('Block Height', formatNumber(s.blocks || freshBlocks.totalHeight || 0)) +
-                        statCard('Hashrate', formatHashRate(s.networkhashps)) +
+                        statCard(s.consensusType === 'VDF' ? 'Consensus' : 'Hashrate',
+                            s.consensusType === 'VDF' ? 'VDF (Proof of Time)' : formatHashRate(s.networkhashps)) +
                         statCard('Difficulty', s.difficulty ? Number(s.difficulty).toFixed(4) : 'N/A') +
-                        statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' DIL' : 'N/A') +
+                        statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' ' + UNIT : 'N/A') +
                         statCard('Avg Block Time', s.avgBlockTime != null ? s.avgBlockTime.toFixed(0) + 's' : 'N/A') +
                         statCard('Holders', s.holders != null ? formatNumber(s.holders) : 'N/A') +
                         statCard('Peers', s.connections != null ? formatNumber(s.connections) : 'N/A');
@@ -496,7 +524,7 @@ async function renderHome() {
                             rows += `<td title="${escapeHtml(formatAbsoluteTime(block.time))}">${escapeHtml(formatTime(block.time))}</td>`;
                             rows += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 8))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
                             rows += `<td class="center">${txCount}</td>`;
-                            rows += `<td class="right amount">${escapeHtml(formatAmount(reward))} DIL</td>`;
+                            rows += `<td class="right amount">${escapeHtml(formatAmount(reward))} ${UNIT}</td>`;
                             rows += '</tr>';
                         }
                         tbody.innerHTML = rows;
@@ -545,8 +573,8 @@ function extractReward(block) {
             return total;
         }
     }
-    // Fallback: 50 DIL block reward (in ions)
-    return 50 * IONS_PER_DIL;
+    // Fallback block reward (in ions)
+    return BLOCK_REWARD_FALLBACK * IONS_PER_DIL;
 }
 
 // ============================================================
@@ -683,7 +711,7 @@ async function renderBlock(id) {
             html += `<td><a href="#/tx/${escapeHtml(txid)}" class="hash">${escapeHtml(formatHash(txid, 12))}</a></td>`;
             html += `<td>${fromHtml}</td>`;
             html += `<td>${toHtml}</td>`;
-            html += `<td class="right amount">${escapeHtml(formatAmount(totalOut))} DIL</td>`;
+            html += `<td class="right amount">${escapeHtml(formatAmount(totalOut))} ${UNIT}</td>`;
             html += `</tr>`;
         });
 
@@ -712,7 +740,7 @@ function renderTxIoItem(addr, val, hasValue) {
         html += '<span class="text-dim">OP_RETURN / Unreadable</span>';
     }
     if (hasValue) {
-        html += `<span class="amount">${escapeHtml(formatAmount(val))} DIL</span>`;
+        html += `<span class="amount">${escapeHtml(formatAmount(val))} ${UNIT}</span>`;
     }
     return html + '</div>';
 }
@@ -734,7 +762,7 @@ function renderTxInputItem(vin) {
         let html = '<div class="tx-io-item tx-io-item-ref">';
         html += `<a href="#/tx/${escapeHtml(srcTxid)}" class="hash" title="View source transaction">${escapeHtml(formatHash(srcTxid, 8))}:${srcVout}</a>`;
         if (hasValue) {
-            html += `<span class="amount">${escapeHtml(formatAmount(val))} DIL</span>`;
+            html += `<span class="amount">${escapeHtml(formatAmount(val))} ${UNIT}</span>`;
         } else {
             html += `<span class="amount text-dim">view tx &#8594;</span>`;
         }
@@ -849,19 +877,19 @@ async function renderTransaction(txid) {
         html += '<div class="tx-summary-top">';
         if (isCoinbase) {
             html += `<div class="tx-summary-item"><span class="tx-summary-label">Type</span><span class="tx-summary-value">${ICONS.pickaxe} New coins mined</span></div>`;
-            html += `<div class="tx-summary-item"><span class="tx-summary-label">Reward</span><span class="tx-summary-value">${escapeHtml(formatAmount(totalOut))} DIL</span></div>`;
+            html += `<div class="tx-summary-item"><span class="tx-summary-label">Reward</span><span class="tx-summary-value">${escapeHtml(formatAmount(totalOut))} ${UNIT}</span></div>`;
         } else {
             const inputLabel = tx.vin ? `${tx.vin.length} Input${tx.vin.length !== 1 ? 's' : ''}` : '0 Inputs';
             const outputLabel = tx.vout ? `${tx.vout.length} Output${tx.vout.length !== 1 ? 's' : ''}` : '0 Outputs';
             html += `<div class="tx-summary-item"><span class="tx-summary-label">${escapeHtml(inputLabel)}</span>`;
             if (hasInputValues) {
-                html += `<span class="tx-summary-value">${escapeHtml(formatAmount(totalIn))} DIL</span>`;
+                html += `<span class="tx-summary-value">${escapeHtml(formatAmount(totalIn))} ${UNIT}</span>`;
             }
             html += '</div>';
             html += `<div class="tx-summary-arrow">${ICONS.arrow}</div>`;
-            html += `<div class="tx-summary-item"><span class="tx-summary-label">${escapeHtml(outputLabel)}</span><span class="tx-summary-value">${escapeHtml(formatAmount(totalOut))} DIL</span></div>`;
+            html += `<div class="tx-summary-item"><span class="tx-summary-label">${escapeHtml(outputLabel)}</span><span class="tx-summary-value">${escapeHtml(formatAmount(totalOut))} ${UNIT}</span></div>`;
             if (hasInputValues && fee > 0) {
-                html += `<div class="tx-summary-item"><span class="tx-summary-label">Fee</span><span class="tx-summary-value">${escapeHtml(formatAmount(fee))} DIL</span></div>`;
+                html += `<div class="tx-summary-item"><span class="tx-summary-label">Fee</span><span class="tx-summary-value">${escapeHtml(formatAmount(fee))} ${UNIT}</span></div>`;
             }
         }
         html += '</div>';
@@ -899,11 +927,11 @@ async function renderTransaction(txid) {
         // Summary bar at bottom
         html += '<div class="summary-bar">';
         if (!isCoinbase && hasInputValues) {
-            html += `<span><span class="label">Total Input: </span><span class="value">${escapeHtml(formatAmount(totalIn))} DIL</span></span>`;
+            html += `<span><span class="label">Total Input: </span><span class="value">${escapeHtml(formatAmount(totalIn))} ${UNIT}</span></span>`;
         }
-        html += `<span><span class="label">Total Output: </span><span class="value">${escapeHtml(formatAmount(totalOut))} DIL</span></span>`;
+        html += `<span><span class="label">Total Output: </span><span class="value">${escapeHtml(formatAmount(totalOut))} ${UNIT}</span></span>`;
         if (!isCoinbase && hasInputValues && fee > 0) {
-            html += `<span><span class="label">Fee: </span><span class="value">${escapeHtml(formatAmount(fee))} DIL</span></span>`;
+            html += `<span><span class="label">Fee: </span><span class="value">${escapeHtml(formatAmount(fee))} ${UNIT}</span></span>`;
         }
         html += '</div>';
         html += '</div>';
@@ -955,7 +983,7 @@ async function renderAddress(addr) {
             const balanceDisplay = typeof balance === 'object' ?
                 formatAmount(balance.balance || balance.confirmed || 0) :
                 formatAmount(balance);
-            html += detailRow('Balance', `<span class="font-bold" style="font-size:18px">${escapeHtml(balanceDisplay)} DIL</span>`);
+            html += detailRow('Balance', `<span class="font-bold" style="font-size:18px">${escapeHtml(balanceDisplay)} ${UNIT}</span>`);
         } else {
             html += detailRow('Balance', '<span class="text-dim">Unable to fetch balance</span>');
         }
@@ -990,7 +1018,7 @@ async function renderAddress(addr) {
                 html += '<tr>';
                 html += `<td><a href="#/tx/${escapeHtml(utxoTxid)}" class="hash">${escapeHtml(formatHash(utxoTxid, 12))}</a></td>`;
                 html += `<td class="center" data-sort-value="${voutIdx}">${escapeHtml(String(voutIdx))}</td>`;
-                html += `<td class="right amount" data-sort-value="${amount}">${escapeHtml(formatAmount(amount))} DIL</td>`;
+                html += `<td class="right amount" data-sort-value="${amount}">${escapeHtml(formatAmount(amount))} ${UNIT}</td>`;
                 html += `<td class="center" data-sort-value="${confs}">${confs ? escapeHtml(formatNumber(confs)) : '<span class="text-dim">N/A</span>'}</td>`;
                 html += '</tr>';
             }
@@ -1056,7 +1084,7 @@ async function renderBlockList(page) {
             html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
             html += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 6))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
             html += `<td class="center" data-sort-value="${txCount}">${txCount}</td>`;
-            html += `<td class="right amount" data-sort-value="${reward || 0}">${reward != null ? escapeHtml(formatAmount(reward)) + ' DIL' : ''}</td>`;
+            html += `<td class="right amount" data-sort-value="${reward || 0}">${reward != null ? escapeHtml(formatAmount(reward)) + ' ' + UNIT : ''}</td>`;
             html += `<td class="right text-muted" data-sort-value="${block.size || 0}">${block.size ? escapeHtml(formatSize(block.size)) : ''}</td>`;
             html += '</tr>';
         }
@@ -1255,5 +1283,17 @@ function initSearchBar() {
 
 document.addEventListener('DOMContentLoaded', function () {
     initSearchBar();
+    // Apply saved chain state on load
+    if (activeChain === 'dilv') {
+        const titleEl = document.querySelector('.navbar-title');
+        if (titleEl) titleEl.textContent = 'DILV EXPLORER';
+        document.title = 'DilV Explorer';
+    }
+    const dilBtn = document.getElementById('chainBtnDil');
+    const dilvBtn = document.getElementById('chainBtnDilv');
+    if (dilBtn && dilvBtn) {
+        dilBtn.classList.toggle('active', activeChain === 'dil');
+        dilvBtn.classList.toggle('active', activeChain === 'dilv');
+    }
     router.route();
 });

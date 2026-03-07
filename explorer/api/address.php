@@ -21,11 +21,11 @@ if (!preg_match('/^D[a-km-zA-HJ-NP-Z1-9]{25,34}$/', $addr)) {
     sendError('Invalid address format. Must start with D and be a valid base58 address.');
 }
 
-// Fetch balance from REST API
-$balance = fetchRestAPI("http://127.0.0.1:8334/api/v1/balance/{$addr}");
-
-// Fetch UTXOs from REST API
-$utxos = fetchRestAPI("http://127.0.0.1:8334/api/v1/utxos/{$addr}");
+// Fetch balance and UTXOs from REST API (port depends on chain)
+$config = getChainConfig();
+$restPort = $config['rest_port'];
+$balance = fetchRestAPI("http://127.0.0.1:{$restPort}/api/v1/balance/{$addr}");
+$utxos = fetchRestAPI("http://127.0.0.1:{$restPort}/api/v1/utxos/{$addr}");
 
 if ($balance === null && $utxos === null) {
     sendError('Failed to fetch address data. Node may be unavailable.', 503);

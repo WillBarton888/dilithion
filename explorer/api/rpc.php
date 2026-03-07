@@ -1,18 +1,38 @@
 <?php
 /**
  * Shared RPC helper for Dilithion Block Explorer API
- * Proxies JSON-RPC calls to the local Dilithion node (127.0.0.1:8332)
+ * Proxies JSON-RPC calls to DIL (127.0.0.1:8332) or DilV (127.0.0.1:9332)
  */
+
+// Chain configuration: ports, units, rewards
+function getChainConfig() {
+    $chain = $_GET['chain'] ?? 'dil';
+    if ($chain !== 'dilv') $chain = 'dil';  // sanitize
+
+    $configs = [
+        'dil'  => ['rpc_port' => 8332, 'rest_port' => 8334, 'unit' => 'DIL', 'reward' => 50, 'name' => 'Dilithion'],
+        'dilv' => ['rpc_port' => 9332, 'rest_port' => 9334, 'unit' => 'DilV', 'reward' => 100, 'name' => 'DilV'],
+    ];
+
+    return array_merge(['chain' => $chain], $configs[$chain]);
+}
 
 // Persistent curl handle for connection reuse (keep-alive)
 $_rpcCurlHandle = null;
+$_rpcPort = null;
 
 function dilithionRPC($method, $params = []) {
-    global $_rpcCurlHandle;
+    global $_rpcCurlHandle, $_rpcPort;
 
-    if ($_rpcCurlHandle === null) {
+    $config = getChainConfig();
+    $port = $config['rpc_port'];
+
+    // Re-create handle if port changed
+    if ($_rpcCurlHandle === null || $_rpcPort !== $port) {
+        if ($_rpcCurlHandle !== null) curl_close($_rpcCurlHandle);
+        $_rpcPort = $port;
         $_rpcCurlHandle = curl_init();
-        curl_setopt($_rpcCurlHandle, CURLOPT_URL, 'http://127.0.0.1:8332/');
+        curl_setopt($_rpcCurlHandle, CURLOPT_URL, "http://127.0.0.1:{$port}/");
         curl_setopt($_rpcCurlHandle, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($_rpcCurlHandle, CURLOPT_TIMEOUT, 5);
         curl_setopt($_rpcCurlHandle, CURLOPT_CONNECTTIMEOUT, 5);

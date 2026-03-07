@@ -40,6 +40,7 @@ scrape_configs:
           location: 'New York'
           network: 'mainnet'
           node_type: 'seed-node'
+          chain: 'dil'
 
   # --------------------------------------------------------------------------
   # London Node - Dilithion Metrics
@@ -53,6 +54,7 @@ scrape_configs:
           location: 'London'
           network: 'mainnet'
           node_type: 'seed-node'
+          chain: 'dil'
 
   # --------------------------------------------------------------------------
   # Singapore Node - Dilithion Metrics
@@ -66,6 +68,7 @@ scrape_configs:
           location: 'Singapore'
           network: 'mainnet'
           node_type: 'seed-node'
+          chain: 'dil'
 
   # --------------------------------------------------------------------------
   # Sydney Node - Dilithion Metrics
@@ -79,9 +82,70 @@ scrape_configs:
           location: 'Sydney'
           network: 'mainnet'
           node_type: 'seed-node'
+          chain: 'dil'
+
+  # ==========================================================================
+  # DilV Chain (VDF) - Same servers, port 9334
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # NYC Node - DilV Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-nyc-dilv'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['138.197.68.128:9334']
+        labels:
+          instance: 'mainnet-nyc-dilv'
+          location: 'New York'
+          network: 'mainnet'
+          node_type: 'seed-node'
+          chain: 'dilv'
+
+  # --------------------------------------------------------------------------
+  # London Node - DilV Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-london-dilv'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['167.172.56.119:9334']
+        labels:
+          instance: 'mainnet-london-dilv'
+          location: 'London'
+          network: 'mainnet'
+          node_type: 'seed-node'
+          chain: 'dilv'
+
+  # --------------------------------------------------------------------------
+  # Singapore Node - DilV Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-singapore-dilv'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['165.22.103.114:9334']
+        labels:
+          instance: 'mainnet-singapore-dilv'
+          location: 'Singapore'
+          network: 'mainnet'
+          node_type: 'seed-node'
+          chain: 'dilv'
+
+  # --------------------------------------------------------------------------
+  # Sydney Node - DilV Metrics
+  # --------------------------------------------------------------------------
+  - job_name: 'mainnet-sydney-dilv'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['134.199.159.83:9334']
+        labels:
+          instance: 'mainnet-sydney-dilv'
+          location: 'Sydney'
+          network: 'mainnet'
+          node_type: 'seed-node'
+          chain: 'dilv'
 
 # ==============================================================================
-# Dilithion Metrics Available (from /metrics endpoint on port 8334)
+# Dilithion Metrics Available (from /metrics endpoint on port 8334/9334)
 # ==============================================================================
 #
 # BLOCKCHAIN METRICS:
