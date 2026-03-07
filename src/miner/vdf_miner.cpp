@@ -23,6 +23,7 @@ void CVDFMiner::Start()
         return;  // Already running
 
     m_abort = false;
+    m_lastHeightChangeTime = std::chrono::steady_clock::now();
     m_thread = std::thread(&CVDFMiner::MiningLoop, this);
 }
 
@@ -173,21 +174,36 @@ void CVDFMiner::MiningLoop()
         // 2. Check cooldown
         // ---------------------------------------------------------------
         if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(minerAddr, height)) {
-            int cd = m_cooldownTracker->GetCooldownBlocks();
-            int lastWin = m_cooldownTracker->GetLastWinHeight(minerAddr);
-            int resumeAt = lastWin + cd + 1;
-            std::cout << "[VDF Miner] In cooldown until block " << resumeAt
-                      << " (current: " << height << ", cooldown: " << cd << " blocks)"
-                      << std::endl;
+            // Chain stall detection: if no block has been produced for a long
+            // time, bypass cooldown so the chain can recover.  Without this,
+            // a stall is permanent — height never advances so cooldowns never
+            // expire.  Threshold: 5 minutes (well above normal ~45s block time).
+            static constexpr int STALL_THRESHOLD_SEC = 300;
+            auto now = std::chrono::steady_clock::now();
+            auto sinceLastBlock = std::chrono::duration_cast<std::chrono::seconds>(
+                now - m_lastHeightChangeTime).count();
 
-            // Wait for new block, or timeout after 2 minutes so a solo miner
-            // (cooldown=0 with MIN_COOLDOWN=0) never deadlocks if it somehow
-            // enters this branch due to a stale cached miner count.
-            std::unique_lock<std::mutex> lock(m_epochMutex);
-            m_epochCV.wait_for(lock, std::chrono::seconds(120),
-                               [this] { return m_epochChanged || !m_running; });
-            m_epochChanged = false;
-            continue;
+            if (sinceLastBlock >= STALL_THRESHOLD_SEC) {
+                std::cout << "[VDF Miner] Chain stall detected (" << sinceLastBlock
+                          << "s since last block) -- bypassing cooldown" << std::endl;
+                // Fall through to VDF computation
+            } else {
+                int cd = m_cooldownTracker->GetCooldownBlocks();
+                int lastWin = m_cooldownTracker->GetLastWinHeight(minerAddr);
+                int resumeAt = lastWin + cd + 1;
+                std::cout << "[VDF Miner] In cooldown until block " << resumeAt
+                          << " (current: " << height << ", cooldown: " << cd << " blocks)"
+                          << std::endl;
+
+                // Wait for new block, or timeout after 2 minutes so a solo miner
+                // (cooldown=0 with MIN_COOLDOWN=0) never deadlocks if it somehow
+                // enters this branch due to a stale cached miner count.
+                std::unique_lock<std::mutex> lock(m_epochMutex);
+                m_epochCV.wait_for(lock, std::chrono::seconds(120),
+                                   [this] { return m_epochChanged || !m_running; });
+                m_epochChanged = false;
+                continue;
+            }
         }
 
         // ---------------------------------------------------------------
