@@ -4944,8 +4944,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Register components with RPC server
         rpc_server.RegisterWallet(&wallet);
-        // DilV: No RandomX miner to register — RPC mining commands use VDF miner
-        // rpc_server.RegisterMiner(&miner);  // CMiningController not used in DilV
+        // DilV: Register VDF miner instead of RandomX miner
+        rpc_server.RegisterVDFMiner(&vdf_miner);
         rpc_server.RegisterBlockchain(&blockchain);
         rpc_server.RegisterChainState(&g_chainstate);
         rpc_server.RegisterMempool(&mempool);

@@ -14,8 +14,9 @@
 #include <rpc/websocket.h>
 #include <rpc/rest_api.h>
 
-// Forward declaration for x402 facilitator
+// Forward declarations
 namespace x402 { class CFacilitator; }
+class CVDFMiner;
 #include <digital_dna/digital_dna_rpc.h>
 #include <script/atomic_swap.h>
 
@@ -134,6 +135,7 @@ private:
     // Component references
     CWallet* m_wallet;
     CMiningController* m_miner;
+    class CVDFMiner* m_vdfMiner{nullptr};
     class CTxMemPool* m_mempool;
     class CBlockchainDB* m_blockchain;
     class CUTXOSet* m_utxo_set;
@@ -403,6 +405,11 @@ public:
      * Register miner instance
      */
     void RegisterMiner(CMiningController* miner) { m_miner = miner; }
+
+    /**
+     * Register VDF miner instance (DilV)
+     */
+    void RegisterVDFMiner(class CVDFMiner* vdfMiner) { m_vdfMiner = vdfMiner; }
 
     /**
      * Register mempool instance

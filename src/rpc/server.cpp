@@ -15,6 +15,7 @@
 #include <wallet/wallet.h>  // BUG #104 FIX: For CSentTx
 #include <crypto/sha3.h>  // For hashing params
 #include <wallet/passphrase_validator.h>
+#include <miner/vdf_miner.h>
 #include <node/mempool.h>
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
@@ -3887,6 +3888,22 @@ std::string CRPCServer::RPC_ClearWalletTxs(const std::string& params) {
 }
 
 std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
+    // VDF miner (DilV) — return VDF-specific mining info
+    if (m_vdfMiner) {
+        std::ostringstream oss;
+        oss << "{";
+        oss << "\"mining\":" << (m_vdfMiner->IsRunning() ? "true" : "false") << ",";
+        oss << "\"type\":\"vdf\",";
+        oss << "\"hashrate\":0,";
+        oss << "\"threads\":1,";
+        oss << "\"current_height\":" << m_vdfMiner->GetCurrentHeight() << ",";
+        oss << "\"blocks_found\":" << m_vdfMiner->GetBlocksFound() << ",";
+        oss << "\"blocks_found_total\":" << m_totalBlocksMined.load();
+        oss << "}";
+        return oss.str();
+    }
+
+    // RandomX miner (DIL)
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
     }
