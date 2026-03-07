@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dilithion Price Chart</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --secondary: #8b5cf6;
+            --accent: #06b6d4;
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #334155;
+            --success: #22c55e;
+            --error: #ef4444;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+        }
+        .header h1 { font-size: 1.5rem; font-weight: 700; }
+        .header a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+        .header a:hover { text-decoration: underline; }
+        .price-cards {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px; margin-bottom: 24px;
+        }
+        .price-card {
+            background: var(--bg-card); border-radius: 12px; padding: 20px;
+            border: 1px solid var(--border);
+        }
+        .price-card .label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
+        .price-card .value { font-size: 1.5rem; font-weight: 700; }
+        .price-card .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+        .chart-card {
+            background: var(--bg-card); border-radius: 12px; padding: 24px;
+            border: 1px solid var(--border); margin-bottom: 24px;
+        }
+        .chart-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 16px; flex-wrap: wrap; gap: 8px;
+        }
+        .chart-header h2 { font-size: 1.1rem; font-weight: 600; }
+        .chart-tabs { display: flex; gap: 4px; }
+        .chart-tab {
+            padding: 6px 14px; border-radius: 6px; border: none;
+            background: transparent; color: var(--text-muted); cursor: pointer;
+            font-size: 0.8rem; font-weight: 500; transition: all 0.2s;
+        }
+        .chart-tab.active { background: var(--primary); color: white; }
+        .chart-tab:hover:not(.active) { color: var(--text-primary); }
+        .chart-wrap { position: relative; height: 300px; }
+        .status { color: var(--text-muted); font-size: 0.75rem; margin-top: 8px; }
+        .pool-info {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+            margin-bottom: 24px;
+        }
+        @media (max-width: 600px) { .pool-info { grid-template-columns: 1fr; } }
+        .pool-card {
+            background: var(--bg-card); border-radius: 12px; padding: 16px;
+            border: 1px solid var(--border);
+        }
+        .pool-card h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 8px; }
+        .pool-card .pool-detail { font-size: 0.8rem; color: var(--text-secondary); margin: 4px 0; }
+        .pool-card a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
+        .refresh-btn {
+            padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+            background: transparent; color: var(--text-secondary); cursor: pointer;
+            font-size: 0.8rem; transition: all 0.2s;
+        }
+        .refresh-btn:hover { border-color: var(--primary); color: var(--text-primary); }
+        .footer { text-align: center; padding: 24px 0; color: var(--text-muted); font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Dilithion Price</h1>
+            <div style="display:flex;gap:16px;align-items:center;">
+                <button class="refresh-btn" onclick="refreshPrices()">Refresh</button>
+                <a href="index.html">Back to dilithion.org</a>
+            </div>
+        </div>
+
+        <div class="price-cards">
+            <div class="price-card">
+                <div class="label">DIL / USD</div>
+                <div class="value" id="dilUsd">--</div>
+                <div class="sub" id="dilEth">-- ETH</div>
+            </div>
+            <div class="price-card">
+                <div class="label">DilV / USD</div>
+                <div class="value" id="dilvUsd">--</div>
+                <div class="sub" id="dilvEth">-- ETH</div>
+            </div>
+            <div class="price-card">
+                <div class="label">DIL / DilV Ratio</div>
+                <div class="value" id="ratio">--</div>
+                <div class="sub">Target: 10:1</div>
+            </div>
+            <div class="price-card">
+                <div class="label">ETH / USD</div>
+                <div class="value" id="ethUsd">--</div>
+                <div class="sub">via CoinGecko</div>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-header">
+                <h2>Price History</h2>
+                <div class="chart-tabs">
+                    <button class="chart-tab active" data-chart="dil" onclick="showChart('dil', this)">DIL</button>
+                    <button class="chart-tab" data-chart="dilv" onclick="showChart('dilv', this)">DilV</button>
+                </div>
+            </div>
+            <div class="chart-wrap">
+                <canvas id="priceChart"></canvas>
+            </div>
+            <div class="status" id="chartStatus">Fetching live price...</div>
+        </div>
+
+        <div class="pool-info">
+            <div class="pool-card">
+                <h3>wDIL / WETH Pool</h3>
+                <div class="pool-detail">Type: Slipstream CL200 (concentrated liquidity)</div>
+                <div class="pool-detail">DEX: Aerodrome Finance (Base L2)</div>
+                <div class="pool-detail">wDIL: 0x30629...36C2</div>
+                <a href="https://basescan.org/token/0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2" target="_blank">View on BaseScan</a>
+            </div>
+            <div class="pool-card">
+                <h3>wDIL / wDilV Pool</h3>
+                <div class="pool-detail">Type: Volatile AMM (x*y=k)</div>
+                <div class="pool-detail">DEX: Aerodrome Finance (Base L2)</div>
+                <div class="pool-detail">wDilV: 0xF162F...03E8</div>
+                <a href="https://basescan.org/token/0xF162F6B432FeeD73458D4653ef8E74Ba014403E8" target="_blank">View on BaseScan</a>
+            </div>
+        </div>
+
+        <div class="footer">
+            Prices fetched live from Aerodrome DEX on Base L2. Auto-refreshes every 60s. Not financial advice.
+        </div>
+    </div>
+
+    <script>
+    // ── Contract addresses (Base mainnet) ───────────────────────────
+    const WDIL  = "0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2";
+    const WDILV = "0xF162F6B432FeeD73458D4653ef8E74Ba014403E8";
+    const WETH  = "0x4200000000000000000000000000000000000006";
+    const QUOTER = "0x3d4C22254F86f64B7eC90ab8F7aeC1FBFD271c6C";
+    const CLASSIC_ROUTER = "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43";
+    const POOL_FACTORY = "0x420DD381b31aEf6683db6B902084cB0FFECe40Da";
+    const TICK_SPACING = 200;
+    const BASE_RPC = "https://mainnet.base.org";
+
+    // ── ABI fragments ───────────────────────────────────────────────
+    const QUOTER_ABI = [
+        "function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, int24 tickSpacing, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)"
+    ];
+    const CLASSIC_ROUTER_ABI = [
+        "function getAmountsOut(uint256 amountIn, (address from, address to, bool stable, address factory)[] routes) view returns (uint256[] amounts)"
+    ];
+
+    // ── State ───────────────────────────────────────────────────────
+    let provider;
+    let ethUsdPrice = null;
+    let dilEthPrice = null;
+    let dilvEthPrice = null;
+    let dilDilvRatio = null;
+    let chartInstance = null;
+    let activeChart = 'dil';
+
+    // Price history stored in localStorage (persists across visits)
+    const HISTORY_KEY = 'dilithionPriceHistory';
+    const MAX_HISTORY = 1440; // 24h at 1-min intervals
+
+    function loadHistory() {
+        try {
+            const raw = localStorage.getItem(HISTORY_KEY);
+            return raw ? JSON.parse(raw) : [];
+        } catch { return []; }
+    }
+
+    function saveHistory(history) {
+        // Keep only last MAX_HISTORY entries
+        if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    }
+
+    // ── Initialize ──────────────────────────────────────────────────
+    async function init() {
+        provider = new ethers.JsonRpcProvider(BASE_RPC);
+        await refreshPrices();
+        renderChart();
+    }
+
+    // ── Fetch all prices ────────────────────────────────────────────
+    async function refreshPrices() {
+        document.getElementById('chartStatus').textContent = 'Fetching prices...';
+        await Promise.all([fetchEthUsdPrice(), fetchDilEthPrice()]);
+        await fetchDilDilvRatio(); // needs dilEthPrice
+        updateDisplay();
+        recordPrice();
+        renderChart();
+        const now = new Date().toLocaleTimeString();
+        document.getElementById('chartStatus').textContent = 'Last updated: ' + now + ' (auto-refreshes every 60s)';
+    }
+
+    // ── ETH/USD from CoinGecko ──────────────────────────────────────
+    async function fetchEthUsdPrice() {
+        try {
+            const resp = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd");
+            const data = await resp.json();
+            ethUsdPrice = data.ethereum.usd;
+        } catch (e) {
+            console.error("CoinGecko error:", e);
+        }
+    }
+
+    // ── DIL/ETH from Slipstream Quoter ──────────────────────────────
+    async function fetchDilEthPrice() {
+        try {
+            const quoter = new ethers.Contract(QUOTER, QUOTER_ABI, provider);
+            const oneDil = 100_000_000n; // 1 DIL = 1e8 ions
+            const result = await quoter.quoteExactInputSingle.staticCall({
+                tokenIn: WDIL,
+                tokenOut: WETH,
+                amountIn: oneDil,
+                tickSpacing: TICK_SPACING,
+                sqrtPriceLimitX96: 0n
+            });
+            dilEthPrice = Number(result[0]) / 1e18;
+        } catch (e) {
+            console.error("Quoter error:", e);
+        }
+    }
+
+    // ── DIL/DilV ratio from Classic Router ──────────────────────────
+    async function fetchDilDilvRatio() {
+        try {
+            const router = new ethers.Contract(CLASSIC_ROUTER, CLASSIC_ROUTER_ABI, provider);
+            const oneDil = 100_000_000n;
+            const route = [{ from: WDIL, to: WDILV, stable: false, factory: POOL_FACTORY }];
+            const amounts = await router.getAmountsOut(oneDil, route);
+            dilDilvRatio = Number(amounts[1]) / 1e8;
+            if (dilEthPrice && dilDilvRatio > 0) {
+                dilvEthPrice = dilEthPrice / dilDilvRatio;
+            }
+        } catch (e) {
+            console.error("Router error:", e);
+        }
+    }
+
+    // ── Update price display ────────────────────────────────────────
+    function updateDisplay() {
+        if (ethUsdPrice) {
+            document.getElementById('ethUsd').textContent = '$' + ethUsdPrice.toLocaleString();
+        }
+        if (dilEthPrice !== null && ethUsdPrice) {
+            const dilUsd = dilEthPrice * ethUsdPrice;
+            document.getElementById('dilUsd').textContent = formatUsd(dilUsd);
+            document.getElementById('dilEth').textContent = dilEthPrice.toFixed(8) + ' ETH';
+        } else {
+            document.getElementById('dilUsd').textContent = 'No liquidity';
+            document.getElementById('dilEth').textContent = '';
+        }
+        if (dilvEthPrice !== null && ethUsdPrice) {
+            const dilvUsd = dilvEthPrice * ethUsdPrice;
+            document.getElementById('dilvUsd').textContent = formatUsd(dilvUsd);
+            document.getElementById('dilvEth').textContent = dilvEthPrice.toFixed(8) + ' ETH';
+        } else {
+            document.getElementById('dilvUsd').textContent = 'No liquidity';
+            document.getElementById('dilvEth').textContent = '';
+        }
+        if (dilDilvRatio) {
+            document.getElementById('ratio').textContent = dilDilvRatio.toFixed(2) + ':1';
+        }
+    }
+
+    function formatUsd(v) {
+        if (v >= 1) return '$' + v.toFixed(2);
+        if (v >= 0.01) return '$' + v.toFixed(4);
+        return '$' + v.toFixed(6);
+    }
+
+    // ── Record current price to history ─────────────────────────────
+    function recordPrice() {
+        if (!dilEthPrice || !ethUsdPrice) return;
+        const history = loadHistory();
+        const now = Date.now();
+        const dilUsd = dilEthPrice * ethUsdPrice;
+        const dilvUsd = dilvEthPrice ? dilvEthPrice * ethUsdPrice : 0;
+        // Don't record if last entry is < 30s ago
+        if (history.length > 0 && (now - history[history.length - 1].t) < 30000) return;
+        history.push({ t: now, dil: dilUsd, dilv: dilvUsd, dilEth: dilEthPrice, dilvEth: dilvEthPrice || 0, ethUsd: ethUsdPrice });
+        saveHistory(history);
+    }
+
+    // ── Render Chart.js ─────────────────────────────────────────────
+    function renderChart() {
+        const canvas = document.getElementById('priceChart');
+        if (chartInstance) chartInstance.destroy();
+
+        const history = loadHistory();
+        const key = activeChart; // 'dil' or 'dilv'
+        const ethKey = key === 'dil' ? 'dilEth' : 'dilvEth';
+        const usdLabel = key === 'dil' ? 'DIL / USD' : 'DilV / USD';
+        const ethLabel = key === 'dil' ? 'DIL / ETH' : 'DilV / ETH';
+        const usdColor = key === 'dil' ? '#6366f1' : '#06b6d4';
+        const ethColor = '#f59e0b';
+        const ethUsdColor = '#22c55e';
+
+        const usdData = history.map(p => ({ x: p.t, y: p[key] })).filter(p => p.y > 0);
+        const coinEthData = history.map(p => ({ x: p.t, y: p[ethKey] })).filter(p => p.y > 0);
+        const ethUsdData = history.map(p => ({ x: p.t, y: p.ethUsd })).filter(p => p.y > 0);
+
+        chartInstance = new Chart(canvas, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: usdLabel,
+                    data: usdData,
+                    borderColor: usdColor,
+                    backgroundColor: usdColor + '20',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: usdData.length > 50 ? 0 : 3,
+                    borderWidth: 2,
+                    yAxisID: 'yCoin',
+                }, {
+                    label: ethLabel,
+                    data: coinEthData,
+                    borderColor: ethColor,
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: coinEthData.length > 50 ? 0 : 3,
+                    borderWidth: 2,
+                    borderDash: [5, 3],
+                    yAxisID: 'yCoinEth',
+                }, {
+                    label: 'ETH / USD',
+                    data: ethUsdData,
+                    borderColor: ethUsdColor,
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: ethUsdData.length > 50 ? 0 : 3,
+                    borderWidth: 1.5,
+                    borderDash: [2, 2],
+                    yAxisID: 'yEthUsd',
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 300 },
+                interaction: { intersect: false, mode: 'index' },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        ticks: {
+                            color: '#64748b',
+                            callback: function(v) {
+                                const d = new Date(v);
+                                return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                            },
+                            maxTicksLimit: 8,
+                        },
+                        grid: { color: '#1e293b' },
+                    },
+                    yCoin: {
+                        position: 'left',
+                        ticks: {
+                            color: usdColor,
+                            callback: v => formatUsd(v),
+                        },
+                        grid: { color: '#1e293b' },
+                    },
+                    yEthUsd: {
+                        position: 'right',
+                        ticks: {
+                            color: ethUsdColor,
+                            callback: v => '$' + v.toLocaleString(),
+                        },
+                        grid: { drawOnChartArea: false },
+                    },
+                    yCoinEth: {
+                        display: false, // hidden axis — values shown in tooltip
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            title: items => new Date(items[0].parsed.x).toLocaleString(),
+                            label: function(item) {
+                                if (item.datasetIndex === 0)
+                                    return item.dataset.label + ': ' + formatUsd(item.parsed.y);
+                                if (item.datasetIndex === 1)
+                                    return item.dataset.label + ': ' + item.parsed.y.toFixed(8) + ' ETH';
+                                return item.dataset.label + ': $' + item.parsed.y.toLocaleString();
+                            },
+                        }
+                    },
+                    legend: {
+                        display: true,
+                        labels: { color: '#94a3b8', usePointStyle: true, pointStyle: 'line', padding: 16 },
+                    },
+                }
+            }
+        });
+    }
+
+    function showChart(chain, btn) {
+        activeChart = chain;
+        document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+        renderChart();
+    }
+
+    // Go
+    init();
+    setInterval(refreshPrices, 60000);
+    </script>
+</body>
+</html>

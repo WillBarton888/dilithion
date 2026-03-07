@@ -10,7 +10,8 @@
 
 // Embedded wallet HTML content
 inline const std::string& GetWalletHTML() {
-    static const std::string wallet_html = R"WALLET_HTML(<!DOCTYPE html>
+    static const std::string wallet_html = R"WALLET_HTML(
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -652,6 +653,14 @@ inline const std::string& GetWalletHTML() {
                 </svg>
                 <span>Blockchain</span>
             </div>
+            <div class="nav-item" data-page="mining-stats">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                    <path d="M2 17l10 5 10-5"></path>
+                    <path d="M2 12l10 5 10-5"></path>
+                </svg>
+                <span>Mining Stats</span>
+            </div>
         </div>
 
         <div class="nav-section">
@@ -662,6 +671,15 @@ inline const std::string& GetWalletHTML() {
                     <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"></path>
                 </svg>
                 <span>Settings</span>
+            </div>
+        </div>
+
+        <!-- Chain Selector -->
+        <div style="padding: 12px 16px; border-top: 1px solid var(--border);">
+            <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px;">Chain</div>
+            <div id="chainSelector" style="display: flex; background: var(--bg-darker); border-radius: 8px; padding: 3px; gap: 2px;">
+                <button id="chainBtnDil" onclick="switchChain('dil')" style="flex:1; padding: 6px 0; border: none; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s; background: var(--primary); color: white;">DIL</button>
+                <button id="chainBtnDilv" onclick="switchChain('dilv')" style="flex:1; padding: 6px 0; border: none; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--text-muted);">DilV</button>
             </div>
         </div>
 
@@ -706,6 +724,9 @@ inline const std::string& GetWalletHTML() {
                     </div>
                 </div>
             </div>
+
+            <!-- Chain Health Warning Banner -->
+            <div id="chainWarning" style="display:none; color:#ff4444; background:#1a0000; padding:12px 16px; margin-bottom:16px; border:1px solid #ff4444; border-radius:8px; font-weight:600;"></div>
 
             <!-- Node Wallet Security Card (Dashboard) -->
             <div class="card" id="dashboardWalletSecurity" style="margin-bottom: 16px; display: none;">
@@ -966,6 +987,82 @@ inline const std::string& GetWalletHTML() {
                         <span class="info-value" id="hashRate">-</span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Mining Stats Page -->
+        <div class="page" id="page-mining-stats">
+            <div class="page-header">
+                <h1 class="page-title">Mining Statistics</h1>
+                <p class="page-subtitle">Network mining data and DFMP fairness status</p>
+            </div>
+
+            <!-- Network Mining Overview -->
+            <div class="card">
+                <div class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                    Network Overview
+                </div>
+                <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px;">
+                    <div class="info-item">
+                        <span class="info-label" style="color: #888; font-size: 12px;">Est. Network Hashrate</span>
+                        <span class="info-value" id="msNetworkHashrate">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label" style="color: #888; font-size: 12px;">Difficulty</span>
+                        <span class="info-value" id="msDifficulty">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label" style="color: #888; font-size: 12px;">Unique Miners (Window)</span>
+                        <span class="info-value" id="msUniqueMiners">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label" style="color: #888; font-size: 12px;">Current Block Reward</span>
+                        <span class="info-value" id="msBlockReward">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DFMP Status -->
+            <div class="card" id="msDfmpCard">
+                <div class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    DFMP Fair Mining Status
+                </div>
+                <div id="msDfmpContent">
+                    <p style="color: var(--text-muted);">Loading DFMP data...</p>
+                </div>
+            </div>
+
+            <!-- Miner Distribution -->
+            <div class="card" id="msDistributionCard">
+                <div class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                        <line x1="9" y1="21" x2="9" y2="9"></line>
+                    </svg>
+                    Miner Distribution (Recent Window)
+                </div>
+                <div id="msDistributionContent">
+                    <p style="color: var(--text-muted);">Loading miner distribution...</p>
+                </div>
+            </div>
+
+            <!-- Calculator Link -->
+            <div class="card" style="text-align: center; background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08)); border-color: rgba(99, 102, 241, 0.2);">
+                <p style="margin-bottom: 12px; color: var(--text-secondary);">Want to estimate your mining rewards before starting?</p>
+                <a href="mining-calculator.html" target="_blank" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.9rem;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                        <rect x="9" y="9" width="6" height="6"></rect>
+                    </svg>
+                    Mining Rewards Estimator
+                </a>
             </div>
         </div>
 
@@ -1284,7 +1381,7 @@ inline const std::string& GetWalletHTML() {
                 <div class="form-group">
                     <label class="form-label">RPC Port</label>
                     <input type="number" class="form-input" id="rpcPort" value="8332">
-                    <small style="color: var(--text-muted); font-size: 0.75rem;">Mainnet: 8332, Testnet: 18332</small>
+                    <small style="color: var(--text-muted); font-size: 0.75rem;">DIL: 8332, DilV: 9332, Testnet: 18332</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">RPC Username</label>
@@ -1412,6 +1509,64 @@ inline const std::string& GetWalletHTML() {
             user: 'rpc',
             pass: 'rpc'
         };
+
+        // Active chain: 'dil' or 'dilv'
+        let activeChain = localStorage.getItem('dilithionActiveChain') || 'dil';
+        const chainPorts = { dil: 8332, dilv: 9332 };
+        const chainUnits = { dil: 'DIL', dilv: 'DilV' };
+
+        function switchChain(chain) {
+            if (chain === activeChain) return;
+            activeChain = chain;
+            localStorage.setItem('dilithionActiveChain', chain);
+
+            // Update toggle buttons
+            const btnDil = document.getElementById('chainBtnDil');
+            const btnDilv = document.getElementById('chainBtnDilv');
+            if (chain === 'dil') {
+                btnDil.style.background = 'var(--primary)';
+                btnDil.style.color = 'white';
+                btnDilv.style.background = 'transparent';
+                btnDilv.style.color = 'var(--text-muted)';
+            } else {
+                btnDilv.style.background = 'var(--secondary)';
+                btnDilv.style.color = 'white';
+                btnDil.style.background = 'transparent';
+                btnDil.style.color = 'var(--text-muted)';
+            }
+
+            // Update all balance unit labels
+            document.querySelectorAll('.balance-unit').forEach(el => {
+                el.textContent = chainUnits[chain];
+            });
+
+            // Update page title
+            document.title = chain === 'dil' ? 'Dilithion Web Wallet' : 'DilV Web Wallet';
+
+            // Switch RPC port and reconnect
+            rpcConfig.port = chainPorts[chain];
+            document.getElementById('rpcPort').value = rpcConfig.port;
+            localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
+            connect();
+        }
+
+        // Initialize chain toggle on load
+        function initChainSelector() {
+            // Apply saved chain state
+            if (activeChain === 'dilv') {
+                const btnDil = document.getElementById('chainBtnDil');
+                const btnDilv = document.getElementById('chainBtnDilv');
+                btnDilv.style.background = 'var(--secondary)';
+                btnDilv.style.color = 'white';
+                btnDil.style.background = 'transparent';
+                btnDil.style.color = 'var(--text-muted)';
+                document.querySelectorAll('.balance-unit').forEach(el => {
+                    el.textContent = 'DilV';
+                });
+                document.title = 'DilV Web Wallet';
+                rpcConfig.port = 9332;
+            }
+        }
 
         // Load saved settings
         function loadSettings() {
@@ -1648,7 +1803,9 @@ inline const std::string& GetWalletHTML() {
             try {
                 const info = await rpcCall('getblockchaininfo');
                 console.log('[Connect] Connection successful, chain:', info.chain);
-                setConnectionStatus(true, info.chain === 'testnet' ? 'Testnet' : 'Mainnet');
+                const networkLabel = info.chain === 'testnet' ? 'Testnet' : 'Mainnet';
+                const chainLabel = activeChain === 'dilv' ? 'DilV' : 'DIL';
+                setConnectionStatus(true, chainLabel + ' ' + networkLabel);
 
                 // Wait before making more requests - server needs time between connections
                 console.log('[Connect] Waiting 1 second before loading data...');
@@ -1711,6 +1868,132 @@ inline const std::string& GetWalletHTML() {
         }
 
         // Refresh all data (serialized to prevent connection overload)
+        // --- Mining Stats Page ---
+        async function refreshMiningStats() {
+            if (!connected) return;
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+            const HASHES_PER_DIFF = Math.pow(2, 32) / 393216;
+
+            // Network overview (works in both modes via getblockchaininfo)
+            try {
+                const info = await rpcCall('getblockchaininfo');
+                const difficulty = info.difficulty || 0;
+                const height = info.blocks || 0;
+                const halvings = Math.floor(height / 210000);
+                const reward = 50 / Math.pow(2, halvings);
+                const networkHashrate = difficulty * HASHES_PER_DIFF / 240;
+
+                document.getElementById('msNetworkHashrate').textContent = formatMsHashrate(networkHashrate);
+                document.getElementById('msDifficulty').textContent = difficulty.toLocaleString();
+                document.getElementById('msBlockReward').textContent = reward + ' DIL (' + (reward * 0.98).toFixed(2) + ' to miner)';
+            } catch (e) {
+                console.error('[MiningStats] Chain info error:', e);
+            }
+
+            if (isLightMode) {
+                document.getElementById('msUniqueMiners').textContent = 'Full node required';
+                document.getElementById('msDfmpContent').innerHTML =
+                    '<p style="color:var(--text-muted);">Connect to your local node (Full Node mode in Settings) to view DFMP data and miner distribution.</p>';
+                document.getElementById('msDistributionContent').innerHTML =
+                    '<p style="color:var(--text-muted);">Connect to your local node (Full Node mode in Settings) to view miner distribution.</p>';
+                return;
+            }
+
+            // MIK Distribution (RPC only)
+            try {
+                const dist = await rpcCall('getmikdistribution');
+                document.getElementById('msUniqueMiners').textContent = (dist.unique_miners || 0).toString();
+
+                const miners = dist.distribution || [];
+                miners.sort((a, b) => b.blocks - a.blocks);
+                const topMiners = miners.slice(0, 20);
+                const totalBlocks = miners.reduce((s, m) => s + m.blocks, 0);
+
+                let html = '';
+
+                // Bar chart visualization
+                if (topMiners.length > 0) {
+                    const maxBlocks = topMiners[0].blocks;
+                    html += '<div style="margin-bottom:20px;">';
+                    topMiners.slice(0, 10).forEach((m, i) => {
+                        const pct = maxBlocks > 0 ? (m.blocks / maxBlocks * 100).toFixed(0) : 0;
+                        const share = totalBlocks > 0 ? (m.blocks / totalBlocks * 100).toFixed(1) : '0';
+                        const shortMik = m.mik.substring(0, 8) + '...' + m.mik.substring(m.mik.length - 6);
+                        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+                        html += '<span style="min-width:28px;font-size:0.75rem;color:var(--text-muted);text-align:right;">#' + (i+1) + '</span>';
+                        html += '<span style="min-width:120px;font-size:0.75rem;font-family:\'JetBrains Mono\',monospace;color:var(--text-secondary);">' + shortMik + '</span>';
+                        html += '<div style="flex:1;height:18px;background:var(--bg-darker);border-radius:4px;overflow:hidden;">';
+                        html += '<div style="width:' + pct + '%;height:100%;background:linear-gradient(90deg,var(--primary),var(--secondary));border-radius:4px;transition:width 0.3s;"></div>';
+                        html += '</div>';
+                        html += '<span style="min-width:60px;font-size:0.8rem;font-family:\'JetBrains Mono\',monospace;text-align:right;">' + m.blocks + ' <span style="color:var(--text-muted);font-size:0.7rem;">(' + share + '%)</span></span>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                // Summary
+                html += '<div style="padding:12px;background:var(--bg-darker);border-radius:8px;font-size:0.85rem;color:var(--text-secondary);">';
+                html += '<strong>' + miners.length + '</strong> unique miners in the current ' + (dist.window_size || 360) + '-block window. ';
+                html += 'Total <strong>' + totalBlocks + '</strong> blocks tracked.';
+                html += '</div>';
+
+                document.getElementById('msDistributionContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('msUniqueMiners').textContent = 'Error';
+                document.getElementById('msDistributionContent').innerHTML =
+                    '<p style="color:var(--error);">Failed to load: ' + e.message + '</p>';
+            }
+
+            // DFMP Info (RPC only)
+            try {
+                const dfmp = await rpcCall('getdfmpinfo');
+                let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:16px;">';
+
+                html += '<div class="info-item"><span class="info-label" style="color:#888;font-size:12px;">DFMP Version</span>';
+                html += '<span class="info-value">' + (dfmp.dfmp_v3_active ? 'v3.1' : (dfmp.dfmp_active ? 'v2.0' : 'Inactive')) + '</span></div>';
+
+                html += '<div class="info-item"><span class="info-label" style="color:#888;font-size:12px;">Your MIK Registered</span>';
+                html += '<span class="info-value">' + (dfmp.is_registered ? 'Yes' : 'No') + '</span></div>';
+
+                html += '<div class="info-item"><span class="info-label" style="color:#888;font-size:12px;">Heat Level</span>';
+                const heatColor = (dfmp.heat || 0) > 10 ? 'var(--warning)' : 'var(--success)';
+                html += '<span class="info-value" style="color:' + heatColor + ';">' + (dfmp.heat || 0) + ' blocks</span></div>';
+
+                html += '<div class="info-item"><span class="info-label" style="color:#888;font-size:12px;">Maturity Penalty</span>';
+                html += '<span class="info-value">' + (dfmp.maturity_penalty || '1.00') + 'x</span></div>';
+
+                html += '<div class="info-item"><span class="info-label" style="color:#888;font-size:12px;">Heat Penalty</span>';
+                html += '<span class="info-value">' + (dfmp.effective_heat_penalty || '1.00') + 'x</span></div>';
+
+                const totalPenalty = dfmp.total_penalty || 1.0;
+                const penaltyColor = totalPenalty > 2.0 ? 'var(--error)' : (totalPenalty > 1.0 ? 'var(--warning)' : 'var(--success)');
+                html += '<div class="info-item"><span class="info-label" style="color:#888;font-size:12px;">Total Difficulty Multiplier</span>';
+                html += '<span class="info-value" style="color:' + penaltyColor + ';">' + totalPenalty + 'x</span></div>';
+
+                html += '</div>';
+
+                // Explanation
+                html += '<div style="padding:12px;background:var(--bg-darker);border-radius:8px;font-size:0.85rem;color:var(--text-secondary);line-height:1.6;">';
+                html += '<strong style="color:var(--text-primary);">How DFMP works:</strong> The Dynamic Fair Mining Protocol increases difficulty for miners who mine too many blocks in a window (high heat), ';
+                html += 'ensuring fair distribution. New miners have a maturity penalty that decays over ~400 blocks. ';
+                html += 'A <strong>1.00x</strong> multiplier = no penalty (best). Higher = harder to mine.';
+                html += '</div>';
+
+                document.getElementById('msDfmpContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('msDfmpContent').innerHTML =
+                    '<p style="color:var(--error);">Failed to load DFMP info: ' + e.message + '</p>';
+            }
+        }
+
+        function formatMsHashrate(h) {
+            if (h >= 1e12) return (h / 1e12).toFixed(2) + ' TH/s';
+            if (h >= 1e9) return (h / 1e9).toFixed(2) + ' GH/s';
+            if (h >= 1e6) return (h / 1e6).toFixed(2) + ' MH/s';
+            if (h >= 1e3) return (h / 1e3).toFixed(2) + ' KH/s';
+            return h.toFixed(0) + ' H/s';
+        }
+
         async function refreshAll() {
             if (!connected) return;
             const wait = () => new Promise(r => setTimeout(r, 300));  // 300ms between function calls
@@ -1721,6 +2004,12 @@ inline const std::string& GetWalletHTML() {
                 await refreshBlockchainInfo();
                 await wait();
                 await refreshTransactions();
+                // Refresh mining stats if that page is active
+                const msPage = document.getElementById('page-mining-stats');
+                if (msPage && msPage.classList.contains('active')) {
+                    await wait();
+                    await refreshMiningStats();
+                }
             } catch(e) {
                 console.error('Refresh error:', e);
             }
@@ -1746,6 +2035,16 @@ inline const std::string& GetWalletHTML() {
                         document.getElementById('matureBalance').textContent = mature.toFixed(8);
                         document.getElementById('immatureBalance').textContent = immature.toFixed(8);
                         document.getElementById('availableForSend').textContent = mature.toFixed(8);
+
+                        // Chain health warning
+                        const chainHealth = nodeBalance.chain_health || 'OK';
+                        const warningEl = document.getElementById('chainWarning');
+                        if (chainHealth === 'DIVERGED') {
+                            warningEl.style.display = 'block';
+                            warningEl.textContent = nodeBalance.chain_warning || 'Your chain tip differs from the network. Mined coins may not be valid on the main chain.';
+                        } else {
+                            warningEl.style.display = 'none';
+                        }
                     } catch (e) {
                         console.error('[Balance] RPC error:', e.message);
                         // Connection loss is handled centrally in rpcCall()
@@ -2002,7 +2301,7 @@ inline const std::string& GetWalletHTML() {
                 await rpcCall('clearwallettxs', {});
                 btnText.textContent = 'Scanning...';
 
-                // Then rescan for new transactions (120s timeout - scans all addresses)
+                // Then rescan for new transactions
                 const result = await rpcCall('rescanwallet', {}, 120000);
                 btnText.textContent = 'Done!';
                 console.log('[Wallet] Rescan result:', result);
@@ -2366,17 +2665,31 @@ inline const std::string& GetWalletHTML() {
         }
 
         // Copy address
-        function copyAddress() {
+        async function copyAddress() {
             const address = document.getElementById('receiveAddress').textContent;
-            navigator.clipboard.writeText(address).then(() => {
-                const btn = document.getElementById('copyBtn');
-                btn.textContent = 'Copied!';
-                btn.classList.add('copied');
-                setTimeout(() => {
-                    btn.textContent = 'Copy';
-                    btn.classList.remove('copied');
-                }, 2000);
-            });
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(address);
+                } else {
+                    throw new Error('no clipboard API');
+                }
+            } catch (e) {
+                const ta = document.createElement('textarea');
+                ta.value = address;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            const btn = document.getElementById('copyBtn');
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
         }
 
         // Mnemonic auto-hide timeout
@@ -2893,6 +3206,9 @@ inline const std::string& GetWalletHTML() {
                 checkSecurityStatus();
                 checkNodeWalletEncryption();
             }
+            if (pageName === 'mining-stats') {
+                refreshMiningStats();
+            }
         }
 
         // ========================================================================
@@ -3403,6 +3719,7 @@ inline const std::string& GetWalletHTML() {
         // Initialize light wallet modules first
         initLightWallet().then(() => {
             loadSettings();
+            initChainSelector();
             // Only auto-connect in full mode
             const savedMode = localStorage.getItem('dilithionWalletMode');
             if (savedMode !== 'light') {
