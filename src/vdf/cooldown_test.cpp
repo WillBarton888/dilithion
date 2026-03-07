@@ -45,11 +45,9 @@ static void test_basic_cooldown()
 
     tracker.OnBlockConnected(100, alice);
 
-    // 1 active miner → cooldown = CalculateCooldown(1) = max(2, 1-3) = 2.
-    CHECK(tracker.IsInCooldown(alice, 101));   // 101-100=1 < 2 → in cooldown
-
-    // At height 102, exactly 2 blocks later, cooldown expires.
-    CHECK(!tracker.IsInCooldown(alice, 102));
+    // 1 active miner → cooldown = floor(1*0.67) = 0, clamped to MIN_COOLDOWN (0).
+    // With cooldown=0, miner is never in cooldown (solo mining).
+    CHECK(!tracker.IsInCooldown(alice, 101));
     CHECK(!tracker.IsInCooldown(alice, 200));
 
     PASS();
@@ -97,16 +95,16 @@ static void test_cooldown_scales_with_miners()
         tracker.OnBlockConnected(1000 + i, make_addr(i));
     }
 
-    // 50 miners → cooldown = 50 - max(3, 5) = 45.
-    CHECK(tracker.GetCooldownBlocks() == 45);
+    // 50 miners → cooldown = floor(50*0.67) = 33.
+    CHECK(tracker.GetCooldownBlocks() == 33);
 
     // Have Alice win again at height 1060 (all 50 miners in window).
     tracker.OnBlockConnected(1060, alice);
 
-    // Alice last won at 1060. At 1060+44=1104 she should still be in cooldown.
-    CHECK(tracker.IsInCooldown(alice, 1104));
-    // At 1060+45=1105 she's out.
-    CHECK(!tracker.IsInCooldown(alice, 1105));
+    // Alice last won at 1060. At 1060+32=1092 she should still be in cooldown.
+    CHECK(tracker.IsInCooldown(alice, 1092));
+    // At 1060+33=1093 she's out.
+    CHECK(!tracker.IsInCooldown(alice, 1093));
 
     PASS();
 }
@@ -116,10 +114,8 @@ static void test_cooldown_clamped_min()
     TEST(cooldown_clamped_min);
     CCooldownTracker tracker;
 
-    // Only 3 miners → formula gives 3-3=0, clamped to MIN_COOLDOWN (2).
-    for (uint8_t i = 1; i <= 3; i++) {
-        tracker.OnBlockConnected(200 + i, make_addr(i));
-    }
+    // Only 1 miner → floor(1*0.67)=0, clamped to MIN_COOLDOWN (0).
+    tracker.OnBlockConnected(201, make_addr(1));
 
     CHECK(tracker.GetCooldownBlocks() == CCooldownTracker::MIN_COOLDOWN);
 
@@ -242,10 +238,9 @@ static void test_consecutive_wins_same_miner()
 
     // Only 1 unique miner.
     CHECK(tracker.GetActiveMiners() == 1);
-    // Last win at 102, cooldown = MIN_COOLDOWN (2).
+    // Last win at 102, cooldown = floor(1*0.67)=0 → not in cooldown.
     CHECK(tracker.GetLastWinHeight(alice) == 102);
-    CHECK(tracker.IsInCooldown(alice, 103));
-    CHECK(!tracker.IsInCooldown(alice, 104));
+    CHECK(!tracker.IsInCooldown(alice, 103));
 
     PASS();
 }
@@ -254,16 +249,17 @@ static void test_cooldown_formula_values()
 {
     TEST(cooldown_formula_values);
 
-    // Verify the formula: cooldown = miners - max(3, miners/10)
-    CHECK(CCooldownTracker::CalculateCooldown(1) == 2);    // 1-3=-2 → clamped to MIN(2)
-    CHECK(CCooldownTracker::CalculateCooldown(5) == 2);    // 5-3=2
-    CHECK(CCooldownTracker::CalculateCooldown(10) == 7);   // 10-3=7
-    CHECK(CCooldownTracker::CalculateCooldown(20) == 17);  // 20-3=17  (20/10=2, max(3,2)=3)
-    CHECK(CCooldownTracker::CalculateCooldown(30) == 27);  // 30-3=27  (30/10=3, max(3,3)=3)
-    CHECK(CCooldownTracker::CalculateCooldown(31) == 28);  // 31-3=28  (31/10=3, max(3,3)=3)
-    CHECK(CCooldownTracker::CalculateCooldown(50) == 45);  // 50-5=45  (50/10=5)
-    CHECK(CCooldownTracker::CalculateCooldown(100) == 90); // 100-10=90
-    CHECK(CCooldownTracker::CalculateCooldown(200) == 100); // 200-20=180 → clamped to MAX(100)
+    // Verify the formula: cooldown = floor(activeMiners * 0.67)
+    CHECK(CCooldownTracker::CalculateCooldown(0) == 0);     // 0*0.67=0
+    CHECK(CCooldownTracker::CalculateCooldown(1) == 0);     // 1*67/100=0
+    CHECK(CCooldownTracker::CalculateCooldown(2) == 1);     // 2*67/100=1
+    CHECK(CCooldownTracker::CalculateCooldown(3) == 2);     // 3*67/100=2
+    CHECK(CCooldownTracker::CalculateCooldown(10) == 6);    // 10*67/100=6
+    CHECK(CCooldownTracker::CalculateCooldown(22) == 14);   // 22*67/100=14
+    CHECK(CCooldownTracker::CalculateCooldown(50) == 33);   // 50*67/100=33
+    CHECK(CCooldownTracker::CalculateCooldown(100) == 67);  // 100*67/100=67
+    CHECK(CCooldownTracker::CalculateCooldown(150) == 100); // 150*67/100=100 → clamped to MAX(100)
+    CHECK(CCooldownTracker::CalculateCooldown(200) == 100); // 200*67/100=134 → clamped to MAX(100)
 
     PASS();
 }
