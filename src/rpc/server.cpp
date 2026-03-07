@@ -994,9 +994,9 @@ void CRPCServer::HandleClient(int clientSocket) {
     }
 
     if (!hasCSRFHeader) {
-        // RPC-016 FIX: Audit log security event (CSRF protection triggered)
-        std::cout << "[RPC-SECURITY] CSRF protection blocked request from " << clientIP
-                  << " (missing X-Dilithion-RPC header)" << std::endl;
+        // CSRF block is logged to audit file only (not console) to avoid
+        // spamming users — the web wallet's browser triggers this on every
+        // page load, favicon request, etc.
 
         // Phase 1: Log security event
         if (m_logger) {
