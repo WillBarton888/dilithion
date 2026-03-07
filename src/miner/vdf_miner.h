@@ -96,6 +96,13 @@ public:
     void SetMinerAddress(const Address& addr);
 
     /**
+     * Set the miner's MIK identity (20-byte MIK hash).
+     * Used for cooldown tracking instead of payout address to prevent
+     * address rotation bypass.
+     */
+    void SetMIKIdentity(const Address& mikId);
+
+    /**
      * Set the VDF iteration count (from chainparams).
      */
     void SetIterations(uint64_t iterations);
@@ -166,6 +173,7 @@ private:
 
     // Configuration
     Address m_minerAddress{};
+    Address m_mikIdentity{};   // MIK identity for cooldown (0 = use m_minerAddress)
     uint64_t m_iterations{200'000'000};
     CCooldownTracker* m_cooldownTracker{nullptr};
 

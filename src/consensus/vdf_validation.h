@@ -64,4 +64,20 @@ bool ExtractCoinbaseAddress(
     std::array<uint8_t, 20>& addr
 );
 
+/**
+ * Extract the miner's MIK identity (20 bytes) from the coinbase scriptSig.
+ *
+ * Parses the MIK_MARKER (0xDF) section of the coinbase and returns the
+ * 20-byte MIK identity.  Falls back to payout address if MIK is not present
+ * (pre-MIK blocks or blocks without MIK data).
+ *
+ * @param block  The block containing the coinbase
+ * @param mikId  Output: 20-byte MIK identity
+ * @return true if extraction succeeded
+ */
+bool ExtractCoinbaseMIKIdentity(
+    const CBlock& block,
+    std::array<uint8_t, 20>& mikId
+);
+
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

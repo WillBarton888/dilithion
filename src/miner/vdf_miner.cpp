@@ -79,6 +79,11 @@ void CVDFMiner::SetMinerAddress(const Address& addr)
     m_minerAddress = addr;
 }
 
+void CVDFMiner::SetMIKIdentity(const Address& mikId)
+{
+    m_mikIdentity = mikId;
+}
+
 void CVDFMiner::SetIterations(uint64_t iterations)
 {
     m_iterations = iterations;
@@ -171,9 +176,13 @@ void CVDFMiner::MiningLoop()
         }
 
         // ---------------------------------------------------------------
-        // 2. Check cooldown
+        // 2. Check cooldown (uses MIK identity, not payout address)
         // ---------------------------------------------------------------
-        if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(minerAddr, height)) {
+        // Cooldown tracks by MIK identity to prevent address rotation bypass.
+        // MIK is set from the wallet's MIK key; falls back to payout address.
+        Address cooldownId = (m_mikIdentity != Address{}) ? m_mikIdentity : minerAddr;
+
+        if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height)) {
             // Chain stall detection: if no block has been produced for a long
             // time, bypass cooldown so the chain can recover.  Without this,
             // a stall is permanent — height never advances so cooldowns never
@@ -189,7 +198,7 @@ void CVDFMiner::MiningLoop()
                 // Fall through to VDF computation
             } else {
                 int cd = m_cooldownTracker->GetCooldownBlocks();
-                int lastWin = m_cooldownTracker->GetLastWinHeight(minerAddr);
+                int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
                 int resumeAt = lastWin + cd + 1;
                 std::cout << "[VDF Miner] In cooldown until block " << resumeAt
                           << " (current: " << height << ", cooldown: " << cd << " blocks)"

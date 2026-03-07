@@ -3,11 +3,13 @@
 
 int CCooldownTracker::CalculateCooldown(int activeMiners)
 {
-    // Formula: cooldown = miners - max(3, miners/10)
-    // Allows a small buffer above fair share — generous at low miner
-    // counts (~1.43x at 10 miners), tight at scale (~1.11x at 50+).
-    int reduction = std::max(3, activeMiners / 10);
-    int cooldown = activeMiners - reduction;
+    // Formula: cooldown = floor(activeMiners * 0.67)
+    // At 22 miners → 14 blocks cooldown (8 miners eligible per round)
+    // At 10 miners →  6 blocks cooldown (4 miners eligible per round)
+    // At 50 miners → 33 blocks cooldown (17 miners eligible per round)
+    // Keeps ~33% of miners eligible at any given height, providing
+    // randomness from the VDF distribution while still rate-limiting.
+    int cooldown = static_cast<int>(activeMiners * 67 / 100);
     return std::clamp(cooldown, MIN_COOLDOWN, MAX_COOLDOWN);
 }
 

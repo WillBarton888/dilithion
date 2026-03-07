@@ -5,6 +5,7 @@
 #include <consensus/validation.h>
 #include <vdf/vdf.h>
 #include <vdf/coinbase_vdf.h>
+#include <dfmp/mik.h>
 #include <crypto/sha3.h>
 #include <cstring>
 #include <iostream>
@@ -65,6 +66,39 @@ bool ExtractCoinbaseAddress(
 
     std::memcpy(addr.data(), spk.data() + 3, 20);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// ExtractCoinbaseMIKIdentity
+// ---------------------------------------------------------------------------
+
+bool ExtractCoinbaseMIKIdentity(
+    const CBlock& block,
+    std::array<uint8_t, 20>& mikId)
+{
+    if (block.vtx.empty())
+        return false;
+
+    CBlockValidator validator;
+    std::vector<CTransactionRef> txs;
+    std::string err;
+    if (!validator.DeserializeBlockTransactions(block, txs, err) || txs.empty())
+        return false;
+
+    const CTransaction& coinbase = *txs[0];
+    if (!coinbase.IsCoinBase() || coinbase.vin.empty())
+        return false;
+
+    // Try to parse MIK from coinbase scriptSig
+    DFMP::CMIKScriptData mikData;
+    if (DFMP::ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData) &&
+        !mikData.identity.IsNull()) {
+        std::memcpy(mikId.data(), mikData.identity.data, 20);
+        return true;
+    }
+
+    // Fallback: use payout address for pre-MIK blocks
+    return ExtractCoinbaseAddress(block, mikId);
 }
 
 // ---------------------------------------------------------------------------

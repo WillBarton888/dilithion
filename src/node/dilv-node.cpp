@@ -3738,12 +3738,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         // Only process VDF blocks
                         if (!block.IsVDFBlock()) continue;
 
-                        // Extract miner address from coinbase P2PKH output
-                        std::array<uint8_t, 20> minerAddr{};
-                        if (!ExtractCoinbaseAddress(block, minerAddr)) continue;
+                        // Extract MIK identity from coinbase (falls back to payout address for pre-MIK blocks)
+                        std::array<uint8_t, 20> mikId{};
+                        if (!ExtractCoinbaseMIKIdentity(block, mikId)) continue;
 
                         g_node_context.cooldown_tracker->OnBlockConnected(
-                            blockIndex->nHeight, minerAddr);
+                            blockIndex->nHeight, mikId);
                         populated++;
                     }
 
@@ -4411,9 +4411,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
             if (!block.IsVDFBlock()) return;
             if (g_node_context.cooldown_tracker) {
-                std::array<uint8_t, 20> minerAddr{};
-                if (ExtractCoinbaseAddress(block, minerAddr)) {
-                    g_node_context.cooldown_tracker->OnBlockConnected(height, minerAddr);
+                std::array<uint8_t, 20> mikId{};
+                if (ExtractCoinbaseMIKIdentity(block, mikId)) {
+                    g_node_context.cooldown_tracker->OnBlockConnected(height, mikId);
                 }
             }
         });
@@ -5139,6 +5139,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     vdf_miner.SetMinerAddress(addr);
                 }
 
+                // Set MIK identity for cooldown tracking (prevents address rotation bypass)
+                {
+                    DFMP::Identity mikId = wallet.GetMIKIdentity();
+                    if (!mikId.IsNull()) {
+                        std::array<uint8_t, 20> mikArr{};
+                        std::memcpy(mikArr.data(), mikId.data, 20);
+                        vdf_miner.SetMIKIdentity(mikArr);
+                    }
+                }
+
                 vdf_miner.Start();
                 std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
             }
@@ -5232,6 +5242,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
                         vdf_miner.SetMinerAddress(addr);
                     }
+                    {
+                        DFMP::Identity mikId = wallet.GetMIKIdentity();
+                        if (!mikId.IsNull()) {
+                            std::array<uint8_t, 20> mikArr{};
+                            std::memcpy(mikArr.data(), mikId.data, 20);
+                            vdf_miner.SetMIKIdentity(mikArr);
+                        }
+                    }
                     vdf_miner.Start();
                 }
 
@@ -5267,6 +5285,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::array<uint8_t, 20> addr{};
                         std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
                         vdf_miner.SetMinerAddress(addr);
+                    }
+                    {
+                        DFMP::Identity mikId = wallet.GetMIKIdentity();
+                        if (!mikId.IsNull()) {
+                            std::array<uint8_t, 20> mikArr{};
+                            std::memcpy(mikArr.data(), mikId.data, 20);
+                            vdf_miner.SetMIKIdentity(mikArr);
+                        }
                     }
                     vdf_miner.Start();
                     mining_deferred_for_ibd = false;

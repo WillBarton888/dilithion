@@ -14,14 +14,19 @@
  * they cannot win again.  The cooldown length scales with the number of
  * active miners so that rotation is fair regardless of network size.
  *
- * Formula: cooldown = activeMiners - max(3, activeMiners/10)
- *   10 miners  →  7 blocks  (max ~14.3% share, fair = 10%)
- *   50 miners  → 45 blocks  (max ~2.2% share,  fair = 2%)
- *  100 miners  → 90 blocks  (max ~1.1% share,  fair = 1%)
+ * Tracks by MIK identity (not payout address) to prevent address rotation
+ * bypass.  Callers pass the 20-byte MIK identity extracted from the
+ * coinbase scriptSig via ExtractCoinbaseMIKIdentity().
  *
- * With MIN_COOLDOWN=0, a solo miner (n=1..3) gets cooldown=0 — they can
+ * Formula: cooldown = floor(activeMiners * 0.67)
+ *   10 miners  →  6 blocks  (~33% eligible per round)
+ *   22 miners  → 14 blocks  (~36% eligible per round)
+ *   50 miners  → 33 blocks  (~34% eligible per round)
+ *  100 miners  → 67 blocks  (~33% eligible per round)
+ *
+ * With MIN_COOLDOWN=0, a solo miner (n=1) gets cooldown=0 — they can
  * mine every block unimpeded, keeping the chain alive during the early
- * network phase.  Cooldown kicks in from n=4 onwards.
+ * network phase.
  *
  * Thread-safe: all public methods acquire m_mutex.
  */
