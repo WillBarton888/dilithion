@@ -186,6 +186,13 @@ public:
     // Testnet: 1 (active from near-genesis)
     int digitalDnaActivationHeight;
 
+    // DNA commitment activation height (VDF blocks only)
+    // After this height: VDF coinbase must include 0xDD + 32-byte DNA hash
+    // Miners commit SHA3-256(serialized_DNA) to prove identity continuity
+    // Mainnet/Testnet: 999999999 (disabled until fork is scheduled)
+    // DilV: 999999999 (disabled until fork is scheduled)
+    int dnaCommitmentActivationHeight;
+
     // Compact encoding fix activation height
     // Before this height: BigToCompact has a sign bit bug where bit 23 of the
     // mantissa collides with the sign bit, causing ~2x difficulty corruption on
