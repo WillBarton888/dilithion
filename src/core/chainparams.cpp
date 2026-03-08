@@ -363,7 +363,7 @@ ChainParams ChainParams::DilV() {
     params.vdfLotteryGracePeriod = 12;         // 12 seconds for slower miners to submit
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
     params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
-    params.dfmpCooldownConsensusHeight = 999999999; // Disabled — cooldown is miner-side policy only
+    params.dfmpCooldownConsensusHeight = 7500; // Consensus-enforced cooldown (hard fork)
     params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on DilV
