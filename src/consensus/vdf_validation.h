@@ -15,8 +15,8 @@
  *   2. VDF proof verifies against the expected challenge
  *   3. VDF output in header matches the proof's output
  *
- * Note: Cooldown is enforced as miner-side policy (CCooldownTracker),
- * not as a consensus validation rule in this function.
+ * Note: Cooldown was miner-side policy until dfmpCooldownConsensusHeight.
+ * After that height, CheckVDFCooldown() enforces cooldown at consensus.
  */
 
 /**
@@ -78,6 +78,28 @@ bool ExtractCoinbaseAddress(
 bool ExtractCoinbaseMIKIdentity(
     const CBlock& block,
     std::array<uint8_t, 20>& mikId
+);
+
+// Forward declaration
+class CCooldownTracker;
+
+/**
+ * Check VDF cooldown consensus rule (hard fork).
+ *
+ * After dfmpCooldownConsensusHeight, rejects blocks where the miner's MIK
+ * identity has mined within the cooldown period.
+ *
+ * @param block         The candidate block
+ * @param height        Block height
+ * @param tracker       Cooldown tracker with current chain state
+ * @param error         Human-readable error string on failure
+ * @return true if block passes cooldown check (or not yet enforced)
+ */
+bool CheckVDFCooldown(
+    const CBlock& block,
+    int height,
+    CCooldownTracker& tracker,
+    std::string& error
 );
 
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

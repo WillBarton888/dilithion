@@ -158,6 +158,13 @@ public:
     // DilV:               1920  (1920 × 45s  ≈ 24h)
     int vdfCooldownActiveWindow;
 
+    // Consensus-enforced cooldown activation height (HARD FORK)
+    // Before this height: Cooldown is miner-side policy only (voluntary)
+    // After this height: Blocks violating cooldown are REJECTED at consensus
+    // All nodes must upgrade before this height or they will fork off.
+    // 999999999 = disabled
+    int dfmpCooldownConsensusHeight;
+
     // Coinbase maturity (blocks before mining rewards are spendable)
     // DIL mainnet/testnet: 100 (PoW reorg safety)
     // DilV: 6 (VDF is deterministic/sequential — reorgs are virtually impossible)

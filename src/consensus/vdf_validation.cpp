@@ -5,10 +5,13 @@
 #include <consensus/validation.h>
 #include <vdf/vdf.h>
 #include <vdf/coinbase_vdf.h>
+#include <vdf/cooldown_tracker.h>
 #include <dfmp/mik.h>
+#include <core/chainparams.h>
 #include <crypto/sha3.h>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 
 // ---------------------------------------------------------------------------
 // ComputeVDFChallenge
@@ -180,6 +183,62 @@ bool CheckVDFProof(
 
     if (!vdf::verify(challenge, result, cfg)) {
         error = "CheckVDFProof: Wesolowski proof verification failed";
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// CheckVDFCooldown  (consensus-enforced cooldown — hard fork)
+// ---------------------------------------------------------------------------
+
+bool CheckVDFCooldown(
+    const CBlock& block,
+    int height,
+    CCooldownTracker& tracker,
+    std::string& error)
+{
+    // Gate: only enforce after activation height
+    int activationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpCooldownConsensusHeight : 999999999;
+    if (height < activationHeight)
+        return true;
+
+    // Only applies to VDF blocks
+    if (!block.IsVDFBlock())
+        return true;
+
+    // Genesis is always exempt
+    if (height == 0)
+        return true;
+
+    // Extract MIK identity from coinbase
+    std::array<uint8_t, 20> mikId{};
+    if (!ExtractCoinbaseMIKIdentity(block, mikId)) {
+        error = "CheckVDFCooldown: cannot extract MIK identity from coinbase";
+        return false;
+    }
+
+    // Check if this MIK is in cooldown
+    if (tracker.IsInCooldown(mikId, height)) {
+        int lastWin = tracker.GetLastWinHeight(mikId);
+        int cooldown = tracker.GetCooldownBlocks();
+        int activeMiners = tracker.GetActiveMiners();
+
+        std::ostringstream oss;
+        oss << "CheckVDFCooldown: MIK ";
+        for (int i = 0; i < 4; ++i) {
+            char hex[3];
+            snprintf(hex, sizeof(hex), "%02x", mikId[i]);
+            oss << hex;
+        }
+        oss << "... violated cooldown (last win: " << lastWin
+            << ", cooldown: " << cooldown
+            << ", active miners: " << activeMiners
+            << ", height: " << height
+            << ", gap: " << (height - lastWin) << ")";
+        error = oss.str();
         return false;
     }
 

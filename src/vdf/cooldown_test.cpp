@@ -392,6 +392,119 @@ static void test_no_double_count()
     PASS();
 }
 
+// --- Consensus-enforced cooldown tests ---
+
+static void test_consensus_cooldown_rejects_violation()
+{
+    TEST(consensus_cooldown_rejects_violation);
+    CCooldownTracker tracker;
+
+    // Set up 10 active miners so cooldown = floor(10*0.67) = 6
+    // All miners must be at heights BELOW the query height because
+    // RecalcActiveMiners(height) only counts blocks at heights <= height.
+    // Miners 2-10 at heights 991-999, miner 1 at 1000 (most recent).
+    for (uint8_t i = 2; i <= 10; i++) {
+        tracker.OnBlockConnected(989 + i, make_addr(i));  // 991-999
+    }
+    tracker.OnBlockConnected(1000, make_addr(1));
+
+    CHECK(tracker.GetActiveMiners() == 10);
+    CHECK(tracker.GetCooldownBlocks() == 6);
+
+    // Miner 1 won at 1000.  At height 1003 (gap=3), still in cooldown (3 < 6).
+    CHECK(tracker.IsInCooldown(make_addr(1), 1003));
+
+    // At height 1006 (gap=6), cooldown expired (6 < 6 is false).
+    CHECK(!tracker.IsInCooldown(make_addr(1), 1006));
+
+    PASS();
+}
+
+static void test_consensus_cooldown_solo_miner_never_blocked()
+{
+    TEST(consensus_cooldown_solo_miner_never_blocked);
+    CCooldownTracker tracker;
+    Address alice = make_addr(1);
+
+    // Solo miner: cooldown = floor(1*0.67) = 0
+    tracker.OnBlockConnected(100, alice);
+    CHECK(!tracker.IsInCooldown(alice, 101));
+    CHECK(!tracker.IsInCooldown(alice, 102));
+
+    // Even consecutive blocks are fine
+    tracker.OnBlockConnected(101, alice);
+    CHECK(!tracker.IsInCooldown(alice, 102));
+
+    PASS();
+}
+
+static void test_consensus_cooldown_exact_boundary()
+{
+    TEST(consensus_cooldown_exact_boundary);
+    CCooldownTracker tracker;
+
+    // 3 miners, all at heights below query.  cooldown = floor(3*0.67) = 2
+    // Miner 1 wins last so their last-win height is most recent.
+    tracker.OnBlockConnected(98, make_addr(2));
+    tracker.OnBlockConnected(99, make_addr(3));
+    tracker.OnBlockConnected(100, make_addr(1));
+
+    CHECK(tracker.GetCooldownBlocks() == 2);
+
+    // Miner 1 won at 100. Cooldown = 2.  IsInCooldown uses strict <.
+    // height 101: gap=1, 1 < 2 → in cooldown
+    CHECK(tracker.IsInCooldown(make_addr(1), 101));
+    // height 102: gap=2, 2 < 2 → false → NOT in cooldown (boundary)
+    CHECK(!tracker.IsInCooldown(make_addr(1), 102));
+    // height 103: gap=3, 3 < 2 → false → NOT in cooldown
+    CHECK(!tracker.IsInCooldown(make_addr(1), 103));
+
+    PASS();
+}
+
+static void test_consensus_cooldown_after_reorg()
+{
+    TEST(consensus_cooldown_after_reorg);
+    CCooldownTracker tracker;
+
+    // 3 miners: A@100, B@101, C@102
+    tracker.OnBlockConnected(100, make_addr(1));
+    tracker.OnBlockConnected(101, make_addr(2));
+    tracker.OnBlockConnected(102, make_addr(3));
+
+    // Cooldown = 2. Miner 1 at 100, gap at 103 = 3, 3 < 2 → false → free.
+    CHECK(!tracker.IsInCooldown(make_addr(1), 103));
+
+    // Reorg: disconnect 102, 101
+    tracker.OnBlockDisconnected(102);
+    tracker.OnBlockDisconnected(101);
+
+    // Now only miner 1 at height 100. Active miners = 1, cooldown = 0.
+    tracker.IsInCooldown(make_addr(1), 101); // force recalc
+    CHECK(tracker.GetActiveMiners() == 1);
+    CHECK(tracker.GetCooldownBlocks() == 0);
+    CHECK(!tracker.IsInCooldown(make_addr(1), 101));
+
+    // Reconnect new fork: D@101, E@102
+    tracker.OnBlockConnected(101, make_addr(4));
+    tracker.OnBlockConnected(102, make_addr(5));
+
+    // 3 active miners again (A@100, D@101, E@102), cooldown = 2
+    CHECK(tracker.GetActiveMiners() == 3);
+    CHECK(tracker.GetCooldownBlocks() == 2);
+
+    // Miner 5 won at 102. At height 103: all 3 miners visible,
+    // cooldown=2, gap=1, 1 < 2 → IN cooldown
+    CHECK(tracker.IsInCooldown(make_addr(5), 103));
+    // At height 104: gap=2, 2 < 2 → false → free (boundary)
+    CHECK(!tracker.IsInCooldown(make_addr(5), 104));
+
+    // Miner 1 at 100 is free at 103 (gap=3, 3 < 2 → false)
+    CHECK(!tracker.IsInCooldown(make_addr(1), 103));
+
+    PASS();
+}
+
 int main()
 {
     std::cout << "\nCCooldownTracker Unit Tests\n";
@@ -412,6 +525,10 @@ int main()
     test_startup_repopulation();
     test_disconnect_reorg_multi_block();
     test_no_double_count();
+    test_consensus_cooldown_rejects_violation();
+    test_consensus_cooldown_solo_miner_never_blocked();
+    test_consensus_cooldown_exact_boundary();
+    test_consensus_cooldown_after_reorg();
 
     std::cout << "\n" << passed << " passed, " << failed << " failed\n";
 

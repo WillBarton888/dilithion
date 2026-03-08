@@ -5,7 +5,9 @@
 #include <consensus/pow.h>
 #include <consensus/reorg_wal.h>  // P1-4: WAL for atomic reorgs
 #include <consensus/validation.h> // BUG #109 FIX: DeserializeBlockTransactions
+#include <consensus/vdf_validation.h> // CheckVDFCooldown (consensus-enforced cooldown)
 #include <core/chainparams.h>     // MAINNET: Checkpoint validation
+#include <core/node_context.h>    // g_node_context.cooldown_tracker
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
 #include <node/mempool.h>         // BUG #109 FIX: RemoveConfirmedTxs
@@ -840,6 +842,28 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                     pdb->WriteBlockIndex(blockHash, *pindex);
                 }
 
+                return false;
+            }
+        }
+
+        // ====================================================================
+        // CONSENSUS-ENFORCED COOLDOWN (hard fork at dfmpCooldownConsensusHeight)
+        // ====================================================================
+        // After activation, reject blocks where the miner's MIK identity
+        // is still within its cooldown period.  This prevents cheaters from
+        // bypassing the voluntary miner-side cooldown.
+        if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+            std::string cooldownError;
+            if (!CheckVDFCooldown(block, pindex->nHeight,
+                                   *g_node_context.cooldown_tracker, cooldownError)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " REJECTED: cooldown violation" << std::endl;
+                std::cerr << "[Chain] " << cooldownError << std::endl;
+
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
                 return false;
             }
         }
