@@ -37,7 +37,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -97,7 +97,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -157,7 +157,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -217,7 +217,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -281,7 +281,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -349,7 +349,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -430,7 +430,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -521,7 +521,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -612,7 +612,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -719,7 +719,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -867,7 +867,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -977,7 +977,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -1074,7 +1074,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -1189,7 +1189,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -1285,7 +1285,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
@@ -1390,7 +1390,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "grafanacloud-prom"
+        "uid": "efbe2jaqk71moc"
       },
       "fieldConfig": {
         "defaults": {
