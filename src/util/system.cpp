@@ -10,7 +10,35 @@
 #ifdef _WIN32
     #include <direct.h>
     #include <windows.h>
+    #include <shlobj.h>
     #define mkdir(path, mode) _mkdir(path)
+
+    /**
+     * Convert a wide (UTF-16) path to its 8.3 short form, then to std::string.
+     * Short paths are always ASCII, so they work with ANSI file APIs and LevelDB.
+     * If short path conversion fails, falls back to narrow conversion (best effort).
+     */
+    static std::string WidePathToSafeString(const wchar_t* widePath) {
+        // Get required buffer size for short path
+        DWORD shortLen = GetShortPathNameW(widePath, NULL, 0);
+        if (shortLen > 0) {
+            std::wstring shortPath(shortLen, L'\0');
+            DWORD result = GetShortPathNameW(widePath, &shortPath[0], shortLen);
+            if (result > 0 && result < shortLen) {
+                shortPath.resize(result);
+                // Short path is ASCII-safe, direct narrow conversion works
+                return std::string(shortPath.begin(), shortPath.end());
+            }
+        }
+        // Fallback: use WideCharToMultiByte with UTF-8 encoding
+        int len = WideCharToMultiByte(CP_UTF8, 0, widePath, -1, NULL, 0, NULL, NULL);
+        if (len > 0) {
+            std::string result(len - 1, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, widePath, -1, &result[0], len, NULL, NULL);
+            return result;
+        }
+        return "";
+    }
 #else
     #include <unistd.h>
     #include <pwd.h>
@@ -24,23 +52,26 @@
  */
 static std::string GetHomeDir() {
 #ifdef _WIN32
-    // Windows: Use APPDATA (standard convention, matches Bitcoin Core)
-    // This gives C:\Users\<user>\AppData\Roaming — the correct place for app data on Windows
+    // Windows: Use wide API to handle Unicode usernames (e.g., Cyrillic, CJK)
+    // SHGetFolderPathW returns the full UTF-16 path, then we convert to 8.3 short
+    // path which is always ASCII-safe for LevelDB and ANSI file APIs.
+    wchar_t widePath[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, widePath))) {
+        std::string result = WidePathToSafeString(widePath);
+        if (!result.empty()) {
+            return result;
+        }
+    }
+
+    // Fallback: try narrow API (works for ASCII usernames)
     const char* appdata = std::getenv("APPDATA");
     if (appdata) {
         return std::string(appdata);
     }
 
-    // Fallback: USERPROFILE
     const char* userprofile = std::getenv("USERPROFILE");
     if (userprofile) {
         return std::string(userprofile);
-    }
-
-    // Last resort: C:\Users\<username>
-    const char* username = std::getenv("USERNAME");
-    if (username) {
-        return "C:\\Users\\" + std::string(username);
     }
 
     return "C:\\";
@@ -279,9 +310,11 @@ bool EnsureDataDirExists(const std::string& path) {
  */
 bool AtomicCreateFile(const std::string& file_path) {
 #ifdef _WIN32
-    // Windows: Use CreateFile with CREATE_NEW disposition
-    HANDLE hFile = CreateFileA(
-        file_path.c_str(),
+    // Windows: Use CreateFileW with CREATE_NEW disposition
+    // Convert to wide string for Unicode path support
+    std::wstring wFilePath(file_path.begin(), file_path.end());
+    HANDLE hFile = CreateFileW(
+        wFilePath.c_str(),
         GENERIC_WRITE,              // Desired access
         0,                          // No sharing (exclusive)
         NULL,                       // Default security

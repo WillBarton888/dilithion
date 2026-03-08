@@ -25,14 +25,28 @@
     #include <shlobj.h>
 #endif
 
-// Get the home/appdata directory
+// Get the home/appdata directory (Unicode-safe on Windows)
 std::string GetHomeDir() {
 #ifdef _WIN32
+    // Use wide API to handle non-ASCII usernames (Cyrillic, CJK, etc.)
+    wchar_t widePath[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, widePath))) {
+        // Convert to 8.3 short path (always ASCII-safe)
+        DWORD shortLen = GetShortPathNameW(widePath, NULL, 0);
+        if (shortLen > 0) {
+            std::wstring shortPath(shortLen, L'\0');
+            DWORD result = GetShortPathNameW(widePath, &shortPath[0], shortLen);
+            if (result > 0 && result < shortLen) {
+                shortPath.resize(result);
+                return std::string(shortPath.begin(), shortPath.end());
+            }
+        }
+    }
+    // Fallback to narrow API (works for ASCII usernames)
     char path[MAX_PATH];
     if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, path) == S_OK) {
         return std::string(path);
     }
-    // Fallback to USERPROFILE
     const char* userprofile = std::getenv("USERPROFILE");
     if (userprofile) {
         return std::string(userprofile);
