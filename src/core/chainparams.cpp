@@ -120,6 +120,7 @@ ChainParams ChainParams::Mainnet() {
     params.scriptV2ActivationHeight = 999999999;
 
     params.digitalDnaActivationHeight = 999999999;  // Disabled until fork is scheduled
+    params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
@@ -261,6 +262,7 @@ ChainParams ChainParams::Testnet() {
     params.scriptV2ActivationHeight = 0;
 
     params.digitalDnaActivationHeight = 1;    // Active from near-genesis for testing
+    params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint
@@ -363,7 +365,7 @@ ChainParams ChainParams::DilV() {
     params.vdfLotteryGracePeriod = 12;         // 12 seconds for slower miners to submit
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
     params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
-    params.dfmpCooldownConsensusHeight = 7500; // Consensus-enforced cooldown (hard fork)
+    params.dfmpCooldownConsensusHeight = 7700; // Consensus-enforced cooldown (moved from 7500 to fix race condition)
     params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on DilV
@@ -371,6 +373,7 @@ ChainParams ChainParams::DilV() {
 
     // Digital DNA: active from genesis
     params.digitalDnaActivationHeight = 0;
+    params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
 
     // No checkpoints (new chain, no history yet)
     // Checkpoints will be added after DilV chain has established blocks

@@ -313,6 +313,25 @@ void CVDFMiner::MiningLoop()
         }
 
         // ---------------------------------------------------------------
+        // 7c. Pre-submission cooldown recheck
+        // ---------------------------------------------------------------
+        // The cooldown parameters (active miner count) may have changed
+        // during VDF computation (~45s) as new blocks arrived.  Re-check
+        // now so we don't submit a block that consensus will reject.
+        if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height)) {
+            int cd = m_cooldownTracker->GetCooldownBlocks();
+            int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
+            std::cout << "[VDF Miner] Cooldown changed during computation -- skipping submission"
+                      << " (last win: " << lastWin << ", cooldown: " << cd
+                      << ", height: " << height << ")" << std::endl;
+            std::unique_lock<std::mutex> lk(m_epochMutex);
+            m_epochCV.wait_for(lk, std::chrono::seconds(10),
+                               [this] { return m_epochChanged || !m_running; });
+            m_epochChanged = false;
+            continue;
+        }
+
+        // ---------------------------------------------------------------
         // 8. Submit block via callback
         // ---------------------------------------------------------------
         {

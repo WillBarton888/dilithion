@@ -41,6 +41,7 @@
 #include <uint256.h>
 #include <util/secure_allocator.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 #include <string>
@@ -80,6 +81,12 @@ constexpr size_t MIK_REGISTRATION_SIZE_V2 = 1 + 1 + 1952 + 3309;
 
 /** Size for MIK registration: marker(1) + type(1) + pubkey(1952) + sig(3309) + nonce(8) [v3.0] */
 constexpr size_t MIK_REGISTRATION_SIZE = 1 + 1 + 1952 + 3309 + 8;
+
+/** Marker byte indicating Digital DNA commitment follows (after MIK data) */
+constexpr uint8_t DNA_COMMITMENT_MARKER = 0xDD;
+
+/** DNA commitment size: marker(1) + hash(32) = 33 bytes */
+constexpr size_t DNA_COMMITMENT_SIZE = 1 + 32;
 
 // ============================================================================
 // MINING IDENTITY KEY
@@ -240,6 +247,10 @@ struct CMIKScriptData {
     /** v3.0: PoW nonce for registration */
     uint64_t registrationNonce = 0;
 
+    /** Digital DNA commitment hash (32 bytes, zero if not present) */
+    std::array<uint8_t, 32> dna_hash{};
+    bool has_dna_hash = false;
+
     CMIKScriptData() : isRegistration(false), registrationNonce(0) {}
 
     bool IsValid() const {
@@ -310,6 +321,16 @@ bool BuildMIKScriptSigRegistration(
     const std::vector<uint8_t>& signature,
     uint64_t registrationNonce,
     std::vector<uint8_t>& data);
+
+/**
+ * Build DNA commitment bytes for coinbase scriptSig
+ *
+ * Format: [DNA_COMMITMENT_MARKER: 0xDD] [dna_hash: 32 bytes]
+ *
+ * @param dna_hash 32-byte SHA3-256 hash of serialized DigitalDNA
+ * @param[out] data Output buffer (appended to)
+ */
+void BuildDNACommitment(const std::array<uint8_t, 32>& dna_hash, std::vector<uint8_t>& data);
 
 /**
  * Verify registration proof-of-work (DFMP v3.0)
