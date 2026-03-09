@@ -1403,6 +1403,110 @@ bool CIbdCoordinator::FetchBlocks() {
     }
 
     // =========================================================================
+    // BUG #273: Fork recovery stuck when all fork blocks already in DB
+    // =========================================================================
+    // When a node has old fork blocks on its active chain, fork recovery requests
+    // the correct fork blocks from peers. Those blocks arrive and get stored in DB,
+    // but GetNextBlocksToRequest returns the same range again because:
+    //   - The blocks are in DB (BLOCK_HAVE_DATA) but not on active chain
+    //   - Individual fork blocks can't trigger a reorg (less chain work than tip)
+    //   - Only the full fork chain from fork_point onward can beat the tip
+    // Fix: After N consecutive cycles of all-in-DB with nothing new to request
+    // during an active fork, escalate to DisconnectToHeight(fork_point) so the
+    // chain rolls back and fork blocks can connect naturally via normal IBD.
+    if (getdata.empty() && already_have_count > 0) {
+        ForkManager& forkMgr = ForkManager::GetInstance();
+        if (forkMgr.HasActiveFork()) {
+            m_fork_all_in_db_cycles++;
+            std::cout << "[IBD] BUG#273: All " << already_have_count << " fork blocks in DB but chain stuck"
+                      << " (cycle " << m_fork_all_in_db_cycles << "/" << MAX_FORK_ALL_IN_DB_CYCLES << ")" << std::endl;
+
+            if (m_fork_all_in_db_cycles >= MAX_FORK_ALL_IN_DB_CYCLES) {
+                auto activeFork = forkMgr.GetActiveFork();
+                int fork_point = activeFork ? activeFork->GetForkPointHeight() : m_fork_point.load();
+                int chain_height = m_chainstate.GetHeight();
+
+                if (fork_point > 0 && fork_point <= chain_height && m_node_context.blockchain_db) {
+                    std::cout << "[IBD] BUG#273: Escalating to DisconnectToHeight(" << fork_point
+                              << ") - fork blocks in DB can't reorg individually" << std::endl;
+
+                    // Chain work check: verify header chain has more work before disconnecting
+                    bool should_disconnect = true;
+                    uint256 localChainWork;
+                    CBlockIndex* pTip = m_chainstate.GetTip();
+                    if (pTip) localChainWork = pTip->nChainWork;
+
+                    uint256 headerChainWork;
+                    if (m_node_context.headers_manager)
+                        headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
+
+                    if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
+                        if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
+                            std::cout << "[IBD] BUG#273: Header chain has LESS work - NOT disconnecting" << std::endl;
+                            should_disconnect = false;
+                        }
+                    }
+
+                    if (should_disconnect) {
+                        // Cancel active fork candidate first
+                        forkMgr.CancelFork("BUG#273: escalating to DisconnectToHeight");
+                        forkMgr.ClearInFlightState(m_node_context, fork_point);
+
+                        // Disconnect to fork point (same as deep fork handler)
+                        int disconnected = m_chainstate.DisconnectToHeight(fork_point, *m_node_context.blockchain_db);
+                        if (disconnected < 0) {
+                            std::cerr << "[IBD] BUG#273: DisconnectToHeight failed - requires --reindex" << std::endl;
+                            m_requires_reindex = true;
+                        } else {
+                            std::cout << "[IBD] BUG#273: Disconnected " << disconnected
+                                      << " blocks (chain now at " << m_chainstate.GetHeight() << ")" << std::endl;
+
+                            // Clear stale state above fork point
+                            uint256 forkPointHash;
+                            CBlockIndex* pNewTip = m_chainstate.GetTip();
+                            if (pNewTip) forkPointHash = pNewTip->GetBlockHash();
+
+                            if (m_node_context.headers_manager)
+                                m_node_context.headers_manager->ClearAboveHeight(fork_point, forkPointHash);
+                            if (m_node_context.block_fetcher)
+                                m_node_context.block_fetcher->ClearAboveHeight(fork_point);
+                            if (g_node_context.block_tracker)
+                                g_node_context.block_tracker->ClearAboveHeight(fork_point);
+
+                            // Reset fork detection state
+                            m_fork_detected.store(false);
+                            g_node_context.fork_detected.store(false);
+                            g_metrics.ClearForkDetected();
+                            m_fork_point.store(-1);
+                            m_fork_stall_cycles.store(0);
+                            m_consecutive_orphan_blocks.store(0);
+                            m_last_cancelled_fork_point = -1;
+
+                            // Resume IBD to re-download correct chain
+                            m_resync_in_progress = true;
+                            m_resync_fork_point = fork_point;
+                            m_resync_original_height = chain_height;
+                            m_resync_target_height = m_node_context.headers_manager ?
+                                m_node_context.headers_manager->GetBestHeight() : chain_height;
+                            m_state = IBDState::BLOCKS_DOWNLOAD;
+                            m_last_header_height = 0;
+
+                            std::cout << "[IBD] BUG#273: Resync started from height " << fork_point << std::endl;
+                        }
+                    }
+                }
+
+                m_fork_all_in_db_cycles = 0;
+                return true;  // Don't send getdata this cycle
+            }
+        } else {
+            m_fork_all_in_db_cycles = 0;  // No active fork, reset counter
+        }
+    } else {
+        m_fork_all_in_db_cycles = 0;  // Progress made or no blocks in DB, reset
+    }
+
+    // =========================================================================
     // BUG #270: Recovery from stuck failed-block ranges
     // =========================================================================
     // If ALL blocks in the requested range are marked as failed (e.g. from a

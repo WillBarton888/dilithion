@@ -302,6 +302,13 @@ private:
     std::chrono::steady_clock::time_point m_last_orphan_scan;
     static constexpr int ORPHAN_SCAN_INTERVAL_SECS = 30;      // Scan orphans every 30 seconds (was 10)
 
+    // BUG #273: Fork recovery stuck when all fork blocks already in DB
+    // Track consecutive cycles where all requested blocks are in DB but chain
+    // can't advance (individual fork blocks have less work than current tip).
+    // After threshold, escalate to DisconnectToHeight to roll back chain.
+    int m_fork_all_in_db_cycles{0};
+    static constexpr int MAX_FORK_ALL_IN_DB_CYCLES = 3;  // Escalate after 3 consecutive stuck cycles
+
     // BUG #261 FIX: Startup grace period for fork detection
     // Skip fork detection during first N seconds after creation to allow:
     // - Header population from local blockchain to complete
