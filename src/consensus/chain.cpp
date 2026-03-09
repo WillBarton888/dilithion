@@ -852,19 +852,37 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // After activation, reject blocks where the miner's MIK identity
         // is still within its cooldown period.  This prevents cheaters from
         // bypassing the voluntary miner-side cooldown.
+        //
+        // STALL EXEMPTION: If the timestamp gap between this block and its
+        // parent is >= 300s (5 min), bypass cooldown enforcement.  During a
+        // stall all miners may be in cooldown, creating a permanent deadlock
+        // where no block can ever be produced (BUG #274).
         if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
-            std::string cooldownError;
-            if (!CheckVDFCooldown(block, pindex->nHeight,
-                                   *g_node_context.cooldown_tracker, cooldownError)) {
-                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
-                          << " REJECTED: cooldown violation" << std::endl;
-                std::cerr << "[Chain] " << cooldownError << std::endl;
+            bool chainStalled = false;
+            if (pindex->pprev) {
+                int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
+                chainStalled = (gap >= 300);
+            }
 
-                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
-                if (pdb != nullptr) {
-                    pdb->WriteBlockIndex(blockHash, *pindex);
+            if (chainStalled) {
+                std::cout << "[Chain] Block " << pindex->nHeight
+                          << ": cooldown check skipped (chain stall -- "
+                          << (block.nTime - pindex->pprev->nTime)
+                          << "s since last block)" << std::endl;
+            } else {
+                std::string cooldownError;
+                if (!CheckVDFCooldown(block, pindex->nHeight,
+                                       *g_node_context.cooldown_tracker, cooldownError)) {
+                    std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                              << " REJECTED: cooldown violation" << std::endl;
+                    std::cerr << "[Chain] " << cooldownError << std::endl;
+
+                    pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                    if (pdb != nullptr) {
+                        pdb->WriteBlockIndex(blockHash, *pindex);
+                    }
+                    return false;
                 }
-                return false;
             }
         }
 

@@ -181,6 +181,7 @@ void CVDFMiner::MiningLoop()
         // Cooldown tracks by MIK identity to prevent address rotation bypass.
         // MIK is set from the wallet's MIK key; falls back to payout address.
         Address cooldownId = (m_mikIdentity != Address{}) ? m_mikIdentity : minerAddr;
+        bool stallBypassed = false;
 
         if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height)) {
             // Chain stall detection: if no block has been produced for a long
@@ -195,6 +196,7 @@ void CVDFMiner::MiningLoop()
             if (sinceLastBlock >= STALL_THRESHOLD_SEC) {
                 std::cout << "[VDF Miner] Chain stall detected (" << sinceLastBlock
                           << "s since last block) -- bypassing cooldown" << std::endl;
+                stallBypassed = true;
                 // Fall through to VDF computation
             } else {
                 int cd = m_cooldownTracker->GetCooldownBlocks();
@@ -318,7 +320,10 @@ void CVDFMiner::MiningLoop()
         // The cooldown parameters (active miner count) may have changed
         // during VDF computation (~45s) as new blocks arrived.  Re-check
         // now so we don't submit a block that consensus will reject.
-        if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height)) {
+        // Exception: if we bypassed cooldown due to a chain stall, honour
+        // that decision — otherwise we create a deadlock where the stall
+        // bypass computes the VDF but the re-check always blocks submission.
+        if (!stallBypassed && m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height)) {
             int cd = m_cooldownTracker->GetCooldownBlocks();
             int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
             std::cout << "[VDF Miner] Cooldown changed during computation -- skipping submission"
