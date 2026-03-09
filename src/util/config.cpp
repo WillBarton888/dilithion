@@ -6,6 +6,7 @@
  */
 
 #include <util/config.h>
+#include <util/system.h>
 #include <util/logging.h>
 #include <fstream>
 #include <sstream>
@@ -15,10 +16,8 @@
 
 #ifdef _WIN32
     #include <windows.h>
-    #include <shlobj.h>
 #else
     #include <unistd.h>
-    #include <pwd.h>
     #include <sys/stat.h>
 #endif
 
@@ -256,47 +255,9 @@ std::vector<std::string> CConfigParser::GetList(const std::string& key) const {
 }
 
 std::string GetDefaultDataDir(bool testnet) {
-#ifdef _WIN32
-    char path[MAX_PATH];
-    if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, path) == S_OK) {
-        std::string dir(path);
-        if (testnet) {
-            return dir + "\\.dilithion-testnet";
-        } else {
-            return dir + "\\.dilithion";
-        }
-    }
-    // Fallback
-    if (testnet) {
-        return ".dilithion-testnet";
-    } else {
-        return ".dilithion";
-    }
-#else
-    const char* home = std::getenv("HOME");
-    if (home == nullptr) {
-        struct passwd* pwd = getpwuid(getuid());
-        if (pwd != nullptr) {
-            home = pwd->pw_dir;
-        }
-    }
-    
-    if (home != nullptr) {
-        std::string dir(home);
-        if (testnet) {
-            return dir + "/.dilithion-testnet";
-        } else {
-            return dir + "/.dilithion";
-        }
-    }
-    
-    // Fallback
-    if (testnet) {
-        return ".dilithion-testnet";
-    } else {
-        return ".dilithion";
-    }
-#endif
+    // Delegate to GetDataDir() from system.cpp which handles Unicode paths
+    // on Windows via SHGetFolderPathW + GetShortPathNameW
+    return GetDataDir(testnet);
 }
 
 std::string GetConfigFilePath(const std::string& datadir) {
