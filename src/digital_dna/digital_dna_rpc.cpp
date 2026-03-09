@@ -34,6 +34,7 @@ void DigitalDNARpc::register_commands() {
     handlers_["getlatencyfingerprint"] = [this](const JsonObject& p) { return cmd_getlatencyfingerprint(p); };
     handlers_["gettimingsignature"] = [this](const JsonObject& p) { return cmd_gettimingsignature(p); };
     handlers_["getperspectiveproof"] = [this](const JsonObject& p) { return cmd_getperspectiveproof(p); };
+    handlers_["dumpdigitaldna"] = [this](const JsonObject& p) { return cmd_dumpdigitaldna(p); };
 }
 
 RpcHandler DigitalDNARpc::get_handler(const std::string& method) const {
@@ -148,17 +149,15 @@ JsonObject DigitalDNARpc::cmd_registerdigitaldna(const JsonObject& params) {
 }
 
 JsonObject DigitalDNARpc::cmd_getdigitaldna(const JsonObject& params) {
-    // Get Digital DNA for a specific address
+    // Get Digital DNA for a specific address or MIK identity
     auto it = params.find("address");
     if (it == params.end()) {
-        return error(-1, "Missing required parameter: address");
+        return error(-1, "Missing required parameter: address (accepts MIK identity or address hex)");
     }
 
-    auto address = hex_to_address(it->second);
-    auto dna = registry_.get_identity(address);
-
+    auto dna = resolve_identity(it->second);
     if (!dna) {
-        return error(-1, "Address not registered: " + it->second);
+        return error(-1, "Identity not registered: " + it->second);
     }
 
     return dna_to_json(*dna);
@@ -173,14 +172,11 @@ JsonObject DigitalDNARpc::cmd_comparedigitaldna(const JsonObject& params) {
         return error(-1, "Missing required parameters: address1, address2");
     }
 
-    auto addr1 = hex_to_address(it1->second);
-    auto addr2 = hex_to_address(it2->second);
+    auto dna1 = resolve_identity(it1->second);
+    auto dna2 = resolve_identity(it2->second);
 
-    auto dna1 = registry_.get_identity(addr1);
-    auto dna2 = registry_.get_identity(addr2);
-
-    if (!dna1) return error(-1, "Address not registered: " + it1->second);
-    if (!dna2) return error(-1, "Address not registered: " + it2->second);
+    if (!dna1) return error(-1, "Identity not registered: " + it1->second);
+    if (!dna2) return error(-1, "Identity not registered: " + it2->second);
 
     auto score = registry_.compare(*dna1, *dna2);
 
@@ -211,10 +207,8 @@ JsonObject DigitalDNARpc::cmd_findsimilaridentities(const JsonObject& params) {
         threshold = std::stod(th_it->second);
     }
 
-    auto address = hex_to_address(it->second);
-    auto dna = registry_.get_identity(address);
-
-    if (!dna) return error(-1, "Address not registered: " + it->second);
+    auto dna = resolve_identity(it->second);
+    if (!dna) return error(-1, "Identity not registered: " + it->second);
 
     auto similar = registry_.find_similar(*dna, threshold);
 
@@ -266,6 +260,7 @@ JsonObject DigitalDNARpc::cmd_listdigitaldna(const JsonObject& params) {
     for (size_t i = offset; i < all.size() && count < limit; i++, count++) {
         oss << "{";
         oss << "\"address\": \"" << address_to_hex(all[i].address) << "\", ";
+        oss << "\"mik_identity\": \"" << address_to_hex(all[i].mik_identity) << "\", ";
         oss << "\"registration_height\": " << all[i].registration_height << ", ";
         oss << "\"iterations_per_sec\": " << std::fixed << std::setprecision(0)
             << all[i].timing.iterations_per_second;
@@ -409,13 +404,12 @@ JsonObject DigitalDNARpc::cmd_validatedigitaldna(const JsonObject& params) {
         return error(-1, "Missing required parameter: address");
     }
 
-    auto address = hex_to_address(it->second);
-    auto dna = registry_.get_identity(address);
-
-    if (!dna) return error(-1, "Address not registered");
+    auto dna = resolve_identity(it->second);
+    if (!dna) return error(-1, "Identity not registered");
 
     JsonObject result;
-    result["address"] = it->second;
+    result["address"] = address_to_hex(dna->address);
+    result["mik_identity"] = address_to_hex(dna->mik_identity);
     result["is_valid"] = dna->is_valid ? "true" : "false";
 
     // Check for Sybils
@@ -440,13 +434,12 @@ JsonObject DigitalDNARpc::cmd_getlatencyfingerprint(const JsonObject& params) {
     auto it = params.find("address");
 
     if (it != params.end()) {
-        // Get for specific address
-        auto address = hex_to_address(it->second);
-        auto dna = registry_.get_identity(address);
-        if (!dna) return error(-1, "Address not registered");
+        // Get for specific address or MIK
+        auto dna = resolve_identity(it->second);
+        if (!dna) return error(-1, "Identity not registered");
 
         JsonObject result;
-        result["address"] = it->second;
+        result["address"] = address_to_hex(dna->address);
 
         std::ostringstream oss;
         oss << "[";
@@ -502,12 +495,11 @@ JsonObject DigitalDNARpc::cmd_gettimingsignature(const JsonObject& params) {
 
     if (it != params.end()) {
         // Get for specific address
-        auto address = hex_to_address(it->second);
-        auto dna = registry_.get_identity(address);
-        if (!dna) return error(-1, "Address not registered");
+        auto dna = resolve_identity(it->second);
+        if (!dna) return error(-1, "Identity not registered");
 
         JsonObject result;
-        result["address"] = it->second;
+        result["address"] = address_to_hex(dna->address);
         result["iterations"] = std::to_string(dna->timing.total_iterations);
         result["iterations_per_second"] = std::to_string(dna->timing.iterations_per_second);
         result["mean_interval_us"] = std::to_string(dna->timing.mean_interval_us);
@@ -549,13 +541,12 @@ JsonObject DigitalDNARpc::cmd_getperspectiveproof(const JsonObject& params) {
     auto it = params.find("address");
 
     if (it != params.end()) {
-        // Get for specific address
-        auto address = hex_to_address(it->second);
-        auto dna = registry_.get_identity(address);
-        if (!dna) return error(-1, "Address not registered");
+        // Get for specific address or MIK
+        auto dna = resolve_identity(it->second);
+        if (!dna) return error(-1, "Identity not registered");
 
         JsonObject result;
-        result["address"] = it->second;
+        result["address"] = address_to_hex(dna->address);
         result["total_unique_peers"] = std::to_string(dna->perspective.total_unique_peers());
         result["peer_turnover_rate"] = std::to_string(dna->perspective.peer_turnover_rate());
         result["witness_coverage"] = std::to_string(dna->perspective.witness_coverage());
@@ -591,10 +582,20 @@ std::array<uint8_t, 20> DigitalDNARpc::hex_to_address(const std::string& hex) co
     return addr;
 }
 
+std::optional<DigitalDNA> DigitalDNARpc::resolve_identity(const std::string& hex_key) const {
+    auto key = hex_to_address(hex_key);
+    // Try MIK lookup first (primary key)
+    auto dna = registry_.get_identity_by_mik(key);
+    if (dna) return dna;
+    // Fallback to address lookup (backward compat)
+    return registry_.get_identity(key);
+}
+
 JsonObject DigitalDNARpc::dna_to_json(const DigitalDNA& dna) const {
     JsonObject result;
 
     result["address"] = address_to_hex(dna.address);
+    result["mik_identity"] = address_to_hex(dna.mik_identity);
     result["registration_height"] = std::to_string(dna.registration_height);
     result["registration_time"] = std::to_string(dna.registration_time);
     result["is_valid"] = dna.is_valid ? "true" : "false";
@@ -644,6 +645,202 @@ JsonObject DigitalDNARpc::error(int code, const std::string& message) const {
     result["error"] = "true";
     result["code"] = std::to_string(code);
     result["message"] = message;
+    return result;
+}
+
+JsonObject DigitalDNARpc::cmd_dumpdigitaldna(const JsonObject& params) {
+    // Full dump of all registered DNA identities with every dimension.
+    // Designed for offline calibration: pull snapshots at day 0/7/14,
+    // compare dimension distributions, calibrate weights.
+
+    auto all = registry_.get_all();
+
+    JsonObject result;
+    result["total"] = std::to_string(all.size());
+    result["dump_time"] = std::to_string(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+
+    std::ostringstream oss;
+    oss << std::fixed;
+    oss << "[";
+    for (size_t idx = 0; idx < all.size(); idx++) {
+        const auto& dna = all[idx];
+        oss << "{";
+
+        // Identity
+        oss << "\"address\": \"" << address_to_hex(dna.address) << "\", ";
+        oss << "\"mik_identity\": \"" << address_to_hex(dna.mik_identity) << "\", ";
+        oss << "\"registration_height\": " << dna.registration_height << ", ";
+        oss << "\"registration_time\": " << dna.registration_time << ", ";
+        oss << "\"is_valid\": " << (dna.is_valid ? "true" : "false") << ", ";
+
+        // Hash
+        auto hash = dna.hash();
+        oss << "\"identity_hash\": \"";
+        for (auto b : hash) oss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+        oss << std::dec << "\", ";
+
+        // L: Latency fingerprint
+        oss << "\"latency\": {";
+        oss << "\"measurement_height\": " << dna.latency.measurement_height << ", ";
+        oss << "\"measurement_timestamp\": " << dna.latency.measurement_timestamp << ", ";
+        oss << "\"seeds\": [";
+        for (size_t i = 0; i < dna.latency.seed_stats.size(); i++) {
+            const auto& s = dna.latency.seed_stats[i];
+            oss << "{\"name\": \"" << s.seed_name << "\", ";
+            oss << std::setprecision(2);
+            oss << "\"median_ms\": " << s.median_ms << ", ";
+            oss << "\"mean_ms\": " << s.mean_ms << ", ";
+            oss << "\"p10_ms\": " << s.p10_ms << ", ";
+            oss << "\"p90_ms\": " << s.p90_ms << ", ";
+            oss << "\"stddev_ms\": " << s.stddev_ms << ", ";
+            oss << "\"samples\": " << s.samples << ", ";
+            oss << "\"failures\": " << s.failures << "}";
+            if (i < dna.latency.seed_stats.size() - 1) oss << ", ";
+        }
+        oss << "]}, ";
+
+        // V: Timing signature
+        oss << "\"timing\": {";
+        oss << std::setprecision(1);
+        oss << "\"iterations_per_second\": " << dna.timing.iterations_per_second << ", ";
+        oss << "\"total_iterations\": " << dna.timing.total_iterations << ", ";
+        oss << "\"total_time_us\": " << dna.timing.total_time_us << ", ";
+        oss << std::setprecision(2);
+        oss << "\"mean_interval_us\": " << dna.timing.mean_interval_us << ", ";
+        oss << "\"stddev_interval_us\": " << dna.timing.stddev_interval_us << ", ";
+        oss << "\"checkpoints\": " << dna.timing.checkpoints.size();
+        oss << "}, ";
+
+        // P: Perspective proof
+        oss << "\"perspective\": {";
+        oss << "\"unique_peers\": " << dna.perspective.total_unique_peers() << ", ";
+        oss << std::setprecision(4);
+        oss << "\"peer_turnover\": " << dna.perspective.peer_turnover_rate() << ", ";
+        oss << "\"snapshots\": " << dna.perspective.snapshots.size();
+        oss << "}, ";
+
+        // M: Memory fingerprint (optional)
+        oss << "\"memory\": ";
+        if (dna.memory.has_value()) {
+            const auto& m = *dna.memory;
+            oss << "{";
+            oss << std::setprecision(1);
+            oss << "\"estimated_l1_kb\": " << m.estimated_l1_kb << ", ";
+            oss << "\"estimated_l2_kb\": " << m.estimated_l2_kb << ", ";
+            oss << "\"estimated_l3_kb\": " << m.estimated_l3_kb << ", ";
+            oss << std::setprecision(2);
+            oss << "\"dram_latency_ns\": " << m.dram_latency_ns << ", ";
+            oss << "\"peak_bandwidth_mbps\": " << m.peak_bandwidth_mbps << ", ";
+            oss << "\"access_curve\": [";
+            for (size_t i = 0; i < m.access_curve.size(); i++) {
+                oss << "{\"ws_kb\": " << m.access_curve[i].working_set_kb;
+                oss << ", \"ns\": " << m.access_curve[i].access_time_ns;
+                oss << ", \"mbps\": " << m.access_curve[i].bandwidth_mbps << "}";
+                if (i < m.access_curve.size() - 1) oss << ", ";
+            }
+            oss << "]}";
+        } else {
+            oss << "null";
+        }
+        oss << ", ";
+
+        // D: Clock drift (optional)
+        oss << "\"clock_drift\": ";
+        if (dna.clock_drift.has_value()) {
+            const auto& d = *dna.clock_drift;
+            oss << "{";
+            oss << std::setprecision(6);
+            oss << "\"drift_rate_ppm\": " << d.drift_rate_ppm << ", ";
+            oss << "\"drift_stability\": " << d.drift_stability << ", ";
+            oss << "\"jitter_signature\": " << d.jitter_signature << ", ";
+            oss << "\"num_samples\": " << d.num_samples << ", ";
+            oss << "\"num_reference_peers\": " << d.num_reference_peers << ", ";
+            oss << "\"observation_start\": " << d.observation_start << ", ";
+            oss << "\"observation_end\": " << d.observation_end << ", ";
+            oss << "\"reliable\": " << (d.is_reliable() ? "true" : "false");
+            oss << "}";
+        } else {
+            oss << "null";
+        }
+        oss << ", ";
+
+        // B: Bandwidth (optional)
+        oss << "\"bandwidth\": ";
+        if (dna.bandwidth.has_value()) {
+            const auto& b = *dna.bandwidth;
+            oss << "{";
+            oss << std::setprecision(2);
+            oss << "\"median_upload_mbps\": " << b.median_upload_mbps << ", ";
+            oss << "\"median_download_mbps\": " << b.median_download_mbps << ", ";
+            oss << std::setprecision(4);
+            oss << "\"median_asymmetry\": " << b.median_asymmetry << ", ";
+            oss << std::setprecision(2);
+            oss << "\"bandwidth_stability\": " << b.bandwidth_stability << ", ";
+            oss << "\"measurements\": " << b.measurements.size() << ", ";
+            oss << "\"reliable\": " << (b.is_reliable() ? "true" : "false");
+            oss << "}";
+        } else {
+            oss << "null";
+        }
+        oss << ", ";
+
+        // T: Thermal (optional)
+        oss << "\"thermal\": ";
+        if (dna.thermal.has_value()) {
+            const auto& t = *dna.thermal;
+            oss << "{";
+            oss << std::setprecision(2);
+            oss << "\"initial_speed\": " << t.initial_speed << ", ";
+            oss << "\"sustained_speed\": " << t.sustained_speed << ", ";
+            oss << std::setprecision(4);
+            oss << "\"throttle_ratio\": " << t.throttle_ratio << ", ";
+            oss << std::setprecision(2);
+            oss << "\"time_to_steady_state_sec\": " << t.time_to_steady_state_sec << ", ";
+            oss << "\"thermal_jitter\": " << t.thermal_jitter << ", ";
+            oss << "\"speed_curve_points\": " << t.speed_curve.size();
+            oss << "}";
+        } else {
+            oss << "null";
+        }
+        oss << ", ";
+
+        // BP: Behavioral profile (optional)
+        oss << "\"behavioral\": ";
+        if (dna.behavioral.has_value()) {
+            const auto& bp = *dna.behavioral;
+            oss << "{";
+            oss << std::setprecision(4);
+            oss << "\"hourly_activity\": [";
+            for (int h = 0; h < 24; h++) {
+                oss << bp.hourly_activity[h];
+                if (h < 23) oss << ", ";
+            }
+            oss << "], ";
+            oss << std::setprecision(2);
+            oss << "\"mean_relay_delay_ms\": " << bp.mean_relay_delay_ms << ", ";
+            oss << "\"relay_consistency\": " << bp.relay_consistency << ", ";
+            oss << "\"avg_peer_session_duration_sec\": " << bp.avg_peer_session_duration_sec << ", ";
+            oss << std::setprecision(4);
+            oss << "\"peer_diversity_score\": " << bp.peer_diversity_score << ", ";
+            oss << std::setprecision(2);
+            oss << "\"tx_relay_rate\": " << bp.tx_relay_rate << ", ";
+            oss << std::setprecision(4);
+            oss << "\"tx_timing_entropy\": " << bp.tx_timing_entropy << ", ";
+            oss << "\"observation_blocks\": " << bp.observation_blocks << ", ";
+            oss << "\"mature\": " << (bp.is_mature() ? "true" : "false");
+            oss << "}";
+        } else {
+            oss << "null";
+        }
+
+        oss << "}";
+        if (idx < all.size() - 1) oss << ", ";
+    }
+    oss << "]";
+    result["identities"] = oss.str();
+
     return result;
 }
 
@@ -734,6 +931,13 @@ std::vector<RpcCommandInfo> get_rpc_help() {
             "address (string) - address to query",
             "Peer observation statistics",
             "getperspectiveproof {\"address\": \"...\"}"
+        },
+        {
+            "dumpdigitaldna",
+            "Dump all DNA identities with full dimension data for offline calibration",
+            "None",
+            "Array of all registered identities with all 8 dimension details",
+            "dumpdigitaldna"
         }
     };
 }

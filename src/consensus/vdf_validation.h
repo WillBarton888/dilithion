@@ -102,4 +102,21 @@ bool CheckVDFCooldown(
     std::string& error
 );
 
+/**
+ * Check DNA commitment in VDF block coinbase (Phase 3).
+ *
+ * After dnaCommitmentActivationHeight, VDF blocks must include a 0xDD + 32-byte
+ * DNA hash in their coinbase scriptSig (after MIK data).
+ *
+ * @param block         The candidate VDF block
+ * @param height        Block height
+ * @param error         Human-readable error string on failure
+ * @return true if block passes DNA commitment check (or pre-activation)
+ */
+bool CheckDNACommitment(
+    const CBlock& block,
+    int height,
+    std::string& error
+);
+
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

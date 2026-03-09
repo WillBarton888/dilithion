@@ -11,6 +11,7 @@
 namespace digital_dna {
 
 const std::string DNARegistryDB::KEY_PREFIX = "dna:";
+const std::string DNARegistryDB::MIK_KEY_PREFIX = "dna_mik:";
 
 DNARegistryDB::DNARegistryDB() {}
 
@@ -126,7 +127,19 @@ IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& 
     auto data = dna.serialize();
     std::string value(data.begin(), data.end());
 
-    status = db_->Put(leveldb::WriteOptions(), key, value);
+    // Dual-key write: address key + MIK key
+    leveldb::WriteBatch batch;
+    batch.Put(key, value);
+
+    // Write MIK key if mik_identity is non-zero
+    std::array<uint8_t, 20> zero_mik{};
+    if (dna.mik_identity != zero_mik) {
+        std::string mik_key = make_mik_key(dna.mik_identity);
+        batch.Put(mik_key, value);
+        mik_to_address_[dna.mik_identity] = dna.address;
+    }
+
+    status = db_->Write(leveldb::WriteOptions(), &batch);
     if (!status.ok()) {
         return RegisterResult::DB_ERROR;
     }
@@ -149,11 +162,20 @@ IDNARegistry::RegisterResult DNARegistryDB::update_identity(const DigitalDNA& dn
         return RegisterResult::INVALID_DNA;  // Not registered yet
     }
 
-    // Overwrite with enriched version
+    // Overwrite with enriched version — dual-key write
     auto data = dna.serialize();
     std::string value(data.begin(), data.end());
 
-    status = db_->Put(leveldb::WriteOptions(), key, value);
+    leveldb::WriteBatch batch;
+    batch.Put(key, value);
+
+    std::array<uint8_t, 20> zero_mik{};
+    if (dna.mik_identity != zero_mik) {
+        batch.Put(make_mik_key(dna.mik_identity), value);
+        mik_to_address_[dna.mik_identity] = dna.address;
+    }
+
+    status = db_->Write(leveldb::WriteOptions(), &batch);
     if (!status.ok()) {
         return RegisterResult::DB_ERROR;
     }
@@ -185,6 +207,32 @@ std::optional<DigitalDNA> DNARegistryDB::get_identity(const std::array<uint8_t, 
     // Check DB
     if (!db_) return std::nullopt;
     std::string key = make_key(address);
+    std::string value;
+    leveldb::Status status = db_->Get(leveldb::ReadOptions(), key, &value);
+    if (!status.ok()) return std::nullopt;
+
+    std::vector<uint8_t> data(value.begin(), value.end());
+    return DigitalDNA::deserialize(data);
+}
+
+std::optional<DigitalDNA> DNARegistryDB::get_identity_by_mik(const std::array<uint8_t, 20>& mik) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Check MIK-to-address index first
+    auto idx = mik_to_address_.find(mik);
+    if (idx != mik_to_address_.end()) {
+        auto it = cache_.find(idx->second);
+        if (it != cache_.end()) return it->second;
+    }
+
+    // Fallback: scan cache for matching mik_identity
+    for (const auto& [addr, dna] : cache_) {
+        if (dna.mik_identity == mik) return dna;
+    }
+
+    // Check DB via MIK key
+    if (!db_) return std::nullopt;
+    std::string key = make_mik_key(mik);
     std::string value;
     leveldb::Status status = db_->Get(leveldb::ReadOptions(), key, &value);
     if (!status.ok()) return std::nullopt;
@@ -272,6 +320,16 @@ bool DNARegistryDB::remove_identity(const std::array<uint8_t, 20>& address) {
 
     if (!db_) return false;
 
+    // Remove MIK key if we have the identity cached
+    auto it = cache_.find(address);
+    if (it != cache_.end()) {
+        std::array<uint8_t, 20> zero_mik{};
+        if (it->second.mik_identity != zero_mik) {
+            db_->Delete(leveldb::WriteOptions(), make_mik_key(it->second.mik_identity));
+            mik_to_address_.erase(it->second.mik_identity);
+        }
+    }
+
     std::string key = make_key(address);
     leveldb::Status status = db_->Delete(leveldb::WriteOptions(), key);
 
@@ -285,23 +343,29 @@ void DNARegistryDB::clear() {
 
     if (!db_) return;
 
-    // Delete all entries with our prefix
+    // Delete all entries with dna: and dna_mik: prefixes
     leveldb::WriteBatch batch;
     std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
     for (it->Seek(KEY_PREFIX); it->Valid(); it->Next()) {
         std::string key = it->key().ToString();
-        if (key.substr(0, KEY_PREFIX.size()) != KEY_PREFIX) break;
+        // Both "dna:" and "dna_mik:" keys are in lexicographic range starting at "dna:"
+        if (key.substr(0, 3) != "dna") break;
         batch.Delete(key);
     }
     db_->Write(leveldb::WriteOptions(), &batch);
 
     cache_.clear();
+    mik_to_address_.clear();
 }
 
 // --- Private helpers ---
 
 std::string DNARegistryDB::make_key(const std::array<uint8_t, 20>& address) const {
     return KEY_PREFIX + address_to_hex(address);
+}
+
+std::string DNARegistryDB::make_mik_key(const std::array<uint8_t, 20>& mik) const {
+    return MIK_KEY_PREFIX + address_to_hex(mik);
 }
 
 std::string DNARegistryDB::address_to_hex(const std::array<uint8_t, 20>& addr) {
@@ -316,17 +380,25 @@ void DNARegistryDB::load_cache() const {
     if (!db_) return;
 
     cache_.clear();
+    mik_to_address_.clear();
 
     std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
     for (it->Seek(KEY_PREFIX); it->Valid(); it->Next()) {
         std::string key = it->key().ToString();
         if (key.substr(0, KEY_PREFIX.size()) != KEY_PREFIX) break;
+        // Skip MIK keys (they start with "dna_mik:" which is > "dna:" lexicographically)
+        if (key.substr(0, MIK_KEY_PREFIX.size()) == MIK_KEY_PREFIX) continue;
 
         std::string value = it->value().ToString();
         std::vector<uint8_t> data(value.begin(), value.end());
         auto dna = DigitalDNA::deserialize(data);
         if (dna) {
             cache_[dna->address] = *dna;
+            // Build MIK index
+            std::array<uint8_t, 20> zero_mik{};
+            if (dna->mik_identity != zero_mik) {
+                mik_to_address_[dna->mik_identity] = dna->address;
+            }
         }
 
         if (cache_.size() >= MAX_CACHE_SIZE) break;

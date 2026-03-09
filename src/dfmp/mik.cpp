@@ -335,6 +335,16 @@ bool ParseMIKFromScriptSig(
                     mikData.registrationNonce = 0;  // Pre-v3.0 registration (no nonce)
                 }
 
+                // Parse DNA commitment if present (0xDD + 32 bytes)
+                if (pos + DNA_COMMITMENT_SIZE <= scriptSig.size() &&
+                    scriptSig[pos] == DNA_COMMITMENT_MARKER) {
+                    pos++;  // skip marker
+                    std::copy(scriptSig.begin() + pos, scriptSig.begin() + pos + 32,
+                              mikData.dna_hash.begin());
+                    mikData.has_dna_hash = true;
+                    pos += 32;
+                }
+
                 return true;
 
             } else if (mikType == MIK_TYPE_REFERENCE) {
@@ -358,6 +368,17 @@ bool ParseMIKFromScriptSig(
                     scriptSig.begin() + pos,
                     scriptSig.begin() + pos + MIK_SIGNATURE_SIZE
                 );
+                pos += MIK_SIGNATURE_SIZE;
+
+                // Parse DNA commitment if present (0xDD + 32 bytes)
+                if (pos + DNA_COMMITMENT_SIZE <= scriptSig.size() &&
+                    scriptSig[pos] == DNA_COMMITMENT_MARKER) {
+                    pos++;  // skip marker
+                    std::copy(scriptSig.begin() + pos, scriptSig.begin() + pos + 32,
+                              mikData.dna_hash.begin());
+                    mikData.has_dna_hash = true;
+                    pos += 32;
+                }
 
                 return true;
 
@@ -441,6 +462,15 @@ bool BuildMIKScriptSigRegistration(
     }
 
     return true;
+}
+
+// ============================================================================
+// DNA COMMITMENT
+// ============================================================================
+
+void BuildDNACommitment(const std::array<uint8_t, 32>& dna_hash, std::vector<uint8_t>& data) {
+    data.push_back(DNA_COMMITMENT_MARKER);
+    data.insert(data.end(), dna_hash.begin(), dna_hash.end());
 }
 
 // ============================================================================

@@ -112,7 +112,8 @@ static bool read_blob(const std::vector<uint8_t>& data, size_t& off, std::vector
 
 // DNA2 envelope constants
 static constexpr uint8_t DNA_MAGIC[4] = {0x44, 0x4E, 0x41, 0x32};  // "DNA2"
-static constexpr uint8_t DNA_VERSION = 0x02;
+static constexpr uint8_t DNA_VERSION = 0x03;
+static constexpr uint8_t DNA_VERSION_V2 = 0x02;  // For backward compat
 
 // Dimension flags
 static constexpr uint8_t FLAG_MEMORY     = 0x01;
@@ -131,6 +132,7 @@ std::vector<uint8_t> DigitalDNA::serialize() const {
 
     // ---- Metadata ----
     data.insert(data.end(), address.begin(), address.end());  // 20 bytes
+    data.insert(data.end(), mik_identity.begin(), mik_identity.end());  // 20 bytes (v3)
     write_u32(data, registration_height);
     write_u64(data, registration_time);
 
@@ -223,6 +225,9 @@ static std::optional<DigitalDNA> deserialize_v1(const std::vector<uint8_t>& data
     // Perspective (simplified — v1 only stored count + turnover)
     off += 12;
 
+    // v1 has no MIK — use address as fallback
+    dna.mik_identity = dna.address;
+
     dna.is_valid = true;
     return dna;
 }
@@ -237,7 +242,7 @@ std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& da
         size_t off = 4;
         uint8_t version;
         if (!read_u8(data, off, version)) return std::nullopt;
-        if (version != DNA_VERSION) return std::nullopt;  // Unknown version
+        if (version != DNA_VERSION && version != DNA_VERSION_V2) return std::nullopt;
 
         DigitalDNA dna;
 
@@ -245,6 +250,16 @@ std::optional<DigitalDNA> DigitalDNA::deserialize(const std::vector<uint8_t>& da
         if (off + 20 > data.size()) return std::nullopt;
         std::copy(data.begin() + off, data.begin() + off + 20, dna.address.begin());
         off += 20;
+
+        // MIK identity (20 bytes, v3 only)
+        if (version >= DNA_VERSION) {
+            if (off + 20 > data.size()) return std::nullopt;
+            std::copy(data.begin() + off, data.begin() + off + 20, dna.mik_identity.begin());
+            off += 20;
+        } else {
+            // v2 backward compat: mik_identity = address
+            dna.mik_identity = dna.address;
+        }
 
         // Metadata
         if (!read_u32(data, off, dna.registration_height)) return std::nullopt;
@@ -444,6 +459,7 @@ std::optional<DigitalDNA> DigitalDNACollector::get_dna() const {
 
     DigitalDNA dna;
     dna.address = address_;
+    dna.mik_identity = mik_identity_;
     dna.latency = *latency_result_;
     dna.timing = *timing_result_;
     dna.perspective = perspective_result_.value_or(perspective_collector_.get_proof());
@@ -561,6 +577,15 @@ bool DigitalDNARegistry::is_registered(const std::array<uint8_t, 20>& address) c
 std::optional<DigitalDNA> DigitalDNARegistry::get_identity(const std::array<uint8_t, 20>& address) const {
     auto it = std::find_if(identities_.begin(), identities_.end(),
         [&](const DigitalDNA& d) { return d.address == address; });
+    if (it != identities_.end()) {
+        return *it;
+    }
+    return std::nullopt;
+}
+
+std::optional<DigitalDNA> DigitalDNARegistry::get_identity_by_mik(const std::array<uint8_t, 20>& mik) const {
+    auto it = std::find_if(identities_.begin(), identities_.end(),
+        [&](const DigitalDNA& d) { return d.mik_identity == mik; });
     if (it != identities_.end()) {
         return *it;
     }

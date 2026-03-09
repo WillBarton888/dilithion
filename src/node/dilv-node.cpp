@@ -991,6 +991,24 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         std::cerr << "[Mining] WARNING: No MIK identity in wallet" << std::endl;
     }
 
+    // Digital DNA commitment: append 0xDD + 32-byte hash after MIK data (VDF blocks only)
+    if (mikDataIncluded && Dilithion::g_chainParams &&
+        static_cast<int>(nHeight) >= Dilithion::g_chainParams->dnaCommitmentActivationHeight) {
+        auto collector = g_node_context.GetDNACollector();
+        if (collector) {
+            auto dna = collector->get_dna();
+            if (dna) {
+                auto dnaHash = dna->hash();
+                DFMP::BuildDNACommitment(dnaHash, scriptSig);
+                if (verbose) {
+                    std::cout << "  DNA: Commitment included (hash " << std::hex;
+                    for (int i = 0; i < 4; i++) std::cout << (int)dnaHash[i];
+                    std::cout << std::dec << "...)" << std::endl;
+                }
+            }
+        }
+    }
+
     // BUG #257 FIX: Refuse to build template without MIK data for post-assume-valid heights.
     // Race condition: if registration PoW is in progress on another thread, MIK data
     // is skipped (regNonce = UINT64_MAX sentinel). Mining with such a template produces
@@ -3595,6 +3613,42 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         });
 
+        // DNA identity request handler: respond with serialized DNA from registry
+        message_processor.SetDNAIdentReqHandler([&message_processor](int peer_id,
+            const std::array<uint8_t, 20>& mik)
+        {
+            if (!g_node_context.dna_registry) return;
+            auto dna = g_node_context.dna_registry->get_identity_by_mik(mik);
+            if (dna) {
+                auto data = dna->serialize();
+                auto msg = message_processor.CreateDNAIdentResMessage(mik, true, data);
+                if (g_node_context.connman) {
+                    g_node_context.connman->PushMessage(peer_id, msg);
+                }
+            } else {
+                auto msg = message_processor.CreateDNAIdentResMessage(mik, false, {});
+                if (g_node_context.connman) {
+                    g_node_context.connman->PushMessage(peer_id, msg);
+                }
+            }
+        });
+
+        // DNA identity response handler: store received DNA in registry
+        message_processor.SetDNAIdentResHandler([](int peer_id,
+            const std::array<uint8_t, 20>& mik, bool found,
+            const std::vector<uint8_t>& dna_data)
+        {
+            if (!found || dna_data.empty() || !g_node_context.dna_registry) return;
+            auto dna = digital_dna::DigitalDNA::deserialize(dna_data);
+            if (!dna || !dna->is_valid) return;
+            // Verify the MIK matches what we requested
+            if (dna->mik_identity != mik) return;
+            // Only store if we don't already have this identity
+            if (!g_node_context.dna_registry->is_registered(dna->address)) {
+                g_node_context.dna_registry->register_identity(*dna);
+            }
+        });
+
         // PEER DISCOVERY: UPnP prompt - ask user permission for automatic port mapping
         if (!config.upnp_prompted && !config.relay_only) {
             std::cout << std::endl;
@@ -4456,6 +4510,35 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                 }
             }
+
+            // DNA commitment soft integrity check (VDF blocks post-activation)
+            int dnaCommitAct = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->dnaCommitmentActivationHeight : 999999999;
+            if (height >= dnaCommitAct && block.IsVDFBlock() && g_node_context.dna_registry) {
+                // Extract DNA commitment from coinbase
+                CBlockValidator validator;
+                std::vector<CTransactionRef> txs;
+                std::string err;
+                if (validator.DeserializeBlockTransactions(block, txs, err) && !txs.empty()) {
+                    DFMP::CMIKScriptData mikData;
+                    if (DFMP::ParseMIKFromScriptSig(txs[0]->vin[0].scriptSig, mikData)) {
+                        if (mikData.has_dna_hash) {
+                            // Log the commitment (soft check — no rejection yet)
+                            std::array<uint8_t, 20> mikArr{};
+                            std::copy(mikData.identity.data, mikData.identity.data + 20, mikArr.begin());
+                            auto existing = g_node_context.dna_registry->get_identity_by_mik(mikArr);
+                            if (existing) {
+                                auto localHash = existing->hash();
+                                if (localHash != mikData.dna_hash) {
+                                    std::cout << "[DNA] Block " << height
+                                              << ": DNA commitment mismatch for MIK (soft check, not rejected)"
+                                              << std::endl;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         });
 
         // NOW start CConnman (after all interactive wallet prompts are complete)
@@ -4982,6 +5065,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     digital_dna::DigitalDNACollector::Config dna_config;
                     dna_config.testnet = config.testnet;
                     auto new_collector = std::make_shared<digital_dna::DigitalDNACollector>(address, dna_config);
+
+                    // Set MIK identity so DNA is keyed by MIK (persistent across address rotation)
+                    DFMP::Identity mikId = wallet.GetMIKIdentity();
+                    if (!mikId.IsNull()) {
+                        std::array<uint8_t, 20> mikArr{};
+                        std::copy(mikId.data, mikId.data + 20, mikArr.begin());
+                        new_collector->set_mik_identity(mikArr);
+                    }
+
                     new_collector->start_collection();
                     g_node_context.SetDNACollector(std::move(new_collector));
 

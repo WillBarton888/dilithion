@@ -62,7 +62,8 @@ struct DigitalDNA {
     std::optional<BehavioralProfile> behavioral;       // BP: Protocol patterns
 
     // Metadata
-    std::array<uint8_t, 20> address;    // Coinbase address (identity anchor)
+    std::array<uint8_t, 20> address;    // Coinbase address (legacy key)
+    std::array<uint8_t, 20> mik_identity{}; // MIK identity (primary key — persistent across address rotation)
     uint32_t registration_height;       // Block height when registered
     uint64_t registration_time;         // Unix timestamp
 
@@ -150,6 +151,7 @@ public:
     virtual RegisterResult update_identity(const DigitalDNA& dna) = 0;
     virtual bool is_registered(const std::array<uint8_t, 20>& address) const = 0;
     virtual std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const = 0;
+    virtual std::optional<DigitalDNA> get_identity_by_mik(const std::array<uint8_t, 20>& mik) const = 0;
     virtual std::vector<std::pair<DigitalDNA, SimilarityScore>> find_similar(
         const DigitalDNA& dna,
         double threshold = SimilarityScore::SUSPICIOUS_THRESHOLD) const = 0;
@@ -196,6 +198,9 @@ public:
     explicit DigitalDNACollector(const std::array<uint8_t, 20>& address, const Config& config = Config());
     ~DigitalDNACollector();
 
+    // Set MIK identity (call before start_collection or after MIK is generated)
+    void set_mik_identity(const std::array<uint8_t, 20>& mik) { mik_identity_ = mik; }
+
     // Start/stop collection
     void start_collection();
     void stop_collection();
@@ -227,6 +232,7 @@ public:
 
 private:
     std::array<uint8_t, 20> address_;
+    std::array<uint8_t, 20> mik_identity_{};
     Config config_;
     bool collecting_ = false;
 
@@ -269,6 +275,7 @@ public:
     RegisterResult update_identity(const DigitalDNA& dna) override;
     bool is_registered(const std::array<uint8_t, 20>& address) const override;
     std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const override;
+    std::optional<DigitalDNA> get_identity_by_mik(const std::array<uint8_t, 20>& mik) const override;
     std::vector<std::pair<DigitalDNA, SimilarityScore>> find_similar(
         const DigitalDNA& dna,
         double threshold = SimilarityScore::SUSPICIOUS_THRESHOLD

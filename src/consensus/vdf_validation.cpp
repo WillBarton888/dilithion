@@ -244,3 +244,73 @@ bool CheckVDFCooldown(
 
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// CheckDNACommitment
+// ---------------------------------------------------------------------------
+
+bool CheckDNACommitment(
+    const CBlock& block,
+    int height,
+    std::string& error)
+{
+    // Pre-activation: always pass
+    int activationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dnaCommitmentActivationHeight : 999999999;
+    if (height < activationHeight) {
+        return true;
+    }
+
+    // Only applies to VDF blocks
+    if (!block.IsVDFBlock()) {
+        return true;
+    }
+
+    // Deserialize coinbase to get scriptSig
+    if (block.vtx.empty()) {
+        error = "CheckDNACommitment: empty vtx";
+        return false;
+    }
+
+    const uint8_t* data = block.vtx.data();
+    size_t dataSize = block.vtx.size();
+
+    // Parse tx count varint
+    size_t txCountSize = 0;
+    if (data[0] < 253) {
+        txCountSize = 1;
+    } else if (data[0] == 253 && dataSize >= 3) {
+        txCountSize = 3;
+    } else {
+        error = "CheckDNACommitment: unsupported tx count encoding";
+        return false;
+    }
+
+    // Deserialize coinbase
+    CTransaction coinbase;
+    size_t consumed = 0;
+    if (!coinbase.Deserialize(data + txCountSize, dataSize - txCountSize, nullptr, &consumed)) {
+        error = "CheckDNACommitment: failed to deserialize coinbase";
+        return false;
+    }
+
+    if (coinbase.vin.empty()) {
+        error = "CheckDNACommitment: coinbase has no inputs";
+        return false;
+    }
+
+    // Parse MIK data from scriptSig — DNA commitment is parsed automatically
+    DFMP::CMIKScriptData mikData;
+    if (!DFMP::ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData)) {
+        error = "CheckDNACommitment: failed to parse MIK from coinbase";
+        return false;
+    }
+
+    // Post-activation: DNA commitment must be present
+    if (!mikData.has_dna_hash) {
+        error = "CheckDNACommitment: missing DNA commitment (0xDD marker) in VDF block at height " + std::to_string(height);
+        return false;
+    }
+
+    return true;
+}

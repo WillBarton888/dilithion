@@ -332,6 +332,8 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         {"dnatsync",   {25, 25}},                      // ts_us(8) + wall_ms(8) + nonce(8) + is_response(1)
         {"dnabwtest",  {20, 1048596}},                 // nonce(8) + size(4) + send_wall_ms(8) + payload(0..1MB)
         {"dnabwres",   {24, 24}},                      // nonce(8) + upload(8) + download(8)
+        {"dnaireq",    {20, 20}},                      // mik_identity(20)
+        {"dnaires",    {21, 4117}},                    // mik(20) + found(1) [+ data_len(2) + data(max ~4KB)]
     };
 
     auto it = size_limits.find(command);
@@ -405,6 +407,10 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         return ProcessDNABWTestMessage(peer_id, stream);
     } else if (command == "dnabwres") {
         return ProcessDNABWResultMessage(peer_id, stream);
+    } else if (command == "dnaireq") {
+        return ProcessDNAIdentReqMessage(peer_id, stream);
+    } else if (command == "dnaires") {
+        return ProcessDNAIdentResMessage(peer_id, stream);
     }
 
     // Unknown message type
@@ -2172,6 +2178,7 @@ static const int64_t DNA_PING_COOLDOWN_SEC = 10;    // 1 dnalping per peer per 1
 static const int64_t DNA_TSYNC_COOLDOWN_SEC = 30;   // 1 dnatsync per peer per 30s
 static const int64_t DNA_BWTEST_COOLDOWN_SEC = 600;  // 1 dnabwtest per peer per 10min
 static const int DNA_BWTEST_GLOBAL_MAX = 3;           // Max 3 concurrent BW tests globally
+static const int64_t DNA_IDENT_COOLDOWN_SEC = 30;    // 1 dnaireq per peer per 30s
 static const int64_t DNA_NONCE_TIMEOUT_SEC = 60;      // Nonces expire after 60s
 
 void CNetMessageProcessor::RegisterDNANonce(uint64_t nonce, int peer_id, uint64_t send_timestamp_us) {
@@ -2448,6 +2455,101 @@ CNetMessage CNetMessageProcessor::CreateDNABWResultMessage(uint64_t nonce,
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();
     return CNetMessage("dnabwres", stream.GetData());
+}
+
+// ---------------------------------------------------------------------------
+// DNA Identity Request/Response (Phase 3b)
+// ---------------------------------------------------------------------------
+
+bool CNetMessageProcessor::ProcessDNAIdentReqMessage(int peer_id, CDataStream& stream) {
+    try {
+        if (stream.size() < 20) {
+            peer_manager.Misbehaving(peer_id, 10);
+            return false;
+        }
+
+        // Rate limit: 1 per peer per 30s
+        {
+            std::lock_guard<std::mutex> lock(cs_dna_rate_limit);
+            auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            auto& last = peer_dna_ident_timestamps[peer_id];
+            if (now - last < DNA_IDENT_COOLDOWN_SEC) {
+                peer_manager.Misbehaving(peer_id, 5);
+                return false;
+            }
+            last = now;
+        }
+
+        std::array<uint8_t, 20> mik{};
+        stream.read(mik.data(), 20);
+
+        if (on_dna_ident_req) {
+            on_dna_ident_req(peer_id, mik);
+        }
+        return true;
+    } catch (...) {
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& stream) {
+    try {
+        if (stream.size() < 21) {
+            peer_manager.Misbehaving(peer_id, 10);
+            return false;
+        }
+
+        std::array<uint8_t, 20> mik{};
+        stream.read(mik.data(), 20);
+
+        uint8_t found = stream.ReadUint8();
+
+        std::vector<uint8_t> dna_data;
+        if (found == 0x01 && stream.size() >= 2) {
+            uint16_t data_len = stream.ReadUint16();
+            if (data_len > 4096 || stream.size() < data_len) {
+                peer_manager.Misbehaving(peer_id, 10);
+                return false;
+            }
+            dna_data.resize(data_len);
+            stream.read(dna_data.data(), data_len);
+        }
+
+        if (on_dna_ident_res) {
+            on_dna_ident_res(peer_id, mik, found == 0x01, dna_data);
+        }
+        return true;
+    } catch (...) {
+        peer_manager.Misbehaving(peer_id, 10);
+        return false;
+    }
+}
+
+CNetMessage CNetMessageProcessor::CreateDNAIdentReqMessage(const std::array<uint8_t, 20>& mik) {
+    CDataStream stream;
+    stream.write(mik.data(), 20);
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+    return CNetMessage("dnaireq", stream.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateDNAIdentResMessage(
+    const std::array<uint8_t, 20>& mik, bool found,
+    const std::vector<uint8_t>& dna_data)
+{
+    CDataStream stream;
+    stream.write(mik.data(), 20);
+    stream.WriteUint8(found ? 0x01 : 0x00);
+    if (found && !dna_data.empty()) {
+        uint16_t data_len = static_cast<uint16_t>(std::min(dna_data.size(), size_t(4096)));
+        stream.WriteUint16(data_len);
+        stream.write(dna_data.data(), data_len);
+    }
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + stream.size();
+    return CNetMessage("dnaires", stream.GetData());
 }
 
 // Serialization helpers

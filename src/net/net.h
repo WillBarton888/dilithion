@@ -55,6 +55,10 @@ public:
         uint64_t nonce, uint64_t send_wall_ms)>;
     using DNABWResultHandler = std::function<void(int peer_id, uint64_t nonce,
         double upload_mbps, double download_mbps)>;
+    // DNA identity propagation: request/response for full DNA data
+    using DNAIdentReqHandler = std::function<void(int peer_id, const std::array<uint8_t, 20>& mik)>;
+    using DNAIdentResHandler = std::function<void(int peer_id, const std::array<uint8_t, 20>& mik,
+        bool found, const std::vector<uint8_t>& dna_data)>;
 
     CNetMessageProcessor(CPeerManager& peer_mgr);
 
@@ -87,6 +91,10 @@ public:
                                           uint64_t nonce, bool is_response);
     CNetMessage CreateDNABWTestMessage(uint64_t nonce, uint32_t payload_size);
     CNetMessage CreateDNABWResultMessage(uint64_t nonce, double upload_mbps, double download_mbps);
+    // DNA identity propagation messages
+    CNetMessage CreateDNAIdentReqMessage(const std::array<uint8_t, 20>& mik);
+    CNetMessage CreateDNAIdentResMessage(const std::array<uint8_t, 20>& mik, bool found,
+                                          const std::vector<uint8_t>& dna_data);
 
     // Register handlers
     void SetVersionHandler(VersionHandler handler) { on_version = handler; }
@@ -112,6 +120,8 @@ public:
     void SetDNATimeSyncHandler(DNATimeSyncHandler handler) { on_dna_time_sync = handler; }
     void SetDNABWTestHandler(DNABWTestHandler handler) { on_dna_bw_test = handler; }
     void SetDNABWResultHandler(DNABWResultHandler handler) { on_dna_bw_result = handler; }
+    void SetDNAIdentReqHandler(DNAIdentReqHandler handler) { on_dna_ident_req = handler; }
+    void SetDNAIdentResHandler(DNAIdentResHandler handler) { on_dna_ident_res = handler; }
     // DNA nonce management (public for initiator logic in node)
     void RegisterDNANonce(uint64_t nonce, int peer_id, uint64_t send_timestamp_us = 0);
     bool ValidateDNANonce(uint64_t nonce, int peer_id);
@@ -132,6 +142,7 @@ private:
     std::map<int, int64_t> peer_dna_ping_timestamps;   // peer_id -> last dnalping time
     std::map<int, int64_t> peer_dna_tsync_timestamps;  // peer_id -> last dnatsync time
     std::map<int, int64_t> peer_dna_bwtest_timestamps; // peer_id -> last dnabwtest time
+    std::map<int, int64_t> peer_dna_ident_timestamps;  // peer_id -> last dnaireq time
     std::atomic<int> dna_bwtest_global_count_{0};       // Global concurrent BW tests
     mutable std::mutex cs_dna_rate_limit;
     // Nonce tracking: nonce -> {peer_id, send_time_sec, send_timestamp_us}
@@ -167,6 +178,8 @@ private:
     DNATimeSyncHandler on_dna_time_sync;
     DNABWTestHandler on_dna_bw_test;
     DNABWResultHandler on_dna_bw_result;
+    DNAIdentReqHandler on_dna_ident_req;
+    DNAIdentResHandler on_dna_ident_res;
 
     // Process specific message types
     bool ProcessVersionMessage(int peer_id, CDataStream& stream);
@@ -195,6 +208,8 @@ private:
     bool ProcessDNATimeSyncMessage(int peer_id, CDataStream& stream);
     bool ProcessDNABWTestMessage(int peer_id, CDataStream& stream);
     bool ProcessDNABWResultMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNAIdentReqMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNAIdentResMessage(int peer_id, CDataStream& stream);
 
     // Serialization helpers
     std::vector<uint8_t> SerializeVersionMessage(const NetProtocol::CVersionMessage& msg);

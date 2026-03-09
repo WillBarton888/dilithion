@@ -70,6 +70,8 @@ enum MessageType {
     MSG_DNA_TIME_SYNC,      // Clock drift measurement exchange
     MSG_DNA_BW_TEST,        // Bandwidth measurement payload
     MSG_DNA_BW_RESULT,      // Bandwidth measurement result (signed)
+    MSG_DNA_IDENT_REQ,      // Request DNA identity by MIK (20 bytes)
+    MSG_DNA_IDENT_RES,      // Response with serialized DNA identity
 };
 
 /** Inventory vector types */
@@ -314,6 +316,8 @@ inline const char* GetMessageCommand(MessageType type) {
         case MSG_DNA_TIME_SYNC: return "dnatsync";
         case MSG_DNA_BW_TEST: return "dnabwtest";
         case MSG_DNA_BW_RESULT: return "dnabwres";
+        case MSG_DNA_IDENT_REQ: return "dnaireq";
+        case MSG_DNA_IDENT_RES: return "dnaires";
         default: return "unknown";
     }
 }

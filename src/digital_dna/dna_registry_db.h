@@ -55,6 +55,7 @@ public:
     RegisterResult update_identity(const DigitalDNA& dna) override;
     bool is_registered(const std::array<uint8_t, 20>& address) const override;
     std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const override;
+    std::optional<DigitalDNA> get_identity_by_mik(const std::array<uint8_t, 20>& mik) const override;
     std::vector<std::pair<DigitalDNA, SimilarityScore>> find_similar(
         const DigitalDNA& dna,
         double threshold = SimilarityScore::SUSPICIOUS_THRESHOLD
@@ -84,14 +85,18 @@ private:
     mutable std::mutex mutex_;
     std::string path_;
 
-    // In-memory cache for fast similarity lookups
+    // In-memory cache for fast similarity lookups (keyed by address)
     mutable std::map<std::array<uint8_t, 20>, DigitalDNA> cache_;
+    // MIK-to-address index for fast MIK lookups
+    mutable std::map<std::array<uint8_t, 20>, std::array<uint8_t, 20>> mik_to_address_;
     static constexpr size_t MAX_CACHE_SIZE = 10000;
 
-    static const std::string KEY_PREFIX;  // "dna:"
+    static const std::string KEY_PREFIX;      // "dna:"
+    static const std::string MIK_KEY_PREFIX;  // "dna_mik:"
 
     // Key helpers
     std::string make_key(const std::array<uint8_t, 20>& address) const;
+    std::string make_mik_key(const std::array<uint8_t, 20>& mik) const;
     static std::string address_to_hex(const std::array<uint8_t, 20>& addr);
 
     // Load all identities into cache on startup

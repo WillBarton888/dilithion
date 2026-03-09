@@ -15,6 +15,7 @@
 #include "digital_dna.h"
 #include "dna_registry_interface.h"
 #include "dna_registry_db.h"
+#include <dfmp/mik.h>
 
 #include <iostream>
 #include <iomanip>
@@ -125,7 +126,7 @@ static void test_v2_serialize_roundtrip() {
     CHECK(data.size() >= 5, "Serialized data has minimum size");
     CHECK(data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x41 && data[3] == 0x32,
           "Starts with DNA2 magic");
-    CHECK(data[4] == 0x02, "Version byte is 0x02");
+    CHECK(data[4] == 0x03, "Version byte is 0x03");
 
     auto restored = DigitalDNA::deserialize(data);
     CHECK(restored.has_value(), "Deserialize succeeds");
@@ -422,6 +423,268 @@ void test_perspective_cached_roundtrip() {
     CHECK(turnover == restored->perspective.cached_turnover_rate, "peer_turnover_rate uses cached fallback");
 }
 
+// ============ Test 10: v3 serialize with MIK identity ============
+static void test_v3_mik_serialize_roundtrip() {
+    std::cout << "\n=== Test 10: v3 MIK identity serialize roundtrip ===\n";
+
+    auto dna = make_core_dna(0xDD, 55.0, 600000.0, 2000);
+    // Set a distinct MIK identity (different from address)
+    dna.mik_identity.fill(0xEE);
+
+    auto data = dna.serialize();
+
+    CHECK(data.size() >= 5, "Serialized data has minimum size");
+    CHECK(data[0] == 'D' && data[1] == 'N' && data[2] == 'A' && data[3] == '2',
+          "Starts with DNA2 magic");
+    CHECK(data[4] == 0x03, "Version byte is 0x03 (v3)");
+
+    auto restored = DigitalDNA::deserialize(data);
+    CHECK(restored.has_value(), "Deserialize succeeds");
+    CHECK(restored->address[0] == 0xDD, "Address preserved");
+    CHECK(restored->mik_identity[0] == 0xEE, "MIK identity preserved");
+    CHECK(restored->mik_identity != restored->address, "MIK != address (distinct)");
+    CHECK(restored->registration_height == 2000, "Height matches");
+    CHECK(std::abs(restored->timing.iterations_per_second - 600000.0) < 0.001, "IPS matches");
+}
+
+// ============ Test 11: v2 backward compat sets mik_identity = address ============
+static void test_v2_backward_compat_mik() {
+    std::cout << "\n=== Test 11: v2 backward compat (mik = address) ===\n";
+
+    // Build a v2 blob manually by using old format
+    // Easiest: create a DNA, serialize as v3, then manually patch version byte to 0x02
+    // and remove the 20-byte MIK field
+    // Actually, let's just verify that v2 data still deserializes correctly
+    // by checking the v1 deserializer already handles this.
+    // The v2 path in deserialize now checks version == 0x02 and sets mik=address.
+    // Let's build a v2 blob manually:
+
+    std::vector<uint8_t> v2_data;
+    // Magic
+    v2_data.push_back(0x44); v2_data.push_back(0x4E);
+    v2_data.push_back(0x41); v2_data.push_back(0x32);
+    // Version = 0x02
+    v2_data.push_back(0x02);
+    // Address (20 bytes of 0xAA)
+    for (int i = 0; i < 20; i++) v2_data.push_back(0xAA);
+    // Registration height = 500
+    v2_data.push_back(0xF4); v2_data.push_back(0x01); v2_data.push_back(0x00); v2_data.push_back(0x00);
+    // Registration time = 1700000500
+    uint64_t t = 1700000500;
+    for (int i = 0; i < 8; i++) v2_data.push_back(static_cast<uint8_t>(t >> (i * 8)));
+    // Flags = 0 (no optional dims)
+    v2_data.push_back(0x00);
+    // Seed count = 2
+    v2_data.push_back(0x02); v2_data.push_back(0x00); v2_data.push_back(0x00); v2_data.push_back(0x00);
+    // 2 seed medians
+    double m1 = 50.0, m2 = 60.0;
+    uint64_t bits;
+    std::memcpy(&bits, &m1, 8); for (int i = 0; i < 8; i++) v2_data.push_back(static_cast<uint8_t>(bits >> (i * 8)));
+    std::memcpy(&bits, &m2, 8); for (int i = 0; i < 8; i++) v2_data.push_back(static_cast<uint8_t>(bits >> (i * 8)));
+    // Timing IPS
+    double ips = 450000.0;
+    std::memcpy(&bits, &ips, 8); for (int i = 0; i < 8; i++) v2_data.push_back(static_cast<uint8_t>(bits >> (i * 8)));
+    // Perspective: peer_count(4) + turnover(8)
+    v2_data.push_back(5); v2_data.push_back(0); v2_data.push_back(0); v2_data.push_back(0);
+    double turn = 0.5;
+    std::memcpy(&bits, &turn, 8); for (int i = 0; i < 8; i++) v2_data.push_back(static_cast<uint8_t>(bits >> (i * 8)));
+
+    auto restored = DigitalDNA::deserialize(v2_data);
+    CHECK(restored.has_value(), "v2 deserialize succeeds");
+    CHECK(restored->address[0] == 0xAA, "v2 address preserved");
+    CHECK(restored->mik_identity == restored->address, "v2 backward compat: mik_identity == address");
+    CHECK(restored->registration_height == 500, "v2 height preserved");
+}
+
+// ============ Test 12: MIK-based registry lookup ============
+static void test_mik_registry_lookup() {
+    std::cout << "\n=== Test 12: MIK-based registry lookup ===\n";
+
+    DigitalDNARegistry registry;
+
+    auto dna = make_core_dna(0x01, 40.0, 500000.0, 100);
+    dna.mik_identity.fill(0xBB);  // Distinct MIK
+
+    auto result = registry.register_identity(dna);
+    CHECK(result == IDNARegistry::RegisterResult::SUCCESS, "Register succeeds");
+
+    // Lookup by address (legacy)
+    auto by_addr = registry.get_identity(dna.address);
+    CHECK(by_addr.has_value(), "get_identity by address works");
+    CHECK(by_addr->mik_identity[0] == 0xBB, "MIK preserved in address lookup");
+
+    // Lookup by MIK (new primary key)
+    std::array<uint8_t, 20> mik{};
+    mik.fill(0xBB);
+    auto by_mik = registry.get_identity_by_mik(mik);
+    CHECK(by_mik.has_value(), "get_identity_by_mik works");
+    CHECK(by_mik->address[0] == 0x01, "Address preserved in MIK lookup");
+
+    // Lookup by wrong MIK
+    std::array<uint8_t, 20> wrong_mik{};
+    wrong_mik.fill(0xCC);
+    auto by_wrong = registry.get_identity_by_mik(wrong_mik);
+    CHECK(!by_wrong.has_value(), "Wrong MIK returns nullopt");
+}
+
+// ============ Test 13: MIK-based DB registry lookup ============
+static void test_mik_registry_db_lookup() {
+    std::cout << "\n=== Test 13: MIK-based DB registry lookup ===\n";
+
+    std::string db_path = "test_dna_registry_mik";
+    std::filesystem::remove_all(db_path);
+
+    {
+        DNARegistryDB db;
+        CHECK(db.Open(db_path), "Open succeeds");
+
+        auto dna = make_core_dna(0x22, 60.0, 700000.0, 300);
+        dna.mik_identity.fill(0x33);
+
+        auto result = db.register_identity(dna);
+        CHECK(result == IDNARegistry::RegisterResult::SUCCESS, "DB register succeeds");
+
+        // Lookup by MIK
+        std::array<uint8_t, 20> mik{};
+        mik.fill(0x33);
+        auto by_mik = db.get_identity_by_mik(mik);
+        CHECK(by_mik.has_value(), "DB get_identity_by_mik works");
+        CHECK(by_mik->address[0] == 0x22, "DB MIK lookup returns correct address");
+
+        db.Close();
+    }
+
+    // Reopen and verify MIK index is rebuilt from cache
+    {
+        DNARegistryDB db;
+        CHECK(db.Open(db_path), "DB reopen succeeds");
+
+        std::array<uint8_t, 20> mik{};
+        mik.fill(0x33);
+        auto by_mik = db.get_identity_by_mik(mik);
+        CHECK(by_mik.has_value(), "DB MIK lookup survives reopen");
+
+        db.Close();
+    }
+
+    std::filesystem::remove_all(db_path);
+}
+
+// ============ Test 14: DNA hash includes MIK identity ============
+static void test_hash_includes_mik() {
+    std::cout << "\n=== Test 14: DNA hash includes MIK identity ===\n";
+
+    auto dna1 = make_core_dna(0x01, 40.0, 500000.0, 100);
+    dna1.mik_identity.fill(0xAA);
+
+    auto dna2 = make_core_dna(0x01, 40.0, 500000.0, 100);
+    dna2.mik_identity.fill(0xBB);  // Different MIK, same address
+
+    auto hash1 = dna1.hash();
+    auto hash2 = dna2.hash();
+    CHECK(hash1 != hash2, "Different MIK produces different hash");
+
+    auto dna3 = make_core_dna(0x01, 40.0, 500000.0, 100);
+    dna3.mik_identity.fill(0xAA);  // Same as dna1
+    auto hash3 = dna3.hash();
+    CHECK(hash1 == hash3, "Same MIK produces same hash");
+}
+
+// ============ Test 15: DNA commitment build & parse roundtrip ============
+static void test_dna_commitment_roundtrip() {
+    std::cout << "\n=== Test 15: DNA commitment build & parse roundtrip ===\n";
+
+    // Create a DNA and compute its hash
+    auto dna = make_core_dna(0x42, 35.0, 600000.0, 200);
+    dna.mik_identity.fill(0xCC);
+    auto dnaHash = dna.hash();
+
+    // Build commitment bytes
+    std::vector<uint8_t> commitData;
+    // Simulate: MIK marker first (0xDF), then reference data, then DNA commitment
+    // For this test, just build the DNA commitment part
+    DFMP::BuildDNACommitment(dnaHash, commitData);
+
+    // Verify format: 0xDD + 32 bytes = 33 bytes total
+    CHECK(commitData.size() == 33, "Commitment is 33 bytes (marker + hash)");
+    CHECK(commitData[0] == 0xDD, "First byte is DNA_COMMITMENT_MARKER (0xDD)");
+
+    // Verify hash matches
+    std::array<uint8_t, 32> extractedHash{};
+    std::copy(commitData.begin() + 1, commitData.end(), extractedHash.begin());
+    CHECK(extractedHash == dnaHash, "Extracted hash matches original DNA hash");
+}
+
+// ============ Test 16: DNA commitment parsed from full scriptSig ============
+static void test_dna_commitment_in_scriptsig() {
+    std::cout << "\n=== Test 16: DNA commitment parsed from full scriptSig ===\n";
+
+    // Build a minimal scriptSig with MIK reference + DNA commitment
+    // Format: [height bytes] [msg] [MIK_MARKER] [MIK_TYPE_REFERENCE] [identity:20] [sig:3309] [0xDD] [hash:32]
+
+    std::vector<uint8_t> scriptSig;
+
+    // Height: 1 byte (height=100)
+    scriptSig.push_back(0x01);  // push 1 byte
+    scriptSig.push_back(100);
+
+    // Message
+    std::string msg = "Test block";
+    scriptSig.insert(scriptSig.end(), msg.begin(), msg.end());
+
+    // MIK reference
+    DFMP::Identity mikId;
+    std::memset(mikId.data, 0xEE, 20);
+
+    // Build a fake signature (3309 bytes of 0xAA)
+    std::vector<uint8_t> fakeSig(DFMP::MIK_SIGNATURE_SIZE, 0xAA);
+
+    std::vector<uint8_t> mikData;
+    DFMP::BuildMIKScriptSigReference(mikId, fakeSig, mikData);
+    scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
+
+    // DNA commitment
+    auto dna = make_core_dna(0x42, 35.0, 600000.0, 200);
+    dna.mik_identity.fill(0xEE);  // Same as MIK identity
+    auto dnaHash = dna.hash();
+    DFMP::BuildDNACommitment(dnaHash, scriptSig);
+
+    // Parse it back
+    DFMP::CMIKScriptData parsed;
+    bool ok = DFMP::ParseMIKFromScriptSig(scriptSig, parsed);
+    CHECK(ok, "ParseMIKFromScriptSig succeeds");
+    CHECK(parsed.has_dna_hash, "DNA hash flag is set");
+    CHECK(parsed.dna_hash == dnaHash, "Parsed DNA hash matches original");
+
+    // Verify MIK identity was also parsed correctly
+    CHECK(std::memcmp(parsed.identity.data, mikId.data, 20) == 0, "MIK identity parsed correctly");
+}
+
+// ============ Test 17: DNA commitment absent pre-activation ============
+static void test_dna_commitment_absent() {
+    std::cout << "\n=== Test 17: DNA commitment absent (pre-activation) ===\n";
+
+    // Build scriptSig with MIK but NO DNA commitment
+    std::vector<uint8_t> scriptSig;
+    scriptSig.push_back(0x01);
+    scriptSig.push_back(50);
+    std::string msg = "No DNA";
+    scriptSig.insert(scriptSig.end(), msg.begin(), msg.end());
+
+    DFMP::Identity mikId;
+    std::memset(mikId.data, 0xDD, 20);  // Intentionally 0xDD to test it's not confused with marker
+    std::vector<uint8_t> fakeSig(DFMP::MIK_SIGNATURE_SIZE, 0xBB);
+    std::vector<uint8_t> mikData;
+    DFMP::BuildMIKScriptSigReference(mikId, fakeSig, mikData);
+    scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
+
+    // Parse — should succeed but has_dna_hash should be false
+    DFMP::CMIKScriptData parsed;
+    bool ok = DFMP::ParseMIKFromScriptSig(scriptSig, parsed);
+    CHECK(ok, "ParseMIKFromScriptSig succeeds without DNA commitment");
+    CHECK(!parsed.has_dna_hash, "has_dna_hash is false when no commitment present");
+}
+
 int main() {
     std::cout << "Digital DNA Serialization & Persistence Tests\n";
     std::cout << "=============================================\n";
@@ -435,6 +698,14 @@ int main() {
     test_registry_advisory_sybil();
     test_registry_update_identity();
     test_perspective_cached_roundtrip();
+    test_v3_mik_serialize_roundtrip();
+    test_v2_backward_compat_mik();
+    test_mik_registry_lookup();
+    test_mik_registry_db_lookup();
+    test_hash_includes_mik();
+    test_dna_commitment_roundtrip();
+    test_dna_commitment_in_scriptsig();
+    test_dna_commitment_absent();
 
     std::cout << "\n=============================================\n";
     std::cout << "Results: " << tests_passed << " passed, " << tests_failed << " failed\n";

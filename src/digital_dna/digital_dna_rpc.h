@@ -16,6 +16,7 @@
  *   getlatencyfingerprint    - Get just the latency component
  *   gettimingsignature       - Get just the timing component
  *   getperspectiveproof      - Get just the perspective component
+ *   dumpdigitaldna           - Dump all DNA identities with full dimension data (calibration)
  */
 
 #ifndef DILITHION_DIGITAL_DNA_RPC_H
@@ -81,10 +82,13 @@ private:
     JsonObject cmd_getlatencyfingerprint(const JsonObject& params);
     JsonObject cmd_gettimingsignature(const JsonObject& params);
     JsonObject cmd_getperspectiveproof(const JsonObject& params);
+    JsonObject cmd_dumpdigitaldna(const JsonObject& params);
 
     // Helpers
     std::string address_to_hex(const std::array<uint8_t, 20>& addr) const;
     std::array<uint8_t, 20> hex_to_address(const std::string& hex) const;
+    // Resolve identity: try MIK lookup first, then address fallback
+    std::optional<DigitalDNA> resolve_identity(const std::string& hex_key) const;
     JsonObject dna_to_json(const DigitalDNA& dna) const;
     JsonObject score_to_json(const SimilarityScore& score) const;
     JsonObject error(int code, const std::string& message) const;
