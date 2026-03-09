@@ -718,6 +718,12 @@ std::vector<DigitalDNA> DigitalDNARegistry::get_all() const {
     return identities_;
 }
 
+std::vector<std::pair<uint64_t, DigitalDNA>> DigitalDNARegistry::get_dna_history(
+    const std::array<uint8_t, 20>& /*mik*/) const {
+    // In-memory registry doesn't track history
+    return {};
+}
+
 bool DigitalDNARegistry::save(const std::string& path) const {
     std::ofstream ofs(path, std::ios::binary);
     if (!ofs) return false;

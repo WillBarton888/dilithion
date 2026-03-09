@@ -17,6 +17,7 @@
  *   gettimingsignature       - Get just the timing component
  *   getperspectiveproof      - Get just the perspective component
  *   dumpdigitaldna           - Dump all DNA identities with full dimension data (calibration)
+ *   getdigitaldnahistory     - Get DNA change history for a MIK identity
  */
 
 #ifndef DILITHION_DIGITAL_DNA_RPC_H
@@ -83,6 +84,7 @@ private:
     JsonObject cmd_gettimingsignature(const JsonObject& params);
     JsonObject cmd_getperspectiveproof(const JsonObject& params);
     JsonObject cmd_dumpdigitaldna(const JsonObject& params);
+    JsonObject cmd_getdigitaldnahistory(const JsonObject& params);
 
     // Helpers
     std::string address_to_hex(const std::array<uint8_t, 20>& addr) const;

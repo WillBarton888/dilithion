@@ -63,6 +63,8 @@ public:
     SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const override;
     std::vector<DigitalDNA> get_all() const override;
     size_t count() const override;
+    std::vector<std::pair<uint64_t, DigitalDNA>> get_dna_history(
+        const std::array<uint8_t, 20>& mik) const override;
 
     // --- Additional methods (not in interface) ---
 
@@ -93,10 +95,12 @@ private:
 
     static const std::string KEY_PREFIX;      // "dna:"
     static const std::string MIK_KEY_PREFIX;  // "dna_mik:"
+    static const std::string HIST_KEY_PREFIX; // "dna_hist:"
 
     // Key helpers
     std::string make_key(const std::array<uint8_t, 20>& address) const;
     std::string make_mik_key(const std::array<uint8_t, 20>& mik) const;
+    std::string make_hist_key(const std::array<uint8_t, 20>& mik, uint64_t timestamp) const;
     static std::string address_to_hex(const std::array<uint8_t, 20>& addr);
 
     // Load all identities into cache on startup

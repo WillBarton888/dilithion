@@ -35,6 +35,7 @@ void DigitalDNARpc::register_commands() {
     handlers_["gettimingsignature"] = [this](const JsonObject& p) { return cmd_gettimingsignature(p); };
     handlers_["getperspectiveproof"] = [this](const JsonObject& p) { return cmd_getperspectiveproof(p); };
     handlers_["dumpdigitaldna"] = [this](const JsonObject& p) { return cmd_dumpdigitaldna(p); };
+    handlers_["getdigitaldnahistory"] = [this](const JsonObject& p) { return cmd_getdigitaldnahistory(p); };
 }
 
 RpcHandler DigitalDNARpc::get_handler(const std::string& method) const {
@@ -844,6 +845,75 @@ JsonObject DigitalDNARpc::cmd_dumpdigitaldna(const JsonObject& params) {
     return result;
 }
 
+JsonObject DigitalDNARpc::cmd_getdigitaldnahistory(const JsonObject& params) {
+    auto it = params.find("mik");
+    if (it == params.end()) {
+        return error(-32602, "Missing required parameter: mik (40-character hex MIK identity)");
+    }
+
+    auto mik = hex_to_address(it->second);
+    auto history = registry_.get_dna_history(mik);
+
+    // Also get current DNA for context
+    auto current = registry_.get_identity_by_mik(mik);
+
+    JsonObject result;
+    result["mik"] = it->second;
+    result["change_count"] = std::to_string(history.size());
+    result["has_current"] = current.has_value() ? "true" : "false";
+
+    if (current) {
+        auto hash = current->hash();
+        std::ostringstream hoss;
+        for (auto b : hash) hoss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+        result["current_hash"] = hoss.str();
+        result["current_registration_height"] = std::to_string(current->registration_height);
+    }
+
+    std::ostringstream oss;
+    oss << std::fixed;
+    oss << "[";
+    for (size_t i = 0; i < history.size(); i++) {
+        const auto& [timestamp, dna] = history[i];
+        auto hash = dna.hash();
+
+        oss << "{";
+        oss << "\"archived_at\": " << timestamp << ", ";
+        oss << "\"hash\": \"";
+        for (auto b : hash) oss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+        oss << std::dec << "\", ";
+        oss << "\"registration_height\": " << dna.registration_height << ", ";
+        oss << std::setprecision(1);
+        oss << "\"iterations_per_sec\": " << dna.timing.iterations_per_second << ", ";
+
+        // Latency summary (medians only)
+        oss << "\"latency_medians\": [";
+        for (size_t j = 0; j < dna.latency.seed_stats.size(); j++) {
+            oss << std::setprecision(1) << dna.latency.seed_stats[j].median_ms;
+            if (j < dna.latency.seed_stats.size() - 1) oss << ", ";
+        }
+        oss << "], ";
+
+        // Key dimension changes (for quick pattern detection)
+        if (dna.clock_drift) {
+            oss << std::setprecision(4);
+            oss << "\"drift_rate_ppm\": " << dna.clock_drift->drift_rate_ppm << ", ";
+        }
+        if (dna.memory) {
+            oss << std::setprecision(0);
+            oss << "\"estimated_l3_kb\": " << dna.memory->estimated_l3_kb << ", ";
+        }
+
+        oss << "\"unique_peers\": " << dna.perspective.total_unique_peers();
+        oss << "}";
+        if (i < history.size() - 1) oss << ", ";
+    }
+    oss << "]";
+    result["history"] = oss.str();
+
+    return result;
+}
+
 // ============ Help Documentation ============
 
 std::vector<RpcCommandInfo> get_rpc_help() {
@@ -938,6 +1008,13 @@ std::vector<RpcCommandInfo> get_rpc_help() {
             "None",
             "Array of all registered identities with all 8 dimension details",
             "dumpdigitaldna"
+        },
+        {
+            "getdigitaldnahistory",
+            "Get DNA change history for a MIK identity (detect hardware/location changes)",
+            "mik (string) - 40-character hex MIK identity",
+            "Change count, current hash, and array of archived DNA snapshots",
+            "getdigitaldnahistory {\"mik\": \"0123456789abcdef0123456789abcdef01234567\"}"
         }
     };
 }

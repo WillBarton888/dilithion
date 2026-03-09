@@ -158,6 +158,12 @@ public:
     virtual SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const = 0;
     virtual std::vector<DigitalDNA> get_all() const = 0;
     virtual size_t count() const = 0;
+
+    /** Get DNA change history for a MIK identity (oldest first).
+     *  Each entry is a previous DNA snapshot archived when update_identity() was called.
+     *  Single change = likely new hardware/location. Multiple regular changes = suspicious. */
+    virtual std::vector<std::pair<uint64_t, DigitalDNA>> get_dna_history(
+        const std::array<uint8_t, 20>& mik) const = 0;
 };
 
 /**
@@ -283,6 +289,8 @@ public:
     SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const override;
     std::vector<DigitalDNA> get_all() const override;
     size_t count() const override { return identities_.size(); }
+    std::vector<std::pair<uint64_t, DigitalDNA>> get_dna_history(
+        const std::array<uint8_t, 20>& mik) const override;
 
     // Persistence (flat file — for tests / backward compat)
     bool save(const std::string& path) const;

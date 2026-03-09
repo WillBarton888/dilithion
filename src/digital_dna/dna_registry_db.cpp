@@ -3,6 +3,8 @@
 #include <leveldb/write_batch.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cinttypes>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -12,6 +14,7 @@ namespace digital_dna {
 
 const std::string DNARegistryDB::KEY_PREFIX = "dna:";
 const std::string DNARegistryDB::MIK_KEY_PREFIX = "dna_mik:";
+const std::string DNARegistryDB::HIST_KEY_PREFIX = "dna_hist:";
 
 DNARegistryDB::DNARegistryDB() {}
 
@@ -162,7 +165,15 @@ IDNARegistry::RegisterResult DNARegistryDB::update_identity(const DigitalDNA& dn
         return RegisterResult::INVALID_DNA;  // Not registered yet
     }
 
-    // Overwrite with enriched version — dual-key write
+    // Archive the previous DNA as history before overwriting
+    auto oldDna = DigitalDNA::deserialize(
+        std::vector<uint8_t>(existing.begin(), existing.end()));
+
+    uint64_t now = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+
+    // Overwrite with enriched version — dual-key write + history
     auto data = dna.serialize();
     std::string value(data.begin(), data.end());
 
@@ -173,6 +184,12 @@ IDNARegistry::RegisterResult DNARegistryDB::update_identity(const DigitalDNA& dn
     if (dna.mik_identity != zero_mik) {
         batch.Put(make_mik_key(dna.mik_identity), value);
         mik_to_address_[dna.mik_identity] = dna.address;
+
+        // Write history entry for the OLD DNA being superseded
+        if (oldDna) {
+            std::string histKey = make_hist_key(dna.mik_identity, now);
+            batch.Put(histKey, existing);  // existing = serialized old DNA
+        }
     }
 
     status = db_->Write(leveldb::WriteOptions(), &batch);
@@ -338,6 +355,37 @@ bool DNARegistryDB::remove_identity(const std::array<uint8_t, 20>& address) {
     return status.ok();
 }
 
+std::vector<std::pair<uint64_t, DigitalDNA>> DNARegistryDB::get_dna_history(
+    const std::array<uint8_t, 20>& mik) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<std::pair<uint64_t, DigitalDNA>> result;
+    if (!db_) return result;
+
+    // Scan all history keys for this MIK: dna_hist:<mik_hex>:
+    std::string prefix = HIST_KEY_PREFIX + address_to_hex(mik) + ":";
+    std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
+
+    for (it->Seek(prefix); it->Valid(); it->Next()) {
+        std::string key = it->key().ToString();
+        if (key.substr(0, prefix.size()) != prefix) break;
+
+        // Extract timestamp from key suffix (16 hex chars)
+        std::string ts_hex = key.substr(prefix.size());
+        uint64_t timestamp = 0;
+        sscanf(ts_hex.c_str(), "%" SCNx64, &timestamp);
+
+        std::string value = it->value().ToString();
+        std::vector<uint8_t> data(value.begin(), value.end());
+        auto dna = DigitalDNA::deserialize(data);
+        if (dna) {
+            result.push_back({timestamp, *dna});
+        }
+    }
+
+    return result;  // Already sorted chronologically (lexicographic key order)
+}
+
 void DNARegistryDB::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -366,6 +414,14 @@ std::string DNARegistryDB::make_key(const std::array<uint8_t, 20>& address) cons
 
 std::string DNARegistryDB::make_mik_key(const std::array<uint8_t, 20>& mik) const {
     return MIK_KEY_PREFIX + address_to_hex(mik);
+}
+
+std::string DNARegistryDB::make_hist_key(const std::array<uint8_t, 20>& mik, uint64_t timestamp) const {
+    // Format: dna_hist:<mik_hex>:<timestamp_hex_16_chars>
+    // Zero-padded timestamp ensures lexicographic = chronological ordering
+    char ts[17];
+    snprintf(ts, sizeof(ts), "%016" PRIx64, timestamp);
+    return HIST_KEY_PREFIX + address_to_hex(mik) + ":" + ts;
 }
 
 std::string DNARegistryDB::address_to_hex(const std::array<uint8_t, 20>& addr) {
