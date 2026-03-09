@@ -1011,6 +1011,8 @@ bool CIbdCoordinator::FetchBlocks() {
                     m_blocks_sync_peer = better_peer_id;
                     m_blocks_sync_peer_consecutive_timeouts = 0;
                     m_consecutive_capacity_stalls = 0;  // New peer gets full stall window
+                    m_sync_peer_futile_batches = 0;  // BUG #272: Reset wrong-fork counter
+                    m_sync_peer_chain_height_at_start = chain_height;
                     should_reselect = false;  // Already switched
                 }
             }
@@ -1129,6 +1131,8 @@ bool CIbdCoordinator::FetchBlocks() {
             m_blocks_sync_peer = best_peer;
             m_blocks_sync_peer_consecutive_timeouts = 0;  // Reset timeout counter for new peer
             m_consecutive_capacity_stalls = 0;  // Reset capacity stall counter - new peer gets full window
+            m_sync_peer_futile_batches = 0;  // BUG #272: Reset wrong-fork counter
+            m_sync_peer_chain_height_at_start = chain_height;
             std::cout << "[IBD] Selected blocks sync peer " << m_blocks_sync_peer
                       << " (height=" << best_height << ")" << std::endl;
         } else {
@@ -1461,6 +1465,35 @@ bool CIbdCoordinator::FetchBlocks() {
         std::cout << "[IBD] Requested " << getdata.size() << " blocks from peer " << m_blocks_sync_peer
                   << " (in-flight=" << m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer)
                   << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << ")" << std::endl;
+
+        // BUG #272: Wrong-fork sync peer detection
+        // If we keep sending full batches but the chain never advances, the sync peer
+        // is delivering blocks from a different fork (they arrive as orphans).
+        // After MAX_FUTILE_BATCHES, switch to a different peer.
+        if (m_sync_peer_chain_height_at_start >= 0 && chain_height == m_sync_peer_chain_height_at_start) {
+            m_sync_peer_futile_batches++;
+            if (m_sync_peer_futile_batches >= MAX_FUTILE_BATCHES) {
+                std::cout << "[IBD] BUG #272: Sync peer " << m_blocks_sync_peer
+                          << " delivered " << m_sync_peer_futile_batches
+                          << " batches without chain advancing (stuck at " << chain_height
+                          << ") - peer likely on different fork, switching" << std::endl;
+                // Mark as timed out with short cooldown so we try a different peer
+                m_timed_out_peer = m_blocks_sync_peer;
+                m_timed_out_peer_time = std::chrono::steady_clock::now();
+                m_timed_out_peer_cooldown_sec = 300;  // 5 min cooldown for wrong-fork peers
+                // Clear in-flight from this peer
+                if (g_node_context.block_tracker) {
+                    g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
+                }
+                m_blocks_sync_peer = -1;
+                m_sync_peer_futile_batches = 0;
+                m_sync_peer_chain_height_at_start = -1;
+            }
+        } else if (chain_height > m_sync_peer_chain_height_at_start) {
+            // Chain advanced - this peer is working, reset counter
+            m_sync_peer_futile_batches = 0;
+            m_sync_peer_chain_height_at_start = chain_height;
+        }
     }
 
     // BUG #260: Re-process orphan blocks whose parents are now connected.

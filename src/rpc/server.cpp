@@ -46,6 +46,8 @@
 #include <net/connman.h>  // Phase 5: For CConnman methods
 #include <net/banman.h>   // For CBanManager
 #include <net/block_tracker.h>  // For block tracker diagnostics
+#include <net/block_fetcher.h>  // For CBlockFetcher
+#include <net/headers_manager.h>  // For CHeadersManager
 
 #include <sstream>
 #include <cstring>
@@ -254,6 +256,10 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["checkblockdb"] = [this](const std::string& p) { return RPC_CheckBlockDB(p); };
     m_handlers["scanblockdb"] = [this](const std::string& p) { return RPC_ScanBlockDB(p); };
     m_handlers["requestblocks"] = [this](const std::string& p) { return RPC_RequestBlocks(p); };
+
+    // Chain management commands
+    m_handlers["invalidateblock"] = [this](const std::string& p) { return RPC_InvalidateBlock(p); };
+    m_handlers["reconsiderblock"] = [this](const std::string& p) { return RPC_ReconsiderBlock(p); };
 
     // HTLC (Hash Time-Locked Contract) commands
     m_handlers["generatepreimage"] = [this](const std::string& p) { return RPC_GeneratePreimage(p); };
@@ -4532,6 +4538,8 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"checkchain - Verify your chain matches official checkpoints (detect forks)\",";
     oss << "\"checkblockdb - Check for missing blocks in database (diagnostic)\",";
     oss << "\"repairblocks - Repair blocks stored under wrong hashes (Bug #243 fix)\",";
+    oss << "\"invalidateblock - Disconnect chain to given height or block hash\",";
+    oss << "\"reconsiderblock - Clear fork detection state for re-sync\",";
 
     // Wallet encryption
     oss << "\"encryptwallet - Encrypt wallet with passphrase\",";
@@ -5748,6 +5756,159 @@ void CRPCServer::SetDataDir(const std::string& dataDir) {
         m_swapStore.SetPath(swap_file);
         m_swapStore.Load();
     }
+}
+
+// ============================================================================
+// Chain Management RPC Commands (Bug #272)
+// ============================================================================
+
+std::string CRPCServer::RPC_InvalidateBlock(const std::string& params) {
+    extern NodeContext g_node_context;
+
+    if (!m_chainstate || !m_blockchain) {
+        throw std::runtime_error("Chain not initialized");
+    }
+
+    // Parse blockhash parameter
+    // Accept either {"blockhash":"hex"} or {"height":N}
+    std::string blockHashHex;
+    int targetHeight = -1;
+
+    size_t hash_pos = params.find("\"blockhash\"");
+    if (hash_pos != std::string::npos) {
+        size_t colon = params.find(":", hash_pos);
+        size_t quote1 = params.find("\"", colon + 1);
+        size_t quote2 = params.find("\"", quote1 + 1);
+        if (quote1 != std::string::npos && quote2 != std::string::npos) {
+            blockHashHex = params.substr(quote1 + 1, quote2 - quote1 - 1);
+        }
+    }
+
+    size_t height_pos = params.find("\"height\"");
+    if (height_pos != std::string::npos) {
+        size_t colon = params.find(":", height_pos);
+        std::string num;
+        for (size_t i = colon + 1; i < params.size(); i++) {
+            if (std::isdigit(params[i])) num += params[i];
+            else if (!num.empty()) break;
+        }
+        if (!num.empty()) targetHeight = std::stoi(num);
+    }
+
+    if (blockHashHex.empty() && targetHeight < 0) {
+        throw std::runtime_error("invalidateblock requires \"blockhash\" or \"height\" parameter");
+    }
+
+    // If height provided, resolve to parent height (disconnect TO height-1)
+    if (targetHeight >= 0) {
+        int currentHeight = m_chainstate->GetHeight();
+        if (targetHeight > currentHeight) {
+            throw std::runtime_error("Height " + std::to_string(targetHeight) + " is above current tip " + std::to_string(currentHeight));
+        }
+        if (targetHeight <= 0) {
+            throw std::runtime_error("Cannot invalidate genesis block");
+        }
+        // Disconnect to one block BEFORE the target (invalidate the target and everything above)
+        int disconnectTo = targetHeight - 1;
+
+        std::cout << "[RPC] invalidateblock: disconnecting from height " << currentHeight
+                  << " to " << disconnectTo << " (" << (currentHeight - disconnectTo) << " blocks)" << std::endl;
+
+        int disconnected = m_chainstate->DisconnectToHeight(disconnectTo, *m_blockchain);
+        if (disconnected < 0) {
+            throw std::runtime_error("DisconnectToHeight failed");
+        }
+
+        // Clear stale headers and tracker state above disconnect point
+        int newHeight = m_chainstate->GetHeight();
+        uint256 newTipHash;
+        CBlockIndex* pNewTip = m_chainstate->GetTip();
+        if (pNewTip) newTipHash = pNewTip->GetBlockHash();
+
+        if (g_node_context.headers_manager)
+            g_node_context.headers_manager->ClearAboveHeight(disconnectTo, newTipHash);
+        if (g_node_context.block_fetcher)
+            g_node_context.block_fetcher->ClearAboveHeight(disconnectTo);
+        if (g_node_context.block_tracker)
+            g_node_context.block_tracker->ClearAboveHeight(disconnectTo);
+
+        // Reset fork detection state so IBD can re-sync
+        if (g_node_context.ibd_coordinator) {
+            g_node_context.fork_detected.store(false);
+        }
+
+        std::ostringstream oss;
+        oss << "{\"disconnected\":" << disconnected
+            << ",\"new_height\":" << newHeight
+            << ",\"new_tip\":\"" << newTipHash.GetHex() << "\"}";
+        return oss.str();
+    }
+
+    // Hash-based invalidation: find block and disconnect to its parent
+    uint256 blockHash;
+    blockHash.SetHex(blockHashHex);
+    CBlockIndex* pindex = m_chainstate->GetBlockIndex(blockHash);
+    if (!pindex) {
+        throw std::runtime_error("Block not found in chainstate: " + blockHashHex);
+    }
+
+    int blockHeight = pindex->nHeight;
+    int disconnectTo = blockHeight - 1;
+    int currentHeight = m_chainstate->GetHeight();
+
+    if (blockHeight > currentHeight) {
+        // Block exists in index but is not on active chain - just mark it
+        std::ostringstream oss;
+        oss << "{\"status\":\"block_not_on_active_chain\",\"height\":" << blockHeight << "}";
+        return oss.str();
+    }
+
+    std::cout << "[RPC] invalidateblock: disconnecting from height " << currentHeight
+              << " to " << disconnectTo << " (" << (currentHeight - disconnectTo) << " blocks)" << std::endl;
+
+    int disconnected = m_chainstate->DisconnectToHeight(disconnectTo, *m_blockchain);
+    if (disconnected < 0) {
+        throw std::runtime_error("DisconnectToHeight failed");
+    }
+
+    int newHeight = m_chainstate->GetHeight();
+    uint256 newTipHash;
+    CBlockIndex* pNewTip = m_chainstate->GetTip();
+    if (pNewTip) newTipHash = pNewTip->GetBlockHash();
+
+    if (g_node_context.headers_manager)
+        g_node_context.headers_manager->ClearAboveHeight(disconnectTo, newTipHash);
+    if (g_node_context.block_fetcher)
+        g_node_context.block_fetcher->ClearAboveHeight(disconnectTo);
+    if (g_node_context.block_tracker)
+        g_node_context.block_tracker->ClearAboveHeight(disconnectTo);
+
+    if (g_node_context.ibd_coordinator) {
+        g_node_context.fork_detected.store(false);
+    }
+
+    std::ostringstream oss;
+    oss << "{\"disconnected\":" << disconnected
+        << ",\"new_height\":" << newHeight
+        << ",\"new_tip\":\"" << newTipHash.GetHex() << "\"}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ReconsiderBlock(const std::string& params) {
+    // ReconsiderBlock removes the BLOCK_FAILED_VALID flag from a block,
+    // allowing it to be reconsidered for chain activation.
+    // For now, just clear fork detection state and let IBD re-sync.
+    extern NodeContext g_node_context;
+
+    g_node_context.fork_detected.store(false);
+
+    // Reset IBD coordinator fork state
+    if (g_node_context.ibd_coordinator) {
+        // Trigger fresh fork detection by clearing the detected flag
+        std::cout << "[RPC] reconsiderblock: clearing fork detection state" << std::endl;
+    }
+
+    return "{\"status\":\"fork_state_cleared\"}";
 }
 
 // ============================================================================

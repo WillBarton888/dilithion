@@ -228,6 +228,14 @@ private:
     static constexpr int MAX_CAPACITY_STALLS_BEFORE_CLEAR = 15;  // 15 seconds of stalling
     int m_last_stall_check_height{0};  // Chain height when stall counter was last reset
 
+    // BUG #272: Wrong-fork sync peer detection
+    // When the sync peer delivers blocks that all become orphans (different fork),
+    // the chain never advances despite blocks being delivered. Track batches sent
+    // without chain progress to detect and switch away from wrong-fork peers.
+    int m_sync_peer_futile_batches{0};           // Batches sent to sync peer without chain advancing
+    int m_sync_peer_chain_height_at_start{-1};   // Chain height when current sync peer was selected
+    static constexpr int MAX_FUTILE_BATCHES = 3; // Switch peer after 3 full batches (96 blocks) with no progress
+
     // Backoff state
     int m_last_header_height{0};
     int m_ibd_no_peer_cycles{0};

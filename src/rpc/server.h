@@ -363,6 +363,10 @@ private:
     std::string RPC_ScanBlockDB(const std::string& params);
     std::string RPC_RequestBlocks(const std::string& params);
 
+    // Chain management methods (Bug #272 fix)
+    std::string RPC_InvalidateBlock(const std::string& params);
+    std::string RPC_ReconsiderBlock(const std::string& params);
+
     // HTLC (Hash Time-Locked Contract) methods
     std::string RPC_GeneratePreimage(const std::string& params);
     std::string RPC_CreateHTLC(const std::string& params);
