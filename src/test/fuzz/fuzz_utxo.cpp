@@ -174,7 +174,7 @@ FUZZ_TARGET(utxo)
                         case OP_UNDO_BLOCK: {
                             if (applied_blocks.empty()) break;
                             CBlock block = applied_blocks.back();
-                            if (utxo.UndoBlock(block)) {
+                            if (utxo.UndoBlock(block, block.GetHash())) {
                                 applied_blocks.pop_back();
                                 available_outpoints.clear();
                             }
@@ -328,7 +328,7 @@ FUZZ_TARGET(utxo)
 
                 // Undo all blocks
                 for (int i = blocks.size() - 1; i >= 0; --i) {
-                    if (!utxo.UndoBlock(blocks[i])) {
+                    if (!utxo.UndoBlock(blocks[i], blocks[i].GetHash())) {
                         // Bug: Should undo applied block
                     }
                 }

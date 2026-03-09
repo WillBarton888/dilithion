@@ -586,7 +586,7 @@ bool CUTXOSet::ApplyBlock(const CBlock& block, uint32_t height, const uint256& b
     return true;
 }
 
-bool CUTXOSet::UndoBlock(const CBlock& block) {
+bool CUTXOSet::UndoBlock(const CBlock& block, const uint256& blockHash) {
     if (!IsOpen()) {
         std::cerr << "[ERROR] CUTXOSet::UndoBlock: Database not open" << std::endl;
         return false;
@@ -602,15 +602,102 @@ bool CUTXOSet::UndoBlock(const CBlock& block) {
     // ============================================================================
 
     // Step 1: Load undo data for this block
-    uint256 blockHash = block.GetHash();
+    // Use the block hash from the block index (same hash used in ApplyBlock)
     std::string undoKey = "undo_";
     undoKey.append(reinterpret_cast<const char*>(blockHash.data), 32);
 
     std::string undoValue;
     leveldb::Status status = db->Get(leveldb::ReadOptions(), undoKey, &undoValue);
+
+    // BUG #271 FIX: If undo data not found, try block.GetHash() as fallback
+    // This catches hash mismatches between block index hash and computed hash
     if (!status.ok()) {
-        std::cerr << "[ERROR] CUTXOSet::UndoBlock: Failed to load undo data: " << status.ToString() << std::endl;
-        return false;
+        uint256 computedHash = block.GetHash();
+        if (computedHash != blockHash) {
+            std::cerr << "[WARN] CUTXOSet::UndoBlock: Hash mismatch detected!"
+                      << " index=" << blockHash.GetHex().substr(0, 16)
+                      << " computed=" << computedHash.GetHex().substr(0, 16) << std::endl;
+            std::string fallbackKey = "undo_";
+            fallbackKey.append(reinterpret_cast<const char*>(computedHash.data), 32);
+            status = db->Get(leveldb::ReadOptions(), fallbackKey, &undoValue);
+            if (status.ok()) {
+                std::cout << "[WARN] CUTXOSet::UndoBlock: Found undo data under computed hash (fallback)" << std::endl;
+                // Use the fallback key for deletion later
+                undoKey = fallbackKey;
+            }
+        }
+    }
+
+    // BUG #271 FIX: If undo data still not found, try to reconstruct
+    // For coinbase-only blocks (common in VDF chains), undo is trivial:
+    // just remove coinbase outputs, no inputs to restore.
+    if (!status.ok()) {
+        std::cerr << "[WARN] CUTXOSet::UndoBlock: Undo data not found, attempting reconstruction"
+                  << " (hash=" << blockHash.GetHex().substr(0, 16) << "...)" << std::endl;
+
+        CBlockValidator validator;
+        std::vector<CTransactionRef> transactions;
+        std::string deserr;
+        if (!validator.DeserializeBlockTransactions(block, transactions, deserr) || transactions.empty()) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Cannot reconstruct - failed to deserialize: "
+                      << deserr << std::endl;
+            return false;
+        }
+
+        // Check if any non-coinbase transactions have inputs that need restoring
+        bool has_regular_txs = false;
+        for (size_t i = 1; i < transactions.size(); ++i) {
+            if (!transactions[i]->vin.empty()) {
+                has_regular_txs = true;
+                break;
+            }
+        }
+
+        if (has_regular_txs) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Block has regular transactions - "
+                      << "cannot reconstruct undo data without tx index. "
+                      << "Consider using --reindex to rebuild UTXO set." << std::endl;
+            return false;
+        }
+
+        // Coinbase-only block: just remove outputs (no inputs to restore)
+        std::cout << "[Chain] Reconstructing undo for coinbase-only block (no spent inputs)" << std::endl;
+
+        leveldb::WriteBatch batch;
+        for (int tx_idx = transactions.size() - 1; tx_idx >= 0; --tx_idx) {
+            const CTransactionRef& tx = transactions[tx_idx];
+            uint256 txid = tx->GetHash();
+            for (uint32_t n = 0; n < tx->vout.size(); ++n) {
+                COutPoint outpoint(txid, n);
+                const CTxOut& txout = tx->vout[n];
+                std::string key = "u";
+                key.append(reinterpret_cast<const char*>(outpoint.hash.data), 32);
+                key.append(reinterpret_cast<const char*>(&outpoint.n), 4);
+                batch.Delete(key);
+                RemoveFromCache(outpoint);
+                if (stats.nUTXOs > 0) stats.nUTXOs--;
+                if (stats.nTotalAmount >= txout.nValue) {
+                    stats.nTotalAmount -= txout.nValue;
+                }
+            }
+        }
+
+        if (stats.nHeight > 0) stats.nHeight--;
+
+        leveldb::WriteOptions wo;
+        wo.sync = true;
+        status = db->Write(wo, &batch);
+        if (!status.ok()) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Reconstructed undo write failed: "
+                      << status.ToString() << std::endl;
+            return false;
+        }
+        if (!Flush()) {
+            std::cerr << "[ERROR] CUTXOSet::UndoBlock: Failed to flush after reconstructed undo" << std::endl;
+            return false;
+        }
+        std::cout << "[Chain] Successfully reconstructed undo for coinbase-only block" << std::endl;
+        return true;
     }
 
     // P1-3 FIX: Verify SHA3-256 integrity checksum (32 bytes at end)

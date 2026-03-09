@@ -572,7 +572,7 @@ BOOST_AUTO_TEST_CASE(utxo_reorg_handling) {
     BOOST_CHECK(utxo.HaveUTXO(new_out));
 
     // Now undo the block
-    BOOST_CHECK(utxo.UndoBlock(block));
+    BOOST_CHECK(utxo.UndoBlock(block, block.GetHash()));
 
     // After undoing: prev_out should be restored, new outputs should be gone
     BOOST_CHECK(utxo.HaveUTXO(prev_out));
@@ -838,7 +838,7 @@ BOOST_AUTO_TEST_CASE(utxo_complex_reorg) {
 
     // Undo blocks in reverse order
     for (int i = 2; i >= 0; i--) {
-        BOOST_CHECK(utxo.UndoBlock(blocks[i]));
+        BOOST_CHECK(utxo.UndoBlock(blocks[i], blocks[i].GetHash()));
     }
 
     // All coinbases should be gone

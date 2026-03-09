@@ -8,6 +8,7 @@
 #include <vdf/cooldown_tracker.h>
 #include <dfmp/mik.h>
 #include <core/chainparams.h>
+#include <digital_dna/digital_dna.h>
 #include <crypto/sha3.h>
 #include <cstring>
 #include <iostream>
@@ -309,6 +310,112 @@ bool CheckDNACommitment(
     // Post-activation: DNA commitment must be present
     if (!mikData.has_dna_hash) {
         error = "CheckDNACommitment: missing DNA commitment (0xDD marker) in VDF block at height " + std::to_string(height);
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// CheckDNAHashEquality  (Phase 5A — hash-equality consensus enforcement)
+// ---------------------------------------------------------------------------
+
+bool CheckDNAHashEquality(
+    const CBlock& block,
+    int height,
+    const digital_dna::IDNARegistry& registry,
+    std::string& error)
+{
+    // Pre-activation: always pass
+    int enforcementHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dnaHashEnforcementHeight : 999999999;
+    if (height < enforcementHeight) {
+        return true;
+    }
+
+    // Only applies to VDF blocks
+    if (!block.IsVDFBlock()) {
+        return true;
+    }
+
+    // Deserialize coinbase
+    if (block.vtx.empty()) {
+        error = "CheckDNAHashEquality: empty vtx";
+        return false;
+    }
+
+    const uint8_t* data = block.vtx.data();
+    size_t dataSize = block.vtx.size();
+
+    size_t txCountSize = 0;
+    if (data[0] < 253) {
+        txCountSize = 1;
+    } else if (data[0] == 253 && dataSize >= 3) {
+        txCountSize = 3;
+    } else {
+        error = "CheckDNAHashEquality: unsupported tx count encoding";
+        return false;
+    }
+
+    CTransaction coinbase;
+    size_t consumed = 0;
+    if (!coinbase.Deserialize(data + txCountSize, dataSize - txCountSize, nullptr, &consumed)) {
+        error = "CheckDNAHashEquality: failed to deserialize coinbase";
+        return false;
+    }
+
+    if (coinbase.vin.empty()) {
+        error = "CheckDNAHashEquality: coinbase has no inputs";
+        return false;
+    }
+
+    // Parse MIK + DNA commitment from scriptSig
+    DFMP::CMIKScriptData mikData;
+    if (!DFMP::ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData)) {
+        error = "CheckDNAHashEquality: failed to parse MIK from coinbase";
+        return false;
+    }
+
+    // No DNA commitment → can't check equality (CheckDNACommitment handles presence)
+    if (!mikData.has_dna_hash) {
+        return true;
+    }
+
+    // Look up the MIK identity in the local registry
+    std::array<uint8_t, 20> mikArr{};
+    std::copy(mikData.identity.data, mikData.identity.data + 20, mikArr.begin());
+
+    auto existing = registry.get_identity_by_mik(mikArr);
+    if (!existing) {
+        // No DNA on file for this MIK — can't verify, pass
+        return true;
+    }
+
+    // Compare committed hash against local hash
+    auto localHash = existing->hash();
+    if (localHash != mikData.dna_hash) {
+        std::ostringstream oss;
+        oss << "CheckDNAHashEquality: DNA hash mismatch at height " << height
+            << " for MIK ";
+        for (int i = 0; i < 4; ++i) {
+            char hex[3];
+            snprintf(hex, sizeof(hex), "%02x", mikArr[i]);
+            oss << hex;
+        }
+        oss << "... (committed ";
+        for (int i = 0; i < 4; ++i) {
+            char hex[3];
+            snprintf(hex, sizeof(hex), "%02x", mikData.dna_hash[i]);
+            oss << hex;
+        }
+        oss << "... != local ";
+        for (int i = 0; i < 4; ++i) {
+            char hex[3];
+            snprintf(hex, sizeof(hex), "%02x", localHash[i]);
+            oss << hex;
+        }
+        oss << "...)";
+        error = oss.str();
         return false;
     }
 

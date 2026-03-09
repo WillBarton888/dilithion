@@ -164,9 +164,11 @@ public:
      * Undo all transactions from a block (for chain reorganization)
      * This reverses the effects of ApplyBlock
      * @param block The block to undo
+     * @param blockHash Block hash from block index (used for undo data lookup;
+     *                  must match the hash passed to ApplyBlock)
      * @return true if successful
      */
-    bool UndoBlock(const CBlock& block);
+    bool UndoBlock(const CBlock& block, const uint256& blockHash);
 
     /**
      * Flush all pending changes to disk

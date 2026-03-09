@@ -193,6 +193,14 @@ public:
     // DilV: 999999999 (disabled until fork is scheduled)
     int dnaCommitmentActivationHeight;
 
+    // DNA hash-equality enforcement height (VDF blocks only)
+    // After this height: committed DNA hash must match the DNA hash in
+    // the local registry for that MIK identity.  Blocks with mismatching
+    // hashes are rejected at consensus.  If the MIK has no DNA on file,
+    // the check passes (cannot verify without data).
+    // Mainnet/Testnet/DilV: 999999999 (disabled until calibration complete)
+    int dnaHashEnforcementHeight;
+
     // Compact encoding fix activation height
     // Before this height: BigToCompact has a sign bit bug where bit 23 of the
     // mantissa collides with the sign bit, causing ~2x difficulty corruption on

@@ -80,8 +80,9 @@ bool ExtractCoinbaseMIKIdentity(
     std::array<uint8_t, 20>& mikId
 );
 
-// Forward declaration
+// Forward declarations
 class CCooldownTracker;
+namespace digital_dna { class IDNARegistry; }
 
 /**
  * Check VDF cooldown consensus rule (hard fork).
@@ -116,6 +117,26 @@ bool CheckVDFCooldown(
 bool CheckDNACommitment(
     const CBlock& block,
     int height,
+    std::string& error
+);
+
+/**
+ * Check DNA hash equality at consensus (Phase 5A).
+ *
+ * After dnaHashEnforcementHeight, the DNA hash committed in the coinbase
+ * must match the hash of the DNA stored in the local registry for that MIK.
+ * If the MIK has no DNA on file, the check passes (can't verify).
+ *
+ * @param block         The candidate VDF block
+ * @param height        Block height
+ * @param registry      DNA registry with stored identities
+ * @param error         Human-readable error string on failure
+ * @return true if hash matches or cannot be verified (no local DNA)
+ */
+bool CheckDNAHashEquality(
+    const CBlock& block,
+    int height,
+    const digital_dna::IDNARegistry& registry,
     std::string& error
 );
 

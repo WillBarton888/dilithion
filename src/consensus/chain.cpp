@@ -867,6 +867,27 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                 return false;
             }
         }
+
+        // ====================================================================
+        // DNA HASH-EQUALITY ENFORCEMENT (Phase 5A, hard fork at dnaHashEnforcementHeight)
+        // ====================================================================
+        // After activation, reject VDF blocks where the committed DNA hash
+        // doesn't match the DNA we have on file for that MIK identity.
+        if (block.IsVDFBlock() && g_node_context.dna_registry) {
+            std::string dnaError;
+            if (!CheckDNAHashEquality(block, pindex->nHeight,
+                                       *g_node_context.dna_registry, dnaError)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " REJECTED: DNA hash mismatch" << std::endl;
+                std::cerr << "[Chain] " << dnaError << std::endl;
+
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
+                return false;
+            }
+        }
     }
 
     // Step 1: Update UTXO set (CS-004)
@@ -974,8 +995,9 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
 
         // Step 2: Undo UTXO set changes (CS-004)
         // BUG #159 FIX: Allow skipping UTXO undo during IBD fork recovery when undo data is missing
+        // BUG #271 FIX: Pass block index hash to UndoBlock for consistent undo data lookup
         if (pUTXOSet != nullptr && block_loaded) {
-            if (!pUTXOSet->UndoBlock(block)) {
+            if (!pUTXOSet->UndoBlock(block, pindex->GetBlockHash())) {
                 if (!force_skip_utxo) {
                     std::cerr << "[Chain] ERROR: Failed to undo block from UTXO set at height "
                               << pindex->nHeight << std::endl;
