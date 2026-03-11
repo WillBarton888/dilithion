@@ -1796,6 +1796,41 @@ int main(int argc, char* argv[]) {
         g_node_state.mining_address_override = config.mining_address_override;
         g_node_state.rotate_mining_address = config.rotate_mining_address;
 
+        // =================================================================
+        // BUG #277: Auto-rebuild after UTXO corruption
+        // =================================================================
+        // Check for auto_rebuild marker (written by IBD coordinator when
+        // UTXO corruption is detected). Wipe blocks+chainstate and resync.
+        {
+            std::string markerPath = config.datadir + "/auto_rebuild";
+            std::ifstream marker(markerPath);
+            if (marker.is_open()) {
+                std::string reason;
+                std::getline(marker, reason);
+                marker.close();
+
+                std::cout << "\n==========================================================" << std::endl;
+                std::cout << "AUTO-REBUILD: UTXO corruption recovery in progress" << std::endl;
+                if (!reason.empty()) {
+                    std::cout << "Reason: " << reason << std::endl;
+                }
+                std::cout << "Wiping blocks and chainstate for clean resync..." << std::endl;
+                std::cout << "==========================================================" << std::endl;
+
+                // Wipe corrupted data
+                std::filesystem::remove_all(config.datadir + "/blocks");
+                std::filesystem::remove_all(config.datadir + "/chainstate");
+                std::filesystem::remove_all(config.datadir + "/wal");
+                std::cout << "  [OK] Chain data cleared" << std::endl;
+
+                // Delete the marker so we don't loop
+                std::remove(markerPath.c_str());
+                std::cout << "  [OK] Auto-rebuild marker removed" << std::endl;
+                std::cout << "  Resyncing from network..." << std::endl;
+                std::cout << "==========================================================" << std::endl;
+            }
+        }
+
         // Phase 1: Initialize blockchain storage and mempool
         std::cerr.flush();
         LogPrintf(ALL, INFO, "Initializing blockchain storage...");

@@ -63,6 +63,13 @@ private:
     // This atomic is updated atomically whenever pindexTip changes
     std::atomic<int> m_cachedHeight{-1};
 
+    // BUG #277: UTXO corruption detection and auto-recovery
+    // Tracks consecutive UTXO failures to detect corruption (vs. one-off errors).
+    // When threshold is reached, signals that the chain needs a full resync.
+    std::atomic<int> m_consecutive_utxo_failures{0};
+    std::atomic<bool> m_utxo_needs_rebuild{false};
+    static constexpr int MAX_UTXO_FAILURES_BEFORE_REBUILD = 3;
+
     // Bug #40 fix: Callback mechanism for tip updates
     // Allows HeadersManager and other components to be notified when chain tip changes
     using TipUpdateCallback = std::function<void(const CBlockIndex*)>;
@@ -120,6 +127,18 @@ public:
      * @return true if -reindex is required
      */
     bool RequiresReindex() const;
+
+    /**
+     * BUG #277: Check if UTXO corruption was detected and a rebuild is needed
+     * The IBD coordinator or main loop should check this and trigger recovery.
+     * @return true if UTXO set needs rebuilding
+     */
+    bool NeedsUTXORebuild() const { return m_utxo_needs_rebuild.load(); }
+
+    /**
+     * BUG #277: Clear the UTXO rebuild flag (after recovery is initiated)
+     */
+    void ClearUTXORebuildFlag() { m_utxo_needs_rebuild.store(false); m_consecutive_utxo_failures.store(0); }
 
     /**
      * Get current chain tip (most work)

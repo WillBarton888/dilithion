@@ -914,18 +914,30 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
             std::cerr << "[Chain] ERROR: Failed to apply block to UTXO set at height "
                       << pindex->nHeight << std::endl;
 
-            // BUG #255: Mark block as permanently failed (authoritative validation)
-            pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
-            std::cerr << "[Chain] Block marked BLOCK_FAILED_VALID - will not retry" << std::endl;
+            // BUG #277: DON'T mark block as BLOCK_FAILED_VALID on UTXO errors.
+            // UTXO lookup failures indicate UTXO set corruption (e.g., after OOM crash),
+            // NOT that the block is actually invalid. Marking it permanently failed
+            // prevents the node from ever syncing past this point.
+            // Instead, track consecutive failures. If persistent, signal corruption
+            // so the IBD coordinator can trigger a full chain resync.
+            int failures = ++m_consecutive_utxo_failures;
+            std::cerr << "[Chain] UTXO failure #" << failures << " at height " << pindex->nHeight
+                      << " (threshold=" << MAX_UTXO_FAILURES_BEFORE_REBUILD << ")" << std::endl;
 
-            // Persist the failed status to disk so it survives restart
-            if (pdb != nullptr) {
-                pdb->WriteBlockIndex(blockHash, *pindex);
+            if (failures >= MAX_UTXO_FAILURES_BEFORE_REBUILD) {
+                std::cerr << "[Chain] CRITICAL: " << failures << " consecutive UTXO failures detected!"
+                          << std::endl;
+                std::cerr << "[Chain] UTXO set appears corrupted. Signaling auto-recovery."
+                          << std::endl;
+                m_utxo_needs_rebuild.store(true);
             }
 
             return false;
         }
     }
+
+    // Reset UTXO failure counter on success
+    m_consecutive_utxo_failures.store(0);
 
     std::cout << " done" << std::endl;
 

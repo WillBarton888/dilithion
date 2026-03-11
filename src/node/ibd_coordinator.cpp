@@ -3,6 +3,7 @@
 
 #include <node/ibd_coordinator.h>
 
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <vector>
@@ -105,6 +106,43 @@ void CIbdCoordinator::Tick() {
         static int no_components_count = 0;
         if (g_verbose.load(std::memory_order_relaxed) && ++no_components_count <= 5) {
             std::cerr << "[IBD-DEBUG] Tick() returning: no headers_manager or block_fetcher" << std::endl;
+        }
+        return;
+    }
+
+    // =========================================================================
+    // BUG #277: Auto-recovery from UTXO corruption
+    // =========================================================================
+    // When ConnectTip fails repeatedly due to UTXO lookup errors (e.g., after
+    // OOM crash), the chain state signals that a rebuild is needed. We write
+    // a marker file and trigger graceful shutdown. On next restart, the node
+    // detects the marker and auto-wipes blocks+chainstate for a clean resync.
+    if (m_chainstate.NeedsUTXORebuild()) {
+        static bool recovery_triggered = false;
+        if (!recovery_triggered) {
+            recovery_triggered = true;
+            std::cerr << "\n==========================================================" << std::endl;
+            std::cerr << "CRITICAL: UTXO corruption detected! Auto-recovery initiated." << std::endl;
+            std::cerr << "The node will shut down and rebuild on next restart." << std::endl;
+            std::cerr << "==========================================================" << std::endl;
+
+            // Write marker file so startup code knows to wipe and resync
+            std::string datadir;
+            if (Dilithion::g_chainParams) {
+                datadir = Dilithion::g_chainParams->dataDir;
+            }
+            if (!datadir.empty()) {
+                std::string markerPath = datadir + "/auto_rebuild";
+                std::ofstream marker(markerPath);
+                if (marker.is_open()) {
+                    marker << "UTXO corruption detected at height " << m_chainstate.GetHeight() << std::endl;
+                    marker.close();
+                    std::cerr << "[Recovery] Wrote auto_rebuild marker to " << markerPath << std::endl;
+                }
+            }
+
+            // Trigger graceful shutdown
+            g_node_state.running = false;
         }
         return;
     }
