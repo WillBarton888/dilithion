@@ -530,8 +530,13 @@ BlockProcessResult ProcessNewBlock(
 
         // BUG #260 FIX: Calculate transaction fees before validating coinbase
         // Previously passed fees=0, which rejected blocks with any transaction fees
+        // BUG #276 FIX: When fee calculation fails (e.g., UTXO set corruption after crash,
+        // or inputs not yet in UTXO set for blocks received out-of-order), skip the
+        // coinbase value check here. Full validation happens in ConnectTip where the
+        // UTXO set is guaranteed correct. This prevents rejecting valid blocks from peers.
         uint64_t totalFees = 0;
         CUTXOSet* utxoSet = g_utxo_set.load();
+        bool feeCalcReliable = true;
 
         if (utxoSet && transactions.size() > 1) {
             // Calculate fees from non-coinbase transactions
@@ -543,23 +548,54 @@ BlockProcessResult ProcessNewBlock(
                     if (txFee > 0) {
                         totalFees += static_cast<uint64_t>(txFee);
                     }
+                } else {
+                    // BUG #276: If any tx fee calc fails, we can't trust totalFees
+                    feeCalcReliable = false;
+                    std::cerr << "[ProcessNewBlock] Fee calc failed for tx " << i
+                              << " at height " << blockHeight << ": " << txError << std::endl;
                 }
-                // Note: Don't fail on individual tx validation here - CheckCoinbase just needs fee estimate
-                // Full tx validation happens during block connect
             }
+        } else if (!utxoSet && transactions.size() > 1) {
+            // No UTXO set available — can't calculate fees
+            feeCalcReliable = false;
         }
 
         // CheckCoinbase validates:
         // - Coinbase value doesn't exceed subsidy + fees
         // - Required Dev Fund and Dev Reward outputs are present with correct amounts
-        if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), totalFees, validationError)) {
-            std::cerr << "[ProcessNewBlock] ERROR: Coinbase validation failed: " << validationError << std::endl;
-            SendRejectMessage(peer_id, "block", "Invalid coinbase: " + validationError);
-            if (ctx.peer_manager) {
-                ctx.peer_manager->Misbehaving(peer_id, 100);  // Ban peer for invalid coinbase
+        // BUG #276: Only check coinbase value if fee calculation was reliable.
+        // If fees couldn't be determined, defer full validation to ConnectTip.
+        // Still check coinbase structure (format, MIK, dev tax) regardless.
+        if (feeCalcReliable) {
+            if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), totalFees, validationError)) {
+                std::cerr << "[ProcessNewBlock] ERROR: Coinbase validation failed: " << validationError << std::endl;
+                SendRejectMessage(peer_id, "block", "Invalid coinbase: " + validationError);
+                if (ctx.peer_manager) {
+                    ctx.peer_manager->Misbehaving(peer_id, 100);  // Ban peer for invalid coinbase
+                }
+                g_metrics.RecordInvalidBlock();
+                return BlockProcessResult::VALIDATION_ERROR;
             }
-            g_metrics.RecordInvalidBlock();
-            return BlockProcessResult::VALIDATION_ERROR;
+        } else {
+            // BUG #276: Fee calc unreliable — still validate coinbase structure
+            // Pass totalFees=UINT64_MAX/2 to skip value check but still validate format/tax
+            std::string structError;
+            uint64_t maxFees = std::numeric_limits<uint64_t>::max() / 2;
+            if (!validator.CheckCoinbase(*transactions[0], static_cast<uint32_t>(blockHeight), maxFees, structError)) {
+                // Only reject if it's a structural error (not value-based)
+                if (structError.find("exceeds subsidy") == std::string::npos) {
+                    std::cerr << "[ProcessNewBlock] ERROR: Coinbase structure invalid: " << structError << std::endl;
+                    SendRejectMessage(peer_id, "block", "Invalid coinbase: " + structError);
+                    if (ctx.peer_manager) {
+                        ctx.peer_manager->Misbehaving(peer_id, 100);
+                    }
+                    g_metrics.RecordInvalidBlock();
+                    return BlockProcessResult::VALIDATION_ERROR;
+                }
+            }
+            std::cout << "[ProcessNewBlock] Fee calc unreliable at height " << blockHeight
+                      << " (txs=" << transactions.size() << ", utxo=" << (utxoSet ? "yes" : "no")
+                      << ") — deferring coinbase value check to ConnectTip" << std::endl;
         }
     }
 
