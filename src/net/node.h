@@ -319,12 +319,18 @@ private:
     std::list<CProcessedMsg> vProcessMsg;
     mutable std::mutex cs_vProcessMsg;
 
+    // BUG #275: Max process queue depth to prevent OOM
+    static constexpr size_t MAX_PROCESS_QUEUE_SIZE = 1000;
+
     //
     // Send queue
     //
     std::deque<CSerializedNetMsg> vSendMsg;
     size_t nSendOffset = 0;  // Offset into first message
     mutable std::mutex cs_vSendMsg;
+
+    // BUG #275: Max send queue depth to prevent OOM from slow peers
+    static constexpr size_t MAX_SEND_QUEUE_SIZE = 1000;
 };
 
 #endif // DILITHION_NET_NODE_H

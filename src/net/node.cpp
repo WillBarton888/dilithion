@@ -80,6 +80,11 @@ std::vector<uint8_t>& CNode::GetRecvBuffer() {
 
 void CNode::PushProcessMsg(CProcessedMsg&& msg) {
     std::lock_guard<std::mutex> lock(cs_vProcessMsg);
+    // BUG #275: Cap process queue to prevent OOM from fast senders
+    // If we can't process messages fast enough, drop oldest to stay bounded.
+    if (vProcessMsg.size() >= MAX_PROCESS_QUEUE_SIZE) {
+        vProcessMsg.pop_front();
+    }
     msg.nTime = GetTime();
     vProcessMsg.push_back(std::move(msg));
 }
@@ -101,6 +106,12 @@ bool CNode::HasProcessMsgs() const {
 
 void CNode::PushSendMsg(CSerializedNetMsg&& msg) {
     std::lock_guard<std::mutex> lock(cs_vSendMsg);
+    // BUG #275: Cap send queue to prevent OOM from slow peers
+    // A slow or stalled peer accumulates queued blocks/messages indefinitely.
+    // Drop new messages when queue is full — peer will re-request if needed.
+    if (vSendMsg.size() >= MAX_SEND_QUEUE_SIZE) {
+        return;  // Silently drop — peer can re-request
+    }
     vSendMsg.push_back(std::move(msg));
 }
 

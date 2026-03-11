@@ -707,6 +707,12 @@ void CConnman::ThreadMessageHandler() {
                 // Queue for async processing - NEVER BLOCK HERE
                 {
                     std::lock_guard<std::mutex> lock(m_headers_queue_mutex);
+                    // BUG #275: Drop oldest headers if queue is full to prevent OOM
+                    if (m_headers_queue.size() >= MAX_HEADERS_QUEUE_SIZE) {
+                        m_headers_queue.pop();
+                        LogPrintf(NET, WARN, "[CConnman] Headers queue full (%zu), dropped oldest entry\n",
+                                  MAX_HEADERS_QUEUE_SIZE);
+                    }
                     m_headers_queue.push({pending.node_id, pending.msg.command, pending.msg.data});
                 }
                 m_headers_cv.notify_one();
@@ -716,6 +722,12 @@ void CConnman::ThreadMessageHandler() {
                 // Queue for async processing - NEVER BLOCK HERE
                 {
                     std::lock_guard<std::mutex> lock(m_blocks_queue_mutex);
+                    // BUG #275: Drop oldest blocks if queue is full to prevent OOM
+                    if (m_blocks_queue.size() >= MAX_BLOCKS_QUEUE_SIZE) {
+                        m_blocks_queue.pop();
+                        LogPrintf(NET, WARN, "[CConnman] Blocks queue full (%zu), dropped oldest entry\n",
+                                  MAX_BLOCKS_QUEUE_SIZE);
+                    }
                     m_blocks_queue.push({pending.node_id, pending.msg.command, pending.msg.data});
                 }
                 m_blocks_cv.notify_one();

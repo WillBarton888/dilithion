@@ -734,13 +734,14 @@ private:
     static constexpr int MEDIAN_TIME_SPAN = 11;            ///< Blocks for median time calculation
 
     // Bug #150: Orphan header pruning configuration
-    static constexpr int ORPHAN_HEADER_EXPIRY_BLOCKS = 100;    ///< Prune orphans >100 blocks behind tip
+    static constexpr int ORPHAN_HEADER_EXPIRY_BLOCKS = 20;     ///< BUG #275: Prune orphans >20 blocks behind tip (was 100, too conservative for fast chains)
     static constexpr int ORPHAN_HEADER_MIN_WORK_PERCENT = 50;  ///< Keep chains with >=50% of best work
-    static constexpr size_t PRUNE_BATCH_SIZE = 1000;           ///< Prune after every N headers processed
+    static constexpr size_t PRUNE_BATCH_SIZE = 200;            ///< BUG #275: Prune after every 200 headers (was 1000, too infrequent for fast chains)
     mutable size_t m_headers_since_last_prune{0};              ///< Counter for triggering prune
 
     // Rejected hash tracking (blocks that failed validation)
     std::set<uint256> m_rejectedHashes;     ///< Hashes of blocks that failed validation
+    static constexpr size_t MAX_REJECTED_HASHES = 10000;  ///< BUG #275: Limit to prevent unbounded growth
 
     // Thread safety
     mutable std::mutex cs_headers;          ///< Protects all data members

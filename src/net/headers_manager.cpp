@@ -1483,6 +1483,12 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
 
             // Track as rejected
             m_rejectedHashes.insert(h);
+            // BUG #275: Evict oldest half when limit exceeded
+            if (m_rejectedHashes.size() > MAX_REJECTED_HASHES) {
+                auto it = m_rejectedHashes.begin();
+                std::advance(it, m_rejectedHashes.size() / 2);
+                m_rejectedHashes.erase(m_rejectedHashes.begin(), it);
+            }
         }
 
         // Update best header if needed
@@ -1529,6 +1535,12 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
     } else {
         // Header not in map, just track hash as rejected
         m_rejectedHashes.insert(hash);
+        // BUG #275: Evict oldest half when limit exceeded
+        if (m_rejectedHashes.size() > MAX_REJECTED_HASHES) {
+            auto it = m_rejectedHashes.begin();
+            std::advance(it, m_rejectedHashes.size() / 2);
+            m_rejectedHashes.erase(m_rejectedHashes.begin(), it);
+        }
     }
 
     std::cout << "[HeadersManager] Removed " << removedCount

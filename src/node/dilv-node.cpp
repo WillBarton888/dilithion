@@ -30,6 +30,7 @@
 // REMOVED: #include <net/message_queue.h> - CMessageProcessorQueue was unused (CConnman handles messages directly)
 #include <net/headers_manager.h>
 #include <net/orphan_manager.h>
+#include <node/resource_monitor.h>  // BUG #275: Memory pressure monitoring
 #include <net/block_fetcher.h>
 #include <net/block_tracker.h>  // IBD BOTTLENECK FIX: For CBlockTracker state updates
 // REMOVED: #include <net/node_state.h> - CNodeStateManager replaced by CPeerManager
@@ -4556,6 +4557,37 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         std::cout << "  [OK] P2P networking started" << std::endl;
 
+        // BUG #275: Start resource monitor to prevent OOM crashes
+        // DilV nodes on 4GB droplets were getting OOM killed at ~3GB RSS.
+        // Monitor triggers cleanup at 80% (warning) and 90% (critical) of limit.
+        CResourceMonitor resource_monitor;
+        resource_monitor.SetMemoryLimit(3ULL * 1024 * 1024 * 1024);  // 3GB limit for 4GB droplets
+        resource_monitor.SetCleanupCallback([](int level) {
+            if (level >= 2) {
+                // Critical: aggressive cleanup
+                if (g_node_context.orphan_manager) {
+                    g_node_context.orphan_manager->Clear();
+                }
+                if (g_node_context.headers_manager) {
+                    g_node_context.headers_manager->PruneOrphanedHeaders();
+                    g_node_context.headers_manager->ClearRejectedHashes();
+                }
+                std::cout << "[ResourceMonitor] CRITICAL: Cleared orphans and pruned headers" << std::endl;
+            } else if (level == 1) {
+                // Warning: light cleanup
+                if (g_node_context.orphan_manager) {
+                    g_node_context.orphan_manager->EraseExpiredOrphans();
+                }
+                if (g_node_context.headers_manager) {
+                    g_node_context.headers_manager->PruneOrphanedHeaders();
+                }
+                std::cout << "[ResourceMonitor] WARNING: Pruned expired orphans and headers" << std::endl;
+            }
+        });
+        resource_monitor.Start();
+        g_resource_monitor = &resource_monitor;
+        std::cout << "  [OK] Resource monitor started (3GB limit)" << std::endl;
+
         // Path for persistent blocks-mined counter
         std::string blocksMined_path = config.datadir + "/blocks_mined.dat";
 
@@ -5803,6 +5835,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_node_context.cooldown_tracker = nullptr;
 
         // REMOVED: CMessageProcessorQueue shutdown (no longer used)
+
+        // BUG #275: Stop resource monitor
+        if (g_resource_monitor) {
+            resource_monitor.Stop();
+            g_resource_monitor = nullptr;
+        }
 
         std::cout << "[Shutdown] Stopping P2P server..." << std::flush;
         // Phase 5: Stop CConnman (handles all socket cleanup internally)

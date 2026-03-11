@@ -360,6 +360,12 @@ private:
     std::vector<std::thread> m_blocks_worker_threads;
     static constexpr int NUM_BLOCK_WORKERS = 1;  // Single worker (validation is sequential anyway)
 
+    // BUG #275: Memory limits for async queues to prevent OOM
+    // Without limits, blocks/headers pile up faster than workers can process,
+    // especially on fast chains (DilV ~45s blocks) with many peers.
+    static constexpr size_t MAX_BLOCKS_QUEUE_SIZE = 500;    // ~500 blocks max in queue
+    static constexpr size_t MAX_HEADERS_QUEUE_SIZE = 2000;  // ~2000 header batches max
+
     // Worker thread functions
     void HeadersWorkerThread();
     void BlocksWorkerThread();
