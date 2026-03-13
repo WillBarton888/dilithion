@@ -150,6 +150,8 @@ ChainParams ChainParams::Mainnet() {
     params.checkpoints.emplace_back(23000, uint256S("00000a5bbef0e203c6b013976bbe4a3afc401975d5d4405298691d6620f47fa6"));
     // Checkpoint at height 24476 - covers blocks with stale nBits accepted via fork switch path
     params.checkpoints.emplace_back(24476, uint256S("000007289cc3fdbe88a572d84f974a49fb962eda7412312c28930153ae52d611"));
+    // Checkpoint at height 30000 - locks in chain through Digital DNA activation
+    params.checkpoints.emplace_back(30000, uint256S("0000000f1cadcbc897976ebe04f1171a5d591ebdb580bdd229d2e310f1a09f05"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)
@@ -378,8 +380,8 @@ ChainParams ChainParams::DilV() {
     params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
 
-    // No checkpoints (new chain, no history yet)
-    // Checkpoints will be added after DilV chain has established blocks
+    // DilV Checkpoints
+    params.checkpoints.emplace_back(10000, uint256S("1554e9011cfc5ec916b600d1f2238cbbe21500762b55904368b3704f117cbaf2"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
