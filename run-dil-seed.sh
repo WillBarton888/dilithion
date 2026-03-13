@@ -4,11 +4,14 @@
 #
 # Usage: nohup ./run-dil-seed.sh > /root/dil-seed.log 2>&1 &
 
-BINARY="./dilithion-node"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BINARY="$SCRIPT_DIR/dilithion-node"
 FLAGS="--relay-only --public-api"
-LOG="/root/dilithion-node.log"
+LOG="/root/node.log"
 
-echo "$(date): DIL seed node wrapper starting"
+cd "$SCRIPT_DIR" || exit 1
+
+echo "$(date): DIL seed node wrapper starting (dir=$SCRIPT_DIR)"
 
 while true; do
     echo "$(date): Starting $BINARY $FLAGS"
