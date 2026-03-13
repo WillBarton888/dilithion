@@ -14,16 +14,19 @@ namespace x402 {
 /**
  * x402 Payment Protocol — Core Data Types
  *
- * Implements the x402 v2 protocol data structures for DilV chain.
+ * Implements the x402 v2 protocol data structures for Dilithion chains.
  * Reference: https://docs.x402.org
  *
- * DilV uses a UTXO-based payment model with Dilithium (post-quantum) signatures.
- * Network identifier: "dilv:mainnet" (CAIP-2 style, pending registration)
+ * Network identifiers use CAIP-2 (bip122 namespace):
+ *   DIL:  bip122:0000009eaa5e7781ba6d14525c3f75c3
+ *   DilV: bip122:3e9a5bfb202db1de714e493fecd165a2
  */
 
-// DilV network identifier for x402
+// CAIP-2 network identifiers (bip122:<first 32 hex of genesis hash>)
 static const char* SCHEME_ID = "exact";
-static const char* NETWORK_ID = "dilv:mainnet";
+static const char* NETWORK_ID_DIL  = "bip122:0000009eaa5e7781ba6d14525c3f75c3";
+static const char* NETWORK_ID_DILV = "bip122:3e9a5bfb202db1de714e493fecd165a2";
+static const char* NETWORK_ID = NETWORK_ID_DILV;  // Default: DilV (payment chain)
 static const char* ASSET_ID = "DILV";  // Native coin
 
 // Payment tiers for Verified Mempool Acceptance
@@ -129,6 +132,131 @@ struct FacilitatorInfo {
     std::vector<std::string> assets; // ["DILV"]
     int64_t micropaymentThreshold;   // Below this = 0-conf accepted
     bool vmaEnabled;                 // Verified Mempool Acceptance supported
+
+    std::string ToJSON() const;
+};
+
+// ============================================================================
+// Extension Types — DNA Trust, VDF Challenge, SIWX
+// ============================================================================
+
+/**
+ * DnaTrustRequest — client requests a trust attestation for an address
+ */
+struct DnaTrustRequest {
+    std::string address;         // DilV address to check
+    std::string network;         // CAIP-2 network ID
+    double minScore;             // Minimum trust score required (0-100)
+    std::string minTier;         // Minimum trust tier ("UNTRUSTED","NEW","ESTABLISHED","TRUSTED","VETERAN")
+};
+
+/**
+ * DnaTrustAttestation — facilitator's signed trust attestation
+ *
+ * Returned by GET /x402/dna-attest?address=...
+ * Used by x402 servers to gate access based on payer trust level.
+ */
+struct DnaTrustAttestation {
+    std::string address;         // DilV address
+    std::string network;         // CAIP-2 network ID
+    double trustScore;           // Current trust score (0-100)
+    std::string trustTier;       // "UNTRUSTED","NEW","ESTABLISHED","TRUSTED","VETERAN"
+    uint32_t registrationHeight; // Block height of DNA registration
+    uint32_t consecutiveHeartbeats; // Consecutive heartbeat count
+    uint64_t timestamp;          // Attestation timestamp (unix seconds)
+    bool isRegistered;           // Whether address has Digital DNA
+
+    std::string ToJSON() const;
+};
+
+/**
+ * VdfChallengeRequest — client requests a VDF challenge
+ */
+struct VdfChallengeRequest {
+    uint64_t iterations;         // Requested iteration count (0 = use default)
+    std::string address;         // Payer address (for challenge seed)
+    std::string network;         // CAIP-2 network ID
+};
+
+/**
+ * VdfChallengeResponse — facilitator issues a VDF challenge
+ *
+ * Returned by POST /x402/vdf-challenge
+ */
+struct VdfChallengeResponse {
+    std::string challengeId;     // Unique challenge ID (hex)
+    std::string seed;            // 32-byte challenge seed (hex)
+    uint64_t iterations;         // Required iterations
+    uint64_t timeoutSec;         // Seconds to complete
+    std::string network;         // CAIP-2 network ID
+
+    std::string ToJSON() const;
+};
+
+/**
+ * VdfProofSubmission — client submits VDF proof
+ */
+struct VdfProofSubmission {
+    std::string challengeId;     // Matches VdfChallengeResponse.challengeId
+    std::string output;          // 32-byte VDF output (hex)
+    std::string proof;           // Wesolowski proof (hex)
+    uint64_t iterations;         // Iterations performed
+};
+
+/**
+ * VdfVerifyResult — facilitator's VDF proof verification
+ *
+ * Returned by POST /x402/vdf-verify
+ */
+struct VdfVerifyResult {
+    bool valid;                  // Proof is cryptographically valid
+    std::string challengeId;     // Challenge this proof answers
+    uint64_t iterations;         // Verified iteration count
+    std::string reason;          // Human-readable reason if invalid
+
+    std::string ToJSON() const;
+};
+
+/**
+ * SIWXChallenge — Sign-In-With-X challenge (Dilithium3)
+ *
+ * Returned by POST /x402/siwx/challenge
+ * Client signs the nonce with their Dilithium3 key.
+ */
+struct SIWXChallenge {
+    std::string challengeId;     // Unique challenge ID (hex)
+    std::string nonce;           // 32-byte random nonce (hex)
+    std::string domain;          // Requesting domain
+    std::string address;         // Claimed DilV address
+    std::string network;         // CAIP-2 network ID
+    uint64_t issuedAt;           // Unix timestamp
+    uint64_t expiresAt;          // Unix timestamp
+
+    std::string ToJSON() const;
+};
+
+/**
+ * SIWXAuth — client's signed authentication proof
+ *
+ * Sent to POST /x402/siwx/verify
+ */
+struct SIWXAuth {
+    std::string challengeId;     // Matches SIWXChallenge.challengeId
+    std::string signature;       // Dilithium3 signature over nonce (hex)
+    std::string publicKey;       // Dilithium3 public key (hex, 1952 bytes)
+    std::string address;         // Claimed DilV address
+};
+
+/**
+ * SIWXResult — facilitator's SIWX verification result
+ *
+ * Returned by POST /x402/siwx/verify
+ */
+struct SIWXResult {
+    bool valid;                  // Signature verified and address matches
+    std::string address;         // Verified DilV address
+    std::string reason;          // Human-readable reason if invalid
+    std::string network;         // CAIP-2 network ID
 
     std::string ToJSON() const;
 };

@@ -957,6 +957,13 @@ public:
      */
     std::string GetMIKIdentityHex() const;
 
+    /**
+     * Get raw pointer to MIK key (for DNA verification signing)
+     *
+     * @return Pointer to CMiningIdentityKey, or nullptr if no MIK
+     */
+    const DFMP::CMiningIdentityKey* GetMIKKeyPtr() const { return m_mik.get(); }
+
     // ============================================================================
     // Persistence
     // ============================================================================

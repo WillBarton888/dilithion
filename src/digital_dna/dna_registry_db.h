@@ -16,6 +16,7 @@
 
 #include "digital_dna.h"
 #include "dna_registry_interface.h"
+#include "dna_verification.h"
 #include "ml_detector.h"
 
 #include <leveldb/db.h>
@@ -80,6 +81,25 @@ public:
     /** Get ML detector status */
     std::string ml_status() const;
 
+    // --- Attestation storage (Phase 2: Verification) ---
+
+    /** Store a verified attestation */
+    bool store_attestation(const verification::DNAAttestation& attestation);
+
+    /** Get all attestations for a target MIK */
+    std::vector<verification::DNAAttestation> get_attestations(
+        const std::array<uint8_t, 20>& target_mik) const;
+
+    /** Count PASS attestations for a target MIK */
+    size_t count_pass_attestations(const std::array<uint8_t, 20>& target_mik) const;
+
+    /** Get verification status for a MIK (computed from attestation count) */
+    verification::VerificationStatus get_verification_status(
+        const std::array<uint8_t, 20>& mik) const;
+
+    /** Get all registered MIK identities (for verifier selection) */
+    std::vector<std::array<uint8_t, 20>> get_all_miks() const;
+
 private:
     std::shared_ptr<MLSybilDetector> ml_detector_;
 
@@ -96,11 +116,15 @@ private:
     static const std::string KEY_PREFIX;      // "dna:"
     static const std::string MIK_KEY_PREFIX;  // "dna_mik:"
     static const std::string HIST_KEY_PREFIX; // "dna_hist:"
+    static const std::string ATT_KEY_PREFIX;  // "dna_att:"
 
     // Key helpers
     std::string make_key(const std::array<uint8_t, 20>& address) const;
     std::string make_mik_key(const std::array<uint8_t, 20>& mik) const;
     std::string make_hist_key(const std::array<uint8_t, 20>& mik, uint64_t timestamp) const;
+    std::string make_att_key(const std::array<uint8_t, 20>& target_mik,
+                             const std::array<uint8_t, 20>& verifier_mik,
+                             uint32_t height) const;
     static std::string address_to_hex(const std::array<uint8_t, 20>& addr);
 
     // Load all identities into cache on startup

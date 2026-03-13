@@ -67,6 +67,9 @@ struct DigitalDNA {
     uint32_t registration_height;       // Block height when registered
     uint64_t registration_time;         // Unix timestamp
 
+    // Verification status (Phase 2: peer attestation)
+    uint8_t verification_status = 0;  // 0=UNVERIFIED, 1=PENDING, 2=VERIFIED, 3=FAILED
+
     // Validation state
     bool is_valid = false;
     std::string validation_error;

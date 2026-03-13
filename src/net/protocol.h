@@ -72,6 +72,11 @@ enum MessageType {
     MSG_DNA_BW_RESULT,      // Bandwidth measurement result (signed)
     MSG_DNA_IDENT_REQ,      // Request DNA identity by MIK (20 bytes)
     MSG_DNA_IDENT_RES,      // Response with serialized DNA identity
+
+    // Phase 2: DNA Verification & Attestation protocol
+    MSG_DNA_VERIFY_CHALL,   // Verification challenge (verifier → target)
+    MSG_DNA_VERIFY_RESP,    // Verification response (target → verifier)
+    MSG_DNA_VERIFY_ATTEST,  // Signed attestation broadcast (verifier → network)
 };
 
 /** Inventory vector types */
@@ -318,6 +323,9 @@ inline const char* GetMessageCommand(MessageType type) {
         case MSG_DNA_BW_RESULT: return "dnabwres";
         case MSG_DNA_IDENT_REQ: return "dnaireq";
         case MSG_DNA_IDENT_RES: return "dnaires";
+        case MSG_DNA_VERIFY_CHALL: return "dnavchall";
+        case MSG_DNA_VERIFY_RESP: return "dnavresp";
+        case MSG_DNA_VERIFY_ATTEST: return "dnavatts";
         default: return "unknown";
     }
 }

@@ -153,6 +153,18 @@ struct CMiningIdentityKey {
               std::vector<uint8_t>& signature) const;
 
     /**
+     * Sign arbitrary data with the MIK private key (Dilithium3)
+     *
+     * Used for DNA attestation signing and other non-block signatures.
+     *
+     * @param message Raw message bytes to sign
+     * @param[out] signature Output signature (3,309 bytes)
+     * @return true if signing successful
+     */
+    bool SignArbitrary(const std::vector<uint8_t>& message,
+                       std::vector<uint8_t>& signature) const;
+
+    /**
      * Clear the MIK (secure wipe of private key)
      */
     void Clear();
@@ -223,6 +235,21 @@ bool VerifyMIKSignature(
  * @return Identity (20 bytes), or null identity if pubkey invalid
  */
 Identity DeriveIdentityFromMIK(const std::vector<uint8_t>& pubkey);
+
+/**
+ * Verify an arbitrary Dilithium3 signature
+ *
+ * Used for DNA attestation verification and other non-block signatures.
+ *
+ * @param pubkey Public key (1,952 bytes)
+ * @param signature Signature to verify (3,309 bytes)
+ * @param message Raw message bytes that were signed
+ * @return true if signature is valid
+ */
+bool VerifyArbitrarySignature(
+    const std::vector<uint8_t>& pubkey,
+    const std::vector<uint8_t>& signature,
+    const std::vector<uint8_t>& message);
 
 // ============================================================================
 // SCRIPTSIG PARSING

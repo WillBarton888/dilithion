@@ -186,7 +186,9 @@ DIGITAL_DNA_SOURCES := src/digital_dna/digital_dna.cpp \
                        src/digital_dna/bandwidth_proof.cpp \
                        src/digital_dna/ml_detector.cpp \
                        src/digital_dna/dna_registry_db.cpp \
-                       src/digital_dna/trust_score.cpp
+                       src/digital_dna/trust_score.cpp \
+                       src/digital_dna/dna_verification.cpp \
+                       src/digital_dna/verification_manager.cpp
 
 # VDF (Verifiable Delay Function) sources - uses chiavdf class group VDF
 VDF_SOURCES := src/vdf/vdf.cpp \

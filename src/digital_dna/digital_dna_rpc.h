@@ -88,6 +88,11 @@ private:
     JsonObject cmd_getdigitaldnahistory(const JsonObject& params);
     JsonObject cmd_getdnamonitor(const JsonObject& params);
 
+    // Phase 2: DNA Verification & Attestation RPCs
+    JsonObject cmd_getverificationstatus(const JsonObject& params);
+    JsonObject cmd_listattestations(const JsonObject& params);
+    JsonObject cmd_getverificationconfig(const JsonObject& params);
+
     // Helpers
     std::string address_to_hex(const std::array<uint8_t, 20>& addr) const;
     std::array<uint8_t, 20> hex_to_address(const std::string& hex) const;

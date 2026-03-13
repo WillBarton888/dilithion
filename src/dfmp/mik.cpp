@@ -123,6 +123,30 @@ bool CMiningIdentityKey::Sign(const uint256& prevHash, int height, uint32_t time
     return true;
 }
 
+bool CMiningIdentityKey::SignArbitrary(const std::vector<uint8_t>& message,
+                                       std::vector<uint8_t>& signature) const {
+    if (!HasPrivateKey()) {
+        return false;
+    }
+
+    signature.resize(MIK_SIGNATURE_SIZE);
+    size_t siglen = 0;
+
+    int result = pqcrystals_dilithium3_ref_signature(
+        signature.data(), &siglen,
+        message.data(), message.size(),
+        nullptr, 0,  // No context
+        privkey.data()
+    );
+
+    if (result != 0 || siglen != MIK_SIGNATURE_SIZE) {
+        signature.clear();
+        return false;
+    }
+
+    return true;
+}
+
 void CMiningIdentityKey::Clear() {
     // Securely wipe private key
     if (!privkey.empty()) {
@@ -253,6 +277,24 @@ Identity DeriveIdentityFromMIK(const std::vector<uint8_t>& pubkey) {
 
     // Take first 20 bytes as identity
     return Identity(hash);
+}
+
+bool VerifyArbitrarySignature(
+    const std::vector<uint8_t>& pubkey,
+    const std::vector<uint8_t>& signature,
+    const std::vector<uint8_t>& message) {
+    if (pubkey.size() != MIK_PUBKEY_SIZE || signature.size() != MIK_SIGNATURE_SIZE) {
+        return false;
+    }
+
+    int result = pqcrystals_dilithium3_ref_verify(
+        signature.data(), signature.size(),
+        message.data(), message.size(),
+        nullptr, 0,  // No context
+        pubkey.data()
+    );
+
+    return result == 0;
 }
 
 // ============================================================================

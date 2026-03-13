@@ -15,6 +15,7 @@ namespace digital_dna {
 const std::string DNARegistryDB::KEY_PREFIX = "dna:";
 const std::string DNARegistryDB::MIK_KEY_PREFIX = "dna_mik:";
 const std::string DNARegistryDB::HIST_KEY_PREFIX = "dna_hist:";
+const std::string DNARegistryDB::ATT_KEY_PREFIX = "dna_att:";
 
 DNARegistryDB::DNARegistryDB() {}
 
@@ -496,6 +497,91 @@ std::string DNARegistryDB::ml_status() const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!ml_detector_) return "{\"status\": \"not_configured\"}";
     return ml_detector_->status_json();
+}
+
+// --- Attestation Storage (Phase 2: Verification) ---
+
+std::string DNARegistryDB::make_att_key(const std::array<uint8_t, 20>& target_mik,
+                                         const std::array<uint8_t, 20>& verifier_mik,
+                                         uint32_t height) const {
+    char h[9];
+    snprintf(h, sizeof(h), "%08x", height);
+    return ATT_KEY_PREFIX + address_to_hex(target_mik) + ":" + address_to_hex(verifier_mik) + ":" + h;
+}
+
+bool DNARegistryDB::store_attestation(const verification::DNAAttestation& attestation) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!db_) return false;
+
+    std::string key = make_att_key(attestation.target_mik, attestation.verifier_mik,
+                                    attestation.registration_height);
+    auto data = attestation.serialize();
+    std::string value(data.begin(), data.end());
+
+    leveldb::Status status = db_->Put(leveldb::WriteOptions(), key, value);
+    return status.ok();
+}
+
+std::vector<verification::DNAAttestation> DNARegistryDB::get_attestations(
+    const std::array<uint8_t, 20>& target_mik) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<verification::DNAAttestation> result;
+    if (!db_) return result;
+
+    std::string prefix = ATT_KEY_PREFIX + address_to_hex(target_mik) + ":";
+    std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
+    for (it->Seek(prefix); it->Valid(); it->Next()) {
+        std::string key = it->key().ToString();
+        if (key.substr(0, prefix.size()) != prefix) break;
+
+        std::string value = it->value().ToString();
+        std::vector<uint8_t> data(value.begin(), value.end());
+        auto att = verification::DNAAttestation::deserialize(data);
+        if (att) {
+            result.push_back(std::move(*att));
+        }
+
+        if (result.size() >= 100) break;  // Safety cap
+    }
+    return result;
+}
+
+size_t DNARegistryDB::count_pass_attestations(const std::array<uint8_t, 20>& target_mik) const {
+    auto atts = get_attestations(target_mik);
+    size_t pass_count = 0;
+    for (const auto& att : atts) {
+        if (att.overall_pass) pass_count++;
+    }
+    return pass_count;
+}
+
+verification::VerificationStatus DNARegistryDB::get_verification_status(
+    const std::array<uint8_t, 20>& mik) const {
+    auto atts = get_attestations(mik);
+    if (atts.empty()) return verification::VerificationStatus::UNVERIFIED;
+
+    size_t pass_count = 0;
+    size_t fail_count = 0;
+    for (const auto& att : atts) {
+        if (att.overall_pass) pass_count++;
+        else fail_count++;
+    }
+
+    if (pass_count >= verification::ATTESTATION_QUORUM)
+        return verification::VerificationStatus::VERIFIED;
+    if (fail_count > verification::VERIFIER_COUNT / 2)
+        return verification::VerificationStatus::FAILED;
+    return verification::VerificationStatus::PENDING;
+}
+
+std::vector<std::array<uint8_t, 20>> DNARegistryDB::get_all_miks() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::array<uint8_t, 20>> result;
+    result.reserve(mik_to_address_.size());
+    for (const auto& [mik, addr] : mik_to_address_) {
+        result.push_back(mik);
+    }
+    return result;
 }
 
 } // namespace digital_dna

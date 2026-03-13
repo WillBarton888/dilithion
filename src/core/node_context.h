@@ -39,6 +39,9 @@ class CCooldownTracker;  // VDF cooldown rate limiter
 #include <digital_dna/dna_registry_db.h>
 #include <digital_dna/trust_score.h>
 
+// Forward declaration for verification manager (Phase 2)
+namespace digital_dna { namespace verification { class VerificationManager; } }
+
 /**
  * NodeContext - Bitcoin Core-style global state management
  *
@@ -88,6 +91,8 @@ struct NodeContext {
     // Digital DNA: Sybil-resistant identity system
     std::unique_ptr<digital_dna::DNARegistryDB> dna_registry;
     std::unique_ptr<digital_dna::TrustScoreManager> trust_manager;
+    // Phase 2: Verification & attestation
+    std::unique_ptr<digital_dna::verification::VerificationManager> verification_manager;
     // DNA collector accessors (storage is a separate global to avoid NodeContext memory stomps)
     std::shared_ptr<digital_dna::DigitalDNACollector> GetDNACollector() const;
     void SetDNACollector(std::shared_ptr<digital_dna::DigitalDNACollector> new_collector);

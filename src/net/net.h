@@ -59,6 +59,10 @@ public:
     using DNAIdentReqHandler = std::function<void(int peer_id, const std::array<uint8_t, 20>& mik)>;
     using DNAIdentResHandler = std::function<void(int peer_id, const std::array<uint8_t, 20>& mik,
         bool found, const std::vector<uint8_t>& dna_data)>;
+    // Phase 2: DNA Verification & Attestation handlers
+    using DNAVerifyChallengeHandler = std::function<void(int peer_id, const std::vector<uint8_t>& data)>;
+    using DNAVerifyResponseHandler = std::function<void(int peer_id, const std::vector<uint8_t>& data)>;
+    using DNAVerifyAttestHandler = std::function<void(int peer_id, const std::vector<uint8_t>& data)>;
 
     CNetMessageProcessor(CPeerManager& peer_mgr);
 
@@ -95,6 +99,10 @@ public:
     CNetMessage CreateDNAIdentReqMessage(const std::array<uint8_t, 20>& mik);
     CNetMessage CreateDNAIdentResMessage(const std::array<uint8_t, 20>& mik, bool found,
                                           const std::vector<uint8_t>& dna_data);
+    // Phase 2: DNA Verification messages
+    CNetMessage CreateDNAVerifyChallengeMessage(const std::vector<uint8_t>& data);
+    CNetMessage CreateDNAVerifyResponseMessage(const std::vector<uint8_t>& data);
+    CNetMessage CreateDNAVerifyAttestMessage(const std::vector<uint8_t>& data);
 
     // Register handlers
     void SetVersionHandler(VersionHandler handler) { on_version = handler; }
@@ -122,6 +130,10 @@ public:
     void SetDNABWResultHandler(DNABWResultHandler handler) { on_dna_bw_result = handler; }
     void SetDNAIdentReqHandler(DNAIdentReqHandler handler) { on_dna_ident_req = handler; }
     void SetDNAIdentResHandler(DNAIdentResHandler handler) { on_dna_ident_res = handler; }
+    // Phase 2: DNA Verification handler setters
+    void SetDNAVerifyChallengeHandler(DNAVerifyChallengeHandler handler) { on_dna_verify_challenge = handler; }
+    void SetDNAVerifyResponseHandler(DNAVerifyResponseHandler handler) { on_dna_verify_response = handler; }
+    void SetDNAVerifyAttestHandler(DNAVerifyAttestHandler handler) { on_dna_verify_attest = handler; }
     // DNA nonce management (public for initiator logic in node)
     void RegisterDNANonce(uint64_t nonce, int peer_id, uint64_t send_timestamp_us = 0);
     bool ValidateDNANonce(uint64_t nonce, int peer_id);
@@ -144,6 +156,10 @@ private:
     std::map<int, int64_t> peer_dna_bwtest_timestamps; // peer_id -> last dnabwtest time
     std::map<int, int64_t> peer_dna_ident_timestamps;  // peer_id -> last dnaireq time
     std::atomic<int> dna_bwtest_global_count_{0};       // Global concurrent BW tests
+    // Phase 2: Verification rate limiting
+    std::map<int, int64_t> peer_dna_verify_timestamps;  // peer_id -> last dnavchall time
+    std::map<int, std::vector<int64_t>> peer_dna_attest_timestamps; // peer_id -> recent dnavatts times
+    std::atomic<int> dna_verify_global_count_{0};       // Global concurrent verifications
     mutable std::mutex cs_dna_rate_limit;
     // Nonce tracking: nonce -> {peer_id, send_time_sec, send_timestamp_us}
     struct DNANonceInfo {
@@ -180,6 +196,10 @@ private:
     DNABWResultHandler on_dna_bw_result;
     DNAIdentReqHandler on_dna_ident_req;
     DNAIdentResHandler on_dna_ident_res;
+    // Phase 2: DNA Verification handlers
+    DNAVerifyChallengeHandler on_dna_verify_challenge;
+    DNAVerifyResponseHandler on_dna_verify_response;
+    DNAVerifyAttestHandler on_dna_verify_attest;
 
     // Process specific message types
     bool ProcessVersionMessage(int peer_id, CDataStream& stream);
@@ -210,6 +230,10 @@ private:
     bool ProcessDNABWResultMessage(int peer_id, CDataStream& stream);
     bool ProcessDNAIdentReqMessage(int peer_id, CDataStream& stream);
     bool ProcessDNAIdentResMessage(int peer_id, CDataStream& stream);
+    // Phase 2: DNA Verification message processing
+    bool ProcessDNAVerifyChallengeMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNAVerifyResponseMessage(int peer_id, CDataStream& stream);
+    bool ProcessDNAVerifyAttestMessage(int peer_id, CDataStream& stream);
 
     // Serialization helpers
     std::vector<uint8_t> SerializeVersionMessage(const NetProtocol::CVersionMessage& msg);

@@ -3,6 +3,9 @@
  */
 
 #include "digital_dna_rpc.h"
+#include "dna_verification.h"
+#include "dna_registry_db.h"
+#include "verification_manager.h"
 #include <core/node_context.h>
 #include <wallet/wallet.h>
 #include <util/base58.h>
@@ -56,6 +59,10 @@ void DigitalDNARpc::register_commands() {
     handlers_["dumpdigitaldna"] = [this](const JsonObject& p) { return cmd_dumpdigitaldna(p); };
     handlers_["getdigitaldnahistory"] = [this](const JsonObject& p) { return cmd_getdigitaldnahistory(p); };
     handlers_["getdnamonitor"] = [this](const JsonObject& p) { return cmd_getdnamonitor(p); };
+    // Phase 2: DNA Verification & Attestation
+    handlers_["getverificationstatus"] = [this](const JsonObject& p) { return cmd_getverificationstatus(p); };
+    handlers_["listattestations"] = [this](const JsonObject& p) { return cmd_listattestations(p); };
+    handlers_["getverificationconfig"] = [this](const JsonObject& p) { return cmd_getverificationconfig(p); };
 }
 
 RpcHandler DigitalDNARpc::get_handler(const std::string& method) const {
@@ -1218,6 +1225,117 @@ JsonObject DigitalDNARpc::cmd_getdnamonitor(const JsonObject& /*params*/) {
     return result;
 }
 
+// ============ Phase 2: DNA Verification & Attestation RPCs ============
+
+JsonObject DigitalDNARpc::cmd_getverificationstatus(const JsonObject& params) {
+    auto it = params.find("mik");
+    if (it == params.end() || it->second.empty()) {
+        return error(-1, "Missing required parameter: mik (40-character hex)");
+    }
+
+    std::array<uint8_t, 20> mik = hex_to_address(it->second);
+
+    // Get verification status from registry
+    auto* reg = dynamic_cast<DNARegistryDB*>(&registry_);
+    if (!reg) {
+        return error(-2, "DNA registry not available");
+    }
+
+    auto status = reg->get_verification_status(mik);
+    auto attestations = reg->get_attestations(mik);
+    size_t pass_count = reg->count_pass_attestations(mik);
+
+    JsonObject result;
+    const char* status_names[] = {"UNVERIFIED", "PENDING", "VERIFIED", "FAILED"};
+    int status_idx = static_cast<int>(status);
+    result["status"] = (status_idx >= 0 && status_idx <= 3) ? status_names[status_idx] : "UNKNOWN";
+    result["attestation_count"] = std::to_string(attestations.size());
+    result["pass_count"] = std::to_string(pass_count);
+    result["fail_count"] = std::to_string(attestations.size() - pass_count);
+    result["quorum_required"] = std::to_string(verification::ATTESTATION_QUORUM);
+
+    // List verifier MIKs
+    std::ostringstream verifiers_json;
+    verifiers_json << "[";
+    for (size_t i = 0; i < attestations.size(); ++i) {
+        if (i > 0) verifiers_json << ",";
+        verifiers_json << "\"" << address_to_hex(attestations[i].verifier_mik) << "\"";
+    }
+    verifiers_json << "]";
+    result["verifiers"] = verifiers_json.str();
+
+    return result;
+}
+
+JsonObject DigitalDNARpc::cmd_listattestations(const JsonObject& params) {
+    auto it = params.find("mik");
+    if (it == params.end() || it->second.empty()) {
+        return error(-1, "Missing required parameter: mik (40-character hex)");
+    }
+
+    std::array<uint8_t, 20> mik = hex_to_address(it->second);
+
+    auto* reg = dynamic_cast<DNARegistryDB*>(&registry_);
+    if (!reg) {
+        return error(-2, "DNA registry not available");
+    }
+
+    auto attestations = reg->get_attestations(mik);
+
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < attestations.size(); ++i) {
+        const auto& att = attestations[i];
+        if (i > 0) oss << ",";
+        oss << "{";
+        oss << "\"verifier\":\"" << address_to_hex(att.verifier_mik) << "\",";
+        oss << "\"target\":\"" << address_to_hex(att.target_mik) << "\",";
+        oss << "\"height\":" << att.registration_height << ",";
+        oss << "\"timestamp\":" << att.timestamp << ",";
+        oss << "\"overall_pass\":" << (att.overall_pass ? "true" : "false") << ",";
+        oss << std::fixed << std::setprecision(2);
+        oss << "\"vdf_measured\":" << att.vdf_timing.measured_value << ",";
+        oss << "\"vdf_claimed\":" << att.vdf_timing.claimed_value << ",";
+        oss << "\"vdf_pass\":" << (att.vdf_timing.pass ? "true" : "false") << ",";
+        oss << "\"bw_up_measured\":" << att.bandwidth_up.measured_value << ",";
+        oss << "\"bw_down_measured\":" << att.bandwidth_down.measured_value << ",";
+        oss << "\"latency_rtt_ms\":" << att.latency_rtt_ms;
+        oss << "}";
+    }
+    oss << "]";
+
+    JsonObject result;
+    result["mik"] = address_to_hex(mik);
+    result["count"] = std::to_string(attestations.size());
+    result["attestations"] = oss.str();
+    return result;
+}
+
+JsonObject DigitalDNARpc::cmd_getverificationconfig(const JsonObject& params) {
+    (void)params;
+    JsonObject result;
+    result["verifier_count"] = std::to_string(verification::VERIFIER_COUNT);
+    result["attestation_quorum"] = std::to_string(verification::ATTESTATION_QUORUM);
+    result["vdf_challenge_iterations"] = std::to_string(verification::VDF_CHALLENGE_ITERS);
+    result["vdf_timing_tolerance"] = std::to_string(verification::VDF_TIMING_TOLERANCE);
+    result["bandwidth_tolerance"] = std::to_string(verification::BW_TOLERANCE);
+    result["vdf_timeout_sec"] = std::to_string(verification::VDF_CHALLENGE_TIMEOUT_SEC);
+    result["bw_timeout_sec"] = std::to_string(verification::BW_CHALLENGE_TIMEOUT_SEC);
+    result["latency_timeout_sec"] = std::to_string(verification::LATENCY_TIMEOUT_SEC);
+    result["max_concurrent"] = std::to_string(verification::MAX_CONCURRENT_VERIFICATIONS);
+    result["rate_limit_sec"] = std::to_string(verification::VERIFICATION_RATE_LIMIT_SEC);
+
+    // Pending count from verification manager
+    if (g_node_context.verification_manager) {
+        result["pending_verifications"] = std::to_string(
+            g_node_context.verification_manager->PendingCount());
+    } else {
+        result["pending_verifications"] = "0";
+    }
+
+    return result;
+}
+
 // ============ Help Documentation ============
 
 std::vector<RpcCommandInfo> get_rpc_help() {
@@ -1326,6 +1444,27 @@ std::vector<RpcCommandInfo> get_rpc_help() {
             "None",
             "Object with sybil_clusters, rotation_alerts, dimension_coverage, trust_distribution, health_score, health_grade",
             "getdnamonitor"
+        },
+        {
+            "getverificationstatus",
+            "Get DNA verification status and attestation summary for a MIK identity",
+            "mik (string) - 40-character hex MIK identity",
+            "Object with status (UNVERIFIED/PENDING/VERIFIED/FAILED), attestation_count, pass_count, fail_count, verifiers",
+            "getverificationstatus {\"mik\": \"0123456789abcdef0123456789abcdef01234567\"}"
+        },
+        {
+            "listattestations",
+            "List all attestations for a MIK identity with per-dimension measurement details",
+            "mik (string) - 40-character hex MIK identity",
+            "Array of attestation objects with verifier, height, timestamp, VDF/BW/latency results",
+            "listattestations {\"mik\": \"0123456789abcdef0123456789abcdef01234567\"}"
+        },
+        {
+            "getverificationconfig",
+            "Get current DNA verification protocol configuration parameters",
+            "None",
+            "Object with verifier_count, quorum, tolerances, timeouts, pending count",
+            "getverificationconfig"
         }
     };
 }

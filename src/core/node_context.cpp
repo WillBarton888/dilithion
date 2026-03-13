@@ -11,6 +11,7 @@
 #include <net/blockencodings.h>  // BIP 152: For PartiallyDownloadedBlock destructor
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <digital_dna/dna_registry_db.h>  // Digital DNA: LevelDB-backed registry
+#include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
 #include <util/logging.h>
 
 // Global node context instance
@@ -108,6 +109,18 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
         trust_manager.reset();  // Non-fatal
     }
 
+    // Initialize DNA verification manager (Phase 2: peer verification & attestation)
+    if (dna_registry && trust_manager) {
+        try {
+            verification_manager = std::make_unique<digital_dna::verification::VerificationManager>(
+                dna_registry.get(), trust_manager.get());
+            LogPrintf(ALL, INFO, "DNA verification manager initialized");
+        } catch (const std::exception& e) {
+            LogPrintf(ALL, ERROR, "Failed to initialize verification manager: %s", e.what());
+            verification_manager.reset();  // Non-fatal
+        }
+    }
+
     // Initialize state flags
     running = false;
     new_block_found = false;
@@ -160,6 +173,9 @@ void NodeContext::Shutdown() {
     // Reset peer manager (unique_ptr will handle cleanup)
     peer_manager.reset();
 
+    // Phase 2: Reset verification manager before trust/registry
+    verification_manager.reset();
+
     // Digital DNA: Reset trust manager (caller saves before Shutdown)
     trust_manager.reset();
     if (dna_registry) {
@@ -191,6 +207,7 @@ void NodeContext::Reset() {
     validation_queue.reset();  // Phase 2: Reset validation queue
     dna_registry.reset();  // Digital DNA
     trust_manager.reset();
+    verification_manager.reset();  // Phase 2
     SetDNACollector(nullptr);
     async_broadcaster = nullptr;
     rpc_server = nullptr;

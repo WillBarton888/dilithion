@@ -72,6 +72,7 @@
 #include <util/error_format.h>  // User experience: Better error messages
 #include <util/bench.h>  // Performance: Benchmarking
 #include <digital_dna/digital_dna_rpc.h>  // Digital DNA RPC commands
+#include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
 
 #include <iostream>
 #include <fstream>
@@ -282,6 +283,11 @@ extern std::atomic<bool> g_utxo_sync_enabled;
 
 // Global async broadcaster pointer (initialized in main)
 CAsyncBroadcaster* g_async_broadcaster = nullptr;
+
+// Phase 2: MIK → peer_id mapping for DNA verification routing
+// Populated when we receive DNA identity responses from peers
+static std::map<std::array<uint8_t, 20>, int> g_mik_peer_map;
+static std::mutex g_mik_peer_mutex;
 
 // Phase 1.2: Global state now managed via NodeContext
 // Legacy globals kept for backward compatibility during migration
@@ -2855,6 +2861,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         x402_facilitator.RegisterUTXOSet(&utxo_set);
         x402_facilitator.RegisterMempool(&mempool);
         x402_facilitator.RegisterChainState(&g_chainstate);
+        x402_facilitator.RegisterNodeContext(&g_node_context);  // Extensions: DNA trust, VDF, SIWX
 
         http_server.SetRestApiHandler([](const std::string& method,
                                          const std::string& path,
@@ -3682,6 +3689,39 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Only store if we don't already have this identity
             if (!g_node_context.dna_registry->is_registered(dna->address)) {
                 g_node_context.dna_registry->register_identity(*dna);
+            }
+            // Phase 2: Track MIK → peer_id mapping for verification routing
+            {
+                std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
+                g_mik_peer_map[mik] = peer_id;
+            }
+        });
+
+        // Phase 2: DNA Verification & Attestation P2P handlers
+        // dnavchall: Verification challenge received (we are the target)
+        message_processor.SetDNAVerifyChallengeHandler([](int peer_id,
+            const std::vector<uint8_t>& data)
+        {
+            if (g_node_context.verification_manager) {
+                g_node_context.verification_manager->OnChallengeReceived(peer_id, data);
+            }
+        });
+
+        // dnavresp: Verification response received (we are the verifier)
+        message_processor.SetDNAVerifyResponseHandler([](int peer_id,
+            const std::vector<uint8_t>& data)
+        {
+            if (g_node_context.verification_manager) {
+                g_node_context.verification_manager->OnResponseReceived(peer_id, data);
+            }
+        });
+
+        // dnavatts: Attestation broadcast received
+        message_processor.SetDNAVerifyAttestHandler([](int peer_id,
+            const std::vector<uint8_t>& data)
+        {
+            if (g_node_context.verification_manager) {
+                g_node_context.verification_manager->OnAttestationReceived(peer_id, data);
             }
         });
 
@@ -4547,6 +4587,31 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             }
 
+            // Phase 2: Trigger DNA verification for new registrations
+            // When a miner's DNA is first registered, selected verifiers initiate challenges
+            if (g_node_context.verification_manager && g_node_context.dna_registry) {
+                // Check if this block contains a new DNA registration
+                // (Look for MIK in coinbase that just registered in trust scoring above)
+                std::array<uint8_t, 20> minerMik{};
+                CBlockValidator validator_v;
+                std::vector<CTransactionRef> txs_v;
+                std::string err_v;
+                if (validator_v.DeserializeBlockTransactions(block, txs_v, err_v) && !txs_v.empty()) {
+                    DFMP::CMIKScriptData mikData_v;
+                    if (DFMP::ParseMIKFromScriptSig(txs_v[0]->vin[0].scriptSig, mikData_v)) {
+                        if (mikData_v.isRegistration) {
+                            // New MIK registration — trigger verification
+                            std::copy(mikData_v.identity.data,
+                                      mikData_v.identity.data + 20, minerMik.begin());
+                            std::array<uint8_t, 32> blockHash{};
+                            std::copy(hash.begin(), hash.begin() + 32, blockHash.begin());
+                            g_node_context.verification_manager->OnNewRegistration(
+                                minerMik, static_cast<uint32_t>(height), blockHash);
+                        }
+                    }
+                }
+            }
+
             // DNA commitment soft integrity check (VDF blocks post-activation)
             int dnaCommitAct = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->dnaCommitmentActivationHeight : 999999999;
@@ -5038,6 +5103,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
                     }
 
+                    // Phase 2: DNA Verification manager tick (timeouts + queued verifications)
+                    if (g_node_context.verification_manager) {
+                        int verifyHeight = g_chainstate.GetHeight();
+                        g_node_context.verification_manager->Tick(
+                            static_cast<uint32_t>(verifyHeight));
+                    }
+
                     // Process feeler connections (Bitcoin Core-style eclipse attack protection)
                     // Feeler connections test addresses we haven't tried recently
                     // Phase 5: Re-enabled after CFeelerManager migration to CConnman
@@ -5148,6 +5220,71 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                               << addr_hex.str() << "...)" << std::endl;
                 }
             }
+        }
+
+        // Phase 2: Wire DNA Verification Manager (MIK identity + P2P callbacks)
+        if (g_node_context.verification_manager) {
+            // Set this node's MIK identity for signing attestations
+            DFMP::Identity vmMikId = wallet.GetMIKIdentity();
+            if (!vmMikId.IsNull()) {
+                std::array<uint8_t, 20> vmMikArr{};
+                std::copy(vmMikId.data, vmMikId.data + 20, vmMikArr.begin());
+                std::vector<uint8_t> vmPubkey;
+                if (wallet.GetMIKPubKey(vmPubkey)) {
+                    g_node_context.verification_manager->SetMyMIK(
+                        vmMikArr, vmPubkey, wallet.GetMIKKeyPtr());
+                    std::cout << "  [OK] DNA verification manager: MIK identity set" << std::endl;
+                }
+            }
+
+            // Set P2P message sending callbacks
+            g_node_context.verification_manager->SetSendChallenge(
+                [](int peer_id, const std::vector<uint8_t>& data) {
+                    if (g_node_context.connman && g_node_context.message_processor) {
+                        auto msg = g_node_context.message_processor->CreateDNAVerifyChallengeMessage(data);
+                        g_node_context.connman->PushMessage(peer_id, msg);
+                    }
+                });
+            g_node_context.verification_manager->SetSendResponse(
+                [](int peer_id, const std::vector<uint8_t>& data) {
+                    if (g_node_context.connman && g_node_context.message_processor) {
+                        auto msg = g_node_context.message_processor->CreateDNAVerifyResponseMessage(data);
+                        g_node_context.connman->PushMessage(peer_id, msg);
+                    }
+                });
+            g_node_context.verification_manager->SetBroadcastAttestation(
+                [](const std::vector<uint8_t>& data) {
+                    if (g_node_context.connman && g_node_context.message_processor) {
+                        auto msg = g_node_context.message_processor->CreateDNAVerifyAttestMessage(data);
+                        auto peers = g_node_context.peer_manager ?
+                            g_node_context.peer_manager->GetConnectedPeers() :
+                            std::vector<std::shared_ptr<CPeer>>{};
+                        for (const auto& peer : peers) {
+                            if (peer->IsHandshakeComplete()) {
+                                g_node_context.connman->PushMessage(peer->id, msg);
+                            }
+                        }
+                    }
+                });
+            g_node_context.verification_manager->SetFindPeerByMik(
+                [](const std::array<uint8_t, 20>& mik) -> int {
+                    // Look up peer by MIK from the identity response cache
+                    std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
+                    auto it = g_mik_peer_map.find(mik);
+                    if (it != g_mik_peer_map.end()) {
+                        // Verify peer is still connected
+                        if (g_node_context.peer_manager) {
+                            auto peer = g_node_context.peer_manager->GetPeer(it->second);
+                            if (peer && peer->IsHandshakeComplete()) {
+                                return it->second;
+                            }
+                        }
+                        g_mik_peer_map.erase(it);  // Stale entry
+                    }
+                    return -1;  // Not found or disconnected
+                });
+
+            std::cout << "  [OK] DNA verification manager: P2P callbacks wired" << std::endl;
         }
 
         // Load persistent total blocks mined counter

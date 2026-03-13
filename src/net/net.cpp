@@ -83,7 +83,9 @@ static const int64_t CONNECTION_COOLDOWN_SECONDS = 30;
 static std::map<int, std::set<uint256>> g_peer_served_blocks;
 static std::mutex cs_served_blocks;
 static const size_t MAX_SERVED_BLOCKS_TRACK = 500;  // Track last N served blocks per peer
-static const int DUPLICATE_GETDATA_PENALTY = 0;     // Log only, no misbehavior (IBD nodes legitimately re-request blocks)
+static const int DUPLICATE_GETDATA_PENALTY = 5;     // Penalize re-requesting already-served blocks
+static const int MAX_DEDUP_STRIKES = 3;             // Disconnect after this many duplicate GETDATA batches
+static std::map<int, int> g_peer_dedup_strikes;      // Per-peer strike counter
 
 // NET-013 FIX: Maximum size for rate limit maps to prevent memory exhaustion
 static const size_t MAX_RATE_LIMIT_MAP_SIZE = 1000;
@@ -138,6 +140,7 @@ void CleanupPeerRateLimitState(int peer_id) {
     {
         std::lock_guard<std::mutex> lock(cs_served_blocks);
         g_peer_served_blocks.erase(peer_id);
+        g_peer_dedup_strikes.erase(peer_id);
     }
 }
 
@@ -199,7 +202,9 @@ void PeriodicRateLimitCleanup() {
     {
         std::lock_guard<std::mutex> lock(cs_served_blocks);
         while (g_peer_served_blocks.size() > MAX_RATE_LIMIT_MAP_SIZE) {
-            g_peer_served_blocks.erase(g_peer_served_blocks.begin());
+            auto it = g_peer_served_blocks.begin();
+            g_peer_dedup_strikes.erase(it->first);
+            g_peer_served_blocks.erase(it);
         }
     }
 }
@@ -334,6 +339,10 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         {"dnabwres",   {24, 24}},                      // nonce(8) + upload(8) + download(8)
         {"dnaireq",    {20, 20}},                      // mik_identity(20)
         {"dnaires",    {21, 4117}},                    // mik(20) + found(1) [+ data_len(2) + data(max ~4KB)]
+        // Phase 2: DNA Verification & Attestation
+        {"dnavchall",  {92, 8192}},                    // Minimum challenge size 92 bytes
+        {"dnavresp",   {70, 8192}},                    // Minimum response size 70 bytes
+        {"dnavatts",   {112, 8192}},                   // Attestation bounds
     };
 
     auto it = size_limits.find(command);
@@ -411,6 +420,16 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         return ProcessDNAIdentReqMessage(peer_id, stream);
     } else if (command == "dnaires") {
         return ProcessDNAIdentResMessage(peer_id, stream);
+    }
+    // Phase 2: DNA Verification messages
+    else if (command == "dnavchall") {
+        return ProcessDNAVerifyChallengeMessage(peer_id, stream);
+    }
+    else if (command == "dnavresp") {
+        return ProcessDNAVerifyResponseMessage(peer_id, stream);
+    }
+    else if (command == "dnavatts") {
+        return ProcessDNAVerifyAttestMessage(peer_id, stream);
     }
 
     // Unknown message type
@@ -1085,15 +1104,55 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
 
         if (duplicate_count > 0) {
             int penalty = duplicate_count * DUPLICATE_GETDATA_PENALTY;
+            int strikes = 0;
+            {
+                std::lock_guard<std::mutex> lock(cs_served_blocks);
+                strikes = ++g_peer_dedup_strikes[peer_id];
+            }
             std::cout << "[P2P] DEDUP: Peer " << peer_id << " re-requested "
                       << duplicate_count << " already-served blocks (+"
-                      << penalty << " misbehavior)" << std::endl;
+                      << penalty << " misbehavior, strike "
+                      << strikes << "/" << MAX_DEDUP_STRIKES << ")" << std::endl;
             peer_manager.Misbehaving(peer_id, penalty);
-        }
 
-        // Call handler to serve requested data (serve even duplicates - don't break sync)
-        std::cout << "[P2P] Invoking GETDATA handler for " << getdata.size() << " items from peer " << peer_id << std::endl;
-        on_getdata(peer_id, getdata);
+            if (strikes >= MAX_DEDUP_STRIKES) {
+                std::cout << "[P2P] DEDUP: Disconnecting peer " << peer_id
+                          << " after " << strikes << " duplicate GETDATA batches (wasting bandwidth)" << std::endl;
+                g_node_context.connman->DisconnectNode(peer_id);
+                {
+                    std::lock_guard<std::mutex> lock(cs_served_blocks);
+                    g_peer_served_blocks.erase(peer_id);
+                    g_peer_dedup_strikes.erase(peer_id);
+                }
+                return true;
+            }
+
+            // Filter out already-served blocks, only serve new ones
+            std::vector<NetProtocol::CInv> new_items;
+            {
+                std::lock_guard<std::mutex> lock(cs_served_blocks);
+                auto& served = g_peer_served_blocks[peer_id];
+                for (const auto& inv : getdata) {
+                    if (inv.type == NetProtocol::MSG_BLOCK_INV && served.count(inv.hash)) {
+                        continue;  // Skip already-served blocks
+                    }
+                    new_items.push_back(inv);
+                }
+            }
+            if (!new_items.empty()) {
+                std::cout << "[P2P] Invoking GETDATA handler for " << new_items.size()
+                          << " NEW items from peer " << peer_id
+                          << " (skipped " << duplicate_count << " duplicates)" << std::endl;
+                on_getdata(peer_id, new_items);
+            } else {
+                std::cout << "[P2P] Skipping GETDATA for peer " << peer_id
+                          << " - all " << getdata.size() << " items already served" << std::endl;
+            }
+        } else {
+            // No duplicates - serve normally
+            std::cout << "[P2P] Invoking GETDATA handler for " << getdata.size() << " items from peer " << peer_id << std::endl;
+            on_getdata(peer_id, getdata);
+        }
 
         // Record served blocks for future dedup detection
         {
@@ -2550,6 +2609,84 @@ CNetMessage CNetMessageProcessor::CreateDNAIdentResMessage(
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();
     return CNetMessage("dnaires", stream.GetData());
+}
+
+// Phase 2: DNA Verification message processing
+
+static constexpr int64_t DNA_VERIFY_COOLDOWN_SEC = 30;
+static constexpr int DNA_VERIFY_GLOBAL_MAX = 3;
+static constexpr int DNA_ATTEST_PER_HOUR_MAX = 10;
+
+bool CNetMessageProcessor::ProcessDNAVerifyChallengeMessage(int peer_id, CDataStream& stream) {
+    std::vector<uint8_t> payload = stream.GetData();
+    if (payload.size() < 92) return false;  // Minimum challenge size
+
+    // Rate limit: 1 per peer per 30 seconds
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    auto it = peer_dna_verify_timestamps.find(peer_id);
+    if (it != peer_dna_verify_timestamps.end() && (now - it->second) < DNA_VERIFY_COOLDOWN_SEC) {
+        return true;  // Silently drop
+    }
+    peer_dna_verify_timestamps[peer_id] = now;
+
+    if (on_dna_verify_challenge) {
+        on_dna_verify_challenge(peer_id, payload);
+    }
+    return true;
+}
+
+bool CNetMessageProcessor::ProcessDNAVerifyResponseMessage(int peer_id, CDataStream& stream) {
+    std::vector<uint8_t> payload = stream.GetData();
+    if (payload.size() < 70) return false;  // Minimum response size
+
+    if (on_dna_verify_response) {
+        on_dna_verify_response(peer_id, payload);
+    }
+    return true;
+}
+
+bool CNetMessageProcessor::ProcessDNAVerifyAttestMessage(int peer_id, CDataStream& stream) {
+    std::vector<uint8_t> payload = stream.GetData();
+    if (payload.size() < 112 || payload.size() > 8192) return false;  // Size bounds
+
+    // Rate limit: max 10 per peer per hour
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    auto it = peer_dna_attest_timestamps.find(peer_id);
+    if (it != peer_dna_attest_timestamps.end() && (now - it->second) < 360) {
+        return true;  // Silently drop (allow ~10/hour)
+    }
+    peer_dna_attest_timestamps[peer_id] = now;
+
+    if (on_dna_verify_attest) {
+        on_dna_verify_attest(peer_id, payload);
+    }
+    return true;
+}
+
+CNetMessage CNetMessageProcessor::CreateDNAVerifyChallengeMessage(const std::vector<uint8_t>& data) {
+    CDataStream ss;
+    ss.write(data.data(), data.size());
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + ss.size();
+    return CNetMessage("dnavchall", ss.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateDNAVerifyResponseMessage(const std::vector<uint8_t>& data) {
+    CDataStream ss;
+    ss.write(data.data(), data.size());
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + ss.size();
+    return CNetMessage("dnavresp", ss.GetData());
+}
+
+CNetMessage CNetMessageProcessor::CreateDNAVerifyAttestMessage(const std::vector<uint8_t>& data) {
+    CDataStream ss;
+    ss.write(data.data(), data.size());
+    g_network_stats.messages_sent++;
+    g_network_stats.bytes_sent += 24 + ss.size();
+    return CNetMessage("dnavatts", ss.GetData());
 }
 
 // Serialization helpers

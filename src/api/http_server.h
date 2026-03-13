@@ -90,7 +90,7 @@ public:
     }
 
     // Configuration constants (match Bitcoin Core defaults)
-    static constexpr size_t DEFAULT_HTTP_WORKQUEUE = 16;
+    static constexpr size_t DEFAULT_HTTP_WORKQUEUE = 128;
 
 private:
     std::queue<T> m_queue;
