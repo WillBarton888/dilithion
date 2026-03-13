@@ -158,7 +158,7 @@ private:
     std::atomic<int> dna_bwtest_global_count_{0};       // Global concurrent BW tests
     // Phase 2: Verification rate limiting
     std::map<int, int64_t> peer_dna_verify_timestamps;  // peer_id -> last dnavchall time
-    std::map<int, std::vector<int64_t>> peer_dna_attest_timestamps; // peer_id -> recent dnavatts times
+    std::map<int, int64_t> peer_dna_attest_timestamps; // peer_id -> last dnavatts time
     std::atomic<int> dna_verify_global_count_{0};       // Global concurrent verifications
     mutable std::mutex cs_dna_rate_limit;
     // Nonce tracking: nonce -> {peer_id, send_time_sec, send_timestamp_us}
