@@ -113,10 +113,18 @@ public:
      */
     void CheckMemoryPressure();
 
+    /**
+     * @brief Auto-detect system RAM and set limit to a percentage of it
+     * @param fraction Fraction of total RAM to use (default 0.85 = 85%)
+     * @return The computed limit in bytes
+     */
+    size_t AutoDetectMemoryLimit(double fraction = 0.85);
+
     // Configuration constants
     static constexpr int64_t CHECK_INTERVAL_MS = 5000;   // Check every 5 seconds
     static constexpr double WARNING_THRESHOLD = 0.80;    // 80% triggers warning
     static constexpr double CRITICAL_THRESHOLD = 0.90;   // 90% triggers critical
+    static constexpr int64_t COOLDOWN_SECONDS = 300;     // 5 min cooldown after futile cleanup
 
 private:
     /**
@@ -129,6 +137,11 @@ private:
      * Platform-specific implementation
      */
     size_t GetProcessRSS() const;
+
+    /**
+     * @brief Get total system physical RAM in bytes
+     */
+    static size_t GetTotalSystemRAM();
 
     // Thread control
     std::thread m_thread;
@@ -146,6 +159,10 @@ private:
     std::atomic<int> m_current_level{0};
     std::atomic<int64_t> m_cleanup_count{0};
     std::atomic<size_t> m_last_rss{0};
+
+    // Cooldown: suppress repeated CRITICAL logs when cleanup is futile
+    std::chrono::steady_clock::time_point m_last_critical_log{};
+    size_t m_rss_before_last_cleanup{0};
 };
 
 // Global instance (set by node initialization)

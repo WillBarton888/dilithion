@@ -4596,10 +4596,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // DilV nodes on 4GB droplets were getting OOM killed at ~3GB RSS.
         // Monitor triggers cleanup at 80% (warning) and 90% (critical) of limit.
         CResourceMonitor resource_monitor;
-        resource_monitor.SetMemoryLimit(3ULL * 1024 * 1024 * 1024);  // 3GB limit for 4GB droplets
+        size_t mem_limit = resource_monitor.AutoDetectMemoryLimit(0.85);
         resource_monitor.SetCleanupCallback([](int level) {
             if (level >= 2) {
-                // Critical: aggressive cleanup
                 if (g_node_context.orphan_manager) {
                     g_node_context.orphan_manager->Clear();
                 }
@@ -4607,21 +4606,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     g_node_context.headers_manager->PruneOrphanedHeaders();
                     g_node_context.headers_manager->ClearRejectedHashes();
                 }
-                std::cout << "[ResourceMonitor] CRITICAL: Cleared orphans and pruned headers" << std::endl;
             } else if (level == 1) {
-                // Warning: light cleanup
                 if (g_node_context.orphan_manager) {
                     g_node_context.orphan_manager->EraseExpiredOrphans();
                 }
                 if (g_node_context.headers_manager) {
                     g_node_context.headers_manager->PruneOrphanedHeaders();
                 }
-                std::cout << "[ResourceMonitor] WARNING: Pruned expired orphans and headers" << std::endl;
             }
         });
         resource_monitor.Start();
         g_resource_monitor = &resource_monitor;
-        std::cout << "  [OK] Resource monitor started (3GB limit)" << std::endl;
+        std::cout << "  [OK] Resource monitor started (" << (mem_limit / (1024 * 1024)) << "MB limit, 85% of system RAM)" << std::endl;
 
         // Path for persistent blocks-mined counter
         std::string blocksMined_path = config.datadir + "/blocks_mined.dat";
