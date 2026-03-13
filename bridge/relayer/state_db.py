@@ -79,6 +79,20 @@ class StateDB:
             self.conn.commit()
             logger.info("Migrated deposits table: added retry_count column")
 
+        try:
+            self.conn.execute("SELECT sender_address FROM deposits LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE deposits ADD COLUMN sender_address TEXT")
+            self.conn.commit()
+            logger.info("Migrated deposits table: added sender_address column")
+
+        try:
+            self.conn.execute("SELECT refund_txid FROM deposits LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE deposits ADD COLUMN refund_txid TEXT")
+            self.conn.commit()
+            logger.info("Migrated deposits table: added refund_txid column")
+
     # ── Sync state ───────────────────────────────────────────────────
 
     def get_sync_state(self, chain: str):
@@ -106,22 +120,37 @@ class StateDB:
 
     def insert_deposit(self, chain: str, native_txid: str, native_vout: int,
                        amount: int, base_address: str, block_height: int,
-                       block_hash: str) -> bool:
+                       block_hash: str, sender_address: str = None) -> bool:
         """Insert a new deposit. Returns False if duplicate (idempotent)."""
         try:
             self.conn.execute(
                 """INSERT INTO deposits
                    (chain, native_txid, native_vout, amount, base_address,
-                    block_height, block_hash)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    block_height, block_hash, sender_address)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (chain, native_txid, native_vout, amount, base_address,
-                 block_height, block_hash)
+                 block_height, block_hash, sender_address)
             )
             self.conn.commit()
             return True
         except sqlite3.IntegrityError:
             logger.debug(f"Duplicate deposit ignored: {native_txid}:{native_vout}")
             return False
+
+    def mark_deposit_refunded(self, deposit_id: int, refund_txid: str):
+        """Mark deposit as refunded (coins sent back to sender)."""
+        self.conn.execute(
+            """UPDATE deposits SET status = 'refunded', refund_txid = ?,
+               updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (refund_txid, deposit_id)
+        )
+        self.conn.commit()
+
+    def get_pending_refunds(self):
+        """Get deposits marked for refund that haven't been sent yet."""
+        return self.conn.execute(
+            "SELECT * FROM deposits WHERE status = 'over_limit'"
+        ).fetchall()
 
     def get_pending_deposits(self, chain: str = None):
         """Get deposits needing confirmation updates."""
@@ -177,12 +206,25 @@ class StateDB:
 
     def get_retryable_deposits(self, max_retries: int = 3,
                                cooldown_minutes: int = 5):
-        """Get failed deposits eligible for retry (under max retries, past cooldown)."""
+        """Get failed deposits eligible for retry.
+
+        Transient errors (contract cap exceeded, nonce issues) get unlimited
+        retries with a longer cooldown — the cap resets daily so these will
+        eventually succeed.  Other errors use the original 3-retry limit.
+        """
         return self.conn.execute(
             """SELECT * FROM deposits
                WHERE status = 'failed'
-                 AND COALESCE(retry_count, 0) < ?
-                 AND updated_at <= datetime('now', ?)""",
+                 AND (
+                     -- Transient errors: unlimited retries, 60 min cooldown
+                     (error_msg IN ('Mint tx reverted')
+                      AND updated_at <= datetime('now', '-60 minutes'))
+                     OR
+                     -- Other errors: capped retries, short cooldown
+                     (error_msg NOT IN ('Mint tx reverted')
+                      AND COALESCE(retry_count, 0) < ?
+                      AND updated_at <= datetime('now', ?))
+                 )""",
             (max_retries, f'-{cooldown_minutes} minutes')
         ).fetchall()
 
@@ -295,6 +337,13 @@ class StateDB:
                 "SELECT COUNT(*) as cnt FROM deposits WHERE status = ?", (status,)
             ).fetchone()
             stats[f"deposits_{status}"] = row["cnt"]
+
+        # Count deposits deferred due to cap (failed with "Mint tx reverted")
+        row = self.conn.execute(
+            "SELECT COUNT(*) as cnt FROM deposits "
+            "WHERE status = 'failed' AND error_msg = 'Mint tx reverted'"
+        ).fetchone()
+        stats["deposits_cap_deferred"] = row["cnt"]
 
         for status in ('pending', 'confirmed', 'sent', 'completed', 'failed'):
             row = self.conn.execute(

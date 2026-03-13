@@ -165,6 +165,7 @@ class BridgeRelayer:
 
                 self._update_confirmations()
                 self._process_confirmed_deposits()
+                self._process_refunds()
 
                 self._scan_base_burns()
                 self._update_withdrawal_confirmations()
@@ -368,19 +369,40 @@ class BridgeRelayer:
             )
             return
 
+        # Extract sender address from vin (first input's previous output)
+        sender_address = self._get_sender_address(chain, tx)
+
         # Validate per-deposit limit (relayer-side)
         max_deposit = self.chain_config[chain]["max_per_deposit"]
         if deposit_amount > max_deposit:
+            coin = self.chain_config[chain]["coin"]
             logger.warning(
                 f"[{chain}] Deposit {txid} exceeds per-deposit limit: "
-                f"{deposit_amount} > {max_deposit}. Skipping."
+                f"{deposit_amount / 1e8:.2f} > {max_deposit / 1e8:.2f} {coin}. "
+                f"Sender: {sender_address or 'unknown'}. Queuing for auto-refund."
             )
+            # Record in DB as over_limit so the refund loop picks it up
+            self.db.insert_deposit(
+                chain, txid, deposit_vout, deposit_amount,
+                base_address, height, block_hash, sender_address
+            )
+            # Immediately mark as over_limit (not pending)
+            row = self.db.conn.execute(
+                "SELECT id FROM deposits WHERE native_txid = ? AND native_vout = ?",
+                (txid, deposit_vout)
+            ).fetchone()
+            if row:
+                self.db.conn.execute(
+                    "UPDATE deposits SET status = 'over_limit' WHERE id = ?",
+                    (row["id"],)
+                )
+                self.db.conn.commit()
             return
 
         # Insert into DB (idempotent — UNIQUE constraint handles duplicates)
         inserted = self.db.insert_deposit(
             chain, txid, deposit_vout, deposit_amount,
-            base_address, height, block_hash
+            base_address, height, block_hash, sender_address
         )
         if inserted:
             coin = self.chain_config[chain]["coin"]
@@ -435,6 +457,95 @@ class BridgeRelayer:
             return None
 
         return Web3.to_checksum_address("0x" + addr_bytes.hex())
+
+    def _get_sender_address(self, chain: str, tx: dict) -> str | None:
+        """Extract sender address from vin (first input's previous output).
+
+        Looks up the previous transaction's output to find the address
+        that funded this deposit.
+        """
+        vins = tx.get("vin", [])
+        if not vins:
+            return None
+
+        # Use first input's previous tx
+        first_vin = vins[0]
+        prev_txid = first_vin.get("txid")
+        prev_vout = first_vin.get("vout", 0)
+
+        if not prev_txid:
+            return None  # Coinbase transaction
+
+        try:
+            rpc = self.chain_config[chain]["rpc"]
+            prev_tx = rpc.get_raw_transaction(prev_txid)
+            prev_outputs = prev_tx.get("vout", [])
+            for out in prev_outputs:
+                if out.get("n") == prev_vout:
+                    addr = out.get("address", "")
+                    if addr:
+                        return addr
+                    # Bitcoin Core format fallback
+                    spk = out.get("scriptPubKey", {})
+                    if isinstance(spk, dict):
+                        addrs = spk.get("addresses", [])
+                        if addrs:
+                            return addrs[0]
+        except Exception as e:
+            logger.debug(f"Could not resolve sender for vin {prev_txid}: {e}")
+
+        return None
+
+    def _process_refunds(self):
+        """Auto-refund deposits that exceed per-deposit limits.
+
+        Sends coins back to the sender minus a small fee for the return tx.
+        """
+        refunds = self.db.get_pending_refunds()
+        if not refunds:
+            return
+
+        REFUND_FEE = 10000  # 0.0001 coins fee deducted from refund (covers tx fee)
+
+        for dep in refunds:
+            chain = dep["chain"]
+            sender = dep["sender_address"]
+            amount = dep["amount"]
+            coin = self.chain_config[chain]["coin"]
+
+            if not sender:
+                logger.warning(
+                    f"[{chain}] Cannot refund deposit {dep['native_txid'][:16]}... "
+                    f"— sender address unknown. Manual refund needed."
+                )
+                self.db.mark_deposit_failed(
+                    dep["id"], "No sender address for auto-refund"
+                )
+                continue
+
+            refund_amount = amount - REFUND_FEE
+            if refund_amount <= 0:
+                logger.warning(
+                    f"[{chain}] Deposit {dep['native_txid'][:16]}... too small to refund "
+                    f"after fee. Amount: {amount}"
+                )
+                self.db.mark_deposit_failed(dep["id"], "Too small to refund after fee")
+                continue
+
+            try:
+                rpc = self.chain_config[chain]["rpc"]
+                # sendtoaddress takes amount in satoshis (integer)
+                refund_txid = rpc.send_to_address(sender, refund_amount)
+                logger.info(
+                    f"[{chain}] AUTO-REFUND: {refund_amount / 1e8:.8f} {coin} "
+                    f"back to {sender} (tx: {refund_txid[:16]}...)"
+                )
+                self.db.mark_deposit_refunded(dep["id"], refund_txid)
+            except Exception as e:
+                logger.error(
+                    f"[{chain}] Refund failed for {dep['native_txid'][:16]}...: {e}"
+                )
+                self.db.mark_deposit_failed(dep["id"], f"Refund failed: {e}")
 
     # ── Confirmation updates ─────────────────────────────────────────
 
@@ -517,7 +628,7 @@ class BridgeRelayer:
                     native_txid_bytes,
                 ).build_transaction({
                     "from": self.account.address,
-                    "nonce": self.w3.eth.get_transaction_count(self.account.address),
+                    "nonce": self.w3.eth.get_transaction_count(self.account.address, "pending"),
                     "gas": 150_000,
                     "maxFeePerGas": self.w3.eth.gas_price * 2,
                     "maxPriorityFeePerGas": self.w3.to_wei(0.001, "gwei"),
@@ -685,11 +796,15 @@ class BridgeRelayer:
         pending_deps = stats.get("deposits_pending", 0) + stats.get("deposits_confirmed", 0)
         pending_wdrs = stats.get("withdrawals_pending", 0) + stats.get("withdrawals_confirmed", 0)
         minted = stats.get("deposits_minted", 0)
+        cap_deferred = stats.get("deposits_cap_deferred", 0)
+
+        # Show deferred deposits waiting for cap reset
+        deferred_str = f" | deferred: {cap_deferred}" if cap_deferred > 0 else ""
 
         # Always log status so the operator knows the relayer is alive
         logger.info(
             f"Pending: {pending_deps} deposits, {pending_wdrs} withdrawals "
-            f"| minted: {minted}{gas_str}"
+            f"| minted: {minted}{deferred_str}{gas_str}"
         )
 
 

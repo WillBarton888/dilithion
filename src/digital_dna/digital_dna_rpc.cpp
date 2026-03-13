@@ -4,6 +4,8 @@
 
 #include "digital_dna_rpc.h"
 #include <core/node_context.h>
+#include <wallet/wallet.h>
+#include <util/base58.h>
 
 #include <sstream>
 #include <iomanip>
@@ -13,6 +15,23 @@
 
 // Forward-declared in node_context.h
 extern NodeContext g_node_context;
+
+// Legacy global node state (wallet lives here, not in NodeContext)
+// Layout must match globals.cpp / dilithion-node.cpp exactly
+struct NodeState {
+    std::atomic<bool> running;
+    std::atomic<bool> new_block_found;
+    std::atomic<bool> mining_enabled;
+    std::atomic<uint64_t> template_version{0};
+    std::string mining_address_override;
+    bool rotate_mining_address;
+    void* rpc_server;
+    void* miner;
+    CWallet* wallet;
+    void* p2p_socket;
+    void* http_server;
+};
+extern NodeState g_node_state;
 
 namespace digital_dna {
 
@@ -36,6 +55,7 @@ void DigitalDNARpc::register_commands() {
     handlers_["getperspectiveproof"] = [this](const JsonObject& p) { return cmd_getperspectiveproof(p); };
     handlers_["dumpdigitaldna"] = [this](const JsonObject& p) { return cmd_dumpdigitaldna(p); };
     handlers_["getdigitaldnahistory"] = [this](const JsonObject& p) { return cmd_getdigitaldnahistory(p); };
+    handlers_["getdnamonitor"] = [this](const JsonObject& p) { return cmd_getdnamonitor(p); };
 }
 
 RpcHandler DigitalDNARpc::get_handler(const std::string& method) const {
@@ -348,8 +368,33 @@ JsonObject DigitalDNARpc::cmd_collectdigitaldna(const JsonObject& params) {
             return error(-1, "Collection already in progress");
         }
 
+        // Get mining address from wallet (not g_my_address which may be stale)
+        std::array<uint8_t, 20> address{};
+        if (g_node_state.wallet) {
+            auto pubKeyHash = g_node_state.wallet->GetPubKeyHash();
+            if (pubKeyHash.size() == 20) {
+                std::copy(pubKeyHash.begin(), pubKeyHash.end(), address.begin());
+                g_my_address = address;  // Update global too
+            }
+        }
+        if (address == std::array<uint8_t, 20>{}) {
+            // Fall back to g_my_address if wallet not available
+            address = g_my_address;
+        }
+
         // Create new collector — shared_ptr for safe cross-thread replacement
-        auto new_collector = std::make_shared<DigitalDNACollector>(g_my_address);
+        auto new_collector = std::make_shared<DigitalDNACollector>(address);
+
+        // Set MIK identity from wallet
+        if (g_node_state.wallet) {
+            DFMP::Identity mikId = g_node_state.wallet->GetMIKIdentity();
+            if (!mikId.IsNull()) {
+                std::array<uint8_t, 20> mikArr{};
+                std::copy(mikId.data, mikId.data + 20, mikArr.begin());
+                new_collector->set_mik_identity(mikArr);
+            }
+        }
+
         new_collector->start_collection();
         set_collector(std::move(new_collector));
 
@@ -466,6 +511,7 @@ JsonObject DigitalDNARpc::cmd_getlatencyfingerprint(const JsonObject& params) {
     collector.set_timeout_ms(5000);
 
     LatencyFingerprint fp;
+    fp.seed_stats.resize(MAINNET_SEEDS.size());
     for (size_t i = 0; i < MAINNET_SEEDS.size(); i++) {
         fp.seed_stats[i] = collector.measure_seed(MAINNET_SEEDS[i]);
     }
@@ -575,6 +621,15 @@ std::string DigitalDNARpc::address_to_hex(const std::array<uint8_t, 20>& addr) c
     return oss.str();
 }
 
+// Convert raw 20-byte pubkey hash to base58check D... address
+static std::string pubkeyhash_to_address(const std::array<uint8_t, 20>& hash) {
+    // Version byte 0x1E produces addresses starting with 'D'
+    std::vector<uint8_t> data;
+    data.push_back(0x1E);
+    data.insert(data.end(), hash.begin(), hash.end());
+    return EncodeBase58Check(data);
+}
+
 std::array<uint8_t, 20> DigitalDNARpc::hex_to_address(const std::string& hex) const {
     std::array<uint8_t, 20> addr = {};
     for (size_t i = 0; i < 20 && i * 2 + 1 < hex.size(); i++) {
@@ -595,7 +650,8 @@ std::optional<DigitalDNA> DigitalDNARpc::resolve_identity(const std::string& hex
 JsonObject DigitalDNARpc::dna_to_json(const DigitalDNA& dna) const {
     JsonObject result;
 
-    result["address"] = address_to_hex(dna.address);
+    result["address"] = pubkeyhash_to_address(dna.address);
+    result["address_hex"] = address_to_hex(dna.address);
     result["mik_identity"] = address_to_hex(dna.mik_identity);
     result["registration_height"] = std::to_string(dna.registration_height);
     result["registration_time"] = std::to_string(dna.registration_time);
@@ -852,7 +908,15 @@ JsonObject DigitalDNARpc::cmd_getdigitaldnahistory(const JsonObject& params) {
     }
 
     auto mik = hex_to_address(it->second);
-    auto history = registry_.get_dna_history(mik);
+
+    size_t max_entries = 100;
+    auto limit_it = params.find("limit");
+    if (limit_it != params.end()) {
+        int val = std::atoi(limit_it->second.c_str());
+        if (val > 0 && val <= 1000) max_entries = static_cast<size_t>(val);
+    }
+
+    auto history = registry_.get_dna_history(mik, max_entries);
 
     // Also get current DNA for context
     auto current = registry_.get_identity_by_mik(mik);
@@ -910,6 +974,246 @@ JsonObject DigitalDNARpc::cmd_getdigitaldnahistory(const JsonObject& params) {
     }
     oss << "]";
     result["history"] = oss.str();
+
+    return result;
+}
+
+// ============ DNA Monitoring Dashboard ============
+
+JsonObject DigitalDNARpc::cmd_getdnamonitor(const JsonObject& /*params*/) {
+    auto all = registry_.get_all();
+    JsonObject result;
+    result["total_identities"] = std::to_string(all.size());
+
+    if (all.empty()) {
+        result["dimension_coverage"] = "{}";
+        result["trust_distribution"] = "{}";
+        result["sybil_clusters"] = "[]";
+        result["rotation_alerts"] = "[]";
+        result["health_score"] = "0";
+        result["health_grade"] = "N/A";
+        return result;
+    }
+
+    // --- 1. Dimension coverage ---
+    int has_memory = 0, has_drift = 0, has_bw = 0, has_thermal = 0, has_behavioral = 0;
+    for (const auto& dna : all) {
+        if (dna.memory) has_memory++;
+        if (dna.clock_drift) has_drift++;
+        if (dna.bandwidth) has_bw++;
+        if (dna.thermal) has_thermal++;
+        if (dna.behavioral) has_behavioral++;
+    }
+    int n = static_cast<int>(all.size());
+    {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1);
+        oss << "{";
+        oss << "\"latency\": 100.0, ";  // Always present (core)
+        oss << "\"timing\": 100.0, ";   // Always present (core)
+        oss << "\"perspective\": 100.0, "; // Always present (core)
+        oss << "\"memory\": " << (100.0 * has_memory / n) << ", ";
+        oss << "\"clock_drift\": " << (100.0 * has_drift / n) << ", ";
+        oss << "\"bandwidth\": " << (100.0 * has_bw / n) << ", ";
+        oss << "\"thermal\": " << (100.0 * has_thermal / n) << ", ";
+        oss << "\"behavioral\": " << (100.0 * has_behavioral / n);
+        oss << "}";
+        result["dimension_coverage"] = oss.str();
+    }
+
+    // --- 2. Sybil cluster detection ---
+    // Build adjacency: identities with similarity > SUSPICIOUS_THRESHOLD
+    // Then find connected components of size >= 3
+    struct Edge { size_t a; size_t b; double score; };
+    std::vector<Edge> edges;
+    for (size_t i = 0; i < all.size(); i++) {
+        for (size_t j = i + 1; j < all.size(); j++) {
+            auto s = registry_.compare(all[i], all[j]);
+            if (s.is_suspicious() || s.is_same_identity()) {
+                edges.push_back({i, j, s.combined_score});
+            }
+        }
+    }
+
+    // Union-Find for clustering
+    std::vector<size_t> parent(all.size());
+    for (size_t i = 0; i < all.size(); i++) parent[i] = i;
+    std::function<size_t(size_t)> find = [&](size_t x) -> size_t {
+        return parent[x] == x ? x : (parent[x] = find(parent[x]));
+    };
+    for (const auto& e : edges) {
+        size_t ra = find(e.a), rb = find(e.b);
+        if (ra != rb) parent[ra] = rb;
+    }
+
+    // Group by cluster root
+    std::map<size_t, std::vector<size_t>> clusters;
+    for (size_t i = 0; i < all.size(); i++) {
+        size_t root = find(i);
+        // Only track if this identity has at least one suspicious edge
+        bool has_edge = false;
+        for (const auto& e : edges) {
+            if (e.a == i || e.b == i) { has_edge = true; break; }
+        }
+        if (has_edge) clusters[root].push_back(i);
+    }
+
+    {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(3);
+        oss << "[";
+        bool first_cluster = true;
+        for (const auto& [root, members] : clusters) {
+            if (members.size() < 2) continue;  // Only report pairs or larger
+            if (!first_cluster) oss << ", ";
+            first_cluster = false;
+
+            oss << "{\"size\": " << members.size();
+            oss << ", \"severity\": " << (members.size() >= 3 ? "\"HIGH\"" : "\"MEDIUM\"");
+
+            // Find max similarity within cluster
+            double max_sim = 0;
+            for (size_t i = 0; i < members.size(); i++) {
+                for (size_t j = i + 1; j < members.size(); j++) {
+                    auto s = registry_.compare(all[members[i]], all[members[j]]);
+                    max_sim = std::max(max_sim, s.combined_score);
+                }
+            }
+            oss << ", \"max_similarity\": " << max_sim;
+
+            // List MIK identities in cluster
+            oss << ", \"miks\": [";
+            for (size_t i = 0; i < members.size(); i++) {
+                oss << "\"" << address_to_hex(all[members[i]].mik_identity) << "\"";
+                if (i < members.size() - 1) oss << ", ";
+            }
+            oss << "]}";
+        }
+        oss << "]";
+        result["sybil_clusters"] = oss.str();
+    }
+
+    // Count clusters for health scoring
+    int cluster_count = 0;
+    int large_cluster_count = 0;
+    for (const auto& [root, members] : clusters) {
+        if (members.size() >= 2) cluster_count++;
+        if (members.size() >= 3) large_cluster_count++;
+    }
+    result["cluster_count"] = std::to_string(cluster_count);
+    result["large_cluster_count"] = std::to_string(large_cluster_count);
+
+    // --- 3. Rotation alerts (MIKs with 3+ changes) ---
+    {
+        std::ostringstream oss;
+        oss << "[";
+        bool first_alert = true;
+        for (const auto& dna : all) {
+            std::array<uint8_t, 20> zero_mik{};
+            if (dna.mik_identity == zero_mik) continue;
+
+            auto history = registry_.get_dna_history(dna.mik_identity, 50);
+            if (history.size() < 2) continue;  // 0-1 changes is normal
+
+            if (!first_alert) oss << ", ";
+            first_alert = false;
+
+            oss << "{\"mik\": \"" << address_to_hex(dna.mik_identity) << "\"";
+            oss << ", \"change_count\": " << history.size();
+
+            // Classify: 2 changes could be legitimate, 3+ is suspicious
+            const char* severity = "LOW";
+            if (history.size() >= 5) severity = "HIGH";
+            else if (history.size() >= 3) severity = "MEDIUM";
+            oss << ", \"severity\": \"" << severity << "\"";
+
+            // Time span of changes
+            if (!history.empty()) {
+                uint64_t first_ts = history.front().first;
+                uint64_t last_ts = history.back().first;
+                uint64_t span_hours = (last_ts > first_ts) ? (last_ts - first_ts) / 3600 : 0;
+                oss << ", \"span_hours\": " << span_hours;
+            }
+
+            oss << "}";
+        }
+        oss << "]";
+        result["rotation_alerts"] = oss.str();
+    }
+
+    // --- 4. Trust distribution (if trust manager available) ---
+    // Note: trust scores are managed separately; count by tier from DNA registry
+    // We can approximate by looking at registration heights (age proxy)
+    {
+        std::ostringstream oss;
+        oss << "{";
+        oss << "\"total_tracked\": " << all.size();
+        // Group by registration age brackets
+        int fresh = 0, young = 0, mature = 0, old = 0;
+        uint32_t max_height = 0;
+        for (const auto& dna : all) {
+            max_height = std::max(max_height, dna.registration_height);
+        }
+        for (const auto& dna : all) {
+            uint32_t age = max_height - dna.registration_height;
+            if (age < 1000) fresh++;       // < ~12 hours (DilV)
+            else if (age < 5000) young++;  // < ~2.5 days
+            else if (age < 20000) mature++; // < ~10 days
+            else old++;                     // 10+ days
+        }
+        oss << ", \"fresh_lt_1k_blocks\": " << fresh;
+        oss << ", \"young_1k_5k_blocks\": " << young;
+        oss << ", \"mature_5k_20k_blocks\": " << mature;
+        oss << ", \"veteran_gt_20k_blocks\": " << old;
+        oss << "}";
+        result["trust_distribution"] = oss.str();
+    }
+
+    // --- 5. Network health score (0-100) ---
+    // Factors: identity count, dimension coverage, cluster ratio, diversity
+    double health = 0.0;
+
+    // Identity count contribution (0-25 pts, linear up to 50 identities)
+    health += std::min(25.0, static_cast<double>(n) * 0.5);
+
+    // Dimension coverage contribution (0-25 pts)
+    double dim_coverage = (has_memory + has_drift + has_bw + has_thermal + has_behavioral)
+                         / (5.0 * n);
+    health += dim_coverage * 25.0;
+
+    // Low cluster ratio contribution (0-25 pts, penalty for suspicious clusters)
+    if (n > 1) {
+        double suspicious_ratio = static_cast<double>(cluster_count) / (n / 2.0);
+        health += std::max(0.0, 25.0 * (1.0 - suspicious_ratio));
+    } else {
+        health += 25.0;
+    }
+
+    // Unique regions contribution (0-25 pts)
+    std::map<std::string, int> regions;
+    for (const auto& dna : all) {
+        double min_rtt = 1e9;
+        std::string region = "unknown";
+        for (const auto& s : dna.latency.seed_stats) {
+            if (s.median_ms > 0 && s.median_ms < min_rtt) {
+                min_rtt = s.median_ms;
+                region = s.seed_name;
+            }
+        }
+        regions[region]++;
+    }
+    health += std::min(25.0, static_cast<double>(regions.size()) * 6.25);
+
+    health = std::min(100.0, std::max(0.0, health));
+    result["health_score"] = std::to_string(static_cast<int>(health));
+
+    const char* grade;
+    if (health >= 80) grade = "A";
+    else if (health >= 60) grade = "B";
+    else if (health >= 40) grade = "C";
+    else if (health >= 20) grade = "D";
+    else grade = "F";
+    result["health_grade"] = grade;
 
     return result;
 }
@@ -1015,6 +1319,13 @@ std::vector<RpcCommandInfo> get_rpc_help() {
             "mik (string) - 40-character hex MIK identity",
             "Change count, current hash, and array of archived DNA snapshots",
             "getdigitaldnahistory {\"mik\": \"0123456789abcdef0123456789abcdef01234567\"}"
+        },
+        {
+            "getdnamonitor",
+            "Network-wide DNA monitoring dashboard with Sybil cluster detection, rotation alerts, dimension coverage, and health score",
+            "None",
+            "Object with sybil_clusters, rotation_alerts, dimension_coverage, trust_distribution, health_score, health_grade",
+            "getdnamonitor"
         }
     };
 }

@@ -506,6 +506,7 @@
                 <div class="form-group">
                     <label>Amount of <span id="depositCoinLabel">DIL</span> to bridge</label>
                     <input type="number" id="depositAmount" placeholder="100" step="0.01" oninput="validateDepositForm()">
+                    <p id="depositLimitNote" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Max per deposit: 500 DIL (daily limit: 1,000 DIL). Split larger amounts into multiple transactions.</p>
                 </div>
 
                 <div class="form-group">
@@ -729,6 +730,11 @@
             document.getElementById('tokenContractDisplay').textContent = contractAddr;
             document.getElementById('nodeRpcUrl').value = 'http://127.0.0.1:' + rpcPort;
 
+            const limits = BRIDGE_LIMITS[chain];
+            document.getElementById('depositLimitNote').textContent =
+                `Max per deposit: ${limits.maxPerDeposit} ${limits.coin} (daily limit: ${limits.dailyCap} ${limits.coin}). Split larger amounts into multiple transactions.`;
+            document.getElementById('depositAmount').setAttribute('max', limits.maxPerDeposit);
+
             validateDepositForm();
         }
 
@@ -742,12 +748,19 @@
 
         // ── Deposit form validation ──────────────────────────────────
 
+        // Bridge deposit limits (must match on-chain contract limits)
+        const BRIDGE_LIMITS = {
+            dil:  { maxPerDeposit: 500,   dailyCap: 1000,  coin: 'DIL',  wrapped: 'wDIL'  },
+            dilv: { maxPerDeposit: 5000,  dailyCap: 10000, coin: 'DilV', wrapped: 'wDILV' },
+        };
+
         function validateDepositForm() {
             const addr = document.getElementById('depositBaseAddr').value.trim();
             const amount = document.getElementById('depositAmount').value.trim();
             const btn = document.getElementById('bridgeBtn');
-            const coin = selectedDepositChain === 'dil' ? 'DIL' : 'DilV';
-            const wrapped = selectedDepositChain === 'dil' ? 'wDIL' : 'wDILV';
+            const limits = BRIDGE_LIMITS[selectedDepositChain];
+            const coin = limits.coin;
+            const wrapped = limits.wrapped;
 
             if (!addr || !addr.startsWith('0x') || addr.length !== 42) {
                 btn.textContent = 'Enter your MetaMask address';
@@ -756,6 +769,12 @@
             }
             if (!amount || parseFloat(amount) <= 0) {
                 btn.textContent = 'Enter amount to bridge';
+                btn.disabled = true;
+                return;
+            }
+            const amountNum = parseFloat(amount);
+            if (amountNum > limits.maxPerDeposit) {
+                btn.textContent = `Max ${limits.maxPerDeposit} ${coin} per deposit`;
                 btn.disabled = true;
                 return;
             }
@@ -991,10 +1010,19 @@
             statusDiv.style.display = 'block';
             btn.disabled = true;
 
-            const coin = chain === 'dil' ? 'DIL' : 'DilV';
+            const limits = BRIDGE_LIMITS[chain];
+            const coin = limits.coin;
             const bridgeAddr = chain === 'dil' ? BRIDGE_CONFIG.dilBridgeAddress : BRIDGE_CONFIG.dilvBridgeAddress;
             const depositSats = Math.round(parseFloat(amountStr) * 1e8);
             const OP_RETURN_VALUE = 50000;
+
+            // Enforce deposit limit
+            if (parseFloat(amountStr) > limits.maxPerDeposit) {
+                statusDiv.style.display = 'block';
+                statusDiv.innerHTML = `<p style="color: var(--error); font-size: 13px;">Maximum deposit is ${limits.maxPerDeposit} ${coin}. Split into multiple smaller transactions.</p>`;
+                btn.disabled = false;
+                return;
+            }
             const FEE_RATE = 6; // volts per byte
             const MAX_INPUTS = 50;
 

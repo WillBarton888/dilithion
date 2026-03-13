@@ -64,7 +64,7 @@ public:
     std::vector<DigitalDNA> get_all() const override;
     size_t count() const override;
     std::vector<std::pair<uint64_t, DigitalDNA>> get_dna_history(
-        const std::array<uint8_t, 20>& mik) const override;
+        const std::array<uint8_t, 20>& mik, size_t max_entries = 100) const override;
 
     // --- Additional methods (not in interface) ---
 

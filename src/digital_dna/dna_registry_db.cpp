@@ -147,6 +147,10 @@ IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& 
         return RegisterResult::DB_ERROR;
     }
 
+    // Evict oldest cache entry if at capacity (LevelDB still has full data)
+    if (cache_.size() >= MAX_CACHE_SIZE) {
+        cache_.erase(cache_.begin());
+    }
     cache_[dna.address] = dna;
     return sybil_flagged ? RegisterResult::SYBIL_FLAGGED : RegisterResult::SUCCESS;
 }
@@ -356,7 +360,7 @@ bool DNARegistryDB::remove_identity(const std::array<uint8_t, 20>& address) {
 }
 
 std::vector<std::pair<uint64_t, DigitalDNA>> DNARegistryDB::get_dna_history(
-    const std::array<uint8_t, 20>& mik) const {
+    const std::array<uint8_t, 20>& mik, size_t max_entries) const {
     std::lock_guard<std::mutex> lock(mutex_);
 
     std::vector<std::pair<uint64_t, DigitalDNA>> result;
@@ -381,6 +385,8 @@ std::vector<std::pair<uint64_t, DigitalDNA>> DNARegistryDB::get_dna_history(
         if (dna) {
             result.push_back({timestamp, *dna});
         }
+
+        if (result.size() >= max_entries) break;
     }
 
     return result;  // Already sorted chronologically (lexicographic key order)

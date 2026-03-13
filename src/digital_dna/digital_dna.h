@@ -163,7 +163,7 @@ public:
      *  Each entry is a previous DNA snapshot archived when update_identity() was called.
      *  Single change = likely new hardware/location. Multiple regular changes = suspicious. */
     virtual std::vector<std::pair<uint64_t, DigitalDNA>> get_dna_history(
-        const std::array<uint8_t, 20>& mik) const = 0;
+        const std::array<uint8_t, 20>& mik, size_t max_entries = 100) const = 0;
 };
 
 /**
@@ -290,7 +290,7 @@ public:
     std::vector<DigitalDNA> get_all() const override;
     size_t count() const override { return identities_.size(); }
     std::vector<std::pair<uint64_t, DigitalDNA>> get_dna_history(
-        const std::array<uint8_t, 20>& mik) const override;
+        const std::array<uint8_t, 20>& mik, size_t max_entries = 100) const override;
 
     // Persistence (flat file — for tests / backward compat)
     bool save(const std::string& path) const;

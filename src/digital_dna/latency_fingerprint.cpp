@@ -23,16 +23,15 @@
 namespace digital_dna {
 
 LatencyFingerprintCollector::LatencyFingerprintCollector() {
-#ifdef _WIN32
-    WSADATA wsaData;
-    WSAStartup(MAKEWORD(2, 2), &wsaData);
-#endif
+    // NOTE: Winsock init/cleanup is NOT done here.
+    // The node process already calls WSAStartup() at startup.
+    // Calling WSACleanup() in the destructor would terminate ALL sockets
+    // in the process (P2P connections), causing a crash.
+    // Standalone test tools should call WSAStartup() themselves before
+    // creating a LatencyFingerprintCollector.
 }
 
 LatencyFingerprintCollector::~LatencyFingerprintCollector() {
-#ifdef _WIN32
-    WSACleanup();
-#endif
 }
 
 double LatencyFingerprintCollector::measure_rtt(const std::string& ip, uint16_t port) {

@@ -119,7 +119,7 @@ ChainParams ChainParams::Mainnet() {
     // Script V2 (HTLC, multisig, etc.): disabled until fork is scheduled
     params.scriptV2ActivationHeight = 999999999;
 
-    params.digitalDnaActivationHeight = 999999999;  // Disabled until fork is scheduled
+    params.digitalDnaActivationHeight = 30000;  // DNA collection + P2P exchange (advisory only, no consensus impact)
     params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
 

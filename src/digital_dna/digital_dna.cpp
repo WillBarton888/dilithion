@@ -719,7 +719,7 @@ std::vector<DigitalDNA> DigitalDNARegistry::get_all() const {
 }
 
 std::vector<std::pair<uint64_t, DigitalDNA>> DigitalDNARegistry::get_dna_history(
-    const std::array<uint8_t, 20>& /*mik*/) const {
+    const std::array<uint8_t, 20>& /*mik*/, size_t /*max_entries*/) const {
     // In-memory registry doesn't track history
     return {};
 }
