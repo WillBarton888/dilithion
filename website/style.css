@@ -4,17 +4,17 @@
 
 /* CSS Variables */
 :root {
-    --primary-color: #6366f1;      /* Indigo */
-    --primary-dark: #4f46e5;
-    --secondary-color: #8b5cf6;    /* Purple */
-    --accent-color: #06b6d4;       /* Cyan */
-    --bg-dark: #0f172a;            /* Dark blue-gray */
-    --bg-darker: #020617;
-    --bg-card: #061229;
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --border-color: #334155;
+    --primary-color: #C8A24E;      /* Gold */
+    --primary-dark: #B08A3E;
+    --secondary-color: #E8C860;    /* Light Gold */
+    --accent-color: #C8A24E;       /* Gold */
+    --bg-dark: #0F0F0D;            /* Near black */
+    --bg-darker: #0A0A09;
+    --bg-card: #161614;
+    --text-primary: #F5F0E8;
+    --text-secondary: #8A8A80;
+    --text-muted: #5A5A52;
+    --border-color: #1F1F1C;
     --success-color: #22c55e;
     --warning-color: #f59e0b;
     --error-color: #ef4444;
@@ -57,7 +57,7 @@ body::before {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(2, 6, 23, 0.50);
+    background: rgba(10, 10, 9, 0.50);
     z-index: 0;
     pointer-events: none;
 }
@@ -78,6 +78,11 @@ body > * {
 h1, h2, h3, h4 {
     font-weight: 700;
     line-height: 1.2;
+}
+
+h1, h2, h3 {
+    font-family: 'DM Serif Display', serif;
+    font-weight: 400;
 }
 
 h1 {
@@ -124,7 +129,7 @@ a:hover {
 
 .btn-primary:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 30px rgba(99, 102, 241, 0.4);
+    box-shadow: 0 10px 30px rgba(200, 162, 78, 0.4);
 }
 
 .btn-secondary {
@@ -145,7 +150,7 @@ a:hover {
 }
 
 .btn-download:hover {
-    background: #0d2050;
+    background: #1E1E1A;
     border-color: white;
     color: white;
 }
@@ -160,7 +165,7 @@ a:hover {
     position: fixed;
     top: 0;
     width: 100%;
-    background: rgba(15, 23, 42, 0.95);
+    background: rgba(15, 15, 13, 0.95);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--border-color);
     z-index: 1000;
@@ -259,7 +264,7 @@ a:hover {
     top: calc(100% + 16px);
     right: 0;
     min-width: 200px;
-    background: rgba(15, 23, 42, 0.98);
+    background: rgba(15, 15, 13, 0.98);
     backdrop-filter: blur(12px);
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -289,14 +294,14 @@ a:hover {
 
 .nav-dropdown-menu a:hover {
     color: var(--primary-color);
-    background: rgba(59, 130, 246, 0.08);
+    background: rgba(200, 162, 78, 0.08);
     padding-left: 24px;
 }
 
 /* Hero Section */
 .hero {
     padding: 160px 0 100px;
-    background: linear-gradient(180deg, rgba(2, 6, 23, 0.6) 0%, rgba(15, 23, 42, 0.75) 100%);
+    background: linear-gradient(180deg, rgba(10, 10, 9, 0.6) 0%, rgba(15, 15, 13, 0.75) 100%);
     position: relative;
     overflow: hidden;
 }
@@ -308,7 +313,7 @@ a:hover {
     right: -20%;
     width: 800px;
     height: 800px;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(200, 162, 78, 0.15) 0%, transparent 70%);
     border-radius: 50%;
 }
 
@@ -329,10 +334,10 @@ a:hover {
 
 @keyframes glow {
     0%, 100% {
-        filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.4));
+        filter: drop-shadow(0 0 8px rgba(200, 162, 78, 0.4));
     }
     50% {
-        filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.8));
+        filter: drop-shadow(0 0 20px rgba(200, 162, 78, 0.8));
     }
 }
 
@@ -384,7 +389,7 @@ a:hover {
 .trust-badge:hover {
     border-color: var(--primary-color);
     transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(99, 102, 241, 0.2);
+    box-shadow: 0 8px 20px rgba(200, 162, 78, 0.2);
 }
 
 .badge-icon {
@@ -478,13 +483,13 @@ a:hover {
 
 /* All sections - semi-transparent so circuit background shows through */
 .mainnet-info {
-    background: rgba(15, 23, 42, 0.5) !important;
+    background: rgba(15, 15, 13, 0.5) !important;
 }
 
 /* Features Section */
 .features {
     padding: 100px 0;
-    background: rgba(15, 23, 42, 0.5);
+    background: rgba(15, 15, 13, 0.5);
 }
 
 .section-title {
@@ -510,7 +515,7 @@ a:hover {
 .feature-card:hover {
     transform: translateY(-4px);
     border-color: var(--primary-color);
-    box-shadow: 0 10px 40px rgba(99, 102, 241, 0.2);
+    box-shadow: 0 10px 40px rgba(200, 162, 78, 0.2);
 }
 
 .feature-icon {
@@ -536,7 +541,7 @@ a:hover {
 /* Dashboard Section */
 .dashboard {
     padding: 100px 0;
-    background: rgba(2, 6, 23, 0.5);
+    background: rgba(10, 10, 9, 0.5);
 }
 
 .dashboard-status {
@@ -606,7 +611,7 @@ a:hover {
 /* Getting Started Section */
 .getting-started {
     padding: 100px 0;
-    background: rgba(15, 23, 42, 0.5);
+    background: rgba(15, 15, 13, 0.5);
 }
 
 .guide-container {
@@ -701,7 +706,7 @@ a:hover {
 /* Downloads Section */
 .downloads {
     padding: 100px 0;
-    background: rgba(2, 6, 23, 0.5);
+    background: rgba(10, 10, 9, 0.5);
 }
 
 .section-subtitle {
@@ -780,7 +785,7 @@ a:hover {
 /* Specifications Section */
 .specifications {
     padding: 100px 0;
-    background: rgba(15, 23, 42, 0.5);
+    background: rgba(15, 15, 13, 0.5);
 }
 
 .specs-grid {
@@ -819,7 +824,7 @@ a:hover {
 /* FAQ Section */
 .faq-section {
     padding: 100px 0;
-    background: rgba(2, 6, 23, 0.5);
+    background: rgba(10, 10, 9, 0.5);
 }
 
 .faq-container {
@@ -926,7 +931,7 @@ a:hover {
 /* Newsletter Section */
 .newsletter-section {
     padding: 100px 0;
-    background: linear-gradient(135deg, rgba(15, 23, 42, 0.5), rgba(2, 6, 23, 0.5));
+    background: linear-gradient(135deg, rgba(15, 15, 13, 0.5), rgba(10, 10, 9, 0.5));
     position: relative;
     overflow: hidden;
 }
@@ -938,7 +943,7 @@ a:hover {
     left: -20%;
     width: 800px;
     height: 800px;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(200, 162, 78, 0.1) 0%, transparent 70%);
     border-radius: 50%;
 }
 
@@ -987,7 +992,7 @@ a:hover {
 .newsletter-input:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    box-shadow: 0 0 0 3px rgba(200, 162, 78, 0.1);
 }
 
 .newsletter-input::placeholder {
@@ -1038,7 +1043,7 @@ a:hover {
 
 /* Footer */
 .footer {
-    background: rgba(2, 6, 23, 0.5);
+    background: rgba(10, 10, 9, 0.5);
     border-top: 1px solid var(--border-color);
     padding: 80px 0 32px;
 }
@@ -1549,10 +1554,10 @@ a:hover {
 /* Mainnet Banner Pulse Animation */
 @keyframes pulse-glow {
     0%, 100% {
-        box-shadow: 0 0 0 0 rgba(30, 58, 95, 0.5);
+        box-shadow: 0 0 0 0 rgba(200, 162, 78, 0.3);
     }
     50% {
-        box-shadow: 0 0 0 8px rgba(30, 58, 95, 0);
+        box-shadow: 0 0 0 8px rgba(200, 162, 78, 0);
     }
 }
 

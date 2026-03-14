@@ -113,1136 +113,881 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css?v=5">
+    <style>
+        /* ── Reset ── */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        /* ── Design tokens ── */
+        :root {
+            --bg: #0F0F0D;
+            --surface: #161614;
+            --border: #1F1F1C;
+            --text-primary: #F5F0E8;
+            --text-secondary: #8A8A80;
+            --text-tertiary: #5A5A52;
+            --text-value: #A0A098;
+            --accent: #C8A24E;
+            --bright-gold: #E8C860;
+            --font-headline: 'DM Serif Display', serif;
+            --font-body: 'Inter', sans-serif;
+            --font-label: 'JetBrains Mono', monospace;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        a { text-decoration: none; color: inherit; }
+        img { display: block; }
+
+        /* ── NAV ── */
+        .nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 94px;
+            padding: 0 80px;
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-brand img {
+            width: 36px;
+            height: 36px;
+        }
+
+        .nav-brand span {
+            font-family: var(--font-body);
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+        }
+
+        .nav-links a {
+            font-family: var(--font-body);
+            font-size: 14px;
+            color: var(--text-secondary);
+            letter-spacing: 0.04em;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--text-primary);
+        }
+
+        .nav-download {
+            background: var(--accent);
+            color: var(--bg);
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 500;
+            padding: 10px 24px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .nav-download:hover {
+            opacity: 0.9;
+        }
+
+        /* ── HERO ── */
+        .hero {
+            position: relative;
+            min-height: 680px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            overflow: hidden;
+        }
+
+        .hero-bg {
+            position: absolute;
+            bottom: -10px;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            overflow: hidden;
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 28px;
+            padding: 0 24px;
+        }
+
+        .hero-label {
+            font-family: var(--font-label);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+        }
+
+        .hero-headline {
+            font-family: var(--font-headline);
+            font-size: 72px;
+            font-weight: 400;
+            color: var(--text-primary);
+            max-width: 900px;
+            line-height: 1.1;
+        }
+
+        .hero-subtitle {
+            font-family: var(--font-body);
+            font-size: 17px;
+            font-weight: 300;
+            color: #7A7A72;
+            max-width: 560px;
+            line-height: 28px;
+        }
+
+        .hero-rule {
+            width: 80px;
+            height: 1px;
+            background: var(--accent);
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+        }
+
+        .btn-gold {
+            display: inline-block;
+            background: var(--accent);
+            color: var(--bg);
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 500;
+            padding: 14px 32px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn-gold:hover { opacity: 0.9; }
+
+        .btn-outline {
+            display: inline-block;
+            border: 1px solid #3A3A35;
+            color: var(--text-secondary);
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 400;
+            padding: 14px 24px;
+            border-radius: 6px;
+            background: transparent;
+            cursor: pointer;
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .btn-outline:hover {
+            border-color: #5A5A52;
+            color: var(--text-primary);
+        }
+
+        /* ── METRICS ── */
+        .metrics {
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            padding: 32px 80px;
+            background: var(--bg);
+        }
+
+        .metrics-row {
+            display: flex;
+            align-items: center;
+            gap: 48px;
+            padding: 20px 0;
+        }
+
+        .metrics-row + .metrics-row {
+            border-top: 1px solid var(--border);
+        }
+
+        .metrics-chain {
+            font-family: var(--font-label);
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            min-width: 48px;
+        }
+
+        .metrics-stats {
+            display: flex;
+            gap: 64px;
+            flex: 1;
+            justify-content: center;
+        }
+
+        .metric-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .metric-value {
+            font-family: var(--font-headline);
+            font-size: 32px;
+            color: var(--text-primary);
+        }
+
+        .metric-label {
+            font-family: var(--font-label);
+            font-size: 10px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+        }
+
+        /* ── FEATURES ── */
+        .features {
+            padding: 80px;
+            background: var(--bg);
+        }
+
+        .features-intro {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 40px;
+            margin-bottom: 48px;
+        }
+
+        .features-intro-title {
+            font-family: var(--font-headline);
+            font-size: 40px;
+            font-weight: 400;
+            color: var(--text-primary);
+            max-width: 400px;
+        }
+
+        .features-intro-text {
+            font-family: var(--font-body);
+            font-size: 15px;
+            font-weight: 300;
+            color: #7A7A72;
+            max-width: 400px;
+            line-height: 24px;
+        }
+
+        .features-divider {
+            width: 100%;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 48px;
+            padding: 48px 0;
+        }
+
+        .feature-card {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .feature-number {
+            font-family: var(--font-label);
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--accent);
+            text-transform: uppercase;
+        }
+
+        .feature-title {
+            font-family: var(--font-headline);
+            font-size: 22px;
+            font-weight: 400;
+            color: var(--text-primary);
+        }
+
+        .feature-desc {
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 300;
+            color: #7A7A72;
+            line-height: 22px;
+        }
+
+        /* ── CHAINS ── */
+        .chains {
+            padding: 0 80px 80px;
+            background: var(--bg);
+        }
+
+        .chains-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2px;
+        }
+
+        .chain-card {
+            background: var(--surface);
+            padding: 56px 48px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .chain-card:first-child {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .chain-card:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .chain-type {
+            font-family: var(--font-label);
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+        }
+
+        .chain-name {
+            font-family: var(--font-headline);
+            font-size: 48px;
+            font-weight: 400;
+            color: var(--text-primary);
+        }
+
+        .chain-rule {
+            width: 40px;
+            height: 1px;
+            background: var(--accent);
+        }
+
+        .chain-specs {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .chain-spec {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+
+        .chain-spec-label {
+            font-family: var(--font-body);
+            font-size: 13px;
+            font-weight: 300;
+            color: var(--text-tertiary);
+        }
+
+        .chain-spec-value {
+            font-family: var(--font-body);
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--text-value);
+        }
+
+        /* ── DOWNLOAD CTA ── */
+        .download {
+            background: #141412;
+            border-top: 1px solid var(--border);
+            padding: 100px 80px;
+            text-align: center;
+        }
+
+        .download-title {
+            font-family: var(--font-headline);
+            font-size: 40px;
+            font-weight: 400;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+        }
+
+        .download-subtitle {
+            font-family: var(--font-body);
+            font-size: 16px;
+            font-weight: 300;
+            color: var(--text-tertiary);
+            max-width: 440px;
+            margin: 0 auto 40px;
+            line-height: 26px;
+        }
+
+        .download-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .btn-outline-dim {
+            display: inline-block;
+            border: 1px solid #3A3A35;
+            color: var(--text-tertiary);
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 400;
+            padding: 14px 24px;
+            border-radius: 6px;
+            background: transparent;
+            cursor: pointer;
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .btn-outline-dim:hover {
+            border-color: #5A5A52;
+            color: var(--text-secondary);
+        }
+
+        /* ── FOOTER ── */
+        .footer {
+            border-top: 1px solid var(--border);
+            padding: 64px 80px 48px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            background: var(--bg);
+        }
+
+        .footer-brand {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .footer-brand-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .footer-logo {
+            width: 28px;
+            height: 28px;
+        }
+
+        .footer-brand-name {
+            font-family: var(--font-headline);
+            font-size: 18px;
+            color: var(--text-primary);
+        }
+
+        .footer-brand-desc {
+            font-family: var(--font-body);
+            font-size: 13px;
+            font-weight: 300;
+            color: #4A4A44;
+            max-width: 280px;
+            line-height: 20px;
+        }
+
+        .footer-columns {
+            display: flex;
+            gap: 80px;
+        }
+
+        .footer-col-title {
+            font-family: var(--font-label);
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 16px;
+        }
+
+        .footer-col ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .footer-col a {
+            font-family: var(--font-body);
+            font-size: 13px;
+            color: var(--text-secondary);
+            transition: color 0.2s;
+        }
+
+        .footer-col a:hover {
+            color: var(--text-primary);
+        }
+
+        /* ── COPYRIGHT ── */
+        .copyright {
+            padding: 24px 80px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid var(--border);
+            background: var(--bg);
+        }
+
+        .copyright-left {
+            font-family: var(--font-body);
+            font-size: 13px;
+            color: #3A3A35;
+        }
+
+        .copyright-right {
+            font-family: var(--font-label);
+            font-size: 10px;
+            color: #3A3A35;
+        }
+
+        /* ── RESPONSIVE ── */
+        @media (max-width: 1024px) {
+            .nav { padding: 0 40px; }
+            .features { padding: 60px 40px; }
+            .chains { padding: 0 40px 60px; }
+            .download { padding: 80px 40px; }
+            .footer { padding: 48px 40px 36px; }
+            .copyright { padding: 24px 40px; }
+            .metrics { padding: 24px 40px; }
+
+            .hero-headline { font-size: 56px; }
+            .metric-value { font-size: 26px; }
+            .metrics-stats { gap: 40px; }
+        }
+
+        @media (max-width: 768px) {
+            .nav { padding: 0 24px; height: 72px; }
+            .nav-links { display: none; }
+
+            .hero { min-height: 520px; }
+            .hero-headline { font-size: 40px; }
+            .hero-subtitle { font-size: 15px; }
+
+            .metrics { padding: 20px 24px; }
+            .metrics-row { flex-direction: column; gap: 16px; align-items: flex-start; }
+            .metrics-stats { flex-wrap: wrap; gap: 24px; justify-content: flex-start; }
+            .metric-item { align-items: flex-start; }
+            .metric-value { font-size: 24px; }
+
+            .features { padding: 48px 24px; }
+            .features-intro { flex-direction: column; gap: 20px; }
+            .features-grid { grid-template-columns: 1fr; gap: 36px; }
+
+            .chains { padding: 0 24px 48px; }
+            .chains-grid { grid-template-columns: 1fr; gap: 2px; }
+            .chain-card:first-child { border-radius: 8px 8px 0 0; }
+            .chain-card:last-child { border-radius: 0 0 8px 8px; }
+            .chain-card { padding: 40px 32px; }
+
+            .download { padding: 60px 24px; }
+            .download-buttons { flex-direction: column; align-items: center; }
+
+            .footer { flex-direction: column; gap: 40px; padding: 40px 24px 32px; }
+            .footer-columns { gap: 40px; flex-wrap: wrap; }
+
+            .copyright { padding: 20px 24px; flex-direction: column; gap: 8px; text-align: center; }
+        }
+    </style>
 </head>
 <body>
-    <!-- SVG Icon Library -->
-    <svg style="display: none;" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-            <!-- Shield Icon (Quantum-Resistant) -->
-            <symbol id="icon-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                <path d="M12 8v4"/>
-                <path d="M12 16h.01"/>
-            </symbol>
 
-            <!-- Zap Icon (Fast & Efficient) -->
-            <symbol id="icon-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-            </symbol>
-
-            <!-- Target Icon (Fair Launch) -->
-            <symbol id="icon-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <circle cx="12" cy="12" r="6"/>
-                <circle cx="12" cy="12" r="2"/>
-            </symbol>
-
-            <!-- CPU Icon (CPU Mining) -->
-            <symbol id="icon-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
-                <rect x="9" y="9" width="6" height="6"/>
-                <line x1="9" y1="1" x2="9" y2="4"/>
-                <line x1="15" y1="1" x2="15" y2="4"/>
-                <line x1="9" y1="20" x2="9" y2="23"/>
-                <line x1="15" y1="20" x2="15" y2="23"/>
-                <line x1="20" y1="9" x2="23" y2="9"/>
-                <line x1="20" y1="14" x2="23" y2="14"/>
-                <line x1="1" y1="9" x2="4" y2="9"/>
-                <line x1="1" y1="14" x2="4" y2="14"/>
-            </symbol>
-
-            <!-- Bar Chart Icon (Bitcoin Supply Model) -->
-            <symbol id="icon-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10"/>
-                <line x1="12" y1="20" x2="12" y2="4"/>
-                <line x1="6" y1="20" x2="6" y2="14"/>
-            </symbol>
-
-            <!-- Globe Icon (Decentralized) -->
-            <symbol id="icon-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="2" y1="12" x2="22" y2="12"/>
-                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-            </symbol>
-
-            <!-- Rocket Icon (Mainnet Live) -->
-            <symbol id="icon-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>
-                <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>
-                <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/>
-                <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>
-            </symbol>
-
-            <!-- Alert Triangle Icon (Warning) -->
-            <symbol id="icon-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
-                <path d="M12 9v4"/>
-                <path d="M12 17h.01"/>
-            </symbol>
-
-            <!-- Check Circle Icon (Checkmark) -->
-            <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                <polyline points="22 4 12 14.01 9 11.01"/>
-            </symbol>
-
-            <!-- Monitor Icon (Windows) -->
-            <symbol id="icon-windows" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                <line x1="8" y1="21" x2="16" y2="21"/>
-                <line x1="12" y1="17" x2="12" y2="21"/>
-            </symbol>
-
-            <!-- Terminal Icon (Linux) -->
-            <symbol id="icon-linux" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="4 17 10 11 4 5"/>
-                <line x1="12" y1="19" x2="20" y2="19"/>
-            </symbol>
-
-            <!-- Command Icon (macOS) -->
-            <symbol id="icon-macos" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
-            </symbol>
-
-            <!-- Menu Icon (Mobile Hamburger) -->
-            <symbol id="icon-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="3" y1="12" x2="21" y2="12"/>
-                <line x1="3" y1="6" x2="21" y2="6"/>
-                <line x1="3" y1="18" x2="21" y2="18"/>
-            </symbol>
-
-            <!-- X Icon (Mobile Close) -->
-            <symbol id="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-            </symbol>
-
-            <!-- Award Icon (Trust Badge) -->
-            <symbol id="icon-award" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="8" r="7"/>
-                <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
-            </symbol>
-
-            <!-- Code Icon (Open Source) -->
-            <symbol id="icon-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="16 18 22 12 16 6"/>
-                <polyline points="8 6 2 12 8 18"/>
-            </symbol>
-
-            <!-- Book Icon (Documentation/Standards) -->
-            <symbol id="icon-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-            </symbol>
-
-            <!-- GitHub Icon -->
-            <symbol id="icon-github" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
-            </symbol>
-
-            <!-- Chevron Down Icon (FAQ Accordion) -->
-            <symbol id="icon-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="6 9 12 15 18 9"/>
-            </symbol>
-        </defs>
-    </svg>
-
-    <!-- Navigation -->
-    <nav class="navbar">
-        <div class="container">
-            <div class="nav-brand">
-                <img src="dilithion-logo-256.png" alt="Dilithion Logo" class="nav-logo">
-                <div class="nav-text">
-                    <h1>DILITHION</h1>
-                    <span class="tagline">Post-Quantum Cryptocurrency</span>
-                </div>
-            </div>
-
-            <!-- Mobile Menu Button -->
-            <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Toggle Menu" aria-expanded="false">
-                <span class="hamburger-lines">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </span>
-            </button>
-
-            <div class="nav-links" id="navLinks">
-                <a href="#dashboard">Dashboard</a>
-                <a href="#getting-started">Get Started</a>
-                <a href="#downloads">Download DIL</a>
-                <a href="#dilv-downloads" style="color: #06b6d4;">⚡ DilV</a>
-                <a href="mining-calculator.html" target="_blank">Mining Calculator</a>
-                <a href="price.html" target="_blank" style="color: #22c55e;">Price</a>
-                <a href="http://127.0.0.1:8332/" target="_blank">Web Wallet</a>
-                <a href="http://explorer.dilithion.org" target="_blank">Explorer</a>
-                <a href="bridge.html" style="color: #8b5cf6;">Bridge</a>
-                <a href="#faq">FAQ</a>
-                <div class="nav-dropdown">
-                    <button class="nav-dropdown-btn" aria-expanded="false">
-                        Learn <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </button>
-                    <div class="nav-dropdown-menu">
-                        <a href="#about">About</a>
-                        <a href="WHITEPAPER.html" target="_blank">Whitepaper</a>
-                        <a href="quantum-security.html">Quantum Security</a>
-                        <a href="post-quantum-cryptography.html">PQC Explained</a>
-                        <a href="mainnet.html">Mainnet</a>
-                    </div>
-                </div>
-            </div>
+    <!-- NAV -->
+    <nav class="nav">
+        <a href="/" class="nav-brand">
+            <img src="logo-option4-goldmatch.png" alt="Dilithion" width="36" height="36">
+            <span>Dilithion</span>
+        </a>
+        <div class="nav-links">
+            <a href="#features">About</a>
+            <a href="#download">Mine</a>
+            <a href="wallet.html">Wallet</a>
+            <a href="bridge.html">Bridge</a>
+            <a href="https://explorer.dilithion.org">Explorer</a>
+            <a href="WHITEPAPER.html">Whitepaper</a>
+            <a href="#download" class="nav-download">Download</a>
         </div>
     </nav>
 
-    <!-- Hero Section -->
-    <section class="hero">
-        <div class="container">
+    <main>
+        <!-- HERO -->
+        <section class="hero">
+            <div class="hero-bg">
+                <svg width="1440" height="640" viewBox="0 0 1440 640" style="position:absolute;bottom:-10px;left:0;width:100%;height:100%;">
+                  <g opacity="0.03">
+                    <line x1="200" y1="20" x2="320" y2="55" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="320" y1="55" x2="440" y2="20" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="440" y1="20" x2="560" y2="55" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="560" y1="55" x2="680" y2="20" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="680" y1="20" x2="800" y2="55" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="800" y1="55" x2="920" y2="20" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="920" y1="20" x2="1040" y2="55" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="1040" y1="55" x2="1160" y2="20" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="1160" y1="20" x2="1280" y2="55" stroke="#C8A24E" stroke-width="0.4"/>
+                    <line x1="200" y1="20" x2="160" y2="130" stroke="#C8A24E" stroke-width="0.3"/>
+                    <line x1="440" y1="20" x2="380" y2="130" stroke="#C8A24E" stroke-width="0.3"/>
+                    <line x1="680" y1="20" x2="600" y2="130" stroke="#C8A24E" stroke-width="0.3"/>
+                    <line x1="920" y1="20" x2="820" y2="130" stroke="#C8A24E" stroke-width="0.3"/>
+                    <line x1="1160" y1="20" x2="1040" y2="130" stroke="#C8A24E" stroke-width="0.3"/>
+                    <circle cx="200" cy="20" r="1.5" fill="#C8A24E"/><circle cx="320" cy="55" r="1" fill="#C8A24E"/><circle cx="440" cy="20" r="1.5" fill="#C8A24E"/><circle cx="560" cy="55" r="1" fill="#C8A24E"/><circle cx="680" cy="20" r="1.5" fill="#C8A24E"/><circle cx="800" cy="55" r="1" fill="#C8A24E"/><circle cx="920" cy="20" r="1.5" fill="#C8A24E"/><circle cx="1040" cy="55" r="1" fill="#C8A24E"/><circle cx="1160" cy="20" r="1.5" fill="#C8A24E"/><circle cx="1280" cy="55" r="1" fill="#C8A24E"/>
+                  </g>
+                  <g opacity="0.06">
+                    <line x1="160" y1="130" x2="270" y2="170" stroke="#C8A24E" stroke-width="0.5"/><line x1="270" y1="170" x2="380" y2="130" stroke="#C8A24E" stroke-width="0.5"/><line x1="380" y1="130" x2="490" y2="170" stroke="#C8A24E" stroke-width="0.5"/><line x1="490" y1="170" x2="600" y2="130" stroke="#C8A24E" stroke-width="0.5"/><line x1="600" y1="130" x2="710" y2="170" stroke="#C8A24E" stroke-width="0.5"/><line x1="710" y1="170" x2="820" y2="130" stroke="#C8A24E" stroke-width="0.5"/><line x1="820" y1="130" x2="930" y2="170" stroke="#C8A24E" stroke-width="0.5"/><line x1="930" y1="170" x2="1040" y2="130" stroke="#C8A24E" stroke-width="0.5"/><line x1="1040" y1="130" x2="1150" y2="170" stroke="#C8A24E" stroke-width="0.5"/><line x1="1150" y1="170" x2="1260" y2="130" stroke="#C8A24E" stroke-width="0.5"/><line x1="1260" y1="130" x2="1370" y2="170" stroke="#C8A24E" stroke-width="0.5"/>
+                    <line x1="160" y1="130" x2="100" y2="280" stroke="#C8A24E" stroke-width="0.4"/><line x1="380" y1="130" x2="300" y2="280" stroke="#C8A24E" stroke-width="0.4"/><line x1="600" y1="130" x2="500" y2="280" stroke="#C8A24E" stroke-width="0.4"/><line x1="820" y1="130" x2="700" y2="280" stroke="#C8A24E" stroke-width="0.4"/><line x1="1040" y1="130" x2="900" y2="280" stroke="#C8A24E" stroke-width="0.4"/><line x1="1260" y1="130" x2="1100" y2="280" stroke="#C8A24E" stroke-width="0.4"/>
+                    <circle cx="160" cy="130" r="2" fill="#C8A24E"/><circle cx="270" cy="170" r="1.5" fill="#C8A24E"/><circle cx="380" cy="130" r="2" fill="#C8A24E"/><circle cx="490" cy="170" r="1.5" fill="#C8A24E"/><circle cx="600" cy="130" r="2" fill="#C8A24E"/><circle cx="710" cy="170" r="1.5" fill="#C8A24E"/><circle cx="820" cy="130" r="2" fill="#C8A24E"/><circle cx="930" cy="170" r="1.5" fill="#C8A24E"/><circle cx="1040" cy="130" r="2" fill="#C8A24E"/><circle cx="1150" cy="170" r="1.5" fill="#C8A24E"/><circle cx="1260" cy="130" r="2" fill="#C8A24E"/><circle cx="1370" cy="170" r="1.5" fill="#C8A24E"/>
+                  </g>
+                  <g opacity="0.11">
+                    <line x1="100" y1="280" x2="200" y2="330" stroke="#C8A24E" stroke-width="0.7"/><line x1="200" y1="330" x2="300" y2="280" stroke="#C8A24E" stroke-width="0.7"/><line x1="300" y1="280" x2="400" y2="330" stroke="#C8A24E" stroke-width="0.7"/><line x1="400" y1="330" x2="500" y2="280" stroke="#C8A24E" stroke-width="0.7"/><line x1="500" y1="280" x2="600" y2="330" stroke="#C8A24E" stroke-width="0.7"/><line x1="600" y1="330" x2="700" y2="280" stroke="#C8A24E" stroke-width="0.7"/><line x1="700" y1="280" x2="800" y2="330" stroke="#C8A24E" stroke-width="0.7"/><line x1="800" y1="330" x2="900" y2="280" stroke="#C8A24E" stroke-width="0.7"/><line x1="900" y1="280" x2="1000" y2="330" stroke="#C8A24E" stroke-width="0.7"/><line x1="1000" y1="330" x2="1100" y2="280" stroke="#C8A24E" stroke-width="0.7"/><line x1="1100" y1="280" x2="1200" y2="330" stroke="#C8A24E" stroke-width="0.7"/><line x1="1200" y1="330" x2="1300" y2="280" stroke="#C8A24E" stroke-width="0.7"/><line x1="1300" y1="280" x2="1400" y2="330" stroke="#C8A24E" stroke-width="0.7"/>
+                    <line x1="100" y1="280" x2="20" y2="440" stroke="#C8A24E" stroke-width="0.5"/><line x1="300" y1="280" x2="200" y2="440" stroke="#C8A24E" stroke-width="0.5"/><line x1="500" y1="280" x2="380" y2="440" stroke="#C8A24E" stroke-width="0.5"/><line x1="700" y1="280" x2="560" y2="440" stroke="#C8A24E" stroke-width="0.5"/><line x1="900" y1="280" x2="740" y2="440" stroke="#C8A24E" stroke-width="0.5"/><line x1="1100" y1="280" x2="920" y2="440" stroke="#C8A24E" stroke-width="0.5"/><line x1="1300" y1="280" x2="1100" y2="440" stroke="#C8A24E" stroke-width="0.5"/>
+                    <circle cx="100" cy="280" r="2.5" fill="#C8A24E"/><circle cx="200" cy="330" r="2" fill="#C8A24E"/><circle cx="300" cy="280" r="2.5" fill="#C8A24E"/><circle cx="400" cy="330" r="2" fill="#C8A24E"/><circle cx="500" cy="280" r="2.5" fill="#C8A24E"/><circle cx="600" cy="330" r="2" fill="#C8A24E"/><circle cx="700" cy="280" r="2.5" fill="#C8A24E"/><circle cx="800" cy="330" r="2" fill="#C8A24E"/><circle cx="900" cy="280" r="2.5" fill="#C8A24E"/><circle cx="1000" cy="330" r="2" fill="#C8A24E"/><circle cx="1100" cy="280" r="2.5" fill="#C8A24E"/><circle cx="1200" cy="330" r="2" fill="#C8A24E"/><circle cx="1300" cy="280" r="2.5" fill="#C8A24E"/><circle cx="1400" cy="330" r="2" fill="#C8A24E"/>
+                  </g>
+                  <g opacity="0.18">
+                    <line x1="20" y1="440" x2="110" y2="500" stroke="#C8A24E"/><line x1="110" y1="500" x2="200" y2="440" stroke="#C8A24E"/><line x1="200" y1="440" x2="290" y2="500" stroke="#C8A24E"/><line x1="290" y1="500" x2="380" y2="440" stroke="#C8A24E"/><line x1="380" y1="440" x2="470" y2="500" stroke="#C8A24E"/><line x1="470" y1="500" x2="560" y2="440" stroke="#C8A24E"/><line x1="560" y1="440" x2="650" y2="500" stroke="#C8A24E"/><line x1="650" y1="500" x2="740" y2="440" stroke="#C8A24E"/><line x1="740" y1="440" x2="830" y2="500" stroke="#C8A24E"/><line x1="830" y1="500" x2="920" y2="440" stroke="#C8A24E"/><line x1="920" y1="440" x2="1010" y2="500" stroke="#C8A24E"/><line x1="1010" y1="500" x2="1100" y2="440" stroke="#C8A24E"/><line x1="1100" y1="440" x2="1190" y2="500" stroke="#C8A24E"/><line x1="1190" y1="500" x2="1280" y2="440" stroke="#C8A24E"/><line x1="1280" y1="440" x2="1370" y2="500" stroke="#C8A24E"/><line x1="1370" y1="500" x2="1440" y2="460" stroke="#C8A24E"/>
+                    <line x1="20" y1="440" x2="20" y2="580" stroke="#C8A24E" stroke-width="0.7"/><line x1="200" y1="440" x2="200" y2="580" stroke="#C8A24E" stroke-width="0.7"/><line x1="380" y1="440" x2="380" y2="580" stroke="#C8A24E" stroke-width="0.7"/><line x1="560" y1="440" x2="560" y2="580" stroke="#C8A24E" stroke-width="0.7"/><line x1="740" y1="440" x2="740" y2="580" stroke="#C8A24E" stroke-width="0.7"/><line x1="920" y1="440" x2="920" y2="580" stroke="#C8A24E" stroke-width="0.7"/><line x1="1100" y1="440" x2="1100" y2="580" stroke="#C8A24E" stroke-width="0.7"/><line x1="1280" y1="440" x2="1280" y2="580" stroke="#C8A24E" stroke-width="0.7"/>
+                    <circle cx="20" cy="440" r="3" fill="#C8A24E"/><circle cx="200" cy="440" r="3" fill="#C8A24E"/><circle cx="380" cy="440" r="3" fill="#C8A24E"/><circle cx="560" cy="440" r="3" fill="#C8A24E"/><circle cx="740" cy="440" r="3" fill="#C8A24E"/><circle cx="920" cy="440" r="3" fill="#C8A24E"/><circle cx="1100" cy="440" r="3" fill="#C8A24E"/><circle cx="1280" cy="440" r="3" fill="#C8A24E"/><circle cx="110" cy="500" r="2.5" fill="#C8A24E"/><circle cx="290" cy="500" r="2.5" fill="#C8A24E"/><circle cx="470" cy="500" r="2.5" fill="#C8A24E"/><circle cx="650" cy="500" r="2.5" fill="#C8A24E"/><circle cx="830" cy="500" r="2.5" fill="#C8A24E"/><circle cx="1010" cy="500" r="2.5" fill="#C8A24E"/><circle cx="1190" cy="500" r="2.5" fill="#C8A24E"/><circle cx="1370" cy="500" r="2.5" fill="#C8A24E"/>
+                  </g>
+                  <g opacity="0.25">
+                    <line x1="20" y1="580" x2="110" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="110" y1="630" x2="200" y2="580" stroke="#C8A24E" stroke-width="1.2"/><line x1="200" y1="580" x2="290" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="290" y1="630" x2="380" y2="580" stroke="#C8A24E" stroke-width="1.2"/><line x1="380" y1="580" x2="470" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="470" y1="630" x2="560" y2="580" stroke="#C8A24E" stroke-width="1.2"/><line x1="560" y1="580" x2="650" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="650" y1="630" x2="740" y2="580" stroke="#C8A24E" stroke-width="1.2"/><line x1="740" y1="580" x2="830" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="830" y1="630" x2="920" y2="580" stroke="#C8A24E" stroke-width="1.2"/><line x1="920" y1="580" x2="1010" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="1010" y1="630" x2="1100" y2="580" stroke="#C8A24E" stroke-width="1.2"/><line x1="1100" y1="580" x2="1190" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="1190" y1="630" x2="1280" y2="580" stroke="#C8A24E" stroke-width="1.2"/><line x1="1280" y1="580" x2="1370" y2="630" stroke="#C8A24E" stroke-width="1.2"/><line x1="1370" y1="630" x2="1440" y2="590" stroke="#C8A24E" stroke-width="1.2"/>
+                    <circle cx="20" cy="580" r="3.5" fill="#C8A24E"/><circle cx="200" cy="580" r="3.5" fill="#C8A24E"/><circle cx="380" cy="580" r="3.5" fill="#C8A24E"/><circle cx="560" cy="580" r="3.5" fill="#C8A24E"/><circle cx="740" cy="580" r="3.5" fill="#C8A24E"/><circle cx="920" cy="580" r="3.5" fill="#C8A24E"/><circle cx="1100" cy="580" r="3.5" fill="#C8A24E"/><circle cx="1280" cy="580" r="3.5" fill="#C8A24E"/><circle cx="110" cy="630" r="3" fill="#C8A24E"/><circle cx="290" cy="630" r="3" fill="#C8A24E"/><circle cx="470" cy="630" r="3" fill="#C8A24E"/><circle cx="650" cy="630" r="3" fill="#C8A24E"/><circle cx="830" cy="630" r="3" fill="#C8A24E"/><circle cx="1010" cy="630" r="3" fill="#C8A24E"/><circle cx="1190" cy="630" r="3" fill="#C8A24E"/><circle cx="1370" cy="630" r="3" fill="#C8A24E"/>
+                  </g>
+                  <g opacity="0.5">
+                    <line x1="100" y1="280" x2="200" y2="330" stroke="#E8C860" stroke-width="1.5"/><line x1="200" y1="330" x2="200" y2="440" stroke="#E8C860" stroke-width="1.5"/><line x1="200" y1="440" x2="110" y2="500" stroke="#E8C860" stroke-width="1.5"/><line x1="110" y1="500" x2="20" y2="580" stroke="#E8C860" stroke-width="1.5"/>
+                    <circle cx="100" cy="280" r="3.5" fill="#E8C860"/><circle cx="200" cy="330" r="4" fill="#E8C860"/><circle cx="200" cy="440" r="5" fill="#E8C860"/><circle cx="110" cy="500" r="4.5" fill="#E8C860"/><circle cx="20" cy="580" r="5.5" fill="#E8C860"/>
+                    <circle cx="200" cy="440" r="14" fill="#C8A24E" opacity="0.08"/>
+                  </g>
+                  <g opacity="0.4">
+                    <line x1="1300" y1="280" x2="1400" y2="330" stroke="#E8C860" stroke-width="1.3"/><line x1="1400" y1="330" x2="1280" y2="440" stroke="#E8C860" stroke-width="1.3"/><line x1="1280" y1="440" x2="1370" y2="500" stroke="#E8C860" stroke-width="1.3"/><line x1="1370" y1="500" x2="1280" y2="580" stroke="#E8C860" stroke-width="1.3"/>
+                    <circle cx="1300" cy="280" r="3" fill="#E8C860"/><circle cx="1400" cy="330" r="3.5" fill="#E8C860"/><circle cx="1280" cy="440" r="4.5" fill="#E8C860"/><circle cx="1370" cy="500" r="4" fill="#E8C860"/><circle cx="1280" cy="580" r="5" fill="#E8C860"/>
+                    <circle cx="1280" cy="440" r="12" fill="#C8A24E" opacity="0.07"/>
+                  </g>
+                </svg>
+            </div>
             <div class="hero-content">
-                <img src="dilithion-logo.png" alt="Dilithion Shield" class="hero-logo">
-                <h1 class="hero-title">The Future of Cryptocurrency is<br><span class="gradient-text">Quantum-Resistant</span></h1>
-                <p class="hero-subtitle">Dilithion is an experimental cryptocurrency built from the ground up for the post-quantum era.</p>
+                <span class="hero-label">Quantum-Resistant Cryptocurrency</span>
+                <h1 class="hero-headline">Sound money for the post-quantum era</h1>
+                <p class="hero-subtitle">Fair-mined, CPU-only. Built with NIST-standard Dilithium signatures to protect your wealth against quantum computers.</p>
+                <div class="hero-rule"></div>
+                <div class="hero-buttons">
+                    <a href="#download" class="btn-gold">Start Mining</a>
+                    <a href="WHITEPAPER.html" class="btn-outline">Read Whitepaper</a>
+                </div>
+            </div>
+        </section>
 
-                <!-- Trust Badges -->
-                <div class="trust-badges">
-                    <a href="https://csrc.nist.gov/projects/post-quantum-cryptography" target="_blank" rel="noopener" class="trust-badge">
-                        <svg class="badge-icon"><use href="#icon-award"/></svg>
-                        <div class="badge-text">
-                            <div class="badge-label">NIST</div>
-                            <div class="badge-value">PQC Standardized</div>
-                        </div>
-                    </a>
-                    <a href="https://pq-crystals.org/dilithium/" target="_blank" rel="noopener" class="trust-badge">
-                        <svg class="badge-icon"><use href="#icon-shield"/></svg>
-                        <div class="badge-text">
-                            <div class="badge-label">Algorithm</div>
-                            <div class="badge-value">Dilithium3</div>
-                        </div>
-                    </a>
-                    <a href="https://github.com/dilithion/dilithion" target="_blank" rel="noopener" class="trust-badge">
-                        <svg class="badge-icon"><use href="#icon-github"/></svg>
-                        <div class="badge-text">
-                            <div class="badge-label">Source Code</div>
-                            <div class="badge-value">Open Source</div>
-                        </div>
-                    </a>
-                    <div class="trust-badge">
-                        <svg class="badge-icon"><use href="#icon-check"/></svg>
-                        <div class="badge-text">
-                            <div class="badge-label">Test Suite</div>
-                            <div class="badge-value">93% Passing</div>
-                        </div>
+        <!-- METRICS -->
+        <section class="metrics" id="metrics">
+            <div class="metrics-row">
+                <span class="metrics-chain">DIL</span>
+                <div class="metrics-stats">
+                    <div class="metric-item">
+                        <span class="metric-value" id="dil-height">32,847</span>
+                        <span class="metric-label">Block Height</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-value" id="dil-supply">1.64M</span>
+                        <span class="metric-label">Circulating Supply</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-value" id="dil-miners">147</span>
+                        <span class="metric-label">Active Miners</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-value" id="dil-difficulty">48.2T</span>
+                        <span class="metric-label">Difficulty</span>
                     </div>
                 </div>
-
-                <!-- Mainnet Live Banner -->
-                <div class="mainnet-banner" style="background: #061229; padding: 16px 24px; text-align: center; border-radius: 12px; margin: 32px 0 24px 0; border: 1px solid var(--border-color); animation: pulse-glow 2s infinite;">
-                    <h2 style="margin: 0; font-size: 1.5rem; color: white;"><svg class="inline-icon"><use href="#icon-rocket"/></svg> MAINNET IS NOW LIVE!</h2>
-                    <p style="margin: 8px 0 0 0; font-size: 1.1rem; color: white;">Fair launch • No premine • CPU mining • Real DIL coins with value</p>
-                    <a href="#downloads" class="btn btn-secondary" style="margin-top: 12px; background: white; color: #061229;">Download & Start Mining →</a>
-                </div>
-
-                <p class="info-badge" style="background: #061229; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 10px 16px; border-radius: 8px; font-size: 0.9rem;"><svg class="inline-icon"><use href="#icon-code"/></svg> AI-Assisted Development using Claude Code</p>
-
-                <!-- Mainnet is LIVE - countdown removed -->
-
-                <div class="hero-actions">
-                    <a href="https://github.com/dilithion/dilithion" target="_blank" class="btn btn-secondary">View on GitHub</a>
-                    <a href="https://discord.gg/DS3gjmsFEJ" target="_blank" class="btn btn-secondary">Join us on Discord</a>
-                    <a href="https://t.me/dilithion" target="_blank" class="btn btn-secondary">Telegram</a>
-                </div>
             </div>
-        </div>
-    </section>
-
-    <!-- Getting Started Section -->
-    <section class="mainnet-info" style="padding: 0 0 80px 0; background: var(--bg-dark);">
-        <div class="container">
-            <h2 class="section-title" style="margin-top: 0;">Start Mining on Mainnet</h2>
-            <p style="text-align: center; color: var(--text-secondary); font-size: 1.2rem; max-width: 700px; margin: 0 auto 60px;">
-                Mainnet is LIVE! Download the node software and start mining real DIL coins today. Fair launch means everyone starts equal.
-            </p>
-
-            <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
-                <div class="feature-card">
-                    <div class="feature-icon">📖</div>
-                    <h3>Quick Start Guide</h3>
-                    <p>Follow our comprehensive quick start guide to get started mining in minutes.</p>
-                    <a href="https://github.com/dilithion/dilithion/blob/main/README.md" target="_blank" class="btn btn-small">Read Guide</a>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">⛏️</div>
-                    <h3>Start Mining</h3>
-                    <p>Easy one-click start! Just run the launcher script and you're mining:</p>
-                    <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px; font-size: 0.85rem;">
-                        <code>Windows: Double-click START-MINING.bat<br>Linux/Mac: ./start-mining.sh</code>
+            <div class="metrics-row">
+                <span class="metrics-chain">DilV</span>
+                <div class="metrics-stats">
+                    <div class="metric-item">
+                        <span class="metric-value" id="dilv-height">14,200</span>
+                        <span class="metric-label">Block Height</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-value" id="dilv-supply">1.42M</span>
+                        <span class="metric-label">Circulating Supply</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-value" id="dilv-miners">89</span>
+                        <span class="metric-label">Active Miners</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-value" id="dilv-difficulty">1,024</span>
+                        <span class="metric-label">Difficulty</span>
                     </div>
                 </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">💳</div>
-                    <h3>HD Wallet</h3>
-                    <p>Full hierarchical deterministic wallet with BIP39 seed phrases, BIP44 key derivation, and encrypted storage:</p>
-                    <div class="code-block" style="margin: 12px 0; padding: 8px; background: var(--bg-darker); border-radius: 4px; font-size: 0.85rem;">
-                        <code>./dilithion-wallet balance<br>./dilithion-wallet send</code>
-                    </div>
-                    <a href="https://github.com/dilithion/dilithion/blob/main/docs/HD_WALLET_USER_GUIDE.md" target="_blank" class="btn btn-small">Wallet Guide</a>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">📊</div>
-                    <h3>Mining Calculator</h3>
-                    <p>Estimate your DIL mining rewards based on your CPU. See live network stats and time to first block.</p>
-                    <a href="mining-calculator.html" target="_blank" class="btn btn-small">Open Calculator</a>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">🐛</div>
-                    <h3>Report Bugs</h3>
-                    <p>Found an issue? Report it on GitHub and help improve Dilithion.</p>
-                    <a href="https://github.com/dilithion/dilithion/issues" target="_blank" class="btn btn-small">GitHub Issues</a>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">💬</div>
-                    <h3>Join Community</h3>
-                    <p>Connect with other miners and developers on Discord, Telegram, and GitHub.</p>
-                    <a href="https://discord.gg/DS3gjmsFEJ" target="_blank" class="btn btn-small">Discord</a>
-                    <a href="https://t.me/dilithion" target="_blank" class="btn btn-small">Telegram</a>
-                </div>
             </div>
+        </section>
 
-            <div class="tips-box" style="margin-top: 60px; border-left: 4px solid #1e3a5f;">
-                <h3><svg class="inline-icon"><use href="#icon-globe"/></svg> Official Mainnet Seed Nodes</h3>
-                <p style="color: var(--text-secondary); margin-bottom: 16px;">Connect to our global network of 24/7 seed nodes for optimal network connectivity:</p>
-                <ul>
-                    <li><strong>NYC (Primary):</strong> 138.197.68.128:8444 - DigitalOcean (New York)</li>
-                    <li><strong>London:</strong> 167.172.56.119:8444 - DigitalOcean (Europe)</li>
-                    <li><strong>Singapore:</strong> 165.22.103.114:8444 - DigitalOcean (Asia-Pacific)</li>
-                    <li><strong>Sydney:</strong> 134.199.159.83:8444 - DigitalOcean (Australia)</li>
-                    <li><strong>Uptime:</strong> 24/7 availability on all nodes</li>
-                    <li><strong>Capacity:</strong> Up to 117 concurrent connections per node</li>
-                </ul>
+        <!-- FEATURES -->
+        <section class="features" id="features">
+            <div class="features-intro">
+                <h2 class="features-intro-title">Why Dilithion exists</h2>
+                <p class="features-intro-text">Most major cryptocurrencies, including Bitcoin and Ethereum, rely on elliptic curve cryptography that quantum computers will eventually break. Dilithion uses NIST-standard post-quantum signatures from day one.</p>
             </div>
-
-            <div class="tips-box" style="margin-top: 24px;">
-                <h3><svg class="inline-icon"><use href="#icon-check"/></svg> Important Mainnet Information</h3>
-                <ul>
-                    <li><strong>Mainnet DIL coins have real value</strong> - Secure your wallet!</li>
-                    <li><strong>Fair launch:</strong> No premine, no ICO, everyone starts at block 0</li>
-                    <li><strong>Development funding:</strong> 1% development fund + 1% developer rewards (mainnet only)</li>
-                    <li><strong>Launch date:</strong> January 28, 2026</li>
-                    <li><strong>Block reward:</strong> 50 DIL per block (49 DIL to miner + 1 DIL dev)</li>
-                </ul>
-            </div>
-        </div>
-    </section>
-
-    <!-- Key Features -->
-    <section id="about" class="features">
-        <div class="container">
-            <h2 class="section-title">Why Dilithion?</h2>
+            <div class="features-divider"></div>
             <div class="features-grid">
                 <div class="feature-card">
-                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-shield"/></svg></div>
-                    <h3>Quantum-Resistant</h3>
-                    <p>Uses CRYSTALS-Dilithium, a NIST-standardized post-quantum signature scheme. Your coins are safe from quantum computers.</p>
+                    <span class="feature-number">01</span>
+                    <h3 class="feature-title">Quantum-Resistant Signatures</h3>
+                    <p class="feature-desc">CRYSTALS-Dilithium, the NIST post-quantum standard. Your keys are safe even when quantum computers break ECDSA.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-zap"/></svg></div>
-                    <h3>Fast & Efficient</h3>
-                    <p>4-minute block time optimized for large post-quantum signatures. 2.5x faster confirmations than Bitcoin.</p>
+                    <span class="feature-number">02</span>
+                    <h3 class="feature-title">Fair CPU Mining</h3>
+                    <p class="feature-desc">RandomX proof-of-work with DFMP ensures one miner, one vote. No ASICs, no GPU farms. Mine with the computer you already own.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-target"/></svg></div>
-                    <h3>Fair Launch</h3>
-                    <p>No premine, no ICO, no VC allocation. Pure proof-of-work with transparent 1% dev fund + 1% developer rewards. Everyone starts equal on January 28, 2026.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-cpu"/></svg></div>
-                    <h3>CPU Mining</h3>
-                    <p>RandomX proof-of-work keeps mining accessible. No expensive ASICs required—mine with your CPU.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-chart"/></svg></div>
-                    <h3>Bitcoin Supply Model</h3>
-                    <p>21 million DIL total supply. Block reward halving every 210,000 blocks. Predictable, deflationary economics.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-globe"/></svg></div>
-                    <h3>Decentralized</h3>
-                    <p>Fully peer-to-peer network. No central authority, no master nodes, no staking. Pure proof-of-work.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon"><svg class="feature-icon-svg"><use href="#icon-code"/></svg></div>
-                    <h3>Sustainable Development</h3>
-                    <p>1% development fund + 1% developer rewards (mainnet only). Miners keep 98% of block rewards.</p>
+                    <span class="feature-number">03</span>
+                    <h3 class="feature-title">Dual-Chain Architecture</h3>
+                    <p class="feature-desc">DIL for store of value. DilV for fast payments. Two chains, one ecosystem — bridged to Base for DeFi access.</p>
                 </div>
             </div>
+            <div class="features-divider"></div>
+        </section>
+
+        <!-- CHAINS -->
+        <section class="chains" id="chains">
+            <div class="chains-grid">
+                <div class="chain-card">
+                    <span class="chain-type">Store of Value</span>
+                    <h2 class="chain-name">DIL</h2>
+                    <div class="chain-rule"></div>
+                    <div class="chain-specs">
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Consensus</span>
+                            <span class="chain-spec-value">RandomX PoW</span>
+                        </div>
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Block time</span>
+                            <span class="chain-spec-value">~4 minutes</span>
+                        </div>
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Supply</span>
+                            <span class="chain-spec-value">21M</span>
+                        </div>
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Reward</span>
+                            <span class="chain-spec-value">50 DIL / block</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="chain-card">
+                    <span class="chain-type">Fast Payments</span>
+                    <h2 class="chain-name">DilV</h2>
+                    <div class="chain-rule"></div>
+                    <div class="chain-specs">
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Consensus</span>
+                            <span class="chain-spec-value">Pure VDF</span>
+                        </div>
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Block time</span>
+                            <span class="chain-spec-value">~45 seconds</span>
+                        </div>
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Supply</span>
+                            <span class="chain-spec-value">210M</span>
+                        </div>
+                        <div class="chain-spec">
+                            <span class="chain-spec-label">Reward</span>
+                            <span class="chain-spec-value">100 DilV / block</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- DOWNLOAD CTA -->
+        <section class="download" id="download">
+            <h2 class="download-title">Ready to mine the future?</h2>
+            <p class="download-subtitle">Download Dilithion for Windows, macOS, or Linux. Start mining with just your CPU — no special hardware required.</p>
+            <div class="download-buttons">
+                <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn-gold">Download for Windows</a>
+                <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn-outline-dim">macOS</a>
+                <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn-outline-dim">Linux</a>
+            </div>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer-brand">
+            <div class="footer-brand-row">
+                <img src="logo-option4-goldmatch.png" alt="Dilithion" class="footer-logo">
+                <span class="footer-brand-name">Dilithion</span>
+            </div>
+            <p class="footer-brand-desc">Quantum-resistant, fair-mined cryptocurrency. Open source under MIT license.</p>
         </div>
-    </section>
-
-    <!-- Live Dashboard -->
-    <section id="dashboard" class="dashboard">
-        <div class="container">
-            <h2 class="section-title">Network Statistics</h2>
-            <p class="dashboard-status" id="network-status">
-                <span class="status-indicator live" id="status-dot"></span>
-                <span id="status-text">MAINNET LIVE since January 28, 2026</span>
-            </p>
-
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Block Height</div>
-                    <div class="stat-value" id="block-height">—</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Network Hash Rate</div>
-                    <div class="stat-value" id="hash-rate">—</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Difficulty</div>
-                    <div class="stat-value" id="difficulty">—</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Total Supply</div>
-                    <div class="stat-value" id="total-supply">0 DIL</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Current Block Reward</div>
-                    <div class="stat-value" id="block-reward">50 DIL</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Next Halving</div>
-                    <div class="stat-value" id="next-halving">210,000 blocks</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Last Block Time</div>
-                    <div class="stat-value" id="last-block-time">—</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Average Block Time</div>
-                    <div class="stat-value" id="avg-block-time">4 minutes</div>
-                </div>
-            </div>
-
-            <!-- Seed Node Status Panels -->
-            <h3 style="margin-top: 40px; margin-bottom: 20px; color: var(--text-primary);">Mainnet Seed Node Status</h3>
-            <div class="seed-nodes-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
-                <!-- NYC Node -->
-                <div class="seed-node-card" id="node-nyc" style="background: var(--bg-secondary); border-radius: 12px; padding: 20px; border: 1px solid var(--border-color);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h4 style="margin: 0; color: var(--text-primary);">NYC (Primary)</h4>
-                        <span class="node-status" id="nyc-status" style="padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; background: rgba(239, 68, 68, 0.2); color: #ef4444;">Offline</span>
-                    </div>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 15px 0;">138.197.68.128:8444</p>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Block Height</div>
-                            <div id="nyc-height" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Connected Peers</div>
-                            <div id="nyc-peers" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- London Node -->
-                <div class="seed-node-card" id="node-ldn" style="background: var(--bg-secondary); border-radius: 12px; padding: 20px; border: 1px solid var(--border-color);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h4 style="margin: 0; color: var(--text-primary);">London</h4>
-                        <span class="node-status" id="ldn-status" style="padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; background: rgba(239, 68, 68, 0.2); color: #ef4444;">Offline</span>
-                    </div>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 15px 0;">167.172.56.119:8444</p>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Block Height</div>
-                            <div id="ldn-height" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Connected Peers</div>
-                            <div id="ldn-peers" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Singapore Node -->
-                <div class="seed-node-card" id="node-sgp" style="background: var(--bg-secondary); border-radius: 12px; padding: 20px; border: 1px solid var(--border-color);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h4 style="margin: 0; color: var(--text-primary);">Singapore</h4>
-                        <span class="node-status" id="sgp-status" style="padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; background: rgba(239, 68, 68, 0.2); color: #ef4444;">Offline</span>
-                    </div>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 15px 0;">165.22.103.114:8444</p>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Block Height</div>
-                            <div id="sgp-height" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Connected Peers</div>
-                            <div id="sgp-peers" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Sydney Node -->
-                <div class="seed-node-card" id="node-syd" style="background: var(--bg-secondary); border-radius: 12px; padding: 20px; border: 1px solid var(--border-color);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h4 style="margin: 0; color: var(--text-primary);">Sydney</h4>
-                        <span class="node-status" id="syd-status" style="padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; background: rgba(239, 68, 68, 0.2); color: #ef4444;">Offline</span>
-                    </div>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 15px 0;">134.199.159.83:8444</p>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Block Height</div>
-                            <div id="syd-height" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                        <div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">Connected Peers</div>
-                            <div id="syd-peers" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 600;">—</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Getting Started -->
-    <section id="getting-started" class="getting-started">
-        <div class="container">
-            <h2 class="section-title">Getting Started</h2>
-
-            <div class="guide-container">
-                <div class="guide-step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h3>Download the Software</h3>
-                        <p>Download the Dilithion node software for your platform. Available for Windows, Linux, and macOS.</p>
-                        <a href="#downloads" class="btn btn-small">Go to Downloads</a>
-                    </div>
-                </div>
-
-                <div class="guide-step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h3>Extract the Package</h3>
-                        <p>Unzip (Windows) or extract the .tar.gz (Linux/Mac) to a folder on your computer.</p>
-                        <div class="code-block">
-                            <code># Linux/Mac<br>tar -xzf dilithion-v3.7.7-mainnet-linux-x64.tar.gz<br>cd dilithion-v3.7.7-mainnet-linux-x64/</code>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="guide-step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h3>Choose Your Start Method</h3>
-                        <p><strong>Option 1 (Easiest):</strong> Double-click START-MINING.bat (Windows) or run ./start-mining.sh (Linux/Mac)</p>
-                        <p><strong>Option 2:</strong> Run the interactive wizard: SETUP-AND-START.bat or ./setup-and-start.sh</p>
-                        <p><strong>Option 3:</strong> Just run dilithion-node.exe (Windows) or ./dilithion-node (Linux/Mac) with no arguments!</p>
-                        <p class="note">All three methods auto-configure everything. You'll be mining in seconds!</p>
-                    </div>
-                </div>
-
-                <div class="guide-step">
-                    <div class="step-number">4</div>
-                    <div class="step-content">
-                        <h3>You're Mining!</h3>
-                        <p>That's it! Your node automatically:</p>
-                        <ul style="text-align: left; margin: 10px 0;">
-                            <li>Connects to the official seed node</li>
-                            <li>Syncs the blockchain</li>
-                            <li>Creates a wallet</li>
-                            <li>Starts mining DIL</li>
-                        </ul>
-                        <p>To check your balance, run: <code>./check-wallet-balance</code></p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tips-box">
-                <h3>Mining Tips</h3>
+        <div class="footer-columns">
+            <div class="footer-col">
+                <div class="footer-col-title">Network</div>
                 <ul>
-                    <li><strong>Auto-Start:</strong> No configuration needed! Scripts auto-detect your CPU and connect to seed node</li>
-                    <li><strong>CPU Threads:</strong> Auto-detection uses 50-75% of your CPU cores (customizable in wizard)</li>
-                    <li><strong>Expected Hash Rate:</strong> ~66 H/s per CPU core (Intel i5/i7)</li>
-                    <li><strong>Stop Anytime:</strong> Press Ctrl+C to stop mining—completely safe</li>
-                    <li><strong>Mainnet = Real Value:</strong> DIL coins have real monetary value - secure your wallet!</li>
+                    <li><a href="#download">Download</a></li>
+                    <li><a href="wallet.html">Wallet</a></li>
+                    <li><a href="bridge.html">Bridge</a></li>
+                    <li><a href="price.html">Price</a></li>
                 </ul>
             </div>
-        </div>
-    </section>
-
-    <!-- Downloads -->
-    <section id="downloads" class="downloads">
-        <div class="container">
-            <h2 class="section-title">Download Dilithion</h2>
-            <p class="section-subtitle">Choose your platform and get started</p>
-
-            <div class="download-notice" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(22, 163, 74, 0.1)); border-left: 4px solid #22c55e; padding: 20px; margin-bottom: 30px; border-radius: 8px;">
-                <h3 style="margin-top: 0; color: #22c55e;">🚀 MAINNET v3.7.7 Available - All Platforms!</h3>
-                <p><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Windows v3.7.7 • <svg class="inline-icon"><use href="#icon-check"/></svg> macOS v3.7.7 • <svg class="inline-icon"><use href="#icon-check"/></svg> Linux v3.7.7</strong></p>
-                <p style="background: rgba(34, 197, 94, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;"><strong>🚀 MAINNET LAUNCH:</strong> This is the official mainnet release. DIL coins have real value. Fair launch - everyone starts at block 0!</p>
-                <p><strong>Easy Installation:</strong> Download, extract, and run! No compiler needed. Defaults to mainnet automatically.</p>
-                <p>Each package includes one-click launcher scripts, interactive setup wizard, and beginner-friendly README.</p>
-                <p><strong>v3.7.7:</strong> Fix stall + cooldown deadlock (BUG #274). Stall bypass now carries through to block submission at both miner and consensus level.</p>
-                <p><strong>Start mining real DIL in under 60 seconds!</strong></p>
+            <div class="footer-col">
+                <div class="footer-col-title">Learn</div>
+                <ul>
+                    <li><a href="WHITEPAPER.html">Whitepaper</a></li>
+                    <li><a href="#download">Mining Guide</a></li>
+                    <li><a href="post-quantum-cryptography.html">Post-Quantum</a></li>
+                </ul>
             </div>
-
-            <div class="download-grid">
-                <div class="download-card">
-                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-windows"/></svg></div>
-                    <h3>Windows</h3>
-                    <p>Windows 10/11 (64-bit x86-64) - Latest: v3.7.7 (Mar 09)</p>
-                    <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1;">Download ZIP</a>
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
-                    </div>
-                    <span class="version">v3.7.7-mainnet • x64 • Embedded web wallet</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-MINING.bat, SETUP-AND-START.bat, dilithion-wallet.bat, README, Binaries, Runtime DLLs</p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">See GitHub release for checksum</code>
-                    </p>
-                </div>
-
-                <div class="download-card">
-                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-linux"/></svg></div>
-                    <h3>Linux</h3>
-                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64) - Latest: v3.7.7 (Mar 09)</p>
-                    <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1;">Download TAR.GZ</a>
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
-                    </div>
-                    <span class="version">v3.7.7-mainnet • x64 • Bundled libraries</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: dilithion-node binary, bundled libraries (libleveldb, libminiupnpc, libsnappy), run-node.sh wrapper</p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong style="color: #22c55e;">✓ No dependencies required!</strong> Libraries are bundled. Just extract and run <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">./run-node.sh</code>
-                    </p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">See GitHub release for checksum</code>
-                    </p>
-                </div>
-
-                <div class="download-card">
-                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-macos"/></svg></div>
-                    <h3>macOS</h3>
-                    <p>macOS 10.15+ (Apple Silicon M1/M2/M3 & Intel) - Latest: v3.7.7 (Mar 09)</p>
-                    <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1;">Download TAR.GZ</a>
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
-                    </div>
-                    <span class="version">v3.7.7-mainnet • x64 • Embedded web wallet</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: start-mining.sh, setup-and-start.sh, README, Binaries</p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <span style="color: #f59e0b;">⚠️ macOS Gatekeeper: Unsigned files may show "cannot be verified" warning.</span><br>
-                        <strong>Fix:</strong> Right-click file → Open, or System Settings → Privacy & Security → Allow Anyway
-                    </p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">Requires: leveldb (install via Homebrew: brew install leveldb)</p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>SHA256:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; font-size: 0.75rem;">See GitHub release for checksum</code>
-                    </p>
-                </div>
-            </div>
-
-            <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; padding: 20px; margin: 30px 0;">
-                <h3 style="margin-top: 0; color: var(--primary); display: flex; align-items: center; gap: 8px;">
-                    <svg style="width: 24px; height: 24px;"><use href="#icon-shield"/></svg>
-                    Security Notice: Antivirus &amp; Code Signing
-                </h3>
-                <p style="margin: 10px 0;"><strong style="color: #f59e0b;">Why might antivirus software flag these files?</strong></p>
-                <p style="margin: 10px 0;">Currently, our executables are <strong>not digitally code-signed</strong>. This is normal for open-source software and doesn't mean the files are dangerous—it simply means we haven't purchased a code signing certificate yet.</p>
-                <p style="margin: 10px 0;">Windows SmartScreen and some antivirus programs may show warnings for unsigned executables. This is a false positive. All our binaries are compiled from open-source code available on GitHub.</p>
-
-                <p style="margin: 15px 0 10px 0;"><strong style="color: var(--primary);">How to verify the files are legitimate:</strong></p>
-                <ol style="margin: 5px 0 5px 20px; padding: 0;">
-                    <li style="margin: 5px 0;">Download the corresponding <code>.sha256</code> checksum file from GitHub Releases</li>
-                    <li style="margin: 5px 0;">Verify the SHA256 hash matches:
-                        <ul style="margin: 5px 0 5px 20px;">
-                            <li><strong>Windows:</strong> <code>certutil -hashfile filename.exe SHA256</code></li>
-                            <li><strong>Linux:</strong> <code>sha256sum -c filename.sha256</code></li>
-                            <li><strong>macOS:</strong> <code>shasum -a 256 -c filename.sha256</code></li>
-                        </ul>
-                    </li>
-                    <li style="margin: 5px 0;">Review the source code on <a href="https://github.com/dilithion/dilithion" target="_blank" style="color: var(--primary); text-decoration: underline;">GitHub</a></li>
-                </ol>
-
-                <p style="margin: 15px 0 0 0;"><strong style="color: var(--success);">Note:</strong> We are working on getting official code signing certificates. In the meantime, please verify downloads using SHA256 checksums provided above.</p>
-            </div>
-
-            <div class="build-from-source">
-                <h3>Build from Source</h3>
-                <p>Developers can compile Dilithion from source code:</p>
-                <div class="code-block">
-                    <code>git clone https://github.com/dilithion/dilithion.git<br>
-                    cd dilithion<br>
-                    make</code>
-                </div>
-                <a href="https://github.com/dilithion/dilithion" target="_blank" class="btn btn-secondary">View on GitHub</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- DilV Downloads -->
-    <section id="dilv-downloads" class="downloads" style="background: linear-gradient(135deg, #060f1e 0%, #0a1628 50%, #06101f 100%);">
-        <div class="container">
-            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 8px;">
-                <h2 class="section-title" style="margin-bottom: 0;">Download DilV</h2>
-                <span style="background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; font-size: 0.75rem; font-weight: 700; padding: 4px 12px; border-radius: 20px; letter-spacing: 0.05em;">NEW</span>
-            </div>
-            <p class="section-subtitle">The fast-payments companion chain to Dilithion — VDF-based, quantum-resistant, ~45s blocks</p>
-
-            <div class="download-notice" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(8, 145, 178, 0.1)); border-left: 4px solid #06b6d4; padding: 20px; margin-bottom: 30px; border-radius: 8px;">
-                <h3 style="margin-top: 0; color: #06b6d4;">⚡ DilV Mainnet — All Platforms!</h3>
-                <p><strong>DilV</strong> is the fast-payments companion chain to Dilithion (DIL). It uses VDF (Verifiable Delay Function) consensus — fair, sequential computation that no GPU or ASIC can accelerate. Any CPU competes equally.</p>
-                <p style="background: rgba(6, 182, 212, 0.15); padding: 10px; border-radius: 6px; margin: 15px 0;">
-                    <strong>⚡ ~45s blocks</strong> &nbsp;•&nbsp;
-                    <strong>🧠 ~512 MB RAM</strong> (vs 2.5 GB for DIL) &nbsp;•&nbsp;
-                    <strong>🔐 Quantum-resistant (Dilithium3)</strong> &nbsp;•&nbsp;
-                    <strong>💸 x402 micropayments</strong>
-                </p>
-                <p><strong>Exchange rate:</strong> ~10 DilV = 1 DIL &nbsp;•&nbsp; <strong>Block reward:</strong> 100 DilV &nbsp;•&nbsp; <strong>Max supply:</strong> 210 million DilV &nbsp;•&nbsp; <strong>P2P port:</strong> 9444</p>
-                <p><strong>Easy start:</strong> Download, extract, and run! One-click launcher scripts included.</p>
-            </div>
-
-            <div class="download-grid">
-                <div class="download-card" style="border-color: rgba(6, 182, 212, 0.3);">
-                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-windows"/></svg></div>
-                    <h3>Windows</h3>
-                    <p>Windows 10/11 (64-bit x86-64)</p>
-                    <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: linear-gradient(135deg, #0891b2, #0e7490);">Download ZIP</a>
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
-                    </div>
-                    <span class="version" style="color: #06b6d4;">dilv-mainnet • x64 • Runtime DLLs included</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: START-DILV-MINING.bat, SETUP-DILV.bat, dilv-node.exe, check-wallet-balance.exe, Runtime DLLs</p>
-                    <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong style="color: #22c55e;">✓ No dependencies needed!</strong> All DLLs bundled. Double-click START-DILV-MINING.bat to begin.
-                    </p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        Wallet stored at: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">%APPDATA%\.dilv\</code>
-                    </p>
-                </div>
-
-                <div class="download-card" style="border-color: rgba(6, 182, 212, 0.3);">
-                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-linux"/></svg></div>
-                    <h3>Linux</h3>
-                    <p>Ubuntu, Debian, Fedora, Arch (64-bit x86-64)</p>
-                    <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: linear-gradient(135deg, #0891b2, #0e7490);">Download TAR.GZ</a>
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
-                    </div>
-                    <span class="version" style="color: #06b6d4;">dilv-mainnet • x64 • Bundled libraries</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: dilv-node, check-wallet-balance, run-node.sh wrapper, start-dilv-mining.sh, setup-dilv.sh</p>
-                    <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong style="color: #22c55e;">✓ Libraries bundled!</strong> Just extract and run <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">./start-dilv-mining.sh</code>
-                    </p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        Optional: <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">sudo apt install libleveldb-dev libgmp-dev</code>
-                    </p>
-                </div>
-
-                <div class="download-card" style="border-color: rgba(6, 182, 212, 0.3);">
-                    <div class="platform-icon"><svg class="platform-icon-svg"><use href="#icon-macos"/></svg></div>
-                    <h3>macOS</h3>
-                    <p>macOS 10.15+ (Apple Silicon &amp; Intel)</p>
-                    <div style="display: flex; gap: 10px; margin: 15px 0;">
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: linear-gradient(135deg, #0891b2, #0e7490);">Download TAR.GZ</a>
-                        <a href="https://github.com/dilithion/dilithion/releases/latest" class="btn btn-download" style="flex: 1; background: var(--bg-secondary);">📝 Release Notes</a>
-                    </div>
-                    <span class="version" style="color: #06b6d4;">dilv-mainnet • x64 • Homebrew deps</span>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary);">Contains: dilv-node, check-wallet-balance, start-dilv-mining.sh, setup-dilv.sh</p>
-                    <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
-                        <strong>Requires (install first):</strong><br>
-                        <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">brew install leveldb gmp openssl miniupnpc</code>
-                    </p>
-                    <p style="margin-top: 5px; font-size: 0.85rem; color: var(--text-muted);">
-                        <span style="color: #f59e0b;">⚠️ macOS Gatekeeper:</span> Right-click → Open, or System Settings → Privacy &amp; Security → Allow Anyway
-                    </p>
-                </div>
-            </div>
-
-            <div style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(8, 145, 178, 0.08)); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 8px; padding: 20px; margin: 30px 0;">
-                <h3 style="margin-top: 0; color: #06b6d4;">⚡ What is DilV?</h3>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 16px;">
-                    <div>
-                        <strong style="color: #06b6d4;">VDF Consensus</strong>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">Sequential computation — no GPU or ASIC advantage. Every CPU competes equally on speed.</p>
-                    </div>
-                    <div>
-                        <strong style="color: #06b6d4;">Fast Payments</strong>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">~45 second blocks with VMA (Verified Mempool Acceptance) for near-instant small payments.</p>
-                    </div>
-                    <div>
-                        <strong style="color: #06b6d4;">x402 Micropayments</strong>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">Built-in HTTP 402 payment protocol for AI agent and machine-to-machine payments.</p>
-                    </div>
-                    <div>
-                        <strong style="color: #06b6d4;">Atomic Swaps (Phase 6)</strong>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 4px 0 0 0;">Trustless DIL ↔ DilV exchange via HTLC scripts. No exchange, no counterparty risk.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="build-from-source">
-                <h3>Build DilV from Source</h3>
-                <p>Compile the DilV node from the same repository as Dilithion:</p>
-                <div class="code-block">
-                    <code>git clone --recursive https://github.com/dilithion/dilithion.git<br>
-                    cd dilithion<br>
-                    make dilv-node check-wallet-balance</code>
-                </div>
-                <a href="https://github.com/dilithion/dilithion" target="_blank" class="btn btn-secondary">View on GitHub</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Technical Specifications -->
-    <section class="specifications">
-        <div class="container">
-            <h2 class="section-title">Technical Specifications</h2>
-
-            <div class="specs-grid">
-                <div class="spec-row">
-                    <div class="spec-label">Signature Algorithm</div>
-                    <div class="spec-value">CRYSTALS-Dilithium3 (NIST PQC Standard)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Proof-of-Work</div>
-                    <div class="spec-value">RandomX (CPU-optimized, ASIC-resistant)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Hash Function</div>
-                    <div class="spec-value">SHA-3 (Keccak-256, quantum-resistant)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Block Time</div>
-                    <div class="spec-value">4 minutes (240 seconds)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Block Size</div>
-                    <div class="spec-value">4 MB (optimized for PQC signatures)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Total Supply</div>
-                    <div class="spec-value">21,000,000 DIL (fixed cap)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Initial Block Reward</div>
-                    <div class="spec-value">50 DIL (49 DIL to miner on mainnet)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Mining Dev Contribution</div>
-                    <div class="spec-value">1% dev fund + 1% dev reward (mainnet only)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Halving Period</div>
-                    <div class="spec-value">Every 210,000 blocks (~1.6 years)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Difficulty Adjustment</div>
-                    <div class="spec-value">Every 2,016 blocks (~5.6 days)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Divisibility</div>
-                    <div class="spec-value">1 DIL = 100,000,000 ions</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">Transaction Fee</div>
-                    <div class="spec-value">~0.001-0.003 DIL (dynamic)</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">P2P Port</div>
-                    <div class="spec-value">8444</div>
-                </div>
-                <div class="spec-row">
-                    <div class="spec-label">RPC Port</div>
-                    <div class="spec-value">8332</div>
-                </div>
-            </div>
-
-            <div class="learn-more">
-                <a href="WHITEPAPER.html" class="btn btn-primary">Read the Whitepaper</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- FAQ Section -->
-    <section id="faq" class="faq-section">
-        <div class="container">
-            <h2 class="section-title">Frequently Asked Questions</h2>
-            <p class="section-subtitle">Everything you need to know about Dilithion</p>
-
-            <div class="faq-container">
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>What is Dilithion?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p>Dilithion is an experimental post-quantum cryptocurrency that uses CRYSTALS-Dilithium, a NIST-standardized digital signature algorithm designed to resist attacks from quantum computers. Unlike Bitcoin and other cryptocurrencies that use ECDSA (vulnerable to quantum attacks), Dilithion is built from the ground up for the quantum era.</p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>Why is quantum resistance important?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p>Quantum computers threaten current cryptocurrency security. A sufficiently powerful quantum computer could break ECDSA signatures used by Bitcoin, Ethereum, and most cryptocurrencies, allowing attackers to steal coins. NIST estimates this threat could materialize within 10-15 years.</p>
-                        <p>Dilithion uses post-quantum cryptography standardized by NIST in 2024, making it resistant to both classical and quantum computer attacks. This ensures your coins remain secure in the quantum era.</p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>How is Dilithion different from Bitcoin?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p><strong>Similarities:</strong> 21 million coin supply, proof-of-work mining, halving every 210,000 blocks, decentralized peer-to-peer network, no premine or ICO.</p>
-                        <p><strong>Differences:</strong></p>
-                        <ul>
-                            <li><strong>Signatures:</strong> Dilithium3 (quantum-resistant) vs ECDSA (quantum-vulnerable)</li>
-                            <li><strong>Block time:</strong> 4 minutes vs 10 minutes (2.5x faster confirmations)</li>
-                            <li><strong>Mining:</strong> RandomX (CPU-only) vs SHA-256 (ASIC-dominated)</li>
-                            <li><strong>Transaction size:</strong> Larger due to post-quantum signatures (signature: 3.3 KB, pubkey: 1.9 KB vs ~250 bytes total for Bitcoin)</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>Is mainnet safe to use?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p><strong>Mainnet DIL coins have real value.</strong> The mainnet is the production network where your mined coins have actual monetary value. Secure your wallet seed phrase!</p>
-                        <p>The mainnet software is experimental and has not undergone professional security audit. While we have conducted extensive testing, please exercise caution and only invest what you can afford to lose. Always backup your wallet and secure your private keys.</p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>Can I mine with my GPU or ASIC?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p><strong>No.</strong> Dilithion uses RandomX proof-of-work, which is optimized for CPUs and designed to be ASIC-resistant and GPU-inefficient. This keeps mining accessible to everyone with a regular computer.</p>
-                        <p>GPU and ASIC mining would provide no advantage and would actually be slower and less efficient than CPU mining. Any modern CPU can mine Dilithion effectively.</p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>What is the total supply and halving schedule?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p><strong>Total supply:</strong> 21 million DIL (same as Bitcoin)</p>
-                        <p><strong>Initial reward:</strong> 50 DIL per block</p>
-                        <p><strong>Halving:</strong> Every 210,000 blocks (~1.6 years with 4-minute blocks)</p>
-                        <p><strong>Final halving:</strong> Around 2089 when block reward becomes negligible</p>
-                        <p>This creates predictable, deflationary economics similar to Bitcoin's proven model.</p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>What is the mining development contribution?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p><strong>On mainnet only</strong>, each block subsidy (NOT transaction fees) includes a development allocation:</p>
-                        <ul>
-                            <li><strong>1% Dev Fund:</strong> Long-term development, security audits, infrastructure</li>
-                            <li><strong>1% Developer Reward:</strong> Active contributor compensation</li>
-                        </ul>
-                        <p><strong>Example:</strong> From a 50 DIL block reward, the miner receives 49 DIL (98%), while 0.5 DIL goes to the dev fund and 0.5 DIL to developer rewards.</p>
-                        <p><strong>Note:</strong> This contribution is active on mainnet. 1% goes to the development fund and 1% to developer rewards.</p>
-                        <p><strong>Addresses:</strong></p>
-                        <ul>
-                            <li>Dev Fund: <code style="font-size: 0.85rem;">DJrywx4AsVQSPLZCKRdg8erZdPMNaRSrKq</code></li>
-                            <li>Dev Reward: <code style="font-size: 0.85rem;">DRne9ygVbQJFKma1pyEMPpyRbjmVKNcbWe</code></li>
-                        </ul>
-                        <p>These addresses are hardcoded in consensus rules—all nodes validate that blocks include the correct development outputs.</p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>When did mainnet launch?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p><strong>Mainnet launched on January 28, 2026 at 00:00:00 UTC</strong></p>
-                        <p>The mainnet is now LIVE! Everyone started at block 0 with a fair launch. No premine, no ICO, no VC allocation. Download the software and start mining real DIL coins today.</p>
-                        <p>Genesis block hash: <code style="font-size: 0.85rem;">00005a86a2a508f9ae0885f530c94f499c0bffa42e65967d01a7a53496d1aabe</code></p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>How can I contribute to the project?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p>We welcome contributions from the community:</p>
-                        <ul>
-                            <li><strong>Mine & test:</strong> Mine, make transactions, and report bugs on <a href="https://github.com/dilithion/dilithion/issues" target="_blank">GitHub Issues</a></li>
-                            <li><strong>Code contributions:</strong> Submit pull requests on <a href="https://github.com/dilithion/dilithion" target="_blank">GitHub</a></li>
-                            <li><strong>Documentation:</strong> Help improve guides, tutorials, and documentation</li>
-                            <li><strong>Community:</strong> Join <a href="https://github.com/dilithion/dilithion/discussions" target="_blank">GitHub Discussions</a> to help others</li>
-                            <li><strong>Security:</strong> Report vulnerabilities to security@dilithion.org</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>Is this project AI-generated?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p>Dilithion is developed with AI assistance (Claude Code) working alongside human oversight. The AI helps with:</p>
-                        <ul>
-                            <li>Code generation and optimization</li>
-                            <li>Documentation and website development</li>
-                            <li>Bug fixing and testing</li>
-                            <li>Implementation of cryptographic standards</li>
-                        </ul>
-                        <p>However, all critical decisions, cryptographic implementations, and security architecture are reviewed by humans. The CRYSTALS-Dilithium algorithm itself is developed by world-class cryptographers and standardized by NIST—not AI-generated.</p>
-                        <p>We believe in full transparency about our development process. AI is a tool that accelerates development while maintaining security and correctness through rigorous testing and peer review.</p>
-                    </div>
-                </div>
-
-                <div class="faq-item">
-                    <button class="faq-question">
-                        <span>Where can I get help or ask questions?</span>
-                        <svg class="faq-icon"><use href="#icon-chevron-down"/></svg>
-                    </button>
-                    <div class="faq-answer">
-                        <p>Multiple ways to get help:</p>
-                        <ul>
-                            <li><strong>GitHub Discussions:</strong> <a href="https://github.com/dilithion/dilithion/discussions" target="_blank">General questions and discussions</a></li>
-                            <li><strong>GitHub Issues:</strong> <a href="https://github.com/dilithion/dilithion/issues" target="_blank">Bug reports and technical issues</a></li>
-                            <li><strong>Email:</strong> team@dilithion.org for general inquiries</li>
-                            <li><strong>Documentation:</strong> <a href="https://github.com/dilithion/dilithion/blob/main/README.md" target="_blank">Getting Started Guide</a></li>
-                            <li><strong>Whitepaper:</strong> <a href="WHITEPAPER.html" target="_blank">Technical documentation</a></li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Newsletter Signup -->
-    <section class="newsletter-section">
-        <div class="container">
-            <div class="newsletter-container">
-                <div class="newsletter-content">
-                    <h2>Stay Updated</h2>
-                    <p>Join our community of quantum-resistant cryptocurrency miners and enthusiasts. Get updates on new releases and important announcements.</p>
-                </div>
-                <form class="newsletter-form" id="newsletterForm">
-                    <input
-                        type="email"
-                        class="newsletter-input"
-                        placeholder="Enter your email address"
-                        required
-                        aria-label="Email address"
-                    >
-                    <button type="submit" class="btn btn-primary newsletter-btn">
-                        Subscribe
-                    </button>
-                </form>
-                <p class="newsletter-disclaimer">
-                    We respect your privacy. Unsubscribe anytime. No spam, only critical updates and new releases.
-                </p>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-section">
-                    <img src="dilithion-logo-256.png" alt="Dilithion Logo" class="footer-logo">
-                    <h3>Dilithion</h3>
-                    <p>Post-quantum cryptocurrency. MAINNET IS NOW LIVE! Fair launch, no premine. AI-assisted development with full transparency.</p>
-                    <p style="margin-top: 10px;"><strong><svg class="inline-icon"><use href="#icon-check"/></svg> Real DIL coins with value</strong></p>
-                </div>
-
-                <div class="footer-section">
-                    <h4>Resources</h4>
-                    <ul>
-                        <li><a href="https://github.com/dilithion/dilithion/blob/main/README.md" target="_blank">Getting Started</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/blob/main/docs/HD_WALLET_USER_GUIDE.md" target="_blank">HD Wallet Guide</a></li>
-                        <li><a href="http://127.0.0.1:8332/" target="_blank">Web Wallet (Beta)</a></li>
-                        <li><a href="mining-calculator.html" target="_blank">Mining Calculator</a></li>
-                        <li><a href="http://explorer.dilithion.org" target="_blank">Block Explorer</a></li>
-                        <li><a href="bridge.html">Bridge (DIL/DilV to Base)</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/releases/latest" target="_blank">Latest Release (v3.7.7)</a></li>
-                        <li><a href="#dilv-downloads">⚡ DilV Downloads</a></li>
-                        <li><a href="WHITEPAPER.html" target="_blank">Whitepaper (HTML)</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/blob/main/WHITEPAPER.md" target="_blank">Whitepaper (Markdown)</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion" target="_blank">GitHub Repository</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/blob/main/SECURITY.md" target="_blank">Security Policy</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/blob/main/website/POST-QUANTUM-CRYPTO-COURSE.md" target="_blank">Learning Course</a></li>
-                        <li><a href="quantum-security.html">Quantum Security Guide</a></li>
-                        <li><a href="post-quantum-cryptography.html">PQC Explained</a></li>
-                        <li><a href="mainnet.html">Mainnet Details</a></li>
-                    </ul>
-                </div>
-
-                <div class="footer-section">
-                    <h4>Community</h4>
-                    <ul>
-                        <li><a href="https://discord.gg/DS3gjmsFEJ" target="_blank">Discord: Dilithion Discussions</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/discussions" target="_blank">GitHub Discussions</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/issues" target="_blank">Report Issues</a></li>
-                        <li><a href="#" target="_blank">Twitter (Coming Soon)</a></li>
-                        <li><a href="https://t.me/dilithion" target="_blank">Telegram: Dilithion Community</a></li>
-                    </ul>
-                </div>
-
-                <div class="footer-section">
-                    <h4>Contact</h4>
-                    <ul>
-                        <li><a href="mailto:team@dilithion.org">General: team@dilithion.org</a></li>
-                        <li><a href="mailto:security@dilithion.org">Security: security@dilithion.org</a></li>
-                        <li><a href="mailto:media@dilithion.org">Media: media@dilithion.org</a></li>
-                        <li><a href="https://github.com/dilithion/dilithion/blob/main/LICENSE" target="_blank">MIT License</a></li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="footer-bottom">
-                <p>&copy; 2025-2026 Dilithion. Open-source post-quantum cryptocurrency. AI-assisted development. MIT License. MAINNET IS LIVE!</p>
-
-                <div class="legal-disclaimers">
-                    <p><strong>Mainnet Notice:</strong> DIL coins have real value. Secure your wallet seed phrase and private keys. We cannot recover lost funds.</p>
-
-                    <p><strong>Legal Disclaimer:</strong> Dilithion is open-source protocol software. We do not operate an exchange, offer investment advice, provide custodial services, or make any guarantees regarding value or security. Users are solely responsible for compliance with local laws and regulations.</p>
-
-                    <p><strong>Australian Users:</strong> Cryptocurrency may be subject to capital gains tax under Australian law. Mining income is generally taxable as ordinary income. Consult a qualified tax professional regarding your obligations. See ATO guidance: <a href="https://www.ato.gov.au/individuals-and-families/investments-and-assets/crypto-asset-investments" target="_blank" rel="noopener">ato.gov.au/crypto-assets</a></p>
-
-                    <p><strong>Risk Warning:</strong> This is experimental software with NO professional security audit. Cryptocurrency trading and mining carry significant financial risk, including total loss of funds. This is NOT financial advice. Do your own research (DYOR) before participating.</p>
-
-                    <p style="margin-top: 20px; text-align: center;">
-                        <a href="terms-of-service.html">Terms of Service</a> |
-                        <a href="privacy-policy.html">Privacy Policy</a>
-                    </p>
-                </div>
+            <div class="footer-col">
+                <div class="footer-col-title">Community</div>
+                <ul>
+                    <li><a href="https://github.com/dilithion/dilithion" target="_blank" rel="noopener">GitHub</a></li>
+                    <li><a href="https://t.me/dilithion" target="_blank" rel="noopener">Telegram</a></li>
+                    <li><a href="https://discord.gg/DS3gjmsFEJ" target="_blank" rel="noopener">Discord</a></li>
+                </ul>
             </div>
         </div>
     </footer>
 
-    <script src="script.js?v=4"></script>
+    <!-- COPYRIGHT -->
+    <div class="copyright">
+        <span class="copyright-left">2026 Dilithion. Open source under MIT license.</span>
+        <span class="copyright-right">Block 32,847 — Network live</span>
+    </div>
+
 </body>
 </html>

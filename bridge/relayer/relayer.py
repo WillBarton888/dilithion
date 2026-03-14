@@ -459,40 +459,24 @@ class BridgeRelayer:
         return Web3.to_checksum_address("0x" + addr_bytes.hex())
 
     def _get_sender_address(self, chain: str, tx: dict) -> str | None:
-        """Extract sender address from vin (first input's previous output).
+        """Extract sender address from the transaction's change output.
 
-        Looks up the previous transaction's output to find the address
-        that funded this deposit.
+        Since getrawtransaction isn't implemented, we can't look up the
+        previous TX's output. Instead, use the change output heuristic:
+        the non-bridge, non-OP_RETURN output is the sender's change address.
         """
-        vins = tx.get("vin", [])
-        if not vins:
-            return None
+        bridge_addr = self.chain_config[chain]["bridge_address"]
+        vouts = tx.get("vout", [])
 
-        # Use first input's previous tx
-        first_vin = vins[0]
-        prev_txid = first_vin.get("txid")
-        prev_vout = first_vin.get("vout", 0)
-
-        if not prev_txid:
-            return None  # Coinbase transaction
-
-        try:
-            rpc = self.chain_config[chain]["rpc"]
-            prev_tx = rpc.get_raw_transaction(prev_txid)
-            prev_outputs = prev_tx.get("vout", [])
-            for out in prev_outputs:
-                if out.get("n") == prev_vout:
-                    addr = out.get("address", "")
-                    if addr:
-                        return addr
-                    # Bitcoin Core format fallback
-                    spk = out.get("scriptPubKey", {})
-                    if isinstance(spk, dict):
-                        addrs = spk.get("addresses", [])
-                        if addrs:
-                            return addrs[0]
-        except Exception as e:
-            logger.debug(f"Could not resolve sender for vin {prev_txid}: {e}")
+        for vout in vouts:
+            addr = vout.get("address", "")
+            if not addr:
+                continue
+            # Skip the bridge deposit output and OP_RETURN (no address)
+            if addr == bridge_addr:
+                continue
+            # This is the change output — the sender's address
+            return addr
 
         return None
 
@@ -518,9 +502,13 @@ class BridgeRelayer:
                     f"[{chain}] Cannot refund deposit {dep['native_txid'][:16]}... "
                     f"— sender address unknown. Manual refund needed."
                 )
-                self.db.mark_deposit_failed(
-                    dep["id"], "No sender address for auto-refund"
+                # Use 'refund_failed' status so it doesn't enter the mint retry loop
+                self.db.conn.execute(
+                    """UPDATE deposits SET status = 'refund_failed', error_msg = ?,
+                       updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                    ("No sender address for auto-refund", dep["id"])
                 )
+                self.db.conn.commit()
                 continue
 
             refund_amount = amount - REFUND_FEE
@@ -534,8 +522,9 @@ class BridgeRelayer:
 
             try:
                 rpc = self.chain_config[chain]["rpc"]
-                # sendtoaddress takes amount in satoshis (integer)
-                refund_txid = rpc.send_to_address(sender, refund_amount)
+                # sendtoaddress expects coins (float), not satoshis
+                refund_coins = refund_amount / 1e8
+                refund_txid = rpc.send_to_address(sender, refund_coins)
                 logger.info(
                     f"[{chain}] AUTO-REFUND: {refund_amount / 1e8:.8f} {coin} "
                     f"back to {sender} (tx: {refund_txid[:16]}...)"
@@ -545,7 +534,14 @@ class BridgeRelayer:
                 logger.error(
                     f"[{chain}] Refund failed for {dep['native_txid'][:16]}...: {e}"
                 )
-                self.db.mark_deposit_failed(dep["id"], f"Refund failed: {e}")
+                # Use refund_failed so it doesn't enter the mint retry loop
+                self.db.conn.execute(
+                    """UPDATE deposits SET status = 'refund_failed', error_msg = ?,
+                       retry_count = COALESCE(retry_count, 0) + 1,
+                       updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                    (f"Refund failed: {e}", dep["id"])
+                )
+                self.db.conn.commit()
 
     # ── Confirmation updates ─────────────────────────────────────────
 

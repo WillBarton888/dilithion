@@ -1,6 +1,6 @@
 /* ============================================================
-   Dilithion Block Explorer - Dark Theme
-   Colors: #0a0e17 (bg), #111827 (secondary), #22c55e (accent)
+   Dilithion Block Explorer - Editorial Gold Theme
+   Matches dilithion.org design system
    ============================================================ */
 
 /* --- Reset & Base --- */
@@ -11,20 +11,21 @@
 }
 
 :root {
-    --bg-primary: #0a0e17;
-    --bg-secondary: #111827;
-    --bg-tertiary: #1a2332;
-    --text-primary: #e5e7eb;
-    --text-muted: #9ca3af;
-    --text-dim: #6b7280;
-    --accent: #22c55e;
-    --accent-hover: #16a34a;
-    --accent-dim: rgba(34, 197, 94, 0.15);
-    --border: #1f2937;
-    --border-light: #374151;
+    --bg-primary: #0F0F0D;
+    --bg-secondary: #161614;
+    --bg-tertiary: #1C1C19;
+    --text-primary: #F5F0E8;
+    --text-muted: #8A8A80;
+    --text-dim: #5A5A52;
+    --accent: #C8A24E;
+    --accent-hover: #E8C860;
+    --accent-dim: rgba(200, 162, 78, 0.15);
+    --border: #1F1F1C;
+    --border-light: #2A2A26;
     --danger: #ef4444;
     --warning: #eab308;
-    --info: #3b82f6;
+    --info: #C8A24E;
+    --font-headline: 'DM Serif Display', serif;
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
     --radius: 8px;
@@ -102,11 +103,12 @@ a:hover {
 }
 
 .navbar-title {
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 15px;
+    font-weight: 500;
     color: var(--text-primary);
-    letter-spacing: 0.5px;
+    letter-spacing: 0.1em;
     white-space: nowrap;
+    font-family: var(--font-mono);
 }
 
 .navbar-title:hover {
@@ -219,10 +221,11 @@ a:hover {
 }
 
 .stat-label {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.08em;
+    font-family: var(--font-mono);
     color: var(--text-dim);
     margin-bottom: 6px;
 }
@@ -257,9 +260,10 @@ a:hover {
 }
 
 .card-header h2 {
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 400;
     color: var(--text-primary);
+    font-family: var(--font-headline);
 }
 
 .card-header .card-action {
@@ -395,8 +399,8 @@ a.hash:hover {
 }
 
 .badge-success {
-    background: rgba(34, 197, 94, 0.15);
-    color: #4ade80;
+    background: var(--accent-dim);
+    color: var(--accent);
 }
 
 .badge-warning {
@@ -864,9 +868,10 @@ a.hash:hover {
 }
 
 .page-header h1 {
-    font-size: 24px;
-    font-weight: 700;
+    font-size: 28px;
+    font-weight: 400;
     color: var(--text-primary);
+    font-family: var(--font-headline);
     margin-bottom: 4px;
 }
 
@@ -1146,3 +1151,114 @@ a.hash:hover {
 .mt-4 { margin-top: 16px; }
 .mb-2 { margin-bottom: 8px; }
 .mb-4 { margin-bottom: 16px; }
+
+/* --- Seed Node Dashboard --- */
+.nodes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+    margin-bottom: 32px;
+}
+
+.node-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    transition: border-color var(--transition);
+}
+
+.node-card.node-online {
+    border-color: rgba(200, 162, 78, 0.25);
+}
+
+.node-card.node-offline {
+    border-color: rgba(239, 68, 68, 0.3);
+    opacity: 0.7;
+}
+
+.node-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.node-card-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.node-status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.node-status-badge.node-online {
+    background: rgba(200, 162, 78, 0.15);
+    color: var(--accent);
+}
+
+.node-status-badge.node-offline {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.node-card-ip {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    margin-bottom: 16px;
+}
+
+.node-card-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.node-stat {
+    min-width: 0;
+}
+
+.node-stat-label {
+    color: var(--text-dim);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 2px;
+    font-family: var(--font-mono);
+}
+
+.node-stat-value {
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.node-sync-synced {
+    color: var(--accent);
+}
+
+.node-sync-behind {
+    color: var(--warning);
+}
+
+.node-card-version {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.75rem;
+}
+
+@media (max-width: 768px) {
+    .nodes-grid {
+        grid-template-columns: 1fr;
+    }
+}

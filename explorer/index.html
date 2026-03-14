@@ -6,8 +6,8 @@
     <title>Dilithion Explorer</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=6">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=8">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 </head>
 <body>
@@ -15,15 +15,16 @@
         <div class="navbar-inner">
             <div class="navbar-left">
                 <a href="https://dilithion.org" class="navbar-logo" title="dilithion.org">
-                    <img src="/dilithion-logo-256.png" alt="Dilithion" width="32" height="32">
+                    <img src="/logo-option4-goldmatch.png" alt="Dilithion" width="32" height="32">
                 </a>
                 <a href="#/" class="navbar-title">DILITHION EXPLORER</a>
                 <div class="navbar-links">
                     <a href="#/" class="nav-link" data-route="home">Home</a>
                     <a href="#/blocks" class="nav-link" data-route="blocks">Blocks</a>
                     <a href="#/forks" class="nav-link" data-route="forks">Forks</a>
+                    <a href="#/nodes" class="nav-link" data-route="nodes">Nodes</a>
                     <div class="chain-toggle" style="display:inline-flex;background:rgba(255,255,255,0.08);border-radius:6px;padding:2px;margin-left:12px;gap:2px;vertical-align:middle;">
-                        <button id="chainBtnDil" class="active" onclick="switchExplorerChain('dil')" style="padding:4px 12px;border:none;border-radius:4px;font-size:0.75rem;font-weight:600;cursor:pointer;transition:all 0.2s;background:var(--primary, #6366f1);color:white;">DIL</button>
+                        <button id="chainBtnDil" class="active" onclick="switchExplorerChain('dil')" style="padding:4px 12px;border:none;border-radius:4px;font-size:0.75rem;font-weight:600;cursor:pointer;transition:all 0.2s;background:var(--accent, #C8A24E);color:#0F0F0D;">DIL</button>
                         <button id="chainBtnDilv" onclick="switchExplorerChain('dilv')" style="padding:4px 12px;border:none;border-radius:4px;font-size:0.75rem;font-weight:600;cursor:pointer;transition:all 0.2s;background:transparent;color:rgba(255,255,255,0.5);">DilV</button>
                     </div>
                 </div>
@@ -59,6 +60,6 @@
         </div>
     </footer>
 
-    <script src="explorer.js?v=6"></script>
+    <script src="explorer.js?v=8"></script>
 </body>
 </html>

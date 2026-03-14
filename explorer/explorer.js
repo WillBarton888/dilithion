@@ -6,7 +6,7 @@
 
 // --- Configuration ---
 const API_BASE = '/api';
-const REFRESH_INTERVAL = 10000;
+const REFRESH_INTERVAL = 5000;
 const ITEMS_PER_PAGE = 20;
 const IONS_PER_DIL = 100000000;
 const COLLAPSE_THRESHOLD = 5; // Show expand button when inputs/outputs exceed this
@@ -98,6 +98,7 @@ router.add('#/address/:addr', renderAddress);
 router.add('#/blocks', () => renderBlockList(1));
 router.add('#/blocks/:page', (page) => renderBlockList(parseInt(page, 10)));
 router.add('#/forks', renderForks);
+router.add('#/nodes', renderNodes);
 router.add('#/search/:query', handleSearch);
 
 // ============================================================
@@ -213,6 +214,8 @@ function updateNavLinks(hash) {
         } else if (route === 'blocks' && hash.startsWith('#/blocks')) {
             link.classList.add('active');
         } else if (route === 'forks' && hash === '#/forks') {
+            link.classList.add('active');
+        } else if (route === 'nodes' && hash === '#/nodes') {
             link.classList.add('active');
         }
     });
@@ -419,14 +422,95 @@ function detectTxType(tx) {
 // View: Home
 // ============================================================
 
+// --- Dashboard helpers ---
+
+const HALVING_INTERVAL = 210000;
+const FLAG_EMOJI = { US: '\u{1F1FA}\u{1F1F8}', GB: '\u{1F1EC}\u{1F1E7}', SG: '\u{1F1F8}\u{1F1EC}', AU: '\u{1F1E6}\u{1F1FA}' };
+
+function getBlockReward(height) {
+    const halvings = Math.floor(height / HALVING_INTERVAL);
+    if (halvings >= 64) return 0;
+    return BLOCK_REWARD_FALLBACK / Math.pow(2, halvings);
+}
+
+function getBlocksUntilHalving(height) {
+    return HALVING_INTERVAL - (height % HALVING_INTERVAL);
+}
+
+function formatLastBlockTime(blockTime) {
+    if (!blockTime || blockTime <= 0) return 'N/A';
+    const secondsAgo = Math.floor((Date.now() / 1000) - blockTime);
+    if (secondsAgo < 10) return 'Just now';
+    if (secondsAgo < 60) return secondsAgo + 's ago';
+    if (secondsAgo < 3600) return Math.floor(secondsAgo / 60) + ' min ago';
+    if (secondsAgo < 86400) return Math.floor(secondsAgo / 3600) + 'h ago';
+    return Math.floor(secondsAgo / 86400) + 'd ago';
+}
+
+function buildStatsBarHTML(s, blocks) {
+    const height = s.blocks || 0;
+    const lastBlockTime = blocks && blocks.length > 0 ? blocks[0].time : 0;
+    let html = '';
+    html += statCard('Block Height', formatNumber(height));
+    html += statCard(s.consensusType === 'VDF' ? 'Consensus' : 'Hashrate',
+        s.consensusType === 'VDF' ? 'VDF (Proof of Time)' : formatHashRate(s.networkhashps));
+    html += statCard('Difficulty', s.difficulty ? Number(s.difficulty).toFixed(4) : 'N/A');
+    html += statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' ' + UNIT : 'N/A');
+    html += statCard('Block Reward', getBlockReward(height) + ' ' + UNIT);
+    html += statCard('Next Halving', formatNumber(getBlocksUntilHalving(height)) + ' blocks');
+    html += statCard('Last Block', formatLastBlockTime(lastBlockTime));
+    html += statCard('Avg Block Time', s.avgBlockTime ? s.avgBlockTime.toFixed(0) + 's' : 'N/A');
+    return html;
+}
+
+function buildNodeCardsHTML(nodesData) {
+    const nodes = nodesData.nodes || [];
+    const consensusHeight = nodesData.consensusHeight || 0;
+    let html = '<div class="nodes-grid">';
+    for (const node of nodes) {
+        const flag = FLAG_EMOJI[node.flag] || '';
+        const isOnline = node.online;
+        const statusClass = isOnline ? 'node-online' : 'node-offline';
+        const statusText = isOnline ? 'Online' : 'Offline';
+        const heightBehind = isOnline && consensusHeight > 0 && node.height !== null
+            ? consensusHeight - node.height : 0;
+        const syncStatus = heightBehind === 0 ? 'Synced' : heightBehind + ' behind';
+        const syncClass = heightBehind === 0 ? 'synced' : 'behind';
+
+        html += `<div class="node-card ${statusClass}">`;
+        html += '<div class="node-card-header">';
+        html += `<div class="node-card-title">${flag} ${escapeHtml(node.label)}${node.primary ? ' <span class="badge badge-info" style="font-size:0.65rem;vertical-align:middle;">PRIMARY</span>' : ''}</div>`;
+        html += `<span class="node-status-badge ${statusClass}">${statusText}</span>`;
+        html += '</div>';
+        html += `<div class="node-card-ip mono">${escapeHtml(node.ip)}:${activeChain === 'dilv' ? '9444' : '8444'}</div>`;
+        html += '<div class="node-card-stats">';
+        html += `<div class="node-stat"><div class="node-stat-label">Block Height</div><div class="node-stat-value">${isOnline && node.height !== null ? formatNumber(node.height) : '\u2014'}</div></div>`;
+        html += `<div class="node-stat"><div class="node-stat-label">Peers</div><div class="node-stat-value">${isOnline && node.peers !== null ? node.peers : '\u2014'}</div></div>`;
+        html += `<div class="node-stat"><div class="node-stat-label">Sync</div><div class="node-stat-value node-sync-${syncClass}">${isOnline ? syncStatus : '\u2014'}</div></div>`;
+        html += `<div class="node-stat"><div class="node-stat-label">Difficulty</div><div class="node-stat-value">${isOnline && node.difficulty != null ? Number(node.difficulty).toFixed(2) : '\u2014'}</div></div>`;
+        html += '</div>';
+        if (isOnline && node.version) {
+            html += `<div class="node-card-version mono">${escapeHtml(node.version.replace(/\//g, ''))}</div>`;
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+    return html;
+}
+
+// ============================================================
+// View: Home (with full dashboard)
+// ============================================================
+
 async function renderHome() {
     setTitle(null);
     showLoading();
 
     try {
-        const [statsRes, blocksRes] = await Promise.all([
+        const [statsRes, blocksRes, nodesRes] = await Promise.all([
             apiFetch('/stats.php'),
             apiFetch('/blocks.php?limit=15'),
+            apiFetch('/nodes.php'),
         ]);
 
         const stats = statsRes;
@@ -434,19 +518,17 @@ async function renderHome() {
 
         let html = '';
 
-        // Stats bar
-        html += '<div class="stats-bar">';
-        html += statCard('Block Height', formatNumber(stats.blocks || blocksRes.totalHeight || 0));
-        html += statCard(stats.consensusType === 'VDF' ? 'Consensus' : 'Hashrate',
-            stats.consensusType === 'VDF' ? 'VDF (Proof of Time)' : formatHashRate(stats.networkhashps));
-        html += statCard('Difficulty', stats.difficulty ? Number(stats.difficulty).toFixed(4) : 'N/A');
-        html += statCard('Supply', stats.supply ? formatNumber(Math.floor(stats.supply)) + ' ' + UNIT : 'N/A');
-        html += statCard('Avg Block Time', stats.avgBlockTime ? stats.avgBlockTime.toFixed(0) + 's' : 'N/A');
-        html += statCard('Holders', stats.holders != null ? formatNumber(stats.holders) : 'N/A');
-        html += statCard('Peers', stats.connections != null ? formatNumber(stats.connections) : 'N/A');
+        // Network stats bar
+        html += '<div class="stats-bar" id="home-stats-bar">';
+        html += buildStatsBarHTML(stats, blocks);
         html += '</div>';
 
-        // Latest blocks
+        // Seed node status panels
+        html += '<div id="home-nodes">';
+        html += buildNodeCardsHTML(nodesRes);
+        html += '</div>';
+
+        // Latest blocks table
         const homeCols = [
             { label: 'Height', sortable: true },
             { label: 'Hash', sortable: false },
@@ -485,27 +567,29 @@ async function renderHome() {
 
         getApp().innerHTML = html;
 
-        // Auto-refresh (silent - no loading spinner)
+        // Auto-refresh every 5 seconds (silent)
         refreshTimer = setInterval(async () => {
             if (currentRoute !== '#/' && currentRoute !== '#/home') return;
             try {
-                const [freshStats, freshBlocks] = await Promise.all([
+                const [freshStats, freshBlocks, freshNodes] = await Promise.all([
                     apiFetch('/stats.php'),
                     apiFetch('/blocks.php?limit=15'),
+                    apiFetch('/nodes.php'),
                 ]);
-                const s = freshStats;
-                // Always update stats bar
-                const statsEl = document.querySelector('.stats-bar');
+
+                // Update stats bar
+                const statsEl = document.getElementById('home-stats-bar');
                 if (statsEl) {
-                    statsEl.innerHTML = statCard('Block Height', formatNumber(s.blocks || freshBlocks.totalHeight || 0)) +
-                        statCard(s.consensusType === 'VDF' ? 'Consensus' : 'Hashrate',
-                            s.consensusType === 'VDF' ? 'VDF (Proof of Time)' : formatHashRate(s.networkhashps)) +
-                        statCard('Difficulty', s.difficulty ? Number(s.difficulty).toFixed(4) : 'N/A') +
-                        statCard('Supply', s.supply ? formatNumber(Math.floor(s.supply)) + ' ' + UNIT : 'N/A') +
-                        statCard('Avg Block Time', s.avgBlockTime != null ? s.avgBlockTime.toFixed(0) + 's' : 'N/A') +
-                        statCard('Holders', s.holders != null ? formatNumber(s.holders) : 'N/A') +
-                        statCard('Peers', s.connections != null ? formatNumber(s.connections) : 'N/A');
+                    const newBlocks = freshBlocks.blocks || [];
+                    statsEl.innerHTML = buildStatsBarHTML(freshStats, newBlocks);
                 }
+
+                // Update node cards
+                const nodesEl = document.getElementById('home-nodes');
+                if (nodesEl) {
+                    nodesEl.innerHTML = buildNodeCardsHTML(freshNodes);
+                }
+
                 // Update blocks table when new block arrives
                 const newBlocks = freshBlocks.blocks || [];
                 if (newBlocks.length > 0 && blocks.length > 0 &&
@@ -1275,6 +1359,55 @@ function initSearchBar() {
             input.focus();
         }
     });
+}
+
+// ============================================================
+// View: Nodes (dedicated page)
+// ============================================================
+
+async function renderNodes() {
+    setTitle('Seed Nodes');
+    showLoading();
+
+    try {
+        const data = await apiFetch('/nodes.php');
+        const nodes = data.nodes || [];
+        const consensusHeight = data.consensusHeight || 0;
+
+        let html = '';
+        html += '<div class="page-header"><h1>Seed Node Status</h1>';
+        html += `<p>Real-time status of the ${UNIT} mainnet seed nodes. Consensus height: <strong>${formatNumber(consensusHeight)}</strong></p>`;
+        html += '</div>';
+
+        const onlineCount = nodes.filter(n => n.online).length;
+        html += '<div class="stats-bar">';
+        html += statCard('Nodes Online', `${onlineCount} / ${nodes.length}`);
+        html += statCard('Consensus Height', formatNumber(consensusHeight));
+        const maxPeers = Math.max(...nodes.map(n => n.peers || 0));
+        html += statCard('Max Peers', formatNumber(maxPeers));
+        const versions = [...new Set(nodes.filter(n => n.version).map(n => n.version))];
+        html += statCard('Version', versions.length === 1 ? versions[0].replace(/\//g, '') : versions.length > 0 ? 'Mixed' : 'N/A');
+        html += '</div>';
+
+        html += '<div id="nodes-cards">';
+        html += buildNodeCardsHTML(data);
+        html += '</div>';
+
+        getApp().innerHTML = html;
+
+        // Auto-refresh every 5 seconds
+        refreshTimer = setInterval(async () => {
+            if (currentRoute !== '#/nodes') return;
+            try {
+                const fresh = await apiFetch('/nodes.php');
+                const el = document.getElementById('nodes-cards');
+                if (el) el.innerHTML = buildNodeCardsHTML(fresh);
+            } catch (e) { /* silent */ }
+        }, REFRESH_INTERVAL);
+
+    } catch (err) {
+        showError('Failed to Load Node Status', err.message);
+    }
 }
 
 // ============================================================

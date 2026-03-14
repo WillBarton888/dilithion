@@ -5,21 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dilithion Price Chart</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
     <style>
         :root {
-            --primary: #6366f1;
-            --secondary: #8b5cf6;
-            --accent: #06b6d4;
-            --bg-dark: #0f172a;
-            --bg-card: #1e293b;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --border: #334155;
-            --success: #22c55e;
+            --primary: #C8A24E;
+            --secondary: #E8C860;
+            --accent: #C8A24E;
+            --bg-dark: #0F0F0D;
+            --bg-card: #161614;
+            --text-primary: #F5F0E8;
+            --text-secondary: #8A8A80;
+            --text-muted: #5A5A52;
+            --border: #1F1F1C;
+            --success: #C8A24E;
             --error: #ef4444;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -34,7 +34,7 @@
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
         }
-        .header h1 { font-size: 1.5rem; font-weight: 700; }
+        .header h1 { font-size: 1.5rem; font-weight: 400; font-family: 'DM Serif Display', serif; }
         .header a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
         .header a:hover { text-decoration: underline; }
         .price-cards {
@@ -56,7 +56,7 @@
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 16px; flex-wrap: wrap; gap: 8px;
         }
-        .chart-header h2 { font-size: 1.1rem; font-weight: 600; }
+        .chart-header h2 { font-size: 1.1rem; font-weight: 400; font-family: 'DM Serif Display', serif; }
         .chart-tabs { display: flex; gap: 4px; }
         .chart-tab {
             padding: 6px 14px; border-radius: 6px; border: none;
@@ -76,7 +76,7 @@
             background: var(--bg-card); border-radius: 12px; padding: 16px;
             border: 1px solid var(--border);
         }
-        .pool-card h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 8px; }
+        .pool-card h3 { font-size: 0.9rem; font-weight: 400; font-family: 'DM Serif Display', serif; margin-bottom: 8px; }
         .pool-card .pool-detail { font-size: 0.8rem; color: var(--text-secondary); margin: 4px 0; }
         .pool-card a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
         .refresh-btn {
@@ -321,9 +321,9 @@
         const ethKey = key === 'dil' ? 'dilEth' : 'dilvEth';
         const usdLabel = key === 'dil' ? 'DIL / USD' : 'DilV / USD';
         const ethLabel = key === 'dil' ? 'DIL / ETH' : 'DilV / ETH';
-        const usdColor = key === 'dil' ? '#6366f1' : '#06b6d4';
-        const ethColor = '#f59e0b';
-        const ethUsdColor = '#22c55e';
+        const usdColor = key === 'dil' ? '#C8A24E' : '#E8C860';
+        const ethColor = key === 'dil' ? '#E8C860' : '#C8A24E';
+        const ethUsdColor = '#8A8A80';
 
         const usdData = history.map(p => ({ x: p.t, y: p[key] })).filter(p => p.y > 0);
         const coinEthData = history.map(p => ({ x: p.t, y: p[ethKey] })).filter(p => p.y > 0);
@@ -336,7 +336,7 @@
                     label: usdLabel,
                     data: usdData,
                     borderColor: usdColor,
-                    backgroundColor: usdColor + '20',
+                    backgroundColor: usdColor + '1A',
                     fill: true,
                     tension: 0.3,
                     pointRadius: usdData.length > 50 ? 0 : 3,
@@ -346,8 +346,8 @@
                     label: ethLabel,
                     data: coinEthData,
                     borderColor: ethColor,
-                    backgroundColor: 'transparent',
-                    fill: false,
+                    backgroundColor: ethColor + '1A',
+                    fill: true,
                     tension: 0.3,
                     pointRadius: coinEthData.length > 50 ? 0 : 3,
                     borderWidth: 2,
@@ -357,7 +357,7 @@
                     label: 'ETH / USD',
                     data: ethUsdData,
                     borderColor: ethUsdColor,
-                    backgroundColor: 'transparent',
+                    backgroundColor: ethUsdColor + '1A',
                     fill: false,
                     tension: 0.3,
                     pointRadius: ethUsdData.length > 50 ? 0 : 3,
@@ -375,14 +375,14 @@
                     x: {
                         type: 'linear',
                         ticks: {
-                            color: '#64748b',
+                            color: '#5A5A52',
                             callback: function(v) {
                                 const d = new Date(v);
                                 return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
                             },
                             maxTicksLimit: 8,
                         },
-                        grid: { color: '#1e293b' },
+                        grid: { color: '#1F1F1C' },
                     },
                     yCoin: {
                         position: 'left',
@@ -390,7 +390,7 @@
                             color: usdColor,
                             callback: v => formatUsd(v),
                         },
-                        grid: { color: '#1e293b' },
+                        grid: { color: '#1F1F1C' },
                     },
                     yEthUsd: {
                         position: 'right',
@@ -419,7 +419,7 @@
                     },
                     legend: {
                         display: true,
-                        labels: { color: '#94a3b8', usePointStyle: true, pointStyle: 'line', padding: 16 },
+                        labels: { color: '#8A8A80', usePointStyle: true, pointStyle: 'line', padding: 16 },
                     },
                 }
             }

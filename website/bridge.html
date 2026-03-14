@@ -7,22 +7,22 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
     <style>
         :root {
-            --primary: #6366f1;
-            --primary-dark: #4f46e5;
-            --secondary: #8b5cf6;
-            --accent: #06b6d4;
-            --bg-dark: #0f172a;
-            --bg-darker: #020617;
-            --bg-card: #1e293b;
-            --bg-card-hover: #283548;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --border: #334155;
+            --primary: #C8A24E;
+            --primary-dark: #B08A3E;
+            --secondary: #E8C860;
+            --accent: #C8A24E;
+            --bg-dark: #0F0F0D;
+            --bg-darker: #0A0A09;
+            --bg-card: #161614;
+            --bg-card-hover: #1E1E1A;
+            --text-primary: #F5F0E8;
+            --text-secondary: #8A8A80;
+            --text-muted: #5A5A52;
+            --border: #1F1F1C;
             --success: #22c55e;
             --warning: #f59e0b;
             --error: #ef4444;
@@ -80,17 +80,17 @@
         }
 
         .connect-btn:hover { background: var(--primary-dark); }
-        .connect-btn.connected { background: var(--success); }
+        .connect-btn.connected { background: var(--primary); color: var(--bg-dark); }
 
         .trust-banner {
-            background: #1c1917;
-            border: 1px solid #78350f;
+            background: #161614;
+            border: 1px solid #B08A3E;
             border-radius: 8px;
             padding: 16px 24px;
             margin: 24px 32px 0;
             font-size: 13px;
             line-height: 1.6;
-            color: #fbbf24;
+            color: #E8C860;
         }
 
         .trust-banner strong { color: #f59e0b; }
@@ -137,8 +137,9 @@
         }
 
         .card h3 {
+            font-family: 'DM Serif Display', serif;
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 400;
             margin-bottom: 16px;
             color: var(--text-primary);
         }
@@ -189,7 +190,7 @@
             transition: all 0.2s;
         }
 
-        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary { background: var(--primary); color: var(--bg-dark); }
         .btn-primary:hover { background: var(--primary-dark); }
         .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -226,18 +227,18 @@
         }
 
         .warning-box {
-            background: #1c1917;
-            border: 1px solid #78350f;
+            background: #161614;
+            border: 1px solid #B08A3E;
             border-radius: 8px;
             padding: 12px 16px;
             font-size: 13px;
-            color: #fbbf24;
+            color: #E8C860;
             margin-bottom: 16px;
         }
 
         .info-box {
-            background: rgba(6, 182, 212, 0.08);
-            border: 1px solid rgba(6, 182, 212, 0.3);
+            background: rgba(200, 162, 78, 0.08);
+            border: 1px solid rgba(200, 162, 78, 0.3);
             border-radius: 8px;
             padding: 12px 16px;
             font-size: 13px;
@@ -307,7 +308,7 @@
             font-size: 12px;
             overflow-x: auto;
             margin: 10px 0;
-            color: var(--success);
+            color: var(--primary);
             cursor: pointer;
             position: relative;
             white-space: pre-wrap;
@@ -373,7 +374,7 @@
             font-weight: 500;
         }
 
-        .badge-pending { background: #1e3a5f; color: #60a5fa; }
+        .badge-pending { background: #3a2f1e; color: #E8C860; }
         .badge-confirmed { background: #14532d; color: #4ade80; }
         .badge-minted { background: #365314; color: #a3e635; }
         .badge-failed { background: #450a0a; color: #f87171; }
@@ -396,17 +397,17 @@
         }
 
         .chain-option:hover { border-color: var(--primary); }
-        .chain-option.active { border-color: var(--primary); background: rgba(99, 102, 241, 0.1); }
+        .chain-option.active { border-color: var(--primary); background: rgba(200, 162, 78, 0.1); }
 
         .quick-buy-card {
-            background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(6, 182, 212, 0.08));
-            border: 1px solid rgba(34, 197, 94, 0.3);
+            background: linear-gradient(135deg, rgba(200, 162, 78, 0.08), rgba(200, 162, 78, 0.04));
+            border: 1px solid rgba(200, 162, 78, 0.3);
             border-radius: 12px;
             padding: 24px;
             margin-bottom: 20px;
         }
 
-        .quick-buy-card h3 { color: var(--success); }
+        .quick-buy-card h3 { color: var(--primary); }
 
         footer {
             text-align: center;
@@ -423,8 +424,8 @@
             bottom: 24px;
             left: 50%;
             transform: translateX(-50%);
-            background: var(--success);
-            color: white;
+            background: var(--primary);
+            color: var(--bg-dark);
             padding: 10px 24px;
             border-radius: 8px;
             font-size: 14px;
@@ -537,7 +538,7 @@
                     <strong>Important:</strong> Your node must be running with RPC enabled (the default).
                     You need <strong>v3.6.9 or later</strong> for browser bridge support.
                     Use the "Test Connection" button above to verify. If you have issues, ask in our
-                    <a href="https://t.me/dilithion" style="color: #60a5fa;">Telegram</a> or Discord.
+                    <a href="https://t.me/dilithion" style="color: #E8C860;">Telegram</a> or Discord.
                 </div>
             </div>
 
@@ -1322,9 +1323,9 @@
             // Warn if served over HTTPS (mixed content blocks local node RPC)
             if (window.location.protocol === 'https:') {
                 const warn = document.createElement('div');
-                warn.style.cssText = 'background:#78350f;color:#fbbf24;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;border:1px solid #92400e;';
+                warn.style.cssText = 'background:#161614;color:#E8C860;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;border:1px solid #B08A3E;';
                 warn.innerHTML = '<strong>Note:</strong> This page is loaded over HTTPS, which prevents connecting to your local node. ' +
-                    'Save this page to your computer (Ctrl+S / Cmd+S) and open the saved file, or visit <a href="http://127.0.0.1:8332/" style="color:#fbbf24;text-decoration:underline;">http://127.0.0.1:8332/</a> directly.';
+                    'Save this page to your computer (Ctrl+S / Cmd+S) and open the saved file, or visit <a href="http://127.0.0.1:8332/" style="color:#E8C860;text-decoration:underline;">http://127.0.0.1:8332/</a> directly.';
                 const main = document.querySelector('.main');
                 if (main) main.insertBefore(warn, main.firstChild);
             }
