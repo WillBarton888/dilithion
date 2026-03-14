@@ -28,6 +28,7 @@
 #include <miner/controller.h>
 #include <wallet/wallet.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <mutex>
@@ -1127,6 +1128,24 @@ BlockProcessResult ProcessNewBlock(
                             relay_peer_ids.push_back(peer->id);
                         }
                     }
+                    // Phase 4: Sort relay peers by trust score (highest first)
+                    if (!relay_peer_ids.empty() && g_node_context.GetPeerTrustScore) {
+                        int chainHeight = g_chainstate.GetHeight();
+                        bool trustActive = Dilithion::g_chainParams &&
+                            chainHeight >= Dilithion::g_chainParams->trustWeightedNetworkHeight;
+                        if (trustActive) {
+                            std::sort(relay_peer_ids.begin(), relay_peer_ids.end(),
+                                [](int a, int b) {
+                                    double ta = g_node_context.GetPeerTrustScore(a);
+                                    double tb = g_node_context.GetPeerTrustScore(b);
+                                    // Unknown (-1) treated as neutral (50.0)
+                                    if (ta < 0) ta = 50.0;
+                                    if (tb < 0) tb = 50.0;
+                                    return ta > tb;  // Higher trust first
+                                });
+                        }
+                    }
+
                     if (!relay_peer_ids.empty()) {
                         if (ctx.async_broadcaster->BroadcastBlock(blockHash, block, relay_peer_ids)) {
                             std::cout << "[ProcessNewBlock] Relaying distribution-winning block to "
@@ -1168,6 +1187,24 @@ BlockProcessResult ProcessNewBlock(
                     for (const auto& peer : connected_peers) {
                         if (peer && peer->IsHandshakeComplete() && peer->id != peer_id) {
                             relay_peer_ids.push_back(peer->id);
+                        }
+                    }
+
+                    // Phase 4: Sort relay peers by trust score (highest first)
+                    if (!relay_peer_ids.empty() && g_node_context.GetPeerTrustScore) {
+                        int chainHeight = g_chainstate.GetHeight();
+                        bool trustActive = Dilithion::g_chainParams &&
+                            chainHeight >= Dilithion::g_chainParams->trustWeightedNetworkHeight;
+                        if (trustActive) {
+                            std::sort(relay_peer_ids.begin(), relay_peer_ids.end(),
+                                [](int a, int b) {
+                                    double ta = g_node_context.GetPeerTrustScore(a);
+                                    double tb = g_node_context.GetPeerTrustScore(b);
+                                    // Unknown (-1) treated as neutral (50.0)
+                                    if (ta < 0) ta = 50.0;
+                                    if (tb < 0) tb = 50.0;
+                                    return ta > tb;  // Higher trust first
+                                });
                         }
                     }
 

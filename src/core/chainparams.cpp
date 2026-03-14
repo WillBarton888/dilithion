@@ -125,6 +125,7 @@ ChainParams ChainParams::Mainnet() {
     params.digitalDnaActivationHeight = 30000;  // DNA collection + P2P exchange (advisory only, no consensus impact)
     params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
+    params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
@@ -273,6 +274,7 @@ ChainParams ChainParams::Testnet() {
     params.digitalDnaActivationHeight = 1;    // Active from near-genesis for testing
     params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
+    params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
 
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint
@@ -386,6 +388,7 @@ ChainParams ChainParams::DilV() {
     params.digitalDnaActivationHeight = 0;
     params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
+    params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
 
     // DilV Checkpoints
     params.checkpoints.emplace_back(10000, uint256S("1554e9011cfc5ec916b600d1f2238cbbe21500762b55904368b3704f117cbaf2"));

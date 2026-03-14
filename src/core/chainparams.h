@@ -206,6 +206,11 @@ public:
     // Mainnet/Testnet/DilV: 999999999 (disabled until calibration complete)
     int dnaHashEnforcementHeight;
 
+    // Trust-weighted network activation height (Phase 4 Sybil Defense)
+    // After this height: peer eviction, relay priority, and outbound selection
+    // are influenced by DNA trust scores. Purely P2P policy — no consensus impact.
+    int trustWeightedNetworkHeight;
+
     // Compact encoding fix activation height
     // Before this height: BigToCompact has a sign bit bug where bit 23 of the
     // mantissa collides with the sign bit, causing ~2x difficulty corruption on

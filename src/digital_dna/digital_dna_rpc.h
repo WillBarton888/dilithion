@@ -18,6 +18,7 @@
  *   getperspectiveproof      - Get just the perspective component
  *   dumpdigitaldna           - Dump all DNA identities with full dimension data (calibration)
  *   getdigitaldnahistory     - Get DNA change history for a MIK identity
+ *   getpeertrust             - Get trust scores for connected peers
  *   getdnamonitor            - Network-wide DNA monitoring dashboard
  */
 
@@ -92,6 +93,9 @@ private:
     JsonObject cmd_getverificationstatus(const JsonObject& params);
     JsonObject cmd_listattestations(const JsonObject& params);
     JsonObject cmd_getverificationconfig(const JsonObject& params);
+
+    // Phase 4: Peer trust scoring
+    JsonObject cmd_getpeertrust(const JsonObject& params);
 
     // Helpers
     std::string address_to_hex(const std::array<uint8_t, 20>& addr) const;

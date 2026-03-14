@@ -422,9 +422,15 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
             }
         }
         if (inbound_count >= static_cast<size_t>(m_options.nMaxInbound)) {
-            LogPrintf(NET, WARN, "[CConnman] Inbound connection limit reached (%zu/%d)\n",
-                      inbound_count, m_options.nMaxInbound);
-            return false;
+            // Phase 4: Try to evict a low-trust peer to make room
+            if (m_peer_manager && m_peer_manager->EvictPeersIfNeeded()) {
+                std::cout << "[P2P] Evicted low-value peer to accept new inbound" << std::endl;
+                // Continue to accept — slot freed by eviction
+            } else {
+                LogPrintf(NET, WARN, "[CConnman] Inbound connection limit reached (%zu/%d)\n",
+                          inbound_count, m_options.nMaxInbound);
+                return false;
+            }
         }
         if (total_count >= static_cast<size_t>(m_options.nMaxTotal)) {
             LogPrintf(NET, WARN, "[CConnman] Total connection limit reached (%zu/%d)\n",

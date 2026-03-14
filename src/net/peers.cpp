@@ -8,6 +8,7 @@
 #include <core/chainparams.h>
 #include <node/block_index.h>
 #include <node/mempool.h>
+#include <node/ibd_coordinator.h>
 #include <net/net.h>
 #include <net/connman.h>
 #include <net/protocol.h>
@@ -867,6 +868,27 @@ bool CPeerManager::EvictPeersIfNeeded() {
 
     if (eviction_candidates.empty()) {
         return false;  // No candidates to evict
+    }
+
+    // Phase 4: Trust-based eviction bonus (only when active and not during IBD)
+    {
+        int current_height = static_cast<int>(g_chain_height.load());
+        bool trust_active = Dilithion::g_chainParams &&
+                            current_height >= Dilithion::g_chainParams->trustWeightedNetworkHeight;
+        bool in_ibd = g_node_context.ibd_coordinator &&
+                      g_node_context.ibd_coordinator->IsInitialBlockDownload();
+
+        if (trust_active && !in_ibd && g_node_context.GetPeerTrustScore) {
+            for (auto& [pid, score] : eviction_candidates) {
+                double trust = g_node_context.GetPeerTrustScore(pid);
+                if (trust >= 0) {
+                    // Lower trust = higher eviction score
+                    // Trust 0 → +50, Trust 50 → +25, Trust 100 → +0
+                    score += static_cast<int>(50.0 * (1.0 - trust / 100.0));
+                }
+                // trust == -1.0 means unknown peer — grace period, no bonus applied
+            }
+        }
     }
 
     // Sort by score (highest first = most likely to evict)

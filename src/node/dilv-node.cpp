@@ -75,6 +75,7 @@
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
 #include <digital_dna/dna_verification.h>  // Phase 3: verification status for DFMP v3.4
 
+#include <algorithm>  // Phase 4: Trust-based relay sorting
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -4810,6 +4811,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                     peer_ids.push_back(peer->id);
                                 }
                             }
+                            // Phase 4: Sort relay peers by trust score (highest first)
+                            if (!peer_ids.empty() && g_node_context.GetPeerTrustScore) {
+                                int chainHeight = g_chainstate.GetHeight();
+                                bool trustActive = Dilithion::g_chainParams &&
+                                    chainHeight >= Dilithion::g_chainParams->trustWeightedNetworkHeight;
+                                if (trustActive) {
+                                    std::sort(peer_ids.begin(), peer_ids.end(),
+                                        [](int a, int b) {
+                                            double ta = g_node_context.GetPeerTrustScore(a);
+                                            double tb = g_node_context.GetPeerTrustScore(b);
+                                            // Unknown (-1) treated as neutral (50.0)
+                                            if (ta < 0) ta = 50.0;
+                                            if (tb < 0) tb = 50.0;
+                                            return ta > tb;  // Higher trust first
+                                        });
+                                }
+                            }
+
                             if (!peer_ids.empty()) {
                                 if (g_node_context.async_broadcaster->BroadcastBlock(blockHash, block, peer_ids)) {
                                     std::cout << "[VDF] Queued block broadcast to " << peer_ids.size()
@@ -5338,6 +5357,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 });
 
             std::cout << "  [OK] DNA verification manager: P2P callbacks wired" << std::endl;
+
+            // Phase 4: Wire trust score callback for P2P layer
+            g_node_context.GetPeerTrustScore = [](int peer_id) -> double {
+                // Reverse lookup: find MIK for this peer_id
+                std::array<uint8_t, 20> mik{};
+                bool found = false;
+                {
+                    std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
+                    for (const auto& [m, pid] : g_mik_peer_map) {
+                        if (pid == peer_id) {
+                            mik = m;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) return -1.0;  // Unknown peer (grace period)
+
+                // Look up trust score
+                if (!g_node_context.trust_manager) return -1.0;
+                if (!g_node_context.trust_manager->has_score(mik)) return -1.0;
+                return g_node_context.trust_manager->get_score(mik).current_score;
+            };
+            std::cout << "  [OK] Trust score callback wired for P2P layer" << std::endl;
         }
 
         // Load persistent total blocks mined counter

@@ -9,6 +9,9 @@
 #include <core/node_context.h>
 #include <wallet/wallet.h>
 #include <util/base58.h>
+#include <net/peers.h>
+#include <net/connman.h>
+#include <net/node.h>
 
 #include <sstream>
 #include <iomanip>
@@ -63,6 +66,8 @@ void DigitalDNARpc::register_commands() {
     handlers_["getverificationstatus"] = [this](const JsonObject& p) { return cmd_getverificationstatus(p); };
     handlers_["listattestations"] = [this](const JsonObject& p) { return cmd_listattestations(p); };
     handlers_["getverificationconfig"] = [this](const JsonObject& p) { return cmd_getverificationconfig(p); };
+    // Phase 4: Peer trust scoring
+    handlers_["getpeertrust"] = [this](const JsonObject& p) { return cmd_getpeertrust(p); };
 }
 
 RpcHandler DigitalDNARpc::get_handler(const std::string& method) const {
@@ -1336,6 +1341,85 @@ JsonObject DigitalDNARpc::cmd_getverificationconfig(const JsonObject& params) {
     return result;
 }
 
+// ============ Peer Trust Scoring ============
+
+JsonObject DigitalDNARpc::cmd_getpeertrust(const JsonObject& params) {
+    // Optional: filter by peer_id
+    int filter_peer_id = -1;
+    auto it = params.find("peer_id");
+    if (it != params.end() && !it->second.empty()) {
+        try {
+            filter_peer_id = std::stoi(it->second);
+        } catch (...) {
+            return error(-1, "Invalid peer_id parameter");
+        }
+    }
+
+    if (!g_node_context.peer_manager) {
+        return error(-2, "Peer manager not available");
+    }
+
+    auto peers = g_node_context.peer_manager->GetConnectedPeers();
+
+    std::ostringstream oss;
+    oss << "[";
+    bool first = true;
+
+    for (const auto& peer : peers) {
+        if (!peer) continue;
+        if (filter_peer_id >= 0 && peer->id != filter_peer_id) continue;
+
+        // Get trust score via the callback wired in node startup
+        double trust_score = -1.0;
+        if (g_node_context.GetPeerTrustScore) {
+            trust_score = g_node_context.GetPeerTrustScore(peer->id);
+        }
+
+        // Determine trust tier from score
+        const char* trust_tier = "UNKNOWN";
+        if (trust_score >= 0.0) {
+            if (trust_score >= TrustScore::TIER_VETERAN) {
+                trust_tier = "VETERAN";
+            } else if (trust_score >= TrustScore::TIER_TRUSTED) {
+                trust_tier = "TRUSTED";
+            } else if (trust_score >= TrustScore::TIER_ESTABLISHED) {
+                trust_tier = "ESTABLISHED";
+            } else if (trust_score >= TrustScore::TIER_NEW) {
+                trust_tier = "NEW";
+            } else {
+                trust_tier = "UNTRUSTED";
+            }
+        }
+
+        // Pull inbound status from CNode (source of truth)
+        bool is_inbound = false;
+        if (g_node_context.connman) {
+            CNode* pnode = g_node_context.connman->GetNode(peer->id);
+            if (pnode) {
+                is_inbound = pnode->fInbound;
+            }
+        }
+
+        if (!first) oss << ",";
+        first = false;
+
+        oss << "{";
+        oss << "\"peer_id\":" << peer->id << ",";
+        oss << std::fixed << std::setprecision(2);
+        oss << "\"trust_score\":" << trust_score << ",";
+        oss << "\"trust_tier\":\"" << trust_tier << "\",";
+        oss << "\"is_inbound\":" << (is_inbound ? "true" : "false");
+        oss << "}";
+    }
+
+    oss << "]";
+
+    JsonObject result;
+    result["peers"] = oss.str();
+    result["count"] = std::to_string(peers.size());
+    return result;
+}
+
 // ============ Help Documentation ============
 
 std::vector<RpcCommandInfo> get_rpc_help() {
@@ -1444,6 +1528,13 @@ std::vector<RpcCommandInfo> get_rpc_help() {
             "None",
             "Object with sybil_clusters, rotation_alerts, dimension_coverage, trust_distribution, health_score, health_grade",
             "getdnamonitor"
+        },
+        {
+            "getpeertrust",
+            "Get trust scores for all connected peers (or a specific peer)",
+            "peer_id (optional, int) - filter to a specific peer",
+            "Object with count and peers array [{peer_id, trust_score, trust_tier, is_inbound}]",
+            "getpeertrust  OR  getpeertrust {\"peer_id\": 3}"
         },
         {
             "getverificationstatus",

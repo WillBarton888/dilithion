@@ -5,6 +5,7 @@
 #define DILITHION_CORE_NODE_CONTEXT_H
 
 #include <memory>
+#include <functional>
 #include <atomic>
 #include <string>
 #include <map>
@@ -93,6 +94,9 @@ struct NodeContext {
     std::unique_ptr<digital_dna::TrustScoreManager> trust_manager;
     // Phase 2: Verification & attestation
     std::unique_ptr<digital_dna::verification::VerificationManager> verification_manager;
+    // Phase 4: Trust-weighted network — resolves peer_id to trust score
+    // Returns 0.0-100.0 if known, -1.0 if unknown (grace period)
+    std::function<double(int)> GetPeerTrustScore;
     // DNA collector accessors (storage is a separate global to avoid NodeContext memory stomps)
     std::shared_ptr<digital_dna::DigitalDNACollector> GetDNACollector() const;
     void SetDNACollector(std::shared_ptr<digital_dna::DigitalDNACollector> new_collector);
