@@ -502,7 +502,11 @@ BlockProcessResult ProcessNewBlock(
     // Validates that coinbase includes required Dev Fund & Dev Reward outputs
     // =========================================================================
     bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
-    if (!isTestnet && !skipPoWCheck) {
+    // BUG FIX: Skip coinbase validation for fork pre-validated blocks.
+    // Fork blocks use our local UTXO set which reflects a different chain,
+    // so fee calculation is wrong. Full coinbase validation runs in ConnectTip
+    // when the fork chain is actually activated and the UTXO set is correct.
+    if (!isTestnet && !skipPoWCheck && !forkPreValidated) {
         // Get block height
         int blockHeight = currentChainHeight + 1;
         CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);

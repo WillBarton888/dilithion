@@ -412,10 +412,29 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
     // Without this check, blocks with wrong difficulty (easier nBits) pass PoW
     // validation but diverge from consensus.
     // Skip for blocks at or below checkpoint height (those blocks are trusted).
+    //
+    // BUG FIX: Only validate nBits for the first fork block (fork_point + 1).
+    // For subsequent fork blocks, the parent is another fork block that isn't in
+    // our chain index, so GetAncestor returns OUR block at that height (wrong chain).
+    // This produces incorrect expected nBits because the parent has different
+    // timestamps/difficulty. Full nBits validation runs during ConnectTip.
     {
         int highestCheckpoint = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->GetHighestCheckpointHeight() : 0;
-        if (forkBlock.height > highestCheckpoint) {
+
+        // Determine fork point to limit nBits check to first fork block only
+        int forkPointHeight = -1;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_activeFork) {
+                forkPointHeight = m_activeFork->GetForkPointHeight();
+            }
+        }
+
+        // Only validate nBits when parent is on our chain (at or below fork point)
+        bool parentOnOurChain = (forkPointHeight < 0) || (forkBlock.height <= forkPointHeight + 1);
+
+        if (forkBlock.height > highestCheckpoint && parentOnOurChain) {
             CBlockIndex* pindexParent = g_chainstate.GetTip();
             // If the fork block's parent height is below current tip, find the right ancestor
             if (pindexParent && pindexParent->nHeight >= forkBlock.height) {
@@ -432,6 +451,9 @@ bool ForkManager::PreValidateBlock(ForkBlock& forkBlock, CBlockchainDB& db)
                     return false;
                 }
             }
+        } else if (forkBlock.height > highestCheckpoint && !parentOnOurChain) {
+            std::cout << "[ForkManager] Block " << forkBlock.height
+                      << " nBits check skipped (parent is fork block, not on our chain)" << std::endl;
         }
     }
 
