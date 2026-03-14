@@ -146,6 +146,29 @@ constexpr int MATURITY_BLOCKS_V33 = 500;
 constexpr int64_t FP_PENDING_START_V33 = 2500000;         // 2.5 × 1,000,000
 
 // ============================================================================
+// DFMP v3.4 CONSTANTS (verification-aware free tier)
+// ============================================================================
+// v3.4 introduces a split free tier based on DNA verification status:
+//   Verified MIKs:   12 free blocks (same as v3.3)
+//   Unverified MIKs:  3 free blocks (reduced)
+// Linear and exponential zones use the same endpoint/growth as v3.3.
+
+/** v3.4: Free blocks for DNA-verified MIKs */
+constexpr int FREE_TIER_THRESHOLD_V34_VERIFIED = 12;
+
+/** v3.4: Free blocks for unverified MIKs */
+constexpr int FREE_TIER_THRESHOLD_V34_UNVERIFIED = 3;
+
+/** v3.4: End of linear zone (same as v3.3) */
+constexpr int LINEAR_ZONE_END_V34 = 24;
+
+/** v3.4: Penalty at end of linear zone (4.0x, same as v3.3) */
+constexpr int64_t FP_LINEAR_END_PENALTY_V34 = 4000000;
+
+/** v3.4: Exponential growth rate (1.58x, same as v3.3) */
+constexpr int64_t FP_HEAT_GROWTH_V34 = 158;
+
+// ============================================================================
 // IDENTITY TYPE (20 bytes)
 // ============================================================================
 
@@ -427,6 +450,23 @@ int64_t CalculateTotalMultiplierFP_V33(int currentHeight, int firstSeenHeight, i
 /** v3.3 convenience functions for logging */
 double GetPendingPenalty_V33(int currentHeight, int firstSeenHeight);
 double GetHeatMultiplier_V33(int heat);
+
+// ============================================================================
+// DFMP v3.4 MULTIPLIER CALCULATION (Verification-Aware Free Tier)
+// ============================================================================
+
+/** v3.4 pending penalty: same as v3.3/v3.2 */
+int64_t CalculatePendingPenaltyFP_V34(int currentHeight, int firstSeenHeight);
+
+/** v3.4 heat multiplier: free tier depends on verification status */
+int64_t CalculateHeatMultiplierFP_V34(int heat, bool isVerified);
+
+/** v3.4 total multiplier: maturity × heat */
+int64_t CalculateTotalMultiplierFP_V34(int currentHeight, int firstSeenHeight, int heat, bool isVerified);
+
+/** v3.4 convenience functions for logging */
+double GetPendingPenalty_V34(int currentHeight, int firstSeenHeight);
+double GetHeatMultiplier_V34(int heat, bool isVerified);
 
 // ============================================================================
 // GLOBAL STATE

@@ -640,6 +640,59 @@ int64_t CalculateTotalMultiplierFP_V33(int currentHeight, int firstSeenHeight, i
 }
 
 // ============================================================================
+// DFMP v3.4 MULTIPLIER CALCULATION (Verification-Aware Free Tier)
+// ============================================================================
+
+int64_t CalculatePendingPenaltyFP_V34(int currentHeight, int firstSeenHeight) {
+    // Same maturity curve as v3.3/v3.2
+    return CalculatePendingPenaltyFP_V32(currentHeight, firstSeenHeight);
+}
+
+int64_t CalculateHeatMultiplierFP_V34(int heat, bool isVerified) {
+    // DFMP v3.4: Same three-zone curve as v3.3, but free tier depends on
+    // DNA verification status:
+    //   Verified:   12 free blocks
+    //   Unverified:  3 free blocks
+    // Linear zone endpoint (24) and exponential growth (1.58x) unchanged.
+
+    int freeTier = isVerified ? FREE_TIER_THRESHOLD_V34_VERIFIED
+                              : FREE_TIER_THRESHOLD_V34_UNVERIFIED;
+
+    // Zone 1: Free tier
+    if (heat <= freeTier) {
+        return FP_SCALE;  // 1.0x
+    }
+
+    // Zone 2: Linear ramp to 4.0x at LINEAR_ZONE_END_V34
+    if (heat <= LINEAR_ZONE_END_V34) {
+        int excess = heat - freeTier;
+        int linearSpan = LINEAR_ZONE_END_V34 - freeTier;
+        // Ramp from 1.0x to 4.0x over linearSpan blocks
+        // penalty = 1.0 + excess × 3.0 / linearSpan
+        int64_t ramp = (static_cast<int64_t>(excess) * 3 * FP_SCALE) / linearSpan;
+        return FP_SCALE + ramp;
+    }
+
+    // Zone 3: Exponential from 4.0x base
+    int64_t penalty = FP_LINEAR_END_PENALTY_V34;  // 4.0x
+    int exponent = heat - LINEAR_ZONE_END_V34;
+
+    for (int i = 0; i < exponent; i++) {
+        penalty = (penalty * FP_HEAT_GROWTH_V34) / 100;  // × 1.58
+    }
+
+    return penalty;
+}
+
+int64_t CalculateTotalMultiplierFP_V34(int currentHeight, int firstSeenHeight, int heat, bool isVerified) {
+    int64_t pendingFP = CalculatePendingPenaltyFP_V34(currentHeight, firstSeenHeight);
+    int64_t heatFP = CalculateHeatMultiplierFP_V34(heat, isVerified);
+
+    // total = maturity × heat
+    return (pendingFP * heatFP) / FP_SCALE;
+}
+
+// ============================================================================
 // CONVENIENCE FUNCTIONS
 // ============================================================================
 
@@ -677,6 +730,14 @@ double GetPendingPenalty_V33(int currentHeight, int firstSeenHeight) {
 
 double GetHeatMultiplier_V33(int heat) {
     return static_cast<double>(CalculateHeatMultiplierFP_V33(heat)) / FP_SCALE;
+}
+
+double GetPendingPenalty_V34(int currentHeight, int firstSeenHeight) {
+    return static_cast<double>(CalculatePendingPenaltyFP_V34(currentHeight, firstSeenHeight)) / FP_SCALE;
+}
+
+double GetHeatMultiplier_V34(int heat, bool isVerified) {
+    return static_cast<double>(CalculateHeatMultiplierFP_V34(heat, isVerified)) / FP_SCALE;
 }
 
 // ============================================================================

@@ -128,6 +128,11 @@ public:
     // After this height: DFMP v3.3 rules (fixed 12-block free tier, linear to 4x at 24, exponential)
     int dfmpV33ActivationHeight;
 
+    // DFMP v3.4 Activation Height (verification-aware free tier)
+    // Before this height: all MIKs get 12 free blocks (v3.3 rules)
+    // After this height: verified MIKs get 12, unverified get 3 free blocks
+    int dfmpV34ActivationHeight;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)

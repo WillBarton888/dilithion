@@ -12,6 +12,7 @@
 #include <dfmp/dfmp.h>
 #include <dfmp/identity_db.h>
 #include <dfmp/mik.h>  // DFMP v2.0: Mining Identity Key
+#include <digital_dna/dna_verification.h>  // Phase 3: verification status
 #include <util/logging.h>
 #include <algorithm>
 #include <vector>
@@ -383,10 +384,48 @@ bool CheckProofOfWorkDFMP(
         Dilithion::g_chainParams->dfmpV32ActivationHeight : 999999999;
     int dfmpV33ActivationHeight = Dilithion::g_chainParams ?
         Dilithion::g_chainParams->dfmpV33ActivationHeight : 999999999;
+    int dfmpV34ActivationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpV34ActivationHeight : 999999999;
 
     int64_t multiplierFP;
 
-    if (height >= dfmpV33ActivationHeight) {
+    if (height >= dfmpV34ActivationHeight) {
+        // ====================================================================
+        // DFMP v3.4: Verification-aware free tier
+        // Verified MIKs: 12 free blocks, Unverified: 3 free blocks
+        // ====================================================================
+
+        // Determine verification status of this MIK
+        bool isVerified = true;  // Default: verified (safe fallback during IBD)
+        if (g_node_context.dna_registry) {
+            std::array<uint8_t, 20> mikArr;
+            std::memcpy(mikArr.data(), identity.data, 20);
+            auto status = g_node_context.dna_registry->get_verification_status(mikArr);
+            isVerified = (status == digital_dna::verification::VerificationStatus::VERIFIED);
+        }
+
+        // MIK identity heat penalty (v3.4 - verification-aware)
+        int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP_V34(blocksInWindow, isVerified);
+
+        // Payout address heat penalty (uses same verification status as the MIK)
+        int64_t payoutHeatPenalty = DFMP::FP_SCALE;  // 1.0x default
+        if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+            DFMP::Identity payoutIdentity = DFMP::DeriveIdentityFromScript(
+                coinbaseTx.vout[0].scriptPubKey);
+            int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutIdentity);
+            payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP_V34(payoutHeat, isVerified);
+        }
+
+        // Effective heat = max(MIK heat, payout heat)
+        int64_t effectiveHeatPenalty = std::max(mikHeatPenalty, payoutHeatPenalty);
+
+        // Maturity penalty (same as v3.3)
+        int64_t maturityPenalty = DFMP::CalculatePendingPenaltyFP_V34(height, effectiveFirstSeen);
+
+        // Total = maturity x heat
+        multiplierFP = (maturityPenalty * effectiveHeatPenalty) / DFMP::FP_SCALE;
+
+    } else if (height >= dfmpV33ActivationHeight) {
         // ====================================================================
         // DFMP v3.3: No dynamic scaling, linear+exponential penalty
         // Free tier: 12, linear to 4.0x at 24, then 1.58x exponential
@@ -517,7 +556,27 @@ bool CheckProofOfWorkDFMP(
     // Log DFMP info for debugging (only if multiplier > 1.0)
     double multiplier = static_cast<double>(multiplierFP) / DFMP::FP_SCALE;
     if (multiplier > 1.01) {
-        if (height >= dfmpV33ActivationHeight) {
+        if (height >= dfmpV34ActivationHeight) {
+            // Determine verification status for logging
+            bool logIsVerified = true;
+            if (g_node_context.dna_registry) {
+                std::array<uint8_t, 20> mikArr;
+                std::memcpy(mikArr.data(), identity.data, 20);
+                auto status = g_node_context.dna_registry->get_verification_status(mikArr);
+                logIsVerified = (status == digital_dna::verification::VerificationStatus::VERIFIED);
+            }
+            double maturityMult = DFMP::GetPendingPenalty_V34(height, effectiveFirstSeen);
+            double heatMult = DFMP::GetHeatMultiplier_V34(blocksInWindow, logIsVerified);
+
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[DFMP v3.4] Block " << height << " MIK " << identity.GetHex().substr(0, 8) << "..."
+                          << " total=" << multiplier << "x"
+                          << " verified=" << (logIsVerified ? "YES" : "NO")
+                          << " freeTier=" << (logIsVerified ? DFMP::FREE_TIER_THRESHOLD_V34_VERIFIED : DFMP::FREE_TIER_THRESHOLD_V34_UNVERIFIED)
+                          << (mikData.isRegistration ? " [REGISTRATION]" : "") << std::endl;
+            }
+
+        } else if (height >= dfmpV33ActivationHeight) {
             double maturityMult = DFMP::GetPendingPenalty_V33(height, effectiveFirstSeen);
             double heatMult = DFMP::GetHeatMultiplier_V33(blocksInWindow);
 

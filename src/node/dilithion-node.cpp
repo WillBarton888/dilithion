@@ -74,6 +74,7 @@
 #include <util/bench.h>  // Performance: Benchmarking
 #include <digital_dna/digital_dna_rpc.h>  // Digital DNA RPC commands
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
+#include <digital_dna/dna_verification.h>       // Phase 3: Verification status for DFMP v3.4
 
 #include <iostream>
 #include <fstream>
@@ -1323,11 +1324,48 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             Dilithion::g_chainParams->dfmpV32ActivationHeight : 999999999;
         int dfmpV33ActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpV33ActivationHeight : 999999999;
+        int dfmpV34ActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpV34ActivationHeight : 999999999;
 
         int64_t multiplierFP;
         double payoutHeatMult = 1.0;
 
-        if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
+        if (static_cast<int>(nHeight) >= dfmpV34ActivationHeight) {
+            // DFMP v3.4: Verification-aware free tier
+            // Verified MIKs: 12 free blocks, Unverified: 3 free blocks
+
+            // Determine verification status of this MIK
+            bool isVerified = true;  // Default: verified (safe fallback during IBD)
+            if (g_node_context.dna_registry) {
+                std::array<uint8_t, 20> mikArr;
+                std::memcpy(mikArr.data(), mikIdentity.data, 20);
+                auto status = g_node_context.dna_registry->get_verification_status(mikArr);
+                isVerified = (status == digital_dna::verification::VerificationStatus::VERIFIED);
+            }
+
+            // MIK identity heat penalty (v3.4 - verification-aware)
+            int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP_V34(heat, isVerified);
+
+            // Payout address heat penalty (uses same verification status as the MIK)
+            int64_t payoutHeatPenalty = DFMP::FP_SCALE;  // 1.0x default
+            if (DFMP::g_payoutHeatTracker && !coinbaseTx.vout.empty()) {
+                DFMP::Identity payoutIdentity = DFMP::DeriveIdentityFromScript(
+                    coinbaseTx.vout[0].scriptPubKey);
+                int payoutHeat = DFMP::g_payoutHeatTracker->GetHeat(payoutIdentity);
+                payoutHeatPenalty = DFMP::CalculateHeatMultiplierFP_V34(payoutHeat, isVerified);
+                payoutHeatMult = static_cast<double>(payoutHeatPenalty) / DFMP::FP_SCALE;
+            }
+
+            // Effective heat = max(MIK heat, payout heat)
+            int64_t effectiveHeatPenalty = std::max(mikHeatPenalty, payoutHeatPenalty);
+
+            // Maturity penalty (same as v3.3)
+            int64_t maturityPenalty = DFMP::CalculatePendingPenaltyFP_V34(nHeight, firstSeen);
+
+            // Total = maturity x heat
+            multiplierFP = (maturityPenalty * effectiveHeatPenalty) / DFMP::FP_SCALE;
+
+        } else if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
             // DFMP v3.3: No dynamic scaling, linear+exponential penalty (must match validator exactly)
             int64_t mikHeatPenalty = DFMP::CalculateHeatMultiplierFP_V33(heat);
 
@@ -1443,7 +1481,19 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         if (multiplier > 1.01) {
             const char* versionTag;
             double maturityMult, heatMult;
-            if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
+            bool logIsVerified = true;
+            if (static_cast<int>(nHeight) >= dfmpV34ActivationHeight) {
+                versionTag = "v3.4";
+                maturityMult = DFMP::GetPendingPenalty_V34(nHeight, firstSeen);
+                // Determine verification status for logging
+                if (g_node_context.dna_registry) {
+                    std::array<uint8_t, 20> mikArr;
+                    std::memcpy(mikArr.data(), mikIdentity.data, 20);
+                    auto status = g_node_context.dna_registry->get_verification_status(mikArr);
+                    logIsVerified = (status == digital_dna::verification::VerificationStatus::VERIFIED);
+                }
+                heatMult = DFMP::GetHeatMultiplier_V34(heat, logIsVerified);
+            } else if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
                 versionTag = "v3.3";
                 maturityMult = DFMP::GetPendingPenalty_V33(nHeight, firstSeen);
                 heatMult = DFMP::GetHeatMultiplier_V33(heat);
@@ -1468,7 +1518,10 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                       << " mikHeat=" << heatMult << "x"
                       << " payoutHeat=" << payoutHeatMult << "x"
                       << " total=" << multiplier << "x";
-            if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
+            if (static_cast<int>(nHeight) >= dfmpV34ActivationHeight) {
+                std::cout << " verified=" << (logIsVerified ? "YES" : "NO")
+                          << " (freeTier=" << (logIsVerified ? DFMP::FREE_TIER_THRESHOLD_V34_VERIFIED : DFMP::FREE_TIER_THRESHOLD_V34_UNVERIFIED) << ")";
+            } else if (static_cast<int>(nHeight) >= dfmpV33ActivationHeight) {
                 std::cout << " (freeTier=12 fixed)";
             } else if (uniqueMiners > 0) {
                 int freeTierBase;
