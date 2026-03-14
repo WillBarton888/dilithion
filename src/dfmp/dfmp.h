@@ -76,6 +76,9 @@ constexpr int64_t FP_DORMANCY_PENALTY = 2500000;   // 2.5 × 1,000,000 (dormancy
 // DFMP v3.0: Registration PoW - computational cost per new MIK identity
 constexpr int REGISTRATION_POW_BITS = 28;          // Leading zero bits required (~10-15 min with ref SHA3)
 
+// Phase 3b: Shared heat — cluster heat capped at this multiple of own heat
+constexpr int MAX_CLUSTER_HEAT_MULTIPLIER = 5;
+
 // ============================================================================
 // DFMP v3.1 CONSTANTS (softened for small networks)
 // ============================================================================

@@ -266,6 +266,7 @@ struct NodeState {
     std::atomic<uint64_t> template_version{0}; // BUG #109 FIX: Template version counter for race detection
     std::string mining_address_override;       // --mining-address=Dxxx (empty = use wallet default)
     bool rotate_mining_address{false};         // --rotate-mining-address (new HD address per block)
+    bool shared_heat{true};                    // Phase 3b: shared cluster heat (default ON)
     CRPCServer* rpc_server = nullptr;
     CMiningController* miner = nullptr;
     CWallet* wallet = nullptr;
@@ -449,6 +450,7 @@ struct NodeConfig {
     bool public_api = false;        // --public-api: Enable public REST API for light wallets (seed nodes only)
     int max_connections = 0;         // --maxconnections: Maximum peer connections (0 = default 125)
     int max_connections_per_ip = 2;  // --max-connections-per-ip: Max inbound per IP (default 2, range 1-64)
+    bool shared_heat = true;         // Phase 3b: shared cluster heat (default ON)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -579,6 +581,10 @@ struct NodeConfig {
                 // Public REST API: bind to 0.0.0.0 for light wallet access (seed nodes only)
                 public_api = true;
             }
+            else if (arg == "--no-shared-heat") {
+                // Disable Phase 3b shared cluster heat penalty
+                shared_heat = false;
+            }
             else if (arg == "--upnp") {
                 // Enable UPnP automatic port mapping
                 upnp_enabled = true;
@@ -661,6 +667,7 @@ struct NodeConfig {
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --relay-only          Relay-only mode: skip wallet (for seed nodes)" << std::endl;
         std::cout << "  --public-api          Enable public REST API for light wallets (seed nodes)" << std::endl;
+        std::cout << "  --no-shared-heat      Disable shared cluster heat penalty" << std::endl;
         std::cout << "  --upnp                Enable automatic port mapping (UPnP)" << std::endl;
         std::cout << "  --no-upnp             Disable UPnP (don't prompt)" << std::endl;
         std::cout << "  --externalip=<ip>     Your public IP (for manual port forwarding)" << std::endl;
@@ -1307,6 +1314,27 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             heat = DFMP::g_heatTracker->GetHeat(mikIdentity);
         }
 
+        // Phase 3b: Shared heat — augment own heat with DNA cluster members' heat
+        int ownHeat = heat;
+        if (g_node_state.shared_heat && heat > 0 &&
+            g_node_context.dna_registry && DFMP::g_heatTracker) {
+            std::array<uint8_t, 20> mikArr;
+            std::memcpy(mikArr.data(), mikIdentity.data, 20);
+            auto myDna = g_node_context.dna_registry->get_identity_by_mik(mikArr);
+            if (myDna) {
+                auto similar = g_node_context.dna_registry->find_similar(*myDna);
+                int clusterHeat = heat;
+                for (const auto& [dna, score] : similar) {
+                    DFMP::Identity memberMik;
+                    std::memcpy(memberMik.data, dna.mik_identity.data(), 20);
+                    if (memberMik == mikIdentity) continue;  // Skip self
+                    clusterHeat += DFMP::g_heatTracker->GetHeat(memberMik);
+                }
+                int cap = heat * DFMP::MAX_CLUSTER_HEAT_MULTIPLIER;
+                heat = std::min(clusterHeat, cap);
+            }
+        }
+
         // Dynamic scaling: get unique miner count if active
         int dfmpDynamicScalingHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpDynamicScalingHeight : 999999999;
@@ -1513,7 +1541,8 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
             std::cout << "[Mining] DFMP " << versionTag << " penalty: MIK " << mikIdentity.GetHex().substr(0, 8) << "..."
                       << " firstSeen=" << firstSeen
-                      << " heat=" << heat
+                      << " heat=" << ownHeat
+                      << (heat != ownHeat ? (" clusterHeat=" + std::to_string(heat)) : "")
                       << " maturity=" << std::fixed << std::setprecision(2) << maturityMult << "x"
                       << " mikHeat=" << heatMult << "x"
                       << " payoutHeat=" << payoutHeatMult << "x"
@@ -1854,6 +1883,7 @@ int main(int argc, char* argv[]) {
         // Store mining config in global state for callbacks to access
         g_node_state.mining_address_override = config.mining_address_override;
         g_node_state.rotate_mining_address = config.rotate_mining_address;
+        g_node_state.shared_heat = config.shared_heat;
 
         // =================================================================
         // BUG #277: Auto-rebuild after UTXO corruption

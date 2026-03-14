@@ -4262,9 +4262,32 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
         }
     }
 
+    // Phase 3b: Compute cluster heat
+    int clusterHeat = heat;
+    if (hasMIK && heat > 0 && g_node_context.dna_registry && DFMP::g_heatTracker) {
+        DFMP::Identity clusterMik = m_wallet->GetMIKIdentity();
+        std::array<uint8_t, 20> mikArr;
+        std::memcpy(mikArr.data(), clusterMik.data, 20);
+        auto myDna = g_node_context.dna_registry->get_identity_by_mik(mikArr);
+        if (myDna) {
+            auto similar = g_node_context.dna_registry->find_similar(*myDna);
+            int summedHeat = heat;
+            for (const auto& [dna, score] : similar) {
+                DFMP::Identity memberMik;
+                std::memcpy(memberMik.data, dna.mik_identity.data(), 20);
+                if (memberMik == clusterMik) continue;
+                summedHeat += DFMP::g_heatTracker->GetHeat(memberMik);
+            }
+            int cap = heat * DFMP::MAX_CLUSTER_HEAT_MULTIPLIER;
+            clusterHeat = std::min(summedHeat, cap);
+        }
+    }
+
     oss << "\"is_registered\":" << (isRegistered ? "true" : "false") << ",";
     oss << "\"first_seen\":" << firstSeen << ",";
     oss << "\"heat\":" << heat << ",";
+    oss << "\"cluster_heat\":" << clusterHeat << ",";
+    oss << "\"shared_heat_active\":" << (clusterHeat != heat ? "true" : "false") << ",";
     oss << "\"payout_heat\":" << payoutHeat << ",";
     oss << "\"last_mined\":" << lastMined << ",";
 
