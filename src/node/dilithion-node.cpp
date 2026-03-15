@@ -2614,22 +2614,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             CBlockIndex* pindexTip = g_chainstate.GetTip();
 
             if (pindexTip != nullptr) {
-                // Build chain from tip to genesis
+                // Build chain from tip to genesis, then reverse for genesis-to-tip order
                 std::vector<CBlockIndex*> chain;
                 CBlockIndex* pindex = pindexTip;
                 while (pindex != nullptr) {
                     chain.push_back(pindex);
                     pindex = pindex->pprev;
                 }
+                std::reverse(chain.begin(), chain.end());
 
-                // Add headers to HeadersManager from genesis to tip
-                // This populates HeadersManager with all historical blocks
-                for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-                    g_node_context.headers_manager->OnBlockActivated((*it)->header, (*it)->GetBlockHash());
-                }
-
-                std::cout << "  [OK] Populated HeadersManager with " << chain.size()
-                          << " header(s) from height 0 to " << pindexTip->nHeight << std::endl;
+                // Bulk-load all headers at once (skips per-block logging and comparisons)
+                g_node_context.headers_manager->BulkLoadHeaders(chain);
             } else {
                 std::cout << "  [WARN] No chain tip - HeadersManager empty (expected for fresh node)" << std::endl;
             }

@@ -768,6 +768,48 @@ void CHeadersManager::OnBlockActivated(const CBlockHeader& header, const uint256
 
 }
 
+void CHeadersManager::BulkLoadHeaders(const std::vector<CBlockIndex*>& chain)
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    // Reserve nothing — std::map doesn't support reserve, but this is still
+    // orders of magnitude faster than OnBlockActivated per-block because we
+    // skip logging, chain work comparison, and fork detection.
+
+    const HeaderWithChainWork* pprev = nullptr;
+
+    for (const auto* pindex : chain) {
+        const uint256& hash = pindex->GetBlockHash();
+        const CBlockHeader& header = pindex->header;
+        int height = pindex->nHeight;
+
+        // Calculate chain work from parent
+        uint256 chainWork = CalculateChainWork(header, pprev);
+
+        // Insert directly — no duplicate check needed (chain is linear)
+        HeaderWithChainWork headerData(header, height);
+        headerData.chainWork = chainWork;
+        mapHeaders[hash] = headerData;
+
+        // Height index for peer serving
+        mapHeightIndex[height].insert(hash);
+
+        // Track pointer for next iteration's chain work calculation
+        pprev = &mapHeaders[hash];
+    }
+
+    // Set best header to the tip (last element)
+    if (!chain.empty()) {
+        const CBlockIndex* tip = chain.back();
+        hashBestHeader = tip->GetBlockHash();
+        nBestHeight = tip->nHeight;
+        InvalidateBestChainCache();
+    }
+
+    std::cout << "  [OK] Bulk-loaded " << chain.size()
+              << " headers (height 0 to " << nBestHeight << ")" << std::endl;
+}
+
 std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
 {
     // DEADLOCK FIX: Get chainstate tip BEFORE acquiring cs_headers

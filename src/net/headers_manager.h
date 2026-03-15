@@ -233,6 +233,20 @@ public:
     void OnBlockActivated(const CBlockHeader& header, const uint256& hash);
 
     /**
+     * @brief Bulk-load headers from an already-validated chain during startup
+     *
+     * Much faster than calling OnBlockActivated per-block because it:
+     * - Skips per-header UpdateBestHeader comparisons and logging
+     * - Skips per-header fork detection
+     * - Sets best header once at the end
+     *
+     * Safe because the chain is already validated and stored on disk.
+     *
+     * @param chain Blocks from genesis (front) to tip (back)
+     */
+    void BulkLoadHeaders(const std::vector<CBlockIndex*>& chain);
+
+    /**
      * @brief Generate block locator for sync
      *
      * Bitcoin Core exponential backoff algorithm:
