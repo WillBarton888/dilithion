@@ -38,7 +38,7 @@ void VerificationManager::SetMyMIK(const std::array<uint8_t, 20>& mik,
 // ============================================================================
 
 uint64_t VerificationManager::RandomNonce() {
-    static std::mt19937_64 rng(std::chrono::steady_clock::now().time_since_epoch().count());
+    thread_local std::mt19937_64 rng(std::chrono::steady_clock::now().time_since_epoch().count());
     return rng();
 }
 
@@ -83,6 +83,7 @@ void VerificationManager::OnNewRegistration(
 
     if (!has_mik_) return;  // Relay-only nodes don't verify
     if (target_mik == my_mik_) return;  // Can't verify ourselves
+    if (!registry_) return;  // Defensive: registry must be available
 
     // Check if we're a selected verifier
     auto all_miks = registry_->get_all_miks();
@@ -108,6 +109,14 @@ void VerificationManager::OnNewRegistration(
         return;
     }
 
+    StartVerificationLocked(target_mik, reg_height, block_hash);
+}
+
+bool VerificationManager::StartVerificationLocked(
+    const std::array<uint8_t, 20>& target_mik,
+    uint32_t reg_height,
+    const std::array<uint8_t, 32>& block_hash)
+{
     // Find peer connection to target
     int peer_id = -1;
     if (find_peer_by_mik_) {
@@ -115,7 +124,7 @@ void VerificationManager::OnNewRegistration(
     }
     if (peer_id < 0) {
         std::cout << "[DNA-VERIFY] Target not connected, skipping verification" << std::endl;
-        return;
+        return false;
     }
 
     // Create pending verification
@@ -133,9 +142,11 @@ void VerificationManager::OnNewRegistration(
     pv.challenge_sent_time = now;
 
     // Get target's claimed VDF timing
-    auto identity = registry_->get_identity_by_mik(target_mik);
-    if (identity) {
-        pv.claimed_vdf_iters_per_sec = identity->timing.iterations_per_second;
+    if (registry_) {
+        auto identity = registry_->get_identity_by_mik(target_mik);
+        if (identity) {
+            pv.claimed_vdf_iters_per_sec = identity->timing.iterations_per_second;
+        }
     }
 
     pending_[pv.nonce] = pv;
@@ -148,6 +159,7 @@ void VerificationManager::OnNewRegistration(
     SendVDFChallenge(pv);
 
     std::cout << "[DNA-VERIFY] Initiated verification for target (peer " << peer_id << ")" << std::endl;
+    return true;
 }
 
 void VerificationManager::SendVDFChallenge(const PendingVerification& pv) {
@@ -378,6 +390,26 @@ void VerificationManager::OnAttestationReceived(int peer_id, const std::vector<u
         return;
     }
 
+    // Age validation: reject stale attestations by block height
+    uint32_t height = current_height_.load();
+    if (height > 0) {
+        constexpr uint32_t MAX_ATTESTATION_AGE_BLOCKS = 1000;
+        if (att->registration_height + MAX_ATTESTATION_AGE_BLOCKS < height) {
+            std::cout << "[DNA-VERIFY] Rejecting stale attestation (reg_height="
+                      << att->registration_height << " current=" << height << ")" << std::endl;
+            return;
+        }
+    }
+
+    // Timestamp validation: reject if > 24 hours old
+    auto now_sec = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    constexpr int64_t MAX_ATTESTATION_AGE_SEC = 86400;  // 24 hours
+    if (att->timestamp > 0 && (now_sec - static_cast<int64_t>(att->timestamp)) > MAX_ATTESTATION_AGE_SEC) {
+        std::cout << "[DNA-VERIFY] Rejecting old attestation (age > 24h)" << std::endl;
+        return;
+    }
+
     // Store the attestation
     if (registry_) {
         registry_->store_attestation(*att);
@@ -447,7 +479,8 @@ size_t VerificationManager::PendingCount() const {
 // Periodic Tick (timeout handling)
 // ============================================================================
 
-void VerificationManager::Tick(uint32_t /*current_height*/) {
+void VerificationManager::Tick(uint32_t current_height) {
+    current_height_ = current_height;
     std::lock_guard<std::mutex> lock(mutex_);
 
     auto now = std::chrono::duration_cast<std::chrono::seconds>(
@@ -479,9 +512,8 @@ void VerificationManager::Tick(uint32_t /*current_height*/) {
     while (!queued_.empty() && active_verifications_.load() < MAX_CONCURRENT_VERIFICATIONS) {
         auto q = queued_.back();
         queued_.pop_back();
-        // Re-check and initiate (will re-acquire lock via OnNewRegistration)
-        // To avoid deadlock, just log and let next tick handle it
-        // For now, we skip re-entrancy — queued items are processed on next registration event
+        std::cout << "[DNA-VERIFY] Starting queued verification (remaining=" << queued_.size() << ")" << std::endl;
+        StartVerificationLocked(q.target_mik, q.registration_height, q.block_hash);
     }
 }
 

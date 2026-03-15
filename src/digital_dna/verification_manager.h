@@ -134,6 +134,7 @@ private:
     // Rate limiting: (my_mik, target_mik) → last verification time
     std::map<std::pair<std::array<uint8_t,20>, std::array<uint8_t,20>>, int64_t> last_verification_time_;
     std::atomic<int> active_verifications_{0};
+    std::atomic<uint32_t> current_height_{0};  // Updated by Tick() for attestation age checks
 
     // Queue for verifications waiting for a free slot
     struct QueuedVerification {
@@ -144,6 +145,12 @@ private:
     std::vector<QueuedVerification> queued_;
 
     // --- Internal helpers ---
+
+    /** Start a verification for a target (caller must hold mutex_) */
+    bool StartVerificationLocked(
+        const std::array<uint8_t, 20>& target_mik,
+        uint32_t reg_height,
+        const std::array<uint8_t, 32>& block_hash);
 
     /** Generate a random nonce */
     static uint64_t RandomNonce();

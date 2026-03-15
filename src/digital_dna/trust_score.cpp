@@ -52,7 +52,15 @@ std::vector<uint8_t> TrustScore::serialize() const {
     // challenge_pending (1 byte)
     data.push_back(challenge_pending ? 1 : 0);
 
-    return data;  // 41 bytes total (8+8+4+4+4+4+4+4+1)
+    // Phase 5: Rotation tracking (12 bytes)
+    for (int i = 0; i < 4; i++)
+        data.push_back(static_cast<uint8_t>(last_dna_change_height >> (i * 8)));
+    for (int i = 0; i < 4; i++)
+        data.push_back(static_cast<uint8_t>(dna_change_count >> (i * 8)));
+    for (int i = 0; i < 4; i++)
+        data.push_back(static_cast<uint8_t>(dna_changes_recent >> (i * 8)));
+
+    return data;  // 53 bytes total (41 + 4+4+4)
 }
 
 TrustScore TrustScore::deserialize(const std::vector<uint8_t>& data) {
@@ -107,6 +115,19 @@ TrustScore TrustScore::deserialize(const std::vector<uint8_t>& data) {
 
     // challenge_pending
     ts.challenge_pending = data[offset] != 0;
+
+    // Phase 5 fields (backward compatible — old 41-byte data leaves these at 0)
+    if (data.size() >= 53) {
+        offset = 41;
+        for (int i = 0; i < 4; i++)
+            ts.last_dna_change_height |= static_cast<uint32_t>(data[offset + i]) << (i * 8);
+        offset += 4;
+        for (int i = 0; i < 4; i++)
+            ts.dna_change_count |= static_cast<uint32_t>(data[offset + i]) << (i * 8);
+        offset += 4;
+        for (int i = 0; i < 4; i++)
+            ts.dna_changes_recent |= static_cast<uint32_t>(data[offset + i]) << (i * 8);
+    }
 
     return ts;
 }

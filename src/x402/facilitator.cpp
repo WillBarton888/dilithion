@@ -7,6 +7,7 @@
 #include <digital_dna/dna_registry_db.h>
 #include <vdf/vdf.h>
 #include <crypto/sha3.h>
+#include <util/base58.h>
 #include <iostream>
 #include <sstream>
 #include <random>
@@ -257,13 +258,12 @@ std::string CFacilitator::HandleDnaAttest(const std::string& query, const std::s
 
     // Decode the DilV address to get the 20-byte pubkey hash
     // Address format: Base58Check(0x1E || hash20)
-    // We need the raw 20-byte hash to query the trust manager
-    // For now, hash the address string with SHA3 to create a lookup key
-    // (the trust manager is keyed by 20-byte address hash)
-    uint8_t hash1[32];
-    SHA3_256(reinterpret_cast<const uint8_t*>(address.data()), address.size(), hash1);
+    std::vector<uint8_t> decoded;
+    if (!DecodeBase58Check(address, decoded) || decoded.size() != 21 || decoded[0] != 0x1E) {
+        return BuildErrorResponse(400, "Invalid DilV address");
+    }
     std::array<uint8_t, 20> addr_key;
-    std::memcpy(addr_key.data(), hash1, 20);
+    std::memcpy(addr_key.data(), decoded.data() + 1, 20);
 
     // Build attestation response
     DnaTrustAttestation att;
@@ -607,11 +607,27 @@ std::string CFacilitator::HandleSiwxVerify(const std::string& body, const std::s
     uint8_t hash1[32], hash2[32];
     SHA3_256(pubkeyBytes.data(), pubkeyBytes.size(), hash1);
     SHA3_256(hash1, 32, hash2);
-    // hash2[0..20] is the pubkey hash that should be embedded in the address
-    // The address is Base58Check(0x1E || hash20) — we'd need to decode and compare
-    // For simplicity, derive the address from the pubkey and compare strings
-    // (This requires the same Base58Check encoding the wallet uses)
-    // Instead, verify by decoding nonce hex to bytes and checking Dilithium3 sig
+
+    // Decode claimed address to get the expected 20-byte pubkey hash
+    std::vector<uint8_t> addrDecoded;
+    if (!DecodeBase58Check(address, addrDecoded) || addrDecoded.size() != 21 || addrDecoded[0] != 0x1E) {
+        SIWXResult fail;
+        fail.valid = false;
+        fail.address = address;
+        fail.reason = "Invalid DilV address format";
+        fail.network = NETWORK_ID;
+        return BuildHTTPResponse(400, fail.ToJSON());
+    }
+
+    // Compare pubkey hash against address hash
+    if (std::memcmp(hash2, addrDecoded.data() + 1, 20) != 0) {
+        SIWXResult fail;
+        fail.valid = false;
+        fail.address = address;
+        fail.reason = "Public key does not match claimed address";
+        fail.network = NETWORK_ID;
+        return BuildHTTPResponse(400, fail.ToJSON());
+    }
 
     // Step 2: Verify Dilithium3 signature over the nonce
     std::vector<uint8_t> nonceBytes;
