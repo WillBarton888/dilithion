@@ -5100,9 +5100,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             int old_dims = count_dims(*existing);
                                             int new_dims = count_dims(*dna_opt);
                                             if (new_dims > old_dims) {
-                                                g_node_context.dna_registry->update_identity(*dna_opt);
+                                                auto result = g_node_context.dna_registry->update_identity(*dna_opt);
                                                 std::cout << "[DNA] Updated identity: " << old_dims
                                                           << " -> " << new_dims << " dimensions" << std::endl;
+                                                // Phase 5: Apply trust penalty on DNA dimension changes
+                                                if (result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED &&
+                                                    g_node_context.trust_manager) {
+                                                    int rotationHeight = Dilithion::g_chainParams ?
+                                                        Dilithion::g_chainParams->dnaRotationActivationHeight : 999999999;
+                                                    if (curHeight >= rotationHeight) {
+                                                        g_node_context.trust_manager->on_dna_changed(
+                                                            dna_opt->address, static_cast<uint32_t>(curHeight));
+                                                        std::cout << "[DNA] Core dimensions changed at height " << curHeight
+                                                                  << " — trust penalty applied (-10)" << std::endl;
+                                                    }
+                                                }
                                             }
                                         }
                                     }

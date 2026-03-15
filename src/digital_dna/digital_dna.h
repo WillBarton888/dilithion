@@ -31,6 +31,7 @@
 #include "behavioral_profile.h"
 
 #include <array>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -146,6 +147,7 @@ public:
         ALREADY_REGISTERED,
         SYBIL_FLAGGED,      // Advisory: stored but flagged
         UPDATED,             // Progressive enrichment: existing record updated
+        DNA_CHANGED,         // Identity updated with core dimension changes
         INVALID_DNA,
         DB_ERROR
     };
@@ -332,6 +334,25 @@ const std::array<SeedNode, 4>& get_mainnet_seeds();
 
 // Get testnet seed nodes
 const std::array<SeedNode, 3>& get_testnet_seeds();
+
+// Returns true if core identity dimensions changed meaningfully
+// (not just registration_height/timestamp enrichment)
+inline bool core_dimensions_changed(const DigitalDNA& old_dna, const DigitalDNA& new_dna) {
+    // Timing: >10% change in IPS → hardware change
+    if (old_dna.timing.iterations_per_second > 0 && new_dna.timing.iterations_per_second > 0) {
+        double ratio = new_dna.timing.iterations_per_second / old_dna.timing.iterations_per_second;
+        if (ratio < 0.9 || ratio > 1.1) return true;
+    }
+
+    // Latency: median changed by >20ms on any seed → location change
+    size_t min_seeds = std::min(old_dna.latency.seed_stats.size(), new_dna.latency.seed_stats.size());
+    for (size_t i = 0; i < min_seeds; i++) {
+        double diff = std::abs(old_dna.latency.seed_stats[i].median_ms - new_dna.latency.seed_stats[i].median_ms);
+        if (diff > 20.0) return true;
+    }
+
+    return false;
+}
 
 } // namespace digital_dna
 

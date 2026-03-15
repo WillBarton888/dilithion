@@ -243,6 +243,74 @@ void TrustScoreManager::on_sybil_challenge_upheld(const std::array<uint8_t, 20>&
     score.challenge_pending = false;
 }
 
+// Phase 5: Rotation & History
+void TrustScoreManager::on_dna_changed(const std::array<uint8_t, 20>& address, uint32_t height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = scores_.find(address);
+    if (it == scores_.end()) return;
+
+    TrustScore& score = it->second;
+
+    TrustEvent event;
+    event.type = TrustEvent::DNA_CHANGED;
+    event.block_height = height;
+    event.score_delta = -10.0;
+
+    apply_event(score, event, height);
+    score.last_dna_change_height = height;
+    score.dna_change_count++;
+    score.dna_changes_recent++;
+
+    // Check for rapid rotation
+    if (score.dna_changes_recent >= TrustScore::RAPID_ROTATION_THRESHOLD) {
+        on_rapid_rotation(address, height);
+    }
+}
+
+void TrustScoreManager::on_rapid_rotation(const std::array<uint8_t, 20>& address, uint32_t height) {
+    // Note: mutex already held by caller (on_dna_changed)
+    auto it = scores_.find(address);
+    if (it == scores_.end()) return;
+
+    TrustScore& score = it->second;
+
+    TrustEvent event;
+    event.type = TrustEvent::RAPID_ROTATION_FLAGGED;
+    event.block_height = height;
+    event.score_delta = -20.0;
+
+    apply_event(score, event, height);
+}
+
+void TrustScoreManager::on_verification_pass(const std::array<uint8_t, 20>& address, uint32_t height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = scores_.find(address);
+    if (it == scores_.end()) return;
+
+    TrustEvent event;
+    event.type = TrustEvent::VERIFICATION_PASSED;
+    event.block_height = height;
+    event.score_delta = 2.0;
+
+    apply_event(it->second, event, height);
+}
+
+void TrustScoreManager::on_verification_fail(const std::array<uint8_t, 20>& address, uint32_t height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = scores_.find(address);
+    if (it == scores_.end()) return;
+
+    TrustEvent event;
+    event.type = TrustEvent::VERIFICATION_FAILED;
+    event.block_height = height;
+    event.score_delta = -10.0;
+
+    apply_event(it->second, event, height);
+}
+
 TrustScore TrustScoreManager::get_score(const std::array<uint8_t, 20>& address) const {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -331,6 +399,19 @@ bool TrustScoreManager::load(const std::string& path) {
 // --- Private helpers ---
 
 void TrustScoreManager::apply_event(TrustScore& score, const TrustEvent& event, uint32_t height) {
+    // Phase 5: Block positive trust changes during stabilization period
+    // (DNA recently changed — trust must re-earn from current level)
+    if (event.score_delta > 0 && score.is_stabilizing(height)) {
+        record_event(score, event);  // Record but don't apply
+        return;
+    }
+
+    // Decay recent rotation counter if window has passed
+    if (score.dna_changes_recent > 0 && score.last_dna_change_height > 0 &&
+        height > score.last_dna_change_height + TrustScore::RAPID_ROTATION_WINDOW) {
+        score.dna_changes_recent = 0;
+    }
+
     score.current_score += event.score_delta;
     if (event.score_delta > 0) {
         score.lifetime_earned += event.score_delta;

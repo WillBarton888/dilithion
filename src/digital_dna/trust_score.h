@@ -38,6 +38,11 @@ struct TrustEvent {
         SYBIL_CHALLENGE_CLEARED,    // +2.0 (vindicated after challenge)
         SYBIL_CHALLENGE_UPHELD,     // Score zeroed (identity is Sybil)
         REGISTRATION_COMPLETE,      // +0.0 (start at zero)
+        // Phase 5: Rotation & History
+        DNA_CHANGED,                // -10.0 per DNA change (anti-laundering)
+        RAPID_ROTATION_FLAGGED,     // -20.0 for rapid DNA changes (3+ in 2000 blocks)
+        VERIFICATION_PASSED,        // +2.0 (Phase 2 attestation pass)
+        VERIFICATION_FAILED,        // -10.0 (Phase 2 attestation fail)
     };
 
     Type type;
@@ -56,6 +61,20 @@ struct TrustScore {
     uint32_t missed_heartbeats = 0;
     uint32_t blocks_relayed = 0;
     bool challenge_pending = false;
+
+    // Phase 5: Rotation tracking
+    uint32_t last_dna_change_height = 0;   // Height of last DNA dimension change
+    uint32_t dna_change_count = 0;         // Total DNA changes
+    uint32_t dna_changes_recent = 0;       // Changes in last RAPID_ROTATION_WINDOW blocks
+
+    static constexpr uint32_t STABILIZATION_PERIOD = 500;       // Blocks after DNA change
+    static constexpr uint32_t RAPID_ROTATION_WINDOW = 2000;     // ~5.5 days
+    static constexpr uint32_t RAPID_ROTATION_THRESHOLD = 3;     // Changes within window
+
+    bool is_stabilizing(uint32_t current_height) const {
+        if (last_dna_change_height == 0) return false;
+        return (current_height - last_dna_change_height) < STABILIZATION_PERIOD;
+    }
 
     // Recent events (last 50 for diagnostics)
     std::vector<TrustEvent> recent_events;
@@ -119,6 +138,14 @@ public:
     void on_sybil_challenge(const std::array<uint8_t, 20>& address, uint32_t height);
     void on_sybil_challenge_cleared(const std::array<uint8_t, 20>& address, uint32_t height);
     void on_sybil_challenge_upheld(const std::array<uint8_t, 20>& address, uint32_t height);
+
+    // Phase 5: Rotation & History
+    void on_dna_changed(const std::array<uint8_t, 20>& address, uint32_t height);
+    void on_rapid_rotation(const std::array<uint8_t, 20>& address, uint32_t height);
+
+    // Phase 2: Verification events
+    void on_verification_pass(const std::array<uint8_t, 20>& address, uint32_t height);
+    void on_verification_fail(const std::array<uint8_t, 20>& address, uint32_t height);
 
     // --- Queries ---
 

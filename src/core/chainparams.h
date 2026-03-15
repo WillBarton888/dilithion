@@ -211,6 +211,10 @@ public:
     // are influenced by DNA trust scores. Purely P2P policy — no consensus impact.
     int trustWeightedNetworkHeight;
 
+    // Phase 5: DNA rotation detection activation height
+    // After this height: DNA changes trigger trust penalties and stabilization
+    int dnaRotationActivationHeight;
+
     // Compact encoding fix activation height
     // Before this height: BigToCompact has a sign bit bug where bit 23 of the
     // mantissa collides with the sign bit, causing ~2x difficulty corruption on

@@ -565,8 +565,11 @@ IDNARegistry::RegisterResult DigitalDNARegistry::update_identity(const DigitalDN
         return RegisterResult::INVALID_DNA;  // Must be registered first
     }
 
+    // Phase 5: Detect core dimension changes
+    bool dimensionsChanged = core_dimensions_changed(*it, dna);
+
     *it = dna;  // Replace with enriched version
-    return RegisterResult::UPDATED;
+    return dimensionsChanged ? RegisterResult::DNA_CHANGED : RegisterResult::UPDATED;
 }
 
 bool DigitalDNARegistry::is_registered(const std::array<uint8_t, 20>& address) const {

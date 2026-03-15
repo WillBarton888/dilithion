@@ -174,6 +174,12 @@ IDNARegistry::RegisterResult DNARegistryDB::update_identity(const DigitalDNA& dn
     auto oldDna = DigitalDNA::deserialize(
         std::vector<uint8_t>(existing.begin(), existing.end()));
 
+    // Phase 5: Detect core dimension changes
+    bool dimensionsChanged = false;
+    if (oldDna) {
+        dimensionsChanged = core_dimensions_changed(*oldDna, dna);
+    }
+
     uint64_t now = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
@@ -203,7 +209,7 @@ IDNARegistry::RegisterResult DNARegistryDB::update_identity(const DigitalDNA& dn
     }
 
     cache_[dna.address] = dna;
-    return RegisterResult::UPDATED;
+    return dimensionsChanged ? RegisterResult::DNA_CHANGED : RegisterResult::UPDATED;
 }
 
 bool DNARegistryDB::is_registered(const std::array<uint8_t, 20>& address) const {
