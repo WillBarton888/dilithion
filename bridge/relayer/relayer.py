@@ -522,7 +522,7 @@ class BridgeRelayer:
 
             try:
                 rpc = self.chain_config[chain]["rpc"]
-                # sendtoaddress expects coins (float), not satoshis
+                # sendtoaddress expects coins (float), not ions/volts
                 refund_coins = refund_amount / 1e8
                 refund_txid = rpc.send_to_address(sender, refund_coins)
                 logger.info(

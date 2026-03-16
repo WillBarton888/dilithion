@@ -159,8 +159,8 @@ def main():
     args = parser.parse_args()
 
     CHAIN_CONFIG = {
-        "dil":  {"bridge": "DPW8h76TAGwj569LgbdLCAFUcgixMuoBWc", "rpc_port": 8332, "coin": "DIL"},
-        "dilv": {"bridge": "DESyLBcZYDU1jrE2o1GuQkdiuiwk2An6Sn", "rpc_port": 9332, "coin": "DilV"},
+        "dil":  {"bridge": "DNaTbwZgm6x23zf4DnJm4vjEG2qGc6cinx", "rpc_port": 8332, "coin": "DIL"},
+        "dilv": {"bridge": "DTHGN3XiZ9LRxHVPUWMumX8B9q6B4BuPdp", "rpc_port": 9332, "coin": "DilV"},
     }
     cfg = CHAIN_CONFIG[args.chain]
 
