@@ -117,6 +117,12 @@ class BridgeRelayer:
             os.path.join(os.path.dirname(__file__), "bridge_state.db")
         )
 
+        # Retired bridge addresses to watch for misdirected deposits
+        self.retired_addresses = {
+            "dil":  config.RETIRED_DIL_BRIDGE_ADDRESSES,
+            "dilv": config.RETIRED_DILV_BRIDGE_ADDRESSES,
+        }
+
         # Chain config mapping
         self.chain_config = {
             "dil": {
@@ -299,6 +305,7 @@ class BridgeRelayer:
                     self._check_tx_for_deposit(
                         chain, txid, tx, height, block_hash, bridge_addr
                     )
+                    self._check_tx_for_retired_deposit(chain, txid, tx, height)
 
             self.db.set_sync_state(chain, height, block_hash)
 
@@ -409,6 +416,46 @@ class BridgeRelayer:
             logger.info(
                 f"[{chain}] New deposit: {deposit_amount / 1e8:.8f} {coin} "
                 f"-> {base_address} (tx: {txid[:16]}... height: {height})"
+            )
+
+    def _check_tx_for_retired_deposit(self, chain: str, txid: str, tx: dict, height: int):
+        """Alert if a deposit was sent to a retired (old) bridge address.
+
+        These funds cannot be processed automatically — the operator must
+        manually mint wTokens for the affected user.
+        """
+        retired = self.retired_addresses.get(chain, [])
+        if not retired:
+            return
+
+        vouts = tx.get("vout", [])
+        for vout in vouts:
+            addr = vout.get("address", "")
+            if addr not in retired:
+                continue
+
+            # Found a payment to a retired address — extract amount and OP_RETURN
+            value = vout.get("value", 0)
+            amount = int(round(value * 1e8)) if isinstance(value, float) and value < 1e9 else int(value)
+            coin = self.chain_config[chain]["coin"]
+
+            # Try to parse the OP_RETURN for the destination Base address
+            base_address = None
+            for v in vouts:
+                spk = v.get("scriptPubKey", "")
+                spk_hex = spk if isinstance(spk, str) else spk.get("hex", "")
+                base_address = self._parse_bridge_op_return(spk_hex)
+                if base_address:
+                    break
+
+            logger.error(
+                f"[{chain}] *** RETIRED ADDRESS DEPOSIT DETECTED ***\n"
+                f"  TxID:         {txid}\n"
+                f"  Amount:       {amount / 1e8:.8f} {coin}\n"
+                f"  Sent to:      {addr}  (RETIRED — funds unrecoverable by relayer)\n"
+                f"  Base address: {base_address or 'NOT FOUND — check OP_RETURN manually'}\n"
+                f"  Height:       {height}\n"
+                f"  ACTION:       Manually call mint() on the w{coin} contract to make user whole."
             )
 
     def _parse_bridge_op_return(self, spk_hex: str) -> str | None:

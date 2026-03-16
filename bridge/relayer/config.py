@@ -29,6 +29,14 @@ WDILV_CONTRACT = os.getenv("WDILV_CONTRACT", "")
 DIL_BRIDGE_ADDRESS  = os.getenv("DIL_BRIDGE_ADDRESS",  "")
 DILV_BRIDGE_ADDRESS = os.getenv("DILV_BRIDGE_ADDRESS", "")
 
+# ── Retired bridge addresses (comma-separated) ───────────────────────
+# Deposits sent here are unrecoverable but we alert loudly so the operator
+# can manually mint wTokens for affected users.
+_retired_dil  = os.getenv("RETIRED_DIL_BRIDGE_ADDRESSES",  "DPW8h76TAGwj569LgbdLCAFUcgixMuoBWc")
+_retired_dilv = os.getenv("RETIRED_DILV_BRIDGE_ADDRESSES", "DESyLBcZYDU1jrE2o1GuQkdiuiwk2An6Sn")
+RETIRED_DIL_BRIDGE_ADDRESSES  = [a.strip() for a in _retired_dil.split(",")  if a.strip()]
+RETIRED_DILV_BRIDGE_ADDRESSES = [a.strip() for a in _retired_dilv.split(",") if a.strip()]
+
 # ── Confirmation thresholds ──────────────────────────────────────────
 DIL_CONFIRMATIONS  = int(os.getenv("DIL_CONFIRMATIONS",  "6"))    # ~24 min
 DILV_CONFIRMATIONS = int(os.getenv("DILV_CONFIRMATIONS", "3"))    # ~2 min (VDF makes deep forks near-impossible)
