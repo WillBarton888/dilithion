@@ -176,5 +176,16 @@ void ThreadSafeError(const char* format, ...);
 // Get reference to console mutex (for advanced use cases)
 std::mutex& GetConsoleMutex();
 
+/**
+ * Install timestamping stream buffers on std::cout and std::cerr.
+ *
+ * After calling this, every line written directly to std::cout or std::cerr
+ * (e.g. from API, consensus, net, wallet code) will automatically be prefixed
+ * with a "YYYY-MM-DD HH:MM:SS " timestamp — no changes needed at call sites.
+ *
+ * Call once, immediately after CLogger::Initialize().
+ */
+void InstallTimestampedStreams();
+
 #endif // DILITHION_UTIL_LOGGING_H
 

@@ -1802,6 +1802,7 @@ int main(int argc, char* argv[]) {
     if (!CLogger::GetInstance().Initialize(config.datadir)) {
         std::cerr << "Warning: Failed to initialize logging system" << std::endl;
     }
+    InstallTimestampedStreams();
     LogPrintf(ALL, INFO, "Dilithion Node starting");
     LogPrintf(ALL, INFO, "Data directory: %s", config.datadir.c_str());
     LogPrintf(ALL, INFO, "P2P port: %d", config.p2pport);

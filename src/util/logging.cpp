@@ -331,6 +331,59 @@ std::mutex& GetConsoleMutex() {
     return GetConsoleMutexInternal();
 }
 
+// ── Timestamped stream buffer ─────────────────────────────────────────────
+// Wraps std::cout / std::cerr so every new line gets a timestamp prefix.
+// Zero changes required at call sites.
+class TimestampedStreamBuf : public std::streambuf {
+public:
+    TimestampedStreamBuf(std::streambuf* orig, std::mutex& mtx)
+        : m_orig(orig), m_mtx(mtx), m_newline(true) {}
+
+private:
+    std::streambuf* m_orig;
+    std::mutex&     m_mtx;
+    bool            m_newline;
+
+    static std::string Now() {
+        std::time_t t = std::time(nullptr);
+        std::tm tm_buf;
+#ifdef _WIN32
+        localtime_s(&tm_buf, &t);
+#else
+        localtime_r(&t, &tm_buf);
+#endif
+        char buf[24];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+        return buf;
+    }
+
+    int overflow(int c) override {
+        if (c == EOF) return EOF;
+        std::lock_guard<std::mutex> lock(m_mtx);
+        if (m_newline) {
+            std::string prefix = Now() + " ";
+            m_orig->sputn(prefix.c_str(), static_cast<std::streamsize>(prefix.size()));
+            m_newline = false;
+        }
+        if (c == '\n') m_newline = true;
+        return m_orig->sputc(static_cast<char>(c));
+    }
+
+    int sync() override { return m_orig->pubsync(); }
+};
+
+// Intentionally leaked — must outlive the process
+static TimestampedStreamBuf* g_cout_buf = nullptr;
+static TimestampedStreamBuf* g_cerr_buf = nullptr;
+
+void InstallTimestampedStreams() {
+    if (g_cout_buf) return;  // already installed
+    g_cout_buf = new TimestampedStreamBuf(std::cout.rdbuf(), GetConsoleMutexInternal());
+    g_cerr_buf = new TimestampedStreamBuf(std::cerr.rdbuf(), GetConsoleMutexInternal());
+    std::cout.rdbuf(g_cout_buf);
+    std::cerr.rdbuf(g_cerr_buf);
+}
+
 void ThreadSafeLog(const char* format, ...) {
     char buffer[4096];
     va_list args;
