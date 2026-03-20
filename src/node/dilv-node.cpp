@@ -5391,13 +5391,38 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  [OK] Trust score callback wired for P2P layer" << std::endl;
         }
 
-        // Load persistent total blocks mined counter
+        // Count blocks mined by scanning chain for our MIK identity
+        // This is always accurate, even after reorgs or forks.
         {
-            std::ifstream ifs(blocksMined_path);
+            DFMP::Identity ourMik = wallet.GetMIKIdentity();
             uint64_t totalMined = 0;
-            if (ifs >> totalMined) {
+            if (!ourMik.IsNull()) {
+                CBlockIndex* pindexTip = g_chainstate.GetTip();
+                int chainHeight = pindexTip ? pindexTip->nHeight : 0;
+                std::cout << "  Counting blocks mined by our MIK..." << std::flush;
+                for (int h = 1; h <= chainHeight; h++) {
+                    std::vector<uint256> hashes = g_chainstate.GetBlocksAtHeight(h);
+                    if (hashes.empty()) continue;
+                    CBlock blk;
+                    if (!blockchain.ReadBlock(hashes[0], blk)) continue;
+                    std::array<uint8_t, 20> blockMik{};
+                    if (!ExtractCoinbaseMIKIdentity(blk, blockMik)) continue;
+                    if (std::memcmp(blockMik.data(), ourMik.data, 20) == 0) {
+                        totalMined++;
+                    }
+                }
                 rpc_server.SetTotalBlocksMined(totalMined);
-                std::cout << " (lifetime blocks mined: " << totalMined << ")";
+                std::cout << " " << totalMined << " blocks found" << std::endl;
+                // Update persistent file to match
+                std::ofstream ofs(blocksMined_path, std::ios::trunc);
+                if (ofs) ofs << totalMined;
+            } else {
+                // No MIK yet — fall back to persisted file
+                std::ifstream ifs(blocksMined_path);
+                if (ifs >> totalMined) {
+                    rpc_server.SetTotalBlocksMined(totalMined);
+                    std::cout << " (lifetime blocks mined: " << totalMined << ")" << std::endl;
+                }
             }
         }
 
