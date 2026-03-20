@@ -385,8 +385,8 @@ ChainParams ChainParams::DilV() {
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
     params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
     params.dfmpCooldownConsensusHeight = 8500; // Consensus-enforced cooldown (moved from 7700: blocks 7700-8400 mined during stall violate cooldown)
-    params.stallExemptionV2Height = 25660;     // Tightened stall exemption: 600s + different miner (~1 day notice)
-    params.consecutiveMinerCheckHeight = 25660; // Reject >3 consecutive blocks from same miner
+    params.stallExemptionV2Height = 27200;     // Tightened stall exemption: 600s + different miner (~2 day notice)
+    params.consecutiveMinerCheckHeight = 27200; // Reject >3 consecutive blocks from same miner
     params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on DilV
