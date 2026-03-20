@@ -71,6 +71,9 @@ enum class MisbehaviorType : uint16_t {
     INVALID_HANDSHAKE = 502,         // Invalid version handshake
     DUPLICATE_VERSION = 503,         // Sent version message twice
     INVALID_GENESIS = 504,           // Peer on different blockchain (wrong genesis hash)
+
+    // Fork violations (20 points)
+    EXCESSIVE_FORK_BLOCKS = 600,     // Peer relays many blocks on competing chains
 };
 
 /**
@@ -110,6 +113,7 @@ inline const char* MisbehaviorTypeToString(MisbehaviorType type) {
         case MisbehaviorType::INVALID_HANDSHAKE: return "invalid_handshake";
         case MisbehaviorType::DUPLICATE_VERSION: return "duplicate_version";
         case MisbehaviorType::INVALID_GENESIS: return "invalid_genesis";
+        case MisbehaviorType::EXCESSIVE_FORK_BLOCKS: return "excessive_fork_blocks";
         default: return "unknown";
     }
 }
@@ -138,6 +142,7 @@ inline int GetMisbehaviorScore(MisbehaviorType type) {
         case MisbehaviorType::INVALID_HANDSHAKE: return 20;
         case MisbehaviorType::DUPLICATE_VERSION: return 20;
         case MisbehaviorType::INVALID_GENESIS: return 20;  // Likely innocent - user hasn't updated binary
+        case MisbehaviorType::EXCESSIVE_FORK_BLOCKS: return 20;  // 5 incidents (100 pts) → ban
 
         // Severe violations (100 points - immediate ban)
         case MisbehaviorType::INVALID_BLOCK_HEADER: return 100;

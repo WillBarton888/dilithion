@@ -9,6 +9,8 @@
 #include <dfmp/mik.h>
 #include <core/chainparams.h>
 #include <digital_dna/digital_dna.h>
+#include <node/blockchain_storage.h>
+#include <node/block_index.h>
 #include <crypto/sha3.h>
 #include <cstring>
 #include <iostream>
@@ -239,6 +241,81 @@ bool CheckVDFCooldown(
             << ", active miners: " << activeMiners
             << ", height: " << height
             << ", gap: " << (height - lastWin) << ")";
+        error = oss.str();
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// CheckConsecutiveMiner  (consensus-enforced — hard fork)
+// ---------------------------------------------------------------------------
+
+bool CheckConsecutiveMiner(
+    const CBlock& block,
+    const CBlockIndex* pindex,
+    CBlockchainDB* db,
+    CCooldownTracker& tracker,
+    std::string& error)
+{
+    static constexpr int MAX_CONSECUTIVE_SAME_MINER = 3;
+
+    // Gate: only enforce after activation height
+    int activationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->consecutiveMinerCheckHeight : 999999999;
+    if (pindex->nHeight < activationHeight)
+        return true;
+
+    // Only applies to VDF blocks
+    if (!block.IsVDFBlock())
+        return true;
+
+    // Extract this block's miner identity first (needed for solo check below)
+    std::array<uint8_t, 20> currentMik{};
+    if (!ExtractCoinbaseMIKIdentity(block, currentMik)) {
+        error = "CheckConsecutiveMiner: cannot extract MIK identity";
+        return false;
+    }
+
+    // Solo miner exemption — a lone miner must be able to keep the chain alive.
+    // Force recalc at this height to avoid stale cache (Cursor review finding #2).
+    tracker.IsInCooldown(currentMik, pindex->nHeight);
+    int activeMiners = tracker.GetActiveMiners();
+    if (activeMiners <= 1)
+        return true;
+
+    // Walk back through parent chain, counting consecutive same-miner blocks
+    int consecutiveCount = 0;
+    const CBlockIndex* pWalk = pindex->pprev;
+
+    while (pWalk && consecutiveCount < MAX_CONSECUTIVE_SAME_MINER && db) {
+        CBlock prevBlock;
+        if (!db->ReadBlock(pWalk->GetBlockHash(), prevBlock))
+            break;
+
+        std::array<uint8_t, 20> prevMik{};
+        if (!ExtractCoinbaseMIKIdentity(prevBlock, prevMik))
+            break;
+
+        if (prevMik != currentMik)
+            break;
+
+        consecutiveCount++;
+        pWalk = pWalk->pprev;
+    }
+
+    if (consecutiveCount >= MAX_CONSECUTIVE_SAME_MINER) {
+        std::ostringstream oss;
+        oss << "CheckConsecutiveMiner: MIK ";
+        for (int i = 0; i < 4; ++i) {
+            char hex[3];
+            snprintf(hex, sizeof(hex), "%02x", currentMik[i]);
+            oss << hex;
+        }
+        oss << "... has mined " << (consecutiveCount + 1)
+            << " consecutive blocks (max " << MAX_CONSECUTIVE_SAME_MINER
+            << ", active miners: " << activeMiners << ")";
         error = oss.str();
         return false;
     }

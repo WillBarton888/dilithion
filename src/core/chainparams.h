@@ -170,6 +170,21 @@ public:
     // 999999999 = disabled
     int dfmpCooldownConsensusHeight;
 
+    // Tightened stall exemption activation height (HARD FORK)
+    // After this height: stall threshold raised from 300s to 600s AND
+    // stall bypass requires a different miner from the previous block
+    // (unless only 1 active miner exists — solo mining scenario).
+    // Prevents private fork mining via stall exemption abuse.
+    // 999999999 = disabled
+    int stallExemptionV2Height;
+
+    // Consecutive miner check activation height (HARD FORK)
+    // After this height: reject VDF blocks where the same MIK identity
+    // has mined more than 3 consecutive blocks (unless solo mining).
+    // Prevents private fork chain construction by a single miner.
+    // 999999999 = disabled
+    int consecutiveMinerCheckHeight;
+
     // Coinbase maturity (blocks before mining rewards are spendable)
     // DIL mainnet/testnet: 100 (PoW reorg safety)
     // DilV: 6 (VDF is deterministic/sequential — reorgs are virtually impossible)

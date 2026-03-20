@@ -47,6 +47,50 @@ struct NodeState {
 extern CChainState g_chainstate;
 extern NodeState g_node_state;
 
+// ---------------------------------------------------------------------------
+// Per-peer fork block tracking (P2P policy, NOT consensus)
+// ---------------------------------------------------------------------------
+// Tracks how many competing-chain blocks each peer relays. If a peer relays
+// too many fork blocks (>10 in a 5-minute window), it receives a misbehavior
+// penalty.  This deters private fork mining and broadcasting.
+static struct PeerForkTracker {
+    std::mutex mutex;
+    std::map<int, int> counts;  // peer_id -> fork block count
+    std::chrono::steady_clock::time_point lastDecay;
+
+    static constexpr int THRESHOLD = 10;           // Fork blocks before penalty
+    static constexpr int DECAY_INTERVAL_SEC = 300;  // Decay every 5 minutes
+
+    void RecordForkBlock(int peerId, NodeContext& ctx) {
+        bool shouldPenalize = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+
+            // Periodic decay: halve all counters every 5 minutes
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDecay).count() >= DECAY_INTERVAL_SEC) {
+                for (auto& [id, count] : counts) {
+                    count /= 2;
+                }
+                lastDecay = now;
+            }
+
+            counts[peerId]++;
+            if (counts[peerId] >= THRESHOLD) {
+                std::cout << "[ForkTracker] Peer " << peerId
+                          << " relayed " << counts[peerId]
+                          << " fork blocks — applying misbehavior penalty" << std::endl;
+                counts[peerId] = 0;  // Reset after penalty
+                shouldPenalize = true;
+            }
+        }
+        // Call Misbehaving outside the mutex to avoid lock-order risks
+        if (shouldPenalize && ctx.peer_manager) {
+            ctx.peer_manager->Misbehaving(peerId, 0, MisbehaviorType::EXCESSIVE_FORK_BLOCKS);
+        }
+    }
+} s_forkTracker;
+
 // Chain tip update callback (set by main node at startup)
 static ChainTipUpdateCallback g_chain_tip_callback = nullptr;
 
@@ -863,6 +907,11 @@ BlockProcessResult ProcessNewBlock(
                 } else if (ctx.headers_manager && !ctx.headers_manager->IsHeaderSyncInProgress()) {
                     std::cout << "[ProcessNewBlock] Competing fork detected (parent "
                               << block.hashPrevBlock.GetHex().substr(0, 16) << " unknown) - requesting headers" << std::endl;
+
+                    // Track per-peer fork block relay for misbehavior scoring
+                    if (peer_id >= 0) {
+                        s_forkTracker.RecordForkBlock(peer_id, ctx);
+                    }
 
                     // Use pure locator from our tip to find common ancestor
                     ctx.headers_manager->RequestHeaders(peer_id, uint256());  // null = use our tip's locator

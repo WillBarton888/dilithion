@@ -140,4 +140,30 @@ bool CheckDNAHashEquality(
     std::string& error
 );
 
+// Forward declaration
+class CBlockchainDB;
+class CBlockIndex;
+
+/**
+ * Check for consecutive same-miner blocks (hard fork).
+ *
+ * After consecutiveMinerCheckHeight, rejects VDF blocks where the same
+ * MIK identity has mined more than MAX_CONSECUTIVE_SAME_MINER consecutive
+ * blocks. Exception: solo miner (1 active miner in cooldown window).
+ *
+ * @param block         The candidate VDF block
+ * @param pindex        Block index with parent chain linkage
+ * @param db            Blockchain database (to load previous blocks)
+ * @param tracker       Cooldown tracker (for active miner count)
+ * @param error         Human-readable error string on failure
+ * @return true if block passes consecutive miner check
+ */
+bool CheckConsecutiveMiner(
+    const CBlock& block,
+    const CBlockIndex* pindex,
+    CBlockchainDB* db,
+    CCooldownTracker& tracker,
+    std::string& error
+);
+
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

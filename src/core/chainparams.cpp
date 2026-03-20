@@ -117,6 +117,8 @@ ChainParams ChainParams::Mainnet() {
     params.vdfMinBlockTime = 180;       // 3 minutes: ensures all miners finish VDF
     params.vdfCooldownActiveWindow = 360; // 360 × 240s ≈ 24 hours
     params.dfmpCooldownConsensusHeight = 999999999; // Disabled (VDF not active on mainnet)
+    params.stallExemptionV2Height = 999999999;     // Disabled (VDF not active on mainnet)
+    params.consecutiveMinerCheckHeight = 999999999; // Disabled (VDF not active on mainnet)
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): disabled until fork is scheduled
@@ -267,6 +269,8 @@ ChainParams ChainParams::Testnet() {
     params.vdfMinBlockTime = 25;        // 25 seconds minimum between blocks
     params.vdfCooldownActiveWindow = 360; // 360 × 60s ≈ 6 hours (fast testnet)
     params.dfmpCooldownConsensusHeight = 999999999; // Disabled until testnet VDF stabilizes
+    params.stallExemptionV2Height = 999999999;     // Disabled until testnet VDF stabilizes
+    params.consecutiveMinerCheckHeight = 999999999; // Disabled until testnet VDF stabilizes
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on testnet
@@ -381,6 +385,8 @@ ChainParams ChainParams::DilV() {
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
     params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
     params.dfmpCooldownConsensusHeight = 8500; // Consensus-enforced cooldown (moved from 7700: blocks 7700-8400 mined during stall violate cooldown)
+    params.stallExemptionV2Height = 25660;     // Tightened stall exemption: 600s + different miner (~1 day notice)
+    params.consecutiveMinerCheckHeight = 25660; // Reject >3 consecutive blocks from same miner
     params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on DilV

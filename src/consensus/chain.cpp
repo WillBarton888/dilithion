@@ -5,7 +5,8 @@
 #include <consensus/pow.h>
 #include <consensus/reorg_wal.h>  // P1-4: WAL for atomic reorgs
 #include <consensus/validation.h> // BUG #109 FIX: DeserializeBlockTransactions
-#include <consensus/vdf_validation.h> // CheckVDFCooldown (consensus-enforced cooldown)
+#include <consensus/vdf_validation.h> // CheckVDFCooldown, CheckConsecutiveMiner
+#include <vdf/cooldown_tracker.h>  // CCooldownTracker full definition
 #include <core/chainparams.h>     // MAINNET: Checkpoint validation
 #include <core/node_context.h>    // g_node_context.cooldown_tracker
 #include <node/blockchain_storage.h>
@@ -854,14 +855,68 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // bypassing the voluntary miner-side cooldown.
         //
         // STALL EXEMPTION: If the timestamp gap between this block and its
-        // parent is >= 300s (5 min), bypass cooldown enforcement.  During a
+        // parent is large enough, bypass cooldown enforcement.  During a
         // stall all miners may be in cooldown, creating a permanent deadlock
         // where no block can ever be produced (BUG #274).
+        //
+        // V2 (stallExemptionV2Height): Threshold raised from 300s to 600s.
+        // Additionally, stall bypass requires a different miner from the
+        // previous block (unless solo mining).  Prevents private fork mining
+        // via repeated stall exemption abuse.
         if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
             bool chainStalled = false;
             if (pindex->pprev) {
                 int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
-                chainStalled = (gap >= 300);
+
+                int stallV2Height = Dilithion::g_chainParams ?
+                    Dilithion::g_chainParams->stallExemptionV2Height : 999999999;
+
+                if (pindex->nHeight >= stallV2Height) {
+                    // V2: Two-tier stall exemption to prevent private fork mining
+                    // while avoiding deadlocks during genuine long stalls.
+                    //
+                    // Tier 1 (600-1199s): bypass cooldown ONLY if different miner
+                    //   (or solo miner).  Blocks the ~384s attack pattern.
+                    // Tier 2 (1200s+): bypass cooldown unconditionally.
+                    //   Prevents permanent deadlock when only the previous miner
+                    //   is available during a genuine extended stall.
+                    static constexpr int64_t STALL_THRESHOLD_V2 = 600;
+                    static constexpr int64_t STALL_UNCONDITIONAL = 1200;
+                    chainStalled = (gap >= STALL_THRESHOLD_V2);
+
+                    if (chainStalled && gap < STALL_UNCONDITIONAL) {
+                        // Tier 1: require different miner (unless solo)
+                        std::array<uint8_t, 20> currentMik{};
+                        std::array<uint8_t, 20> prevMik{};
+                        bool haveCurrent = ExtractCoinbaseMIKIdentity(block, currentMik);
+
+                        CBlock prevBlock;
+                        bool havePrev = false;
+                        if (pdb != nullptr) {
+                            havePrev = pdb->ReadBlock(pindex->pprev->GetBlockHash(), prevBlock);
+                            if (havePrev) {
+                                havePrev = ExtractCoinbaseMIKIdentity(prevBlock, prevMik);
+                            }
+                        }
+
+                        if (haveCurrent && havePrev && currentMik == prevMik) {
+                            // Same miner — force recalc of active miners at this
+                            // height (fixes stale cache issue in stall path)
+                            g_node_context.cooldown_tracker->IsInCooldown(currentMik, pindex->nHeight);
+                            int activeMiners = g_node_context.cooldown_tracker->GetActiveMiners();
+                            if (activeMiners > 1) {
+                                chainStalled = false;  // Reject stall exemption
+                                std::cout << "[Chain] Block " << pindex->nHeight
+                                          << ": stall exemption DENIED (same miner as prev, "
+                                          << activeMiners << " active miners)" << std::endl;
+                            }
+                        }
+                    }
+                    // Tier 2 (gap >= 1200s): chainStalled stays true unconditionally
+                } else {
+                    // Legacy: 300s threshold, no miner check
+                    chainStalled = (gap >= 300);
+                }
             }
 
             if (chainStalled) {
@@ -883,6 +938,28 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                     }
                     return false;
                 }
+            }
+        }
+
+        // ====================================================================
+        // CONSECUTIVE MINER CHECK (hard fork at consecutiveMinerCheckHeight)
+        // ====================================================================
+        // After activation, reject VDF blocks where the same MIK identity
+        // has mined more than 3 consecutive blocks.  Prevents private fork
+        // chain construction by a single miner.  Solo miner exemption applies.
+        if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+            std::string consecError;
+            if (!CheckConsecutiveMiner(block, pindex, pdb,
+                                       *g_node_context.cooldown_tracker, consecError)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " REJECTED: consecutive miner violation" << std::endl;
+                std::cerr << "[Chain] " << consecError << std::endl;
+
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
+                return false;
             }
         }
 

@@ -187,8 +187,9 @@ void CVDFMiner::MiningLoop()
             // Chain stall detection: if no block has been produced for a long
             // time, bypass cooldown so the chain can recover.  Without this,
             // a stall is permanent — height never advances so cooldowns never
-            // expire.  Threshold: 5 minutes (well above normal ~45s block time).
-            static constexpr int STALL_THRESHOLD_SEC = 300;
+            // expire.  Threshold: 10 minutes (raised from 5 min to match
+            // consensus stallExemptionV2 and prevent private fork mining).
+            static constexpr int STALL_THRESHOLD_SEC = 600;
             auto now = std::chrono::steady_clock::now();
             auto sinceLastBlock = std::chrono::duration_cast<std::chrono::seconds>(
                 now - m_lastHeightChangeTime).count();
