@@ -134,6 +134,7 @@ class BridgeRelayer:
                 "max_per_deposit": config.MAX_PER_DEPOSIT_DIL,
                 "unit": "ions",
                 "coin": "DIL",
+                "start_height": config.DIL_BRIDGE_START_HEIGHT,
             },
             "dilv": {
                 "rpc": self.dilv_rpc,
@@ -144,6 +145,7 @@ class BridgeRelayer:
                 "max_per_deposit": config.MAX_PER_DEPOSIT_DILV,
                 "unit": "volts",
                 "coin": "DilV",
+                "start_height": config.DILV_BRIDGE_START_HEIGHT,
             },
         }
 
@@ -277,8 +279,12 @@ class BridgeRelayer:
             return
 
         # Get starting height
+        # If we have sync state, resume from where we left off.
+        # If no sync state (fresh DB or reset), start from the bridge start
+        # height — NOT current_height - 100 which would skip deposits.
         sync = self.db.get_sync_state(chain)
-        start_height = (sync[0] + 1) if sync else max(0, current_height - 100)
+        bridge_start = self.chain_config[chain].get("start_height", 0)
+        start_height = (sync[0] + 1) if sync else max(bridge_start, 0)
 
         if start_height > current_height:
             return  # Already up to date

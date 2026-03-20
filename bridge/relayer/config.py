@@ -37,6 +37,14 @@ _retired_dilv = os.getenv("RETIRED_DILV_BRIDGE_ADDRESSES", "DESyLBcZYDU1jrE2o1Gu
 RETIRED_DIL_BRIDGE_ADDRESSES  = [a.strip() for a in _retired_dil.split(",")  if a.strip()]
 RETIRED_DILV_BRIDGE_ADDRESSES = [a.strip() for a in _retired_dilv.split(",") if a.strip()]
 
+# ── Bridge scan start heights ─────────────────────────────────────────
+# When the relayer has no sync state (fresh DB), start scanning from these
+# heights instead of current_height - 100.  This ensures deposits to both
+# current and retired addresses are never missed after a DB reset.
+# Set to the height when the bridge first went live on each chain.
+DIL_BRIDGE_START_HEIGHT  = int(os.getenv("DIL_BRIDGE_START_HEIGHT",  "24000"))
+DILV_BRIDGE_START_HEIGHT = int(os.getenv("DILV_BRIDGE_START_HEIGHT", "8000"))
+
 # ── Confirmation thresholds ──────────────────────────────────────────
 DIL_CONFIRMATIONS  = int(os.getenv("DIL_CONFIRMATIONS",  "6"))    # ~24 min
 DILV_CONFIRMATIONS = int(os.getenv("DILV_CONFIRMATIONS", "3"))    # ~2 min (VDF makes deep forks near-impossible)
