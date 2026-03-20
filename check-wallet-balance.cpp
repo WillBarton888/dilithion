@@ -163,10 +163,8 @@ int main(int argc, char* argv[]) {
             datadirs.push_back(argv[i]);
         }
     } else {
-        // Use default testnet datadirs (with proper paths for this platform)
-        datadirs.push_back(GetFullDataDir(".dilithion-testnet"));
-        datadirs.push_back(GetFullDataDir(".dilithion-testnet-node2"));
-        datadirs.push_back(GetFullDataDir(".dilithion-testnet-node3"));
+        // Use default mainnet datadir
+        datadirs.push_back(GetFullDataDir(".dilithion"));
     }
 
     // Check each wallet
