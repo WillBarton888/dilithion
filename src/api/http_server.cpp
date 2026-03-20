@@ -199,6 +199,7 @@ void CHttpServer::AcceptThread() {
             // Queue is full - send 503 Service Unavailable
             std::cerr << "[HttpServer] Work queue full, rejecting request" << std::endl;
             Send503(client_socket);
+            shutdown(client_socket, SHUT_RDWR);
             close(client_socket);
         }
         // Worker thread will close the socket after handling
@@ -224,7 +225,8 @@ void CHttpServer::WorkerThread() {
             std::cerr << "[HttpServer] Exception handling request: " << e.what() << std::endl;
         }
 
-        // Close client socket
+        // Gracefully close client socket (shutdown prevents CLOSE-WAIT leak)
+        shutdown(client_socket, SHUT_RDWR);
         close(client_socket);
     }
 }

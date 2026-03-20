@@ -554,8 +554,13 @@ void CRPCServer::ServerThread() {
             SSL* ssl = m_ssl_wrapper->AcceptSSL(clientSocket);
             if (!ssl) {
                 // SSL handshake failed
-                std::cerr << "[RPC-SSL] SSL handshake failed: " 
+                std::cerr << "[RPC-SSL] SSL handshake failed: "
                           << m_ssl_wrapper->GetLastError() << std::endl;
+                #ifdef _WIN32
+                shutdown(clientSocket, SD_BOTH);
+                #else
+                shutdown(clientSocket, SHUT_RDWR);
+                #endif
                 closesocket(clientSocket);
                 continue;
             }
@@ -716,16 +721,26 @@ void CRPCServer::HandleClient(int clientSocket) {
         }
     };
     
-    // Phase 3: Helper lambda for sending response and cleaning up
-    auto send_response_and_cleanup = [this, &ssl, clientSocket, &socket_write](const std::string& response) {
-        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
+    // Helper lambda to properly close a client socket (shutdown + close prevents CLOSE-WAIT leak)
+    auto close_client_socket = [this, &ssl, clientSocket]() {
         if (ssl && m_ssl_wrapper) {
             m_ssl_wrapper->SSLShutdown(ssl);
             m_ssl_wrapper->SSLFree(ssl);
             std::lock_guard<std::mutex> lock(m_ssl_mutex);
             m_ssl_connections.erase(clientSocket);
         }
+        #ifdef _WIN32
+        shutdown(clientSocket, SD_BOTH);
+        #else
+        shutdown(clientSocket, SHUT_RDWR);
+        #endif
         closesocket(clientSocket);
+    };
+
+    // Phase 3: Helper lambda for sending response and cleaning up
+    auto send_response_and_cleanup = [&close_client_socket, clientSocket, &socket_write](const std::string& response) {
+        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
+        close_client_socket();
     };
 
     // Check if IP is locked out due to failed auth attempts
@@ -733,16 +748,7 @@ void CRPCServer::HandleClient(int clientSocket) {
         std::string response = BuildHTTPResponse(
             "{\"error\":\"Too many failed authentication attempts. Try again later.\"}"
         );
-        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
-        
-        // Phase 3: Clean up SSL connection
-        if (ssl && m_ssl_wrapper) {
-            m_ssl_wrapper->SSLShutdown(ssl);
-            m_ssl_wrapper->SSLFree(ssl);
-            std::lock_guard<std::mutex> lock(m_ssl_mutex);
-            m_ssl_connections.erase(clientSocket);
-        }
-        closesocket(clientSocket);
+        send_response_and_cleanup(response);
         return;
     }
 
@@ -751,16 +757,7 @@ void CRPCServer::HandleClient(int clientSocket) {
         std::string response = BuildHTTPResponse(
             "{\"error\":\"Rate limit exceeded. Please slow down your requests.\"}"
         );
-        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
-        
-        // Phase 3: Clean up SSL connection
-        if (ssl && m_ssl_wrapper) {
-            m_ssl_wrapper->SSLShutdown(ssl);
-            m_ssl_wrapper->SSLFree(ssl);
-            std::lock_guard<std::mutex> lock(m_ssl_mutex);
-            m_ssl_connections.erase(clientSocket);
-        }
-        closesocket(clientSocket);
+        send_response_and_cleanup(response);
         return;
     }
 
@@ -786,7 +783,8 @@ void CRPCServer::HandleClient(int clientSocket) {
         if (bytesRead <= 0) {
             // Connection closed or error
             if (totalRead == 0) {
-                // No data received at all
+                // No data received at all — close socket to avoid fd leak
+                close_client_socket();
                 return;
             }
             // Partial data received - treat as complete
@@ -879,16 +877,7 @@ void CRPCServer::HandleClient(int clientSocket) {
                                "Connection: close\r\n"
                                "\r\n"
                                "{\"error\":\"Request too large (max 1MB)\",\"code\":-32700}";
-        (void)socket_write(clientSocket, response.c_str(), response.size());  // CID 1675273/1675308: Best-effort
-        
-        // Phase 3: Clean up SSL connection
-        if (ssl && m_ssl_wrapper) {
-            m_ssl_wrapper->SSLShutdown(ssl);
-            m_ssl_wrapper->SSLFree(ssl);
-            std::lock_guard<std::mutex> lock(m_ssl_mutex);
-            m_ssl_connections.erase(clientSocket);
-        }
-        closesocket(clientSocket);
+        send_response_and_cleanup(response);
         return;
     }
 
@@ -1118,7 +1107,7 @@ void CRPCServer::HandleClient(int clientSocket) {
                                "Connection: close\r\n"
                                "\r\n"
                                "{\"error\":\"JSON-RPC body too large (max 64KB)\",\"code\":-32700}";
-        send(clientSocket, response.c_str(), response.size(), 0);
+        send_response_and_cleanup(response);
         return;
     }
 
@@ -1374,12 +1363,12 @@ void CRPCServer::HandleClient(int clientSocket) {
         );
 
         response += SerializeResponse(rpcResp);
-        send(clientSocket, response.c_str(), response.size(), 0);
 
         // Audit log authorization failure
         std::cout << "[RPC-AUTHORIZATION-DENIED] " << clientIP << " user '" << username
                   << "' (role: " << CRPCPermissions::GetRoleName(userPermissions)
                   << ") attempted to call " << rpcReq.method << " - DENIED" << std::endl;
+        send_response_and_cleanup(response);
         return;
     }
 
