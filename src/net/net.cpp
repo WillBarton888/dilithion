@@ -542,9 +542,13 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
 
         // Protocol version negotiation (Bitcoin Core pattern)
         // Reject peers with incompatible protocol versions
-        if (msg.version < NetProtocol::MIN_PEER_PROTO_VERSION) {
+        // DilV requires v3.8.3+ (70007) due to fork defense consensus changes
+        int minProtoVersion = (NetProtocol::g_network_magic == NetProtocol::DILV_MAGIC)
+            ? NetProtocol::DILV_MIN_PEER_PROTO_VERSION
+            : NetProtocol::MIN_PEER_PROTO_VERSION;
+        if (msg.version < minProtoVersion) {
             LogPrintf(NET, WARN, "Peer %d has incompatible protocol version %d (minimum: %d)",
-                      peer_id, msg.version, NetProtocol::MIN_PEER_PROTO_VERSION);
+                      peer_id, msg.version, minProtoVersion);
             ErrorMessage error = CErrorFormatter::NetworkError("process version message", 
                 "Peer has incompatible protocol version");
             error.severity = ErrorSeverity::WARNING;
@@ -553,7 +557,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             std::cout << "[P2P] CONNECTION REJECTED - OUTDATED SOFTWARE" << std::endl;
             std::cout << "[P2P] ================================================" << std::endl;
             std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") protocol v"
-                      << msg.version << " (minimum required: " << NetProtocol::MIN_PEER_PROTO_VERSION << ")" << std::endl;
+                      << msg.version << " (minimum required: " << minProtoVersion << ")" << std::endl;
             std::cout << "[P2P] " << std::endl;
             std::cout << "[P2P] This peer is running outdated software with incompatible" << std::endl;
             std::cout << "[P2P] consensus rules, which causes fork creation on the network." << std::endl;
@@ -561,7 +565,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             std::cout << "[P2P] Your IP will be temporarily banned for 10 minutes." << std::endl;
             std::cout << "[P2P] " << std::endl;
             std::cout << "[P2P] HOW TO FIX:" << std::endl;
-            std::cout << "[P2P] 1. Download the latest version from https://dilithion.org" << std::endl;
+            std::cout << "[P2P] 1. Download the latest version from https://github.com/dilithion/dilithion" << std::endl;
             std::cout << "[P2P] 2. Stop your node" << std::endl;
             std::cout << "[P2P] 3. Delete blocks/ and chainstate/ (keep wallet.dat!)" << std::endl;
             std::cout << "[P2P] 4. Download the bootstrap from the releases page" << std::endl;
@@ -570,8 +574,8 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             // Send reject message so the peer knows WHY they were banned
             SendRejectMessage(peer_id, "version",
                 "Outdated protocol version " + std::to_string(msg.version) +
-                " (minimum: " + std::to_string(NetProtocol::MIN_PEER_PROTO_VERSION) +
-                "). Banned for 10 minutes. Upgrade at https://dilithion.org",
+                " (minimum: " + std::to_string(minProtoVersion) +
+                "). Banned for 10 minutes. Upgrade at https://github.com/dilithion/dilithion",
                 REJECT_OBSOLETE);
             // Ban for 10 minutes (not 1 hour) - these are miners who need to update, not attackers
             peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_PROTOCOL_VERSION);
