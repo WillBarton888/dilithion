@@ -3,6 +3,7 @@
 
 #include <rpc/server.h>
 #include <rpc/auth.h>
+#include <node/block_processing.h>  // BanMIK/UnbanMIK/ListBannedMIKs
 #include <net/sock.h>
 #include <net/dns.h>
 #include <core/version.h>
@@ -248,6 +249,9 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["setban"] = [this](const std::string& p) { return RPC_SetBan(p); };
     m_handlers["listbanned"] = [this](const std::string& p) { return RPC_ListBanned(p); };
     m_handlers["clearbanned"] = [this](const std::string& p) { return RPC_ClearBanned(p); };
+    m_handlers["banmik"] = [this](const std::string& p) { return RPC_BanMIK(p); };
+    m_handlers["unbanmik"] = [this](const std::string& p) { return RPC_UnbanMIK(p); };
+    m_handlers["listbannedmiks"] = [this](const std::string& p) { return RPC_ListBannedMIKs(p); };
 
     // UTXO set queries
     m_handlers["getholdercount"] = [this](const std::string& p) { return RPC_GetHolderCount(p); };
@@ -5115,6 +5119,75 @@ std::string CRPCServer::RPC_ClearBanned(const std::string& params) {
 
     std::cout << "[RPC] clearbanned: All bans cleared" << std::endl;
     return "null";
+}
+
+// ============================================================================
+// MIK BAN METHODS (node policy, NOT consensus)
+// ============================================================================
+
+std::string CRPCServer::RPC_BanMIK(const std::string& params) {
+    // Parse MIK hex from params: {"mik":"0ce86d786646..."}
+    size_t pos = params.find("\"mik\"");
+    if (pos == std::string::npos) {
+        // Try positional: first quoted string
+        pos = params.find("\"");
+    }
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Usage: banmik {\"mik\":\"<40-char hex>\"}");
+    }
+    size_t q1 = params.find("\"", pos + 1);
+    if (q1 == std::string::npos) q1 = pos;
+    size_t q2 = params.find("\"", q1 + 1);
+    size_t q3 = params.find("\"", q2 + 1);
+    std::string mikHex;
+    if (q3 != std::string::npos) {
+        mikHex = params.substr(q2 + 1, q3 - q2 - 1);
+    } else {
+        mikHex = params.substr(q1 + 1, q2 - q1 - 1);
+    }
+
+    if (mikHex.length() != 40) {
+        throw std::runtime_error("MIK must be 40 hex characters, got " + std::to_string(mikHex.length()));
+    }
+
+    BanMIK(mikHex);
+    std::cout << "[RPC] banmik: Banned MIK " << mikHex.substr(0, 12) << "..." << std::endl;
+    return "null";
+}
+
+std::string CRPCServer::RPC_UnbanMIK(const std::string& params) {
+    size_t pos = params.find("\"mik\"");
+    if (pos == std::string::npos) pos = params.find("\"");
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Usage: unbanmik {\"mik\":\"<40-char hex>\"}");
+    }
+    size_t q1 = params.find("\"", pos + 1);
+    if (q1 == std::string::npos) q1 = pos;
+    size_t q2 = params.find("\"", q1 + 1);
+    size_t q3 = params.find("\"", q2 + 1);
+    std::string mikHex;
+    if (q3 != std::string::npos) {
+        mikHex = params.substr(q2 + 1, q3 - q2 - 1);
+    } else {
+        mikHex = params.substr(q1 + 1, q2 - q1 - 1);
+    }
+
+    UnbanMIK(mikHex);
+    std::cout << "[RPC] unbanmik: Unbanned MIK " << mikHex.substr(0, 12) << "..." << std::endl;
+    return "null";
+}
+
+std::string CRPCServer::RPC_ListBannedMIKs(const std::string& params) {
+    (void)params;
+    auto banned = ListBannedMIKs();
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < banned.size(); i++) {
+        if (i > 0) oss << ",";
+        oss << "\"" << banned[i] << "\"";
+    }
+    oss << "]";
+    return oss.str();
 }
 
 // ============================================================================

@@ -3,6 +3,7 @@
 
 #include <node/block_processing.h>
 #include <node/blockchain_storage.h>
+#include <consensus/vdf_validation.h>
 #include <node/block_index.h>
 #include <node/block_validation_queue.h>
 #include <node/fork_manager.h>
@@ -90,6 +91,42 @@ static struct PeerForkTracker {
         }
     }
 } s_forkTracker;
+
+// ---------------------------------------------------------------------------
+// Banned MIK identities (node policy, NOT consensus)
+// ---------------------------------------------------------------------------
+// Blocks from banned MIKs are rejected locally and not relayed.
+// Managed via RPC: banmik / unbanmik / listbannedmiks
+static struct BannedMIKSet {
+    std::mutex mutex;
+    std::set<std::string> banned;  // MIK hex strings (40 chars)
+
+    bool IsBanned(const std::string& mikHex) {
+        std::lock_guard<std::mutex> lock(mutex);
+        return banned.count(mikHex) > 0;
+    }
+
+    void Add(const std::string& mikHex) {
+        std::lock_guard<std::mutex> lock(mutex);
+        banned.insert(mikHex);
+    }
+
+    void Remove(const std::string& mikHex) {
+        std::lock_guard<std::mutex> lock(mutex);
+        banned.erase(mikHex);
+    }
+
+    std::vector<std::string> List() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return std::vector<std::string>(banned.begin(), banned.end());
+    }
+} g_bannedMIKs;
+
+// Public accessors for RPC
+void BanMIK(const std::string& mikHex) { g_bannedMIKs.Add(mikHex); }
+void UnbanMIK(const std::string& mikHex) { g_bannedMIKs.Remove(mikHex); }
+std::vector<std::string> ListBannedMIKs() { return g_bannedMIKs.List(); }
+bool IsMIKBanned(const std::string& mikHex) { return g_bannedMIKs.IsBanned(mikHex); }
 
 // Chain tip update callback (set by main node at startup)
 static ChainTipUpdateCallback g_chain_tip_callback = nullptr;
@@ -216,6 +253,31 @@ BlockProcessResult ProcessNewBlock(
         auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
         std::cout << "[ProcessNewBlock] Hash computed in " << hash_ms << "ms: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
         std::cout.flush();
+    }
+
+    // =========================================================================
+    // MIK BAN CHECK (node policy, NOT consensus)
+    // Reject blocks from banned MIK identities before any expensive processing.
+    // =========================================================================
+    {
+        std::array<uint8_t, 20> blockMik{};
+        if (ExtractCoinbaseMIKIdentity(block, blockMik)) {
+            // Convert to hex for lookup
+            std::string mikHex;
+            mikHex.reserve(40);
+            for (int i = 0; i < 20; i++) {
+                char hex[3];
+                snprintf(hex, sizeof(hex), "%02x", blockMik[i]);
+                mikHex += hex;
+            }
+            if (g_bannedMIKs.IsBanned(mikHex)) {
+                std::cout << "[ProcessNewBlock] REJECTED: banned MIK " << mikHex.substr(0, 12) << "..." << std::endl;
+                if (peer_id >= 0 && ctx.block_fetcher) {
+                    ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                }
+                return BlockProcessResult::VALIDATION_ERROR;
+            }
+        }
     }
 
     // RAII guard: ensures block tracker is cleaned on ALL exit paths.

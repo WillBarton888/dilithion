@@ -64,6 +64,15 @@ BlockProcessResult ProcessNewBlock(
 const char* BlockProcessResultToString(BlockProcessResult result);
 
 /**
+ * @brief MIK ban management (node policy, NOT consensus)
+ * Blocks from banned MIKs are rejected locally and not relayed.
+ */
+void BanMIK(const std::string& mikHex);
+void UnbanMIK(const std::string& mikHex);
+std::vector<std::string> ListBannedMIKs();
+bool IsMIKBanned(const std::string& mikHex);
+
+/**
  * @brief Callback type for chain tip updates
  *
  * Called when a new block becomes the chain tip (either new block or reorg).

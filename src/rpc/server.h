@@ -353,6 +353,9 @@ private:
     std::string RPC_SetBan(const std::string& params);
     std::string RPC_ListBanned(const std::string& params);
     std::string RPC_ClearBanned(const std::string& params);
+    std::string RPC_BanMIK(const std::string& params);
+    std::string RPC_UnbanMIK(const std::string& params);
+    std::string RPC_ListBannedMIKs(const std::string& params);
 
     // UTXO set query methods
     std::string RPC_GetHolderCount(const std::string& params);
