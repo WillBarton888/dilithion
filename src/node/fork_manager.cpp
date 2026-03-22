@@ -602,28 +602,33 @@ bool ForkManager::ValidateMIK(const CBlock& block, int32_t height, ForkCandidate
             }
 
             if (!DFMP::g_identityDb->GetMIKPubKey(identity, pubkey)) {
-                // Unknown identity in both fork cache AND main DB - REJECT
-                std::cerr << "[ForkManager] Block " << height << ": Unknown MIK identity "
-                          << identity.GetHex().substr(0, 16) << "... (not in fork cache or main DB)" << std::endl;
-                return false;
+                // Unknown identity — can't verify signature, but this doesn't mean
+                // the block is invalid.  The miner may have registered on fork blocks
+                // we haven't processed, or our identity DB may be incomplete.
+                // Defer to ConnectTip for authoritative MIK validation.
+                std::cout << "[ForkManager] Block " << height << ": Unknown MIK identity "
+                          << identity.GetHex().substr(0, 16) << "... — deferring to ConnectTip" << std::endl;
+                return true;
             }
 
             std::cout << "[ForkManager] Block " << height << ": MIK reference - found pubkey in main DB" << std::endl;
         }
     }
 
-    // Verify MIK signature
+    // Verify MIK signature (only if we have the pubkey)
     // Message = SHA3-256(prevBlockHash || height || timestamp || identity)
-    if (!DFMP::VerifyMIKSignature(pubkey, mikData.signature,
-                                   block.hashPrevBlock, height, block.nTime,
-                                   identity)) {
-        std::cerr << "[ForkManager] Block " << height << ": Invalid MIK signature for identity "
-                  << identity.GetHex().substr(0, 16) << "..." << std::endl;
-        return false;
-    }
+    if (!pubkey.empty()) {
+        if (!DFMP::VerifyMIKSignature(pubkey, mikData.signature,
+                                       block.hashPrevBlock, height, block.nTime,
+                                       identity)) {
+            std::cerr << "[ForkManager] Block " << height << ": Invalid MIK signature for identity "
+                      << identity.GetHex().substr(0, 16) << "..." << std::endl;
+            return false;
+        }
 
-    std::cout << "[ForkManager] Block " << height << ": MIK signature verified for identity "
-              << identity.GetHex().substr(0, 16) << "..." << std::endl;
+        std::cout << "[ForkManager] Block " << height << ": MIK signature verified for identity "
+                  << identity.GetHex().substr(0, 16) << "..." << std::endl;
+    }
     return true;
 }
 
