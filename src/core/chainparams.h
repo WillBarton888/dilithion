@@ -185,6 +185,18 @@ public:
     // 999999999 = disabled
     int consecutiveMinerCheckHeight;
 
+    // VDF cooldown short window (blocks) for dual-window cooldown.
+    // After stabilizationForkHeight, effective cooldown = min(longCooldown, shortCooldown).
+    // Short window tracks recent participation; long window prevents gaming.
+    // 0 = disabled (single-window only)
+    int vdfCooldownShortWindow;
+
+    // Stabilization fork activation height (HARD FORK)
+    // Activates: dual-window cooldown, time-based cooldown expiry,
+    // stall exemption removal.  Single height for all stabilization changes.
+    // 999999999 = disabled
+    int stabilizationForkHeight;
+
     // Coinbase maturity (blocks before mining rewards are spendable)
     // DIL mainnet/testnet: 100 (PoW reorg safety)
     // DilV: 6 (VDF is deterministic/sequential — reorgs are virtually impossible)

@@ -505,6 +505,339 @@ static void test_consensus_cooldown_after_reorg()
     PASS();
 }
 
+// --- Dual-window cooldown tests (post-stabilization) ---
+
+static void test_dual_window_basic()
+{
+    TEST(dual_window_basic);
+    // Long window 360, short window 50, activation at height 100
+    CCooldownTracker tracker(360, 50, 100, 45);
+
+    // Add 20 miners in the long window (heights 1-20)
+    for (uint8_t i = 1; i <= 20; i++) {
+        tracker.OnBlockConnected(i, make_addr(i));
+    }
+
+    // Long: 20 miners → cooldown = floor(20*0.67) = 13
+    // Short window [71..120] at height 120 — but we only have blocks 1-20,
+    // so short window at height 120 would contain no blocks (cutoff = 71).
+    // Let's query at height 25 instead, where all 20 blocks are in both windows.
+    // Short window at height 25: [25-50+1, 25] = [-24, 25] → all 20 blocks are in window
+    // Both windows see 20 miners → cooldown = 13
+    // Before activation (height 25 < 100), only long window used
+    CHECK(tracker.GetEffectiveCooldown(25) == 13);  // pre-activation: long only
+
+    PASS();
+}
+
+static void test_dual_window_reduces_cooldown()
+{
+    TEST(dual_window_reduces_cooldown);
+    // Long window 1920, short window 100, activation at height 500
+    CCooldownTracker tracker(1920, 100, 500, 45);
+
+    // Add 100 miners in the long window (heights 1-100)
+    for (int i = 1; i <= 100; i++) {
+        Address a{};
+        a[0] = static_cast<uint8_t>(i & 0xFF);
+        a[1] = static_cast<uint8_t>((i >> 8) & 0xFF);
+        tracker.OnBlockConnected(i, a);
+    }
+
+    // Now only 5 miners in the short window (heights 501-505)
+    for (uint8_t i = 1; i <= 5; i++) {
+        tracker.OnBlockConnected(500 + i, make_addr(i));
+    }
+
+    // At height 506 (post-activation):
+    // Long window [506-1920+1, 506] = includes all 105 unique miners
+    // But wait, unique miners from heights 1-100 (100 unique) + 501-505 (5, some overlap with 1-5)
+    // Miners 1-5 are in both sets, so total = 100 unique miners
+    // Long cooldown = floor(100*0.67) = 67
+    // Short window [506-100+1, 506] = [407, 506] → only heights 501-505 → 5 miners
+    // Short cooldown = floor(5*0.67) = 3
+    // Effective = min(67, 3) = 3
+    CHECK(tracker.GetEffectiveCooldown(506) == 3);
+
+    PASS();
+}
+
+static void test_dual_window_solo_floor()
+{
+    TEST(dual_window_solo_floor);
+    // Short window 100, activation at height 100
+    CCooldownTracker tracker(360, 100, 100, 45);
+
+    // Add 10 miners in the long window
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker.OnBlockConnected(i, make_addr(i));
+    }
+
+    // Only 2 miners in the short window (at heights 200-201)
+    tracker.OnBlockConnected(200, make_addr(1));
+    tracker.OnBlockConnected(201, make_addr(2));
+
+    // At height 202 (post-activation):
+    // Long window: all miners still visible → depends on eviction
+    // Short window [202-100+1, 202] = [103, 202] → only heights 200, 201 → 2 miners
+    // Solo floor: shortMiners ≤ 2 → treated as 1 → shortCooldown = 0
+    // Effective = min(longCooldown, 0) = 0
+    CHECK(tracker.GetEffectiveCooldown(202) == 0);
+
+    // Miner 1 at height 200 should NOT be in cooldown at 201 (cooldown=0)
+    CHECK(!tracker.IsInCooldown(make_addr(1), 202));
+
+    PASS();
+}
+
+static void test_dual_window_activation_gating()
+{
+    TEST(dual_window_activation_gating);
+    // Activation at height 1000 — before that, only long window
+    CCooldownTracker tracker(360, 100, 1000, 45);
+
+    // 10 miners at heights 1-10
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker.OnBlockConnected(i, make_addr(i));
+    }
+
+    // Pre-activation: only long window
+    // 10 miners → cooldown = 6
+    CHECK(tracker.GetEffectiveCooldown(15) == 6);
+
+    // Same miners, post-activation: both windows active
+    // Short window at height 15: [15-100+1, 15] = all 10 blocks in range → 10 miners
+    // Same result since both see the same miners
+    // But since height 15 < activation 1000, still long-only
+    CHECK(tracker.GetEffectiveCooldown(15) == 6);
+
+    PASS();
+}
+
+static void test_dual_window_sybil_heavy()
+{
+    TEST(dual_window_sybil_heavy);
+    // Test that flooding short window with many MIKs doesn't REDUCE cooldown
+    CCooldownTracker tracker(1920, 100, 500, 45);
+
+    // 50 legitimate miners in long window (heights 1-50)
+    for (uint8_t i = 1; i <= 50; i++) {
+        tracker.OnBlockConnected(i, make_addr(i));
+    }
+
+    // Attacker floods short window with 80 unique MIKs (heights 501-580)
+    for (int i = 1; i <= 80; i++) {
+        Address a{};
+        a[0] = static_cast<uint8_t>((i + 100) & 0xFF);  // different from legitimate miners
+        a[1] = static_cast<uint8_t>(((i + 100) >> 8) & 0xFF);
+        tracker.OnBlockConnected(500 + i, a);
+    }
+
+    // At height 581 (post-activation):
+    // Long window: 50 + 80 = 130 unique miners → cooldown = min(floor(130*0.67), 100) = 87 (clamped)
+    // Short window [581-100+1, 581] = [482, 581] → heights 501-580 → 80 miners
+    // Short cooldown = floor(80*0.67) = 53
+    // Effective = min(87, 53) = 53
+    // This is HIGHER than the long-only cooldown for 50 miners (33)
+    // Key: flooding short window does NOT reduce cooldown below what legitimate miners get
+    int eff = tracker.GetEffectiveCooldown(581);
+    int longOnly = CCooldownTracker::CalculateCooldown(130);  // clamped to 87
+    CHECK(eff <= longOnly);  // effective never exceeds long
+    CHECK(eff >= 33);  // never below what 50 real miners would give
+
+    PASS();
+}
+
+static void test_time_based_expiry()
+{
+    TEST(time_based_expiry);
+    // shortWindow=0 (no dual-window), activation at height 100, 45s blocks
+    CCooldownTracker tracker(360, 0, 100, 45);
+
+    // 10 miners at heights 100-109 (all post-activation)
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker.OnBlockConnected(99 + i, make_addr(i), 50000 + i * 45);
+    }
+
+    // At height 110: 10 miners visible. Long cooldown = 6, time cooldown = 6*45 = 270s.
+    // Miner 10 at height 109, ts = 50000 + 10*45 = 50450.
+    // Gap at 110 = 1 < 6 → in cooldown by block-gap.
+
+    // Time gap 250s < 270s → still in cooldown
+    CHECK(tracker.IsInCooldown(make_addr(10), 110, 50700));
+
+    // Time gap 280s >= 270s → time-based expiry!
+    CHECK(!tracker.IsInCooldown(make_addr(10), 110, 50730));
+
+    PASS();
+}
+
+static void test_time_based_pre_activation()
+{
+    TEST(time_based_pre_activation);
+    // Activation at height 1000 — before that, timestamp ignored (fail closed)
+    CCooldownTracker tracker(360, 0, 1000, 45);
+
+    // 10 miners at heights 100-109 with timestamps
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker.OnBlockConnected(99 + i, make_addr(i), 50000 + i * 45);
+    }
+
+    // Pre-activation (height 110 < 1000): time-based expiry should NOT apply
+    // Miner 10 at height 109, cooldown = 6. Gap at 110 = 1 < 6 → in cooldown.
+    // Even with a huge timestamp that would trigger time expiry, should stay in cooldown
+    CHECK(tracker.IsInCooldown(make_addr(10), 110, 999999));
+
+    PASS();
+}
+
+static void test_time_based_both_paths()
+{
+    TEST(time_based_both_paths);
+    // shortWindow=0, activation at height 0, 45s blocks
+    CCooldownTracker tracker(360, 0, 0, 45);
+
+    // 10 miners at heights 100-109, timestamps 50000+i*45
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker.OnBlockConnected(99 + i, make_addr(i), 50000 + i * 45);
+    }
+    // Miner 10 at height 109, ts=50450. Cooldown=6, time cooldown=270s
+
+    // Case 1: Both expired → not in cooldown
+    // height 116 (gap=7>=6), time 50750 (300>=270)
+    CHECK(!tracker.IsInCooldown(make_addr(10), 116, 50750));
+
+    // Case 2: Neither expired → in cooldown
+    // height 112 (gap=3<6), time 50550 (100<270)
+    CHECK(tracker.IsInCooldown(make_addr(10), 112, 50550));
+
+    // Case 3: Block-gap expired, time not → not in cooldown (OR logic)
+    // height 116 (gap=7>=6), time 50500 (50<270)
+    CHECK(!tracker.IsInCooldown(make_addr(10), 116, 50500));
+
+    // Case 4: Time expired, block-gap not → not in cooldown (OR logic)
+    // height 112 (gap=3<6), time 50750 (300>=270)
+    CHECK(!tracker.IsInCooldown(make_addr(10), 112, 50750));
+
+    PASS();
+}
+
+static void test_time_based_zero_timestamp()
+{
+    TEST(time_based_zero_timestamp);
+    // shortWindow=0, activation at height 0
+    CCooldownTracker tracker(360, 0, 0, 45);
+
+    // 10 miners at heights 100-109 with timestamps
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker.OnBlockConnected(99 + i, make_addr(i), 50000 + i * 45);
+    }
+
+    // Miner 10 at height 109. At height 112 (gap=3<6), in cooldown.
+    // currentTimestamp=0 → time-based expiry SKIPPED (fail closed)
+    CHECK(tracker.IsInCooldown(make_addr(10), 112, 0));
+    CHECK(tracker.IsInCooldown(make_addr(10), 112));  // default arg = 0
+
+    PASS();
+}
+
+static void test_dual_window_reorg()
+{
+    TEST(dual_window_reorg);
+    // Short window 10, activation at height 0
+    CCooldownTracker tracker(360, 10, 0, 45);
+
+    // 5 miners at heights 1-5
+    for (uint8_t i = 1; i <= 5; i++) {
+        tracker.OnBlockConnected(i, make_addr(i));
+    }
+
+    // Short window at height 6: [6-10+1, 6] = all 5 blocks → 5 miners
+    CHECK(tracker.GetEffectiveCooldown(6) == 3);  // min(long=3, short=3)
+
+    // Disconnect heights 4, 5
+    tracker.OnBlockDisconnected(5);
+    tracker.OnBlockDisconnected(4);
+
+    // Short window at height 4: [4-10+1, 4] = heights 1-3 → 3 miners
+    CHECK(tracker.GetEffectiveCooldown(4) == 2);
+
+    // Reconnect with different miners
+    tracker.OnBlockConnected(4, make_addr(6));
+    tracker.OnBlockConnected(5, make_addr(7));
+
+    // Now 5 unique miners again (1,2,3,6,7)
+    CHECK(tracker.GetEffectiveCooldown(6) == 3);
+
+    PASS();
+}
+
+static void test_startup_with_timestamps()
+{
+    TEST(startup_with_timestamps);
+    // Simulate startup population with timestamps (shortWindow=0)
+    CCooldownTracker tracker(360, 0, 0, 45);
+
+    // Populate with 5 miners + timestamps
+    for (uint8_t i = 1; i <= 5; i++) {
+        tracker.OnBlockConnected(99 + i, make_addr(i), 50000 + i * 45);
+    }
+
+    // 5 miners → cooldown 3, time cooldown = 3*45 = 135s
+    // Miner 5 at height 104, ts = 50000 + 5*45 = 50225
+    // At height 106 (gap=2<3), ts=50225+100=50325 (100<135) → in cooldown
+    CHECK(tracker.IsInCooldown(make_addr(5), 106, 50325));
+    // At height 106, ts=50225+140=50365 (140>=135) → time-based expiry
+    CHECK(!tracker.IsInCooldown(make_addr(5), 106, 50365));
+
+    PASS();
+}
+
+static void test_effective_cooldown_unit()
+{
+    TEST(effective_cooldown_unit);
+    // Verify GetEffectiveCooldown returns correct values
+
+    // Pre-activation: long window only
+    CCooldownTracker tracker1(360, 100, 1000, 45);
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker1.OnBlockConnected(i, make_addr(i));
+    }
+    CHECK(tracker1.GetEffectiveCooldown(15) == 6);  // 10 miners, long only (pre-activation)
+
+    // Post-activation: min(long, short)
+    // Short window 10, long window 360, activation at 0
+    CCooldownTracker tracker2(360, 10, 0, 45);
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker2.OnBlockConnected(i, make_addr(i));
+    }
+    // At height 15: long = 10 miners → 6; short [6,15] = heights 6-10 = 5 miners → 3
+    // Effective = min(6, 3) = 3
+    CHECK(tracker2.GetEffectiveCooldown(15) == 3);
+    // At height 10 (right at last block): long = 10 → 6; short [1,10] = 10 → 6
+    // Effective = min(6, 6) = 6
+    CHECK(tracker2.GetEffectiveCooldown(10) == 6);
+
+    // Short window 5 — miners only in long window
+    CCooldownTracker tracker3(360, 5, 0, 45);
+    for (uint8_t i = 1; i <= 10; i++) {
+        tracker3.OnBlockConnected(i, make_addr(i));
+    }
+    // At height 15: short [11,15] → 0 miners → solo floor → cooldown 0
+    CHECK(tracker3.GetEffectiveCooldown(15) == 0);
+
+    // Add miners to short window
+    for (uint8_t i = 11; i <= 15; i++) {
+        tracker3.OnBlockConnected(i, make_addr(i));
+    }
+    // At height 16: short [12,16] → heights 12-15 = 4 miners → cooldown 2
+    // Long = 15 miners → 10
+    // Effective = min(10, 2) = 2
+    CHECK(tracker3.GetEffectiveCooldown(16) == 2);
+
+    PASS();
+}
+
 int main()
 {
     std::cout << "\nCCooldownTracker Unit Tests\n";
@@ -529,6 +862,21 @@ int main()
     test_consensus_cooldown_solo_miner_never_blocked();
     test_consensus_cooldown_exact_boundary();
     test_consensus_cooldown_after_reorg();
+
+    std::cout << "\n--- Stabilization Fork Tests ---\n\n";
+
+    test_dual_window_basic();
+    test_dual_window_reduces_cooldown();
+    test_dual_window_solo_floor();
+    test_dual_window_activation_gating();
+    test_dual_window_sybil_heavy();
+    test_time_based_expiry();
+    test_time_based_pre_activation();
+    test_time_based_both_paths();
+    test_time_based_zero_timestamp();
+    test_dual_window_reorg();
+    test_startup_with_timestamps();
+    test_effective_cooldown_unit();
 
     std::cout << "\n" << passed << " passed, " << failed << " failed\n";
 

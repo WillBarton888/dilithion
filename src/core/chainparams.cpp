@@ -119,6 +119,8 @@ ChainParams ChainParams::Mainnet() {
     params.dfmpCooldownConsensusHeight = 999999999; // Disabled (VDF not active on mainnet)
     params.stallExemptionV2Height = 999999999;     // Disabled (VDF not active on mainnet)
     params.consecutiveMinerCheckHeight = 999999999; // Disabled (VDF not active on mainnet)
+    params.vdfCooldownShortWindow = 0;               // Disabled (VDF not active on mainnet)
+    params.stabilizationForkHeight = 999999999;      // Disabled (VDF not active on mainnet)
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): disabled until fork is scheduled
@@ -271,6 +273,8 @@ ChainParams ChainParams::Testnet() {
     params.dfmpCooldownConsensusHeight = 999999999; // Disabled until testnet VDF stabilizes
     params.stallExemptionV2Height = 999999999;     // Disabled until testnet VDF stabilizes
     params.consecutiveMinerCheckHeight = 999999999; // Disabled until testnet VDF stabilizes
+    params.vdfCooldownShortWindow = 0;               // Disabled until testnet VDF stabilizes
+    params.stabilizationForkHeight = 999999999;      // Disabled until testnet VDF stabilizes
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on testnet
@@ -381,12 +385,14 @@ ChainParams ChainParams::DilV() {
 
     // VDF Distribution: active from genesis
     params.vdfLotteryActivationHeight = 0;
-    params.vdfLotteryGracePeriod = 12;         // 12 seconds for slower miners to submit
+    params.vdfLotteryGracePeriod = 20;         // 20 seconds (matches vdfMinBlockTime)
     params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
     params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
     params.dfmpCooldownConsensusHeight = 8500; // Consensus-enforced cooldown (moved from 7700: blocks 7700-8400 mined during stall violate cooldown)
     params.stallExemptionV2Height = 25500;     // Tightened stall exemption: 600s + different miner
     params.consecutiveMinerCheckHeight = 25500; // Reject >3 consecutive blocks from same miner
+    params.vdfCooldownShortWindow = 100;        // 100-block short window for dual-window cooldown
+    params.stabilizationForkHeight = 25870;     // Dual-window cooldown + time-based expiry + no stall exemption
     params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on DilV

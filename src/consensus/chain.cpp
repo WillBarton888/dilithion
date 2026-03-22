@@ -865,7 +865,15 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // via repeated stall exemption abuse.
         if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
             bool chainStalled = false;
-            if (pindex->pprev) {
+
+            int stabilizationHeight = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
+
+            if (pindex->nHeight >= stabilizationHeight) {
+                // Post-stabilization: NO stall exemption.
+                // Dual-window cooldown + time-based expiry handle stalls naturally.
+                // chainStalled stays false.
+            } else if (pindex->pprev) {
                 int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
 
                 int stallV2Height = Dilithion::g_chainParams ?
@@ -926,8 +934,11 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                           << "s since last block)" << std::endl;
             } else {
                 std::string cooldownError;
+                // Pass block.nTime for time-based cooldown expiry
+                int64_t blockTs = static_cast<int64_t>(block.nTime);
                 if (!CheckVDFCooldown(block, pindex->nHeight,
-                                       *g_node_context.cooldown_tracker, cooldownError)) {
+                                       *g_node_context.cooldown_tracker, cooldownError,
+                                       blockTs)) {
                     std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
                               << " REJECTED: cooldown violation" << std::endl;
                     std::cerr << "[Chain] " << cooldownError << std::endl;

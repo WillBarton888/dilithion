@@ -200,7 +200,8 @@ bool CheckVDFCooldown(
     const CBlock& block,
     int height,
     CCooldownTracker& tracker,
-    std::string& error)
+    std::string& error,
+    int64_t blockTimestamp)
 {
     // Gate: only enforce after activation height
     int activationHeight = Dilithion::g_chainParams ?
@@ -223,8 +224,8 @@ bool CheckVDFCooldown(
         return false;
     }
 
-    // Check if this MIK is in cooldown
-    if (tracker.IsInCooldown(mikId, height)) {
+    // Check if this MIK is in cooldown (pass timestamp for time-based expiry)
+    if (tracker.IsInCooldown(mikId, height, blockTimestamp)) {
         int lastWin = tracker.GetLastWinHeight(mikId);
         int cooldown = tracker.GetCooldownBlocks();
         int activeMiners = tracker.GetActiveMiners();

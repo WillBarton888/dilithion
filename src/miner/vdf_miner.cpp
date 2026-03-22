@@ -5,6 +5,7 @@
 #include <vdf/coinbase_vdf.h>
 #include <consensus/pow.h>  // HashLessThan for VDF distribution comparison
 #include <crypto/sha3.h>
+#include <core/chainparams.h>
 #include <util/logging.h>
 
 #include <cstring>
@@ -183,12 +184,38 @@ void CVDFMiner::MiningLoop()
         Address cooldownId = (m_mikIdentity != Address{}) ? m_mikIdentity : minerAddr;
         bool stallBypassed = false;
 
-        if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height)) {
+        // Use candidate block's nTime for time-based cooldown expiry (consensus-consistent)
+        int64_t candidateTimestamp = static_cast<int64_t>(templateOpt->block.nTime);
+
+        if (m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height, candidateTimestamp)) {
             // Chain stall detection: if no block has been produced for a long
             // time, bypass cooldown so the chain can recover.  Without this,
             // a stall is permanent — height never advances so cooldowns never
-            // expire.  Threshold: 10 minutes (raised from 5 min to match
-            // consensus stallExemptionV2 and prevent private fork mining).
+            // expire.
+            //
+            // Post-stabilization: stall bypass is disabled.  Dual-window cooldown
+            // + time-based expiry handle stalls naturally (IsInCooldown already
+            // accounts for elapsed time via candidateTimestamp).
+            int stabilizationHeight = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
+
+            if (static_cast<int>(height) >= stabilizationHeight) {
+                // No stall bypass — time-based expiry in IsInCooldown handles this
+                int cd = m_cooldownTracker->GetCooldownBlocks();
+                int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
+                int resumeAt = lastWin + cd + 1;
+                std::cout << "[VDF Miner] In cooldown until block " << resumeAt
+                          << " (current: " << height << ", cooldown: " << cd
+                          << " blocks, time-based expiry active)" << std::endl;
+
+                std::unique_lock<std::mutex> lock(m_epochMutex);
+                m_epochCV.wait_for(lock, std::chrono::seconds(120),
+                                   [this] { return m_epochChanged || !m_running; });
+                m_epochChanged = false;
+                continue;
+            }
+
+            // Pre-stabilization: legacy stall bypass
             static constexpr int STALL_THRESHOLD_SEC = 600;
             auto now = std::chrono::steady_clock::now();
             auto sinceLastBlock = std::chrono::duration_cast<std::chrono::seconds>(
@@ -324,7 +351,7 @@ void CVDFMiner::MiningLoop()
         // Exception: if we bypassed cooldown due to a chain stall, honour
         // that decision — otherwise we create a deadlock where the stall
         // bypass computes the VDF but the re-check always blocks submission.
-        if (!stallBypassed && m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height)) {
+        if (!stallBypassed && m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height, candidateTimestamp)) {
             int cd = m_cooldownTracker->GetCooldownBlocks();
             int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
             std::cout << "[VDF Miner] Cooldown changed during computation -- skipping submission"

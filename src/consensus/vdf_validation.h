@@ -90,17 +90,19 @@ namespace digital_dna { class IDNARegistry; }
  * After dfmpCooldownConsensusHeight, rejects blocks where the miner's MIK
  * identity has mined within the cooldown period.
  *
- * @param block         The candidate block
- * @param height        Block height
- * @param tracker       Cooldown tracker with current chain state
- * @param error         Human-readable error string on failure
+ * @param block          The candidate block
+ * @param height         Block height
+ * @param tracker        Cooldown tracker with current chain state
+ * @param error          Human-readable error string on failure
+ * @param blockTimestamp Block's nTime for time-based cooldown expiry (0 = disabled)
  * @return true if block passes cooldown check (or not yet enforced)
  */
 bool CheckVDFCooldown(
     const CBlock& block,
     int height,
     CCooldownTracker& tracker,
-    std::string& error
+    std::string& error,
+    int64_t blockTimestamp = 0
 );
 
 /**

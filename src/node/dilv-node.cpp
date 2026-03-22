@@ -3888,7 +3888,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         int vdf_cooldown_window = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->vdfCooldownActiveWindow : CCooldownTracker::ACTIVE_WINDOW;
-        CCooldownTracker cooldown_tracker(vdf_cooldown_window);
+        int vdf_cooldown_short = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->vdfCooldownShortWindow : 0;
+        int stabilization_height = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
+        int target_block_time = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->blockTime : 45;
+        CCooldownTracker cooldown_tracker(vdf_cooldown_window, vdf_cooldown_short,
+                                          stabilization_height, target_block_time);
         g_node_context.cooldown_tracker = &cooldown_tracker;
 
         CVDFMiner vdf_miner;
@@ -3957,7 +3964,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (!ExtractCoinbaseMIKIdentity(block, mikId)) continue;
 
                         g_node_context.cooldown_tracker->OnBlockConnected(
-                            blockIndex->nHeight, mikId);
+                            blockIndex->nHeight, mikId,
+                            static_cast<int64_t>(block.nTime));
                         populated++;
                     }
 
@@ -3990,7 +3998,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         {
             int stallV2Height = Dilithion::g_chainParams ? Dilithion::g_chainParams->stallExemptionV2Height : 999999999;
             int consecutiveHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->consecutiveMinerCheckHeight : 999999999;
-            int activationHeight = std::min(stallV2Height, consecutiveHeight);
+            int stabForkHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
+            int activationHeight = std::min({stallV2Height, consecutiveHeight, stabForkHeight});
             int chainHeight = g_chainstate.GetHeight();
 
             if (chainHeight > activationHeight && activationHeight < 999999999) {
@@ -4052,6 +4061,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 *g_node_context.cooldown_tracker, err)) {
                             firstInvalidHeight = idx->nHeight;
                             invalidReason = "Consecutive miner violation: " + err;
+                            break;
+                        }
+                    }
+
+                    // --- Check 3: Post-stabilization cooldown (no stall exemption) ---
+                    // After stabilizationForkHeight, stall exemption is removed.
+                    // Blocks that were accepted via stall bypass under old rules
+                    // must now pass dual-window cooldown + time-based expiry.
+                    if (idx->nHeight >= stabForkHeight && block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+                        std::string err;
+                        int64_t blockTs = static_cast<int64_t>(block.nTime);
+                        if (!CheckVDFCooldown(block, idx->nHeight,
+                                *g_node_context.cooldown_tracker, err, blockTs)) {
+                            firstInvalidHeight = idx->nHeight;
+                            invalidReason = "Post-stabilization cooldown violation: " + err;
                             break;
                         }
                     }
@@ -4726,7 +4750,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_context.cooldown_tracker) {
                 std::array<uint8_t, 20> mikId{};
                 if (ExtractCoinbaseMIKIdentity(block, mikId)) {
-                    g_node_context.cooldown_tracker->OnBlockConnected(height, mikId);
+                    g_node_context.cooldown_tracker->OnBlockConnected(
+                        height, mikId, static_cast<int64_t>(block.nTime));
                 }
             }
         });
@@ -5214,6 +5239,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                                 g_node_context.trust_manager->on_registration(
                                                     dna_opt->address, static_cast<uint32_t>(curHeight));
                                             }
+                                            // Broadcast DNA to all connected peers
+                                            if (g_node_context.connman && g_node_context.message_processor &&
+                                                dna_opt->mik_identity != std::array<uint8_t, 20>{}) {
+                                                auto dna_data = dna_opt->serialize();
+                                                auto msg = g_node_context.message_processor->CreateDNAIdentResMessage(
+                                                    dna_opt->mik_identity, true, dna_data);
+                                                auto nodes = g_node_context.connman->GetNodes();
+                                                int sent = 0;
+                                                for (auto* n : nodes) {
+                                                    if (n && n->IsConnected()) {
+                                                        g_node_context.connman->PushMessage(n->id, msg);
+                                                        ++sent;
+                                                    }
+                                                }
+                                                std::cout << "[DNA] Broadcast identity to " << sent << " peers" << std::endl;
+                                            }
                                         }
                                     } else {
                                         // Progressive enrichment: update if more dimensions
@@ -5246,6 +5287,51 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Digital DNA Discovery: Request DNA from peers for known miners
+                    {
+                        static auto last_dna_discovery = std::chrono::steady_clock::now();
+                        auto now_disc = std::chrono::steady_clock::now();
+                        auto disc_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                            now_disc - last_dna_discovery).count();
+
+                        if (disc_elapsed >= 300 && g_node_context.dna_registry &&
+                            g_node_context.cooldown_tracker &&
+                            g_node_context.connman && g_node_context.message_processor) {
+                            int dnaActDisc = Dilithion::g_chainParams ?
+                                Dilithion::g_chainParams->digitalDnaActivationHeight : 999999999;
+                            if (g_chainstate.GetHeight() >= dnaActDisc) {
+                                last_dna_discovery = now_disc;
+                                auto known_miks = g_node_context.cooldown_tracker->GetKnownAddresses();
+                                auto nodes = g_node_context.connman->GetNodes();
+                                std::vector<int> peer_ids;
+                                for (auto* n : nodes) {
+                                    if (n && n->IsConnected()) peer_ids.push_back(n->id);
+                                }
+
+                                if (!peer_ids.empty()) {
+                                    std::mt19937 rng(std::random_device{}());
+                                    int requested = 0;
+                                    for (const auto& mik : known_miks) {
+                                        if (mik == std::array<uint8_t, 20>{}) continue;
+                                        auto existing = g_node_context.dna_registry->get_identity_by_mik(mik);
+                                        if (existing) continue;
+
+                                        int target = peer_ids[rng() % peer_ids.size()];
+                                        auto msg = g_node_context.message_processor->CreateDNAIdentReqMessage(mik);
+                                        g_node_context.connman->PushMessage(target, msg);
+                                        ++requested;
+                                        if (requested >= 10) break;
+                                    }
+                                    if (requested > 0) {
+                                        std::cout << "[DNA] Discovery: requested DNA for "
+                                                  << requested << " unknown MIKs (of "
+                                                  << known_miks.size() << " known)" << std::endl;
                                     }
                                 }
                             }
@@ -5394,44 +5480,48 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             rpc_server.RegisterDNARpc(dna_rpc.get());
             std::cout << "  [OK] Digital DNA RPC commands registered" << std::endl;
 
-            // Initialize DNA collector with mining address (miners only)
+            // Initialize DNA collector (miners AND relay-only nodes)
             int dnaActivation = Dilithion::g_chainParams ?
                 Dilithion::g_chainParams->digitalDnaActivationHeight : 999999999;
             int tipHeight = g_chainstate.GetHeight();
 
-            if (config.start_mining && !config.relay_only && wallet.GetAddresses().size() > 0 &&
-                tipHeight >= dnaActivation) {
-                std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                if (pubKeyHash.size() == 20) {
-                    std::array<uint8_t, 20> address{};
-                    std::copy(pubKeyHash.begin(), pubKeyHash.end(), address.begin());
+            if (tipHeight >= dnaActivation) {
+                std::array<uint8_t, 20> address{};
+                bool have_mik = false;
+                std::array<uint8_t, 20> mikArr{};
 
-                    // Set address for RPC-initiated collection
-                    digital_dna::DigitalDNARpc::set_my_address(address);
-
-                    // Create and auto-start the collector (shared_ptr for safe cross-thread access)
-                    digital_dna::DigitalDNACollector::Config dna_config;
-                    dna_config.testnet = config.testnet;
-                    auto new_collector = std::make_shared<digital_dna::DigitalDNACollector>(address, dna_config);
-
-                    // Set MIK identity so DNA is keyed by MIK (persistent across address rotation)
+                if (!config.relay_only && wallet.GetAddresses().size() > 0) {
+                    // Mining node: use wallet address + MIK
+                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                    if (pubKeyHash.size() == 20) {
+                        std::copy(pubKeyHash.begin(), pubKeyHash.end(), address.begin());
+                        digital_dna::DigitalDNARpc::set_my_address(address);
+                    }
                     DFMP::Identity mikId = wallet.GetMIKIdentity();
                     if (!mikId.IsNull()) {
-                        std::array<uint8_t, 20> mikArr{};
                         std::copy(mikId.data, mikId.data + 20, mikArr.begin());
-                        new_collector->set_mik_identity(mikArr);
+                        have_mik = true;
                     }
-
-                    new_collector->start_collection();
-                    g_node_context.SetDNACollector(std::move(new_collector));
-
-                    // Display truncated address hex
-                    std::ostringstream addr_hex;
-                    for (int i = 0; i < 4; ++i)
-                        addr_hex << std::hex << std::setfill('0') << std::setw(2) << (int)address[i];
-                    std::cout << "  [OK] Digital DNA collection started (auto, address: "
-                              << addr_hex.str() << "...)" << std::endl;
                 }
+                // Relay-only nodes: use zero address (latency/timing still measured)
+
+                digital_dna::DigitalDNACollector::Config dna_config;
+                dna_config.testnet = config.testnet;
+                auto new_collector = std::make_shared<digital_dna::DigitalDNACollector>(address, dna_config);
+
+                if (have_mik) {
+                    new_collector->set_mik_identity(mikArr);
+                }
+
+                new_collector->start_collection();
+                g_node_context.SetDNACollector(std::move(new_collector));
+
+                std::ostringstream addr_hex;
+                for (int i = 0; i < 4; ++i)
+                    addr_hex << std::hex << std::setfill('0') << std::setw(2) << (int)address[i];
+                std::cout << "  [OK] Digital DNA collection started (auto"
+                          << (config.relay_only ? ", relay-only" : "")
+                          << ", address: " << addr_hex.str() << "...)" << std::endl;
             }
         }
 
