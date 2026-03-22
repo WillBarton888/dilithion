@@ -21,7 +21,7 @@ static const uint32_t DILV_MAGIC    = 0xD17FD100;  // DilV chain
 /** Protocol version */
 static const int PROTOCOL_VERSION = 70008;          // v3.9.0: DilV stabilization fork
 static const int MIN_PEER_PROTO_VERSION = 70005;    // DIL: Require v3.4.0+ (ASERT difficulty)
-static const int DILV_MIN_PEER_PROTO_VERSION = 70008; // DilV: Require v3.9.0+ (stabilization fork)
+static const int DILV_MIN_PEER_PROTO_VERSION = 70007; // DilV: Require v3.8.3+ (fork defense) — bumped at stabilization fork
 
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;
