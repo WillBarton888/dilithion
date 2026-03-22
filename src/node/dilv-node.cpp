@@ -3980,6 +3980,105 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // DilV: VDF mining is always used — no height-based switching needed
 
+        // ================================================================
+        // STARTUP RE-VALIDATION: Enforce consensus rules at activation heights
+        // ================================================================
+        // When consensus rules change at an activation height (e.g., stallExemptionV2,
+        // consecutiveMinerCheck), blocks that were connected under OLD rules may violate
+        // the NEW rules. This scan detects violations and disconnects back to the last
+        // valid block. Runs on every startup (~1 block read per height, <1s for 500 blocks).
+        {
+            int stallV2Height = Dilithion::g_chainParams ? Dilithion::g_chainParams->stallExemptionV2Height : 999999999;
+            int consecutiveHeight = Dilithion::g_chainParams ? Dilithion::g_chainParams->consecutiveMinerCheckHeight : 999999999;
+            int activationHeight = std::min(stallV2Height, consecutiveHeight);
+            int chainHeight = g_chainstate.GetHeight();
+
+            if (chainHeight > activationHeight && activationHeight < 999999999) {
+                std::cout << "\n[REVALIDATION] Scanning blocks " << activationHeight
+                          << " to " << chainHeight << " for consensus rule compliance..." << std::endl;
+
+                int firstInvalidHeight = -1;
+                std::string invalidReason;
+
+                // Build ordered list of block indices from activation height to tip
+                CBlockIndex* pWalk = g_chainstate.GetTip();
+                std::vector<CBlockIndex*> toCheck;
+                while (pWalk && pWalk->nHeight >= activationHeight) {
+                    toCheck.push_back(pWalk);
+                    pWalk = pWalk->pprev;
+                }
+                std::reverse(toCheck.begin(), toCheck.end());
+
+                for (CBlockIndex* idx : toCheck) {
+                    CBlock block;
+                    if (!blockchain.ReadBlock(idx->GetBlockHash(), block)) {
+                        std::cerr << "[REVALIDATION] WARNING: Cannot read block at height "
+                                  << idx->nHeight << " - skipping" << std::endl;
+                        continue;
+                    }
+
+                    // --- Check 1: V2 Stall Exemption ---
+                    if (idx->nHeight >= stallV2Height && block.IsVDFBlock() && idx->pprev) {
+                        int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(idx->pprev->nTime);
+
+                        if (gap >= 600 && gap < 1200) {
+                            // Tier 1: requires different miner from previous block
+                            std::array<uint8_t, 20> currentMik{}, prevMik{};
+                            bool haveCurrent = ExtractCoinbaseMIKIdentity(block, currentMik);
+
+                            CBlock prevBlock;
+                            bool havePrev = blockchain.ReadBlock(idx->pprev->GetBlockHash(), prevBlock)
+                                            && ExtractCoinbaseMIKIdentity(prevBlock, prevMik);
+
+                            if (haveCurrent && havePrev && currentMik == prevMik) {
+                                // Same miner during Tier 1 stall — check if solo mining
+                                int activeMiners = g_node_context.cooldown_tracker ?
+                                    g_node_context.cooldown_tracker->GetActiveMiners() : 0;
+                                if (activeMiners > 1) {
+                                    firstInvalidHeight = idx->nHeight;
+                                    invalidReason = "V2 stall exemption violation (same miner as prev, gap="
+                                        + std::to_string(gap) + "s, " + std::to_string(activeMiners)
+                                        + " active miners)";
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // --- Check 2: Consecutive Miner (>3 same miner in a row) ---
+                    if (idx->nHeight >= consecutiveHeight && block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+                        std::string err;
+                        if (!CheckConsecutiveMiner(block, idx, &blockchain,
+                                *g_node_context.cooldown_tracker, err)) {
+                            firstInvalidHeight = idx->nHeight;
+                            invalidReason = "Consecutive miner violation: " + err;
+                            break;
+                        }
+                    }
+                }
+
+                if (firstInvalidHeight > 0) {
+                    std::cout << "\n[REVALIDATION] ================================================" << std::endl;
+                    std::cout << "[REVALIDATION] INVALID BLOCK DETECTED at height " << firstInvalidHeight << std::endl;
+                    std::cout << "[REVALIDATION] Reason: " << invalidReason << std::endl;
+                    std::cout << "[REVALIDATION] Disconnecting chain to height " << (firstInvalidHeight - 1) << std::endl;
+                    std::cout << "[REVALIDATION] ================================================\n" << std::endl;
+
+                    int disconnected = g_chainstate.DisconnectToHeight(firstInvalidHeight - 1, blockchain);
+                    if (disconnected < 0) {
+                        std::cerr << "[REVALIDATION] CRITICAL: DisconnectToHeight failed!" << std::endl;
+                        std::cerr << "[REVALIDATION] Try running with --reindex" << std::endl;
+                    } else {
+                        std::cout << "[REVALIDATION] Disconnected " << disconnected
+                                  << " blocks. Chain now at height " << g_chainstate.GetHeight() << std::endl;
+                    }
+                } else {
+                    std::cout << "[REVALIDATION] All " << (int)toCheck.size()
+                              << " blocks pass consensus rules" << std::endl;
+                }
+            }
+        }
+
         // Phase 4: Initialize wallet (before mining callback setup)
         // BUG #56 FIX: Full wallet persistence with Bitcoin Core pattern
         CWallet wallet;
