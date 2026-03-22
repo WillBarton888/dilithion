@@ -767,8 +767,42 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
             return false;
         }
     } else {
-        // Shouldn't happen at startup (single-threaded), but handle defensively
-        return true;
+        // BUG #278 FIX: Another thread is already mining registration PoW.
+        // Wait for it to finish instead of returning true (which caused the caller
+        // to proceed to BuildMiningTemplate before the nonce was cached, resulting
+        // in "Template rejected - no MIK data" loops for new miners).
+        std::cout << "  [Mining] Registration PoW already in progress on another thread, waiting..." << std::endl;
+        int wait_sec = 0;
+        while (s_regPowInProgress.load(std::memory_order_acquire) && g_node_state.running) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            wait_sec++;
+            if (wait_sec % 30 == 0) {
+                std::cout << "  [Mining] Still waiting for registration PoW... (" << wait_sec << "s)" << std::endl;
+            }
+        }
+        if (!g_node_state.running) return false;
+        // Check if the other thread succeeded
+        if (s_regNonceMined.load() && s_regNonceIdentity == identity) {
+            std::cout << "  [Mining] Registration PoW completed by other thread!" << std::endl;
+            return true;
+        }
+        // Other thread failed — we need to try ourselves
+        std::cerr << "[Mining] WARNING: Registration PoW failed on other thread, retrying..." << std::endl;
+        if (!s_regPowInProgress.exchange(true)) {
+            uint64_t nonce = 0;
+            if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce, &g_node_state.running)) {
+                s_cachedRegNonce = nonce;
+                s_regNonceIdentity = identity;
+                s_regNonceMined.store(true);
+                s_regPowInProgress.store(false);
+                std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
+                return true;
+            } else {
+                s_regPowInProgress.store(false);
+                return false;
+            }
+        }
+        return false;
     }
 }
 

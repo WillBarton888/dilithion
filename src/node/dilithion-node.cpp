@@ -704,12 +704,12 @@ struct NodeConfig {
 static CTransactionRef g_currentCoinbase;
 static std::mutex g_coinbaseMutex;
 
-// File-scope MIK registration PoW cache
-// Shared between EnsureMIKRegistered() and BuildMiningTemplate()
-static uint64_t s_cachedRegNonce = 0;
-static std::atomic<bool> s_regNonceMined{false};
-static std::atomic<bool> s_regPowInProgress{false};
-static DFMP::Identity s_regNonceIdentity;
+// MIK registration PoW cache (defined in globals.cpp, also accessed by RPC server)
+// Shared between EnsureMIKRegistered(), BuildMiningTemplate(), and RPC_StartMining()
+extern uint64_t g_regCachedNonce;
+extern std::atomic<bool> g_regNonceMined;
+extern std::atomic<bool> g_regPowInProgress;
+extern DFMP::Identity g_regNonceIdentity;
 
 /**
  * Ensure MIK identity is registered before mining begins.
@@ -746,7 +746,7 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
     if (DFMP::g_identityDb->HasMIKPubKey(identity)) return true;
 
     // Already cached from a previous call?
-    if (s_regNonceMined.load() && s_regNonceIdentity == identity) return true;
+    if (g_regNonceMined.load() && g_regNonceIdentity == identity) return true;
 
     // Get public key for PoW
     std::vector<uint8_t> mikPubkey;
@@ -761,19 +761,19 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
     std::cout << "  [Mining] This is a one-time process. Mining starts automatically after." << std::endl;
     std::cout << std::endl;
 
-    if (!s_regPowInProgress.exchange(true)) {
+    if (!g_regPowInProgress.exchange(true)) {
         uint64_t nonce = 0;
         if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce, &g_node_state.running)) {
-            s_cachedRegNonce = nonce;
-            s_regNonceIdentity = identity;
-            s_regNonceMined.store(true);
-            s_regPowInProgress.store(false);
+            g_regCachedNonce = nonce;
+            g_regNonceIdentity = identity;
+            g_regNonceMined.store(true);
+            g_regPowInProgress.store(false);
             std::cout << std::endl;
             std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
             std::cout << std::endl;
             return true;
         } else {
-            s_regPowInProgress.store(false);
+            g_regPowInProgress.store(false);
             if (!g_node_state.running) {
                 std::cout << "[Mining] Registration PoW cancelled (shutting down)" << std::endl;
             } else {
@@ -782,8 +782,42 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
             return false;
         }
     } else {
-        // Shouldn't happen at startup (single-threaded), but handle defensively
-        return true;
+        // BUG #278 FIX: Another thread is already mining registration PoW.
+        // Wait for it to finish instead of returning true (which caused the caller
+        // to proceed to BuildMiningTemplate before the nonce was cached, resulting
+        // in "Template rejected - no MIK data" loops for new miners).
+        std::cout << "  [Mining] Registration PoW already in progress on another thread, waiting..." << std::endl;
+        int wait_sec = 0;
+        while (g_regPowInProgress.load(std::memory_order_acquire) && g_node_state.running) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            wait_sec++;
+            if (wait_sec % 30 == 0) {
+                std::cout << "  [Mining] Still waiting for registration PoW... (" << wait_sec << "s)" << std::endl;
+            }
+        }
+        if (!g_node_state.running) return false;
+        // Check if the other thread succeeded
+        if (g_regNonceMined.load() && g_regNonceIdentity == identity) {
+            std::cout << "  [Mining] Registration PoW completed by other thread!" << std::endl;
+            return true;
+        }
+        // Other thread failed — we need to try ourselves
+        std::cerr << "[Mining] WARNING: Registration PoW failed on other thread, retrying..." << std::endl;
+        if (!g_regPowInProgress.exchange(true)) {
+            uint64_t nonce = 0;
+            if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce, &g_node_state.running)) {
+                g_regCachedNonce = nonce;
+                g_regNonceIdentity = identity;
+                g_regNonceMined.store(true);
+                g_regPowInProgress.store(false);
+                std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
+                return true;
+            } else {
+                g_regPowInProgress.store(false);
+                return false;
+            }
+        }
+        return false;
     }
 }
 
@@ -964,24 +998,24 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                     // Thread-safety: atomic flag prevents duplicate PoW mining when
                     // BuildMiningTemplate is called concurrently (e.g. main thread
                     // startup + chain tip callback from P2P thread)
-                    // NOTE: s_cachedRegNonce, s_regNonceMined, s_regPowInProgress,
-                    // s_regNonceIdentity are file-scope (shared with EnsureMIKRegistered)
+                    // NOTE: g_regCachedNonce, g_regNonceMined, g_regPowInProgress,
+                    // g_regNonceIdentity are file-scope (shared with EnsureMIKRegistered)
                     uint64_t regNonce = 0;
                     if (Dilithion::g_chainParams && nHeight >= Dilithion::g_chainParams->dfmpV3ActivationHeight) {
-                        if (s_regNonceMined.load() && s_regNonceIdentity == mikIdentity) {
-                            regNonce = s_cachedRegNonce;
-                        } else if (!s_regPowInProgress.exchange(true)) {
+                        if (g_regNonceMined.load() && g_regNonceIdentity == mikIdentity) {
+                            regNonce = g_regCachedNonce;
+                        } else if (!g_regPowInProgress.exchange(true)) {
                             // We acquired the lock - mine the PoW
                             std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
                             if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce, &g_node_state.running)) {
-                                s_cachedRegNonce = regNonce;
-                                s_regNonceIdentity = mikIdentity;
-                                s_regNonceMined.store(true);
+                                g_regCachedNonce = regNonce;
+                                g_regNonceIdentity = mikIdentity;
+                                g_regNonceMined.store(true);
                             } else {
                                 std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
                                 regNonce = UINT64_MAX;  // Sentinel: skip registration (prevents nonce=0 template)
                             }
-                            s_regPowInProgress.store(false);
+                            g_regPowInProgress.store(false);
                         } else {
                             // Another thread is already mining registration PoW - skip MIK for this template.
                             // The next template rebuild (after PoW completes) will include the cached nonce.
@@ -2595,8 +2629,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Without the IBD check, BuildMiningTemplate runs on every block during sync,
             // and at height 7000+ triggers MineRegistrationPoW which blocks the processing
             // thread for ~10-15 minutes, stalling IBD.
+            // BUG #278 FIX: Also skip during registration PoW to avoid flooding logs
+            // with "Registration PoW already in progress" warnings
             if (g_node_state.miner && g_node_state.wallet && g_node_state.mining_enabled.load()
-                && !IsInitialBlockDownload()) {
+                && !IsInitialBlockDownload() && !g_regPowInProgress.load(std::memory_order_relaxed)) {
                 std::cout << "[Mining] " << (is_reorg ? "Reorg" : "New tip")
                           << " detected - updating template immediately..." << std::endl;
                 auto templateOpt = BuildMiningTemplate(db, *g_node_state.wallet, false, g_node_state.mining_address_override);

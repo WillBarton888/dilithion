@@ -79,6 +79,13 @@ struct NodeState {
 };
 extern NodeState g_node_state;
 
+// BUG #278 FIX: Access cached MIK registration PoW nonce from dilithion-node.cpp
+// Prevents RPC_StartMining from re-mining PoW when it's already cached or in progress
+extern uint64_t g_regCachedNonce;
+extern std::atomic<bool> g_regNonceMined;
+extern std::atomic<bool> g_regPowInProgress;
+extern DFMP::Identity g_regNonceIdentity;
+
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>  // For inet_pton
@@ -4020,14 +4027,51 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         }
         std::cout << "[RPC] MIK not registered - will include full pubkey in coinbase" << std::endl;
 
-        // DFMP v3.0: Mine registration PoW nonce (required at/above v3 activation height)
+        // DFMP v3.0: Registration PoW nonce (required at/above v3 activation height)
+        // BUG #278 FIX: Check cached nonce first (from EnsureMIKRegistered or BuildMiningTemplate)
+        // to avoid re-mining and blocking the RPC handler for 10-15 minutes
         int dfmpV3Height = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpV3ActivationHeight : 0;
         if (static_cast<int>(nHeight) >= dfmpV3Height) {
-            std::cout << "[RPC] Mining registration PoW (this may take 10-15 minutes)..." << std::endl;
             uint64_t regNonce = 0;
-            if (!DFMP::MineRegistrationPoW(mikData.pubkey, DFMP::REGISTRATION_POW_BITS, regNonce)) {
-                throw std::runtime_error("Failed to mine registration PoW nonce");
+            if (g_regNonceMined.load() && g_regNonceIdentity == mikData.identity) {
+                // Cached from startup path — use immediately
+                regNonce = g_regCachedNonce;
+                std::cout << "[RPC] Using cached registration PoW nonce" << std::endl;
+            } else if (g_regPowInProgress.load()) {
+                // Another thread is mining — wait for it
+                std::cout << "[RPC] Registration PoW in progress, waiting for completion..." << std::endl;
+                int wait_sec = 0;
+                while (g_regPowInProgress.load() && g_node_state.running.load()) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    wait_sec++;
+                    if (wait_sec % 30 == 0) {
+                        std::cout << "[RPC] Still waiting for registration PoW... (" << wait_sec << "s)" << std::endl;
+                    }
+                    if (wait_sec > 1200) {
+                        throw std::runtime_error("Registration PoW timeout (20 min)");
+                    }
+                }
+                if (g_regNonceMined.load() && g_regNonceIdentity == mikData.identity) {
+                    regNonce = g_regCachedNonce;
+                    std::cout << "[RPC] Registration PoW completed!" << std::endl;
+                } else {
+                    throw std::runtime_error("Registration PoW failed on other thread");
+                }
+            } else {
+                // Not cached and not in progress — mine it ourselves
+                std::cout << "[RPC] Mining registration PoW (one-time, ~10-15 minutes)..." << std::endl;
+                g_regPowInProgress.store(true);
+                if (DFMP::MineRegistrationPoW(mikData.pubkey, DFMP::REGISTRATION_POW_BITS, regNonce, &g_node_state.running)) {
+                    g_regCachedNonce = regNonce;
+                    g_regNonceIdentity = mikData.identity;
+                    g_regNonceMined.store(true);
+                    g_regPowInProgress.store(false);
+                    std::cout << "[RPC] Registration PoW complete!" << std::endl;
+                } else {
+                    g_regPowInProgress.store(false);
+                    throw std::runtime_error("Failed to mine registration PoW nonce");
+                }
             }
             mikData.registrationNonce = regNonce;
         }

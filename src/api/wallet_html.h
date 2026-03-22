@@ -2281,16 +2281,24 @@ inline const std::string& GetWalletHTML() {
                     await rpcCall('stopmining');
                 } else {
                     // Start mining with selected threads
+                    // BUG #278 FIX: New miners need ~10-15 min for one-time MIK registration PoW.
+                    // Use 20-minute timeout and show registration message.
                     const threads = getSelectedThreads();
-                    btnText.textContent = 'Starting...';
+                    btnText.textContent = 'Registering identity...';
                     console.log('[Mining] Starting with', threads, 'threads');
-                    await rpcCall('startmining', { threads: threads });
+                    await rpcCall('startmining', { threads: threads }, 1200000);
+                    btnText.textContent = 'Mining!';
                 }
                 // Refresh to get new status
                 await refreshBlockchainInfo();
             } catch(e) {
                 console.error('Mining toggle error:', e);
-                alert('Failed to toggle mining: ' + e.message);
+                // Don't show alarming error for timeouts during registration
+                if (e.message && e.message.includes('timed out')) {
+                    alert('Mining registration is taking longer than expected. Check the node console for progress. Mining will start automatically when ready.');
+                } else {
+                    alert('Failed to toggle mining: ' + e.message);
+                }
             } finally {
                 btn.disabled = false;
             }

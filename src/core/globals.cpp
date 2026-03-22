@@ -14,6 +14,7 @@
 
 #include <consensus/chain.h>
 #include <core/node_context.h>
+#include <dfmp/dfmp.h>
 #include <atomic>
 
 // Global chain state (kept separate for utilities that don't need full NodeContext)
@@ -37,3 +38,10 @@ struct NodeState {
 };
 
 NodeState g_node_state;
+
+// BUG #278 FIX: MIK registration PoW cache — shared between dilithion-node.cpp and server.cpp
+// Defined here so all link targets (dilithion-node, dilv-node, genesis_gen, check-wallet-balance) resolve them
+uint64_t g_regCachedNonce = 0;
+std::atomic<bool> g_regNonceMined{false};
+std::atomic<bool> g_regPowInProgress{false};
+DFMP::Identity g_regNonceIdentity;

@@ -2293,8 +2293,10 @@ async function toggleMining() {
                 }
             } catch (e) { /* wallet might not be encrypted */ }
 
+            addLog('Starting mining (first-time registration may take ~10-15 minutes)...');
+            btn.textContent = 'Registering...';
             await rpcCall('startmining');
-            addLog('Start mining requested');
+            addLog('Mining started!');
             miningStartTime = Date.now();
         }
     } catch (err) {
