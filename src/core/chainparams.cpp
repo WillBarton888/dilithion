@@ -161,6 +161,8 @@ ChainParams ChainParams::Mainnet() {
     params.checkpoints.emplace_back(24476, uint256S("000007289cc3fdbe88a572d84f974a49fb962eda7412312c28930153ae52d611"));
     // Checkpoint at height 30000 - locks in chain through Digital DNA activation
     params.checkpoints.emplace_back(30000, uint256S("0000000f1cadcbc897976ebe04f1171a5d591ebdb580bdd229d2e310f1a09f05"));
+    // Checkpoint at height 34000 - post v3.9.0 stabilization
+    params.checkpoints.emplace_back(34000, uint256S("00000009b2312644f10b286934ed982520e92aaa54b2736e46f365a77bd92d98"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)
@@ -407,6 +409,8 @@ ChainParams ChainParams::DilV() {
 
     // DilV Checkpoints
     params.checkpoints.emplace_back(10000, uint256S("1554e9011cfc5ec916b600d1f2238cbbe21500762b55904368b3704f117cbaf2"));
+    // Checkpoint at height 25000 - pre-stabilization fork
+    params.checkpoints.emplace_back(25000, uint256S("d2dbd3344b5a084276356f52116d158fe8d3a4088b5d2f2bb7806357e1fd47ba"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
