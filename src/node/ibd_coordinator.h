@@ -309,6 +309,16 @@ private:
     int m_fork_all_in_db_cycles{0};
     static constexpr int MAX_FORK_ALL_IN_DB_CYCLES = 3;  // Escalate after 3 consecutive stuck cycles
 
+    // BUG #278: Prevent infinite re-validation loop
+    // Track block hashes that have been re-cleared by BUG #270 recovery and then
+    // failed validation AGAIN. These blocks are genuinely invalid under current
+    // consensus rules (not stale from an old binary) and must not be re-cleared.
+    std::set<uint256> m_permanently_failed_blocks;
+
+    // BUG #278: Remember last fork point where chain switch failed (consensus violation).
+    // Prevents fork detection from re-detecting the same invalid fork.
+    int m_last_failed_fork_point{-1};
+
     // BUG #261 FIX: Startup grace period for fork detection
     // Skip fork detection during first N seconds after creation to allow:
     // - Header population from local blockchain to complete

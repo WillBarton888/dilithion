@@ -719,6 +719,14 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         m_last_cancelled_fork_point = -1;
     }
 
+    // BUG #278: Clear failed fork point when chain advances past it.
+    // This allows fresh fork detection for new forks at different points.
+    if (m_last_failed_fork_point >= 0 && chain_height > m_last_failed_fork_point) {
+        std::cout << "[FORK-RECOVERY] Chain advanced past failed fork point " << m_last_failed_fork_point
+                  << " - clearing BUG #278 suppression" << std::endl;
+        m_last_failed_fork_point = -1;
+    }
+
     m_last_checked_chain_height = chain_height;
 
     // FORK TIMEOUT CHECK: Check active fork timeout independently of detection layers.
@@ -858,6 +866,17 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                                 m_fork_detected.store(false);
                                 g_node_context.fork_detected.store(false);
                                 g_metrics.ClearForkDetected();
+                            } else {
+                                // BUG #278: Chain switch FAILED (consensus violation in fork chain).
+                                // Record fork point so we don't re-detect and retry the same invalid fork.
+                                int failedForkPoint = m_fork_point.load();
+                                std::cout << "[IBD] Fork chain switch FAILED at fork point " << failedForkPoint
+                                          << " - marking fork as permanently invalid" << std::endl;
+                                m_last_failed_fork_point = failedForkPoint;
+                                m_fork_detected.store(false);
+                                g_node_context.fork_detected.store(false);
+                                g_metrics.ClearForkDetected();
+                                m_fork_point.store(-1);
                             }
                         }
                     }
@@ -1553,21 +1572,31 @@ bool CIbdCoordinator::FetchBlocks() {
     // flags so blocks can be re-validated with current consensus rules.
     // Blocks with BLOCK_HAVE_DATA whose parent is connected get queued for
     // immediate re-processing via the existing orphan reprocessing path.
+    //
+    // BUG #278: Skip blocks in m_permanently_failed_blocks. These are blocks
+    // that were already re-cleared and re-validated in THIS session but failed
+    // again (genuine consensus violations, not stale flags from old binary).
     if (getdata.empty() && failed_skip_count > 0 && (header_height - chain_height) > 10) {
-        std::cout << "[IBD] All " << failed_skip_count << " blocks in range marked as failed - "
-                  << "clearing flags for re-validation (chain=" << chain_height
-                  << " headers=" << header_height << ")" << std::endl;
-
         int cleared_count = 0;
+        int perm_failed_count = 0;
         for (int h : blocks_to_request) {
             uint256 hash = m_node_context.headers_manager->GetRandomXHashAtHeight(h);
             if (hash.IsNull()) continue;
+
+            // BUG #278: Don't re-clear blocks that already failed re-validation
+            if (m_permanently_failed_blocks.count(hash)) {
+                perm_failed_count++;
+                continue;
+            }
 
             CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
             if (pindex && pindex->IsInvalid()) {
                 // Clear the failed flags
                 pindex->nStatus &= ~CBlockIndex::BLOCK_FAILED_MASK;
                 cleared_count++;
+
+                // Track this block — if it fails again, it's permanently invalid
+                m_permanently_failed_blocks.insert(hash);
 
                 // If block data is in DB and parent is connected, queue for re-processing
                 if ((pindex->nStatus & CBlockIndex::BLOCK_HAVE_DATA) && m_node_context.blockchain_db) {
@@ -1583,7 +1612,14 @@ bool CIbdCoordinator::FetchBlocks() {
                 }
             }
         }
-        std::cout << "[IBD] Cleared failed flags on " << cleared_count << " blocks" << std::endl;
+        if (cleared_count > 0) {
+            std::cout << "[IBD] Cleared failed flags on " << cleared_count << " blocks for re-validation"
+                      << " (chain=" << chain_height << " headers=" << header_height << ")" << std::endl;
+        }
+        if (perm_failed_count > 0) {
+            std::cout << "[IBD] Skipped " << perm_failed_count
+                      << " permanently invalid blocks (already re-validated and failed)" << std::endl;
+        }
     }
 
     // Send GETDATA to our single sync peer
@@ -2011,6 +2047,21 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
 
 bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, ForkRecoveryReason reason) {
     int fork_point = FindForkPoint(chain_height);
+
+    // BUG #278: Don't retry fork recovery at a fork point that already failed chain switch.
+    // The fork contains blocks with consensus violations (e.g., cooldown) that won't pass
+    // on retry. Without this check, fork detection → recovery → switch fail → re-detection
+    // creates an infinite loop that stalls the node.
+    // Set m_fork_detected=true to suppress further detection attempts from all 3 layers.
+    // Normal IBD continues for the valid chain; if the chain advances past this fork point,
+    // m_last_failed_fork_point is cleared and fresh detection can occur.
+    if (fork_point > 0 && fork_point == m_last_failed_fork_point) {
+        std::cout << "[FORK-RECOVERY] Skipping fork at point " << fork_point
+                  << " - chain switch already failed here (BUG #278), suppressing detection" << std::endl;
+        m_fork_detected.store(true);  // Suppress further detection
+        m_fork_point.store(fork_point);
+        return false;
+    }
 
     // BUG #189 FIX: Allow fork_point up to chain_height + 1 to handle race conditions
     if (fork_point <= 0 || fork_point > chain_height + 1) {
