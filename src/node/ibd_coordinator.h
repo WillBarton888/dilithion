@@ -319,6 +319,10 @@ private:
     // Prevents fork detection from re-detecting the same invalid fork.
     int m_last_failed_fork_point{-1};
 
+    // BUG #278: Count consecutive cycles where all blocks in range are permanently invalid.
+    // After threshold, clear stale headers to re-fetch from correct-chain peers.
+    int m_perm_failed_stuck_cycles{0};
+
     // BUG #261 FIX: Startup grace period for fork detection
     // Skip fork detection during first N seconds after creation to allow:
     // - Header population from local blockchain to complete

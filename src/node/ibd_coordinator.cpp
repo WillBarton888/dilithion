@@ -1620,6 +1620,38 @@ bool CIbdCoordinator::FetchBlocks() {
             std::cout << "[IBD] Skipped " << perm_failed_count
                       << " permanently invalid blocks (already re-validated and failed)" << std::endl;
         }
+
+        // BUG #278: If ALL blocks in the range are permanently invalid and nothing
+        // was cleared, our headers chain points to the wrong (fork) chain. Clear
+        // headers above chain tip so they get re-fetched from correct-chain peers.
+        if (cleared_count == 0 && perm_failed_count > 0) {
+            m_perm_failed_stuck_cycles++;
+            if (m_perm_failed_stuck_cycles >= 3) {
+                std::cout << "[IBD] BUG #278: All blocks in range permanently invalid for "
+                          << m_perm_failed_stuck_cycles << " cycles - clearing stale headers above "
+                          << chain_height << " to re-fetch from correct chain" << std::endl;
+
+                if (m_node_context.headers_manager) {
+                    CBlockIndex* tip = m_chainstate.GetTip();
+                    uint256 tipHash = tip ? tip->GetBlockHash() : uint256();
+                    m_node_context.headers_manager->ClearAboveHeight(chain_height, tipHash);
+                }
+                if (g_node_context.block_tracker)
+                    g_node_context.block_tracker->ClearAboveHeight(chain_height);
+
+                // Clear permanently failed set so fresh headers get a clean start
+                m_permanently_failed_blocks.clear();
+                m_perm_failed_stuck_cycles = 0;
+                m_last_failed_fork_point = -1;
+
+                // Reset to header sync to re-fetch from peers
+                m_state = IBDState::HEADERS_SYNC;
+                m_last_header_height = 0;
+                std::cout << "[IBD] BUG #278: Switched to HEADERS_SYNC to get correct chain headers" << std::endl;
+            }
+        } else {
+            m_perm_failed_stuck_cycles = 0;
+        }
     }
 
     // Send GETDATA to our single sync peer
