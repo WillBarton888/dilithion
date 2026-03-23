@@ -262,6 +262,7 @@ CRPCServer::CRPCServer(uint16_t port)
 
     // UTXO set queries
     m_handlers["getholdercount"] = [this](const std::string& p) { return RPC_GetHolderCount(p); };
+    m_handlers["gettopholders"] = [this](const std::string& p) { return RPC_GetTopHolders(p); };
 
     // Block repair commands
     m_handlers["repairblocks"] = [this](const std::string& p) { return RPC_RepairBlocks(p); };
@@ -3392,6 +3393,69 @@ std::string CRPCServer::RPC_GetHolderCount(const std::string& params) {
     oss << "\"utxos\":" << totalUTXOs << ",";
     oss << "\"total_amount\":" << FormatAmount(totalAmount);
     oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetTopHolders(const std::string& params) {
+    if (!m_utxo_set) {
+        throw std::runtime_error("UTXO set not initialized");
+    }
+
+    // Parse optional count parameter (default 100, max 500)
+    int count = 100;
+    try {
+        auto parsed = nlohmann::json::parse(params);
+        if (parsed.contains("count")) {
+            count = parsed["count"].get<int>();
+            if (count < 1) count = 1;
+            if (count > 500) count = 500;
+        }
+    } catch (...) {
+        // Use default
+    }
+
+    // Aggregate balances by address (pubkey hash)
+    std::map<std::vector<uint8_t>, uint64_t> balances;
+    uint64_t totalUTXOs = 0;
+
+    m_utxo_set->ForEach([&](const COutPoint& outpoint, const CUTXOEntry& entry) -> bool {
+        totalUTXOs++;
+        std::vector<uint8_t> pkh = WalletCrypto::ExtractPubKeyHash(entry.out.scriptPubKey);
+        if (!pkh.empty()) {
+            balances[pkh] += entry.out.nValue;
+        }
+        return true;
+    });
+
+    // Sort by balance descending
+    std::vector<std::pair<std::vector<uint8_t>, uint64_t>> sorted(balances.begin(), balances.end());
+    std::sort(sorted.begin(), sorted.end(),
+        [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    // Trim to requested count
+    if ((int)sorted.size() > count) {
+        sorted.resize(count);
+    }
+
+    // Build JSON response
+    std::ostringstream oss;
+    oss << "{\"holders\":" << balances.size() << ",\"utxos\":" << totalUTXOs << ",\"top\":[";
+
+    for (size_t i = 0; i < sorted.size(); i++) {
+        if (i > 0) oss << ",";
+
+        // Encode pubkey hash to address
+        std::vector<uint8_t> addrData;
+        addrData.push_back(0x1E);  // Dilithion version byte ('D' prefix)
+        addrData.insert(addrData.end(), sorted[i].first.begin(), sorted[i].first.end());
+        std::string address = EncodeBase58Check(addrData);
+
+        oss << "{\"address\":\"" << address << "\","
+            << "\"balance\":" << FormatAmount(sorted[i].second) << ","
+            << "\"rank\":" << (i + 1) << "}";
+    }
+
+    oss << "]}";
     return oss.str();
 }
 

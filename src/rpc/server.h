@@ -359,6 +359,7 @@ private:
 
     // UTXO set query methods
     std::string RPC_GetHolderCount(const std::string& params);
+    std::string RPC_GetTopHolders(const std::string& params);
 
     // Block repair methods (Bug #243 fix)
     std::string RPC_RepairBlocks(const std::string& params);

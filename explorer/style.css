@@ -423,6 +423,16 @@ a.hash:hover {
     color: #9ca3af;
 }
 
+.badge-reward {
+    background: var(--accent-dim);
+    color: var(--accent);
+}
+
+.badge-tx {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+}
+
 /* --- Pagination --- */
 .pagination {
     display: flex;

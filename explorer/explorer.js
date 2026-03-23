@@ -99,6 +99,9 @@ router.add('#/blocks', () => renderBlockList(1));
 router.add('#/blocks/:page', (page) => renderBlockList(parseInt(page, 10)));
 router.add('#/forks', renderForks);
 router.add('#/nodes', renderNodes);
+router.add('#/holders', renderHolders);
+router.add('#/transactions', () => renderTransactions(1));
+router.add('#/transactions/:page', (page) => renderTransactions(parseInt(page, 10)));
 router.add('#/search/:query', handleSearch);
 
 // ============================================================
@@ -216,6 +219,10 @@ function updateNavLinks(hash) {
         } else if (route === 'forks' && hash === '#/forks') {
             link.classList.add('active');
         } else if (route === 'nodes' && hash === '#/nodes') {
+            link.classList.add('active');
+        } else if (route === 'holders' && hash === '#/holders') {
+            link.classList.add('active');
+        } else if (route === 'transactions' && hash.startsWith('#/transactions')) {
             link.classList.add('active');
         }
     });
@@ -1430,3 +1437,118 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     router.route();
 });
+
+// ============================================================
+// Top Holders Page
+// ============================================================
+
+async function renderHolders() {
+    setTitle('Top Holders');
+    showLoading();
+
+    try {
+        const data = await apiFetch('/holders.php?count=100');
+        const holders = data.top || [];
+        const totalHolders = data.holders || 0;
+        const supply = data.supply || 0;
+
+        let html = '';
+        html += '<div class="page-header"><h1>Top Holders</h1>';
+        html += '<p>' + formatNumber(totalHolders) + ' unique addresses holding ' + UNIT + '</p></div>';
+
+        const cols = [
+            { label: 'Rank', sortable: true, align: 'center' },
+            { label: 'Address', sortable: false },
+            { label: 'Balance', sortable: true, align: 'right' },
+            { label: '% of Supply', sortable: true, align: 'right' },
+        ];
+
+        html += '<div class="card">';
+        html += '<div class="card-body-flush"><div class="table-container">';
+        html += '<table class="data-table" data-sort-table="holders">';
+        html += '<thead><tr>' + makeSortableHeader('holders', cols) + '</tr></thead>';
+        html += '<tbody>';
+
+        for (const h of holders) {
+            const balance = h.balance || 0;
+            const pct = supply > 0 ? (balance / supply * 100) : 0;
+
+            html += '<tr>';
+            html += `<td class="center" data-sort-value="${h.rank}">${h.rank}</td>`;
+            html += `<td><a href="#/address/${escapeHtml(h.address)}" class="address">${escapeHtml(h.address)}</a></td>`;
+            html += `<td class="right amount" data-sort-value="${balance}">${formatNumber(Math.floor(balance))} ${UNIT}</td>`;
+            html += `<td class="right" data-sort-value="${pct}">${pct.toFixed(2)}%</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table></div></div>';
+        html += '</div>';
+
+        getApp().innerHTML = html;
+    } catch (e) {
+        showError('Failed to load holders', e.message);
+    }
+}
+
+// ============================================================
+// Recent Transactions Page
+// ============================================================
+
+async function renderTransactions(page) {
+    page = page || 1;
+    setTitle('Transactions - Page ' + page);
+    showLoading();
+
+    try {
+        const data = await apiFetch('/transactions.php?limit=50');
+        const transactions = data.transactions || [];
+        const tipHeight = data.tip_height || 0;
+
+        let html = '';
+        html += '<div class="page-header"><h1>Recent Transactions</h1>';
+        html += '<p>Latest transactions from the ' + (activeChain === 'dilv' ? 'DilV' : 'Dilithion') + ' blockchain</p></div>';
+
+        const cols = [
+            { label: 'TxID', sortable: false },
+            { label: 'Block', sortable: true, align: 'center' },
+            { label: 'Time', sortable: true },
+            { label: 'Type', sortable: false, align: 'center' },
+            { label: 'Amount', sortable: true, align: 'right' },
+            { label: 'To', sortable: false },
+        ];
+
+        html += '<div class="card">';
+        html += '<div class="card-body-flush"><div class="table-container">';
+        html += '<table class="data-table" data-sort-table="txlist">';
+        html += '<thead><tr>' + makeSortableHeader('txlist', cols) + '</tr></thead>';
+        html += '<tbody>';
+
+        for (const tx of transactions) {
+            const txid = tx.txid || '';
+            const blockHeight = tx.block_height;
+            const time = tx.time || 0;
+            const isCoinbase = tx.coinbase;
+            const totalOutput = tx.total_output || 0;
+            const outputs = tx.outputs || [];
+
+            // Primary recipient (first non-change output, or first output)
+            const primaryTo = outputs.length > 0 ? outputs[0].address : '';
+
+            html += '<tr>';
+            html += `<td><a href="#/tx/${escapeHtml(txid)}" class="hash">${escapeHtml(formatHash(txid, 10))}</a></td>`;
+            html += `<td class="center" data-sort-value="${blockHeight}"><a href="#/block/${blockHeight}">${formatNumber(blockHeight)}</a></td>`;
+            html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
+            html += `<td class="center"><span class="badge ${isCoinbase ? 'badge-reward' : 'badge-tx'}">${isCoinbase ? 'Reward' : 'Transfer'}</span></td>`;
+            html += `<td class="right amount" data-sort-value="${totalOutput}">${formatNumber(Math.floor(totalOutput / IONS_PER_DIL))} ${UNIT}</td>`;
+            html += `<td>${primaryTo ? `<a href="#/address/${escapeHtml(primaryTo)}" class="address">${escapeHtml(formatHash(primaryTo, 8))}</a>` : '<span class="text-dim">-</span>'}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table></div></div>';
+        html += '</div>';
+
+        getApp().innerHTML = html;
+    } catch (e) {
+        showError('Failed to load transactions', e.message);
+    }
+}
