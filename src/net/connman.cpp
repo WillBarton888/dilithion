@@ -1054,14 +1054,27 @@ void CConnman::ThreadOpenConnections() {
         // PHASE 3: Auto-reconnect manual nodes (Bitcoin Core pattern)
         // --connect, --addnode, and RPC addnode peers are automatically reconnected
         // Uses ip:port matching (not just IP) to support multiple manual nodes on same IP
+        // Backoff: wait 60s between reconnect attempts per endpoint to avoid ID leak
         {
+            static std::map<std::string, std::chrono::steady_clock::time_point> s_lastReconnectAttempt;
+            auto now_tp = std::chrono::steady_clock::now();
+
             std::lock_guard<std::mutex> lock(cs_manual_nodes);
             for (const auto& manual_addr : m_manual_nodes) {
                 std::string manual_ip = manual_addr.ToStringIP();
                 std::string manual_endpoint = manual_ip + ":" + std::to_string(manual_addr.port);
                 if (connected_endpoints.count(manual_endpoint)) {
+                    s_lastReconnectAttempt.erase(manual_endpoint);  // Reset backoff on success
                     continue;  // Already connected to this ip:port
                 }
+
+                // Backoff: don't retry more than once per 60s per endpoint
+                auto it = s_lastReconnectAttempt.find(manual_endpoint);
+                if (it != s_lastReconnectAttempt.end()) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - it->second).count();
+                    if (elapsed < 60) continue;
+                }
+                s_lastReconnectAttempt[manual_endpoint] = now_tp;
 
                 LogPrintf(NET, INFO, "[CConnman] Auto-reconnecting manual node %s:%d\n",
                           manual_ip.c_str(), manual_addr.port);
