@@ -1377,5 +1377,25 @@ bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPre
         }
     }
 
+    // Rule 3: Minimum timestamp gap between consecutive blocks
+    // After activation, block.nTime must be >= prevBlock.nTime + minBlockTimestampGap.
+    // This enforces minimum block spacing at the consensus level regardless of
+    // miner behavior, preventing fast miners from outrunning the grace period.
+    if (pindexPrev != nullptr && Dilithion::g_chainParams) {
+        int minGap = Dilithion::g_chainParams->minBlockTimestampGap;
+        if (minGap > 0) {
+            int64_t prevTime = static_cast<int64_t>(pindexPrev->nTime);
+            int64_t blockTime = static_cast<int64_t>(block.nTime);
+            if (blockTime < prevTime + minGap) {
+                std::cerr << "CheckBlockTimestamp(): block timestamp gap too small"
+                          << " (block time: " << block.nTime
+                          << ", prev time: " << pindexPrev->nTime
+                          << ", gap: " << (blockTime - prevTime)
+                          << "s, required: " << minGap << "s)" << std::endl;
+                return false;
+            }
+        }
+    }
+
     return true;
 }

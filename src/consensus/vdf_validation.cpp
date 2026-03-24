@@ -499,3 +499,72 @@ bool CheckDNAHashEquality(
 
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// CheckMIKWindowCap — per-MIK block cap in a rolling window
+// ---------------------------------------------------------------------------
+
+bool CheckMIKWindowCap(
+    const CBlock& block,
+    int height,
+    CCooldownTracker& tracker,
+    int64_t prevBlockTime,
+    int64_t blockTime,
+    std::string& error)
+{
+    // Gate: only enforce when window cap is configured
+    if (!Dilithion::g_chainParams)
+        return true;
+
+    int window = Dilithion::g_chainParams->mikWindowCapWindow;
+    int cap = Dilithion::g_chainParams->mikWindowCapFloor;
+    if (window <= 0 || cap <= 0)
+        return true;
+
+    // Only applies to VDF blocks
+    if (!block.IsVDFBlock())
+        return true;
+
+    // Genesis is always exempt
+    if (height == 0)
+        return true;
+
+    // Solo miner exemption: if only 1 active miner, cap disabled
+    int activeMiners = tracker.GetActiveMiners();
+    if (activeMiners <= 1)
+        return true;
+
+    // Liveness escape: if no block for livenessTimeoutSec, cap suspended
+    int livenessTimeout = Dilithion::g_chainParams->livenessTimeoutSec;
+    if (livenessTimeout > 0 && prevBlockTime > 0 && blockTime > 0) {
+        int64_t gap = blockTime - prevBlockTime;
+        if (gap >= livenessTimeout)
+            return true;  // chain stall — let any miner produce a block
+    }
+
+    // Extract MIK identity
+    std::array<uint8_t, 20> mikId{};
+    if (!ExtractCoinbaseMIKIdentity(block, mikId)) {
+        error = "CheckMIKWindowCap: cannot extract MIK identity from coinbase";
+        return false;
+    }
+
+    // Count blocks by this MIK in the trailing window (exclude current height)
+    int count = tracker.GetBlockCountInWindow(mikId, height - 1, window);
+    if (count >= cap) {
+        std::ostringstream oss;
+        oss << "CheckMIKWindowCap: MIK ";
+        for (int i = 0; i < 4; ++i) {
+            char hex[3];
+            snprintf(hex, sizeof(hex), "%02x", mikId[i]);
+            oss << hex;
+        }
+        oss << "... exceeded window cap (" << count << " blocks in "
+            << window << "-block window, cap=" << cap
+            << ", active miners=" << activeMiners << ")";
+        error = oss.str();
+        return false;
+    }
+
+    return true;
+}

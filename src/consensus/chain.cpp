@@ -975,6 +975,31 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         }
 
         // ====================================================================
+        // PER-MIK WINDOW CAP (consensus rule)
+        // ====================================================================
+        // Reject blocks where the miner's MIK has already mined the maximum
+        // allowed blocks in the trailing window.  Exemptions: solo miner,
+        // liveness timeout (chain stall).
+        if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+            int64_t prevTime = pindex->pprev ? static_cast<int64_t>(pindex->pprev->nTime) : 0;
+            int64_t blkTime = static_cast<int64_t>(block.nTime);
+            std::string capError;
+            if (!CheckMIKWindowCap(block, pindex->nHeight,
+                                    *g_node_context.cooldown_tracker,
+                                    prevTime, blkTime, capError)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " REJECTED: window cap exceeded" << std::endl;
+                std::cerr << "[Chain] " << capError << std::endl;
+
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
+                return false;
+            }
+        }
+
+        // ====================================================================
         // DNA HASH-EQUALITY ENFORCEMENT (Phase 5A, hard fork at dnaHashEnforcementHeight)
         // ====================================================================
         // After activation, reject VDF blocks where the committed DNA hash

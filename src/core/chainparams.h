@@ -197,6 +197,24 @@ public:
     // 999999999 = disabled
     int stabilizationForkHeight;
 
+    // Per-MIK window cap: max blocks a single MIK can mine in a rolling window.
+    // Prevents one miner (or Sybil identity) from taking >5% of blocks.
+    // 0 = disabled
+    int mikWindowCapWindow;           // Rolling window size in blocks (480 = ~6h at 45s)
+    int mikWindowCapFloor;            // Max blocks per MIK per window (24 = 5% of 480)
+
+    // Liveness escape: if no block for this many seconds, cap is suspended.
+    // Prevents deadlock when all eligible miners are capped.
+    // 0 = disabled
+    int livenessTimeoutSec;           // seconds (300 = ~6.7× target block time)
+
+    // Minimum block timestamp gap (seconds).
+    // Consensus rule: block.nTime >= prevBlock.nTime + minBlockTimestampGap.
+    // Enforces minimum block spacing at the consensus level regardless of
+    // miner behavior.  Interacts with MTP and future-time checks.
+    // 0 = disabled (legacy behavior)
+    int minBlockTimestampGap;
+
     // Coinbase maturity (blocks before mining rewards are spendable)
     // DIL mainnet/testnet: 100 (PoW reorg safety)
     // DilV: 6 (VDF is deterministic/sequential — reorgs are virtually impossible)

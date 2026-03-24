@@ -28,15 +28,15 @@
  * Dual-window (post-stabilization fork):
  *   effectiveCooldown = min(longCooldown, shortCooldown)
  *   Short window tracks recent participation; long window prevents gaming.
- *   Solo-mode floor: if short window has ≤2 miners, treat as 1 (cooldown=0).
+ *   Short window disabled at DilV genesis (vdfCooldownShortWindow=0).
  *
  * Time-based expiry (post-stabilization fork):
  *   Cooldown also expires when (currentTime - lastWinTime) >= cooldown × targetBlockTime.
  *   Handles chain stalls without needing a stall exemption.
  *
- * With MIN_COOLDOWN=0, a solo miner (n=1) gets cooldown=0 — they can
- * mine every block unimpeded, keeping the chain alive during the early
- * network phase.
+ * With MIN_COOLDOWN=2, a solo miner (n=1) gets cooldown=2 — they wait
+ * ~95s between blocks (2 × 45s target via time-based expiry).  Chain
+ * never stalls, just slows to ~95s/block during the solo phase.
  *
  * Thread-safe: all public methods acquire m_mutex.
  */
@@ -45,7 +45,7 @@ public:
     using Address = std::array<uint8_t, 20>;
 
     // Consensus-level bounds.
-    static constexpr int MIN_COOLDOWN = 0;    // blocks (0 = solo miners never stall)
+    static constexpr int MIN_COOLDOWN = 2;    // blocks (solo miner waits ~95s with time-based expiry)
     static constexpr int MAX_COOLDOWN = 100;  // blocks
 
     // Default active window — kept for backward compatibility.
@@ -96,6 +96,10 @@ public:
 
     /** Effective cooldown at a given height (considers dual-window after activation). */
     int GetEffectiveCooldown(int height) const;
+
+    /** Count how many blocks a MIK has mined in the trailing `window` blocks up to `height`.
+     *  Used for per-MIK window cap enforcement. */
+    int GetBlockCountInWindow(const Address& addr, int height, int window) const;
 
     // --- Mutation interface (called from block connect/disconnect) ---
 

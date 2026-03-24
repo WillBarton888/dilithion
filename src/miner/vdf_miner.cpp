@@ -7,6 +7,7 @@
 #include <crypto/sha3.h>
 #include <core/chainparams.h>
 #include <util/logging.h>
+#include <util/time.h>        // GetTime() for grace period timestamp
 
 #include <cstring>
 #include <iostream>
@@ -115,12 +116,17 @@ void CVDFMiner::MiningLoop()
 
     while (m_running) {
         // ---------------------------------------------------------------
-        // 0. Minimum block time wait
+        // 0. Start VDF immediately (no pre-computation wait)
         // ---------------------------------------------------------------
-        // Wait until vdfMinBlockTime seconds have elapsed since the last
-        // height change. This ensures all miners (fast and slow) finish
-        // their current-height VDF and participate in the distribution before
-        // the chain advances to the next height.
+        // VDF computation begins as soon as the height changes.  The grace
+        // period (45s) collects all miners' outputs — fast and slow miners
+        // compete within the same window.  The consensus-enforced minimum
+        // timestamp gap (minBlockTimestampGap=45s) prevents blocks from
+        // being accepted before the grace period expires, regardless of
+        // miner behavior.
+        //
+        // Legacy minBlockTime wait is skipped (vdfMinBlockTime=0).  The
+        // post-computation grace wait (Step 7d) handles pacing.
         if (m_minBlockTimeSec > 0 && !m_firstRound) {
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -362,6 +368,38 @@ void CVDFMiner::MiningLoop()
                                [this] { return m_epochChanged || !m_running; });
             m_epochChanged = false;
             continue;
+        }
+
+        // ---------------------------------------------------------------
+        // 7d. Grace period wait — ensure block timestamp is valid
+        // ---------------------------------------------------------------
+        // The consensus rule requires block.nTime >= prevBlock.nTime + minBlockTimestampGap.
+        // Wait until enough wall-clock time has passed since the last height change
+        // so we can set a valid timestamp.  This is the grace period during which
+        // slower miners submit competing (potentially lower) VDF outputs.
+        if (Dilithion::g_chainParams && Dilithion::g_chainParams->minBlockTimestampGap > 0) {
+            int minGap = Dilithion::g_chainParams->minBlockTimestampGap;
+            auto now = std::chrono::steady_clock::now();
+            auto sinceHeight = std::chrono::duration_cast<std::chrono::seconds>(
+                now - m_lastHeightChangeTime).count();
+            int graceRemaining = minGap - static_cast<int>(sinceHeight);
+
+            if (graceRemaining > 0) {
+                std::cout << "[VDF Miner] Grace period: waiting " << graceRemaining
+                          << "s for block timestamp validity (gap=" << minGap << "s)"
+                          << std::endl;
+                std::unique_lock<std::mutex> lock(m_epochMutex);
+                m_epochCV.wait_for(lock, std::chrono::seconds(graceRemaining),
+                    [this] { return m_epochChanged || !m_running; });
+
+                if (m_epochChanged || !m_running) {
+                    m_epochChanged = false;
+                    continue;
+                }
+            }
+
+            // Update block timestamp to now (must be >= prevBlock.nTime + minGap)
+            block.nTime = static_cast<uint32_t>(GetTime());
         }
 
         // ---------------------------------------------------------------

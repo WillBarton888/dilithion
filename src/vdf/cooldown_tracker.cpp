@@ -22,10 +22,6 @@ int CCooldownTracker::ComputeEffectiveCooldown(int height) const
     if (height >= m_stabilizationHeight && m_shortWindow > 0) {
         RecalcShortActiveMiners(height);
         int shortMiners = m_cachedShortActiveMinersMut;
-        // Solo-mode floor: ≤2 miners in short window treated as 1 (cooldown=0).
-        // With VDF, only one miner wins per height (deterministic), so two miners
-        // with cooldown=0 simply alternate — no conflict.
-        if (shortMiners <= 2) shortMiners = 1;
         int shortCooldown = CalculateCooldown(shortMiners);
         return std::min(longCooldown, shortCooldown);
     }
@@ -83,6 +79,21 @@ int CCooldownTracker::GetShortActiveMiners() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_cachedShortActiveMinersMut;
+}
+
+int CCooldownTracker::GetBlockCountInWindow(const Address& addr, int height, int window) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    int count = 0;
+    int fromHeight = std::max(0, height - window + 1);
+    // Iterate over the height→winner map in the window range
+    auto it = m_heightToWinner.lower_bound(fromHeight);
+    auto end = m_heightToWinner.upper_bound(height);
+    for (; it != end; ++it) {
+        if (it->second == addr)
+            ++count;
+    }
+    return count;
 }
 
 std::vector<CCooldownTracker::Address> CCooldownTracker::GetKnownAddresses() const

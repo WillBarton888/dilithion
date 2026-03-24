@@ -168,4 +168,32 @@ bool CheckConsecutiveMiner(
     std::string& error
 );
 
+/**
+ * Check per-MIK window cap (hard fork).
+ *
+ * Rejects blocks where the miner's MIK identity has already mined
+ * mikWindowCapFloor blocks in the trailing mikWindowCapWindow blocks.
+ *
+ * Exemptions:
+ *   - Solo miner (activeMiners <= 1): cap disabled to prevent chain stall
+ *   - Liveness timeout: if no block for livenessTimeoutSec seconds, cap
+ *     suspended until chain advances (prevents deadlock when all miners capped)
+ *
+ * @param block          The candidate VDF block
+ * @param height         Block height
+ * @param tracker        Cooldown tracker with current chain state
+ * @param prevBlockTime  Timestamp of the previous block (for liveness check)
+ * @param blockTime      Timestamp of the candidate block
+ * @param error          Human-readable error string on failure
+ * @return true if block passes window cap check
+ */
+bool CheckMIKWindowCap(
+    const CBlock& block,
+    int height,
+    CCooldownTracker& tracker,
+    int64_t prevBlockTime,
+    int64_t blockTime,
+    std::string& error
+);
+
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

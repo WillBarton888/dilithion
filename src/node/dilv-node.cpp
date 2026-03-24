@@ -4079,6 +4079,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             break;
                         }
                     }
+
+                    // --- Check 4: Per-MIK Window Cap ---
+                    if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+                        int64_t prevTime = idx->pprev ? static_cast<int64_t>(idx->pprev->nTime) : 0;
+                        int64_t blkTime = static_cast<int64_t>(block.nTime);
+                        std::string err;
+                        if (!CheckMIKWindowCap(block, idx->nHeight,
+                                *g_node_context.cooldown_tracker,
+                                prevTime, blkTime, err)) {
+                            firstInvalidHeight = idx->nHeight;
+                            invalidReason = "Window cap violation: " + err;
+                            break;
+                        }
+                    }
                 }
 
                 if (firstInvalidHeight > 0) {

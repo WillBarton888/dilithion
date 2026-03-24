@@ -196,7 +196,12 @@ uint256 GetGenesisHash() {
     static bool initialized = false;
 
     if (!initialized) {
-        CBlock genesis = (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) ?
+        // Use VDF genesis for any chain with VDF active from genesis (DilV, or testnet in VDF-only mode)
+        bool useVdfGenesis = Dilithion::g_chainParams &&
+            (Dilithion::g_chainParams->IsDilV() ||
+             (Dilithion::g_chainParams->vdfActivationHeight == 0 &&
+              Dilithion::g_chainParams->vdfExclusiveHeight == 0));
+        CBlock genesis = useVdfGenesis ?
             CreateDilVGenesisBlock() : CreateGenesisBlock();
         hash = genesis.GetHash();
         initialized = true;
@@ -211,8 +216,12 @@ bool IsGenesisBlock(const CBlock& block) {
         throw std::runtime_error("Chain parameters not initialized");
     }
 
-    // DilV genesis is version 4 (VDF), regular genesis is version 1
-    if (Dilithion::g_chainParams->IsDilV()) {
+    // Use VDF genesis for any chain with VDF active from genesis
+    bool useVdfGenesis = Dilithion::g_chainParams->IsDilV() ||
+        (Dilithion::g_chainParams->vdfActivationHeight == 0 &&
+         Dilithion::g_chainParams->vdfExclusiveHeight == 0);
+
+    if (useVdfGenesis) {
         if (block.nVersion != CBlockHeader::VDF_VERSION) return false;
     } else {
         if (block.nVersion != VERSION) return false;
@@ -223,7 +232,7 @@ bool IsGenesisBlock(const CBlock& block) {
     if (block.nBits != Dilithion::g_chainParams->genesisNBits) return false;
 
     // Check merkle root matches expected
-    CBlock genesis = Dilithion::g_chainParams->IsDilV() ?
+    CBlock genesis = useVdfGenesis ?
         CreateDilVGenesisBlock() : CreateGenesisBlock();
     if (!(block.hashMerkleRoot == genesis.hashMerkleRoot)) return false;
 

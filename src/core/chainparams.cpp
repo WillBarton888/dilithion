@@ -121,6 +121,10 @@ ChainParams ChainParams::Mainnet() {
     params.consecutiveMinerCheckHeight = 999999999; // Disabled (VDF not active on mainnet)
     params.vdfCooldownShortWindow = 0;               // Disabled (VDF not active on mainnet)
     params.stabilizationForkHeight = 999999999;      // Disabled (VDF not active on mainnet)
+    params.mikWindowCapWindow = 0;                   // Disabled (VDF not active on mainnet)
+    params.mikWindowCapFloor = 0;
+    params.livenessTimeoutSec = 0;
+    params.minBlockTimestampGap = 0;                 // Disabled (DIL uses RandomX, not VDF pacing)
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): disabled until fork is scheduled
@@ -183,14 +187,12 @@ ChainParams ChainParams::Testnet() {
     // Different from mainnet to prevent transaction replay between networks
     params.chainID = 1001;  // Testnet Chain ID
 
-    // Genesis block parameters
-    // V1.0.14: Increased difficulty 6x (0x1f060000 → 0x1f010000) to match v1.0.13 performance
-    // With per-thread RandomX VMs (~600 H/s), this produces ~60 second block times
-    params.genesisTime = 1730000000;   // October 27, 2025 (testnet launch)
-    params.genesisNonce = 15178;       // Mined on 2025-11-18
-    params.genesisNBits = 0x1f010000;  // 6x harder (target=0x010000...)
-    params.genesisHash = "0000ee281e9c4a9216ed662146da376ff20fd2b3cc516bc4346cedb2a330e6d3";
-    params.genesisCoinbaseMsg = "Dilithion Testnet v1.0.15 - Bug #32 & #33 fixes (mining template + IBD)";
+    // Genesis block parameters — VDF genesis for MVP testing
+    params.genesisTime = 1774656000;   // March 25, 2026 12:00:00 UTC (MVP testnet reset)
+    params.genesisNonce = 0;           // VDF blocks don't use nonce
+    params.genesisNBits = 0x1d00ffff;  // Fixed — VDF uses lowest-output-wins
+    params.genesisHash = "";           // COMPUTED AT STARTUP — will be printed on first run
+    params.genesisCoinbaseMsg = "Dilithion Testnet MVP - Fair Mining Reset";
 
     // Network ports (different from mainnet to allow running both simultaneously)
     params.p2pPort = 18444;            // Testnet P2P port
@@ -262,21 +264,25 @@ ChainParams ChainParams::Testnet() {
     // Timestamp validation: active from genesis on testnet
     params.timestampValidationHeight = 0;
 
-    // VDF Fair Mining (testnet activation)
-    params.vdfActivationHeight = 86850;       // Hybrid period: VDF + RandomX both accepted
-    params.vdfExclusiveHeight  = 87500;       // VDF-only after this height
-    params.vdfIterations       = 1'000'000;   // ~20s on VPS (fast enough for distribution competition)
+    // VDF Fair Mining — VDF-only from genesis for MVP testing
+    params.vdfActivationHeight = 0;
+    params.vdfExclusiveHeight  = 0;            // VDF-only from genesis (like DilV)
+    params.vdfIterations       = 500000;       // 500K iterations (~4-8s, matches DilV)
 
-    // VDF Distribution: "lowest output wins"
-    params.vdfLotteryActivationHeight = 87240;
-    params.vdfLotteryGracePeriod = 30;  // 30 seconds (faster for testing)
-    params.vdfMinBlockTime = 25;        // 25 seconds minimum between blocks
-    params.vdfCooldownActiveWindow = 360; // 360 × 60s ≈ 6 hours (fast testnet)
-    params.dfmpCooldownConsensusHeight = 999999999; // Disabled until testnet VDF stabilizes
-    params.stallExemptionV2Height = 999999999;     // Disabled until testnet VDF stabilizes
-    params.consecutiveMinerCheckHeight = 999999999; // Disabled until testnet VDF stabilizes
-    params.vdfCooldownShortWindow = 0;               // Disabled until testnet VDF stabilizes
-    params.stabilizationForkHeight = 999999999;      // Disabled until testnet VDF stabilizes
+    // VDF Distribution: "lowest output wins" — reset MVP testing
+    params.vdfLotteryActivationHeight = 0;     // Active from genesis for MVP testing
+    params.vdfLotteryGracePeriod = 45;         // 45s grace period (MVP)
+    params.vdfMinBlockTime = 0;                // Disabled — grace period controls pacing
+    params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
+    params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
+    params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
+    params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive from genesis
+    params.vdfCooldownShortWindow = 0;         // Disabled — avoids MIN_COOLDOWN bypass
+    params.stabilizationForkHeight = 0;        // Dual-window + time expiry from genesis
+    params.mikWindowCapWindow = 480;           // 480 blocks = ~6h at 45s/block (MVP)
+    params.mikWindowCapFloor = 24;             // Max 24 blocks per MIK per window (5%)
+    params.livenessTimeoutSec = 300;           // 300s liveness escape (MVP)
+    params.minBlockTimestampGap = 45;          // Consensus-enforced 45s min gap (MVP)
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on testnet
@@ -387,14 +393,23 @@ ChainParams ChainParams::DilV() {
 
     // VDF Distribution: active from genesis
     params.vdfLotteryActivationHeight = 0;
-    params.vdfLotteryGracePeriod = 20;         // 20 seconds (matches vdfMinBlockTime)
-    params.vdfMinBlockTime = 20;               // 20 seconds minimum between blocks
+    params.vdfLotteryGracePeriod = 45;         // 45 seconds — collection window for all miners' VDF outputs
+    params.vdfMinBlockTime = 0;                // Disabled — grace period controls pacing now
     params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
-    params.dfmpCooldownConsensusHeight = 8500; // Consensus-enforced cooldown (moved from 7700: blocks 7700-8400 mined during stall violate cooldown)
-    params.stallExemptionV2Height = 25500;     // Tightened stall exemption: 600s + different miner
-    params.consecutiveMinerCheckHeight = 25500; // Reject >3 consecutive blocks from same miner
-    params.vdfCooldownShortWindow = 100;        // 100-block short window for dual-window cooldown
-    params.stabilizationForkHeight = 25870;     // Dual-window cooldown + time-based expiry + no stall exemption
+    params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
+    params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
+    params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive blocks from same miner from genesis
+    params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
+    params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
+
+    // Per-MIK window cap + liveness escape
+    params.mikWindowCapWindow = 480;           // 480 blocks = ~6 hours at 45s/block
+    params.mikWindowCapFloor = 24;             // Max 24 blocks per MIK per 480-block window (5%)
+    params.livenessTimeoutSec = 300;           // 300s = ~6.7× target; suspends cap during stalls
+
+    // Minimum block timestamp gap (consensus-enforced block pacing)
+    params.minBlockTimestampGap = 45;          // block.nTime >= prevBlock.nTime + 45
+
     params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on DilV
@@ -402,15 +417,13 @@ ChainParams ChainParams::DilV() {
 
     // Digital DNA: active from genesis
     params.digitalDnaActivationHeight = 0;
-    params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
+    params.dnaCommitmentActivationHeight = 0;           // Active from genesis
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
 
-    // DilV Checkpoints
-    params.checkpoints.emplace_back(10000, uint256S("1554e9011cfc5ec916b600d1f2238cbbe21500762b55904368b3704f117cbaf2"));
-    // Checkpoint at height 25000 - pre-stabilization fork
-    params.checkpoints.emplace_back(25000, uint256S("d2dbd3344b5a084276356f52116d158fe8d3a4088b5d2f2bb7806357e1fd47ba"));
+    // DilV Checkpoints (cleared for chain reset)
+    // New checkpoints will be added after the reset chain stabilizes.
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
