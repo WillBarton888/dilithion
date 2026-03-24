@@ -5085,7 +5085,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Initiate outbound connections for --connect nodes (manual=true for auto-reconnect)
         if (!config.connect_nodes.empty()) {
-            std::cout << "Initiating outbound connections..." << std::endl;
+            // --connect mode: only connect to specified peers, skip hardcoded seeds + AddrMan
+            g_node_context.connman->m_connect_only = true;
+            std::cout << "Initiating outbound connections (connect-only mode)..." << std::endl;
             for (const auto& node_addr : config.connect_nodes) {
                 std::cout << "  Connecting to " << node_addr << "..." << std::endl;
 

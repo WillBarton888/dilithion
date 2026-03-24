@@ -971,8 +971,8 @@ void CConnman::ThreadOpenConnections() {
             }
         }
 
-        // PHASE 1: Always ensure ALL seed nodes are connected
-        // This is aggressive - we want to be connected to ALL seeds, not just some
+        // PHASE 1: Ensure seed nodes are connected (skip if --connect used)
+        if (!m_connect_only) {
         auto seeds = m_peer_manager->GetSeedNodes();
         for (const auto& seed_addr : seeds) {
             std::string seed_ip = seed_addr.ToStringIP();
@@ -1048,6 +1048,8 @@ void CConnman::ThreadOpenConnections() {
                           connections_made);
             }
         }
+
+        } // end !m_connect_only (skip seeds + AddrMan when --connect used)
 
         // PHASE 3: Auto-reconnect manual nodes (Bitcoin Core pattern)
         // --connect, --addnode, and RPC addnode peers are automatically reconnected

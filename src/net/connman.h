@@ -385,6 +385,12 @@ private:
     std::vector<NetProtocol::CAddress> m_manual_nodes;
     mutable std::mutex cs_manual_nodes;
 
+public:
+    // When true (--connect used), skip hardcoded seed connections and AddrMan.
+    // Only connect to manually specified nodes.
+    bool m_connect_only{false};
+private:
+
     // Local addresses (for self-connection prevention)
     mutable std::mutex cs_localAddresses;
     std::set<std::string> m_localAddresses;
