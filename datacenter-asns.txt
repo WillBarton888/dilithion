@@ -1,0 +1,46 @@
+# Datacenter ASN list for Dilithion mining policy
+# Miners on these ASNs are refused MIK attestation by seed nodes.
+# Format: ASN number per line (with or without "AS" prefix)
+# Source: DIL/DilV peer analysis, 2026-03-24
+#
+# To add a new provider: add their ASN number below and restart seed nodes.
+
+# Major cloud providers
+AS396982   # Google Cloud
+AS15169    # Google LLC (additional ranges)
+AS16509    # Amazon Web Services (AWS)
+AS14618    # Amazon.com
+AS132203   # Tencent Cloud
+AS45102    # Alibaba Cloud
+AS8075     # Microsoft Azure
+AS13335    # Cloudflare
+
+# Hosting / VPS providers (found in DIL/DilV peer analysis)
+AS134351   # Leaseweb Japan
+AS60781    # Leaseweb Netherlands
+AS28753    # Leaseweb Germany
+AS42474    # SmartApe OU
+AS204770   # Cherry Servers (UAB)
+AS201814   # MEVSPACE
+AS147049   # PacketHub
+AS12876    # Scaleway (Online SAS)
+AS24940    # Hetzner Online
+AS14061    # DigitalOcean
+AS63949    # Linode (Akamai Connected Cloud)
+AS20473    # Vultr / The Constant Company
+AS62567    # UpCloud
+AS398101   # GoDaddy
+AS16276    # OVHcloud
+AS46606    # Unified Layer (Bluehost/HostGator)
+
+# Additional datacenter providers
+AS3842     # Ramnode
+AS20860    # iomart (UK hosting)
+AS36352    # ColoCrossing
+AS55286    # Equinix (formerly PacketFabric)
+AS394695   # Contabo US
+AS40021    # Contabo EU
+AS51167    # Contabo Asia
+AS9009     # M247 (hosting)
+AS51396    # Pfcloud
+AS44592    # SkyLink Data Center

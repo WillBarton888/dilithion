@@ -1386,7 +1386,10 @@ void CRPCServer::HandleClient(int clientSocket) {
 
     // Phase 1: Log request start time
     auto request_start = std::chrono::steady_clock::now();
-    
+
+    // Store client IP for handlers that need it (e.g., getmikattestation)
+    m_currentClientIP = clientIP;
+
     // Execute RPC
     RPCResponse rpcResp = ExecuteRPC(rpcReq);
     

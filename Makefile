@@ -220,6 +220,7 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/connection_quality.cpp \
                src/net/partition_detector.cpp \
                src/net/connman.cpp \
+               src/net/asn_database.cpp \
                src/net/node.cpp \
                src/net/sock.cpp \
                src/net/upnp.cpp

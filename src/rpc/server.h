@@ -159,6 +159,9 @@ private:
     std::map<std::string, RPCHandler> m_handlers;
     std::mutex m_handlersMutex;
 
+    // Current request's client IP (set before handler dispatch, used by getmikattestation)
+    std::string m_currentClientIP;
+
     // Rate limiting
     CRateLimiter m_rateLimiter;
 
