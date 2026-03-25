@@ -308,6 +308,27 @@ bool CheckConsecutiveMiner(
     }
 
     if (consecutiveCount >= MAX_CONSECUTIVE_SAME_MINER) {
+        // Stall exemption: if no block has been produced for a long time,
+        // allow the same miner past the consecutive limit to keep the chain
+        // alive.  Without this, a chain where only one miner is active (but
+        // many MIKs are registered) deadlocks permanently — the sole miner
+        // hits the consecutive cap and nobody else produces blocks.
+        //
+        // 600s threshold matches the cooldown stall exemption Tier 1.
+        static constexpr int64_t CONSECUTIVE_STALL_THRESHOLD_SECS = 600;
+
+        if (pindex->pprev) {
+            int64_t gap = static_cast<int64_t>(block.nTime) -
+                          static_cast<int64_t>(pindex->pprev->nTime);
+            if (gap >= CONSECUTIVE_STALL_THRESHOLD_SECS) {
+                std::cout << "[Chain] CheckConsecutiveMiner: stall exemption at height "
+                          << pindex->nHeight << " (gap=" << gap
+                          << "s >= " << CONSECUTIVE_STALL_THRESHOLD_SECS << "s, "
+                          << (consecutiveCount + 1) << " consecutive)" << std::endl;
+                return true;
+            }
+        }
+
         std::ostringstream oss;
         oss << "CheckConsecutiveMiner: MIK ";
         for (int i = 0; i < 4; ++i) {
