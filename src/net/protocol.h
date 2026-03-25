@@ -21,7 +21,7 @@ static const uint32_t DILV_MAGIC    = 0xD17FD100;  // DilV chain
 /** Protocol version */
 static const int PROTOCOL_VERSION = 70009;          // v3.10.0: DilV chain reset (window cap + block pacing)
 static const int MIN_PEER_PROTO_VERSION = 70005;    // DIL: Require v3.4.0+ (ASERT difficulty)
-static const int DILV_MIN_PEER_PROTO_VERSION = 70009; // DilV: Require v3.10.0+ (chain reset: window cap, 45s pacing, MIN_COOLDOWN=2)
+static const int DILV_MIN_PEER_PROTO_VERSION = 70008; // DilV: Require v3.8.0+ (DNA + stabilization)
 
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;
