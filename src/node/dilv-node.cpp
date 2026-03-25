@@ -4068,6 +4068,44 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "\n[REVALIDATION] Scanning blocks " << activationHeight
                           << " to " << chainHeight << " for consensus rule compliance..." << std::endl;
 
+                // Reset cooldown tracker to only contain data up to activationHeight.
+                // The tracker was populated with the full chain, but revalidation
+                // checks blocks starting at activationHeight — if the tracker has
+                // future data (blocks after the one being checked), cooldown gaps
+                // go negative and cause false "cooldown violation" rejections.
+                if (g_node_context.cooldown_tracker) {
+                    g_node_context.cooldown_tracker->Clear();
+
+                    // Repopulate tracker with blocks BEFORE the scan range
+                    CBlockIndex* pPre = g_chainstate.GetTip();
+                    while (pPre && pPre->nHeight >= activationHeight)
+                        pPre = pPre->pprev;
+
+                    // Walk back up to 1920 blocks before activationHeight
+                    std::vector<CBlockIndex*> preBlocks;
+                    int preCount = 0;
+                    while (pPre && preCount < 1920) {
+                        preBlocks.push_back(pPre);
+                        pPre = pPre->pprev;
+                        preCount++;
+                    }
+                    std::reverse(preBlocks.begin(), preBlocks.end());
+
+                    for (CBlockIndex* idx : preBlocks) {
+                        CBlock blk;
+                        if (blockchain.ReadBlock(idx->GetBlockHash(), blk) && blk.IsVDFBlock()) {
+                            std::array<uint8_t, 20> mikId{};
+                            if (ExtractCoinbaseMIKIdentity(blk, mikId)) {
+                                g_node_context.cooldown_tracker->OnBlockConnected(
+                                    idx->nHeight, mikId, static_cast<int64_t>(blk.nTime));
+                            }
+                        }
+                    }
+
+                    std::cout << "[REVALIDATION] Reset cooldown tracker to " << preBlocks.size()
+                              << " blocks before height " << activationHeight << std::endl;
+                }
+
                 int firstInvalidHeight = -1;
                 std::string invalidReason;
 
@@ -4153,6 +4191,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             firstInvalidHeight = idx->nHeight;
                             invalidReason = "Window cap violation: " + err;
                             break;
+                        }
+                    }
+
+                    // Record this validated block in the tracker so subsequent
+                    // blocks in the scan have correct cooldown state.
+                    if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+                        std::array<uint8_t, 20> mikId{};
+                        if (ExtractCoinbaseMIKIdentity(block, mikId)) {
+                            g_node_context.cooldown_tracker->OnBlockConnected(
+                                idx->nHeight, mikId, static_cast<int64_t>(block.nTime));
                         }
                     }
                 }
