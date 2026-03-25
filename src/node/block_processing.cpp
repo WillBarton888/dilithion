@@ -788,27 +788,32 @@ BlockProcessResult ProcessNewBlock(
                     parent_height = ctx.headers_manager->GetHeightForHash(block.hashPrevBlock);
                 }
 
-                if (parent_height <= 0 && ctx.connman && ctx.message_processor) {
-                    // Parent is on a competing fork - request it directly
-                    struct Uint256Hasher {
-                        size_t operator()(const uint256& h) const {
-                            return *reinterpret_cast<const size_t*>(h.data);
-                        }
-                    };
-                    static std::unordered_map<uint256, std::chrono::steady_clock::time_point, Uint256Hasher> s_requested_parents;
-                    static std::mutex s_requested_mutex;
+                // Rate-limited parent block request tracking (shared between fork paths)
+                struct Uint256Hasher {
+                    size_t operator()(const uint256& h) const {
+                        return *reinterpret_cast<const size_t*>(h.data);
+                    }
+                };
+                static std::unordered_map<uint256, std::chrono::steady_clock::time_point, Uint256Hasher> s_requested_parents;
+                static std::mutex s_requested_mutex;
 
+                // Request parent if missing from chainstate, regardless of whether
+                // it's in the headers chain or not. Handles both:
+                //   - parent_height <= 0: parent on a completely unknown fork
+                //   - parent_height > 0 but not in chainstate: VDF divergence (#279)
+                CBlockIndex* pParentCheck = g_chainstate.GetBlockIndex(block.hashPrevBlock);
+                if (!pParentCheck && ctx.connman && ctx.message_processor) {
                     std::lock_guard<std::mutex> lock(s_requested_mutex);
                     auto now = std::chrono::steady_clock::now();
                     auto it = s_requested_parents.find(block.hashPrevBlock);
 
-                    // Only request if we haven't requested this parent in the last 30 seconds
                     if (it == s_requested_parents.end() ||
                         std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count() > 30) {
                         s_requested_parents[block.hashPrevBlock] = now;
 
-                        std::cout << "[ProcessNewBlock] Block in DB, parent on competing fork - requesting: "
-                                  << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                        std::cout << "[ProcessNewBlock] Parent " << block.hashPrevBlock.GetHex().substr(0, 16)
+                                  << "... (height " << parent_height << ") NOT in chainstate"
+                                  << " — requesting by hash from peer " << peer_id << std::endl;
 
                         std::vector<NetProtocol::CInv> getdata_inv;
                         getdata_inv.emplace_back(NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock);
