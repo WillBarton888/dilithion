@@ -75,6 +75,8 @@
 #include <digital_dna/digital_dna_rpc.h>  // Digital DNA RPC commands
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
 #include <digital_dna/dna_verification.h>       // Phase 3: Verification status for DFMP v3.4
+#include <attestation/seed_attestation.h>       // Phase 2+3: Seed-attested MIK registration
+#include <util/strencodings.h>                   // HexStr, ParseHex
 
 #include <algorithm>  // Phase 4: Trust-based relay sorting
 #include <iostream>
@@ -711,6 +713,10 @@ extern std::atomic<bool> g_regNonceMined;
 extern std::atomic<bool> g_regPowInProgress;
 extern DFMP::Identity g_regNonceIdentity;
 
+// Phase 2+3: Cached seed attestations (defined in globals.cpp)
+extern Attestation::CAttestationSet g_cachedAttestations;
+extern std::atomic<bool> g_attestationsCollected;
+
 /**
  * Ensure MIK identity is registered before mining begins.
  * This is a one-time operation for new miners (~10-15 minutes).
@@ -753,6 +759,46 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
     if (!wallet.GetMIKPubKey(mikPubkey)) {
         std::cerr << "[Mining] WARNING: Failed to get MIK public key (wallet may be locked)" << std::endl;
         return false;
+    }
+
+    // Phase 2+3: Collect seed attestations before registration PoW (DilV only)
+    if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV() &&
+        !g_attestationsCollected.load() &&
+        !Dilithion::g_chainParams->seedAttestationIPs.empty()) {
+
+        int attestationHeight = Dilithion::g_chainParams->seedAttestationActivationHeight;
+        if (static_cast<int>(nextHeight) >= attestationHeight) {
+            std::cout << std::endl;
+            std::cout << "  [Mining] Requesting seed attestations for MIK registration..." << std::endl;
+
+            // Get DNA hash (if available)
+            std::array<uint8_t, 32> dnaHash{};
+            // TODO: Get actual DNA hash from digital_dna collector when available
+            // For now, use zero hash — seeds will accept it until DNA enforcement activates
+
+            std::string mikPubkeyHex = HexStr(mikPubkey);
+            std::string dnaHashHex = HexStr(dnaHash.data(), 32);
+
+            Attestation::CAttestationSet attestations;
+            std::string attestError;
+            bool gotAttestations = Attestation::CollectAttestations(
+                Dilithion::g_chainParams->seedAttestationIPs,
+                Dilithion::g_chainParams->seedAttestationRPCPort,
+                mikPubkeyHex, dnaHashHex,
+                attestations, attestError);
+
+            if (gotAttestations) {
+                g_cachedAttestations = std::move(attestations);
+                g_attestationsCollected.store(true);
+                std::cout << "  [Mining] Seed attestations collected successfully!" << std::endl;
+            } else {
+                std::cerr << "  [Mining] WARNING: " << attestError << std::endl;
+                std::cerr << "  [Mining] Proceeding without attestations (fail-open mode)." << std::endl;
+                std::cerr << "  [Mining] Note: After activation height " << attestationHeight
+                          << ", blocks without attestations will be rejected." << std::endl;
+            }
+            std::cout << std::endl;
+        }
     }
 
     // Mine registration PoW with clear messaging
@@ -1063,6 +1109,25 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                     for (int i = 0; i < 4; i++) std::cout << (int)dnaHash[i];
                     std::cout << std::dec << "...)" << std::endl;
                 }
+            }
+        }
+    }
+
+    // Phase 2+3: Append seed attestation data after DNA commitment (registration blocks only)
+    // Format: [ATTESTATION_MARKER: 0xDA] [count: 1] [entry: 3314 bytes]...
+    // Only include in registration blocks (first block with a new MIK).
+    // Check: MIK not yet in identity DB = this is a registration block.
+    bool isRegistrationBlock = mikDataIncluded &&
+        DFMP::g_identityDb && !mikIdentity.IsNull() &&
+        !DFMP::g_identityDb->HasMIKPubKey(mikIdentity);
+    if (isRegistrationBlock && g_attestationsCollected.load()) {
+        std::vector<uint8_t> attestData;
+        if (Attestation::BuildAttestationScriptData(g_cachedAttestations, attestData)) {
+            scriptSig.insert(scriptSig.end(), attestData.begin(), attestData.end());
+            if (verbose) {
+                std::cout << "  Attestations: " << g_cachedAttestations.Count()
+                          << " seed attestations included ("
+                          << attestData.size() << " bytes)" << std::endl;
             }
         }
     }

@@ -46,6 +46,9 @@
 #include <vector>
 #include <string>
 
+// Forward declaration for attestation data
+namespace Attestation { struct CAttestationSet; }
+
 namespace DFMP {
 
 // ============================================================================
@@ -277,6 +280,17 @@ struct CMIKScriptData {
     /** Digital DNA commitment hash (32 bytes, zero if not present) */
     std::array<uint8_t, 32> dna_hash{};
     bool has_dna_hash = false;
+
+    /** Seed attestations (Phase 2+3: only present in MIK registration blocks) */
+    bool has_attestations = false;
+    uint8_t attestation_count = 0;
+    // Raw attestation entries: each is [seed_id:1][timestamp:4][signature:3309]
+    struct AttestationEntry {
+        uint8_t seedId;
+        uint32_t timestamp;
+        std::vector<uint8_t> signature;
+    };
+    std::vector<AttestationEntry> attestations;
 
     CMIKScriptData() : isRegistration(false), registrationNonce(0) {}
 

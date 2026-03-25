@@ -11,6 +11,7 @@
 #include <digital_dna/digital_dna.h>
 #include <node/blockchain_storage.h>
 #include <node/block_index.h>
+#include <attestation/seed_attestation.h>
 #include <crypto/sha3.h>
 #include <cstring>
 #include <iostream>
@@ -563,6 +564,123 @@ bool CheckMIKWindowCap(
             << window << "-block window, cap=" << cap
             << ", active miners=" << activeMiners << ")";
         error = oss.str();
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// CheckMIKAttestations (Phase 2+3 — seed-attested MIK registration)
+// ---------------------------------------------------------------------------
+
+bool CheckMIKAttestations(
+    const CBlock& block,
+    int height,
+    std::string& error)
+{
+    // Pre-activation: always pass
+    int activationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->seedAttestationActivationHeight : 999999999;
+    if (height < activationHeight) {
+        return true;
+    }
+
+    // Only applies to VDF blocks
+    if (!block.IsVDFBlock()) {
+        return true;
+    }
+
+    // Deserialize coinbase
+    if (block.vtx.empty()) {
+        error = "CheckMIKAttestations: empty vtx";
+        return false;
+    }
+
+    const uint8_t* data = block.vtx.data();
+    size_t dataSize = block.vtx.size();
+
+    // Parse tx count varint
+    size_t txCountSize = 0;
+    if (data[0] < 253) {
+        txCountSize = 1;
+    } else if (data[0] == 253 && dataSize >= 3) {
+        txCountSize = 3;
+    } else {
+        error = "CheckMIKAttestations: unsupported tx count encoding";
+        return false;
+    }
+
+    CTransaction coinbase;
+    size_t consumed = 0;
+    if (!coinbase.Deserialize(data + txCountSize, dataSize - txCountSize, nullptr, &consumed)) {
+        error = "CheckMIKAttestations: failed to deserialize coinbase";
+        return false;
+    }
+
+    if (coinbase.vin.empty()) {
+        error = "CheckMIKAttestations: coinbase has no inputs";
+        return false;
+    }
+
+    // Parse MIK data from scriptSig
+    DFMP::CMIKScriptData mikData;
+    if (!DFMP::ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData)) {
+        error = "CheckMIKAttestations: failed to parse MIK from coinbase";
+        return false;
+    }
+
+    // Only registration blocks need attestations
+    if (!mikData.isRegistration) {
+        return true;  // Reference block — MIK was already attested at registration
+    }
+
+    // Registration block: must have attestation data
+    if (!mikData.has_attestations) {
+        error = "CheckMIKAttestations: MIK registration at height " +
+                std::to_string(height) + " missing required seed attestations";
+        return false;
+    }
+
+    if (mikData.attestation_count < Attestation::MIN_ATTESTATIONS) {
+        error = "CheckMIKAttestations: insufficient attestations: " +
+                std::to_string(mikData.attestation_count) + " < " +
+                std::to_string(Attestation::MIN_ATTESTATIONS);
+        return false;
+    }
+
+    // Get seed public keys from chainparams
+    const auto& seedPubkeys = Dilithion::g_chainParams->seedAttestationPubkeys;
+    if (seedPubkeys.size() != Attestation::NUM_SEEDS) {
+        error = "CheckMIKAttestations: chainparams has " +
+                std::to_string(seedPubkeys.size()) + " seed pubkeys, expected " +
+                std::to_string(Attestation::NUM_SEEDS);
+        return false;
+    }
+
+    // Get DNA hash from parsed MIK data
+    std::array<uint8_t, 32> dnaHash{};
+    if (mikData.has_dna_hash) {
+        dnaHash = mikData.dna_hash;
+    }
+
+    // Build attestation set for verification
+    Attestation::CAttestationSet attestSet;
+    for (const auto& entry : mikData.attestations) {
+        Attestation::CAttestation att;
+        att.seedId = entry.seedId;
+        att.timestamp = entry.timestamp;
+        att.signature = entry.signature;
+        attestSet.attestations.push_back(std::move(att));
+    }
+
+    // Verify attestations
+    int64_t blockTimestamp = block.nTime;
+    std::string verifyError;
+    if (!Attestation::VerifyAttestationSet(
+            attestSet, mikData.pubkey, dnaHash,
+            seedPubkeys, blockTimestamp, verifyError)) {
+        error = "CheckMIKAttestations: " + verifyError + " at height " + std::to_string(height);
         return false;
     }
 

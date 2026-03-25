@@ -58,6 +58,9 @@
 #include <dfmp/dfmp.h>             // DFMP: Fair Mining Protocol
 #include <dfmp/identity_db.h>      // DFMP: Identity persistence
 #include <dfmp/mik.h>              // DFMP v2.0: Mining Identity Key
+#include <attestation/seed_attestation.h>  // Phase 2+3: Seed-attested MIK registration
+#include <net/asn_database.h>              // Phase 2+3: ASN database for datacenter IP check
+#include <util/strencodings.h>             // HexStr, ParseHex
 #include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
@@ -696,6 +699,10 @@ static std::atomic<bool> s_regNonceMined{false};
 static std::atomic<bool> s_regPowInProgress{false};
 static DFMP::Identity s_regNonceIdentity;
 
+// Phase 2+3: Cached seed attestations (collected before registration PoW, embedded in coinbase)
+static Attestation::CAttestationSet s_cachedAttestations;
+static std::atomic<bool> s_attestationsCollected{false};
+
 /**
  * Ensure MIK identity is registered before mining begins.
  * This is a one-time operation for new miners (~10-15 minutes).
@@ -738,6 +745,45 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
     if (!wallet.GetMIKPubKey(mikPubkey)) {
         std::cerr << "[Mining] WARNING: Failed to get MIK public key (wallet may be locked)" << std::endl;
         return false;
+    }
+
+    // Phase 2+3: Collect seed attestations before registration PoW (DilV only)
+    if (!s_attestationsCollected.load() &&
+        Dilithion::g_chainParams &&
+        !Dilithion::g_chainParams->seedAttestationIPs.empty()) {
+
+        int attestationHeight = Dilithion::g_chainParams->seedAttestationActivationHeight;
+        if (static_cast<int>(nextHeight) >= attestationHeight) {
+            std::cout << std::endl;
+            std::cout << "  [Mining] Requesting seed attestations for MIK registration..." << std::endl;
+
+            // Get DNA hash (if available)
+            std::array<uint8_t, 32> dnaHash{};
+            // TODO: Get actual DNA hash from digital_dna collector when available
+
+            std::string mikPubkeyHex = HexStr(mikPubkey);
+            std::string dnaHashHex = HexStr(dnaHash.data(), 32);
+
+            Attestation::CAttestationSet attestations;
+            std::string attestError;
+            bool gotAttestations = Attestation::CollectAttestations(
+                Dilithion::g_chainParams->seedAttestationIPs,
+                Dilithion::g_chainParams->seedAttestationRPCPort,
+                mikPubkeyHex, dnaHashHex,
+                attestations, attestError);
+
+            if (gotAttestations) {
+                s_cachedAttestations = std::move(attestations);
+                s_attestationsCollected.store(true);
+                std::cout << "  [Mining] Seed attestations collected successfully!" << std::endl;
+            } else {
+                std::cerr << "  [Mining] WARNING: " << attestError << std::endl;
+                std::cerr << "  [Mining] Proceeding without attestations (fail-open mode)." << std::endl;
+                std::cerr << "  [Mining] Note: After activation height " << attestationHeight
+                          << ", blocks without attestations will be rejected." << std::endl;
+            }
+            std::cout << std::endl;
+        }
     }
 
     // Mine registration PoW with clear messaging
@@ -1048,6 +1094,22 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                     for (int i = 0; i < 4; i++) std::cout << (int)dnaHash[i];
                     std::cout << std::dec << "...)" << std::endl;
                 }
+            }
+        }
+    }
+
+    // Phase 2+3: Append seed attestation data after DNA commitment (registration blocks only)
+    bool isRegistrationBlock = mikDataIncluded &&
+        DFMP::g_identityDb && !mikIdentity.IsNull() &&
+        !DFMP::g_identityDb->HasMIKPubKey(mikIdentity);
+    if (isRegistrationBlock && s_attestationsCollected.load()) {
+        std::vector<uint8_t> attestData;
+        if (Attestation::BuildAttestationScriptData(s_cachedAttestations, attestData)) {
+            scriptSig.insert(scriptSig.end(), attestData.begin(), attestData.end());
+            if (verbose) {
+                std::cout << "  Attestations: " << s_cachedAttestations.Count()
+                          << " seed attestations included ("
+                          << attestData.size() << " bytes)" << std::endl;
             }
         }
     }
@@ -5487,6 +5549,70 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.SetTestnet(config.testnet);
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
         rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
+
+        // Phase 2+3: Seed attestation initialization (relay-only DilV nodes only)
+        // Loads ASN database and attestation signing key so seeds can serve
+        // getmikattestation RPC requests from miners.
+        static Attestation::CSeedAttestationKey seedAttestKey;
+        static CASNDatabase asnDatabase;
+        if (config.relay_only && Dilithion::g_chainParams &&
+            Dilithion::g_chainParams->IsDilV()) {
+            std::string dataDir = Dilithion::g_chainParams->dataDir;
+
+            // Load ASN database from data directory (or project root)
+            std::string asnPath = dataDir + "/ip2asn-v4.tsv";
+            if (!asnDatabase.LoadDatabase(asnPath)) {
+                // Try project root as fallback
+                std::cerr << "[Attestation] ASN database not found at " << asnPath
+                          << ", trying ./ip2asn-v4.tsv" << std::endl;
+                if (!asnDatabase.LoadDatabase("ip2asn-v4.tsv")) {
+                    std::cerr << "[Attestation] WARNING: ASN database not loaded. "
+                              << "getmikattestation RPC will be unavailable." << std::endl;
+                }
+            }
+
+            if (asnDatabase.IsLoaded()) {
+                std::string dcPath = dataDir + "/datacenter-asns.txt";
+                if (!asnDatabase.LoadDatacenterList(dcPath)) {
+                    asnDatabase.LoadDatacenterList("datacenter-asns.txt");
+                }
+                std::cout << "  [OK] ASN database loaded (" << asnDatabase.RangeCount()
+                          << " ranges, " << asnDatabase.DatacenterASNCount()
+                          << " datacenter ASNs)" << std::endl;
+            }
+
+            // Load or generate attestation key
+            if (seedAttestKey.LoadOrGenerate(dataDir)) {
+                // Determine seed ID by matching our IP against known seed IPs
+                // For now, use a simple index. In production, compare external IP.
+                int seedId = -1;
+                const auto& seedIPs = Dilithion::g_chainParams->seedAttestationIPs;
+                if (!config.external_ip.empty()) {
+                    for (size_t i = 0; i < seedIPs.size(); i++) {
+                        if (seedIPs[i] == config.external_ip) {
+                            seedId = static_cast<int>(i);
+                            break;
+                        }
+                    }
+                }
+                // Fallback: use --seed-id flag or auto-detect
+                // For testnet, just assign based on order of known IPs
+                if (seedId < 0) {
+                    // Try to auto-detect from the port number or IP binding
+                    // For now, default to 0 if not specified
+                    seedId = 0;
+                    std::cerr << "[Attestation] WARNING: Could not determine seed ID. "
+                              << "Use --externalip=<IP> to set. Defaulting to seed_id=0" << std::endl;
+                }
+
+                if (asnDatabase.IsLoaded()) {
+                    rpc_server.RegisterSeedAttestation(&seedAttestKey, &asnDatabase, seedId);
+                    std::cout << "  [OK] Seed attestation ready (seed_id=" << seedId
+                              << ", key=" << seedAttestKey.GetPubKeyHex().substr(0, 16) << "...)"
+                              << std::endl;
+                }
+            }
+        }
 
         // Register Digital DNA RPC commands
         std::unique_ptr<digital_dna::DigitalDNARpc> dna_rpc;

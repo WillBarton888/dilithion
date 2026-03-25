@@ -196,4 +196,25 @@ bool CheckMIKWindowCap(
     std::string& error
 );
 
+/**
+ * Check seed attestations in MIK registration block (Phase 2+3).
+ *
+ * After seedAttestationActivationHeight, MIK registration blocks must include
+ * 3+ valid attestations signed by known seed node public keys. Attestations
+ * prove the miner's IP was verified as non-datacenter at registration time.
+ *
+ * Only applies to MIK registration blocks (type 0x01). Reference blocks
+ * (type 0x02) do not need attestations — the MIK was already attested.
+ *
+ * @param block         The candidate VDF block
+ * @param height        Block height
+ * @param error         Human-readable error string on failure
+ * @return true if block passes attestation check (or pre-activation, or not registration)
+ */
+bool CheckMIKAttestations(
+    const CBlock& block,
+    int height,
+    std::string& error
+);
+
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

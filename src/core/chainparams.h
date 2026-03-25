@@ -260,6 +260,23 @@ public:
     // After this height: DNA changes trigger trust penalties and stabilization
     int dnaRotationActivationHeight;
 
+    // Seed-attested MIK registration activation height (Phase 2+3)
+    // After this height: MIK registration blocks on DilV must include 3+ valid
+    // attestations signed by known seed node keys (hardcoded below).
+    // Seeds verify the miner's TCP source IP against ASN database at registration
+    // time, refusing to sign for datacenter IPs.
+    // 999999999 = disabled
+    int seedAttestationActivationHeight;
+
+    // Seed node public keys for attestation verification (Dilithium3, 1952 bytes each)
+    // Ordered by seed index (0-3): NYC, London, Singapore, Sydney
+    // Populated only for DilV chain. Empty for DIL mainnet/testnet.
+    std::vector<std::vector<uint8_t>> seedAttestationPubkeys;
+
+    // Seed node IPs and RPC port (used by miners to request attestations)
+    std::vector<std::string> seedAttestationIPs;
+    uint16_t seedAttestationRPCPort;
+
     // Compact encoding fix activation height
     // Before this height: BigToCompact has a sign bit bug where bit 23 of the
     // mantissa collides with the sign bit, causing ~2x difficulty corruption on

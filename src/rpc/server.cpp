@@ -38,6 +38,8 @@
 #include <script/script.h>      // CScript, opcodes
 #include <script/atomic_swap.h> // Atomic swap state machine
 #include <util/strencodings.h>
+#include <attestation/seed_attestation.h>
+#include <net/asn_database.h>
 #include <util/error_format.h>  // UX: Better error messages
 #include <set>
 #include <amount.h>
@@ -285,6 +287,9 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["initiateswap"] = [this](const std::string& p) { return RPC_InitiateSwap(p); };
     m_handlers["acceptswap"] = [this](const std::string& p) { return RPC_AcceptSwap(p); };
     m_handlers["listswaps"] = [this](const std::string& p) { return RPC_ListSwaps(p); };
+
+    // Seed attestation (Phase 2+3)
+    m_handlers["getmikattestation"] = [this](const std::string& p) { return RPC_GetMIKAttestation(p); };
 }
 
 CRPCServer::~CRPCServer() {
@@ -7223,4 +7228,119 @@ std::string CRPCServer::RPC_ListSwaps(const std::string& params) {
     }
     oss << "],\"count\":" << swaps.size() << "}";
     return oss.str();
+}
+
+// ============================================================================
+// Seed Attestation RPC (Phase 2+3)
+// ============================================================================
+
+std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
+    // This RPC is only available on seed nodes with attestation key loaded
+    if (!m_seedAttestationKey || m_seedId < 0) {
+        throw std::runtime_error("getmikattestation is only available on seed nodes");
+    }
+
+    if (!m_asnDatabase || !m_asnDatabase->IsLoaded()) {
+        throw std::runtime_error("ASN database not loaded on this seed node");
+    }
+
+    // Parse params: {"mik_pubkey": "hex...", "dna_hash": "hex..."}
+    std::string mikPubkeyHex, dnaHashHex;
+
+    // Extract mik_pubkey
+    size_t pos = params.find("\"mik_pubkey\"");
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Missing required parameter: mik_pubkey");
+    }
+    pos = params.find("\"", pos + 12);  // Find opening quote of value
+    if (pos != std::string::npos) {
+        pos++;
+        size_t end = params.find("\"", pos);
+        if (end != std::string::npos) {
+            mikPubkeyHex = params.substr(pos, end - pos);
+        }
+    }
+
+    // Extract dna_hash
+    pos = params.find("\"dna_hash\"");
+    if (pos == std::string::npos) {
+        throw std::runtime_error("Missing required parameter: dna_hash");
+    }
+    pos = params.find("\"", pos + 10);
+    if (pos != std::string::npos) {
+        pos++;
+        size_t end = params.find("\"", pos);
+        if (end != std::string::npos) {
+            dnaHashHex = params.substr(pos, end - pos);
+        }
+    }
+
+    // Validate pubkey
+    std::vector<uint8_t> mikPubkey = ParseHex(mikPubkeyHex);
+    if (mikPubkey.size() != DFMP::MIK_PUBKEY_SIZE) {
+        throw std::runtime_error("Invalid mik_pubkey size: expected " +
+            std::to_string(DFMP::MIK_PUBKEY_SIZE * 2) + " hex chars");
+    }
+
+    // Validate DNA hash
+    std::vector<uint8_t> dnaHashVec = ParseHex(dnaHashHex);
+    if (dnaHashVec.size() != 32) {
+        throw std::runtime_error("Invalid dna_hash size: expected 64 hex chars");
+    }
+    std::array<uint8_t, 32> dnaHash;
+    std::copy(dnaHashVec.begin(), dnaHashVec.end(), dnaHash.begin());
+
+    // Check client IP against ASN database
+    std::string clientIP = m_currentClientIP;
+    if (clientIP.empty() || clientIP == "unknown") {
+        throw std::runtime_error("Cannot determine client IP address");
+    }
+
+    // Strip port if present (e.g., "192.168.1.1:12345" -> "192.168.1.1")
+    size_t colonPos = clientIP.rfind(':');
+    if (colonPos != std::string::npos) {
+        // Check if this looks like an IPv4 with port (not IPv6)
+        if (clientIP.find('.') != std::string::npos) {
+            clientIP = clientIP.substr(0, colonPos);
+        }
+    }
+
+    if (m_asnDatabase->IsDatacenterIP(clientIP)) {
+        uint32_t asn = m_asnDatabase->LookupASN(clientIP);
+        std::string desc = m_asnDatabase->LookupDescription(clientIP);
+        throw std::runtime_error("Mining not available from datacenter IPs. "
+            "Your IP (" + clientIP + ") belongs to ASN " + std::to_string(asn) +
+            " (" + desc + "). Use a residential connection to mine.");
+    }
+
+    // Build attestation message
+    uint32_t timestamp = static_cast<uint32_t>(std::time(nullptr));
+    std::vector<uint8_t> message = Attestation::BuildAttestationMessage(
+        mikPubkey, dnaHash, timestamp, static_cast<uint8_t>(m_seedId));
+
+    // Sign with seed's attestation key
+    std::vector<uint8_t> signature;
+    if (!m_seedAttestationKey->Sign(message, signature)) {
+        throw std::runtime_error("Failed to sign attestation");
+    }
+
+    // Log the attestation
+    uint32_t asn = m_asnDatabase->LookupASN(clientIP);
+    std::string desc = m_asnDatabase->LookupDescription(clientIP);
+    DFMP::Identity identity = DFMP::DeriveIdentityFromMIK(mikPubkey);
+    std::cout << "[Attestation] Signed attestation for MIK " << identity.GetHex().substr(0, 12) << "..."
+              << " from " << clientIP << " (ASN " << asn << " " << desc << ")" << std::endl;
+
+    // Build response
+    std::ostringstream result;
+    result << "{\"seed_id\":" << m_seedId
+           << ",\"timestamp\":" << timestamp
+           << ",\"signature\":\"" << HexStr(signature) << "\""
+           << ",\"mik_identity\":\"" << identity.GetHex() << "\""
+           << ",\"client_ip\":\"" << clientIP << "\""
+           << ",\"asn\":" << asn
+           << ",\"asn_description\":\"" << EscapeJSON(desc) << "\""
+           << "}";
+
+    return result.str();
 }

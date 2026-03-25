@@ -1019,6 +1019,26 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                 return false;
             }
         }
+
+        // ====================================================================
+        // SEED ATTESTATION CHECK (Phase 2+3, hard fork at seedAttestationActivationHeight)
+        // ====================================================================
+        // After activation, MIK registration blocks must include 3+ valid
+        // attestations signed by known seed node keys.
+        if (block.IsVDFBlock()) {
+            std::string attestError;
+            if (!CheckMIKAttestations(block, pindex->nHeight, attestError)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " REJECTED: attestation check failed" << std::endl;
+                std::cerr << "[Chain] " << attestError << std::endl;
+
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
+                return false;
+            }
+        }
     }
 
     // Step 1: Update UTXO set (CS-004)

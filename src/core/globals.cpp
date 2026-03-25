@@ -15,6 +15,7 @@
 #include <consensus/chain.h>
 #include <core/node_context.h>
 #include <dfmp/dfmp.h>
+#include <attestation/seed_attestation.h>
 #include <atomic>
 
 // Global chain state (kept separate for utilities that don't need full NodeContext)
@@ -45,3 +46,7 @@ uint64_t g_regCachedNonce = 0;
 std::atomic<bool> g_regNonceMined{false};
 std::atomic<bool> g_regPowInProgress{false};
 DFMP::Identity g_regNonceIdentity;
+
+// Phase 2+3: Cached seed attestations (collected before registration PoW, embedded in coinbase)
+Attestation::CAttestationSet g_cachedAttestations;
+std::atomic<bool> g_attestationsCollected{false};

@@ -16,7 +16,9 @@
 
 // Forward declarations
 namespace x402 { class CFacilitator; }
+namespace Attestation { class CSeedAttestationKey; }
 class CVDFMiner;
+class CASNDatabase;
 #include <digital_dna/digital_dna_rpc.h>
 #include <script/atomic_swap.h>
 
@@ -183,6 +185,11 @@ private:
     // Phase 5: REST API for light wallets
     std::unique_ptr<CRestAPI> m_restAPI;
     bool m_publicAPI{false};  // --public-api flag: bind to 0.0.0.0 instead of 127.0.0.1
+
+    // Seed attestation (Phase 2+3): only active on seed nodes (--relay-only + DilV)
+    Attestation::CSeedAttestationKey* m_seedAttestationKey{nullptr};
+    CASNDatabase* m_asnDatabase{nullptr};
+    int m_seedId{-1};  // This seed's index (0-3), or -1 if not a seed
 
     // Server socket
     int m_serverSocket;
@@ -374,6 +381,9 @@ private:
     std::string RPC_InvalidateBlock(const std::string& params);
     std::string RPC_ReconsiderBlock(const std::string& params);
 
+    // Seed attestation methods (Phase 2+3)
+    std::string RPC_GetMIKAttestation(const std::string& params);
+
     // HTLC (Hash Time-Locked Contract) methods
     std::string RPC_GeneratePreimage(const std::string& params);
     std::string RPC_CreateHTLC(const std::string& params);
@@ -480,6 +490,18 @@ public:
      * SECURITY: Only enable on seed nodes, not home mining nodes.
      */
     void SetPublicAPI(bool publicAPI) { m_publicAPI = publicAPI; }
+
+    /**
+     * Register seed attestation components (Phase 2+3).
+     * Only called on seed nodes (--relay-only + DilV).
+     */
+    void RegisterSeedAttestation(Attestation::CSeedAttestationKey* key,
+                                  CASNDatabase* asnDb,
+                                  int seedId) {
+        m_seedAttestationKey = key;
+        m_asnDatabase = asnDb;
+        m_seedId = seedId;
+    }
 
     /**
      * Check if public API mode is enabled

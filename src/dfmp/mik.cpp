@@ -387,6 +387,32 @@ bool ParseMIKFromScriptSig(
                     pos += 32;
                 }
 
+                // Parse attestation data if present (0xDA + count + entries)
+                // Only in registration blocks. Each entry: seed_id(1) + timestamp(4) + sig(3309)
+                if (pos + 2 <= scriptSig.size() && scriptSig[pos] == 0xDA) {
+                    pos++;  // skip marker
+                    uint8_t attCount = scriptSig[pos++];
+                    const size_t ATTEST_ENTRY_SIZE = 1 + 4 + MIK_SIGNATURE_SIZE;  // 3314
+
+                    if (pos + (attCount * ATTEST_ENTRY_SIZE) <= scriptSig.size()) {
+                        mikData.has_attestations = true;
+                        mikData.attestation_count = attCount;
+                        for (uint8_t ai = 0; ai < attCount; ai++) {
+                            CMIKScriptData::AttestationEntry entry;
+                            entry.seedId = scriptSig[pos++];
+                            entry.timestamp = static_cast<uint32_t>(scriptSig[pos]) |
+                                            (static_cast<uint32_t>(scriptSig[pos + 1]) << 8) |
+                                            (static_cast<uint32_t>(scriptSig[pos + 2]) << 16) |
+                                            (static_cast<uint32_t>(scriptSig[pos + 3]) << 24);
+                            pos += 4;
+                            entry.signature.assign(scriptSig.begin() + pos,
+                                                   scriptSig.begin() + pos + MIK_SIGNATURE_SIZE);
+                            pos += MIK_SIGNATURE_SIZE;
+                            mikData.attestations.push_back(std::move(entry));
+                        }
+                    }
+                }
+
                 return true;
 
             } else if (mikType == MIK_TYPE_REFERENCE) {

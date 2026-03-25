@@ -136,6 +136,12 @@ ChainParams ChainParams::Mainnet() {
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
 
+    // Seed attestation: disabled on DIL mainnet (DilV-only feature)
+    params.seedAttestationActivationHeight = 999999999;
+    params.seedAttestationPubkeys = {};
+    params.seedAttestationIPs = {};
+    params.seedAttestationRPCPort = 0;
+
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
     //
@@ -294,6 +300,12 @@ ChainParams ChainParams::Testnet() {
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
 
+    // Seed attestation: disabled on DIL testnet (DilV-only feature)
+    params.seedAttestationActivationHeight = 999999999;
+    params.seedAttestationPubkeys = {};
+    params.seedAttestationIPs = {};
+    params.seedAttestationRPCPort = 0;
+
     // TESTNET: Checkpoints for IBD optimization
     // PoW validation is skipped for headers at/before the highest checkpoint
     // This dramatically speeds up Initial Block Download (~100ms -> ~1ms per header)
@@ -421,6 +433,27 @@ ChainParams ChainParams::DilV() {
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
+
+    // Seed-attested MIK registration (Phase 2+3)
+    // Disabled until seed nodes generate their keys and pubkeys are hardcoded here.
+    // Activation height will be set once all seeds have keys deployed.
+    params.seedAttestationActivationHeight = 999999999;  // Disabled until keys deployed
+
+    // Seed attestation public keys — placeholder (empty until seeds generate keys)
+    // Order: [0]=NYC, [1]=London, [2]=Singapore, [3]=Sydney
+    // Each key will be 1952 bytes (Dilithium3). Populate with hex from seed nodes:
+    //   ssh root@SEED "cat ~/.dilv/seed_attestation_key.dat | xxd -p -c0 | tail -c3904"
+    // (skip first 5 bytes of file header, take 1952 bytes of pubkey)
+    params.seedAttestationPubkeys = {};  // Empty — will be populated before activation
+
+    // Seed node IPs for attestation requests (DilV seeds)
+    params.seedAttestationIPs = {
+        "138.197.68.128",   // NYC
+        "167.172.56.119",   // London
+        "165.22.103.114",   // Singapore
+        "134.199.159.83"    // Sydney
+    };
+    params.seedAttestationRPCPort = 9332;  // DilV RPC port
 
     // DilV Checkpoints (cleared for chain reset)
     // New checkpoints will be added after the reset chain stabilizes.
