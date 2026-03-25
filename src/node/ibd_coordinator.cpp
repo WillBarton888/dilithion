@@ -1470,6 +1470,42 @@ bool CIbdCoordinator::FetchBlocks() {
                     }
                 }
 
+                // BUG #279 FIX: If parent is NOT in chainstate at all, this is a VDF
+                // divergence — the block's hashPrevBlock references a replacement tip
+                // block we don't have. Request the missing parent by hash.
+                // This is the core fix: without it, the block is skipped forever as
+                // "already have" and the parent is never fetched.
+                if (m_node_context.blockchain_db && m_blocks_sync_peer != -1) {
+                    // Use header data (cheaper than DB read) if available
+                    const uint256& parentHash = pindex->header.hashPrevBlock;
+                    if (!parentHash.IsNull()) {
+                        CBlockIndex* pParent = m_chainstate.GetBlockIndex(parentHash);
+                        bool parentOnActiveChain = pParent && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN);
+                        if (!parentOnActiveChain) {
+                            // Rate limit: only request each parent hash once per 30s
+                            static std::map<uint256, std::chrono::steady_clock::time_point> s_parent_requests;
+                            static std::mutex s_parent_req_mutex;
+                            std::lock_guard<std::mutex> prl(s_parent_req_mutex);
+                            auto now = std::chrono::steady_clock::now();
+                            auto pit = s_parent_requests.find(parentHash);
+                            if (pit == s_parent_requests.end() ||
+                                std::chrono::duration_cast<std::chrono::seconds>(now - pit->second).count() > 30) {
+                                s_parent_requests[parentHash] = now;
+
+                                int parent_h = h - 1;
+                                std::cout << "[IBD] BUG#279: Block " << h << " in DB but parent "
+                                          << parentHash.GetHex().substr(0, 16) << "... (height " << parent_h << ") "
+                                          << (pParent ? "NOT on active chain" : "MISSING from chainstate")
+                                          << " — requesting parent by hash from peer " << m_blocks_sync_peer << std::endl;
+
+                                if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, parent_h, parentHash)) {
+                                    getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, parentHash);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // NEVER MarkCompleted here. Only ProcessNewBlock results (ACCEPTED)
                 // should mark a height completed. If reprocess fails or parent isn't
                 // connected, the height stays untracked so it reappears in future ticks.
