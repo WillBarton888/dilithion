@@ -992,7 +992,24 @@ BlockProcessResult ProcessNewBlock(
                     std::cout << "[ProcessNewBlock] Fork header sync already in progress - skipping redundant request" << std::endl;
                 }
             } else {
-                std::cout << "[ProcessNewBlock] Orphan block stored - IBD coordinator will handle block request" << std::endl;
+                // BUG #279 FIX: Parent hash is known in headers but NOT in chainstate.
+                // This happens after VDF distribution tiebreak: the header chain references
+                // a replacement block at the same height that we don't have. The IBD
+                // coordinator tracks by height and already has a different block at that
+                // height, so it will never request this specific hash. Fetch it directly.
+                bool parent_in_chainstate = (g_chainstate.GetBlockIndex(block.hashPrevBlock) != nullptr);
+                if (!parent_in_chainstate && peer_id >= 0 && ctx.block_fetcher && ctx.connman) {
+                    std::cout << "[ProcessNewBlock] Parent " << block.hashPrevBlock.GetHex().substr(0, 16)
+                              << "... (height " << parent_height << ") not in chainstate — requesting by hash from peer "
+                              << peer_id << std::endl;
+                    if (ctx.block_fetcher->RequestBlockFromPeer(peer_id, parent_height, block.hashPrevBlock)) {
+                        CNetMessage parent_msg = ctx.message_processor->CreateGetDataMessage(
+                            {{NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock}});
+                        ctx.connman->PushMessage(peer_id, parent_msg);
+                    }
+                } else {
+                    std::cout << "[ProcessNewBlock] Orphan block stored - IBD coordinator will handle block request" << std::endl;
+                }
             }
         } else {
             std::cerr << "[Orphan] ERROR: Failed to add block to orphan pool" << std::endl;

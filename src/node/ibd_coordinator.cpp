@@ -750,6 +750,40 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             m_last_cancelled_fork_point = cancelPoint;
             m_fork_cancel_time = std::chrono::steady_clock::now();
             m_fork_stall_cycles.store(0);
+
+            // BUG #279 FIX (Option B): After fork cancellation, check if there are
+            // orphan blocks whose parents we can now request. This handles the case
+            // where blocks arrived during the fork window but their parents (VDF
+            // replacement blocks at the same height) were never fetched.
+            if (m_node_context.orphan_manager && m_blocks_sync_peer != -1) {
+                auto orphans = m_node_context.orphan_manager->GetAllOrphans();
+                int requested = 0;
+                for (const auto& orphanHash : orphans) {
+                    CBlock orphanBlock;
+                    if (m_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
+                        CBlockIndex* pParent = m_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
+                        if (!pParent) {
+                            // Parent missing — request it
+                            int ph = cancelPoint;  // Best guess for height
+                            if (m_node_context.headers_manager) {
+                                int hh = m_node_context.headers_manager->GetHeightForHash(orphanBlock.hashPrevBlock);
+                                if (hh > 0) ph = hh;
+                            }
+                            if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, ph, orphanBlock.hashPrevBlock)) {
+                                CNetMessage msg = m_node_context.message_processor->CreateGetDataMessage(
+                                    {{NetProtocol::MSG_BLOCK_INV, orphanBlock.hashPrevBlock}});
+                                m_node_context.connman->PushMessage(m_blocks_sync_peer, msg);
+                                requested++;
+                                if (requested >= 3) break;  // Rate limit: max 3 parent requests per cancellation
+                            }
+                        }
+                    }
+                }
+                if (requested > 0) {
+                    std::cout << "[IBD] Post-cancel: Requested " << requested
+                              << " missing parent blocks for stranded orphans" << std::endl;
+                }
+            }
         }
     }
 
@@ -1776,14 +1810,51 @@ bool CIbdCoordinator::FetchBlocks() {
                                   << " is in DB awaiting validation (" << wait_elapsed << "s/"
                                   << PARENT_VALIDATION_TIMEOUT_SECS << "s)" << std::endl;
                     } else {
-                        // Timeout expired - validation is stuck. Escalate to full recovery:
-                        // clear tracker, rotate peer, let normal stall recovery handle it.
-                        std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
-                                  << " stuck in DB for " << wait_elapsed << "s - escalating to peer recovery"
-                                  << std::endl;
+                        // Timeout expired - validation is stuck.
+                        // BUG #279 FIX: Check if the block's parent is on the active chain.
+                        // After a VDF distribution tiebreak, the block's hashPrevBlock may
+                        // reference a different block at the same height (replacement tip).
+                        // If the parent is missing or not on active chain, request it by hash.
                         m_parent_validation_wait_active = false;
                         m_waiting_parent_height = -1;
                         m_waiting_parent_hash = uint256{};
+
+                        bool parent_fetched = false;
+                        if (m_node_context.blockchain_db && m_node_context.blockchain_db->BlockExists(next_hash)) {
+                            CBlock stuck_block;
+                            if (m_node_context.blockchain_db->ReadBlock(next_hash, stuck_block)) {
+                                const uint256& parentHash = stuck_block.hashPrevBlock;
+                                CBlockIndex* pParent = m_chainstate.GetBlockIndex(parentHash);
+                                bool parentOnActiveChain = pParent && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN);
+
+                                if (!parentOnActiveChain) {
+                                    // Parent is missing or not on active chain — this is the VDF divergence case.
+                                    // Request the PARENT block by hash from peers.
+                                    std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
+                                              << " stuck — parent " << parentHash.GetHex().substr(0, 16) << "..."
+                                              << " is " << (pParent ? "NOT on active chain" : "MISSING from chainstate")
+                                              << ". Requesting parent from peers." << std::endl;
+
+                                    if (m_blocks_sync_peer != -1 && m_node_context.block_fetcher && m_node_context.connman) {
+                                        int parent_height = next_needed - 1;  // Parent is at height below
+                                        if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, parent_height, parentHash)) {
+                                            CNetMessage parent_msg = m_node_context.message_processor->CreateGetDataMessage(
+                                                {{NetProtocol::MSG_BLOCK_INV, parentHash}});
+                                            m_node_context.connman->PushMessage(m_blocks_sync_peer, parent_msg);
+                                            parent_fetched = true;
+                                            std::cout << "[IBD] Requested missing parent block " << parentHash.GetHex().substr(0, 16)
+                                                      << "... (height " << parent_height << ") from peer " << m_blocks_sync_peer << std::endl;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!parent_fetched) {
+                            std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
+                                      << " stuck in DB for " << wait_elapsed << "s - escalating to peer recovery"
+                                      << std::endl;
+                        }
                         m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
                     }
                 } else {
