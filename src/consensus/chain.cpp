@@ -692,7 +692,14 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             return false;
         }
 
-        if (!ConnectTip(pindexConnect, connectBlock)) {
+        // BUG #279 FIX: Skip cooldown/MIK/DFMP validation during reorg connect.
+        // The fork chain's blocks were validated by the network when mined, but
+        // cooldown/consecutive-miner checks depend on chain-local state (the
+        // cooldown tracker reflects the OLD chain, not the fork chain). VDF proof
+        // and basic PoW are context-independent and were already checked in
+        // PreValidateBlock or ProcessNewBlock. Without this skip, a legitimate
+        // reorg (e.g., VDF tiebreak) gets rejected with "cooldown violation."
+        if (!ConnectTip(pindexConnect, connectBlock, true /* skipValidation — reorg */)) {
             std::cerr << "[Chain] ERROR: Failed to connect block during reorg at height "
                       << pindexConnect->nHeight << std::endl;
 
