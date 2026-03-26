@@ -4000,6 +4000,17 @@ std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
 }
 
 std::string CRPCServer::RPC_StartMining(const std::string& params) {
+    // VDF miner (DilV) — start VDF mining
+    if (m_vdfMiner) {
+        if (m_vdfMiner->IsRunning()) {
+            return "true";  // Already mining
+        }
+        m_vdfMiner->Start();
+        g_node_state.mining_enabled = true;
+        return "true";
+    }
+
+    // RandomX miner (DIL)
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
     }
@@ -4185,6 +4196,14 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
 }
 
 std::string CRPCServer::RPC_StopMining(const std::string& params) {
+    // VDF miner (DilV) — stop VDF mining
+    if (m_vdfMiner) {
+        m_vdfMiner->Stop();
+        g_node_state.mining_enabled = false;
+        return "true";
+    }
+
+    // RandomX miner (DIL)
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
     }
@@ -4198,6 +4217,12 @@ std::string CRPCServer::RPC_StopMining(const std::string& params) {
 }
 
 std::string CRPCServer::RPC_SetMiningThreads(const std::string& params) {
+    // VDF miner (DilV) — single-threaded by design, ignore thread count
+    if (m_vdfMiner) {
+        return "1";  // VDF mining always uses 1 thread
+    }
+
+    // RandomX miner (DIL)
     if (!m_miner) {
         throw std::runtime_error("Miner not initialized");
     }

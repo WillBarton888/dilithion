@@ -2992,6 +2992,46 @@
             try {
                 const txid = await rpcCall('sendtoaddress', {address: pendingSend.address, amount: pendingSend.amount});
                 showSendSuccess(typeof txid === 'object' ? txid.txid : txid);
+                pendingSend = null;
+                resetSendButton();
+            } catch(e) {
+                const msg = (e.message || '').toLowerCase();
+                if (msg.includes('locked') || msg.includes('unlock')) {
+                    // Show inline unlock prompt instead of raw error
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-error" style="margin-bottom: 12px;">Wallet is locked. Enter your password to unlock and send.</div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="password" class="form-input" id="sendUnlockPassword" placeholder="Wallet password"
+                                   style="flex: 1;" onkeypress="if(event.key==='Enter')unlockAndSend()">
+                            <button class="btn btn-primary" onclick="unlockAndSend()">Unlock & Send</button>
+                            <button class="btn" onclick="cancelSend()" style="background: var(--bg-secondary); border: 1px solid var(--border);">Cancel</button>
+                        </div>
+                    `;
+                    // Focus the password input
+                    setTimeout(() => document.getElementById('sendUnlockPassword')?.focus(), 50);
+                } else {
+                    alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
+                    pendingSend = null;
+                    resetSendButton();
+                }
+            }
+        }
+
+        async function unlockAndSend() {
+            const password = document.getElementById('sendUnlockPassword')?.value;
+            if (!password) {
+                showNotification('Please enter your wallet password', 'error');
+                return;
+            }
+            const alertDiv = document.getElementById('sendAlert');
+            alertDiv.innerHTML = '<div style="text-align: center; padding: 16px;"><div class="spinner" style="width: 20px; height: 20px; margin: 0 auto;"></div><div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">Unlocking wallet and sending...</div></div>';
+
+            try {
+                await rpcCall('walletpassphrase', { passphrase: password, timeout: 300 });
+                walletLocked = false;
+                updateLockUI();
+                const txid = await rpcCall('sendtoaddress', {address: pendingSend.address, amount: pendingSend.amount});
+                showSendSuccess(typeof txid === 'object' ? txid.txid : txid);
             } catch(e) {
                 alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
             }
