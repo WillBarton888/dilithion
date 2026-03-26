@@ -446,14 +446,14 @@ ChainParams ChainParams::DilV() {
     // (skip first 5 bytes of file header, take 1952 bytes of pubkey)
     params.seedAttestationPubkeys = {};  // Empty — will be populated before activation
 
-    // Seed node IPs for attestation requests (DilV seeds)
+    // Seed node IPs for attestation requests (DilV testnet seeds)
+    // TODO: Switch to mainnet IPs when deploying to mainnet
     params.seedAttestationIPs = {
-        "138.197.68.128",   // NYC
-        "167.172.56.119",   // London
-        "165.22.103.114",   // Singapore
-        "134.199.159.83"    // Sydney
+        "134.122.4.164",    // NYC (testnet)
+        "188.166.255.63",   // Singapore (testnet)
+        "209.97.177.197"    // London (testnet)
     };
-    params.seedAttestationRPCPort = 9332;  // DilV RPC port
+    params.seedAttestationRPCPort = 18332;  // DilV testnet RPC port
 
     // DilV Checkpoints (cleared for chain reset)
     // New checkpoints will be added after the reset chain stabilizes.
