@@ -201,6 +201,10 @@ class CPeerManager {
 private:
     // NET-009 FIX: Use recursive_mutex to prevent deadlock on recursive acquisition
     // Some operations (like GetStats calling IsConnected) may need to reacquire the lock
+    //
+    // LOCK ORDERING: cs_vNodes (CConnman) → cs_peers → cs_nodes
+    // Code holding cs_peers or cs_nodes must NEVER call into CConnman (PushMessage, GetNode, etc.)
+    // When both cs_peers and cs_nodes are needed, use std::scoped_lock for deadlock avoidance.
     mutable std::recursive_mutex cs_peers;
     std::map<int, std::shared_ptr<CPeer>> peers;
 

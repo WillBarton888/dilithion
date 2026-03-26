@@ -1387,47 +1387,60 @@ void CPeerManager::UpdatePeerBestKnownTip(int peer_id, int height, const uint256
 
 bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, bool preferred)
 {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    // DEADLOCK FIX: Split into phases to avoid holding cs_peers while calling
+    // PushMessage (which acquires cs_vNodes via CConnman::GetNode).
+    // Without this fix, Thread A (SocketHandler) holding cs_vNodes → cs_peers
+    // and Thread B (here) holding cs_peers → cs_vNodes creates ABBA deadlock.
+    std::string peer_addr_str;  // Captured under lock for DNA notification
 
-    auto it = peers.find(peer_id);
-    if (it == peers.end()) {
-        // Create peer entry if not exists
-        // BUG FIX: Get address from CNode to avoid null addr
-        NetProtocol::CAddress addr;
-        {
-            std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
-            auto node_it = node_refs.find(peer_id);
-            if (node_it != node_refs.end() && node_it->second) {
-                addr = node_it->second->addr;
+    // Phase 1: Update peer state (under cs_peers lock)
+    {
+        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+        auto it = peers.find(peer_id);
+        if (it == peers.end()) {
+            // Create peer entry if not exists
+            // BUG FIX: Get address from CNode to avoid null addr
+            NetProtocol::CAddress addr;
+            {
+                std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
+                auto node_it = node_refs.find(peer_id);
+                if (node_it != node_refs.end() && node_it->second) {
+                    addr = node_it->second->addr;
+                }
             }
+            auto new_peer = std::make_shared<CPeer>(peer_id, addr);
+            new_peer->state = CPeer::STATE_CONNECTED;
+            peers[peer_id] = std::move(new_peer);
+            it = peers.find(peer_id);
         }
-        auto new_peer = std::make_shared<CPeer>(peer_id, addr);
-        new_peer->state = CPeer::STATE_CONNECTED;
-        peers[peer_id] = std::move(new_peer);
-        it = peers.find(peer_id);
+
+        CPeer* peer = it->second.get();
+
+        peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
+        peer->start_height = starting_height;
+        peer->best_known_height = starting_height;  // Initialize to starting height
+        peer->fPreferredDownload = preferred;
+        peer->fSyncStarted = false;
+
+        // Initialize timing
+        auto now = std::chrono::steady_clock::now();
+        peer->m_stalling_since = now;
+        peer->m_downloading_since = now;
+        peer->m_last_block_announcement = now;
+        peer->last_tip_update = now;  // Initialize so peer isn't excluded as stale before first HEADERS
+        peer->lastSuccessTime = now;
+        peer->lastStallTime = now;
+
+        // Capture address for DNA notification (before releasing lock)
+        peer_addr_str = peer->addr.ToString();
     }
+    // cs_peers released — safe to call into CConnman now
 
-    CPeer* peer = it->second.get();
-
-    peer->state = CPeer::STATE_HANDSHAKE_COMPLETE;
-    peer->start_height = starting_height;
-    peer->best_known_height = starting_height;  // Initialize to starting height
-    peer->fPreferredDownload = preferred;
-    peer->fSyncStarted = false;
-
-    // Initialize timing
-    auto now = std::chrono::steady_clock::now();
-    peer->m_stalling_since = now;
-    peer->m_downloading_since = now;
-    peer->m_last_block_announcement = now;
-    peer->last_tip_update = now;  // Initialize so peer isn't excluded as stale before first HEADERS
-    peer->lastSuccessTime = now;
-    peer->lastStallTime = now;
-
-    // Send mempool INV to newly connected peer so they learn about pending transactions.
-    // Without this, peers that connect after a tx was broadcast never learn about it.
-    // RATE-LIMITED: Only send up to 8 INVs per connect to avoid triggering DoS bans
-    // on the remote peer. The periodic rebroadcast (every 60s) will catch the rest.
+    // Phase 2: Send mempool INV (no peer locks held)
+    // PushMessage calls CConnman::GetNode which acquires cs_vNodes.
+    // This MUST be outside cs_peers to maintain lock ordering: cs_vNodes → cs_peers.
+    // If peer disconnected between phase 1 and here, PushMessage returns false (safe).
     {
         extern std::atomic<CTxMemPool*> g_mempool;
         auto* mempool = g_mempool.load();
@@ -1449,12 +1462,11 @@ bool CPeerManager::OnPeerHandshakeComplete(int peer_id, int starting_height, boo
         }
     }
 
-    // Digital DNA: Notify collector about new peer connection
+    // Phase 3: Digital DNA notification (no locks needed, uses captured addr)
     if (auto collector = g_node_context.GetDNACollector()) {
         // Convert peer address to 20-byte ID (hash of IP:port)
         std::array<uint8_t, 20> peer_dna_id = {};
-        std::string addr_str = peer->addr.ToString();
-        auto hash = std::hash<std::string>{}(addr_str);
+        auto hash = std::hash<std::string>{}(peer_addr_str);
         memcpy(peer_dna_id.data(), &hash, std::min(sizeof(hash), peer_dna_id.size()));
         collector->on_peer_connected(peer_dna_id);
     }
@@ -1558,13 +1570,14 @@ bool CPeerManager::RegisterNode(int node_id, CNode* node, const NetProtocol::CAd
         }
     }
 
+    // DEADLOCK FIX: Use scoped_lock for consistent lock ordering.
+    // Other code paths (EvictPeersIfNeeded, Misbehaving) acquire cs_peers then cs_nodes.
+    // scoped_lock uses deadlock-avoidance algorithm, matching RemoveNode's approach.
     {
-        std::lock_guard<std::recursive_mutex> lock(cs_nodes);
-        node_refs[node_id] = node;
-    }
+        std::scoped_lock lock(cs_peers, cs_nodes);
 
-    {
-        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+        node_refs[node_id] = node;
+
         auto it = peers.find(node_id);
         if (it == peers.end()) {
             // Create new peer

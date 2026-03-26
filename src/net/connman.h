@@ -312,6 +312,9 @@ private:
     //
 
     std::vector<std::unique_ptr<CNode>> m_nodes;
+    // LOCK ORDERING: cs_vNodes must be acquired BEFORE cs_peers/cs_nodes (CPeerManager).
+    // Code holding cs_peers or cs_nodes must NEVER call CConnman methods that acquire cs_vNodes
+    // (e.g., GetNode, PushMessage(int)). Violating this causes ABBA deadlock.
     mutable std::mutex cs_vNodes;
     int m_next_node_id = 1;
 
