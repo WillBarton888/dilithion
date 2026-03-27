@@ -1,4 +1,5 @@
 #include "chainparams.h"
+#include "../attestation/seed_pubkeys_testnet.h"
 #include <util/system.h>
 
 namespace Dilithion {
@@ -437,14 +438,10 @@ ChainParams ChainParams::DilV() {
     // Seed-attested MIK registration (Phase 2+3)
     // Disabled until seed nodes generate their keys and pubkeys are hardcoded here.
     // Activation height will be set once all seeds have keys deployed.
-    params.seedAttestationActivationHeight = 999999999;  // Disabled until keys deployed
+    params.seedAttestationActivationHeight = 15;  // Testnet: activate at height 15
 
-    // Seed attestation public keys — placeholder (empty until seeds generate keys)
-    // Order: [0]=NYC, [1]=London, [2]=Singapore, [3]=Sydney
-    // Each key will be 1952 bytes (Dilithium3). Populate with hex from seed nodes:
-    //   ssh root@SEED "cat ~/.dilv/seed_attestation_key.dat | xxd -p -c0 | tail -c3904"
-    // (skip first 5 bytes of file header, take 1952 bytes of pubkey)
-    params.seedAttestationPubkeys = {};  // Empty — will be populated before activation
+    // Seed attestation public keys (testnet)
+    params.seedAttestationPubkeys = Attestation::GetTestnetSeedPubkeys();
 
     // Seed node IPs for attestation requests (DilV testnet seeds)
     // TODO: Switch to mainnet IPs when deploying to mainnet
