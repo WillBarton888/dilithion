@@ -3112,10 +3112,19 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
         hasTxs = validator.DeserializeBlockTransactions(block, transactions, deserializeError);
     }
 
-    // Extract miner address from coinbase transaction
+    // Extract miner address and MIK from coinbase transaction
     std::string minerAddress = "";
-    if (hasTxs && !transactions.empty() && !transactions[0]->vout.empty()) {
-        minerAddress = DecodeScriptPubKeyToAddress(transactions[0]->vout[0].scriptPubKey);
+    std::string minerMIK = "";
+    if (hasTxs && !transactions.empty()) {
+        if (!transactions[0]->vout.empty()) {
+            minerAddress = DecodeScriptPubKeyToAddress(transactions[0]->vout[0].scriptPubKey);
+        }
+        if (!transactions[0]->vin.empty()) {
+            DFMP::CMIKScriptData mikData;
+            if (DFMP::ParseMIKFromScriptSig(transactions[0]->vin[0].scriptSig, mikData)) {
+                minerMIK = mikData.identity.GetHex();
+            }
+        }
     }
 
     // Get next block hash if available (use active chain, not any fork)
@@ -3155,6 +3164,9 @@ std::string CRPCServer::RPC_GetBlock(const std::string& params) {
     }
 
     oss << "\"miner\":\"" << minerAddress << "\"";
+    if (!minerMIK.empty()) {
+        oss << ",\"mik\":\"" << minerMIK << "\"";
+    }
 
     // Verbosity 1: Add txid array
     if (verbosity >= 1 && hasTxs) {
@@ -4555,6 +4567,7 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
 
     int currentHeight = static_cast<int>(m_chainstate->GetHeight());
     std::map<std::string, int> mikBlockCounts;  // MIK identity hex -> block count
+    std::map<std::string, std::set<std::string>> mikAddresses;  // MIK hex -> set of payout addresses
     int blocksWithMIK = 0;
     int blocksWithoutMIK = 0;
 
@@ -4594,6 +4607,14 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
             std::string mikHex = mikData.identity.GetHex();
             mikBlockCounts[mikHex]++;
             blocksWithMIK++;
+
+            // Extract miner payout address from coinbase vout[0]
+            if (!coinbaseTx->vout.empty()) {
+                std::string minerAddr = DecodeScriptPubKeyToAddress(coinbaseTx->vout[0].scriptPubKey);
+                if (!minerAddr.empty()) {
+                    mikAddresses[mikHex].insert(minerAddr);
+                }
+            }
         } else {
             blocksWithoutMIK++;
         }
@@ -4618,7 +4639,22 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
         first = false;
         double percentage = (currentHeight > 0) ? (blockCount * 100.0 / currentHeight) : 0;
         oss << "{\"mik\":\"" << mikHex << "\",\"blocks\":" << blockCount
-            << ",\"percent\":" << std::fixed << std::setprecision(2) << percentage << "}";
+            << ",\"percent\":" << std::fixed << std::setprecision(2) << percentage;
+
+        // Include payout addresses for this MIK
+        auto it = mikAddresses.find(mikHex);
+        if (it != mikAddresses.end()) {
+            oss << ",\"addresses\":[";
+            bool firstAddr = true;
+            for (const auto& addr : it->second) {
+                if (!firstAddr) oss << ",";
+                firstAddr = false;
+                oss << "\"" << addr << "\"";
+            }
+            oss << "]";
+        }
+
+        oss << "}";
     }
 
     oss << "]}";
