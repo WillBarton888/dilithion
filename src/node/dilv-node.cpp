@@ -3827,16 +3827,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             const std::array<uint8_t, 20>& mik, bool found,
             const std::vector<uint8_t>& dna_data)
         {
-            if (!found || dna_data.empty() || !g_node_context.dna_registry) return;
+            if (!g_node_context.dna_registry) return;
+            if (!found || dna_data.empty()) return;
+
             auto dna = digital_dna::DigitalDNA::deserialize(dna_data);
             if (!dna || !dna->is_valid) return;
-            // Verify the MIK matches what we requested
             if (dna->mik_identity != mik) return;
-            // Only store if we don't already have this identity
-            if (!g_node_context.dna_registry->is_registered(dna->address)) {
-                g_node_context.dna_registry->register_identity(*dna);
+
+            // Check by MIK (not address) to match how discovery decides what to request
+            auto existing = g_node_context.dna_registry->get_identity_by_mik(mik);
+            if (!existing) {
+                auto result = g_node_context.dna_registry->register_identity(*dna);
+                char hex[9];
+                snprintf(hex, sizeof(hex), "%02x%02x%02x%02x", mik[0], mik[1], mik[2], mik[3]);
+                std::cout << "[DNA] Stored DNA for MIK " << hex << "... from peer "
+                          << peer_id << " (registry=" << g_node_context.dna_registry->count()
+                          << ")" << std::endl;
             }
-            // Phase 2: Track MIK → peer_id mapping for verification routing
+
+            // Phase 2: Track MIK -> peer_id mapping for verification routing
             {
                 std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
                 g_mik_peer_map[mik] = peer_id;
@@ -5420,13 +5429,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
 
                     // Digital DNA Discovery: Request DNA from peers for known miners
+                    // Fixed: round-robin across peers, rotating offset to cover all MIKs
                     {
                         static auto last_dna_discovery = std::chrono::steady_clock::now();
+                        static size_t dna_disc_offset = 0;
                         auto now_disc = std::chrono::steady_clock::now();
                         auto disc_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                             now_disc - last_dna_discovery).count();
 
-                        if (disc_elapsed >= 300 && g_node_context.dna_registry &&
+                        if (disc_elapsed >= 60 && g_node_context.dna_registry &&
                             g_node_context.cooldown_tracker &&
                             g_node_context.connman && g_node_context.message_processor) {
                             int dnaActDisc = Dilithion::g_chainParams ?
@@ -5441,23 +5452,36 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 }
 
                                 if (!peer_ids.empty()) {
-                                    std::mt19937 rng(std::random_device{}());
-                                    int requested = 0;
+                                    // Collect MIKs missing from our DNA registry
+                                    std::vector<std::array<uint8_t, 20>> missing_miks;
                                     for (const auto& mik : known_miks) {
                                         if (mik == std::array<uint8_t, 20>{}) continue;
-                                        auto existing = g_node_context.dna_registry->get_identity_by_mik(mik);
-                                        if (existing) continue;
-
-                                        int target = peer_ids[rng() % peer_ids.size()];
-                                        auto msg = g_node_context.message_processor->CreateDNAIdentReqMessage(mik);
-                                        g_node_context.connman->PushMessage(target, msg);
-                                        ++requested;
-                                        if (requested >= 10) break;
+                                        if (!g_node_context.dna_registry->get_identity_by_mik(mik))
+                                            missing_miks.push_back(mik);
                                     }
-                                    if (requested > 0) {
-                                        std::cout << "[DNA] Discovery: requested DNA for "
-                                                  << requested << " unknown MIKs (of "
-                                                  << known_miks.size() << " known)" << std::endl;
+
+                                    if (!missing_miks.empty()) {
+                                        if (dna_disc_offset >= missing_miks.size())
+                                            dna_disc_offset = 0;
+
+                                        // Send at most 1 request per peer (round-robin)
+                                        size_t max_requests = std::min(peer_ids.size(), missing_miks.size());
+                                        int requested = 0;
+                                        for (size_t i = 0; i < max_requests; ++i) {
+                                            size_t mik_idx = (dna_disc_offset + i) % missing_miks.size();
+                                            int target = peer_ids[i % peer_ids.size()];
+                                            auto msg = g_node_context.message_processor->CreateDNAIdentReqMessage(
+                                                missing_miks[mik_idx]);
+                                            g_node_context.connman->PushMessage(target, msg);
+                                            ++requested;
+                                        }
+                                        dna_disc_offset += requested;
+
+                                        std::cout << "[DNA] Discovery: requested " << requested
+                                                  << " of " << missing_miks.size() << " missing MIKs"
+                                                  << " (registered=" << g_node_context.dna_registry->count()
+                                                  << ", total_known=" << known_miks.size() << ")"
+                                                  << std::endl;
                                     }
                                 }
                             }

@@ -2241,7 +2241,7 @@ static const int64_t DNA_PING_COOLDOWN_SEC = 10;    // 1 dnalping per peer per 1
 static const int64_t DNA_TSYNC_COOLDOWN_SEC = 30;   // 1 dnatsync per peer per 30s
 static const int64_t DNA_BWTEST_COOLDOWN_SEC = 600;  // 1 dnabwtest per peer per 10min
 static const int DNA_BWTEST_GLOBAL_MAX = 3;           // Max 3 concurrent BW tests globally
-static const int64_t DNA_IDENT_COOLDOWN_SEC = 30;    // 1 dnaireq per peer per 30s
+static const int64_t DNA_IDENT_COOLDOWN_SEC = 10;    // 1 dnaireq per peer per 10s
 static const int64_t DNA_NONCE_TIMEOUT_SEC = 60;      // Nonces expire after 60s
 
 void CNetMessageProcessor::RegisterDNANonce(uint64_t nonce, int peer_id, uint64_t send_timestamp_us) {
@@ -2531,15 +2531,14 @@ bool CNetMessageProcessor::ProcessDNAIdentReqMessage(int peer_id, CDataStream& s
             return false;
         }
 
-        // Rate limit: 1 per peer per 30s
+        // Rate limit: 1 per peer per 10s (silently drop excess — no misbehavior penalty)
         {
             std::lock_guard<std::mutex> lock(cs_dna_rate_limit);
             auto now = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
             auto& last = peer_dna_ident_timestamps[peer_id];
             if (now - last < DNA_IDENT_COOLDOWN_SEC) {
-                peer_manager.Misbehaving(peer_id, 5);
-                return false;
+                return true;  // Silently accept — rate-limited DNA requests are not misbehavior
             }
             last = now;
         }
