@@ -5226,6 +5226,35 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                 }
                 g_node_state.new_block_found = true;
+            } else {
+                // Block rejected — if attestation cache is stale, re-collect
+                // This handles seed_id changes, key rotations, or expired attestations
+                // without requiring a full node restart or PoW redo
+                if (s_attestationsCollected.load() &&
+                    Dilithion::g_chainParams &&
+                    !Dilithion::g_chainParams->seedAttestationIPs.empty()) {
+                    std::cout << "[VDF] Block rejected — re-collecting seed attestations..." << std::endl;
+                    s_attestationsCollected.store(false);
+
+                    std::vector<uint8_t> mikPubkey;
+                    if (wallet.GetMIKPubKey(mikPubkey)) {
+                        std::string mikHex = HexStr(mikPubkey);
+                        std::string dnaHex = HexStr(s_cachedDnaHash.data(), 32);
+
+                        Attestation::CAttestationSet freshAttest;
+                        std::string attestErr;
+                        if (Attestation::CollectAttestations(
+                                Dilithion::g_chainParams->seedAttestationIPs,
+                                Dilithion::g_chainParams->seedAttestationRPCPort,
+                                mikHex, dnaHex, freshAttest, attestErr)) {
+                            s_cachedAttestations = std::move(freshAttest);
+                            s_attestationsCollected.store(true);
+                            std::cout << "[VDF] Fresh attestations collected — next block should succeed" << std::endl;
+                        } else {
+                            std::cerr << "[VDF] WARNING: Attestation re-collection failed: " << attestErr << std::endl;
+                        }
+                    }
+                }
             }
         });
 
