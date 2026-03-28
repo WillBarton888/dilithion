@@ -10,6 +10,7 @@
 
 #include <consensus/chain.h>
 #include <consensus/pow.h>  // BUG #245: ChainWorkGreaterThan for fork work comparison
+#include <vdf/cooldown_tracker.h>  // Cooldown undo during re-validation
 #include <core/chainparams.h>  // Initial header request needs genesis hash
 #include <node/genesis.h>      // Genesis::GetGenesisHash()
 #include <node/blockchain_storage.h>  // BUG #159: Orphan block deletion
@@ -1664,6 +1665,12 @@ bool CIbdCoordinator::FetchBlocks() {
                 // Clear the failed flags
                 pindex->nStatus &= ~CBlockIndex::BLOCK_FAILED_MASK;
                 cleared_count++;
+
+                // Undo cooldown tracker state for this block so re-validation
+                // doesn't hit false cooldown violations from the prior pass
+                if (m_node_context.cooldown_tracker) {
+                    m_node_context.cooldown_tracker->OnBlockDisconnected(pindex->nHeight);
+                }
 
                 // Track this block — if it fails again, it's permanently invalid
                 m_permanently_failed_blocks.insert(hash);
