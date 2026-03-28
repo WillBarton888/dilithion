@@ -1,5 +1,6 @@
 #include "cooldown_tracker.h"
 #include <algorithm>
+#include <iostream>
 
 int CCooldownTracker::CalculateCooldown(int activeMiners)
 {
@@ -45,16 +46,35 @@ bool CCooldownTracker::IsInCooldown(const Address& addr, int height, int64_t cur
         return false;
 
     // Time-based expiry (post-stabilization, when timestamp provided).
-    // Cooldown also expires when enough wall-clock time has passed,
-    // handling chain stalls where height doesn't advance.
-    // Fail-closed: when currentTimestamp == 0, time-based expiry is not applied.
     if (height >= m_stabilizationHeight && currentTimestamp > 0) {
         auto tsIt = m_lastWinTimestamp.find(addr);
         if (tsIt != m_lastWinTimestamp.end() && tsIt->second > 0) {
             int64_t timeGap = currentTimestamp - tsIt->second;
             int64_t timeCooldown = static_cast<int64_t>(cooldown) * m_targetBlockTime;
+            // DEBUG: dump full state for blocks near 259
+            if (height >= 255 && height <= 265) {
+                std::cerr << "[COOLDOWN-TRACE] h=" << height
+                          << " lastWinH=" << it->second
+                          << " blockGap=" << blockGap
+                          << " cooldown=" << cooldown
+                          << " blockTs=" << currentTimestamp
+                          << " lastWinTs=" << tsIt->second
+                          << " timeGap=" << timeGap
+                          << " timeCooldown=" << timeCooldown
+                          << " timeExpired=" << (timeGap >= timeCooldown ? "YES" : "NO")
+                          << " entries=" << m_heightToWinner.size()
+                          << " stabH=" << m_stabilizationHeight
+                          << " target=" << m_targetBlockTime
+                          << std::endl;
+            }
             if (timeGap >= timeCooldown)
                 return false;  // time-based expiry
+        } else if (height >= 255 && height <= 265) {
+            std::cerr << "[COOLDOWN-TRACE] h=" << height
+                      << " lastWinH=" << it->second
+                      << " NO TIMESTAMP for this MIK (tsIt="
+                      << (tsIt == m_lastWinTimestamp.end() ? "END" : "ZERO")
+                      << ")" << std::endl;
         }
     }
 

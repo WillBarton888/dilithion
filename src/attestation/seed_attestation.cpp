@@ -278,31 +278,42 @@ bool VerifyAttestationSet(
     int validCount = 0;
     bool usedSeed[NUM_SEEDS] = {};  // Track which seeds have been used (no duplicates)
 
-    for (const auto& att : attestations.attestations) {
+    for (size_t idx = 0; idx < attestations.attestations.size(); idx++) {
+        const auto& att = attestations.attestations[idx];
         if (att.seedId >= NUM_SEEDS) {
-            continue;  // Skip invalid seed IDs
+            std::cerr << "  [Attest] #" << idx << ": seedId=" << (int)att.seedId << " SKIP (invalid id)" << std::endl;
+            continue;
         }
 
         if (usedSeed[att.seedId]) {
-            continue;  // Skip duplicate seed attestations
+            std::cerr << "  [Attest] #" << idx << ": seedId=" << (int)att.seedId << " SKIP (duplicate)" << std::endl;
+            continue;
         }
 
         // Check freshness: attestation timestamp within validity window of block timestamp
         int64_t timeDiff = blockTimestamp - static_cast<int64_t>(att.timestamp);
         if (timeDiff < 0 || timeDiff > ATTESTATION_VALIDITY_WINDOW) {
-            continue;  // Too old or in the future
+            std::cerr << "  [Attest] #" << idx << ": seedId=" << (int)att.seedId
+                      << " SKIP (stale: diff=" << timeDiff << "s, window=" << ATTESTATION_VALIDITY_WINDOW << ")" << std::endl;
+            continue;
         }
 
         // Verify signature
-        if (VerifyAttestation(att, mikPubkey, dnaHash, seedPubkeys[att.seedId])) {
+        bool sigOk = VerifyAttestation(att, mikPubkey, dnaHash, seedPubkeys[att.seedId]);
+        if (sigOk) {
             usedSeed[att.seedId] = true;
             validCount++;
+        } else {
+            std::cerr << "  [Attest] #" << idx << ": seedId=" << (int)att.seedId
+                      << " FAILED signature (sigSize=" << att.signature.size()
+                      << ", keySize=" << seedPubkeys[att.seedId].size() << ")" << std::endl;
         }
     }
 
     if (validCount < MIN_ATTESTATIONS) {
         error = "Insufficient valid attestations: " + std::to_string(validCount) +
-                " of " + std::to_string(MIN_ATTESTATIONS) + " required";
+                " of " + std::to_string(MIN_ATTESTATIONS) + " required"
+                + " (checked " + std::to_string(attestations.attestations.size()) + " entries)";
         return false;
     }
 

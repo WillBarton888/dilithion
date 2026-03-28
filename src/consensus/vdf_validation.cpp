@@ -226,6 +226,20 @@ bool CheckVDFCooldown(
     }
 
     // Check if this MIK is in cooldown (pass timestamp for time-based expiry)
+    // DEBUG: log cooldown state for diagnosis
+    {
+        int dbgLastWin = tracker.GetLastWinHeight(mikId);
+        int dbgCooldown = tracker.GetEffectiveCooldown(height);
+        int dbgActive = tracker.GetActiveMiners();
+        int dbgGap = (dbgLastWin >= 0) ? (height - dbgLastWin) : -1;
+        if (dbgLastWin >= 0 && dbgGap < dbgCooldown) {
+            std::cerr << "[CooldownDBG] h=" << height << " mik=" << std::hex;
+            for (int i = 0; i < 4; i++) { char h2[3]; snprintf(h2,3,"%02x",mikId[i]); std::cerr << h2; }
+            std::cerr << std::dec << " lastWin=" << dbgLastWin << " gap=" << dbgGap
+                      << " cooldown=" << dbgCooldown << " active=" << dbgActive
+                      << " blockTs=" << blockTimestamp << std::endl;
+        }
+    }
     if (tracker.IsInCooldown(mikId, height, blockTimestamp)) {
         int lastWin = tracker.GetLastWinHeight(mikId);
         int cooldown = tracker.GetCooldownBlocks();
