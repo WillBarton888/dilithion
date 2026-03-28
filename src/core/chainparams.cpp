@@ -1,5 +1,6 @@
 #include "chainparams.h"
 #include "../attestation/seed_pubkeys_testnet.h"
+#include "../attestation/seed_pubkeys_mainnet.h"
 #include <util/system.h>
 
 namespace Dilithion {
@@ -144,7 +145,7 @@ ChainParams ChainParams::Mainnet() {
     // confirming the miner connects from a residential (non-datacenter) IP
     params.seedAttestationActivationHeight = 40000;
     // Same seed servers as DilV — same attestation keys
-    params.seedAttestationPubkeys = Attestation::GetTestnetSeedPubkeys();
+    params.seedAttestationPubkeys = Attestation::GetMainnetSeedPubkeys();
     params.seedAttestationIPs = {
         "138.197.68.128",   // NYC
         "167.172.56.119",   // London
@@ -452,8 +453,8 @@ ChainParams ChainParams::DilV() {
     // Activation height will be set once all seeds have keys deployed.
     params.seedAttestationActivationHeight = 0;   // Active from genesis — fair mining from block 1
 
-    // Seed attestation public keys (testnet)
-    params.seedAttestationPubkeys = Attestation::GetTestnetSeedPubkeys();
+    // Seed attestation public keys (mainnet — extracted from seed nodes)
+    params.seedAttestationPubkeys = Attestation::GetMainnetSeedPubkeys();
 
     // Seed node IPs for attestation requests (DilV mainnet seeds)
     params.seedAttestationIPs = {

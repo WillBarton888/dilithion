@@ -47,10 +47,10 @@ namespace Attestation {
 // ============================================================================
 
 /** Number of seed nodes (3 for testnet, 4 for mainnet) */
-constexpr int NUM_SEEDS = 3;
+constexpr int NUM_SEEDS = 4;
 
-/** Minimum attestations required (Byzantine: 2-of-3) */
-constexpr int MIN_ATTESTATIONS = 2;
+/** Minimum attestations required (Byzantine: 3-of-4) */
+constexpr int MIN_ATTESTATIONS = 3;
 
 /** Coinbase marker byte for attestation data */
 constexpr uint8_t ATTESTATION_MARKER = 0xDA;
