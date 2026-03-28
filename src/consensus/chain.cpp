@@ -1032,7 +1032,8 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // ====================================================================
         // After activation, MIK registration blocks must include 3+ valid
         // attestations signed by known seed node keys.
-        if (block.IsVDFBlock()) {
+        // Skip attestation for genesis (height 0) — no MIK exists yet
+        if (block.IsVDFBlock() && pindex->nHeight > 0) {
             std::string attestError;
             if (!CheckMIKAttestations(block, pindex->nHeight, attestError)) {
                 std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
