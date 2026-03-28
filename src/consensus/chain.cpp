@@ -855,6 +855,28 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         }
 
         // ====================================================================
+        // ASSUME-VALID: Skip cooldown, consecutive, window cap, and attestation
+        // checks for historical blocks below dfmpAssumeValidHeight.
+        // These blocks were accepted by the network and are part of the canonical
+        // chain. Skipping validation avoids false rejections caused by cooldown
+        // tracker state differences during IBD vs real-time processing.
+        // The tracker is still updated so state is correct for post-assume blocks.
+        // This is the same pattern as Bitcoin Core's -assumevalid.
+        // ====================================================================
+        int assumeValidHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
+        bool assumeValid = (assumeValidHeight > 0 && pindex->nHeight <= assumeValidHeight);
+
+        if (assumeValid && block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+            // Update tracker without enforcement so state is correct at assume-valid boundary
+            std::array<uint8_t, 20> mikId{};
+            if (ExtractCoinbaseMIKIdentity(block, mikId)) {
+                g_node_context.cooldown_tracker->OnBlockConnected(
+                    pindex->nHeight, mikId, static_cast<int64_t>(block.nTime));
+            }
+        }
+
+        // ====================================================================
         // CONSENSUS-ENFORCED COOLDOWN (hard fork at dfmpCooldownConsensusHeight)
         // ====================================================================
         // After activation, reject blocks where the miner's MIK identity
@@ -870,7 +892,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // Additionally, stall bypass requires a different miner from the
         // previous block (unless solo mining).  Prevents private fork mining
         // via repeated stall exemption abuse.
-        if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+        if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
             bool chainStalled = false;
 
             int stabilizationHeight = Dilithion::g_chainParams ?
@@ -965,7 +987,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // After activation, reject VDF blocks where the same MIK identity
         // has mined more than 3 consecutive blocks.  Prevents private fork
         // chain construction by a single miner.  Solo miner exemption applies.
-        if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+        if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
             std::string consecError;
             if (!CheckConsecutiveMiner(block, pindex, pdb,
                                        *g_node_context.cooldown_tracker, consecError)) {
@@ -987,7 +1009,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // Reject blocks where the miner's MIK has already mined the maximum
         // allowed blocks in the trailing window.  Exemptions: solo miner,
         // liveness timeout (chain stall).
-        if (block.IsVDFBlock() && g_node_context.cooldown_tracker) {
+        if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
             int64_t prevTime = pindex->pprev ? static_cast<int64_t>(pindex->pprev->nTime) : 0;
             int64_t blkTime = static_cast<int64_t>(block.nTime);
             std::string capError;
@@ -1033,7 +1055,7 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         // After activation, MIK registration blocks must include 3+ valid
         // attestations signed by known seed node keys.
         // Skip attestation for genesis (height 0) — no MIK exists yet
-        if (block.IsVDFBlock() && pindex->nHeight > 0) {
+        if (block.IsVDFBlock() && pindex->nHeight > 0 && !assumeValid) {
             std::string attestError;
             if (!CheckMIKAttestations(block, pindex->nHeight, attestError)) {
                 std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
