@@ -1475,7 +1475,8 @@ async function renderHolders() {
 
             html += '<tr>';
             html += `<td class="center" data-sort-value="${h.rank}">${h.rank}</td>`;
-            html += `<td><a href="#/address/${escapeHtml(h.address)}" class="address">${escapeHtml(h.address)}</a></td>`;
+            const addrLabel = h.label ? ` <span class="badge badge-info" style="font-size:0.65rem;vertical-align:middle;">${escapeHtml(h.label)}</span>` : '';
+            html += `<td><a href="#/address/${escapeHtml(h.address)}" class="address">${escapeHtml(h.address)}</a>${addrLabel}</td>`;
             html += `<td class="right amount" data-sort-value="${balance}">${formatNumber(Math.floor(balance))} ${UNIT}</td>`;
             html += `<td class="right" data-sort-value="${pct}">${pct.toFixed(2)}%</td>`;
             html += '</tr>';

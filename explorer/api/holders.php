@@ -42,12 +42,30 @@ if ($result === null) {
 }
 
 // Calculate supply for percentage
-$supply = ($result["holders"] ?? 0) > 0 ? 0 : 0;
+// Include pre-funded supply from genesis (chain reset balances)
+$prefundSupply = $config['chain'] === 'dilv' ? 2610191.92 : 0;  // DilV reset pre-fund total
 $blockchainInfo = dilithionRPC("getblockchaininfo");
+$height = 0;
 if ($blockchainInfo !== null) {
     $height = $blockchainInfo["blocks"] ?? 0;
-    $supply = $height * $config['reward'];
 }
+$supply = ($height * $config['reward']) + $prefundSupply;
+
+// Known address labels
+$labels = [
+    "DTHGN3XiZ9LRxHVPUWMumX8B9q6B4BuPdp" => "Bridge",
+    "DNaTbwZgm6x23zf4DnJm4vjEG2qGc6cinx" => "Bridge",
+];
+
+// Add labels to top holders
+$top = $result["top"] ?? [];
+foreach ($top as &$holder) {
+    $addr = $holder["address"] ?? "";
+    if (isset($labels[$addr])) {
+        $holder["label"] = $labels[$addr];
+    }
+}
+unset($holder);
 
 $response = [
     "holders" => $result["holders"] ?? 0,
@@ -55,7 +73,7 @@ $response = [
     "supply" => $supply,
     "unit" => $config['unit'],
     "chain" => $config['chain'],
-    "top" => $result["top"] ?? [],
+    "top" => $top,
     "updated_at" => time(),
 ];
 
