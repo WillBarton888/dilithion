@@ -251,6 +251,11 @@ bool CBlockValidator::CheckCoinbase(
         return false;
     }
 
+    // Genesis block: pre-funded addresses can exceed normal subsidy
+    if (nHeight == 0) {
+        return true;  // Skip value and mining tax checks for genesis
+    }
+
     // Calculate maximum allowed coinbase value
     uint64_t nMaxValue = CalculateBlockSubsidy(nHeight);
 
@@ -643,6 +648,10 @@ bool CBlockValidator::CheckBlock(
     }
 
     // Step 7: Validate coinbase value (subsidy + fees)
+    // Genesis block: skip check (pre-funded addresses exceed normal subsidy)
+    if (nHeight == 0) {
+        return true;
+    }
     uint64_t blockSubsidy = CalculateBlockSubsidy(nHeight);
     uint64_t maxCoinbaseValue = blockSubsidy + totalFees;
 

@@ -8,6 +8,7 @@
 #include <consensus/pow.h>
 #include <core/chainparams.h>
 #include <vdf/coinbase_vdf.h>
+#include <util/base58.h>
 
 #include <cstring>
 #include <iostream>
@@ -167,13 +168,32 @@ CBlock CreateDilVGenesisBlock() {
     std::vector<uint8_t> genesisVdfProof(genesisVdfProofBytes, genesisVdfProofBytes + 200);
     CoinbaseVDF::EmbedProof(coinbaseTx.vin[0], genesisVdfProof);
 
-    // Output: 100 DilV (10 billion ions)
+    // Output 0: OP_RETURN (unspendable, genesis tradition)
     coinbaseTx.vout.resize(1);
-    coinbaseTx.vout[0].nValue = 100ULL * 100000000ULL;  // 100 DilV
-
-    // scriptPubKey: OP_RETURN (unspendable)
-    // Genesis coins are traditionally unspendable
+    coinbaseTx.vout[0].nValue = 0;  // No value for OP_RETURN
     coinbaseTx.vout[0].scriptPubKey.push_back(0x6a);  // OP_RETURN opcode
+
+    // Pre-funded outputs: balance restoration from chain reset
+    // Each address gets a P2PKH output with their preserved balance
+    for (const auto& [address, amount] : Dilithion::g_chainParams->preFundAddresses) {
+        std::vector<uint8_t> addrData;
+        if (!DecodeBase58Check(address, addrData) || addrData.size() != 21) {
+            continue;  // Skip invalid addresses
+        }
+        // Extract 20-byte pubkey hash (skip version byte)
+        std::vector<uint8_t> pubKeyHash(addrData.begin() + 1, addrData.end());
+
+        CTxOut out;
+        out.nValue = amount;
+        // P2PKH scriptPubKey: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+        out.scriptPubKey.push_back(0x76);  // OP_DUP
+        out.scriptPubKey.push_back(0xa9);  // OP_HASH160
+        out.scriptPubKey.push_back(0x14);  // Push 20 bytes
+        out.scriptPubKey.insert(out.scriptPubKey.end(), pubKeyHash.begin(), pubKeyHash.end());
+        out.scriptPubKey.push_back(0x88);  // OP_EQUALVERIFY
+        out.scriptPubKey.push_back(0xac);  // OP_CHECKSIG
+        coinbaseTx.vout.push_back(out);
+    }
 
     coinbaseTx.nLockTime = 0;
 

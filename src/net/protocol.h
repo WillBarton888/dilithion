@@ -19,9 +19,9 @@ static const uint32_t REGTEST_MAGIC = 0xFABFB5DA;
 static const uint32_t DILV_MAGIC    = 0xD17FD100;  // DilV chain
 
 /** Protocol version */
-static const int PROTOCOL_VERSION = 70009;          // v3.10.0: DilV chain reset (window cap + block pacing)
-static const int MIN_PEER_PROTO_VERSION = 70005;    // DIL: Require v3.4.0+ (ASERT difficulty)
-static const int DILV_MIN_PEER_PROTO_VERSION = 70008; // DilV: Require v3.8.0+ (DNA + stabilization)
+static const int PROTOCOL_VERSION = 70010;          // v4.0.0: DilV reset + DIL attestation
+static const int MIN_PEER_PROTO_VERSION = 70005;    // DIL: Allow old nodes until attestation activates at 40,000
+static const int DILV_MIN_PEER_PROTO_VERSION = 70010; // DilV: Require v4.0.0 (new genesis)
 
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;

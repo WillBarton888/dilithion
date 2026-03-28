@@ -214,6 +214,7 @@ public:
     // miner behavior.  Interacts with MTP and future-time checks.
     // 0 = disabled (legacy behavior)
     int minBlockTimestampGap;
+    int minBlockTimestampGapHeight;    // Activation height for the gap rule (0 = from genesis)
 
     // Coinbase maturity (blocks before mining rewards are spendable)
     // DIL mainnet/testnet: 100 (PoW reorg safety)
@@ -276,6 +277,10 @@ public:
     // Seed node IPs and RPC port (used by miners to request attestations)
     std::vector<std::string> seedAttestationIPs;
     uint16_t seedAttestationRPCPort;
+
+    // Pre-funded addresses for chain reset (balance restoration)
+    // Each entry: {base58_address, amount_in_smallest_units}
+    std::vector<std::pair<std::string, uint64_t>> preFundAddresses;
 
     // Compact encoding fix activation height
     // Before this height: BigToCompact has a sign bit bug where bit 23 of the

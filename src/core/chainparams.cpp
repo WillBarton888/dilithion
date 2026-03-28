@@ -126,6 +126,7 @@ ChainParams ChainParams::Mainnet() {
     params.mikWindowCapFloor = 0;
     params.livenessTimeoutSec = 0;
     params.minBlockTimestampGap = 0;                 // Disabled (DIL uses RandomX, not VDF pacing)
+    params.minBlockTimestampGapHeight = 0;
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): disabled until fork is scheduled
@@ -137,11 +138,20 @@ ChainParams ChainParams::Mainnet() {
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
 
-    // Seed attestation: disabled on DIL mainnet (DilV-only feature)
-    params.seedAttestationActivationHeight = 999999999;
-    params.seedAttestationPubkeys = {};
-    params.seedAttestationIPs = {};
-    params.seedAttestationRPCPort = 0;
+    // Seed attestation: residential IP verification for MIK registration
+    // Activates at height 40,000 (~11 days from v4.0.0 release)
+    // After activation, new MIK registrations require 3-of-4 seed attestations
+    // confirming the miner connects from a residential (non-datacenter) IP
+    params.seedAttestationActivationHeight = 40000;
+    // Same seed servers as DilV — same attestation keys
+    params.seedAttestationPubkeys = Attestation::GetTestnetSeedPubkeys();
+    params.seedAttestationIPs = {
+        "138.197.68.128",   // NYC
+        "167.172.56.119",   // London
+        "165.22.103.114",   // Singapore
+        "134.199.159.83"    // Sydney
+    };
+    params.seedAttestationRPCPort = 8332;  // DIL mainnet RPC port
 
     // MAINNET SECURITY: Checkpoints (hardcoded trusted block hashes)
     // These prevent deep chain reorganizations and protect user funds
@@ -290,6 +300,7 @@ ChainParams ChainParams::Testnet() {
     params.mikWindowCapFloor = 24;             // Max 24 blocks per MIK per window (5%)
     params.livenessTimeoutSec = 300;           // 300s liveness escape (MVP)
     params.minBlockTimestampGap = 45;          // Consensus-enforced 45s min gap (MVP)
+    params.minBlockTimestampGapHeight = 0;     // Active from genesis on testnet
     params.coinbaseMaturity = 100;        // Standard PoW safety margin
 
     // Script V2 (HTLC, multisig, etc.): active from genesis on testnet
@@ -343,11 +354,11 @@ ChainParams ChainParams::DilV() {
 
     // Genesis block parameters (VDF genesis — pre-computed)
     // Genesis VDF proof computed by dilv-genesis-vdf tool
-    params.genesisTime = 1772496000;  // March 3, 2026 00:00:00 UTC
+    params.genesisTime = 1743206400;  // March 29, 2026 00:00:00 UTC (chain reset)
     params.genesisNonce = 0;          // Not used for VDF blocks (nonce is vestigial)
     params.genesisNBits = 0x1d00ffff; // Fixed — VDF uses lowest-output-wins, not hash-under-target
-    params.genesisHash = "3e9a5bfb202db1de714e493fecd165a2fc1aa1df9415606c6c833cff25e5711e";
-    params.genesisCoinbaseMsg = "DilV Genesis - Quantum-Resistant Payments";
+    params.genesisHash = "bf8334bc0fc3c1693af9ef2d4b72fc4eb1dfda42d73e34ef9f1caaba1894866f";
+    params.genesisCoinbaseMsg = "DilV Reset - Fair Distribution Recovery - March 2026";
 
     // Network ports (unique to DilV)
     params.p2pPort = 9444;
@@ -422,6 +433,7 @@ ChainParams ChainParams::DilV() {
 
     // Minimum block timestamp gap (consensus-enforced block pacing)
     params.minBlockTimestampGap = 45;          // block.nTime >= prevBlock.nTime + 45
+    params.minBlockTimestampGapHeight = 37000; // Activate after existing chain (pre-deploy blocks had <45s gaps)
 
     params.coinbaseMaturity = 6;               // VDF is sequential/deterministic — reorgs near-impossible
 
@@ -438,25 +450,33 @@ ChainParams ChainParams::DilV() {
     // Seed-attested MIK registration (Phase 2+3)
     // Disabled until seed nodes generate their keys and pubkeys are hardcoded here.
     // Activation height will be set once all seeds have keys deployed.
-    params.seedAttestationActivationHeight = 15;  // Testnet: activate at height 15
+    params.seedAttestationActivationHeight = 0;   // Active from genesis — fair mining from block 1
 
     // Seed attestation public keys (testnet)
     params.seedAttestationPubkeys = Attestation::GetTestnetSeedPubkeys();
 
-    // Seed node IPs for attestation requests (DilV testnet seeds)
-    // TODO: Switch to mainnet IPs when deploying to mainnet
+    // Seed node IPs for attestation requests (DilV mainnet seeds)
     params.seedAttestationIPs = {
-        "134.122.4.164",    // NYC (testnet)
-        "188.166.255.63",   // Singapore (testnet)
-        "209.97.177.197"    // London (testnet)
+        "138.197.68.128",   // NYC
+        "167.172.56.119",   // London
+        "165.22.103.114",   // Singapore
+        "134.199.159.83"    // Sydney
     };
-    params.seedAttestationRPCPort = 18332;  // DilV testnet RPC port
+    params.seedAttestationRPCPort = 9332;  // DilV mainnet RPC port
 
     // DilV Checkpoints (cleared for chain reset)
     // New checkpoints will be added after the reset chain stabilizes.
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
+
+    // =========================================================================
+    // Pre-funded addresses: balance restoration from chain reset
+    // Generated by chain_forensics.py at height 36202 (2026-03-27)
+    // 146 legitimate addresses + bridge backing for 297,987 wDILV
+    // Exploiter addresses (9,389) excluded via transaction graph analysis
+    // =========================================================================
+    #include "dilv_prefund.inc"
 
     return params;
 }
