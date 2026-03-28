@@ -168,8 +168,8 @@ static const size_t MAX_TX_SIZE = 100000;  // 100 KB
 /** Maximum number of signature operations per transaction */
 static const unsigned int MAX_TX_SIGOPS = 20000;
 
-/** Maximum script size in bytes */
-static const size_t MAX_SCRIPT_SIZE = 10000;
+/** Maximum script size in bytes (raised from 10KB for Dilithium post-quantum signatures) */
+static const size_t MAX_SCRIPT_SIZE = 20000;
 
 /** Maximum number of transaction inputs */
 static const size_t MAX_TX_INPUTS = 100000;

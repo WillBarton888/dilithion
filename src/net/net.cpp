@@ -54,7 +54,7 @@
 static const uint64_t MAX_BLOCK_VTX_BYTES = 4 * 1024 * 1024;  // 4 MB (matches storage layer)
 static const uint64_t MAX_TX_INPUTS = 10000;            // Max inputs per transaction
 static const uint64_t MAX_TX_OUTPUTS = 10000;           // Max outputs per transaction
-static const uint64_t MAX_SCRIPT_SIZE = 10000;          // Max script size in bytes
+static const uint64_t MAX_SCRIPT_SIZE = 20000;          // Max script size (raised for Dilithium sigs)
 
 // P2-1 FIX: Rate limiting for GETDATA messages (DoS protection)
 // Limits: 50 GETDATA messages per second per peer (increased from 10 for IBD sync)
@@ -1659,7 +1659,7 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
                 ptx.tx.vin[j].prevout.hash = stream.ReadUint256();
                 ptx.tx.vin[j].prevout.n = stream.ReadUint32();
                 uint64_t script_size = stream.ReadCompactSize();
-                if (script_size > 10000) throw std::runtime_error("Script too large");
+                if (script_size > MAX_SCRIPT_SIZE) throw std::runtime_error("Script too large");
                 ptx.tx.vin[j].scriptSig.resize(script_size);
                 if (script_size > 0) {
                     stream.read(ptx.tx.vin[j].scriptSig.data(), script_size);
@@ -1676,7 +1676,7 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
             for (uint64_t j = 0; j < vout_size; j++) {
                 ptx.tx.vout[j].nValue = stream.ReadUint64();
                 uint64_t script_size = stream.ReadCompactSize();
-                if (script_size > 10000) throw std::runtime_error("Script too large");
+                if (script_size > MAX_SCRIPT_SIZE) throw std::runtime_error("Script too large");
                 ptx.tx.vout[j].scriptPubKey.resize(script_size);
                 if (script_size > 0) {
                     stream.read(ptx.tx.vout[j].scriptPubKey.data(), script_size);
@@ -1809,7 +1809,7 @@ bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stre
                 tx.vin[j].prevout.hash = stream.ReadUint256();
                 tx.vin[j].prevout.n = stream.ReadUint32();
                 uint64_t script_size = stream.ReadCompactSize();
-                if (script_size > 10000) throw std::runtime_error("Script too large");
+                if (script_size > MAX_SCRIPT_SIZE) throw std::runtime_error("Script too large");
                 tx.vin[j].scriptSig.resize(script_size);
                 if (script_size > 0) {
                     stream.read(tx.vin[j].scriptSig.data(), script_size);
@@ -1826,7 +1826,7 @@ bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stre
             for (uint64_t j = 0; j < vout_size; j++) {
                 tx.vout[j].nValue = stream.ReadUint64();
                 uint64_t script_size = stream.ReadCompactSize();
-                if (script_size > 10000) throw std::runtime_error("Script too large");
+                if (script_size > MAX_SCRIPT_SIZE) throw std::runtime_error("Script too large");
                 tx.vout[j].scriptPubKey.resize(script_size);
                 if (script_size > 0) {
                     stream.read(tx.vout[j].scriptPubKey.data(), script_size);

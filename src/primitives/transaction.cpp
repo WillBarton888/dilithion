@@ -434,8 +434,11 @@ bool CTransaction::Deserialize(const uint8_t* data, size_t len, std::string* err
             return false;
         }
 
-        // Sanity check: max 10KB scriptSig
-        if (scriptSig_len > 10000) {
+        // Sanity check: max 20KB scriptSig
+        // Raised from 10KB for Dilithium post-quantum signatures (3,309 bytes each).
+        // Registration blocks need: MIK pubkey (1,952) + MIK sig (3,309) + up to 4
+        // attestation sigs (4 × 3,314) + DNA commitment (33) ≈ 18,566 bytes.
+        if (scriptSig_len > 20000) {
             if (error) *error = "scriptSig too large";
             return false;
         }
