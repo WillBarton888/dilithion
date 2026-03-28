@@ -357,7 +357,7 @@ ChainParams ChainParams::DilV() {
     params.genesisTime = 1743206400;  // March 29, 2026 00:00:00 UTC (chain reset)
     params.genesisNonce = 0;          // Not used for VDF blocks (nonce is vestigial)
     params.genesisNBits = 0x1d00ffff; // Fixed — VDF uses lowest-output-wins, not hash-under-target
-    params.genesisHash = "bf8334bc0fc3c1693af9ef2d4b72fc4eb1dfda42d73e34ef9f1caaba1894866f";
+    params.genesisHash = "27b45859879bd329a64dcbe9aa12ac2c0e7b24650955419e6e1192e6111c1464";
     params.genesisCoinbaseMsg = "DilV Reset - Fair Distribution Recovery - March 2026";
 
     // Network ports (unique to DilV)
