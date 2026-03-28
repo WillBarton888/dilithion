@@ -104,6 +104,11 @@ public:
     // This is a consensus-critical change - all nodes must upgrade before this height
     int dfmpV3ActivationHeight;
 
+    // Registration PoW difficulty (leading zero bits required)
+    // DIL mainnet: 24 bits (~1-2 min) — existing chain, cannot change without hard fork
+    // DilV mainnet: 30 bits (~40-60 min) — production strength from genesis
+    int registrationPowBits;
+
     // DFMP Dynamic Scaling Activation Height
     // Before this height: Static free tier thresholds (12 for v3.0, 20 for v2.0)
     // After this height: Free tier scales by active miner count:

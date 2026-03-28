@@ -545,15 +545,26 @@ void BuildDNACommitment(const std::array<uint8_t, 32>& dna_hash, std::vector<uin
 // REGISTRATION PROOF-OF-WORK (DFMP v3.0)
 // ============================================================================
 
-bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, int requiredBits) {
+bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, int requiredBits,
+                            const std::array<uint8_t, 32>* dnaHash) {
     if (pubkey.size() != MIK_PUBKEY_SIZE || requiredBits <= 0 || requiredBits > 256) {
         return false;
     }
 
-    // Build preimage: pubkey || nonce (little-endian)
+    // Build preimage: pubkey || [dna_hash] || nonce (little-endian)
+    // DNA hash included when provided and non-zero (DilV from genesis, DIL future)
     std::vector<uint8_t> preimage;
-    preimage.reserve(MIK_PUBKEY_SIZE + 8);
+    preimage.reserve(MIK_PUBKEY_SIZE + 32 + 8);
     preimage.insert(preimage.end(), pubkey.begin(), pubkey.end());
+
+    // Include DNA hash in preimage if provided and non-zero
+    if (dnaHash) {
+        bool allZero = true;
+        for (auto b : *dnaHash) { if (b != 0) { allZero = false; break; } }
+        if (!allZero) {
+            preimage.insert(preimage.end(), dnaHash->begin(), dnaHash->end());
+        }
+    }
 
     // Append nonce as 8 bytes little-endian
     for (int i = 0; i < 8; i++) {
@@ -584,16 +595,29 @@ bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, i
 }
 
 bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce,
-                          const std::atomic<bool>* running) {
+                          const std::atomic<bool>* running,
+                          const std::array<uint8_t, 32>* dnaHash) {
     if (pubkey.size() != MIK_PUBKEY_SIZE || requiredBits <= 0) {
         return false;
     }
 
-    // Build base preimage (pubkey only, nonce appended in loop)
+    // Build base preimage: pubkey || [dna_hash] || nonce
+    // DNA hash included when provided and non-zero (binds identity to hardware fingerprint)
     std::vector<uint8_t> preimage;
-    preimage.reserve(MIK_PUBKEY_SIZE + 8);
+    size_t baseSize = MIK_PUBKEY_SIZE;
+
+    bool includeDna = false;
+    if (dnaHash) {
+        for (auto b : *dnaHash) { if (b != 0) { includeDna = true; break; } }
+    }
+
+    preimage.reserve(baseSize + (includeDna ? 32 : 0) + 8);
     preimage.insert(preimage.end(), pubkey.begin(), pubkey.end());
-    preimage.resize(MIK_PUBKEY_SIZE + 8);  // Reserve space for nonce
+    if (includeDna) {
+        preimage.insert(preimage.end(), dnaHash->begin(), dnaHash->end());
+        baseSize += 32;
+    }
+    preimage.resize(baseSize + 8);  // Reserve space for nonce
 
     uint8_t hash[32];
     auto start_time = std::chrono::steady_clock::now();
@@ -606,9 +630,9 @@ bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, u
             return false;
         }
 
-        // Write nonce bytes (little-endian)
+        // Write nonce bytes (little-endian) at offset after pubkey [+ dna_hash]
         for (int i = 0; i < 8; i++) {
-            preimage[MIK_PUBKEY_SIZE + i] = static_cast<uint8_t>((n >> (i * 8)) & 0xFF);
+            preimage[baseSize + i] = static_cast<uint8_t>((n >> (i * 8)) & 0xFF);
         }
 
         // Hash

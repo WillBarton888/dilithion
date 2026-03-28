@@ -71,6 +71,7 @@ ChainParams ChainParams::Mainnet() {
 
     // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
     params.dfmpV3ActivationHeight = 7000;
+    params.registrationPowBits = 28;  // DIL mainnet: original production value (unchanged)
 
     // DFMP Dynamic Scaling - free tier scales by active miner count
     // Prevents penalty spiral with few miners (e.g., 3 miners sharing 360-block window)
@@ -134,7 +135,7 @@ ChainParams ChainParams::Mainnet() {
     params.scriptV2ActivationHeight = 999999999;
 
     params.digitalDnaActivationHeight = 30000;  // DNA collection + P2P exchange (advisory only, no consensus impact)
-    params.dnaCommitmentActivationHeight = 999999999;  // Disabled until fork is scheduled
+    params.dnaCommitmentActivationHeight = 40000;  // DNA mandatory in MIK registration from height 40,000
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
@@ -256,6 +257,7 @@ ChainParams ChainParams::Testnet() {
     // Testnet tip was ~86,829 when v3.0 was implemented
     // Activation at 87,000 gives ~170 blocks buffer for upgrade
     params.dfmpV3ActivationHeight = 87000;
+    params.registrationPowBits = 24;  // DIL testnet
 
     // DFMP Dynamic Scaling - always active on testnet
     params.dfmpDynamicScalingHeight = 0;
@@ -395,6 +397,7 @@ ChainParams ChainParams::DilV() {
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;
+    params.registrationPowBits = 28;  // DilV mainnet: ~27 min on consumer hardware (DNA+attestation are primary Sybil defense)
     params.dfmpDynamicScalingHeight = 0;
     params.dfmpV31ActivationHeight = 0;
     params.dfmpV32ActivationHeight = 0;

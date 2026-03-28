@@ -809,7 +809,7 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
 
     if (!g_regPowInProgress.exchange(true)) {
         uint64_t nonce = 0;
-        if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce, &g_node_state.running)) {
+        if (DFMP::MineRegistrationPoW(mikPubkey, (Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : DFMP::REGISTRATION_POW_BITS), nonce, &g_node_state.running)) {
             g_regCachedNonce = nonce;
             g_regNonceIdentity = identity;
             g_regNonceMined.store(true);
@@ -851,7 +851,7 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
         std::cerr << "[Mining] WARNING: Registration PoW failed on other thread, retrying..." << std::endl;
         if (!g_regPowInProgress.exchange(true)) {
             uint64_t nonce = 0;
-            if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, nonce, &g_node_state.running)) {
+            if (DFMP::MineRegistrationPoW(mikPubkey, (Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : DFMP::REGISTRATION_POW_BITS), nonce, &g_node_state.running)) {
                 g_regCachedNonce = nonce;
                 g_regNonceIdentity = identity;
                 g_regNonceMined.store(true);
@@ -1053,7 +1053,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                         } else if (!g_regPowInProgress.exchange(true)) {
                             // We acquired the lock - mine the PoW
                             std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
-                            if (DFMP::MineRegistrationPoW(mikPubkey, DFMP::REGISTRATION_POW_BITS, regNonce, &g_node_state.running)) {
+                            if (DFMP::MineRegistrationPoW(mikPubkey, (Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : DFMP::REGISTRATION_POW_BITS), regNonce, &g_node_state.running)) {
                                 g_regCachedNonce = regNonce;
                                 g_regNonceIdentity = mikIdentity;
                                 g_regNonceMined.store(true);
@@ -4434,8 +4434,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "  [OK] HD Wallet created successfully!" << std::endl;
                 std::cout << std::endl;
 
-                // Generate and display first receiving address prominently
-                CDilithiumAddress addr = wallet.GetNewHDAddress();
+                // Display the wallet's primary address (same one shown by check-wallet-balance)
+                auto walletAddresses = wallet.GetAddresses();
+                CDilithiumAddress addr = walletAddresses.empty() ? wallet.GetNewAddress() : walletAddresses[0];
                 std::string addrStr = addr.ToString();
 
                 // Save seed phrase to backup file

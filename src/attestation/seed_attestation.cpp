@@ -418,11 +418,18 @@ static bool HttpJsonRpcCall(
 #endif
 
     // Set timeout
+#ifdef _WIN32
+    // Windows SO_RCVTIMEO/SO_SNDTIMEO expects DWORD in milliseconds, not struct timeval
+    DWORD timeout_ms = timeoutSec * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+#else
     struct timeval tv;
     tv.tv_sec = timeoutSec;
     tv.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+#endif
 
     // Resolve and connect
     struct sockaddr_in addr;

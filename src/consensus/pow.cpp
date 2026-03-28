@@ -12,6 +12,7 @@
 #include <dfmp/dfmp.h>
 #include <dfmp/identity_db.h>
 #include <dfmp/mik.h>  // DFMP v2.0: Mining Identity Key
+#include <array>
 #include <digital_dna/dna_verification.h>  // Phase 3: verification status
 #include <util/logging.h>
 #include <algorithm>
@@ -324,13 +325,34 @@ bool CheckProofOfWorkDFMP(
     // DFMP v3.0: Registration PoW Check
     // ========================================================================
     // New MIK registrations after v3.0 activation must include a valid
-    // proof-of-work nonce to prevent mass identity generation.
+    // proof-of-work nonce. On DilV, the PoW challenge includes the DNA hash:
+    //   SHA3-256(pubkey || dna_hash || nonce) with registrationPowBits leading zeros
     if (height >= dfmpV3ActivationHeight && mikData.isRegistration) {
+        // Height-gated PoW bits: before DNA activation use legacy 24 bits, after use chainparams (30)
+        // This ensures existing DIL blocks (mined with 24-bit PoW) validate correctly during IBD
+        int regBits = DFMP::REGISTRATION_POW_BITS;  // Legacy default: 24
+        if (Dilithion::g_chainParams) {
+            int dnaHeight = Dilithion::g_chainParams->dnaCommitmentActivationHeight;
+            if (dnaHeight == 0 || height >= dnaHeight) {
+                // DilV (dnaHeight=0, always active) or DIL post-activation
+                regBits = Dilithion::g_chainParams->registrationPowBits;
+            }
+        }
+
+        // Pass DNA hash to verification if present in coinbase
+        // DilV: from genesis. DIL: from dnaCommitmentActivationHeight (40,000)
+        const std::array<uint8_t, 32>* dnaForVerify = nullptr;
+        if (mikData.has_dna_hash) {
+            dnaForVerify = &mikData.dna_hash;
+        }
+
         if (!DFMP::VerifyRegistrationPoW(mikData.pubkey, mikData.registrationNonce,
-                                          DFMP::REGISTRATION_POW_BITS)) {
+                                          regBits, dnaForVerify)) {
             std::cerr << "[DFMP v3.0] Block " << height
                       << ": Registration PoW invalid for MIK " << identity.GetHex().substr(0, 8) << "..."
-                      << " (nonce=" << mikData.registrationNonce << ")" << std::endl;
+                      << " (nonce=" << mikData.registrationNonce
+                      << ", bits=" << regBits
+                      << ", dna=" << (dnaForVerify ? "yes" : "no") << ")" << std::endl;
             return false;
         }
     }
@@ -1383,7 +1405,8 @@ bool CheckBlockTimestamp(const CBlockHeader& block, const CBlockIndex* pindexPre
     // miner behavior, preventing fast miners from outrunning the grace period.
     if (pindexPrev != nullptr && Dilithion::g_chainParams) {
         int minGap = Dilithion::g_chainParams->minBlockTimestampGap;
-        if (minGap > 0) {
+        int gapActivation = Dilithion::g_chainParams->minBlockTimestampGapHeight;
+        if (minGap > 0 && blockHeight >= gapActivation) {
             int64_t prevTime = static_cast<int64_t>(pindexPrev->nTime);
             int64_t blockTime = static_cast<int64_t>(block.nTime);
             if (blockTime < prevTime + minGap) {

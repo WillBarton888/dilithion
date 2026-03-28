@@ -4157,7 +4157,8 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
                 // Not cached and not in progress — mine it ourselves
                 std::cout << "[RPC] Mining registration PoW (one-time, ~10-15 minutes)..." << std::endl;
                 g_regPowInProgress.store(true);
-                if (DFMP::MineRegistrationPoW(mikData.pubkey, DFMP::REGISTRATION_POW_BITS, regNonce, &g_node_state.running)) {
+                int rpBits = Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : DFMP::REGISTRATION_POW_BITS;
+                if (DFMP::MineRegistrationPoW(mikData.pubkey, rpBits, regNonce, &g_node_state.running)) {
                     g_regCachedNonce = regNonce;
                     g_regNonceIdentity = mikData.identity;
                     g_regNonceMined.store(true);
@@ -4463,7 +4464,7 @@ std::string CRPCServer::RPC_GetDFMPInfo(const std::string& params) {
         oss << "\"unverified_free_tier\":" << DFMP::FREE_TIER_THRESHOLD_V34_UNVERIFIED << ",";
     }
 
-    oss << "\"registration_pow_bits\":" << DFMP::REGISTRATION_POW_BITS << ",";
+    oss << "\"registration_pow_bits\":" << (Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : DFMP::REGISTRATION_POW_BITS) << ",";
 
     // Calculate penalty using actual DFMP functions (version-aware)
     int effectiveFirstSeen = firstSeen;

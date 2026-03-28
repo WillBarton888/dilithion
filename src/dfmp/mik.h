@@ -377,30 +377,35 @@ void BuildDNACommitment(const std::array<uint8_t, 32>& dna_hash, std::vector<uin
  * Verify registration proof-of-work (DFMP v3.0)
  *
  * Registration PoW prevents mass MIK identity generation.
- * SHA3-256(pubkey || nonce) must have >= requiredBits leading zero bits.
+ * SHA3-256(pubkey || dna_hash || nonce) must have >= requiredBits leading zero bits.
+ * If dnaHash is null or all zeros, uses legacy format: SHA3-256(pubkey || nonce).
  *
  * @param pubkey MIK public key (1,952 bytes)
  * @param nonce Registration nonce
- * @param requiredBits Number of leading zero bits required (default: REGISTRATION_POW_BITS = 28)
+ * @param requiredBits Number of leading zero bits required
+ * @param dnaHash Optional 32-byte DNA hash to bind into PoW challenge
  * @return true if PoW is valid
  */
-bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, int requiredBits);
+bool VerifyRegistrationPoW(const std::vector<uint8_t>& pubkey, uint64_t nonce, int requiredBits,
+                            const std::array<uint8_t, 32>* dnaHash = nullptr);
 
 /**
  * Mine registration proof-of-work nonce (DFMP v3.0)
  *
- * Finds a nonce such that SHA3-256(pubkey || nonce) has >= requiredBits leading zero bits.
- * This is computationally expensive (~10-15 minutes for 28 bits on a fast CPU,
- * up to 60+ minutes on slower hardware due to probabilistic variance).
+ * Finds a nonce such that SHA3-256(pubkey || dna_hash || nonce) has >= requiredBits
+ * leading zero bits. If dnaHash is null, uses legacy format without DNA.
+ * At 30 bits: ~40-60 min on a fast CPU.
  *
  * @param pubkey MIK public key (1,952 bytes)
  * @param requiredBits Number of leading zero bits required
  * @param[out] nonce Output nonce that satisfies the PoW requirement
  * @param running Optional pointer to a running flag; if it becomes false, mining aborts
+ * @param dnaHash Optional 32-byte DNA hash to bind into PoW challenge
  * @return true if nonce found, false if aborted or failed
  */
 bool MineRegistrationPoW(const std::vector<uint8_t>& pubkey, int requiredBits, uint64_t& nonce,
-                          const std::atomic<bool>* running = nullptr);
+                          const std::atomic<bool>* running = nullptr,
+                          const std::array<uint8_t, 32>* dnaHash = nullptr);
 
 // ============================================================================
 // DFMP V2.0 CONSTANTS

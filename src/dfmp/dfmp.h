@@ -74,7 +74,7 @@ constexpr int DORMANCY_DECAY_BLOCKS = 400;         // Decay duration after dorma
 constexpr int64_t FP_DORMANCY_PENALTY = 2500000;   // 2.5 × 1,000,000 (dormancy reset penalty)
 
 // DFMP v3.0: Registration PoW - computational cost per new MIK identity
-constexpr int REGISTRATION_POW_BITS = 24;          // TESTNET: ~1-2 min (production: 30 bits, ~40-60 min)
+constexpr int REGISTRATION_POW_BITS = 28;          // Default/fallback — actual value from chainparams.registrationPowBits (DIL=28, DilV=30)
 
 // Phase 3b: Shared heat — cluster heat capped at this multiple of own heat
 constexpr int MAX_CLUSTER_HEAT_MULTIPLIER = 5;
