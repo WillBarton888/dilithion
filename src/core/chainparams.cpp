@@ -357,10 +357,10 @@ ChainParams ChainParams::DilV() {
 
     // Genesis block parameters (VDF genesis — pre-computed)
     // Genesis VDF proof computed by dilv-genesis-vdf tool
-    params.genesisTime = 1743206400;  // March 29, 2026 00:00:00 UTC (chain reset)
+    params.genesisTime = 1774656000;  // March 28, 2026 00:00:00 UTC (chain reset)
     params.genesisNonce = 0;          // Not used for VDF blocks (nonce is vestigial)
     params.genesisNBits = 0x1d00ffff; // Fixed — VDF uses lowest-output-wins, not hash-under-target
-    params.genesisHash = "27b45859879bd329a64dcbe9aa12ac2c0e7b24650955419e6e1192e6111c1464";
+    params.genesisHash = "ed06d89a233d9cfa4518f9a6012d8bccb2264afed098c6035b9949710d31c48e";
     params.genesisCoinbaseMsg = "DilV Reset - Fair Distribution Recovery - March 2026";
 
     // Network ports (unique to DilV)
