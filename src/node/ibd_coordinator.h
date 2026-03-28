@@ -202,7 +202,9 @@ private:
     int m_headers_sync_last_height{0};                              // Header height at last progress check
     uint64_t m_headers_sync_last_processed{0};                      // Processed count at last progress check (fork catch-up)
     bool m_headers_in_flight{false};                                // True while awaiting headers from sync peer
-    static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 45;       // 45 sec base timeout (faster failover)
+    static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 120;      // 120 sec base — accounts for RandomX LIGHT mode
+                                                                     // processing time (~37ms/hash * 2000 = 74s on seed servers,
+                                                                     // potentially 100s+ on slower CPUs)
     static constexpr int HEADERS_SYNC_TIMEOUT_PER_HEADER_MS = 1;    // +1ms per missing header
     std::set<int> m_headers_bad_peers;                              // Peers that have repeatedly failed to deliver headers
     int m_headers_sync_peer_consecutive_stalls{0};                  // Consecutive stalls for current peer

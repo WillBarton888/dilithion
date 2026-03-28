@@ -2382,6 +2382,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     // Even though hashes are already computed, we store in batches to release
     // cs_headers lock periodically, allowing block processing to proceed.
 
+    size_t prevTotalProcessed = 0;  // For incremental processed count updates
     for (size_t batchStart = 0; batchStart < headers.size(); batchStart += BATCH_SIZE) {
         size_t batchEnd = std::min(batchStart + BATCH_SIZE, headers.size());
         size_t batchSize = batchEnd - batchStart;
@@ -2515,6 +2516,16 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             }
         }  // Release cs_headers lock after each batch - allows block downloading to progress
 
+        // BUG FIX: Update processed count incrementally after each batch.
+        // Previously only updated after ALL 2000 headers finished (~74s on seed servers).
+        // The IBD stall detector checks GetProcessedCount() for progress, but saw zero
+        // during the entire processing window. On any CPU slower than seed servers,
+        // this exceeded the 81s stall timeout → infinite stall/retry loop at height=0.
+        if (totalProcessed > prevTotalProcessed) {
+            m_headers_processed_count.fetch_add(totalProcessed - prevTotalProcessed);
+            prevTotalProcessed = totalProcessed;
+        }
+
         // Log batch progress
         if (batchStart > 0 && batchStart % 500 == 0) {
             std::cout << "[HeadersManager] Batch progress: " << totalProcessed
@@ -2541,9 +2552,10 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
     std::cout << "[HeadersManager] Progressive processing complete: " << totalProcessed
               << " headers stored in " << total_ms << "ms (hashes: " << hash_ms << "ms)" << std::endl;
 
-    // Track total headers processed for fork catch-up progress detection
-    if (totalProcessed > 0) {
-        m_headers_processed_count.fetch_add(totalProcessed);
+    // Note: m_headers_processed_count already updated incrementally in batch loop above.
+    // Final update for any remainder not covered by batch boundaries.
+    if (totalProcessed > prevTotalProcessed) {
+        m_headers_processed_count.fetch_add(totalProcessed - prevTotalProcessed);
     }
 
     // BUG FIX #183: Update m_last_request_hash AFTER successful processing
