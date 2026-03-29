@@ -825,9 +825,31 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     // - Fork pre-validation only checks PoW + hash match
     // - ConnectTip validates MIK when we have correct chain state
     //
-    // skipValidation: Set during rollback reconnection. These blocks were already
-    // validated when first accepted. Re-validating during rollback can fail because
-    // the identity DB is in an inconsistent state (identities removed by DisconnectTip).
+    // skipValidation: Set during reorg reconnection and rollback. Re-validating
+    // MIK/DNA/attestation during reorgs can fail because the identity DB is in
+    // an inconsistent state (DisconnectTip only removes identities first seen at
+    // the disconnected height — incomplete for multi-block reorgs).
+    //
+    // BUG #280 FIX: Cooldown/consecutive/window-cap checks are now OUTSIDE this
+    // gate. The cooldown tracker IS properly maintained during reorgs via
+    // OnBlockDisconnected callbacks — after disconnecting old chain blocks, the
+    // tracker state at the common ancestor is correct for validating the new
+    // chain's blocks. Previously, these checks were inside !skipValidation,
+    // meaning blocks connected during reorgs (Case 3) bypassed cooldown
+    // enforcement. This allowed cooldown-violating blocks into the canonical
+    // chain, which IBD then correctly rejected — breaking fresh sync.
+
+    // ====================================================================
+    // ASSUME-VALID: Skip cooldown, consecutive, window cap, and attestation
+    // checks for historical blocks below dfmpAssumeValidHeight.
+    // These blocks were accepted by the network and are part of the canonical
+    // chain. Computed before !skipValidation so it's available for both
+    // identity-dependent checks (inside) and tracker-based checks (outside).
+    // ====================================================================
+    int assumeValidHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
+    bool assumeValid = (assumeValidHeight > 0 && pindex->nHeight <= assumeValidHeight);
+
     if (!skipValidation) {
         int dfmpActivationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpActivationHeight : 0;
@@ -840,12 +862,9 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                 std::cerr << "[Chain] Hash: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
 
                 // BUG #255: Mark block as permanently failed (authoritative validation)
-                // This is ConnectTip with parent on active chain - failure is definitive.
-                // Prevents infinite retry loops for invalid blocks.
                 pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
                 std::cerr << "[Chain] Block marked BLOCK_FAILED_VALID - will not retry" << std::endl;
 
-                // Persist the failed status to disk so it survives restart
                 if (pdb != nullptr) {
                     pdb->WriteBlockIndex(blockHash, *pindex);
                 }
@@ -853,19 +872,6 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                 return false;
             }
         }
-
-        // ====================================================================
-        // ASSUME-VALID: Skip cooldown, consecutive, window cap, and attestation
-        // checks for historical blocks below dfmpAssumeValidHeight.
-        // These blocks were accepted by the network and are part of the canonical
-        // chain. Skipping validation avoids false rejections caused by cooldown
-        // tracker state differences during IBD vs real-time processing.
-        // The tracker is still updated so state is correct for post-assume blocks.
-        // This is the same pattern as Bitcoin Core's -assumevalid.
-        // ====================================================================
-        int assumeValidHeight = Dilithion::g_chainParams ?
-            Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
-        bool assumeValid = (assumeValidHeight > 0 && pindex->nHeight <= assumeValidHeight);
 
         if (assumeValid && block.IsVDFBlock() && g_node_context.cooldown_tracker) {
             // Update tracker without enforcement so state is correct at assume-valid boundary
@@ -873,158 +879,6 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
             if (ExtractCoinbaseMIKIdentity(block, mikId)) {
                 g_node_context.cooldown_tracker->OnBlockConnected(
                     pindex->nHeight, mikId, static_cast<int64_t>(block.nTime));
-            }
-        }
-
-        // ====================================================================
-        // CONSENSUS-ENFORCED COOLDOWN (hard fork at dfmpCooldownConsensusHeight)
-        // ====================================================================
-        // After activation, reject blocks where the miner's MIK identity
-        // is still within its cooldown period.  This prevents cheaters from
-        // bypassing the voluntary miner-side cooldown.
-        //
-        // STALL EXEMPTION: If the timestamp gap between this block and its
-        // parent is large enough, bypass cooldown enforcement.  During a
-        // stall all miners may be in cooldown, creating a permanent deadlock
-        // where no block can ever be produced (BUG #274).
-        //
-        // V2 (stallExemptionV2Height): Threshold raised from 300s to 600s.
-        // Additionally, stall bypass requires a different miner from the
-        // previous block (unless solo mining).  Prevents private fork mining
-        // via repeated stall exemption abuse.
-        if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
-            bool chainStalled = false;
-
-            int stabilizationHeight = Dilithion::g_chainParams ?
-                Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
-
-            if (pindex->nHeight >= stabilizationHeight) {
-                // Post-stabilization: NO stall exemption.
-                // Dual-window cooldown + time-based expiry handle stalls naturally.
-                // chainStalled stays false.
-            } else if (pindex->pprev) {
-                int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
-
-                int stallV2Height = Dilithion::g_chainParams ?
-                    Dilithion::g_chainParams->stallExemptionV2Height : 999999999;
-
-                if (pindex->nHeight >= stallV2Height) {
-                    // V2: Two-tier stall exemption to prevent private fork mining
-                    // while avoiding deadlocks during genuine long stalls.
-                    //
-                    // Tier 1 (600-1199s): bypass cooldown ONLY if different miner
-                    //   (or solo miner).  Blocks the ~384s attack pattern.
-                    // Tier 2 (1200s+): bypass cooldown unconditionally.
-                    //   Prevents permanent deadlock when only the previous miner
-                    //   is available during a genuine extended stall.
-                    static constexpr int64_t STALL_THRESHOLD_V2 = 600;
-                    static constexpr int64_t STALL_UNCONDITIONAL = 1200;
-                    chainStalled = (gap >= STALL_THRESHOLD_V2);
-
-                    if (chainStalled && gap < STALL_UNCONDITIONAL) {
-                        // Tier 1: require different miner (unless solo)
-                        std::array<uint8_t, 20> currentMik{};
-                        std::array<uint8_t, 20> prevMik{};
-                        bool haveCurrent = ExtractCoinbaseMIKIdentity(block, currentMik);
-
-                        CBlock prevBlock;
-                        bool havePrev = false;
-                        if (pdb != nullptr) {
-                            havePrev = pdb->ReadBlock(pindex->pprev->GetBlockHash(), prevBlock);
-                            if (havePrev) {
-                                havePrev = ExtractCoinbaseMIKIdentity(prevBlock, prevMik);
-                            }
-                        }
-
-                        if (haveCurrent && havePrev && currentMik == prevMik) {
-                            // Same miner — force recalc of active miners at this
-                            // height (fixes stale cache issue in stall path)
-                            g_node_context.cooldown_tracker->IsInCooldown(currentMik, pindex->nHeight);
-                            int activeMiners = g_node_context.cooldown_tracker->GetActiveMiners();
-                            if (activeMiners > 1) {
-                                chainStalled = false;  // Reject stall exemption
-                                std::cout << "[Chain] Block " << pindex->nHeight
-                                          << ": stall exemption DENIED (same miner as prev, "
-                                          << activeMiners << " active miners)" << std::endl;
-                            }
-                        }
-                    }
-                    // Tier 2 (gap >= 1200s): chainStalled stays true unconditionally
-                } else {
-                    // Legacy: 300s threshold, no miner check
-                    chainStalled = (gap >= 300);
-                }
-            }
-
-            if (chainStalled) {
-                std::cout << "[Chain] Block " << pindex->nHeight
-                          << ": cooldown check skipped (chain stall -- "
-                          << (block.nTime - pindex->pprev->nTime)
-                          << "s since last block)" << std::endl;
-            } else {
-                std::string cooldownError;
-                // Pass block.nTime for time-based cooldown expiry
-                int64_t blockTs = static_cast<int64_t>(block.nTime);
-                if (!CheckVDFCooldown(block, pindex->nHeight,
-                                       *g_node_context.cooldown_tracker, cooldownError,
-                                       blockTs)) {
-                    std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
-                              << " REJECTED: cooldown violation" << std::endl;
-                    std::cerr << "[Chain] " << cooldownError << std::endl;
-
-                    pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
-                    if (pdb != nullptr) {
-                        pdb->WriteBlockIndex(blockHash, *pindex);
-                    }
-                    return false;
-                }
-            }
-        }
-
-        // ====================================================================
-        // CONSECUTIVE MINER CHECK (hard fork at consecutiveMinerCheckHeight)
-        // ====================================================================
-        // After activation, reject VDF blocks where the same MIK identity
-        // has mined more than 3 consecutive blocks.  Prevents private fork
-        // chain construction by a single miner.  Solo miner exemption applies.
-        if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
-            std::string consecError;
-            if (!CheckConsecutiveMiner(block, pindex, pdb,
-                                       *g_node_context.cooldown_tracker, consecError)) {
-                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
-                          << " REJECTED: consecutive miner violation" << std::endl;
-                std::cerr << "[Chain] " << consecError << std::endl;
-
-                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
-                if (pdb != nullptr) {
-                    pdb->WriteBlockIndex(blockHash, *pindex);
-                }
-                return false;
-            }
-        }
-
-        // ====================================================================
-        // PER-MIK WINDOW CAP (consensus rule)
-        // ====================================================================
-        // Reject blocks where the miner's MIK has already mined the maximum
-        // allowed blocks in the trailing window.  Exemptions: solo miner,
-        // liveness timeout (chain stall).
-        if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
-            int64_t prevTime = pindex->pprev ? static_cast<int64_t>(pindex->pprev->nTime) : 0;
-            int64_t blkTime = static_cast<int64_t>(block.nTime);
-            std::string capError;
-            if (!CheckMIKWindowCap(block, pindex->nHeight,
-                                    *g_node_context.cooldown_tracker,
-                                    prevTime, blkTime, capError)) {
-                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
-                          << " REJECTED: window cap exceeded" << std::endl;
-                std::cerr << "[Chain] " << capError << std::endl;
-
-                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
-                if (pdb != nullptr) {
-                    pdb->WriteBlockIndex(blockHash, *pindex);
-                }
-                return false;
             }
         }
 
@@ -1068,6 +922,174 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                 }
                 return false;
             }
+        }
+    }
+
+    // ========================================================================
+    // COOLDOWN-TRACKER CONSENSUS CHECKS (run for ALL block connects)
+    // ========================================================================
+    // BUG #280 FIX: These checks use the cooldown tracker which is properly
+    // maintained during reorgs via OnBlockDisconnected/OnBlockConnected
+    // callbacks. After disconnecting old chain blocks, the tracker state at
+    // the common ancestor is correct for validating the new chain's blocks.
+    //
+    // Previously these were inside !skipValidation, so reorg-connected blocks
+    // (Case 3, skipValidation=true) bypassed cooldown enforcement — allowing
+    // violations into the canonical chain that IBD then rejected.
+    //
+    // MIK validation, DNA, and attestation remain inside !skipValidation
+    // because the identity DB undo is incomplete for multi-block reorgs.
+    // ========================================================================
+
+    // ====================================================================
+    // CONSENSUS-ENFORCED COOLDOWN (hard fork at dfmpCooldownConsensusHeight)
+    // ====================================================================
+    // After activation, reject blocks where the miner's MIK identity
+    // is still within its cooldown period.  This prevents cheaters from
+    // bypassing the voluntary miner-side cooldown.
+    //
+    // STALL EXEMPTION: If the timestamp gap between this block and its
+    // parent is large enough, bypass cooldown enforcement.  During a
+    // stall all miners may be in cooldown, creating a permanent deadlock
+    // where no block can ever be produced (BUG #274).
+    //
+    // V2 (stallExemptionV2Height): Threshold raised from 300s to 600s.
+    // Additionally, stall bypass requires a different miner from the
+    // previous block (unless solo mining).  Prevents private fork mining
+    // via repeated stall exemption abuse.
+    if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
+        bool chainStalled = false;
+
+        int stabilizationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
+
+        if (pindex->nHeight >= stabilizationHeight) {
+            // Post-stabilization: NO stall exemption.
+            // Dual-window cooldown + time-based expiry handle stalls naturally.
+            // chainStalled stays false.
+        } else if (pindex->pprev) {
+            int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
+
+            int stallV2Height = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->stallExemptionV2Height : 999999999;
+
+            if (pindex->nHeight >= stallV2Height) {
+                // V2: Two-tier stall exemption to prevent private fork mining
+                // while avoiding deadlocks during genuine long stalls.
+                //
+                // Tier 1 (600-1199s): bypass cooldown ONLY if different miner
+                //   (or solo miner).  Blocks the ~384s attack pattern.
+                // Tier 2 (1200s+): bypass cooldown unconditionally.
+                //   Prevents permanent deadlock when only the previous miner
+                //   is available during a genuine extended stall.
+                static constexpr int64_t STALL_THRESHOLD_V2 = 600;
+                static constexpr int64_t STALL_UNCONDITIONAL = 1200;
+                chainStalled = (gap >= STALL_THRESHOLD_V2);
+
+                if (chainStalled && gap < STALL_UNCONDITIONAL) {
+                    // Tier 1: require different miner (unless solo)
+                    std::array<uint8_t, 20> currentMik{};
+                    std::array<uint8_t, 20> prevMik{};
+                    bool haveCurrent = ExtractCoinbaseMIKIdentity(block, currentMik);
+
+                    CBlock prevBlock;
+                    bool havePrev = false;
+                    if (pdb != nullptr) {
+                        havePrev = pdb->ReadBlock(pindex->pprev->GetBlockHash(), prevBlock);
+                        if (havePrev) {
+                            havePrev = ExtractCoinbaseMIKIdentity(prevBlock, prevMik);
+                        }
+                    }
+
+                    if (haveCurrent && havePrev && currentMik == prevMik) {
+                        // Same miner — force recalc of active miners at this
+                        // height (fixes stale cache issue in stall path)
+                        g_node_context.cooldown_tracker->IsInCooldown(currentMik, pindex->nHeight);
+                        int activeMiners = g_node_context.cooldown_tracker->GetActiveMiners();
+                        if (activeMiners > 1) {
+                            chainStalled = false;  // Reject stall exemption
+                            std::cout << "[Chain] Block " << pindex->nHeight
+                                      << ": stall exemption DENIED (same miner as prev, "
+                                      << activeMiners << " active miners)" << std::endl;
+                        }
+                    }
+                }
+                // Tier 2 (gap >= 1200s): chainStalled stays true unconditionally
+            } else {
+                // Legacy: 300s threshold, no miner check
+                chainStalled = (gap >= 300);
+            }
+        }
+
+        if (chainStalled) {
+            std::cout << "[Chain] Block " << pindex->nHeight
+                      << ": cooldown check skipped (chain stall -- "
+                      << (block.nTime - pindex->pprev->nTime)
+                      << "s since last block)" << std::endl;
+        } else {
+            std::string cooldownError;
+            // Pass block.nTime for time-based cooldown expiry
+            int64_t blockTs = static_cast<int64_t>(block.nTime);
+            if (!CheckVDFCooldown(block, pindex->nHeight,
+                                   *g_node_context.cooldown_tracker, cooldownError,
+                                   blockTs)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " REJECTED: cooldown violation" << std::endl;
+                std::cerr << "[Chain] " << cooldownError << std::endl;
+
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
+                return false;
+            }
+        }
+    }
+
+    // ====================================================================
+    // CONSECUTIVE MINER CHECK (hard fork at consecutiveMinerCheckHeight)
+    // ====================================================================
+    // After activation, reject VDF blocks where the same MIK identity
+    // has mined more than 3 consecutive blocks.  Prevents private fork
+    // chain construction by a single miner.  Solo miner exemption applies.
+    if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
+        std::string consecError;
+        if (!CheckConsecutiveMiner(block, pindex, pdb,
+                                   *g_node_context.cooldown_tracker, consecError)) {
+            std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                      << " REJECTED: consecutive miner violation" << std::endl;
+            std::cerr << "[Chain] " << consecError << std::endl;
+
+            pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+            if (pdb != nullptr) {
+                pdb->WriteBlockIndex(blockHash, *pindex);
+            }
+            return false;
+        }
+    }
+
+    // ====================================================================
+    // PER-MIK WINDOW CAP (consensus rule)
+    // ====================================================================
+    // Reject blocks where the miner's MIK has already mined the maximum
+    // allowed blocks in the trailing window.  Exemptions: solo miner,
+    // liveness timeout (chain stall).
+    if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
+        int64_t prevTime = pindex->pprev ? static_cast<int64_t>(pindex->pprev->nTime) : 0;
+        int64_t blkTime = static_cast<int64_t>(block.nTime);
+        std::string capError;
+        if (!CheckMIKWindowCap(block, pindex->nHeight,
+                                *g_node_context.cooldown_tracker,
+                                prevTime, blkTime, capError)) {
+            std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                      << " REJECTED: window cap exceeded" << std::endl;
+            std::cerr << "[Chain] " << capError << std::endl;
+
+            pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+            if (pdb != nullptr) {
+                pdb->WriteBlockIndex(blockHash, *pindex);
+            }
+            return false;
         }
     }
 

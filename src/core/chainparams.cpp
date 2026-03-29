@@ -393,7 +393,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 5000;  // Skip cooldown/attestation during IBD — root cause of inconsistent validation under investigation
+    params.dfmpAssumeValidHeight = 1000;  // BUG #280: covers historical cooldown violations from reorg-accepted blocks
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;

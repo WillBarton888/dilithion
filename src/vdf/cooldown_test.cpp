@@ -838,6 +838,165 @@ static void test_effective_cooldown_unit()
     PASS();
 }
 
+// --- BUG #280: Reorg must detect cooldown violations ---
+// The root cause was that ConnectTip skipped cooldown during reorgs.
+// These tests verify the tracker state is correct after disconnect,
+// so the moved checks (now outside !skipValidation) will work.
+
+static void test_bug280_reorg_detects_cooldown_violation()
+{
+    TEST(bug280_reorg_detects_cooldown_violation);
+    // DilV params: activeWindow=1920, shortWindow=0, stabilization=0, target=45s
+    CCooldownTracker tracker(1920, 0, 0, 45);
+
+    // Build a chain with 14 unique miners at heights 1-14.
+    // This gives cooldown = floor(14 * 0.67) = 9.
+    for (uint8_t i = 1; i <= 14; i++) {
+        tracker.OnBlockConnected(240 + i, make_addr(i), 1774710000 + i * 45);
+    }
+
+    // Miner 1 wins at height 256.
+    tracker.OnBlockConnected(256, make_addr(1), 1774713166);
+
+    // Fill heights 257-258 with other miners.
+    tracker.OnBlockConnected(257, make_addr(2), 1774713245);
+    tracker.OnBlockConnected(258, make_addr(3), 1774713368);
+
+    // Pre-reorg state: miner 1 last won at 256, cooldown = 9.
+    CHECK(tracker.GetLastWinHeight(make_addr(1)) == 256);
+
+    // Miner 1 at height 259 has gap = 259 - 256 = 3 < 9 → should be in cooldown.
+    // Time gap = 1774713414 - 1774713166 = 248s < 405s (9*45) → no time expiry.
+    CHECK(tracker.IsInCooldown(make_addr(1), 259, 1774713414));
+
+    // Now simulate a reorg: disconnect 258, 257, 256 (back to fork point 255).
+    tracker.OnBlockDisconnected(258);
+    tracker.OnBlockDisconnected(257);
+    tracker.OnBlockDisconnected(256);
+
+    // After disconnect: miner 1's last win should revert to height 241
+    // (from the initial population). Miner 2 reverts to 242, miner 3 to 243.
+    CHECK(tracker.GetLastWinHeight(make_addr(1)) == 241);
+    CHECK(tracker.GetLastWinHeight(make_addr(2)) == 242);
+    CHECK(tracker.GetLastWinHeight(make_addr(3)) == 243);
+
+    // Reconnect new fork: miner 1 at 256 again, different miners at 257-258.
+    tracker.OnBlockConnected(256, make_addr(1), 1774713166);
+    tracker.OnBlockConnected(257, make_addr(4), 1774713245);
+    tracker.OnBlockConnected(258, make_addr(5), 1774713368);
+
+    // After reconnect: miner 1 last won at 256 (same as before reorg).
+    CHECK(tracker.GetLastWinHeight(make_addr(1)) == 256);
+
+    // KEY TEST: miner 1 at height 259 is STILL in cooldown after the reorg.
+    // gap = 259 - 256 = 3 < 9 → violation. Time gap still insufficient.
+    // This is what BUG #280 fix enforces — before the fix, this check was
+    // skipped during reorg connects (skipValidation=true).
+    CHECK(tracker.IsInCooldown(make_addr(1), 259, 1774713414));
+
+    PASS();
+}
+
+static void test_bug280_reorg_tracker_matches_sequential()
+{
+    TEST(bug280_reorg_tracker_matches_sequential);
+    // Verify that tracker state after disconnect+reconnect is IDENTICAL
+    // to tracker state built by sequential IBD.
+    CCooldownTracker tracker_reorg(1920, 0, 0, 45);
+    CCooldownTracker tracker_ibd(1920, 0, 0, 45);
+
+    // Both trackers start with the same shared prefix (heights 1-10).
+    for (uint8_t i = 1; i <= 10; i++) {
+        int64_t ts = 1000000 + i * 45;
+        tracker_reorg.OnBlockConnected(i, make_addr(i), ts);
+        tracker_ibd.OnBlockConnected(i, make_addr(i), ts);
+    }
+
+    // Reorg tracker: build OLD fork (heights 11-15, miners A-E).
+    for (uint8_t i = 0; i < 5; i++) {
+        tracker_reorg.OnBlockConnected(11 + i, make_addr(101 + i), 1000495 + i * 45);
+    }
+
+    // Reorg tracker: disconnect OLD fork (heights 15..11).
+    for (int h = 15; h >= 11; h--) {
+        tracker_reorg.OnBlockDisconnected(h);
+    }
+
+    // Reorg tracker: connect NEW fork (heights 11-15, miners F-J).
+    for (uint8_t i = 0; i < 5; i++) {
+        tracker_reorg.OnBlockConnected(11 + i, make_addr(201 + i), 1000495 + i * 45);
+    }
+
+    // IBD tracker: directly build NEW fork (heights 11-15, miners F-J).
+    for (uint8_t i = 0; i < 5; i++) {
+        tracker_ibd.OnBlockConnected(11 + i, make_addr(201 + i), 1000495 + i * 45);
+    }
+
+    // State must match exactly.
+    CHECK(tracker_reorg.GetActiveMiners() == tracker_ibd.GetActiveMiners());
+
+    // Check every miner's cooldown status at height 16.
+    for (uint8_t i = 1; i <= 10; i++) {
+        CHECK(tracker_reorg.IsInCooldown(make_addr(i), 16, 1000720) ==
+              tracker_ibd.IsInCooldown(make_addr(i), 16, 1000720));
+    }
+    for (uint8_t i = 201; i <= 205; i++) {
+        CHECK(tracker_reorg.IsInCooldown(make_addr(i), 16, 1000720) ==
+              tracker_ibd.IsInCooldown(make_addr(i), 16, 1000720));
+    }
+
+    // Old fork miners should NOT be in either tracker.
+    for (uint8_t i = 101; i <= 105; i++) {
+        CHECK(tracker_reorg.GetLastWinHeight(make_addr(i)) == -1);
+    }
+
+    PASS();
+}
+
+static void test_bug280_rollback_reconnect_passes()
+{
+    TEST(bug280_rollback_reconnect_passes);
+    // Simulate a failed reorg rollback: the OLD chain is reconnected.
+    // Since the old chain was already valid, cooldown should pass.
+    // Use 10 miners cycling so each miner's gap (10) >> cooldown (6).
+    CCooldownTracker tracker(1920, 0, 0, 45);
+
+    // Build valid chain: 10 miners taking turns across 30 blocks.
+    // 10 miners → cooldown = floor(10 * 0.67) = 6.
+    // Cycle length 10, so each miner's gap is always 10 >= 6.
+    for (int h = 1; h <= 30; h++) {
+        uint8_t miner = ((h - 1) % 10) + 1;
+        tracker.OnBlockConnected(h, make_addr(miner), 1000000 + h * 45);
+    }
+
+    CHECK(tracker.GetActiveMiners() == 10);
+    CHECK(tracker.GetCooldownBlocks() == 6);
+
+    // Simulate reorg: disconnect blocks 30..26 (5 blocks).
+    for (int h = 30; h >= 26; h--) {
+        tracker.OnBlockDisconnected(h);
+    }
+
+    // After disconnect, tracker is at height 25.
+    // Miners 6-10 had their last wins at 26-30 (disconnected) → revert to 16-20.
+    // Miners 1-5 had last wins at 21-25 (still connected).
+
+    // Rollback: reconnect the SAME blocks (simulating failed reorg recovery).
+    for (int h = 26; h <= 30; h++) {
+        uint8_t miner = ((h - 1) % 10) + 1;
+        // Before connecting, verify this miner is NOT in cooldown at height h.
+        // Miner's last win after disconnect is at h-10 (gap = 10 >= cooldown 6).
+        CHECK(!tracker.IsInCooldown(make_addr(miner), h, 1000000 + h * 45));
+        tracker.OnBlockConnected(h, make_addr(miner), 1000000 + h * 45);
+    }
+
+    // State should be back to original.
+    CHECK(tracker.GetActiveMiners() == 10);
+    CHECK(tracker.GetCooldownBlocks() == 6);
+
+    PASS();
+}
+
 int main()
 {
     std::cout << "\nCCooldownTracker Unit Tests\n";
@@ -877,6 +1036,12 @@ int main()
     test_dual_window_reorg();
     test_startup_with_timestamps();
     test_effective_cooldown_unit();
+
+    std::cout << "\n--- BUG #280 Reorg Enforcement Tests ---\n\n";
+
+    test_bug280_reorg_detects_cooldown_violation();
+    test_bug280_reorg_tracker_matches_sequential();
+    test_bug280_rollback_reconnect_passes();
 
     std::cout << "\n" << passed << " passed, " << failed << " failed\n";
 
