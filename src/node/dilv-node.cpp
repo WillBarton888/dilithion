@@ -4149,7 +4149,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             int activationHeight = std::min({stallV2Height, consecutiveHeight, stabForkHeight});
             int chainHeight = g_chainstate.GetHeight();
 
-            if (chainHeight > activationHeight && activationHeight < 999999999) {
+            int assumeValidH = Dilithion::g_chainParams ? Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
+            // Skip revalidation if chain is below assume-valid height (blocks already accepted by network)
+            if (chainHeight > activationHeight && activationHeight < 999999999 && chainHeight > assumeValidH) {
                 std::cout << "\n[REVALIDATION] Scanning blocks " << activationHeight
                           << " to " << chainHeight << " for consensus rule compliance..." << std::endl;
 
