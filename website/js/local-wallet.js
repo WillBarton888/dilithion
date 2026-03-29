@@ -146,7 +146,7 @@ class LocalWallet {
         const walletId = this.generateUUID();
 
         // Derive first address
-        const keyPath = "m/44'/573'/0'/0/0";
+        const keyPath = "m/44'/573'/0'/0'/0'";
         const { publicKey, chainCode } = await this.crypto.deriveChildKey(seed, keyPath);
         const firstAddress = this.crypto.deriveAddress(publicKey);
 
@@ -297,7 +297,7 @@ class LocalWallet {
 
         // Derive new address
         const addressIndex = account.nextAddressIndex;
-        const keyPath = `m/44'/573'/${accountIndex}'/0/${addressIndex}`;
+        const keyPath = `m/44'/573'/${accountIndex}'/0'/${addressIndex}'`;
         const { publicKey } = await this.crypto.deriveChildKey(this.decryptedSeed, keyPath);
         const address = this.crypto.deriveAddress(publicKey);
 

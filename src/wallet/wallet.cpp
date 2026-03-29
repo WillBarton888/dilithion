@@ -508,9 +508,12 @@ size_t CWallet::ClearAllTransactions() {
 
     size_t count = mapWalletTx.size();
 
-    if (count > 0) {
-        std::cout << "[WALLET] Clearing " << count << " transaction(s) from wallet history..." << std::endl;
+    size_t sentCount = mapSentTx.size();
+
+    if (count > 0 || sentCount > 0) {
+        std::cout << "[WALLET] Clearing " << count << " received + " << sentCount << " sent transaction(s) from wallet history..." << std::endl;
         mapWalletTx.clear();
+        mapSentTx.clear();
 
         // Reset best block pointer to genesis
         m_bestBlockHeight = 0;
@@ -526,7 +529,7 @@ size_t CWallet::ClearAllTransactions() {
         std::cout << "[WALLET] No transactions to clear." << std::endl;
     }
 
-    return count;
+    return count + sentCount;
 }
 
 // ============================================================================

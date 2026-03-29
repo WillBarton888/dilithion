@@ -15,11 +15,16 @@ const CONNECTION_MODE = {
     LIGHT: 'light'
 };
 
-// Default seed nodes (mainnet) - REST API on port 8334
+// HTTPS API endpoint (proxied via explorer nginx to local node REST API)
+// This allows the light wallet to work from HTTPS pages without mixed-content issues
+const HTTPS_API_BASE = 'https://explorer.dilithion.org';
+
+// Default seed nodes (mainnet) - HTTPS proxy preferred, direct HTTP as fallback
 const DEFAULT_SEED_NODES = [
-    { host: '138.197.68.128', port: 8334, region: 'US' },      // NYC
-    { host: '167.172.56.119', port: 8334, region: 'EU' },      // London
-    { host: '165.22.103.114', port: 8334, region: 'APAC' }     // Singapore
+    { host: 'explorer.dilithion.org', port: 443, region: 'US', https: true },  // HTTPS proxy (NYC)
+    { host: '138.197.68.128', port: 8334, region: 'US' },      // NYC direct
+    { host: '167.172.56.119', port: 8334, region: 'EU' },      // London direct
+    { host: '165.22.103.114', port: 8334, region: 'APAC' }     // Singapore direct
 ];
 
 // Testnet seed nodes - REST API on port 18334
@@ -162,8 +167,11 @@ class ConnectionManager {
         const tests = nodes.map(async (node) => {
             const start = Date.now();
             try {
+                const baseUrl = node.https
+                    ? `https://${node.host}`
+                    : `http://${node.host}:${node.port}`;
                 const response = await this.fetchWithTimeout(
-                    `http://${node.host}:${node.port}/api/v1/info`,
+                    `${baseUrl}/api/v1/info`,
                     { method: 'GET' },
                     5000  // 5 second timeout for probe
                 );
@@ -433,7 +441,9 @@ class ConnectionManager {
         }
 
         const node = this.lightConfig.currentNode;
-        const url = `http://${node.host}:${node.port}${path}`;
+        const url = node.https
+            ? `https://${node.host}${path}`
+            : `http://${node.host}:${node.port}${path}`;
 
         const options = {
             method,

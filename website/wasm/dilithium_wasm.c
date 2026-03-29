@@ -1,9 +1,13 @@
 /**
  * Dilithium WebAssembly Wrapper for Dilithion Light Wallet
  *
- * Uses liboqs ML-DSA-65 (equivalent to Dilithium3)
+ * Uses pqcrystals Dilithium3 reference implementation directly.
+ * This is the SAME source code the node binary uses (depends/dilithium/ref/),
+ * ensuring cryptographic compatibility between node and browser wallets.
  *
- * Copyright (c) 2025 The Dilithion Core developers
+ * Compiled with: -DDILITHIUM_MODE=3 -DDILITHIUM_RANDOMIZED_SIGNING
+ *
+ * Copyright (c) 2025-2026 The Dilithion Core developers
  * Distributed under the MIT software license
  */
 
@@ -11,140 +15,149 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <oqs/oqs.h>
 
-// ML-DSA-65 (Dilithium3) parameters
-#define DILITHIUM3_PUBLICKEY_BYTES 1952
-#define DILITHIUM3_SECRETKEY_BYTES 4032
-#define DILITHIUM3_SIGNATURE_BYTES 3309
+/* Dilithium3 reference implementation headers.
+ * DILITHIUM_MODE=3 is set via compiler flag (-DDILITHIUM_MODE=3). */
+#include "sign.h"
+#include "randombytes.h"
+#include "params.h"
 
-// Algorithm name
-#define ALGORITHM_NAME OQS_SIG_alg_ml_dsa_65
-
-// Global OQS_SIG object (lazily initialized)
-static OQS_SIG *g_sig = NULL;
+/* Compile-time assertions for key sizes (Dilithium3 / ML-DSA-65) */
+_Static_assert(CRYPTO_PUBLICKEYBYTES == 1952, "PK size mismatch");
+_Static_assert(CRYPTO_SECRETKEYBYTES == 4032, "SK size mismatch");
+_Static_assert(CRYPTO_BYTES == 3309, "Signature size mismatch");
 
 /**
- * Initialize the Dilithium module
- * @return 0 on success, -1 on failure
+ * Initialize the Dilithium module.
+ * No-op for the reference implementation (no global state needed).
+ * Kept for API compatibility with the JS layer.
+ * @return 0 (always succeeds)
  */
 int dilithium_init(void) {
-    if (g_sig != NULL) {
-        return 0;  // Already initialized
-    }
-
-    g_sig = OQS_SIG_new(ALGORITHM_NAME);
-    if (g_sig == NULL) {
-        return -1;  // Failed to create algorithm
-    }
-
     return 0;
 }
 
 /**
- * Cleanup the Dilithium module
+ * Cleanup the Dilithium module.
+ * No-op for the reference implementation.
  */
 void dilithium_cleanup(void) {
-    if (g_sig != NULL) {
-        OQS_SIG_free(g_sig);
-        g_sig = NULL;
-    }
+    /* Nothing to do */
 }
 
 /**
- * Get public key size
+ * Get public key size in bytes.
  */
 size_t dilithium_get_publickey_bytes(void) {
-    return DILITHIUM3_PUBLICKEY_BYTES;
+    return CRYPTO_PUBLICKEYBYTES;
 }
 
 /**
- * Get secret key size
+ * Get secret key size in bytes.
  */
 size_t dilithium_get_secretkey_bytes(void) {
-    return DILITHIUM3_SECRETKEY_BYTES;
+    return CRYPTO_SECRETKEYBYTES;
 }
 
 /**
- * Get signature size
+ * Get maximum signature size in bytes.
  */
 size_t dilithium_get_signature_bytes(void) {
-    return DILITHIUM3_SIGNATURE_BYTES;
+    return CRYPTO_BYTES;
 }
 
 /**
- * Generate a keypair
- * @param public_key Output buffer for public key (must be DILITHIUM3_PUBLICKEY_BYTES)
- * @param secret_key Output buffer for secret key (must be DILITHIUM3_SECRETKEY_BYTES)
+ * Get seed size in bytes.
+ */
+size_t dilithium_get_seed_bytes(void) {
+    return SEEDBYTES;
+}
+
+/**
+ * Generate a random Dilithium3 keypair.
+ * Uses crypto.getRandomValues() (browser) via WASI random_get.
+ * @param pk Output buffer for public key (CRYPTO_PUBLICKEYBYTES bytes)
+ * @param sk Output buffer for secret key (CRYPTO_SECRETKEYBYTES bytes)
+ * @return 0 on success
+ */
+int dilithium_keypair(uint8_t *pk, uint8_t *sk) {
+    return crypto_sign_keypair(pk, sk);
+}
+
+/**
+ * Generate a deterministic Dilithium3 keypair from a 32-byte seed.
+ * This is the critical function for HD wallet / mnemonic import.
+ * Same seed always produces the same keypair.
+ * @param pk Output buffer for public key (CRYPTO_PUBLICKEYBYTES bytes)
+ * @param sk Output buffer for secret key (CRYPTO_SECRETKEYBYTES bytes)
+ * @param seed 32-byte input seed
+ * @return 0 on success
+ */
+int dilithium3_keypair_seed(uint8_t *pk, uint8_t *sk, const uint8_t *seed) {
+    return crypto_sign_keypair_from_seed(pk, sk, seed);
+}
+
+/**
+ * Sign a message with Dilithium3.
+ * Uses empty context (NULL, 0) for compatibility with node signatures.
+ * @param sig Output buffer for signature (CRYPTO_BYTES bytes)
+ * @param sig_len Output: actual signature length
+ * @param msg Message to sign
+ * @param msg_len Message length
+ * @param sk Secret key (CRYPTO_SECRETKEYBYTES bytes)
  * @return 0 on success, -1 on failure
  */
-int dilithium_keypair(uint8_t *public_key, uint8_t *secret_key) {
-    if (g_sig == NULL) {
-        if (dilithium_init() != 0) {
-            return -1;
-        }
-    }
-
-    OQS_STATUS status = OQS_SIG_keypair(g_sig, public_key, secret_key);
-    return (status == OQS_SUCCESS) ? 0 : -1;
+int dilithium_sign(uint8_t *sig, size_t *sig_len,
+                   const uint8_t *msg, size_t msg_len,
+                   const uint8_t *sk) {
+    return crypto_sign_signature(sig, sig_len, msg, msg_len, NULL, 0, sk);
 }
 
 /**
- * Sign a message
- * @param signature Output buffer for signature (must be DILITHIUM3_SIGNATURE_BYTES)
- * @param signature_len Output for actual signature length
- * @param message Message to sign
- * @param message_len Length of message
- * @param secret_key Secret key
- * @return 0 on success, -1 on failure
- */
-int dilithium_sign(uint8_t *signature, size_t *signature_len,
-                   const uint8_t *message, size_t message_len,
-                   const uint8_t *secret_key) {
-    if (g_sig == NULL) {
-        if (dilithium_init() != 0) {
-            return -1;
-        }
-    }
-
-    OQS_STATUS status = OQS_SIG_sign(g_sig, signature, signature_len,
-                                      message, message_len, secret_key);
-    return (status == OQS_SUCCESS) ? 0 : -1;
-}
-
-/**
- * Verify a signature
- * @param message Message that was signed
- * @param message_len Length of message
- * @param signature Signature to verify
- * @param signature_len Length of signature
- * @param public_key Public key
+ * Verify a Dilithium3 signature.
+ * Uses empty context (NULL, 0) for compatibility with node verification.
+ * @param msg Message that was signed
+ * @param msg_len Message length
+ * @param sig Signature to verify
+ * @param sig_len Signature length
+ * @param pk Public key (CRYPTO_PUBLICKEYBYTES bytes)
  * @return 0 if valid, -1 if invalid
  */
-int dilithium_verify(const uint8_t *message, size_t message_len,
-                     const uint8_t *signature, size_t signature_len,
-                     const uint8_t *public_key) {
-    if (g_sig == NULL) {
-        if (dilithium_init() != 0) {
-            return -1;
-        }
-    }
-
-    OQS_STATUS status = OQS_SIG_verify(g_sig, message, message_len,
-                                        signature, signature_len, public_key);
-    return (status == OQS_SUCCESS) ? 0 : -1;
+int dilithium_verify(const uint8_t *msg, size_t msg_len,
+                     const uint8_t *sig, size_t sig_len,
+                     const uint8_t *pk) {
+    return crypto_sign_verify(sig, sig_len, msg, msg_len, NULL, 0, pk);
 }
 
 /**
- * Allocate memory (for JavaScript to use)
+ * Allocate memory (for JavaScript to use via WASM).
  */
 void *dilithium_malloc(size_t size) {
     return malloc(size);
 }
 
 /**
- * Free memory (for JavaScript to use)
+ * Free memory (for JavaScript to use via WASM).
  */
 void dilithium_free(void *ptr) {
     free(ptr);
+}
+
+/**
+ * Securely free memory by zeroing before freeing.
+ * Use for buffers that contained secret keys or seeds.
+ * Uses volatile to prevent compiler dead-store elimination.
+ * @param ptr Pointer to memory
+ * @param size Number of bytes to zero before freeing
+ */
+void dilithium_secure_free(void *ptr, size_t size) {
+    if (ptr) {
+        volatile uint8_t *p = (volatile uint8_t *)ptr;
+        for (size_t i = 0; i < size; i++) {
+            p[i] = 0;
+        }
+        /* Memory barrier to prevent reordering past the zeroing */
+        __asm__ volatile("" ::: "memory");
+        free(ptr);
+    }
 }

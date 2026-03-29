@@ -27,6 +27,8 @@ inline const std::string& GetWalletHTML() {
 //# sourceMappingURL=qrcode.min.js.map</script>
     <!-- SHA3 library for Light Wallet -->
     <script src="https://cdn.jsdelivr.net/npm/js-sha3@0.9.3/src/sha3.min.js"></script>
+    <!-- Ethers.js for MetaMask / Base bridge integration -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
     <!-- Dilithium WASM Module (must load before dilithium-crypto.js) -->
     <script src="js/dilithium.js"></script>
     <!-- Light Wallet Modules -->
@@ -249,9 +251,12 @@ inline const std::string& GetWalletHTML() {
         }
 
         .balance-amount {
-            font-size: 2rem;
+            font-size: clamp(1rem, 3.5vw, 2rem);
             font-weight: 700;
             font-family: 'JetBrains Mono', monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .balance-unit {
@@ -670,6 +675,17 @@ inline const std::string& GetWalletHTML() {
         </div>
 
         <div class="nav-section">
+            <div class="nav-section-title">Bridge</div>
+            <div class="nav-item" data-page="bridge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
+                    <line x1="4" y1="22" x2="4" y2="15"></line>
+                </svg>
+                <span>Bridge</span>
+            </div>
+        </div>
+
+        <div class="nav-section">
             <div class="nav-section-title">Settings</div>
             <div class="nav-item" data-page="settings">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -828,14 +844,14 @@ inline const std::string& GetWalletHTML() {
                                 <line x1="22" y1="2" x2="11" y2="13"></line>
                                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                             </svg>
-                            Send DIL
+                            Send <span class="chain-label">DIL</span>
                         </button>
                         <button class="btn btn-secondary" onclick="navigateTo('receive')">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
                                 <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path>
                             </svg>
-                            Receive DIL
+                            Receive <span class="chain-label">DIL</span>
                         </button>
                         <button class="btn btn-secondary" onclick="rescanWallet()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -862,7 +878,7 @@ inline const std::string& GetWalletHTML() {
         <!-- Send Page -->
         <div class="page" id="page-send">
             <div class="page-header">
-                <h1 class="page-title">Send DIL</h1>
+                <h1 class="page-title">Send <span class="chain-label">DIL</span></h1>
                 <p class="page-subtitle">Transfer funds to another address</p>
             </div>
 
@@ -875,9 +891,9 @@ inline const std::string& GetWalletHTML() {
                         <div class="form-hint">Enter the recipient's Dilithion address</div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Amount (DIL)</label>
+                        <label class="form-label">Amount (<span class="chain-label">DIL</span>)</label>
                         <input type="number" class="form-input" id="sendAmount" placeholder="0.00000000" step="0.00000001" min="0.00000001" required>
-                        <div class="form-hint">Available: <span id="availableForSend">0.00000000</span> DIL</div>
+                        <div class="form-hint">Available: <span id="availableForSend">0.00000000</span> <span class="chain-label">DIL</span></div>
                     </div>
                     <button type="submit" class="btn btn-primary" id="sendBtn">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -893,7 +909,7 @@ inline const std::string& GetWalletHTML() {
         <!-- Receive Page -->
         <div class="page" id="page-receive">
             <div class="page-header">
-                <h1 class="page-title">Receive DIL</h1>
+                <h1 class="page-title">Receive <span class="chain-label">DIL</span></h1>
                 <p class="page-subtitle">Share your address to receive funds</p>
             </div>
 
@@ -1504,9 +1520,153 @@ inline const std::string& GetWalletHTML() {
                 </p>
             </div>
         </div>
+        <!-- Bridge Page -->
+        <div class="page" id="page-bridge">
+            <div class="page-header">
+                <h1 class="page-title">Bridge</h1>
+                <p class="page-subtitle">Convert between native coins and wrapped tokens on Base</p>
+            </div>
+
+            <!-- MetaMask Connection -->
+            <div class="card" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <div class="card-title" style="margin-bottom: 4px;">MetaMask</div>
+                    <p style="color: var(--text-secondary); margin: 0; font-size: 0.85rem;" id="bridgeMetaMaskStatus">Not connected</p>
+                </div>
+                <button class="btn btn-primary" id="bridgeConnectBtn" onclick="bridgeConnectWallet()">Connect MetaMask</button>
+            </div>
+
+            <!-- Bridge Sub-tabs -->
+            <div style="display: flex; gap: 4px; margin-bottom: 20px; background: var(--bg-darker); border-radius: 10px; padding: 4px;">
+                <div class="bridge-tab active" data-bridge-tab="deposit" onclick="switchBridgeTab('deposit')" style="flex: 1; text-align: center; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); transition: all 0.2s;">Deposit (to Base)</div>
+                <div class="bridge-tab" data-bridge-tab="withdraw" onclick="switchBridgeTab('withdraw')" style="flex: 1; text-align: center; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); transition: all 0.2s;">Withdraw (from Base)</div>
+            </div>
+
+            <!-- DEPOSIT PANEL -->
+            <div id="bridge-deposit-panel">
+                <!-- Quick Buy -->
+                <div class="card" style="border-color: var(--primary); background: rgba(200,162,78,0.04);">
+                    <div class="card-title">Just want to buy?</div>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+                        The easiest way is to buy directly on Aerodrome using ETH. No bridging needed.
+                    </p>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <a href="https://aerodrome.finance/swap?outputCurrency=0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2" target="_blank" class="btn btn-primary" style="text-decoration: none; font-size: 0.8rem;">Buy wDIL</a>
+                        <a href="https://aerodrome.finance/swap?outputCurrency=0xF162F6B432FeeD73458D4653ef8E74Ba014403E8" target="_blank" class="btn" style="text-decoration: none; font-size: 0.8rem; border: 1px solid var(--primary); color: var(--primary);">Buy wDILV</a>
+                    </div>
+                </div>
+
+                <!-- Bridge Deposit Form -->
+                <div class="card">
+                    <div class="card-title">Bridge: <span class="chain-label">DIL</span> to Base</div>
+                    <div id="bridgeHttpsWarning" style="display: none; background: #161614; border: 1px solid #B08A3E; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.8rem; color: #E8C860; line-height: 1.5;">
+                        <strong>Deposits require your local node.</strong> Open
+                        <a href="http://127.0.0.1:8332/" style="color: #E8C860; text-decoration: underline;">http://127.0.0.1:8332/</a>
+                        in your browser and use the Bridge tab there. Withdrawals work here via MetaMask.
+                    </div>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+                        Send native coins to the bridge address with your MetaMask address tagged in OP_RETURN. Your node must be running.
+                    </p>
+
+                    <!-- Chain toggle -->
+                    <div style="display: flex; gap: 4px; margin-bottom: 16px; background: var(--bg-darker); border-radius: 8px; padding: 3px;">
+                        <div class="bridge-chain-opt active" onclick="bridgeSelectDepositChain('dil')" style="flex:1; text-align:center; padding:8px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-weight:500; transition:all 0.2s;">DIL to wDIL</div>
+                        <div class="bridge-chain-opt" onclick="bridgeSelectDepositChain('dilv')" style="flex:1; text-align:center; padding:8px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-weight:500; color:var(--text-muted); transition:all 0.2s;">DilV to wDILV</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Your MetaMask address (on Base)</label>
+                        <input type="text" class="form-input" id="bridgeDepositBaseAddr" placeholder="0x..." oninput="bridgeValidateDeposit()">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Amount of <span id="bridgeDepositCoinLabel">DIL</span> to bridge</label>
+                        <input type="number" class="form-input" id="bridgeDepositAmount" placeholder="100" step="0.01" oninput="bridgeValidateDeposit()">
+                        <small style="color: var(--text-muted); font-size: 0.75rem;" id="bridgeDepositLimitNote">Max per deposit: 500 DIL. Daily limit: 1,000 DIL.</small>
+                    </div>
+
+                    <button class="btn btn-primary" id="bridgeDepositBtn" onclick="bridgeExecuteDeposit()" disabled style="width: 100%; padding: 12px;">
+                        Enter details above
+                    </button>
+
+                    <div id="bridgeDepositStatus" style="margin-top: 12px; max-height: 200px; overflow-y: auto; display: none;"></div>
+
+                    <div style="margin-top: 12px; padding: 10px 12px; background: var(--bg-darker); border-radius: 8px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.5;">
+                        After <strong id="bridgeConfirmCount">6</strong> confirmations (<strong id="bridgeConfirmTime">~24 min</strong>),
+                        <strong id="bridgeWrappedLabel">wDIL</strong> will be minted to your MetaMask wallet.
+                    </div>
+                </div>
+
+                <!-- Add to MetaMask -->
+                <div class="card">
+                    <div class="card-title">See tokens in MetaMask</div>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 8px;">Import token in MetaMask with this contract address:</p>
+                    <div style="background: var(--bg-darker); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; word-break: break-all; color: var(--accent); cursor: pointer;" id="bridgeTokenContract" onclick="navigator.clipboard.writeText(this.textContent).then(()=>{showNotification('Copied!','success')})">0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2</div>
+                </div>
+            </div>
+
+            <!-- WITHDRAW PANEL -->
+            <div id="bridge-withdraw-panel" style="display: none;">
+                <div class="card">
+                    <div class="card-title">Withdraw: Wrapped tokens back to native</div>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+                        Burns wDIL/wDILV on Base and the bridge sends native coins to your wallet. Requires MetaMask on Base network.
+                    </p>
+
+                    <!-- Chain toggle -->
+                    <div style="display: flex; gap: 4px; margin-bottom: 16px; background: var(--bg-darker); border-radius: 8px; padding: 3px;">
+                        <div class="bridge-wchain-opt active" onclick="bridgeSelectWithdrawChain('dil')" style="flex:1; text-align:center; padding:8px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-weight:500; transition:all 0.2s;">wDIL to DIL</div>
+                        <div class="bridge-wchain-opt" onclick="bridgeSelectWithdrawChain('dilv')" style="flex:1; text-align:center; padding:8px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-weight:500; color:var(--text-muted); transition:all 0.2s;">wDILV to DilV</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Amount to withdraw</label>
+                        <input type="number" class="form-input" id="bridgeWithdrawAmount" placeholder="0.00" step="0.00000001">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Your Dilithion wallet address (starts with D)</label>
+                        <input type="text" class="form-input" id="bridgeWithdrawNativeAddr" placeholder="DJrywx4AsVQSPLZCKRdg8erZdPMNaRSrKq">
+                    </div>
+
+                    <button class="btn btn-primary" id="bridgeWithdrawBtn" onclick="bridgeExecuteBurn()" disabled style="width: 100%; padding: 12px;">
+                        Connect MetaMask First
+                    </button>
+
+                    <div id="bridgeWithdrawResult" style="margin-top: 12px; display: none;"></div>
+                </div>
+            </div>
+
+            <!-- Bridge Info -->
+            <div class="card">
+                <div class="card-title">Bridge Info</div>
+                <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 2;">
+                    <div style="display: flex; justify-content: space-between;"><span>wDIL Contract</span><span style="font-family: 'JetBrains Mono', monospace; color: var(--accent); font-size: 0.7rem;">0x3062...D36C2</span></div>
+                    <div style="display: flex; justify-content: space-between;"><span>wDILV Contract</span><span style="font-family: 'JetBrains Mono', monospace; color: var(--accent); font-size: 0.7rem;">0xF162...03E8</span></div>
+                    <div style="display: flex; justify-content: space-between;"><span>DIL Bridge Address</span><span style="font-family: 'JetBrains Mono', monospace; color: var(--accent); font-size: 0.7rem;">DNaTbw...6cinx</span></div>
+                    <div style="display: flex; justify-content: space-between;"><span>DilV Bridge Address</span><span style="font-family: 'JetBrains Mono', monospace; color: var(--accent); font-size: 0.7rem;">DTHGN3...BuPdp</span></div>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 8px;">
+                    Custodial bridge. Will be upgraded to 3-of-5 multisig when value at stake justifies it.
+                </p>
+            </div>
+        </div>
+
     </main>
 
     <script>
+        // Auto-fit balance text — shrinks font only when it overflows the card
+        function fitBalanceText() {
+            document.querySelectorAll('.balance-amount').forEach(el => {
+                el.style.fontSize = '';  // reset to CSS default (2rem)
+                let size = 2;
+                while (el.scrollWidth > el.clientWidth && size > 0.8) {
+                    size -= 0.1;
+                    el.style.fontSize = size + 'rem';
+                }
+            });
+        }
+
         // Wallet State
         let connected = false;
         let rpcConfig = {
@@ -1541,8 +1701,8 @@ inline const std::string& GetWalletHTML() {
                 btnDil.style.color = 'var(--text-muted)';
             }
 
-            // Update all balance unit labels
-            document.querySelectorAll('.balance-unit').forEach(el => {
+            // Update all balance unit labels and chain labels
+            document.querySelectorAll('.balance-unit, .chain-label').forEach(el => {
                 el.textContent = chainUnits[chain];
             });
 
@@ -1566,7 +1726,7 @@ inline const std::string& GetWalletHTML() {
                 btnDilv.style.color = 'white';
                 btnDil.style.background = 'transparent';
                 btnDil.style.color = 'var(--text-muted)';
-                document.querySelectorAll('.balance-unit').forEach(el => {
+                document.querySelectorAll('.balance-unit, .chain-label').forEach(el => {
                     el.textContent = 'DilV';
                 });
                 document.title = 'DilV Web Wallet';
@@ -1826,6 +1986,17 @@ inline const std::string& GetWalletHTML() {
                 setConnectionStatus(false, 'Connection failed');
                 console.error('[Connect] Connection failed:', e.message);
                 console.log('[Connect] Tried to connect to:', rpcConfig.host + ':' + rpcConfig.port);
+
+                // Clear stale data from previous chain
+                document.getElementById('totalBalance').textContent = '0.00000000';
+                document.getElementById('matureBalance').textContent = '0.00000000';
+                document.getElementById('immatureBalance').textContent = '0.00000000';
+                document.getElementById('availableForSend').textContent = '0.00000000';
+                document.getElementById('recentTxList').innerHTML =
+                    '<div class="empty-state">Unable to connect to ' + chainUnits[activeChain] + ' node on port ' + rpcConfig.port + '</div>';
+                const txListEl = document.getElementById('txList');
+                if (txListEl) txListEl.innerHTML = '';
+                fitBalanceText();
             }
         }
 
@@ -1881,17 +2052,24 @@ inline const std::string& GetWalletHTML() {
             const HASHES_PER_DIFF = Math.pow(2, 32) / 393216;
 
             // Network overview (works in both modes via getblockchaininfo)
+            // Chain-specific params: DIL = 50/block, 210K halving, 240s blocks; DilV = 100/block, 1.05M halving, 45s blocks
+            const chainRewardParams = {
+                dil:  { baseReward: 50, halvingInterval: 210000, blockTime: 240 },
+                dilv: { baseReward: 100, halvingInterval: 1050000, blockTime: 45 }
+            };
+            const rewardParams = chainRewardParams[activeChain] || chainRewardParams.dil;
             try {
                 const info = await rpcCall('getblockchaininfo');
                 const difficulty = info.difficulty || 0;
                 const height = info.blocks || 0;
-                const halvings = Math.floor(height / 210000);
-                const reward = 50 / Math.pow(2, halvings);
-                const networkHashrate = difficulty * HASHES_PER_DIFF / 240;
+                const halvings = Math.floor(height / rewardParams.halvingInterval);
+                const reward = rewardParams.baseReward / Math.pow(2, halvings);
+                const networkHashrate = difficulty * HASHES_PER_DIFF / rewardParams.blockTime;
 
                 document.getElementById('msNetworkHashrate').textContent = formatMsHashrate(networkHashrate);
                 document.getElementById('msDifficulty').textContent = difficulty.toLocaleString();
-                document.getElementById('msBlockReward').textContent = reward + ' DIL (' + (reward * 0.98).toFixed(2) + ' to miner)';
+                const unit = chainUnits[activeChain];
+                document.getElementById('msBlockReward').textContent = reward + ' ' + unit + ' (' + (reward * 0.98).toFixed(2) + ' to miner)';
             } catch (e) {
                 console.error('[MiningStats] Chain info error:', e);
             }
@@ -2041,6 +2219,7 @@ inline const std::string& GetWalletHTML() {
                         document.getElementById('matureBalance').textContent = mature.toFixed(8);
                         document.getElementById('immatureBalance').textContent = immature.toFixed(8);
                         document.getElementById('availableForSend').textContent = mature.toFixed(8);
+                        fitBalanceText();
 
                         // Chain health warning
                         const chainHealth = nodeBalance.chain_health || 'OK';
@@ -2084,6 +2263,7 @@ inline const std::string& GetWalletHTML() {
                     document.getElementById('matureBalance').textContent = confirmedBalance.toFixed(8);
                     document.getElementById('immatureBalance').textContent = '0.00000000';
                     document.getElementById('availableForSend').textContent = confirmedBalance.toFixed(8);
+                    fitBalanceText();
                 } else {
                     // Not connected
                     document.getElementById('totalBalance').textContent = '0.00000000';
@@ -2281,24 +2461,16 @@ inline const std::string& GetWalletHTML() {
                     await rpcCall('stopmining');
                 } else {
                     // Start mining with selected threads
-                    // BUG #278 FIX: New miners need ~10-15 min for one-time MIK registration PoW.
-                    // Use 20-minute timeout and show registration message.
                     const threads = getSelectedThreads();
-                    btnText.textContent = 'Registering identity...';
+                    btnText.textContent = 'Starting...';
                     console.log('[Mining] Starting with', threads, 'threads');
-                    await rpcCall('startmining', { threads: threads }, 1200000);
-                    btnText.textContent = 'Mining!';
+                    await rpcCall('startmining', { threads: threads });
                 }
                 // Refresh to get new status
                 await refreshBlockchainInfo();
             } catch(e) {
                 console.error('Mining toggle error:', e);
-                // Don't show alarming error for timeouts during registration
-                if (e.message && e.message.includes('timed out')) {
-                    alert('Mining registration is taking longer than expected. Check the node console for progress. Mining will start automatically when ready.');
-                } else {
-                    alert('Failed to toggle mining: ' + e.message);
-                }
+                alert('Failed to toggle mining: ' + e.message);
             } finally {
                 btn.disabled = false;
             }
@@ -2504,10 +2676,10 @@ inline const std::string& GetWalletHTML() {
                         <div class="tx-details">
                             <div class="tx-type">${typeText} <span style="color:#8A8A80;font-size:12px;" title="${fullTimestamp}">${timeText}</span></div>
                             <div class="tx-hash" style="font-size:11px;color:#5A5A52;" title="${address || ''}">${originLabel}</div>
-                            <div class="tx-hash">${txid.substring(0, 16)}...${txid.substring(txid.length - 8)}</div>
+                            <div class="tx-hash" title="${txid}" style="cursor:pointer;" onclick="navigator.clipboard.writeText('${txid}').then(()=>{const el=this;el.dataset.orig=el.textContent;el.textContent='Copied!';setTimeout(()=>el.textContent=el.dataset.orig,1500)})">${txid.substring(0, 16)}...${txid.substring(txid.length - 8)}</div>
                         </div>
                         <div>
-                            <div class="tx-amount ${amountClass}">${amountPrefix}${displayAmount} DIL${feeText}</div>
+                            <div class="tx-amount ${amountClass}">${amountPrefix}${displayAmount} ${chainUnits[activeChain]}${feeText}</div>
                             <div class="tx-confirmations">${confirmations} confirmations</div>
                         </div>
                     </div>
@@ -2944,15 +3116,15 @@ inline const std::string& GetWalletHTML() {
                                 </tr>
                                 <tr>
                                     <td style="padding: 4px 0; color: var(--text-muted);">Amount</td>
-                                    <td style="padding: 4px 0; text-align: right; font-weight: 600;">${amount.toFixed(8)} DIL</td>
+                                    <td style="padding: 4px 0; text-align: right; font-weight: 600;">${amount.toFixed(8)} ${chainUnits[activeChain]}</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 4px 0; color: var(--text-muted);">Network Fee</td>
-                                    <td style="padding: 4px 0; text-align: right;">${estimate.fee.toFixed(8)} DIL</td>
+                                    <td style="padding: 4px 0; text-align: right;">${estimate.fee.toFixed(8)} ${chainUnits[activeChain]}</td>
                                 </tr>
                                 <tr style="border-top: 1px solid var(--border);">
                                     <td style="padding: 8px 0 4px; font-weight: 600;">Total</td>
-                                    <td style="padding: 8px 0 4px; text-align: right; font-weight: 600; color: var(--primary);">${estimate.total.toFixed(8)} DIL</td>
+                                    <td style="padding: 8px 0 4px; text-align: right; font-weight: 600; color: var(--primary);">${estimate.total.toFixed(8)} ${chainUnits[activeChain]}</td>
                                 </tr>
                             </table>
                             <div style="display: flex; gap: 8px; margin-top: 12px;">
@@ -2990,7 +3162,7 @@ inline const std::string& GetWalletHTML() {
                     }
 
                     if (!fromAddress) {
-                        throw new Error(`Insufficient balance. You have ${totalBalance.toFixed(8)} DIL but need ${amount} DIL`);
+                        throw new Error(`Insufficient balance. You have ${totalBalance.toFixed(8)} ${chainUnits[activeChain]} but need ${amount} ${chainUnits[activeChain]}`);
                     }
 
                     const result = await txBuilder.send(fromAddress, toAddress, amount);
@@ -3011,6 +3183,46 @@ inline const std::string& GetWalletHTML() {
             alertDiv.innerHTML = '<div style="text-align: center; padding: 16px;"><div class="spinner" style="width: 20px; height: 20px; margin: 0 auto;"></div><div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">Sending transaction...</div></div>';
 
             try {
+                const txid = await rpcCall('sendtoaddress', {address: pendingSend.address, amount: pendingSend.amount});
+                showSendSuccess(typeof txid === 'object' ? txid.txid : txid);
+                pendingSend = null;
+                resetSendButton();
+            } catch(e) {
+                const msg = (e.message || '').toLowerCase();
+                if (msg.includes('locked') || msg.includes('unlock')) {
+                    // Show inline unlock prompt instead of raw error
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-error" style="margin-bottom: 12px;">Wallet is locked. Enter your password to unlock and send.</div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="password" class="form-input" id="sendUnlockPassword" placeholder="Wallet password"
+                                   style="flex: 1;" onkeypress="if(event.key==='Enter')unlockAndSend()">
+                            <button class="btn btn-primary" onclick="unlockAndSend()">Unlock & Send</button>
+                            <button class="btn" onclick="cancelSend()" style="background: var(--bg-secondary); border: 1px solid var(--border);">Cancel</button>
+                        </div>
+                    `;
+                    // Focus the password input
+                    setTimeout(() => document.getElementById('sendUnlockPassword')?.focus(), 50);
+                } else {
+                    alertDiv.innerHTML = `<div class="alert alert-error">Error: ${e.message}</div>`;
+                    pendingSend = null;
+                    resetSendButton();
+                }
+            }
+        }
+
+        async function unlockAndSend() {
+            const password = document.getElementById('sendUnlockPassword')?.value;
+            if (!password) {
+                showNotification('Please enter your wallet password', 'error');
+                return;
+            }
+            const alertDiv = document.getElementById('sendAlert');
+            alertDiv.innerHTML = '<div style="text-align: center; padding: 16px;"><div class="spinner" style="width: 20px; height: 20px; margin: 0 auto;"></div><div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">Unlocking wallet and sending...</div></div>';
+
+            try {
+                await rpcCall('walletpassphrase', { passphrase: password, timeout: 300 });
+                walletLocked = false;
+                updateLockUI();
                 const txid = await rpcCall('sendtoaddress', {address: pendingSend.address, amount: pendingSend.amount});
                 showSendSuccess(typeof txid === 'object' ? txid.txid : txid);
             } catch(e) {
@@ -3198,6 +3410,433 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
+        // ========================================================================
+        // Bridge Functions
+        // ========================================================================
+
+        const BRIDGE_CONFIG = {
+            chainId: 8453,
+            chainName: 'Base',
+            rpcUrl: 'https://mainnet.base.org',
+            wdilContract: '0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2',
+            wdilvContract: '0xF162F6B432FeeD73458D4653ef8E74Ba014403E8',
+            dilBridgeAddress: 'DNaTbwZgm6x23zf4DnJm4vjEG2qGc6cinx',
+            dilvBridgeAddress: 'DTHGN3XiZ9LRxHVPUWMumX8B9q6B4BuPdp',
+            burnAbi: [
+                'function burn(uint256 amount, string calldata nativeAddress) external',
+                'function balanceOf(address account) external view returns (uint256)',
+                'function decimals() external view returns (uint8)',
+                'function symbol() external view returns (string)'
+            ]
+        };
+
+        const BRIDGE_LIMITS = {
+            dil:  { maxPerDeposit: 500,  dailyCap: 1000,  coin: 'DIL',  wrapped: 'wDIL'  },
+            dilv: { maxPerDeposit: 5000, dailyCap: 10000, coin: 'DilV', wrapped: 'wDILV' }
+        };
+
+        let bridgeProvider = null;
+        let bridgeSigner = null;
+        let bridgeConnectedAddress = null;
+        let bridgeDepositChain = 'dil';
+        let bridgeWithdrawChain = 'dil';
+
+        function switchBridgeTab(tab) {
+            document.querySelectorAll('.bridge-tab').forEach(t => {
+                t.classList.remove('active');
+                t.style.background = '';
+                t.style.color = 'var(--text-secondary)';
+            });
+            const active = document.querySelector(`.bridge-tab[data-bridge-tab="${tab}"]`);
+            if (active) {
+                active.classList.add('active');
+                active.style.background = 'var(--primary)';
+                active.style.color = 'white';
+            }
+            document.getElementById('bridge-deposit-panel').style.display = tab === 'deposit' ? 'block' : 'none';
+            document.getElementById('bridge-withdraw-panel').style.display = tab === 'withdraw' ? 'block' : 'none';
+        }
+
+        function bridgeSelectDepositChain(chain) {
+            bridgeDepositChain = chain;
+            const opts = document.querySelectorAll('.bridge-chain-opt');
+            opts.forEach(o => { o.classList.remove('active'); o.style.background = ''; o.style.color = 'var(--text-muted)'; });
+            opts[chain === 'dil' ? 0 : 1].classList.add('active');
+            opts[chain === 'dil' ? 0 : 1].style.background = 'var(--primary)';
+            opts[chain === 'dil' ? 0 : 1].style.color = 'white';
+
+            const limits = BRIDGE_LIMITS[chain];
+            document.getElementById('bridgeDepositCoinLabel').textContent = limits.coin;
+            document.getElementById('bridgeWrappedLabel').textContent = limits.wrapped;
+            document.getElementById('bridgeConfirmCount').textContent = chain === 'dil' ? '6' : '15';
+            document.getElementById('bridgeConfirmTime').textContent = chain === 'dil' ? '~24 min' : '~12 min';
+            document.getElementById('bridgeDepositLimitNote').textContent =
+                `Max per deposit: ${limits.maxPerDeposit} ${limits.coin}. Daily limit: ${limits.dailyCap} ${limits.coin}.`;
+            document.getElementById('bridgeDepositAmount').setAttribute('max', limits.maxPerDeposit);
+            document.getElementById('bridgeTokenContract').textContent =
+                chain === 'dil' ? BRIDGE_CONFIG.wdilContract : BRIDGE_CONFIG.wdilvContract;
+            bridgeValidateDeposit();
+        }
+
+        function bridgeSelectWithdrawChain(chain) {
+            bridgeWithdrawChain = chain;
+            const opts = document.querySelectorAll('.bridge-wchain-opt');
+            opts.forEach(o => { o.classList.remove('active'); o.style.background = ''; o.style.color = 'var(--text-muted)'; });
+            opts[chain === 'dil' ? 0 : 1].classList.add('active');
+            opts[chain === 'dil' ? 0 : 1].style.background = 'var(--primary)';
+            opts[chain === 'dil' ? 0 : 1].style.color = 'white';
+            bridgeUpdateWithdrawBtn();
+        }
+
+        function bridgeValidateDeposit() {
+            const addr = document.getElementById('bridgeDepositBaseAddr').value.trim();
+            const amount = document.getElementById('bridgeDepositAmount').value.trim();
+            const btn = document.getElementById('bridgeDepositBtn');
+            const limits = BRIDGE_LIMITS[bridgeDepositChain];
+
+            if (!addr || !addr.startsWith('0x') || addr.length !== 42) {
+                btn.textContent = 'Enter your MetaMask address';
+                btn.disabled = true;
+                return;
+            }
+            if (!amount || parseFloat(amount) <= 0) {
+                btn.textContent = 'Enter amount to bridge';
+                btn.disabled = true;
+                return;
+            }
+            if (parseFloat(amount) > limits.maxPerDeposit) {
+                btn.textContent = `Max ${limits.maxPerDeposit} ${limits.coin} per deposit`;
+                btn.disabled = true;
+                return;
+            }
+            btn.textContent = `Bridge ${amount} ${limits.coin} to ${limits.wrapped}`;
+            btn.disabled = false;
+        }
+
+        function bridgeUpdateWithdrawBtn() {
+            const btn = document.getElementById('bridgeWithdrawBtn');
+            if (!bridgeSigner) {
+                btn.textContent = 'Connect MetaMask First';
+                btn.disabled = true;
+            } else {
+                const symbol = bridgeWithdrawChain === 'dil' ? 'wDIL' : 'wDILV';
+                btn.textContent = `Burn ${symbol} & Withdraw`;
+                btn.disabled = false;
+            }
+        }
+
+        async function bridgeConnectWallet() {
+            if (typeof window.ethereum === 'undefined') {
+                showNotification('MetaMask not installed. Install it to use withdraw, or just paste your 0x address for deposits.', 'error');
+                return;
+            }
+            try {
+                bridgeProvider = new ethers.providers.Web3Provider(window.ethereum);
+                await bridgeProvider.send('eth_requestAccounts', []);
+                bridgeSigner = bridgeProvider.getSigner();
+                bridgeConnectedAddress = await bridgeSigner.getAddress();
+
+                const short = bridgeConnectedAddress.slice(0, 6) + '...' + bridgeConnectedAddress.slice(-4);
+                document.getElementById('bridgeConnectBtn').textContent = short;
+                document.getElementById('bridgeConnectBtn').style.background = 'var(--success)';
+                document.getElementById('bridgeMetaMaskStatus').textContent = 'Connected: ' + short;
+
+                // Auto-fill deposit address
+                document.getElementById('bridgeDepositBaseAddr').value = bridgeConnectedAddress;
+                bridgeValidateDeposit();
+
+                // Switch to Base if needed
+                const network = await bridgeProvider.getNetwork();
+                if (network.chainId !== BRIDGE_CONFIG.chainId) {
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: '0x' + BRIDGE_CONFIG.chainId.toString(16) }]
+                        });
+                    } catch (e) {
+                        console.warn('Could not switch to Base:', e);
+                    }
+                }
+
+                bridgeUpdateWithdrawBtn();
+                showNotification('MetaMask connected on Base', 'success');
+            } catch (e) {
+                showNotification('MetaMask connection failed: ' + e.message, 'error');
+            }
+        }
+
+        // Bridge deposit helpers (ported from bridge.html)
+        const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+        function bridgeBase58Decode(str) {
+            let n = BigInt(0);
+            for (const c of str) {
+                const idx = BASE58_ALPHABET.indexOf(c);
+                if (idx < 0) throw new Error('Invalid Base58 character: ' + c);
+                n = n * 58n + BigInt(idx);
+            }
+            const hex = n.toString(16).padStart(50, '0');
+            const bytes = new Uint8Array(hex.match(/.{2}/g).map(b => parseInt(b, 16)));
+            let leadingZeros = 0;
+            for (const c of str) { if (c === '1') leadingZeros++; else break; }
+            const result = new Uint8Array(leadingZeros + bytes.length);
+            result.set(bytes, leadingZeros);
+            return result;
+        }
+
+        function bridgeGetPubKeyHash(address) {
+            return bridgeBase58Decode(address).slice(1, 21);
+        }
+
+        function bridgeBuildP2PKHScript(pubkeyHash) {
+            const script = new Uint8Array(25);
+            script[0] = 0x76; script[1] = 0xa9; script[2] = 20;
+            script.set(pubkeyHash, 3);
+            script[23] = 0x88; script[24] = 0xac;
+            return script;
+        }
+
+        function bridgeBuildOpReturnScript(data) {
+            const script = new Uint8Array(2 + data.length);
+            script[0] = 0x6a; script[1] = data.length;
+            script.set(data, 2);
+            return script;
+        }
+
+        function bridgeCompactSize(n) {
+            if (n < 253) return new Uint8Array([n]);
+            if (n <= 0xFFFF) { const b = new Uint8Array(3); b[0] = 0xfd; b[1] = n & 0xff; b[2] = (n >> 8) & 0xff; return b; }
+            const b = new Uint8Array(5); b[0] = 0xfe; b[1] = n & 0xff; b[2] = (n >> 8) & 0xff; b[3] = (n >> 16) & 0xff; b[4] = (n >> 24) & 0xff; return b;
+        }
+
+        function bridgeUint32LE(n) {
+            const b = new Uint8Array(4); b[0] = n & 0xff; b[1] = (n >> 8) & 0xff; b[2] = (n >> 16) & 0xff; b[3] = (n >> 24) & 0xff; return b;
+        }
+
+        function bridgeUint64LE(n) {
+            const b = new Uint8Array(8);
+            const lo = n & 0xFFFFFFFF; const hi = Math.floor(n / 0x100000000) & 0xFFFFFFFF;
+            b[0] = lo & 0xff; b[1] = (lo >> 8) & 0xff; b[2] = (lo >> 16) & 0xff; b[3] = (lo >> 24) & 0xff;
+            b[4] = hi & 0xff; b[5] = (hi >> 8) & 0xff; b[6] = (hi >> 16) & 0xff; b[7] = (hi >> 24) & 0xff;
+            return b;
+        }
+
+        function bridgeHexToBytes(hex) { return new Uint8Array(hex.match(/.{2}/g).map(b => parseInt(b, 16))); }
+        function bridgeBytesToHex(bytes) { return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(''); }
+        function bridgeReverseBytes(bytes) { return new Uint8Array(Array.from(bytes).reverse()); }
+        function bridgeConcatBytes(...arrays) {
+            let total = arrays.reduce((s, a) => s + a.length, 0);
+            let result = new Uint8Array(total);
+            let offset = 0;
+            for (const arr of arrays) { result.set(arr, offset); offset += arr.length; }
+            return result;
+        }
+
+        function bridgeBuildRawTx(inputs, bridgeAddr, depositSats, changeAddr, changeSats, opReturnData) {
+            const OP_RETURN_VALUE = 50000;
+            let parts = [];
+            parts.push(bridgeUint32LE(1)); // version
+            parts.push(bridgeCompactSize(inputs.length));
+            for (const inp of inputs) {
+                parts.push(bridgeReverseBytes(bridgeHexToBytes(inp.txid)));
+                parts.push(bridgeUint32LE(inp.vout));
+                parts.push(bridgeCompactSize(0)); // empty scriptSig
+                parts.push(bridgeUint32LE(0xFFFFFFFF));
+            }
+            parts.push(bridgeCompactSize(3)); // 3 outputs
+            // Output 1: bridge payment
+            parts.push(bridgeUint64LE(depositSats));
+            const bridgeScript = bridgeBuildP2PKHScript(bridgeGetPubKeyHash(bridgeAddr));
+            parts.push(bridgeCompactSize(bridgeScript.length)); parts.push(bridgeScript);
+            // Output 2: OP_RETURN
+            const opReturnScript = bridgeBuildOpReturnScript(opReturnData);
+            parts.push(bridgeUint64LE(OP_RETURN_VALUE));
+            parts.push(bridgeCompactSize(opReturnScript.length)); parts.push(opReturnScript);
+            // Output 3: change
+            parts.push(bridgeUint64LE(changeSats));
+            const changeScript = bridgeBuildP2PKHScript(bridgeGetPubKeyHash(changeAddr));
+            parts.push(bridgeCompactSize(changeScript.length)); parts.push(changeScript);
+            parts.push(bridgeUint32LE(0)); // locktime
+            return bridgeConcatBytes(...parts);
+        }
+
+        async function bridgeExecuteDeposit() {
+            const baseAddr = document.getElementById('bridgeDepositBaseAddr').value.trim();
+            const amountStr = document.getElementById('bridgeDepositAmount').value.trim();
+            const chain = bridgeDepositChain;
+            const statusDiv = document.getElementById('bridgeDepositStatus');
+            const btn = document.getElementById('bridgeDepositBtn');
+
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '';
+            btn.disabled = true;
+
+            const limits = BRIDGE_LIMITS[chain];
+            const bridgeAddr = chain === 'dil' ? BRIDGE_CONFIG.dilBridgeAddress : BRIDGE_CONFIG.dilvBridgeAddress;
+            const depositSats = Math.round(parseFloat(amountStr) * 1e8);
+            const OP_RETURN_VALUE = 50000;
+            const FEE_RATE = 6;
+            const MAX_INPUTS = 50;
+
+            function log(msg, type) {
+                const color = type === 'error' ? 'var(--error)' : type === 'success' ? 'var(--success)' : 'var(--text-muted)';
+                statusDiv.innerHTML += `<p style="color: ${color}; font-size: 0.8rem; margin: 3px 0;">${msg}</p>`;
+                statusDiv.scrollTop = statusDiv.scrollHeight;
+            }
+
+            try {
+                // Step 1: Get UTXOs from node
+                log('Connecting to node...');
+                let utxos;
+                try {
+                    utxos = await rpcCall('listunspent');
+                } catch (e) {
+                    log('Cannot connect to node. Is it running?', 'error');
+                    log('The node must be running locally for deposits.', 'error');
+                    btn.disabled = false;
+                    return;
+                }
+                log('Connected. Found ' + utxos.length + ' UTXOs.');
+
+                // Step 2: Select UTXOs
+                for (const u of utxos) {
+                    const amt = u.amount;
+                    u.amount_sats = (typeof amt === 'number' && amt < 10000) ? Math.round(amt * 1e8) : parseInt(amt);
+                }
+                utxos = utxos.filter(u => u.address !== bridgeAddr);
+                utxos.sort((a, b) => b.amount_sats - a.amount_sats);
+
+                const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
+                const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
+                let selected = [];
+                let totalSats = 0;
+                for (const u of utxos) {
+                    if (selected.length >= MAX_INPUTS) break;
+                    selected.push(u);
+                    totalSats += u.amount_sats;
+                    if (totalSats >= needed) break;
+                }
+
+                const estSignedSize = selected.length * 5400 + 200;
+                const feeSats = estSignedSize * FEE_RATE;
+                const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
+
+                if (totalSats < actualNeeded) {
+                    log(`Insufficient funds. Have ${(totalSats / 1e8).toFixed(4)} ${limits.coin}, need ${(actualNeeded / 1e8).toFixed(4)}`, 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
+                const changeAddr = selected[0].address;
+                log(`Selected ${selected.length} UTXOs. Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}`);
+
+                // Step 3: Build OP_RETURN (DBRG tag + Base address)
+                const tag = new Uint8Array([0x44, 0x42, 0x52, 0x47]); // "DBRG"
+                const baseAddrBytes = bridgeHexToBytes(baseAddr.slice(2));
+                const opReturnData = bridgeConcatBytes(tag, baseAddrBytes);
+
+                // Step 4: Build raw tx
+                log('Building transaction...');
+                const inputs = selected.map(u => ({ txid: u.txid, vout: u.vout }));
+                const rawTx = bridgeBuildRawTx(inputs, bridgeAddr, depositSats, changeAddr, changeSats, opReturnData);
+                const rawHex = bridgeBytesToHex(rawTx);
+
+                // Step 5: Confirm
+                const confirmed = confirm(
+                    `Bridge ${amountStr} ${limits.coin}?\n\n` +
+                    `Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}\n` +
+                    `To: ${baseAddr}\n` +
+                    `Inputs: ${selected.length}`
+                );
+                if (!confirmed) { log('Cancelled.', 'error'); btn.disabled = false; return; }
+
+                // Step 6: Sign
+                log('Signing (' + selected.length + ' inputs)...');
+                const signResult = await rpcCall('signrawtransaction', { hex: rawHex }, 120000);
+                if (!signResult.complete) {
+                    log('Signing failed: ' + JSON.stringify(signResult), 'error');
+                    btn.disabled = false;
+                    return;
+                }
+                log('Signed. Size: ' + (signResult.hex.length / 2 / 1024).toFixed(1) + ' KB');
+
+                // Step 7: Broadcast
+                log('Broadcasting...');
+                const txid = await rpcCall('sendrawtransaction', { hex: signResult.hex }, 120000);
+                log('Sent! TxID: ' + txid, 'success');
+                log(`${limits.wrapped} will arrive in your MetaMask after confirmations.`, 'success');
+
+            } catch (e) {
+                log('Error: ' + e.message, 'error');
+            }
+
+            btn.disabled = false;
+            bridgeValidateDeposit();
+        }
+
+        async function bridgeExecuteBurn() {
+            if (!bridgeSigner) { showNotification('Connect MetaMask first', 'error'); return; }
+
+            const amount = document.getElementById('bridgeWithdrawAmount').value;
+            const nativeAddr = document.getElementById('bridgeWithdrawNativeAddr').value.trim();
+
+            if (!amount || parseFloat(amount) <= 0) { showNotification('Enter a valid amount', 'error'); return; }
+            if (!nativeAddr || !nativeAddr.startsWith('D')) { showNotification('Enter a valid Dilithion address (starts with D)', 'error'); return; }
+
+            const contractAddr = bridgeWithdrawChain === 'dil' ? BRIDGE_CONFIG.wdilContract : BRIDGE_CONFIG.wdilvContract;
+            const resultDiv = document.getElementById('bridgeWithdrawResult');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">Processing burn...</p>';
+
+            try {
+                const contract = new ethers.Contract(contractAddr, BRIDGE_CONFIG.burnAbi, bridgeSigner);
+                const decimals = await contract.decimals();
+                const amountWei = ethers.utils.parseUnits(amount, decimals);
+
+                const balance = await contract.balanceOf(bridgeConnectedAddress);
+                if (balance.lt(amountWei)) {
+                    resultDiv.innerHTML = `<p style="color: var(--error); font-size: 0.85rem;">Insufficient balance. You have ${ethers.utils.formatUnits(balance, decimals)}</p>`;
+                    return;
+                }
+
+                const tx = await contract.burn(amountWei, nativeAddr);
+                resultDiv.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">TX submitted: ${tx.hash.slice(0, 16)}... Waiting for confirmation...</p>`;
+
+                const receipt = await tx.wait();
+                const symbol = bridgeWithdrawChain === 'dil' ? 'wDIL' : 'wDILV';
+                const coin = bridgeWithdrawChain === 'dil' ? 'DIL' : 'DilV';
+
+                resultDiv.innerHTML = `
+                    <div style="background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); border-radius: 8px; padding: 12px; font-size: 0.85rem;">
+                        <p style="color: var(--success); font-weight: 600; margin-bottom: 8px;">Burn confirmed!</p>
+                        <p style="color: var(--text-secondary);">Amount: ${amount} ${symbol}</p>
+                        <p style="color: var(--text-secondary);">To: ${nativeAddr}</p>
+                        <p style="color: var(--text-secondary);">Base TX: ${receipt.transactionHash.slice(0, 20)}...</p>
+                        <p style="color: var(--text-muted); margin-top: 8px; font-size: 0.8rem;">
+                            The bridge will send ${coin} to your address after ~12 Base block confirmations (~30s).
+                        </p>
+                    </div>
+                `;
+            } catch (e) {
+                resultDiv.innerHTML = `<p style="color: var(--error); font-size: 0.85rem;">Burn failed: ${e.reason || e.message}</p>`;
+            }
+        }
+
+        function bridgeInitTab() {
+            // Initialize active states
+            switchBridgeTab('deposit');
+            bridgeSelectDepositChain('dil');
+            bridgeSelectWithdrawChain('dil');
+            // Show warning if on HTTPS (deposits need local node RPC)
+            const warn = document.getElementById('bridgeHttpsWarning');
+            if (warn) warn.style.display = window.location.protocol === 'https:' ? 'block' : 'none';
+            // Auto-connect if MetaMask is already connected
+            if (window.ethereum && window.ethereum.selectedAddress) {
+                bridgeConnectWallet();
+            }
+        }
+
         // Navigation
         function navigateTo(pageName) {
             document.querySelectorAll('.nav-item').forEach(item => {
@@ -3222,6 +3861,9 @@ inline const std::string& GetWalletHTML() {
             }
             if (pageName === 'mining-stats') {
                 refreshMiningStats();
+            }
+            if (pageName === 'bridge') {
+                bridgeInitTab();
             }
         }
 
@@ -3740,6 +4382,9 @@ inline const std::string& GetWalletHTML() {
                 connect();
             }
         });
+
+        // Refit balance text when window resizes (e.g. moving between monitors)
+        window.addEventListener('resize', fitBalanceText);
 
         // BUG #115 FIX: Auto-refresh with serialized requests to prevent connection overload
         let refreshInProgress = false;
