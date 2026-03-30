@@ -3292,14 +3292,10 @@ std::vector<CWalletTx> CWallet::ListUnspentOutputs(CUTXOSet& utxo_set, unsigned 
         }
 
         // WALLET-003 FIX: Check confirmation depth to prevent spending unconfirmed transactions
-        // Without this check, wallet spends 0-conf transactions which are vulnerable to:
-        // - Double-spend attacks (attacker replaces transaction before it confirms)
-        // - Chain reorganizations (transaction may disappear from chain)
-        // Impact: Protects against double-spend and ensures funds are safe from reorgs
         // Confirmations = (current_height - tx_height) + 1
-        // For unconfirmed txs (height = 0 or not in chain), depth = 0
+        // Note: no nHeight > 0 guard — genesis outputs (height 0) are valid (pre-fund)
         unsigned int depth = 0;
-        if (entry.nHeight > 0 && current_height >= entry.nHeight) {
+        if (current_height >= entry.nHeight) {
             depth = current_height - entry.nHeight + 1;
         }
 

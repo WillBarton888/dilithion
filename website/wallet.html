@@ -1020,8 +1020,25 @@
         <!-- Dashboard Page -->
         <div class="page active" id="page-dashboard">
             <div class="page-header">
-                <h1 class="page-title">Dashboard</h1>
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                    <h1 class="page-title" style="margin: 0;">HD Wallet Dashboard</h1>
+                    <button class="btn btn-secondary" onclick="toggleAddressList()" id="showAddressesBtn" style="padding: 8px 16px; font-size: 13px;">
+                        Show All Addresses
+                    </button>
+                </div>
                 <p class="page-subtitle">Your wallet overview</p>
+            </div>
+
+            <!-- All Addresses Panel (toggled by Show All Addresses button) -->
+            <div id="addressListPanel" class="card" style="display: none; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <div class="card-title" style="margin: 0;">All Wallet Addresses</div>
+                    <button class="btn btn-secondary" onclick="toggleAddressList()" style="padding: 4px 12px; font-size: 12px;">Close</button>
+                </div>
+                <p style="color: #8A8A80; font-size: 12px; margin: 0 0 12px 0;">Your HD wallet derives multiple addresses. Mining rewards and received funds may be on different addresses.</p>
+                <div id="addressListContent" style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Loading...</div>
+                </div>
             </div>
 
             <!-- Mobile Chain Toggle (hidden on desktop — sidebar has it) -->
@@ -1156,6 +1173,13 @@
                             <span class="info-value" id="etaToBlock">N/A</span>
                         </div>
                     </div>
+                    <div id="miningAddressRow" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(138,138,128,0.15); display: none;">
+                        <span class="info-label" style="color: #8A8A80; font-size: 12px;">Rewards Address</span>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                            <span id="miningAddressText" style="font-family: monospace; font-size: 13px; color: #C8B560; word-break: break-all; flex: 1;">—</span>
+                            <button class="copy-btn" onclick="copyMiningAddress()" style="flex-shrink: 0; padding: 4px 10px; font-size: 11px;">Copy</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Quick Actions Card -->
@@ -1236,6 +1260,15 @@
                 <p class="page-subtitle">Share your address to receive funds</p>
             </div>
 
+            <div class="card" id="miningAddressCard" style="display: none; border-left: 3px solid #C8B560;">
+                <div class="card-title" style="color: #C8B560;">Mining Rewards Address</div>
+                <p style="color: #8A8A80; font-size: 13px; margin: 0 0 8px 0;">This is where your mining rewards are sent. Use this to check your balance on the explorer.</p>
+                <div class="address-display">
+                    <span class="address-text" id="receiveMiningAddress" style="font-family: monospace;">Loading...</span>
+                    <button class="copy-btn" onclick="copyMiningAddress()">Copy</button>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-title">Your Receiving Address</div>
                 <div class="address-display">
@@ -1254,6 +1287,7 @@
                     Generate New Address
                 </button>
             </div>
+
         </div>
 
         <!-- Transactions Page -->
@@ -2801,6 +2835,44 @@
             } else {
                 etaEl.textContent = estimateTimeToBlock(hashrate, difficulty);
             }
+
+            // Fetch and display mining address
+            refreshMiningAddress();
+        }
+
+        // Fetch the current mining address and display it in the dashboard
+        async function refreshMiningAddress() {
+            const row = document.getElementById('miningAddressRow');
+            const textEl = document.getElementById('miningAddressText');
+            try {
+                const result = await rpcCall('getminingaddress');
+                if (result && result.address) {
+                    textEl.textContent = result.address;
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            } catch (e) {
+                row.style.display = 'none';
+            }
+        }
+
+        // Copy the mining address to clipboard
+        function copyMiningAddress() {
+            const addr = document.getElementById('miningAddressText').textContent;
+            if (!addr || addr === '—') return;
+            navigator.clipboard.writeText(addr).then(() => {
+                showNotification('Mining address copied', 'success');
+            }).catch(() => {
+                // Fallback for older browsers
+                const ta = document.createElement('textarea');
+                ta.value = addr;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showNotification('Mining address copied', 'success');
+            });
         }
 
         // Estimate time to find next block
@@ -3174,6 +3246,21 @@
 
                 // Show existing label if any
                 updateAddressLabelDisplay(address);
+
+                // Show mining address card if mining address differs from receive address
+                const miningCard = document.getElementById('miningAddressCard');
+                const miningAddrEl = document.getElementById('receiveMiningAddress');
+                try {
+                    const miningResult = await rpcCall('getminingaddress');
+                    if (miningResult && miningResult.address && miningResult.address !== address) {
+                        miningAddrEl.textContent = miningResult.address;
+                        miningCard.style.display = '';
+                    } else {
+                        miningCard.style.display = 'none';
+                    }
+                } catch (e) {
+                    miningCard.style.display = 'none';
+                }
             } catch(e) {
                 document.getElementById('receiveAddress').textContent = 'Error loading address';
                 console.error('Address error:', e);
@@ -3289,6 +3376,174 @@
                 btn.textContent = 'Copy';
                 btn.classList.remove('copied');
             }, 2000);
+        }
+
+        // Toggle address list visibility on dashboard
+        function toggleAddressList() {
+            const panel = document.getElementById('addressListPanel');
+            const btn = document.getElementById('showAddressesBtn');
+            const isHidden = panel.style.display === 'none';
+            panel.style.display = isHidden ? '' : 'none';
+            btn.textContent = isHidden ? 'Hide Addresses' : 'Show All Addresses';
+            if (isHidden) {
+                loadAddressBalances();
+            }
+        }
+
+        // Load all wallet addresses with balances
+        async function loadAddressBalances() {
+            const content = document.getElementById('addressListContent');
+            content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Loading...</div>';
+
+            try {
+                const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
+                let addressBalances = [];
+
+                if (isFullNode && connected) {
+                    // Get all addresses and UTXOs from node
+                    const [addresses, utxos] = await Promise.all([
+                        rpcCall('getaddresses'),
+                        rpcCall('listunspent')
+                    ]);
+
+                    // Also get mining address
+                    let miningAddr = null;
+                    try {
+                        const ma = await rpcCall('getminingaddress');
+                        if (ma && ma.address) miningAddr = ma.address;
+                    } catch (e) {}
+
+                    // Aggregate UTXO balances by address
+                    const balanceMap = {};
+                    for (const addr of addresses) {
+                        balanceMap[addr] = 0;
+                    }
+                    for (const utxo of utxos) {
+                        if (!balanceMap.hasOwnProperty(utxo.address)) {
+                            balanceMap[utxo.address] = 0;
+                        }
+                        balanceMap[utxo.address] += utxo.amount;
+                    }
+
+                    // Build sorted list (addresses with balance first)
+                    for (const [addr, bal] of Object.entries(balanceMap)) {
+                        const isMining = addr === miningAddr;
+                        addressBalances.push({ address: addr, balance: bal, isMining: isMining });
+                    }
+                    addressBalances.sort((a, b) => b.balance - a.balance);
+
+                } else if (!isFullNode && localWallet && localWallet.isWalletUnlocked()) {
+                    // Light wallet mode — show addresses (no balance without node)
+                    const addresses = await localWallet.getAddresses();
+                    for (const a of addresses) {
+                        addressBalances.push({ address: a.address, balance: null, isMining: false });
+                    }
+                } else {
+                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Connect to a node to see address balances</div>';
+                    return;
+                }
+
+                if (addressBalances.length === 0) {
+                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">No addresses found</div>';
+                    return;
+                }
+
+                // Determine coin label
+                const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
+
+                // Split into addresses with balance and empty addresses
+                const withBalance = addressBalances.filter(a => a.balance > 0 || a.isMining);
+                const emptyAddrs = addressBalances.filter(a => a.balance <= 0 && !a.isMining);
+
+                function renderAddressRow(item) {
+                    const label = getAddressLabel(item.address);
+                    const tags = [];
+                    if (item.isMining) tags.push('<span style="background: rgba(200,181,96,0.2); color: #C8B560; font-size: 10px; padding: 2px 6px; border-radius: 3px; margin-left: 6px;">MINING</span>');
+                    if (label) tags.push('<span style="color: #8A8A80; font-size: 11px; margin-left: 6px;">' + label + '</span>');
+
+                    const balText = item.balance !== null
+                        ? '<span style="color: ' + (item.balance > 0 ? '#22c55e' : '#8A8A80') + '; font-size: 13px; white-space: nowrap;">' + item.balance.toFixed(8) + ' ' + coinLabel + '</span>'
+                        : '<span style="color: #8A8A80; font-size: 12px;">Balance requires node</span>';
+
+                    return `
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(138,138,128,0.05); border-radius: 4px; gap: 8px;">
+                            <div style="min-width: 0; flex: 1;">
+                                <div style="display: flex; align-items: center; flex-wrap: wrap;">
+                                    <span style="font-family: monospace; font-size: 12px; color: #e0e0d0; word-break: break-all;">${item.address}</span>
+                                    ${tags.join('')}
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                                ${balText}
+                                <button class="copy-btn" onclick="copyText('${item.address}')" style="padding: 3px 8px; font-size: 10px;">Copy</button>
+                            </div>
+                        </div>`;
+                }
+
+                let html = '';
+                if (withBalance.length === 0) {
+                    html += '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">No addresses with balance found</div>';
+                } else {
+                    for (const item of withBalance) {
+                        html += renderAddressRow(item);
+                    }
+                }
+
+                if (emptyAddrs.length > 0) {
+                    html += `
+                        <button class="btn btn-secondary" onclick="toggleEmptyAddresses()" id="emptyAddrsBtn" style="width: 100%; margin-top: 8px; padding: 8px; font-size: 12px;">
+                            Show ${emptyAddrs.length} Empty Addresses
+                        </button>
+                        <div id="emptyAddressList" style="display: none; flex-direction: column; gap: 4px; margin-top: 4px;">`;
+                    // Pre-render but hidden
+                    html += '</div>';
+                    // Store empty addresses for lazy render
+                    window._emptyAddresses = emptyAddrs;
+                    window._renderAddressRow = renderAddressRow;
+                }
+
+                content.innerHTML = html;
+
+            } catch (e) {
+                console.error('[AddressList] Error:', e);
+                content.innerHTML = '<div style="color: #ff6b6b; font-size: 13px; padding: 12px 0;">Error loading addresses: ' + e.message + '</div>';
+            }
+        }
+
+        // Toggle empty addresses visibility
+        function toggleEmptyAddresses() {
+            const container = document.getElementById('emptyAddressList');
+            const btn = document.getElementById('emptyAddrsBtn');
+            if (container.style.display === 'none') {
+                // Lazy render on first open
+                if (container.innerHTML === '' && window._emptyAddresses) {
+                    let html = '';
+                    for (const item of window._emptyAddresses) {
+                        html += window._renderAddressRow(item);
+                    }
+                    container.innerHTML = html;
+                }
+                container.style.display = 'flex';
+                btn.textContent = 'Hide Empty Addresses';
+            } else {
+                container.style.display = 'none';
+                btn.textContent = 'Show ' + (window._emptyAddresses ? window._emptyAddresses.length : '') + ' Empty Addresses';
+            }
+        }
+
+        // Generic copy text helper
+        function copyText(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showNotification('Address copied', 'success');
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showNotification('Address copied', 'success');
+            });
         }
 
         // Mnemonic auto-hide timeout

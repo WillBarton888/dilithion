@@ -691,7 +691,17 @@ inline const std::string& GetWalletHTML() {
                 font-size: 0.95rem !important;
             }
 
-            /* Dashboard mining + quick actions stack */
+            /* Hide mining on mobile (requires a node) */
+            .mining-only {
+                display: none !important;
+            }
+
+            /* Show chain toggle on mobile dashboard */
+            .mobile-chain-toggle {
+                display: block !important;
+            }
+
+            /* Dashboard quick actions full width */
             .cards-row {
                 grid-template-columns: 1fr !important;
             }
@@ -898,7 +908,6 @@ inline const std::string& GetWalletHTML() {
         <div class="mobile-more-sheet">
             <div class="mobile-more-item" onclick="mobileNavigate('transactions')">History</div>
             <div class="mobile-more-item" onclick="mobileNavigate('network')">Blockchain</div>
-            <div class="mobile-more-item" onclick="mobileNavigate('mining-stats')">Mining Stats</div>
             <div class="mobile-more-item" onclick="mobileNavigate('backup')">Backup & Recover</div>
             <div class="mobile-more-item" onclick="mobileNavigate('settings')">Settings</div>
             <div style="display: flex; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border); margin-top: 8px;">
@@ -1024,8 +1033,33 @@ inline const std::string& GetWalletHTML() {
         <!-- Dashboard Page -->
         <div class="page active" id="page-dashboard">
             <div class="page-header">
-                <h1 class="page-title">Dashboard</h1>
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                    <h1 class="page-title" style="margin: 0;">HD Wallet Dashboard</h1>
+                    <button class="btn btn-secondary" onclick="toggleAddressList()" id="showAddressesBtn" style="padding: 8px 16px; font-size: 13px;">
+                        Show All Addresses
+                    </button>
+                </div>
                 <p class="page-subtitle">Your wallet overview</p>
+            </div>
+
+            <!-- All Addresses Panel (toggled by Show All Addresses button) -->
+            <div id="addressListPanel" class="card" style="display: none; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <div class="card-title" style="margin: 0;">All Wallet Addresses</div>
+                    <button class="btn btn-secondary" onclick="toggleAddressList()" style="padding: 4px 12px; font-size: 12px;">Close</button>
+                </div>
+                <p style="color: #8A8A80; font-size: 12px; margin: 0 0 12px 0;">Your HD wallet derives multiple addresses. Mining rewards and received funds may be on different addresses.</p>
+                <div id="addressListContent" style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Mobile Chain Toggle (hidden on desktop — sidebar has it) -->
+            <div class="mobile-chain-toggle" id="mobileChainToggle" style="display: none; margin-bottom: 16px;">
+                <div style="display: flex; gap: 4px; background: var(--bg-darker); border-radius: 10px; padding: 4px;">
+                    <button id="mobileChainDil" onclick="switchChain('dil')" style="flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background: var(--primary); color: white;">DIL</button>
+                    <button id="mobileChainDilv" onclick="switchChain('dilv')" style="flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--text-muted);">DilV</button>
+                </div>
             </div>
 
             <div class="balance-grid">
@@ -1105,8 +1139,8 @@ inline const std::string& GetWalletHTML() {
             </div>
 
             <div class="cards-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                <!-- Mining Card -->
-                <div class="card">
+                <!-- Mining Card (hidden on mobile/light mode) -->
+                <div class="card mining-only" id="dashMiningCard">
                     <div class="card-title">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px; vertical-align: middle;">
                             <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
@@ -1152,6 +1186,13 @@ inline const std::string& GetWalletHTML() {
                             <span class="info-value" id="etaToBlock">N/A</span>
                         </div>
                     </div>
+                    <div id="miningAddressRow" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(138,138,128,0.15); display: none;">
+                        <span class="info-label" style="color: #8A8A80; font-size: 12px;">Rewards Address</span>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                            <span id="miningAddressText" style="font-family: monospace; font-size: 13px; color: #C8B560; word-break: break-all; flex: 1;">—</span>
+                            <button class="copy-btn" onclick="copyMiningAddress()" style="flex-shrink: 0; padding: 4px 10px; font-size: 11px;">Copy</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Quick Actions Card -->
@@ -1177,7 +1218,7 @@ inline const std::string& GetWalletHTML() {
                                 <polyline points="23 4 23 10 17 10"></polyline>
                                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
                             </svg>
-                            <span id="rescanBtnText">Rescan Wallet</span>
+                            <span id="rescanBtnText">Refresh Balances</span>
                         </button>
                     </div>
                 </div>
@@ -1232,6 +1273,15 @@ inline const std::string& GetWalletHTML() {
                 <p class="page-subtitle">Share your address to receive funds</p>
             </div>
 
+            <div class="card" id="miningAddressCard" style="display: none; border-left: 3px solid #C8B560;">
+                <div class="card-title" style="color: #C8B560;">Mining Rewards Address</div>
+                <p style="color: #8A8A80; font-size: 13px; margin: 0 0 8px 0;">This is where your mining rewards are sent. Use this to check your balance on the explorer.</p>
+                <div class="address-display">
+                    <span class="address-text" id="receiveMiningAddress" style="font-family: monospace;">Loading...</span>
+                    <button class="copy-btn" onclick="copyMiningAddress()">Copy</button>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-title">Your Receiving Address</div>
                 <div class="address-display">
@@ -1250,6 +1300,7 @@ inline const std::string& GetWalletHTML() {
                     Generate New Address
                 </button>
             </div>
+
         </div>
 
         <!-- Transactions Page -->
@@ -2012,7 +2063,7 @@ inline const std::string& GetWalletHTML() {
         };
 
         // Active chain: 'dil' or 'dilv'
-        let activeChain = localStorage.getItem('dilithionActiveChain') || 'dil';
+        let activeChain = 'dil';  // Always start on DIL
         const chainPorts = { dil: 8332, dilv: 9332 };
         const chainUnits = { dil: 'DIL', dilv: 'DilV' };
 
@@ -2050,36 +2101,80 @@ inline const std::string& GetWalletHTML() {
             localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
             // Update chain ID for transaction signing (DIL=1, DilV=2)
             if (txBuilder) txBuilder.chainId = chain === 'dilv' ? 2 : 1;
-            // Update mobile chain buttons
-            const mDil = document.getElementById('mChainDil');
-            const mDilv = document.getElementById('mChainDilv');
-            if (mDil && mDilv) {
-                if (chain === 'dil') {
-                    mDil.style.background = 'var(--primary)'; mDil.style.color = 'white'; mDil.style.border = 'none';
-                    mDilv.style.background = 'transparent'; mDilv.style.color = 'var(--text-muted)'; mDilv.style.border = '1px solid var(--border)';
-                } else {
-                    mDilv.style.background = 'var(--secondary)'; mDilv.style.color = 'white'; mDilv.style.border = 'none';
-                    mDil.style.background = 'transparent'; mDil.style.color = 'var(--text-muted)'; mDil.style.border = '1px solid var(--border)';
+            // Update connection manager chain for API routing
+            if (connectionManager) connectionManager.setChain(chain);
+            // Update ALL mobile chain buttons (More menu + dashboard toggle)
+            const chainBtns = [
+                ['mChainDil', 'mChainDilv'],
+                ['mobileChainDil', 'mobileChainDilv']
+            ];
+            for (const [dilId, dilvId] of chainBtns) {
+                const d = document.getElementById(dilId);
+                const v = document.getElementById(dilvId);
+                if (d && v) {
+                    if (chain === 'dil') {
+                        d.style.background = 'var(--primary)'; d.style.color = 'white'; d.style.border = 'none';
+                        v.style.background = 'transparent'; v.style.color = 'var(--text-muted)'; v.style.border = '1px solid var(--border)';
+                    } else {
+                        v.style.background = 'var(--secondary)'; v.style.color = 'white'; v.style.border = 'none';
+                        d.style.background = 'transparent'; d.style.color = 'var(--text-muted)'; d.style.border = '1px solid var(--border)';
+                    }
                 }
             }
-            connect();
+            // Show loading state while switching
+            document.getElementById('totalBalance').textContent = '...';
+            document.getElementById('matureBalance').textContent = '...';
+            document.getElementById('immatureBalance').textContent = '...';
+
+            // Reconnect with new chain
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+            if (isLightMode) {
+                connectionManager.connect().then(() => {
+                    setConnectionStatus(true, (chain === 'dilv' ? 'DilV' : 'DIL') + ' Light Wallet');
+                    refreshAll();
+                }).catch(() => {
+                    setConnectionStatus(false, 'Connection failed');
+                    document.getElementById('totalBalance').textContent = '0.00000000';
+                    document.getElementById('matureBalance').textContent = '0.00000000';
+                    document.getElementById('immatureBalance').textContent = '0.00000000';
+                });
+            } else {
+                connect();
+            }
         }
 
         // Initialize chain toggle on load
         function initChainSelector() {
             // Apply saved chain state
             if (activeChain === 'dilv') {
+                // Sidebar buttons
                 const btnDil = document.getElementById('chainBtnDil');
                 const btnDilv = document.getElementById('chainBtnDilv');
-                btnDilv.style.background = 'var(--secondary)';
-                btnDilv.style.color = 'white';
-                btnDil.style.background = 'transparent';
-                btnDil.style.color = 'var(--text-muted)';
+                if (btnDilv) { btnDilv.style.background = 'var(--secondary)'; btnDilv.style.color = 'white'; }
+                if (btnDil) { btnDil.style.background = 'transparent'; btnDil.style.color = 'var(--text-muted)'; }
+
+                // Mobile dashboard toggle
+                const mDil = document.getElementById('mobileChainDil');
+                const mDilv = document.getElementById('mobileChainDilv');
+                if (mDilv) { mDilv.style.background = 'var(--secondary)'; mDilv.style.color = 'white'; mDilv.style.border = 'none'; }
+                if (mDil) { mDil.style.background = 'transparent'; mDil.style.color = 'var(--text-muted)'; mDil.style.border = '1px solid var(--border)'; }
+
+                // Mobile More menu toggle
+                const mmDil = document.getElementById('mChainDil');
+                const mmDilv = document.getElementById('mChainDilv');
+                if (mmDilv) { mmDilv.style.background = 'var(--secondary)'; mmDilv.style.color = 'white'; mmDilv.style.border = 'none'; }
+                if (mmDil) { mmDil.style.background = 'transparent'; mmDil.style.color = 'var(--text-muted)'; mmDil.style.border = '1px solid var(--border)'; }
+
+                // Labels and title
                 document.querySelectorAll('.balance-unit, .chain-label').forEach(el => {
                     el.textContent = 'DilV';
                 });
                 document.title = 'DilV Web Wallet';
                 rpcConfig.port = 9332;
+
+                // Update connection manager chain
+                if (connectionManager) connectionManager.setChain('dilv');
+                if (txBuilder) txBuilder.chainId = 2;
             }
         }
 
@@ -2753,6 +2848,44 @@ inline const std::string& GetWalletHTML() {
             } else {
                 etaEl.textContent = estimateTimeToBlock(hashrate, difficulty);
             }
+
+            // Fetch and display mining address
+            refreshMiningAddress();
+        }
+
+        // Fetch the current mining address and display it in the dashboard
+        async function refreshMiningAddress() {
+            const row = document.getElementById('miningAddressRow');
+            const textEl = document.getElementById('miningAddressText');
+            try {
+                const result = await rpcCall('getminingaddress');
+                if (result && result.address) {
+                    textEl.textContent = result.address;
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            } catch (e) {
+                row.style.display = 'none';
+            }
+        }
+
+        // Copy the mining address to clipboard
+        function copyMiningAddress() {
+            const addr = document.getElementById('miningAddressText').textContent;
+            if (!addr || addr === '—') return;
+            navigator.clipboard.writeText(addr).then(() => {
+                showNotification('Mining address copied', 'success');
+            }).catch(() => {
+                // Fallback for older browsers
+                const ta = document.createElement('textarea');
+                ta.value = addr;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showNotification('Mining address copied', 'success');
+            });
         }
 
         // Estimate time to find next block
@@ -2833,31 +2966,43 @@ inline const std::string& GetWalletHTML() {
         async function rescanWallet() {
             const btnText = document.getElementById('rescanBtnText');
             const originalText = btnText.textContent;
-            btnText.textContent = 'Clearing...';
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
 
-            try {
-                // First clear old transaction history (important after chain resets)
-                await rpcCall('clearwallettxs', {});
+            if (isLightMode) {
+                // Light mode: re-scan HD addresses via API and refresh balances
                 btnText.textContent = 'Scanning...';
-
-                // Then rescan for new transactions
-                const result = await rpcCall('rescanwallet', {}, 120000);
-                btnText.textContent = 'Done!';
-                console.log('[Wallet] Rescan result:', result);
-
-                // Refresh balance and transactions
-                await refreshBalance();
-                await refreshTransactions();
-
-                setTimeout(() => {
-                    btnText.textContent = originalText;
-                }, 2000);
-            } catch(e) {
-                console.error('Rescan error:', e);
-                btnText.textContent = 'Failed';
-                setTimeout(() => {
-                    btnText.textContent = originalText;
-                }, 2000);
+                try {
+                    if (localWallet && localWallet.isWalletUnlocked() && connectionManager.isConnected()) {
+                        const result = await localWallet.scanHDAddresses(connectionManager, (index, found) => {
+                            btnText.textContent = `Scanning (${index})...`;
+                        });
+                        btnText.textContent = `Found ${result.found} addresses`;
+                    }
+                    await refreshBalance();
+                    await refreshTransactions();
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                } catch(e) {
+                    console.error('Rescan error:', e);
+                    btnText.textContent = 'Failed';
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                }
+            } else {
+                // Full node mode: use RPC
+                btnText.textContent = 'Clearing...';
+                try {
+                    await rpcCall('clearwallettxs', {});
+                    btnText.textContent = 'Scanning...';
+                    const result = await rpcCall('rescanwallet', {}, 120000);
+                    btnText.textContent = 'Done!';
+                    console.log('[Wallet] Rescan result:', result);
+                    await refreshBalance();
+                    await refreshTransactions();
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                } catch(e) {
+                    console.error('Rescan error:', e);
+                    btnText.textContent = 'Failed';
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                }
             }
         }
 
@@ -3114,6 +3259,21 @@ inline const std::string& GetWalletHTML() {
 
                 // Show existing label if any
                 updateAddressLabelDisplay(address);
+
+                // Show mining address card if mining address differs from receive address
+                const miningCard = document.getElementById('miningAddressCard');
+                const miningAddrEl = document.getElementById('receiveMiningAddress');
+                try {
+                    const miningResult = await rpcCall('getminingaddress');
+                    if (miningResult && miningResult.address && miningResult.address !== address) {
+                        miningAddrEl.textContent = miningResult.address;
+                        miningCard.style.display = '';
+                    } else {
+                        miningCard.style.display = 'none';
+                    }
+                } catch (e) {
+                    miningCard.style.display = 'none';
+                }
             } catch(e) {
                 document.getElementById('receiveAddress').textContent = 'Error loading address';
                 console.error('Address error:', e);
@@ -3229,6 +3389,174 @@ inline const std::string& GetWalletHTML() {
                 btn.textContent = 'Copy';
                 btn.classList.remove('copied');
             }, 2000);
+        }
+
+        // Toggle address list visibility on dashboard
+        function toggleAddressList() {
+            const panel = document.getElementById('addressListPanel');
+            const btn = document.getElementById('showAddressesBtn');
+            const isHidden = panel.style.display === 'none';
+            panel.style.display = isHidden ? '' : 'none';
+            btn.textContent = isHidden ? 'Hide Addresses' : 'Show All Addresses';
+            if (isHidden) {
+                loadAddressBalances();
+            }
+        }
+
+        // Load all wallet addresses with balances
+        async function loadAddressBalances() {
+            const content = document.getElementById('addressListContent');
+            content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Loading...</div>';
+
+            try {
+                const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
+                let addressBalances = [];
+
+                if (isFullNode && connected) {
+                    // Get all addresses and UTXOs from node
+                    const [addresses, utxos] = await Promise.all([
+                        rpcCall('getaddresses'),
+                        rpcCall('listunspent')
+                    ]);
+
+                    // Also get mining address
+                    let miningAddr = null;
+                    try {
+                        const ma = await rpcCall('getminingaddress');
+                        if (ma && ma.address) miningAddr = ma.address;
+                    } catch (e) {}
+
+                    // Aggregate UTXO balances by address
+                    const balanceMap = {};
+                    for (const addr of addresses) {
+                        balanceMap[addr] = 0;
+                    }
+                    for (const utxo of utxos) {
+                        if (!balanceMap.hasOwnProperty(utxo.address)) {
+                            balanceMap[utxo.address] = 0;
+                        }
+                        balanceMap[utxo.address] += utxo.amount;
+                    }
+
+                    // Build sorted list (addresses with balance first)
+                    for (const [addr, bal] of Object.entries(balanceMap)) {
+                        const isMining = addr === miningAddr;
+                        addressBalances.push({ address: addr, balance: bal, isMining: isMining });
+                    }
+                    addressBalances.sort((a, b) => b.balance - a.balance);
+
+                } else if (!isFullNode && localWallet && localWallet.isWalletUnlocked()) {
+                    // Light wallet mode — show addresses (no balance without node)
+                    const addresses = await localWallet.getAddresses();
+                    for (const a of addresses) {
+                        addressBalances.push({ address: a.address, balance: null, isMining: false });
+                    }
+                } else {
+                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Connect to a node to see address balances</div>';
+                    return;
+                }
+
+                if (addressBalances.length === 0) {
+                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">No addresses found</div>';
+                    return;
+                }
+
+                // Determine coin label
+                const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
+
+                // Split into addresses with balance and empty addresses
+                const withBalance = addressBalances.filter(a => a.balance > 0 || a.isMining);
+                const emptyAddrs = addressBalances.filter(a => a.balance <= 0 && !a.isMining);
+
+                function renderAddressRow(item) {
+                    const label = getAddressLabel(item.address);
+                    const tags = [];
+                    if (item.isMining) tags.push('<span style="background: rgba(200,181,96,0.2); color: #C8B560; font-size: 10px; padding: 2px 6px; border-radius: 3px; margin-left: 6px;">MINING</span>');
+                    if (label) tags.push('<span style="color: #8A8A80; font-size: 11px; margin-left: 6px;">' + label + '</span>');
+
+                    const balText = item.balance !== null
+                        ? '<span style="color: ' + (item.balance > 0 ? '#22c55e' : '#8A8A80') + '; font-size: 13px; white-space: nowrap;">' + item.balance.toFixed(8) + ' ' + coinLabel + '</span>'
+                        : '<span style="color: #8A8A80; font-size: 12px;">Balance requires node</span>';
+
+                    return `
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(138,138,128,0.05); border-radius: 4px; gap: 8px;">
+                            <div style="min-width: 0; flex: 1;">
+                                <div style="display: flex; align-items: center; flex-wrap: wrap;">
+                                    <span style="font-family: monospace; font-size: 12px; color: #e0e0d0; word-break: break-all;">${item.address}</span>
+                                    ${tags.join('')}
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                                ${balText}
+                                <button class="copy-btn" onclick="copyText('${item.address}')" style="padding: 3px 8px; font-size: 10px;">Copy</button>
+                            </div>
+                        </div>`;
+                }
+
+                let html = '';
+                if (withBalance.length === 0) {
+                    html += '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">No addresses with balance found</div>';
+                } else {
+                    for (const item of withBalance) {
+                        html += renderAddressRow(item);
+                    }
+                }
+
+                if (emptyAddrs.length > 0) {
+                    html += `
+                        <button class="btn btn-secondary" onclick="toggleEmptyAddresses()" id="emptyAddrsBtn" style="width: 100%; margin-top: 8px; padding: 8px; font-size: 12px;">
+                            Show ${emptyAddrs.length} Empty Addresses
+                        </button>
+                        <div id="emptyAddressList" style="display: none; flex-direction: column; gap: 4px; margin-top: 4px;">`;
+                    // Pre-render but hidden
+                    html += '</div>';
+                    // Store empty addresses for lazy render
+                    window._emptyAddresses = emptyAddrs;
+                    window._renderAddressRow = renderAddressRow;
+                }
+
+                content.innerHTML = html;
+
+            } catch (e) {
+                console.error('[AddressList] Error:', e);
+                content.innerHTML = '<div style="color: #ff6b6b; font-size: 13px; padding: 12px 0;">Error loading addresses: ' + e.message + '</div>';
+            }
+        }
+
+        // Toggle empty addresses visibility
+        function toggleEmptyAddresses() {
+            const container = document.getElementById('emptyAddressList');
+            const btn = document.getElementById('emptyAddrsBtn');
+            if (container.style.display === 'none') {
+                // Lazy render on first open
+                if (container.innerHTML === '' && window._emptyAddresses) {
+                    let html = '';
+                    for (const item of window._emptyAddresses) {
+                        html += window._renderAddressRow(item);
+                    }
+                    container.innerHTML = html;
+                }
+                container.style.display = 'flex';
+                btn.textContent = 'Hide Empty Addresses';
+            } else {
+                container.style.display = 'none';
+                btn.textContent = 'Show ' + (window._emptyAddresses ? window._emptyAddresses.length : '') + ' Empty Addresses';
+            }
+        }
+
+        // Generic copy text helper
+        function copyText(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showNotification('Address copied', 'success');
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showNotification('Address copied', 'success');
+            });
         }
 
         // Mnemonic auto-hide timeout
@@ -3923,7 +4251,26 @@ inline const std::string& GetWalletHTML() {
 
         async function bridgeConnectWallet() {
             if (typeof window.ethereum === 'undefined') {
-                showNotification('MetaMask not installed. Install it to use withdraw, or just paste your 0x address for deposits.', 'error');
+                const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+                if (isMobile) {
+                    document.getElementById('bridgeMetaMaskStatus').innerHTML = `
+                        <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px; padding: 16px; font-size: 0.85rem; line-height: 1.6;">
+                            <strong style="color: var(--warning);">MetaMask on Mobile</strong>
+                            <p style="color: var(--text-secondary); margin: 8px 0;">To connect MetaMask, open this wallet inside the <strong>MetaMask app's built-in browser</strong>:</p>
+                            <ol style="color: var(--text-secondary); margin: 8px 0 12px 20px;">
+                                <li>Open the <strong>MetaMask</strong> app</li>
+                                <li>Tap <strong>Explore</strong> (magnifying glass icon) at the bottom</li>
+                                <li>Paste this URL in the address bar:</li>
+                            </ol>
+                            <div onclick="navigator.clipboard.writeText('https://dilithion.org/wallet.html?mode=light').then(()=>{this.querySelector('span').textContent='Copied!';})" style="background: var(--bg-darker); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent); cursor: pointer; word-break: break-all; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                dilithion.org/wallet.html?mode=light
+                                <span style="font-family: Inter, sans-serif; font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">Tap to copy</span>
+                            </div>
+                            <p style="color: var(--text-muted); margin: 10px 0 0; font-size: 0.8rem;">For deposits, you don't need MetaMask — just paste your 0x address above.</p>
+                        </div>`;
+                } else {
+                    showNotification('MetaMask not installed. Install it to use withdraw, or just paste your 0x address for deposits.', 'error');
+                }
                 return;
             }
             try {
@@ -5120,6 +5467,25 @@ inline const std::string& GetWalletHTML() {
 
         // Refit balance text when window resizes (e.g. moving between monitors)
         window.addEventListener('resize', fitBalanceText);
+
+        // Add show/hide toggle to all password fields
+        document.querySelectorAll('input[type="password"].form-input').forEach(input => {
+            // Skip if already has a toggle (welcome form fields)
+            if (input.parentElement.querySelector('span[onclick*="type="]')) return;
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'relative';
+            input.parentNode.insertBefore(wrapper, input);
+            wrapper.appendChild(input);
+            input.style.paddingRight = '48px';
+            const toggle = document.createElement('span');
+            toggle.textContent = 'Show';
+            toggle.style.cssText = 'position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:0.75rem;color:var(--text-muted);user-select:none;';
+            toggle.onclick = function() {
+                input.type = input.type === 'password' ? 'text' : 'password';
+                toggle.textContent = input.type === 'password' ? 'Show' : 'Hide';
+            };
+            wrapper.appendChild(toggle);
+        });
 
         // Register PWA service worker
         if ('serviceWorker' in navigator) {

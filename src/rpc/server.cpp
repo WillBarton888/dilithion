@@ -2119,9 +2119,9 @@ std::string CRPCServer::RPC_ListUnspent(const std::string& params) {
     for (size_t i = 0; i < utxos.size(); ++i) {
         if (i > 0) oss << ",";
 
-        // Get confirmations
+        // Get confirmations (no height > 0 guard — genesis outputs are valid)
         unsigned int confirmations = 0;
-        if (utxos[i].nHeight > 0 && currentHeight >= utxos[i].nHeight) {
+        if (currentHeight >= utxos[i].nHeight) {
             confirmations = currentHeight - utxos[i].nHeight + 1;
         }
 
@@ -2775,21 +2775,20 @@ std::string CRPCServer::RPC_ListTransactions(const std::string& params) {
         auto& tx = allTx[i];
 
         // Fill in block hash and time from chain state (only for top N results)
+        // Note: no height > 0 guard — genesis block (height 0) has valid outputs (pre-fund)
         std::string blockhash;
-        if (tx.height > 0) {
-            std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(tx.height);
-            if (!hashes.empty()) {
-                blockhash = hashes[0].GetHex();
-                if (tx.time == 0) {
-                    CBlockIndex* pindex = m_chainstate->GetBlockIndex(hashes[0]);
-                    if (pindex) tx.time = pindex->nTime;
-                }
+        std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(tx.height);
+        if (!hashes.empty()) {
+            blockhash = hashes[0].GetHex();
+            if (tx.time == 0) {
+                CBlockIndex* pindex = m_chainstate->GetBlockIndex(hashes[0]);
+                if (pindex) tx.time = pindex->nTime;
             }
         }
         if (tx.time == 0) tx.time = std::time(nullptr);
 
         unsigned int confirmations = 0;
-        if (tx.height > 0 && currentHeight >= tx.height) {
+        if (!blockhash.empty() && currentHeight >= tx.height) {
             confirmations = currentHeight - tx.height + 1;
         }
 
