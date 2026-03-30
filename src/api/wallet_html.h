@@ -18,6 +18,13 @@ inline const std::string& GetWalletHTML() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dilithion Web Wallet</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#C8A24E">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Dilithion">
+    <link rel="apple-touch-icon" href="dilithion-logo-200.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -580,28 +587,176 @@ inline const std::string& GetWalletHTML() {
         }
 
         /* Responsive */
+        /* Mobile bottom navigation */
+        .mobile-nav {
+            display: none;
+        }
+        .mobile-more-overlay {
+            display: none;
+        }
+
         @media (max-width: 768px) {
+            /* Hide sidebar on mobile */
             .sidebar {
-                width: 60px;
-                padding: 12px 0;
+                display: none !important;
             }
 
-            .logo-text, .nav-section-title, .nav-item span, .status-indicator span {
-                display: none;
-            }
-
-            .nav-item {
-                justify-content: center;
-                padding: 12px;
-            }
-
+            /* Full-width main content */
             .main-content {
-                margin-left: 60px;
-                padding: 16px;
+                margin-left: 0 !important;
+                padding: 16px !important;
+                padding-bottom: 80px !important; /* space for bottom nav */
+            }
+
+            /* Show bottom navigation */
+            .mobile-nav {
+                display: flex;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 64px;
+                background: var(--bg-dark);
+                border-top: 1px solid var(--border);
+                z-index: 1000;
+                justify-content: space-around;
+                align-items: center;
+                padding: 0 4px;
+            }
+            .mobile-nav-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 3px;
+                padding: 8px 4px;
+                color: var(--text-muted);
+                cursor: pointer;
+                min-width: 52px;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .mobile-nav-item.active { color: var(--primary); }
+            .mobile-nav-item svg { width: 22px; height: 22px; }
+            .mobile-nav-item span { font-size: 10px; font-weight: 500; }
+
+            /* More menu overlay */
+            .mobile-more-overlay {
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.6);
+                z-index: 1001;
+            }
+            .mobile-more-overlay.active { display: flex !important; align-items: flex-end; }
+            .mobile-more-sheet {
+                width: 100%;
+                background: var(--bg-card);
+                border-top: 1px solid var(--border);
+                border-radius: 16px 16px 0 0;
+                padding: 20px 24px;
+                padding-bottom: 80px; /* clear bottom nav */
+            }
+            .mobile-more-item {
+                padding: 14px 0;
+                font-size: 1rem;
+                color: var(--text-primary);
+                cursor: pointer;
+                border-bottom: 1px solid var(--border);
+            }
+            .mobile-more-item:last-of-type { border-bottom: none; }
+
+            /* Balance cards */
+            .balance-amount {
+                font-size: clamp(1.1rem, 5vw, 1.8rem);
+            }
+            .balance-grid {
+                gap: 12px !important;
+            }
+            .balance-card {
+                padding: 16px !important;
+            }
+
+            /* Page headers */
+            .page-header {
+                margin-bottom: 16px !important;
+            }
+            .page-title {
+                font-size: 1.4rem !important;
+            }
+
+            /* Cards */
+            .card {
+                padding: 16px !important;
+                margin-bottom: 12px !important;
+            }
+            .card-title {
+                font-size: 0.95rem !important;
+            }
+
+            /* Dashboard mining + quick actions stack */
+            .cards-row {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Bridge sub-tabs */
+            .bridge-tab {
+                font-size: 0.8rem !important;
+                padding: 8px 4px !important;
+            }
+
+            /* Form inputs - ensure full width */
+            .form-input, .form-group input, .form-group select, .form-group textarea {
+                font-size: 16px !important; /* prevents iOS zoom */
+            }
+
+            /* Transaction list */
+            .tx-item {
+                padding: 10px 0 !important;
+            }
+
+            /* Welcome flow */
+            #welcomeMnemonicWords {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+
+            /* PWA install banner clearance */
+            #pwaInstallBanner {
+                bottom: 64px !important;
+            }
+        }
+
+        /* Small phones */
+        @media (max-width: 480px) {
+            .main-content {
+                padding: 12px !important;
+                padding-bottom: 76px !important;
             }
 
             .balance-amount {
-                font-size: 1.5rem;
+                font-size: clamp(0.9rem, 4.5vw, 1.4rem);
+            }
+
+            .balance-grid {
+                grid-template-columns: 1fr !important;
+                gap: 8px !important;
+            }
+
+            .page-title {
+                font-size: 1.2rem !important;
+            }
+
+            .btn {
+                padding: 10px 16px !important;
+                font-size: 0.85rem !important;
+            }
+
+            /* Stack bridge chain toggles */
+            .bridge-chain-opt, .bridge-wchain-opt {
+                font-size: 0.75rem !important;
+                padding: 6px 2px !important;
+            }
+
+            /* Tighter cards */
+            .card {
+                padding: 12px !important;
             }
         }
     </style>
@@ -713,6 +868,45 @@ inline const std::string& GetWalletHTML() {
             <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); connect();">Reconnect</button>
         </div>
     </nav>
+
+    <!-- Mobile Bottom Navigation (hidden on desktop) -->
+    <nav class="mobile-nav" id="mobileNav">
+        <div class="mobile-nav-item active" data-mobile-page="dashboard" onclick="mobileNavigate('dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+            <span>Home</span>
+        </div>
+        <div class="mobile-nav-item" data-mobile-page="send" onclick="mobileNavigate('send')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            <span>Send</span>
+        </div>
+        <div class="mobile-nav-item" data-mobile-page="receive" onclick="mobileNavigate('receive')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path></svg>
+            <span>Receive</span>
+        </div>
+        <div class="mobile-nav-item" data-mobile-page="bridge" onclick="mobileNavigate('bridge')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+            <span>Bridge</span>
+        </div>
+        <div class="mobile-nav-item" onclick="toggleMobileMore()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+            <span>More</span>
+        </div>
+    </nav>
+
+    <!-- Mobile "More" Menu Overlay -->
+    <div class="mobile-more-overlay" id="mobileMoreOverlay" onclick="if(event.target===this)toggleMobileMore()">
+        <div class="mobile-more-sheet">
+            <div class="mobile-more-item" onclick="mobileNavigate('transactions')">History</div>
+            <div class="mobile-more-item" onclick="mobileNavigate('network')">Blockchain</div>
+            <div class="mobile-more-item" onclick="mobileNavigate('mining-stats')">Mining Stats</div>
+            <div class="mobile-more-item" onclick="mobileNavigate('backup')">Backup & Recover</div>
+            <div class="mobile-more-item" onclick="mobileNavigate('settings')">Settings</div>
+            <div style="display: flex; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border); margin-top: 8px;">
+                <button id="mChainDil" onclick="switchChain('dil');toggleMobileMore()" style="flex:1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; background: var(--primary); color: white;">DIL</button>
+                <button id="mChainDilv" onclick="switchChain('dilv');toggleMobileMore()" style="flex:1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; background: transparent; color: var(--text-muted); border: 1px solid var(--border);">DilV</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Main Content -->
     <main class="main-content">
@@ -1854,6 +2048,20 @@ inline const std::string& GetWalletHTML() {
             rpcConfig.port = chainPorts[chain];
             document.getElementById('rpcPort').value = rpcConfig.port;
             localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
+            // Update chain ID for transaction signing (DIL=1, DilV=2)
+            if (txBuilder) txBuilder.chainId = chain === 'dilv' ? 2 : 1;
+            // Update mobile chain buttons
+            const mDil = document.getElementById('mChainDil');
+            const mDilv = document.getElementById('mChainDilv');
+            if (mDil && mDilv) {
+                if (chain === 'dil') {
+                    mDil.style.background = 'var(--primary)'; mDil.style.color = 'white'; mDil.style.border = 'none';
+                    mDilv.style.background = 'transparent'; mDilv.style.color = 'var(--text-muted)'; mDilv.style.border = '1px solid var(--border)';
+                } else {
+                    mDilv.style.background = 'var(--secondary)'; mDilv.style.color = 'white'; mDilv.style.border = 'none';
+                    mDil.style.background = 'transparent'; mDil.style.color = 'var(--text-muted)'; mDil.style.border = '1px solid var(--border)';
+                }
+            }
             connect();
         }
 
@@ -3855,6 +4063,7 @@ inline const std::string& GetWalletHTML() {
             const chain = bridgeDepositChain;
             const statusDiv = document.getElementById('bridgeDepositStatus');
             const btn = document.getElementById('bridgeDepositBtn');
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
 
             statusDiv.style.display = 'block';
             statusDiv.innerHTML = '';
@@ -3873,91 +4082,199 @@ inline const std::string& GetWalletHTML() {
                 statusDiv.scrollTop = statusDiv.scrollHeight;
             }
 
-            try {
-                // Step 1: Get UTXOs from node
-                log('Connecting to node...');
-                let utxos;
+            // Build OP_RETURN data (DBRG tag + Base address) — same for both modes
+            const tag = new Uint8Array([0x44, 0x42, 0x52, 0x47]); // "DBRG"
+            const baseAddrBytes = bridgeHexToBytes(baseAddr.slice(2));
+            const opReturnData = bridgeConcatBytes(tag, baseAddrBytes);
+
+            if (isLightMode) {
+                // ============================================================
+                // LIGHT MODE: Sign locally with browser wallet, broadcast via API
+                // ============================================================
                 try {
-                    utxos = await rpcCall('listunspent');
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        log('Wallet is locked. Unlock it first in Settings.', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    // Step 1: Get addresses and UTXOs from API
+                    log('Fetching UTXOs from network...');
+                    const addresses = await localWallet.getAddresses();
+                    let allUtxos = [];
+                    for (const addr of addresses) {
+                        try {
+                            const utxoResponse = await connectionManager.getUTXOs(addr.address);
+                            const utxos = utxoResponse.utxos || utxoResponse;
+                            if (Array.isArray(utxos)) {
+                                for (const u of utxos) {
+                                    u.address = addr.address;
+                                    u.addressPath = addr.path;
+                                    u.amount_sats = u.value || u.amount || 0;
+                                    allUtxos.push(u);
+                                }
+                            }
+                        } catch (e) { /* skip failed addresses */ }
+                    }
+
+                    allUtxos = allUtxos.filter(u => u.address !== bridgeAddr);
+                    allUtxos.sort((a, b) => b.amount_sats - a.amount_sats);
+                    log('Found ' + allUtxos.length + ' UTXOs across ' + addresses.length + ' addresses.');
+
+                    if (allUtxos.length === 0) {
+                        log('No UTXOs available.', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    // Step 2: Select UTXOs
+                    const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
+                    const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
+                    let selected = [];
+                    let totalSats = 0;
+                    for (const u of allUtxos) {
+                        if (selected.length >= MAX_INPUTS) break;
+                        selected.push(u);
+                        totalSats += u.amount_sats;
+                        if (totalSats >= needed) break;
+                    }
+
+                    const estSignedSize = selected.length * 5400 + 200;
+                    const feeSats = estSignedSize * FEE_RATE;
+                    const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
+
+                    if (totalSats < actualNeeded) {
+                        log(`Insufficient funds. Have ${(totalSats / 1e8).toFixed(4)} ${limits.coin}, need ${(actualNeeded / 1e8).toFixed(4)}`, 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
+                    const changeAddr = selected[0].address;
+                    log(`Selected ${selected.length} UTXOs. Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}`);
+
+                    // Step 3: Build transaction with OP_RETURN
+                    log('Building transaction...');
+                    const tx = txBuilder.buildTransaction(
+                        selected.map(u => ({ txid: u.txid, vout: u.vout })),
+                        bridgeAddr, depositSats, changeAddr, changeSats
+                    );
+
+                    // Add OP_RETURN output (between bridge payment and change)
+                    const opReturnScript = new Uint8Array(2 + opReturnData.length);
+                    opReturnScript[0] = 0x6a; // OP_RETURN
+                    opReturnScript[1] = opReturnData.length;
+                    opReturnScript.set(opReturnData, 2);
+                    tx.outputs.splice(1, 0, { value: OP_RETURN_VALUE, scriptPubKey: Array.from(opReturnScript) });
+
+                    // Step 4: Confirm
+                    const confirmed = confirm(
+                        `Bridge ${amountStr} ${limits.coin}?\n\n` +
+                        `Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}\n` +
+                        `To: ${baseAddr}\n` +
+                        `Inputs: ${selected.length}`
+                    );
+                    if (!confirmed) { log('Cancelled.', 'error'); btn.disabled = false; return; }
+
+                    // Step 5: Sign locally with browser wallet keys
+                    log('Signing locally (' + selected.length + ' inputs)...');
+                    const signingAddr = selected[0].address;
+                    const addrRecord = (await localWallet.getAddresses()).find(a => a.address === signingAddr);
+                    if (!addrRecord) throw new Error('Signing address not found in wallet');
+
+                    const privateKey = await localWallet.getPrivateKey(signingAddr);
+                    const keyData = await DilithiumCrypto.deriveChildKey(localWallet.decryptedSeed, addrRecord.path);
+                    const signedTx = await txBuilder.signTransaction(tx, privateKey, keyData.publicKey);
+                    const rawHex = txBuilder.serializeTransaction(signedTx);
+                    log('Signed. Size: ' + (rawHex.length / 2 / 1024).toFixed(1) + ' KB');
+
+                    // Step 6: Broadcast via API
+                    log('Broadcasting...');
+                    const result = await connectionManager.broadcast(rawHex);
+                    log('Sent! TxID: ' + result.txid, 'success');
+                    log(`${limits.wrapped} will arrive in your MetaMask after confirmations.`, 'success');
+
                 } catch (e) {
-                    log('Cannot connect to node. Is it running?', 'error');
-                    log('The node must be running locally for deposits.', 'error');
-                    btn.disabled = false;
-                    return;
+                    log('Error: ' + e.message, 'error');
                 }
-                log('Connected. Found ' + utxos.length + ' UTXOs.');
+            } else {
+                // ============================================================
+                // FULL NODE MODE: Use node RPC for UTXOs, signing, broadcasting
+                // ============================================================
+                try {
+                    log('Connecting to node...');
+                    let utxos;
+                    try {
+                        utxos = await rpcCall('listunspent');
+                    } catch (e) {
+                        log('Cannot connect to node. Is it running?', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+                    log('Connected. Found ' + utxos.length + ' UTXOs.');
 
-                // Step 2: Select UTXOs
-                for (const u of utxos) {
-                    const amt = u.amount;
-                    u.amount_sats = (typeof amt === 'number' && amt < 10000) ? Math.round(amt * 1e8) : parseInt(amt);
+                    for (const u of utxos) {
+                        const amt = u.amount;
+                        u.amount_sats = (typeof amt === 'number' && amt < 10000) ? Math.round(amt * 1e8) : parseInt(amt);
+                    }
+                    utxos = utxos.filter(u => u.address !== bridgeAddr);
+                    utxos.sort((a, b) => b.amount_sats - a.amount_sats);
+
+                    const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
+                    const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
+                    let selected = [];
+                    let totalSats = 0;
+                    for (const u of utxos) {
+                        if (selected.length >= MAX_INPUTS) break;
+                        selected.push(u);
+                        totalSats += u.amount_sats;
+                        if (totalSats >= needed) break;
+                    }
+
+                    const estSignedSize = selected.length * 5400 + 200;
+                    const feeSats = estSignedSize * FEE_RATE;
+                    const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
+
+                    if (totalSats < actualNeeded) {
+                        log(`Insufficient funds. Have ${(totalSats / 1e8).toFixed(4)} ${limits.coin}, need ${(actualNeeded / 1e8).toFixed(4)}`, 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
+                    const changeAddr = selected[0].address;
+                    log(`Selected ${selected.length} UTXOs. Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}`);
+
+                    log('Building transaction...');
+                    const inputs = selected.map(u => ({ txid: u.txid, vout: u.vout }));
+                    const rawTx = bridgeBuildRawTx(inputs, bridgeAddr, depositSats, changeAddr, changeSats, opReturnData);
+                    const rawHex = bridgeBytesToHex(rawTx);
+
+                    const confirmed = confirm(
+                        `Bridge ${amountStr} ${limits.coin}?\n\n` +
+                        `Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}\n` +
+                        `To: ${baseAddr}\n` +
+                        `Inputs: ${selected.length}`
+                    );
+                    if (!confirmed) { log('Cancelled.', 'error'); btn.disabled = false; return; }
+
+                    log('Signing (' + selected.length + ' inputs)...');
+                    const signResult = await rpcCall('signrawtransaction', { hex: rawHex }, 120000);
+                    if (!signResult.complete) {
+                        log('Signing failed: ' + JSON.stringify(signResult), 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+                    log('Signed. Size: ' + (signResult.hex.length / 2 / 1024).toFixed(1) + ' KB');
+
+                    log('Broadcasting...');
+                    const txid = await rpcCall('sendrawtransaction', { hex: signResult.hex }, 120000);
+                    log('Sent! TxID: ' + txid, 'success');
+                    log(`${limits.wrapped} will arrive in your MetaMask after confirmations.`, 'success');
+
+                } catch (e) {
+                    log('Error: ' + e.message, 'error');
                 }
-                utxos = utxos.filter(u => u.address !== bridgeAddr);
-                utxos.sort((a, b) => b.amount_sats - a.amount_sats);
-
-                const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
-                const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
-                let selected = [];
-                let totalSats = 0;
-                for (const u of utxos) {
-                    if (selected.length >= MAX_INPUTS) break;
-                    selected.push(u);
-                    totalSats += u.amount_sats;
-                    if (totalSats >= needed) break;
-                }
-
-                const estSignedSize = selected.length * 5400 + 200;
-                const feeSats = estSignedSize * FEE_RATE;
-                const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
-
-                if (totalSats < actualNeeded) {
-                    log(`Insufficient funds. Have ${(totalSats / 1e8).toFixed(4)} ${limits.coin}, need ${(actualNeeded / 1e8).toFixed(4)}`, 'error');
-                    btn.disabled = false;
-                    return;
-                }
-
-                const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
-                const changeAddr = selected[0].address;
-                log(`Selected ${selected.length} UTXOs. Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}`);
-
-                // Step 3: Build OP_RETURN (DBRG tag + Base address)
-                const tag = new Uint8Array([0x44, 0x42, 0x52, 0x47]); // "DBRG"
-                const baseAddrBytes = bridgeHexToBytes(baseAddr.slice(2));
-                const opReturnData = bridgeConcatBytes(tag, baseAddrBytes);
-
-                // Step 4: Build raw tx
-                log('Building transaction...');
-                const inputs = selected.map(u => ({ txid: u.txid, vout: u.vout }));
-                const rawTx = bridgeBuildRawTx(inputs, bridgeAddr, depositSats, changeAddr, changeSats, opReturnData);
-                const rawHex = bridgeBytesToHex(rawTx);
-
-                // Step 5: Confirm
-                const confirmed = confirm(
-                    `Bridge ${amountStr} ${limits.coin}?\n\n` +
-                    `Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}\n` +
-                    `To: ${baseAddr}\n` +
-                    `Inputs: ${selected.length}`
-                );
-                if (!confirmed) { log('Cancelled.', 'error'); btn.disabled = false; return; }
-
-                // Step 6: Sign
-                log('Signing (' + selected.length + ' inputs)...');
-                const signResult = await rpcCall('signrawtransaction', { hex: rawHex }, 120000);
-                if (!signResult.complete) {
-                    log('Signing failed: ' + JSON.stringify(signResult), 'error');
-                    btn.disabled = false;
-                    return;
-                }
-                log('Signed. Size: ' + (signResult.hex.length / 2 / 1024).toFixed(1) + ' KB');
-
-                // Step 7: Broadcast
-                log('Broadcasting...');
-                const txid = await rpcCall('sendrawtransaction', { hex: signResult.hex }, 120000);
-                log('Sent! TxID: ' + txid, 'success');
-                log(`${limits.wrapped} will arrive in your MetaMask after confirmations.`, 'success');
-
-            } catch (e) {
-                log('Error: ' + e.message, 'error');
             }
 
             btn.disabled = false;
@@ -4013,8 +4330,11 @@ inline const std::string& GetWalletHTML() {
         }
 
         function bridgeInitTab() {
-            // Initialize active states
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+
+            // Both tabs work in both modes — light mode signs locally via WASM
             switchBridgeTab('deposit');
+
             bridgeSelectDepositChain('dil');
             bridgeSelectWithdrawChain('dil');
             // Show warning if on HTTPS (deposits need local node RPC)
@@ -4027,10 +4347,35 @@ inline const std::string& GetWalletHTML() {
         }
 
         // Navigation
+        // Mobile navigation
+        function mobileNavigate(pageName) {
+            navigateTo(pageName);
+            // Update mobile nav active state
+            document.querySelectorAll('.mobile-nav-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.mobilePage === pageName) {
+                    item.classList.add('active');
+                }
+            });
+            // Close more menu if open
+            document.getElementById('mobileMoreOverlay').classList.remove('active');
+        }
+
+        function toggleMobileMore() {
+            document.getElementById('mobileMoreOverlay').classList.toggle('active');
+        }
+
         function navigateTo(pageName) {
             document.querySelectorAll('.nav-item').forEach(item => {
                 item.classList.remove('active');
                 if (item.dataset.page === pageName) {
+                    item.classList.add('active');
+                }
+            });
+            // Also update mobile nav
+            document.querySelectorAll('.mobile-nav-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.mobilePage === pageName) {
                     item.classList.add('active');
                 }
             });
@@ -4124,6 +4469,8 @@ inline const std::string& GetWalletHTML() {
                 // Initialize transaction builder
                 if (window.TransactionBuilder) {
                     txBuilder = new window.TransactionBuilder(connectionManager, window.DilithiumCrypto, localWallet);
+                    // Set chain ID for sighash (DIL=1, DilV=2)
+                    txBuilder.chainId = activeChain === 'dilv' ? 2 : 1;
                 }
 
                 console.log('[LightWallet] All modules initialized');
@@ -4773,6 +5120,15 @@ inline const std::string& GetWalletHTML() {
 
         // Refit balance text when window resizes (e.g. moving between monitors)
         window.addEventListener('resize', fitBalanceText);
+
+        // Register PWA service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').then(reg => {
+                console.log('[PWA] Service worker registered');
+            }).catch(err => {
+                console.log('[PWA] Service worker registration failed:', err.message);
+            });
+        }
 
         // BUG #115 FIX: Auto-refresh with serialized requests to prevent connection overload
         let refreshInProgress = false;

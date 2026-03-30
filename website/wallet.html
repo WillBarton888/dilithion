@@ -574,28 +574,186 @@
         }
 
         /* Responsive */
+        /* Mobile bottom navigation */
+        .mobile-nav {
+            display: none;
+        }
+        .mobile-more-overlay {
+            display: none;
+        }
+
         @media (max-width: 768px) {
+            /* Hide sidebar on mobile */
             .sidebar {
-                width: 60px;
-                padding: 12px 0;
+                display: none !important;
             }
 
-            .logo-text, .nav-section-title, .nav-item span, .status-indicator span {
-                display: none;
-            }
-
-            .nav-item {
-                justify-content: center;
-                padding: 12px;
-            }
-
+            /* Full-width main content */
             .main-content {
-                margin-left: 60px;
-                padding: 16px;
+                margin-left: 0 !important;
+                padding: 16px !important;
+                padding-bottom: 80px !important; /* space for bottom nav */
+            }
+
+            /* Show bottom navigation */
+            .mobile-nav {
+                display: flex;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 64px;
+                background: var(--bg-dark);
+                border-top: 1px solid var(--border);
+                z-index: 1000;
+                justify-content: space-around;
+                align-items: center;
+                padding: 0 4px;
+            }
+            .mobile-nav-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 3px;
+                padding: 8px 4px;
+                color: var(--text-muted);
+                cursor: pointer;
+                min-width: 52px;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .mobile-nav-item.active { color: var(--primary); }
+            .mobile-nav-item svg { width: 22px; height: 22px; }
+            .mobile-nav-item span { font-size: 10px; font-weight: 500; }
+
+            /* More menu overlay */
+            .mobile-more-overlay {
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.6);
+                z-index: 1001;
+            }
+            .mobile-more-overlay.active { display: flex !important; align-items: flex-end; }
+            .mobile-more-sheet {
+                width: 100%;
+                background: var(--bg-card);
+                border-top: 1px solid var(--border);
+                border-radius: 16px 16px 0 0;
+                padding: 20px 24px;
+                padding-bottom: 80px; /* clear bottom nav */
+            }
+            .mobile-more-item {
+                padding: 14px 0;
+                font-size: 1rem;
+                color: var(--text-primary);
+                cursor: pointer;
+                border-bottom: 1px solid var(--border);
+            }
+            .mobile-more-item:last-of-type { border-bottom: none; }
+
+            /* Balance cards */
+            .balance-amount {
+                font-size: clamp(1.1rem, 5vw, 1.8rem);
+            }
+            .balance-grid {
+                gap: 12px !important;
+            }
+            .balance-card {
+                padding: 16px !important;
+            }
+
+            /* Page headers */
+            .page-header {
+                margin-bottom: 16px !important;
+            }
+            .page-title {
+                font-size: 1.4rem !important;
+            }
+
+            /* Cards */
+            .card {
+                padding: 16px !important;
+                margin-bottom: 12px !important;
+            }
+            .card-title {
+                font-size: 0.95rem !important;
+            }
+
+            /* Hide mining on mobile (requires a node) */
+            .mining-only {
+                display: none !important;
+            }
+
+            /* Show chain toggle on mobile dashboard */
+            .mobile-chain-toggle {
+                display: block !important;
+            }
+
+            /* Dashboard quick actions full width */
+            .cards-row {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Bridge sub-tabs */
+            .bridge-tab {
+                font-size: 0.8rem !important;
+                padding: 8px 4px !important;
+            }
+
+            /* Form inputs - ensure full width */
+            .form-input, .form-group input, .form-group select, .form-group textarea {
+                font-size: 16px !important; /* prevents iOS zoom */
+            }
+
+            /* Transaction list */
+            .tx-item {
+                padding: 10px 0 !important;
+            }
+
+            /* Welcome flow */
+            #welcomeMnemonicWords {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+
+            /* PWA install banner clearance */
+            #pwaInstallBanner {
+                bottom: 64px !important;
+            }
+        }
+
+        /* Small phones */
+        @media (max-width: 480px) {
+            .main-content {
+                padding: 12px !important;
+                padding-bottom: 76px !important;
             }
 
             .balance-amount {
-                font-size: 1.5rem;
+                font-size: clamp(0.9rem, 4.5vw, 1.4rem);
+            }
+
+            .balance-grid {
+                grid-template-columns: 1fr !important;
+                gap: 8px !important;
+            }
+
+            .page-title {
+                font-size: 1.2rem !important;
+            }
+
+            .btn {
+                padding: 10px 16px !important;
+                font-size: 0.85rem !important;
+            }
+
+            /* Stack bridge chain toggles */
+            .bridge-chain-opt, .bridge-wchain-opt {
+                font-size: 0.75rem !important;
+                padding: 6px 2px !important;
+            }
+
+            /* Tighter cards */
+            .card {
+                padding: 12px !important;
             }
         }
     </style>
@@ -707,6 +865,44 @@
             <button id="reconnectBtn" class="btn btn-secondary" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; display: none;" onclick="event.stopPropagation(); connect();">Reconnect</button>
         </div>
     </nav>
+
+    <!-- Mobile Bottom Navigation (hidden on desktop) -->
+    <nav class="mobile-nav" id="mobileNav">
+        <div class="mobile-nav-item active" data-mobile-page="dashboard" onclick="mobileNavigate('dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+            <span>Home</span>
+        </div>
+        <div class="mobile-nav-item" data-mobile-page="send" onclick="mobileNavigate('send')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            <span>Send</span>
+        </div>
+        <div class="mobile-nav-item" data-mobile-page="receive" onclick="mobileNavigate('receive')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path></svg>
+            <span>Receive</span>
+        </div>
+        <div class="mobile-nav-item" data-mobile-page="bridge" onclick="mobileNavigate('bridge')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+            <span>Bridge</span>
+        </div>
+        <div class="mobile-nav-item" onclick="toggleMobileMore()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+            <span>More</span>
+        </div>
+    </nav>
+
+    <!-- Mobile "More" Menu Overlay -->
+    <div class="mobile-more-overlay" id="mobileMoreOverlay" onclick="if(event.target===this)toggleMobileMore()">
+        <div class="mobile-more-sheet">
+            <div class="mobile-more-item" onclick="mobileNavigate('transactions')">History</div>
+            <div class="mobile-more-item" onclick="mobileNavigate('network')">Blockchain</div>
+            <div class="mobile-more-item" onclick="mobileNavigate('backup')">Backup & Recover</div>
+            <div class="mobile-more-item" onclick="mobileNavigate('settings')">Settings</div>
+            <div style="display: flex; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border); margin-top: 8px;">
+                <button id="mChainDil" onclick="switchChain('dil');toggleMobileMore()" style="flex:1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; background: var(--primary); color: white;">DIL</button>
+                <button id="mChainDilv" onclick="switchChain('dilv');toggleMobileMore()" style="flex:1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; background: transparent; color: var(--text-muted); border: 1px solid var(--border);">DilV</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Main Content -->
     <main class="main-content">
@@ -828,6 +1024,14 @@
                 <p class="page-subtitle">Your wallet overview</p>
             </div>
 
+            <!-- Mobile Chain Toggle (hidden on desktop — sidebar has it) -->
+            <div class="mobile-chain-toggle" id="mobileChainToggle" style="display: none; margin-bottom: 16px;">
+                <div style="display: flex; gap: 4px; background: var(--bg-darker); border-radius: 10px; padding: 4px;">
+                    <button id="mobileChainDil" onclick="switchChain('dil')" style="flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background: var(--primary); color: white;">DIL</button>
+                    <button id="mobileChainDilv" onclick="switchChain('dilv')" style="flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--text-muted);">DilV</button>
+                </div>
+            </div>
+
             <div class="balance-grid">
                 <div class="balance-card total">
                     <div class="balance-label">Total Balance</div>
@@ -905,8 +1109,8 @@
             </div>
 
             <div class="cards-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                <!-- Mining Card -->
-                <div class="card">
+                <!-- Mining Card (hidden on mobile/light mode) -->
+                <div class="card mining-only" id="dashMiningCard">
                     <div class="card-title">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px; vertical-align: middle;">
                             <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
@@ -977,7 +1181,7 @@
                                 <polyline points="23 4 23 10 17 10"></polyline>
                                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
                             </svg>
-                            <span id="rescanBtnText">Rescan Wallet</span>
+                            <span id="rescanBtnText">Refresh Balances</span>
                         </button>
                     </div>
                 </div>
@@ -1812,7 +2016,7 @@
         };
 
         // Active chain: 'dil' or 'dilv'
-        let activeChain = localStorage.getItem('dilithionActiveChain') || 'dil';
+        let activeChain = 'dil';  // Always start on DIL
         const chainPorts = { dil: 8332, dilv: 9332 };
         const chainUnits = { dil: 'DIL', dilv: 'DilV' };
 
@@ -1850,24 +2054,80 @@
             localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
             // Update chain ID for transaction signing (DIL=1, DilV=2)
             if (txBuilder) txBuilder.chainId = chain === 'dilv' ? 2 : 1;
-            connect();
+            // Update connection manager chain for API routing
+            if (connectionManager) connectionManager.setChain(chain);
+            // Update ALL mobile chain buttons (More menu + dashboard toggle)
+            const chainBtns = [
+                ['mChainDil', 'mChainDilv'],
+                ['mobileChainDil', 'mobileChainDilv']
+            ];
+            for (const [dilId, dilvId] of chainBtns) {
+                const d = document.getElementById(dilId);
+                const v = document.getElementById(dilvId);
+                if (d && v) {
+                    if (chain === 'dil') {
+                        d.style.background = 'var(--primary)'; d.style.color = 'white'; d.style.border = 'none';
+                        v.style.background = 'transparent'; v.style.color = 'var(--text-muted)'; v.style.border = '1px solid var(--border)';
+                    } else {
+                        v.style.background = 'var(--secondary)'; v.style.color = 'white'; v.style.border = 'none';
+                        d.style.background = 'transparent'; d.style.color = 'var(--text-muted)'; d.style.border = '1px solid var(--border)';
+                    }
+                }
+            }
+            // Show loading state while switching
+            document.getElementById('totalBalance').textContent = '...';
+            document.getElementById('matureBalance').textContent = '...';
+            document.getElementById('immatureBalance').textContent = '...';
+
+            // Reconnect with new chain
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+            if (isLightMode) {
+                connectionManager.connect().then(() => {
+                    setConnectionStatus(true, (chain === 'dilv' ? 'DilV' : 'DIL') + ' Light Wallet');
+                    refreshAll();
+                }).catch(() => {
+                    setConnectionStatus(false, 'Connection failed');
+                    document.getElementById('totalBalance').textContent = '0.00000000';
+                    document.getElementById('matureBalance').textContent = '0.00000000';
+                    document.getElementById('immatureBalance').textContent = '0.00000000';
+                });
+            } else {
+                connect();
+            }
         }
 
         // Initialize chain toggle on load
         function initChainSelector() {
             // Apply saved chain state
             if (activeChain === 'dilv') {
+                // Sidebar buttons
                 const btnDil = document.getElementById('chainBtnDil');
                 const btnDilv = document.getElementById('chainBtnDilv');
-                btnDilv.style.background = 'var(--secondary)';
-                btnDilv.style.color = 'white';
-                btnDil.style.background = 'transparent';
-                btnDil.style.color = 'var(--text-muted)';
+                if (btnDilv) { btnDilv.style.background = 'var(--secondary)'; btnDilv.style.color = 'white'; }
+                if (btnDil) { btnDil.style.background = 'transparent'; btnDil.style.color = 'var(--text-muted)'; }
+
+                // Mobile dashboard toggle
+                const mDil = document.getElementById('mobileChainDil');
+                const mDilv = document.getElementById('mobileChainDilv');
+                if (mDilv) { mDilv.style.background = 'var(--secondary)'; mDilv.style.color = 'white'; mDilv.style.border = 'none'; }
+                if (mDil) { mDil.style.background = 'transparent'; mDil.style.color = 'var(--text-muted)'; mDil.style.border = '1px solid var(--border)'; }
+
+                // Mobile More menu toggle
+                const mmDil = document.getElementById('mChainDil');
+                const mmDilv = document.getElementById('mChainDilv');
+                if (mmDilv) { mmDilv.style.background = 'var(--secondary)'; mmDilv.style.color = 'white'; mmDilv.style.border = 'none'; }
+                if (mmDil) { mmDil.style.background = 'transparent'; mmDil.style.color = 'var(--text-muted)'; mmDil.style.border = '1px solid var(--border)'; }
+
+                // Labels and title
                 document.querySelectorAll('.balance-unit, .chain-label').forEach(el => {
                     el.textContent = 'DilV';
                 });
                 document.title = 'DilV Web Wallet';
                 rpcConfig.port = 9332;
+
+                // Update connection manager chain
+                if (connectionManager) connectionManager.setChain('dilv');
+                if (txBuilder) txBuilder.chainId = 2;
             }
         }
 
@@ -2621,31 +2881,43 @@
         async function rescanWallet() {
             const btnText = document.getElementById('rescanBtnText');
             const originalText = btnText.textContent;
-            btnText.textContent = 'Clearing...';
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
 
-            try {
-                // First clear old transaction history (important after chain resets)
-                await rpcCall('clearwallettxs', {});
+            if (isLightMode) {
+                // Light mode: re-scan HD addresses via API and refresh balances
                 btnText.textContent = 'Scanning...';
-
-                // Then rescan for new transactions
-                const result = await rpcCall('rescanwallet', {}, 120000);
-                btnText.textContent = 'Done!';
-                console.log('[Wallet] Rescan result:', result);
-
-                // Refresh balance and transactions
-                await refreshBalance();
-                await refreshTransactions();
-
-                setTimeout(() => {
-                    btnText.textContent = originalText;
-                }, 2000);
-            } catch(e) {
-                console.error('Rescan error:', e);
-                btnText.textContent = 'Failed';
-                setTimeout(() => {
-                    btnText.textContent = originalText;
-                }, 2000);
+                try {
+                    if (localWallet && localWallet.isWalletUnlocked() && connectionManager.isConnected()) {
+                        const result = await localWallet.scanHDAddresses(connectionManager, (index, found) => {
+                            btnText.textContent = `Scanning (${index})...`;
+                        });
+                        btnText.textContent = `Found ${result.found} addresses`;
+                    }
+                    await refreshBalance();
+                    await refreshTransactions();
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                } catch(e) {
+                    console.error('Rescan error:', e);
+                    btnText.textContent = 'Failed';
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                }
+            } else {
+                // Full node mode: use RPC
+                btnText.textContent = 'Clearing...';
+                try {
+                    await rpcCall('clearwallettxs', {});
+                    btnText.textContent = 'Scanning...';
+                    const result = await rpcCall('rescanwallet', {}, 120000);
+                    btnText.textContent = 'Done!';
+                    console.log('[Wallet] Rescan result:', result);
+                    await refreshBalance();
+                    await refreshTransactions();
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                } catch(e) {
+                    console.error('Rescan error:', e);
+                    btnText.textContent = 'Failed';
+                    setTimeout(() => { btnText.textContent = originalText; }, 2000);
+                }
             }
         }
 
@@ -3711,7 +3983,26 @@
 
         async function bridgeConnectWallet() {
             if (typeof window.ethereum === 'undefined') {
-                showNotification('MetaMask not installed. Install it to use withdraw, or just paste your 0x address for deposits.', 'error');
+                const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+                if (isMobile) {
+                    document.getElementById('bridgeMetaMaskStatus').innerHTML = `
+                        <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px; padding: 16px; font-size: 0.85rem; line-height: 1.6;">
+                            <strong style="color: var(--warning);">MetaMask on Mobile</strong>
+                            <p style="color: var(--text-secondary); margin: 8px 0;">To connect MetaMask, open this wallet inside the <strong>MetaMask app's built-in browser</strong>:</p>
+                            <ol style="color: var(--text-secondary); margin: 8px 0 12px 20px;">
+                                <li>Open the <strong>MetaMask</strong> app</li>
+                                <li>Tap <strong>Explore</strong> (magnifying glass icon) at the bottom</li>
+                                <li>Paste this URL in the address bar:</li>
+                            </ol>
+                            <div onclick="navigator.clipboard.writeText('https://dilithion.org/wallet.html?mode=light').then(()=>{this.querySelector('span').textContent='Copied!';})" style="background: var(--bg-darker); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent); cursor: pointer; word-break: break-all; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                dilithion.org/wallet.html?mode=light
+                                <span style="font-family: Inter, sans-serif; font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">Tap to copy</span>
+                            </div>
+                            <p style="color: var(--text-muted); margin: 10px 0 0; font-size: 0.8rem;">For deposits, you don't need MetaMask — just paste your 0x address above.</p>
+                        </div>`;
+                } else {
+                    showNotification('MetaMask not installed. Install it to use withdraw, or just paste your 0x address for deposits.', 'error');
+                }
                 return;
             }
             try {
@@ -4135,10 +4426,35 @@
         }
 
         // Navigation
+        // Mobile navigation
+        function mobileNavigate(pageName) {
+            navigateTo(pageName);
+            // Update mobile nav active state
+            document.querySelectorAll('.mobile-nav-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.mobilePage === pageName) {
+                    item.classList.add('active');
+                }
+            });
+            // Close more menu if open
+            document.getElementById('mobileMoreOverlay').classList.remove('active');
+        }
+
+        function toggleMobileMore() {
+            document.getElementById('mobileMoreOverlay').classList.toggle('active');
+        }
+
         function navigateTo(pageName) {
             document.querySelectorAll('.nav-item').forEach(item => {
                 item.classList.remove('active');
                 if (item.dataset.page === pageName) {
+                    item.classList.add('active');
+                }
+            });
+            // Also update mobile nav
+            document.querySelectorAll('.mobile-nav-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.dataset.mobilePage === pageName) {
                     item.classList.add('active');
                 }
             });
@@ -4883,6 +5199,25 @@
 
         // Refit balance text when window resizes (e.g. moving between monitors)
         window.addEventListener('resize', fitBalanceText);
+
+        // Add show/hide toggle to all password fields
+        document.querySelectorAll('input[type="password"].form-input').forEach(input => {
+            // Skip if already has a toggle (welcome form fields)
+            if (input.parentElement.querySelector('span[onclick*="type="]')) return;
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'relative';
+            input.parentNode.insertBefore(wrapper, input);
+            wrapper.appendChild(input);
+            input.style.paddingRight = '48px';
+            const toggle = document.createElement('span');
+            toggle.textContent = 'Show';
+            toggle.style.cssText = 'position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:0.75rem;color:var(--text-muted);user-select:none;';
+            toggle.onclick = function() {
+                input.type = input.type === 'password' ? 'text' : 'password';
+                toggle.textContent = input.type === 'password' ? 'Show' : 'Hide';
+            };
+            wrapper.appendChild(toggle);
+        });
 
         // Register PWA service worker
         if ('serviceWorker' in navigator) {

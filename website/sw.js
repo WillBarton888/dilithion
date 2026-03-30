@@ -1,7 +1,7 @@
 // Dilithion Wallet Service Worker
 // Caches wallet assets for offline access (keys stay in IndexedDB regardless)
 
-const CACHE_NAME = 'dilithion-wallet-v1';
+const CACHE_NAME = 'dilithion-wallet-v3';
 
 // Core assets to cache for offline wallet access
 const CORE_ASSETS = [

@@ -16,8 +16,14 @@ const CONNECTION_MODE = {
 };
 
 // HTTPS API endpoint (proxied via explorer nginx to local node REST API)
-// This allows the light wallet to work from HTTPS pages without mixed-content issues
+// DIL: /api/v1/...  DilV: /dilv/api/v1/...
 const HTTPS_API_BASE = 'https://explorer.dilithion.org';
+
+// API path prefix per chain (DilV uses a separate nginx proxy route)
+const CHAIN_API_PREFIX = {
+    dil: '/api/v1',
+    dilv: '/dilv/api/v1'
+};
 
 // Default seed nodes (mainnet) - HTTPS only (HTTP blocked by mixed-content on HTTPS pages)
 const DEFAULT_SEED_NODES = [
@@ -53,6 +59,9 @@ class ConnectionManager {
             currentNode: null,
             testnet: false
         };
+
+        // Active chain ('dil' or 'dilv')
+        this.activeChain = 'dil';
 
         // Connection state
         this.connected = false;
@@ -139,6 +148,24 @@ class ConnectionManager {
     }
 
     /**
+     * Set active chain ('dil' or 'dilv')
+     * @param {string} chain
+     */
+    setChain(chain) {
+        this.activeChain = chain;
+        this.lightConfig.currentNode = null;  // Reset to re-probe
+        this.connected = false;
+    }
+
+    /**
+     * Get the API path prefix for the current chain
+     * @returns {string} e.g., '/api/v1' or '/dilv/api/v1'
+     */
+    getApiPrefix() {
+        return CHAIN_API_PREFIX[this.activeChain] || CHAIN_API_PREFIX.dil;
+    }
+
+    /**
      * Set testnet mode
      * @param {boolean} testnet
      */
@@ -167,8 +194,9 @@ class ConnectionManager {
                 const baseUrl = node.https
                     ? `https://${node.host}`
                     : `http://${node.host}:${node.port}`;
+                const apiPrefix = node.https ? this.getApiPrefix() : '/api/v1';
                 const response = await this.fetchWithTimeout(
-                    `${baseUrl}/api/v1/info`,
+                    `${baseUrl}${apiPrefix}/info`,
                     { method: 'GET' },
                     5000  // 5 second timeout for probe
                 );
@@ -438,8 +466,10 @@ class ConnectionManager {
         }
 
         const node = this.lightConfig.currentNode;
+        // Rewrite /api/v1 prefix for chain-aware routing (e.g., /dilv/api/v1 for DilV)
+        const chainPath = node.https ? path.replace('/api/v1', this.getApiPrefix()) : path;
         const url = node.https
-            ? `https://${node.host}${path}`
+            ? `https://${node.host}${chainPath}`
             : `http://${node.host}:${node.port}${path}`;
 
         const options = {
