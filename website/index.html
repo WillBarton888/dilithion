@@ -1133,6 +1133,55 @@
     </div>
 
     <script>
+        // Live network stats
+        function formatNum(n) {
+            if (n >= 1e12) return (n/1e12).toFixed(1) + 'T';
+            if (n >= 1e9) return (n/1e9).toFixed(1) + 'B';
+            if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+            if (n >= 1e3) return n.toLocaleString();
+            return n.toString();
+        }
+
+        async function loadNetworkStats() {
+            try {
+                // DIL chain
+                const [dilInfo, dilSupplyRaw] = await Promise.all([
+                    fetch('https://explorer.dilithion.org/api/v1/info').then(r => r.json()),
+                    fetch('https://explorer.dilithion.org/api/supply.php?chain=dil&q=circulating').then(r => r.text())
+                ]);
+                const dilHeight = document.getElementById('dil-height');
+                const dilSupply = document.getElementById('dil-supply');
+                const dilDifficulty = document.getElementById('dil-difficulty');
+                if (dilHeight) dilHeight.textContent = formatNum(dilInfo.height);
+                if (dilSupply) dilSupply.textContent = formatNum(parseFloat(dilSupplyRaw));
+                if (dilDifficulty) dilDifficulty.textContent = formatNum(Math.round(dilInfo.difficulty));
+
+                // Update footer block height
+                const copyright = document.querySelector('.copyright-right');
+                if (copyright) copyright.textContent = 'Block ' + formatNum(dilInfo.height) + ' — Network live';
+            } catch(e) {
+                console.warn('Failed to load DIL stats:', e.message);
+            }
+
+            try {
+                // DilV chain
+                const [dilvInfo, dilvSupplyRaw] = await Promise.all([
+                    fetch('https://explorer.dilithion.org/dilv/api/v1/info').then(r => r.json()),
+                    fetch('https://explorer.dilithion.org/api/supply.php?chain=dilv&q=circulating').then(r => r.text())
+                ]);
+                const dilvHeight = document.getElementById('dilv-height');
+                const dilvSupply = document.getElementById('dilv-supply');
+                const dilvDifficulty = document.getElementById('dilv-difficulty');
+                if (dilvHeight) dilvHeight.textContent = formatNum(dilvInfo.height);
+                if (dilvSupply) dilvSupply.textContent = formatNum(parseFloat(dilvSupplyRaw));
+                if (dilvDifficulty) dilvDifficulty.textContent = formatNum(Math.round(dilvInfo.difficulty));
+            } catch(e) {
+                console.warn('Failed to load DilV stats:', e.message);
+            }
+        }
+
+        loadNetworkStats();
+
         function closeMenu() {
             document.querySelector('.nav-links').classList.remove('open');
             document.getElementById('hamburgerBtn').classList.remove('open');
