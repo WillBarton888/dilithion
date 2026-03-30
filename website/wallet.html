@@ -941,6 +941,32 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Unlock Existing (shown when a wallet already exists in browser) -->
+                    <div class="card" id="welcomeUnlockCard" style="display: none; cursor: pointer; transition: border-color 0.2s;" onclick="welcomeShowUnlock()" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 48px; height: 48px; background: rgba(34,197,94,0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0110 0v4"></path></svg>
+                            </div>
+                            <div>
+                                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 4px;">Unlock Existing Wallet</div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem;">You have a wallet saved in this browser. Enter your password to unlock it.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Unlock Existing Flow -->
+            <div id="welcomeUnlockFlow" style="display: none; max-width: 520px; margin: 0 auto;">
+                <div class="card">
+                    <div class="card-title">Unlock Wallet</div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-input" id="welcomeUnlockPassword" placeholder="Enter your wallet password" onkeypress="if(event.key==='Enter')welcomeDoUnlock()">
+                    </div>
+                    <button class="btn btn-primary" onclick="welcomeDoUnlock()" style="width: 100%;">Unlock</button>
+                    <button class="btn" onclick="welcomeUnlockBack()" style="width: 100%; margin-top: 8px; background: transparent; color: var(--text-secondary);">Back</button>
                 </div>
             </div>
 
@@ -1206,6 +1232,13 @@
                                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
                             </svg>
                             <span id="rescanBtnText">Refresh Balances</span>
+                        </button>
+                        <button class="btn btn-secondary light-only" id="lockWalletBtn" onclick="lockAndSwitch()" style="display: none;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0110 0v4"></path>
+                            </svg>
+                            Lock / Switch Wallet
                         </button>
                     </div>
                 </div>
@@ -2014,6 +2047,23 @@
     <script>
         // Auto-fit balance text — shrinks font only when it overflows the card
         // Quick unlock from dashboard prompt
+        // Lock wallet and show welcome screen (allows switching to a different wallet)
+        function lockAndSwitch() {
+            if (localWallet) {
+                localWallet.lock();
+            }
+            updateLightWalletUI();
+            // Reset balances
+            document.getElementById('totalBalance').textContent = '---';
+            document.getElementById('matureBalance').textContent = '---';
+            document.getElementById('immatureBalance').textContent = '---';
+            // Show welcome screen
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById('page-welcome').style.display = 'block';
+            document.getElementById('page-welcome').classList.add('active');
+            showNotification('Wallet locked. Import a different wallet or unlock the current one.', 'info');
+        }
+
         async function dashboardQuickUnlock() {
             const pw = document.getElementById('dashboardUnlockPw').value;
             if (!pw) return;
@@ -2675,9 +2725,13 @@
                         document.getElementById('immatureBalance').textContent = '---';
                         document.getElementById('availableForSend').textContent = '0.00000000';
                         if (unlockPrompt) unlockPrompt.style.display = 'block';
+                        const lockBtnHide = document.getElementById('lockWalletBtn');
+                        if (lockBtnHide) lockBtnHide.style.display = 'none';
                         return;
                     }
                     if (unlockPrompt) unlockPrompt.style.display = 'none';
+                    const lockBtn = document.getElementById('lockWalletBtn');
+                    if (lockBtn) lockBtn.style.display = 'block';
 
                     const addresses = await localWallet.getAddresses();
                     let confirmedBalance = 0;
@@ -5276,6 +5330,29 @@
             document.getElementById('welcomeCreateFlow').style.display = 'none';
         }
 
+        function welcomeShowUnlock() {
+            document.getElementById('welcomeUnlockFlow').style.display = 'block';
+            document.getElementById('welcomeCreateFlow').style.display = 'none';
+            document.getElementById('welcomeImportFlow').style.display = 'none';
+        }
+
+        function welcomeUnlockBack() {
+            document.getElementById('welcomeUnlockFlow').style.display = 'none';
+        }
+
+        async function welcomeDoUnlock() {
+            const pw = document.getElementById('welcomeUnlockPassword').value;
+            if (!pw) { showNotification('Enter your password', 'error'); return; }
+            try {
+                await localWallet.unlock(pw);
+                document.getElementById('welcomeUnlockPassword').value = '';
+                showNotification('Wallet unlocked', 'success');
+                welcomeFinish();
+            } catch (e) {
+                showNotification('Wrong password', 'error');
+            }
+        }
+
         function welcomeImportBack() {
             document.getElementById('welcomeImportFlow').style.display = 'none';
         }
@@ -5402,12 +5479,16 @@
                 if (localWallet) {
                     try {
                         const hasBrowserWallet = await localWallet.hasWallet();
-                        if (hasBrowserWallet) return false;
+                        if (hasBrowserWallet && localWallet.isWalletUnlocked()) return false;
+                        if (hasBrowserWallet) {
+                            // Wallet exists but locked — show welcome with unlock option
+                            document.getElementById('welcomeUnlockCard').style.display = 'block';
+                        }
                     } catch (e) {
                         console.log('[Welcome] Could not check browser wallet:', e.message);
                     }
                 }
-                // No localWallet module OR no wallet exists → show welcome
+                // No wallet or wallet is locked → show welcome
             } else {
                 // Full mode: check if node is reachable
                 try {
