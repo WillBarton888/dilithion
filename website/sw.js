@@ -1,7 +1,8 @@
 // Dilithion Wallet Service Worker
 // Caches wallet assets for offline access (keys stay in IndexedDB regardless)
+// Strategy: network-first for everything (always get latest, cache as offline fallback)
 
-const CACHE_NAME = 'dilithion-wallet-v3';
+const CACHE_NAME = 'dilithion-wallet-v5';
 
 // Core assets to cache for offline wallet access
 const CORE_ASSETS = [
@@ -37,41 +38,29 @@ self.addEventListener('activate', event => {
     );
 });
 
-// Fetch: network-first for API calls, cache-first for static assets
+// Fetch: network-first for all assets (always get latest, offline fallback to cache)
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
 
-    // API calls and external resources: always go to network
+    // API calls and external resources: let browser handle normally
     if (url.pathname.startsWith('/api/') ||
         url.hostname !== self.location.hostname ||
         event.request.method !== 'GET') {
-        return;  // Let browser handle normally
+        return;
     }
 
-    // Static assets: cache-first, fallback to network
+    // Everything else: network-first
     event.respondWith(
-        caches.match(event.request).then(cached => {
-            if (cached) {
-                // Return cached version, but also update cache in background
-                fetch(event.request).then(response => {
-                    if (response.ok) {
-                        caches.open(CACHE_NAME).then(cache => {
-                            cache.put(event.request, response);
-                        });
-                    }
-                }).catch(() => {});
-                return cached;
+        fetch(event.request).then(response => {
+            if (response.ok) {
+                const clone = response.clone();
+                caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
             }
-
-            // Not cached: fetch from network and cache
-            return fetch(event.request).then(response => {
-                if (response.ok) {
-                    const clone = response.clone();
-                    caches.open(CACHE_NAME).then(cache => {
-                        cache.put(event.request, clone);
-                    });
-                }
-                return response;
+            return response;
+        }).catch(() => {
+            return caches.match(event.request).then(cached => {
+                if (cached) return cached;
+                return new Response('Offline', { status: 503 });
             });
         })
     );

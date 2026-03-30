@@ -217,7 +217,7 @@ class LocalWallet {
             throw new Error('Wallet is locked');
         }
 
-        const GAP_LIMIT = 20;
+        const GAP_LIMIT = 250;  // Mining wallets can have large gaps between funded addresses
         const accountIndex = 0;
         let consecutiveEmpty = 0;
         let index = 1; // Start at 1 since index 0 was created during import
@@ -230,21 +230,39 @@ class LocalWallet {
 
         console.log('[LocalWallet] Starting HD address scan (gap limit: ' + GAP_LIMIT + ')...');
 
+        // Scan both external (0') and internal/change (1') chains
+        for (const chainIndex of [0, 1]) {
+            consecutiveEmpty = 0;
+            index = chainIndex === 0 ? 1 : 0;  // External starts at 1 (0 created at import), internal at 0
+
         while (consecutiveEmpty < GAP_LIMIT) {
-            const keyPath = `m/44'/573'/${accountIndex}'/0'/${index}'`;
+            const keyPath = `m/44'/573'/${accountIndex}'/${chainIndex}'/${index}'`;
 
             try {
                 const { publicKey } = await this.crypto.deriveChildKey(this.decryptedSeed, keyPath);
                 const address = this.crypto.deriveAddress(publicKey);
 
-                // Query balance from API
+                // Query balance from API — check BOTH chains without touching activeChain
                 let hasBalance = false;
-                try {
-                    const balanceInfo = await connectionManager.getBalance(address);
-                    hasBalance = (balanceInfo.confirmed || 0) > 0 || (balanceInfo.unconfirmed || 0) > 0;
-                } catch (e) {
-                    // API error — assume empty, continue scanning
+                const apiPrefixes = ['/api/v1', '/dilv/api/v1'];
+                for (const prefix of apiPrefixes) {
+                    try {
+                        const url = `https://explorer.dilithion.org${prefix}/balance/${address}`;
+                        const resp = await fetch(url);
+                        if (resp.ok) {
+                            const balanceInfo = await resp.json();
+                            if ((balanceInfo.confirmed || 0) > 0 || (balanceInfo.unconfirmed || 0) > 0) {
+                                hasBalance = true;
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        // API error — try next chain
+                    }
                 }
+
+                // Keep wallet alive during long scans
+                this.resetLockTimer();
 
                 if (hasBalance) {
                     consecutiveEmpty = 0;
@@ -286,6 +304,7 @@ class LocalWallet {
 
             index++;
         }
+        } // end for chainIndex
 
         console.log('[LocalWallet] HD scan complete. Scanned: ' + (index - 1) + ', Found: ' + found);
         return { scanned: index - 1, found, addresses: foundAddresses };

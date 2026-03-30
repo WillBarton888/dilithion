@@ -3487,10 +3487,15 @@
                     addressBalances.sort((a, b) => b.balance - a.balance);
 
                 } else if (!isFullNode && localWallet && localWallet.isWalletUnlocked()) {
-                    // Light wallet mode — show addresses (no balance without node)
+                    // Light wallet mode — query balances via HTTPS API
                     const addresses = await localWallet.getAddresses();
                     for (const a of addresses) {
-                        addressBalances.push({ address: a.address, balance: null, isMining: false });
+                        let bal = 0;
+                        try {
+                            const balInfo = await connectionManager.getBalance(a.address);
+                            bal = (balInfo.confirmed || 0) / 100000000;
+                        } catch (e) {}
+                        addressBalances.push({ address: a.address, balance: bal, isMining: false });
                     }
                 } else {
                     content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Connect to a node to see address balances</div>';
@@ -5439,16 +5444,24 @@
             }
 
             try {
-                const result = await localWallet.scanHDAddresses(connectionManager, (index, found, addr, hasBalance) => {
+                const result = await localWallet.scanHDAddresses(connectionManager, (index, found) => {
                     const el = document.getElementById('hdScanProgress');
-                    if (el) el.textContent = `Checked ${index} addresses, found ${found} with balance...`;
+                    if (el) el.textContent = `Checking address ${index} (found ${found} with balance)...`;
                 });
 
+                if (scanStatus) {
+                    scanStatus.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--success);">' +
+                        `Scan complete: found ${result.found} addresses across ${result.scanned} checked.</div>`;
+                }
                 showNotification(`Scan complete: found ${result.found} additional addresses`, 'success');
                 await refreshBalance();
                 await refreshTransactions();
             } catch (e) {
                 console.warn('[HDScan] Error:', e.message);
+                if (scanStatus) {
+                    scanStatus.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Scan finished.</div>';
+                }
+                await refreshBalance();
             }
         }
 
