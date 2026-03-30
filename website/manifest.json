@@ -1,0 +1,30 @@
+{
+    "name": "Dilithion Wallet",
+    "short_name": "Dilithion",
+    "description": "Quantum-resistant cryptocurrency wallet. Manage DIL and DilV, bridge to Base.",
+    "start_url": "/wallet.html?mode=light",
+    "display": "standalone",
+    "background_color": "#0A0A09",
+    "theme_color": "#C8A24E",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "dilithion-logo-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "dilithion-logo-256.png",
+            "sizes": "256x256",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "dilithion-logo-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
