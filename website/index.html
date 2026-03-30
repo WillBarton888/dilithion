@@ -738,9 +738,73 @@
             .metrics-stats { gap: 40px; }
         }
 
+        /* Hamburger button (hidden on desktop) */
+        .hamburger {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 8px;
+            z-index: 1001;
+        }
+        .hamburger span {
+            display: block;
+            width: 24px;
+            height: 2px;
+            background: var(--text-secondary);
+            transition: all 0.3s;
+        }
+        .hamburger.open span:nth-child(1) { transform: rotate(45deg) translate(5px, 5px); }
+        .hamburger.open span:nth-child(2) { opacity: 0; }
+        .hamburger.open span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
+
         @media (max-width: 768px) {
-            .nav { padding: 0 24px; height: 72px; }
-            .nav-links { display: none; }
+            .nav { padding: 0 24px; height: 64px; }
+
+            /* Hamburger visible */
+            .hamburger { display: flex; }
+
+            /* Nav links become slide-out panel */
+            .nav-links {
+                display: flex;
+                flex-direction: column;
+                position: fixed;
+                top: 64px;
+                right: -300px;
+                width: 280px;
+                height: calc(100vh - 64px);
+                background: var(--surface);
+                border-left: 1px solid var(--border);
+                padding: 24px;
+                gap: 0;
+                transition: right 0.3s ease;
+                z-index: 1000;
+                overflow-y: auto;
+            }
+            .nav-links.open { right: 0; }
+            .nav-links a {
+                padding: 14px 0;
+                border-bottom: 1px solid var(--border);
+                font-size: 16px;
+            }
+            .nav-download {
+                margin-top: 12px;
+                text-align: center !important;
+                padding: 14px 24px !important;
+            }
+
+            /* Dropdown works as expandable section on mobile */
+            .nav-dropdown-menu { display: none; position: static; transform: none; padding-top: 0; min-width: 0; }
+            .nav-dropdown-menu-inner { background: transparent; border: none; padding: 0; box-shadow: none; }
+            .nav-dropdown.open .nav-dropdown-menu { display: block; }
+            .nav-dropdown:hover .nav-dropdown-menu { display: none; }
+            .nav-dropdown.open:hover .nav-dropdown-menu { display: block; }
+            .nav-dropdown-trigger { padding: 14px 0; border-bottom: 1px solid var(--border); display: block; }
+            .nav-dropdown-item { padding: 10px 16px; }
+            .nav-dropdown-item strong { font-size: 14px; }
+            .nav-dropdown-item span { font-size: 12px; }
 
             .hero { min-height: 520px; }
             .hero-headline { font-size: 40px; }
@@ -770,6 +834,21 @@
 
             .copyright { padding: 20px 24px; flex-direction: column; gap: 8px; text-align: center; }
         }
+
+        @media (max-width: 480px) {
+            .hero-headline { font-size: 32px; }
+            .hero-subtitle { font-size: 14px; }
+            .hero-buttons { flex-direction: column; width: 100%; }
+            .hero-buttons a { width: 100%; text-align: center; }
+
+            .metric-value { font-size: 20px; }
+            .chain-name { font-size: 36px; }
+            .chain-card { padding: 32px 24px; }
+            .download-title { font-size: 32px; }
+
+            .feature-card { padding: 24px; }
+            .footer-columns { flex-direction: column; gap: 32px; }
+        }
     </style>
 </head>
 <body>
@@ -780,9 +859,12 @@
             <img src="logo-option4-goldmatch.png" alt="Dilithion" width="36" height="36">
             <span>Dilithion</span>
         </a>
+        <button class="hamburger" id="hamburgerBtn" onclick="document.querySelector('.nav-links').classList.toggle('open');this.classList.toggle('open')">
+            <span></span><span></span><span></span>
+        </button>
         <div class="nav-links">
-            <a href="#features">About</a>
-            <a href="#download">Mine</a>
+            <a href="#features" onclick="closeMenu()">About</a>
+            <a href="#download" onclick="closeMenu()">Mine</a>
             <div class="nav-dropdown">
                 <a class="nav-dropdown-trigger">Wallet</a>
                 <div class="nav-dropdown-menu"><div class="nav-dropdown-menu-inner">
@@ -1050,5 +1132,26 @@
         <span class="copyright-right">Block 32,847 — Network live</span>
     </div>
 
+    <script>
+        function closeMenu() {
+            document.querySelector('.nav-links').classList.remove('open');
+            document.getElementById('hamburgerBtn').classList.remove('open');
+        }
+
+        // Tap-friendly dropdown on mobile
+        document.querySelector('.nav-dropdown-trigger').addEventListener('click', function(e) {
+            if (window.innerWidth <= 768) {
+                e.preventDefault();
+                this.closest('.nav-dropdown').classList.toggle('open');
+            }
+        });
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(e) {
+            if (window.innerWidth <= 768 && !e.target.closest('.nav-links') && !e.target.closest('.hamburger')) {
+                closeMenu();
+            }
+        });
+    </script>
 </body>
 </html>

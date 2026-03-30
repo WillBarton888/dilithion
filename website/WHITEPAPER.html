@@ -168,6 +168,14 @@
         .toc a:hover {
             text-decoration: underline;
         }
+        @media screen and (max-width: 768px) {
+            body { padding: 16px; font-size: 10pt; }
+            .title-page { padding-top: 40px; }
+            .title-page h1 { font-size: 24px; }
+            table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            pre { font-size: 0.7rem; }
+        }
+
         @media print {
             body {
                 font-size: 10pt;

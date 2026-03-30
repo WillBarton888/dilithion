@@ -71,7 +71,13 @@
             display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
             margin-bottom: 24px;
         }
+        @media (max-width: 768px) {
+            .container { padding: 16px; }
+        }
         @media (max-width: 600px) { .pool-info { grid-template-columns: 1fr; } }
+        @media (max-width: 480px) {
+            .price-card .value { font-size: 1.1rem; }
+        }
         .pool-card {
             background: var(--bg-card); border-radius: 12px; padding: 16px;
             border: 1px solid var(--border);
