@@ -882,34 +882,47 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
             }
         }
 
-        // ====================================================================
-        // DNA HASH-EQUALITY ENFORCEMENT (Phase 5A, hard fork at dnaHashEnforcementHeight)
-        // ====================================================================
-        // After activation, reject VDF blocks where the committed DNA hash
-        // doesn't match the DNA we have on file for that MIK identity.
-        if (block.IsVDFBlock() && g_node_context.dna_registry) {
-            std::string dnaError;
-            if (!CheckDNAHashEquality(block, pindex->nHeight,
-                                       *g_node_context.dna_registry, dnaError)) {
-                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
-                          << " REJECTED: DNA hash mismatch" << std::endl;
-                std::cerr << "[Chain] " << dnaError << std::endl;
-
-                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
-                if (pdb != nullptr) {
-                    pdb->WriteBlockIndex(blockHash, *pindex);
-                }
-                return false;
-            }
-        }
-
     }
 
     // ========================================================================
-    // CONTEXT-INDEPENDENT CONSENSUS CHECKS (run for ALL block connects)
+    // REORG-SAFE CONSENSUS CHECKS (run for ALL block connects)
     // ========================================================================
-    // These checks do NOT depend on chain-local state (identity DB, DNA
-    // registry) — they only read block data and hardcoded chainparams.
+    // These checks MUST run even during reorg connects (skipValidation=true),
+    // because VDF block selection is effectively a reorg every block.
+    //
+    // BUG #281: Attestation and DNA checks were inside !skipValidation,
+    // so reorg-connected blocks bypassed them. Same class as BUG #280.
+    //
+    // CheckMIKAttestations: fully context-independent (block data + hardcoded keys).
+    // CheckDNAHashEquality: uses DNA registry but degrades gracefully — if the
+    //   registry lacks data for a MIK during reorg, the check passes (can't verify).
+    //   This prevents bypass while avoiding false rejections from stale state.
+    //
+    // CheckProofOfWorkDFMP remains inside !skipValidation because it depends on
+    // the identity DB which has incomplete undo during multi-block reorgs.
+    // ========================================================================
+
+    // ====================================================================
+    // DNA HASH-EQUALITY ENFORCEMENT (Phase 5A, hard fork at dnaHashEnforcementHeight)
+    // ====================================================================
+    // After activation, reject VDF blocks where the committed DNA hash
+    // doesn't match the DNA we have on file for that MIK identity.
+    // Safe during reorgs: if registry lacks MIK data, check passes (line 503-505).
+    if (block.IsVDFBlock() && g_node_context.dna_registry) {
+        std::string dnaError;
+        if (!CheckDNAHashEquality(block, pindex->nHeight,
+                                   *g_node_context.dna_registry, dnaError)) {
+            std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                      << " REJECTED: DNA hash mismatch" << std::endl;
+            std::cerr << "[Chain] " << dnaError << std::endl;
+
+            pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+            if (pdb != nullptr) {
+                pdb->WriteBlockIndex(blockHash, *pindex);
+            }
+            return false;
+        }
+    }
     // They MUST run even during reorg connects (skipValidation=true),
     // because VDF block selection is effectively a reorg every block.
     //
