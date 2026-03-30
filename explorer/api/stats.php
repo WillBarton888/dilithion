@@ -53,6 +53,11 @@ if ($mikInfo !== null && isset($mikInfo["total_supply"])) {
     $supply = $height * $config['reward'];
 }
 
+// DilV: add pre-fund (genesis) supply from chain reset
+if ($config['chain'] === 'dilv') {
+    $supply += 2681636.92;
+}
+
 // Calculate average block time from last 10 blocks
 $avgBlockTime = null;
 if ($height >= 10) {

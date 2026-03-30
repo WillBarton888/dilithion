@@ -1145,56 +1145,42 @@
         async function loadNetworkStats() {
             try {
                 // DIL chain
-                const [dilInfo, dilSupplyRaw] = await Promise.all([
-                    fetch('https://explorer.dilithion.org/api/v1/info').then(r => r.json()),
-                    fetch('https://explorer.dilithion.org/api/supply.php?chain=dil&q=circulating').then(r => r.text())
+                const [dilSupplyRaw, dilNodes] = await Promise.all([
+                    fetch('https://explorer.dilithion.org/api/supply.php?chain=dil&q=circulating').then(r => r.text()),
+                    fetch('https://explorer.dilithion.org/api/nodes.php').then(r => r.json())
                 ]);
+                const nyc = dilNodes.nodes && dilNodes.nodes.find(n => n.id === 'nyc');
                 const dilHeight = document.getElementById('dil-height');
                 const dilSupply = document.getElementById('dil-supply');
                 const dilDifficulty = document.getElementById('dil-difficulty');
-                if (dilHeight) dilHeight.textContent = formatNum(dilInfo.height);
+                const dilMiners = document.getElementById('dil-miners');
+                if (dilHeight && dilNodes.consensusHeight) dilHeight.textContent = formatNum(dilNodes.consensusHeight);
                 if (dilSupply) dilSupply.textContent = formatNum(parseFloat(dilSupplyRaw));
-                if (dilDifficulty) dilDifficulty.textContent = formatNum(Math.round(dilInfo.difficulty));
+                if (dilDifficulty && nyc) dilDifficulty.textContent = formatNum(Math.round(nyc.difficulty));
+                if (dilMiners && nyc) dilMiners.textContent = formatNum(nyc.peers);
 
                 // Update footer block height
                 const copyright = document.querySelector('.copyright-right');
-                if (copyright) copyright.textContent = 'Block ' + formatNum(dilInfo.height) + ' — Network live';
-
-                // Peer count from NYC as proxy for active miners
-                try {
-                    const nodes = await fetch('https://explorer.dilithion.org/api/nodes.php').then(r => r.json());
-                    const nyc = nodes.nodes && nodes.nodes.find(n => n.id === 'nyc');
-                    if (nyc && nyc.peers) {
-                        const dilMiners = document.getElementById('dil-miners');
-                        if (dilMiners) dilMiners.textContent = formatNum(nyc.peers);
-                    }
-                } catch(e) {}
+                if (copyright && dilNodes.consensusHeight) copyright.textContent = 'Block ' + formatNum(dilNodes.consensusHeight) + ' — Network live';
             } catch(e) {
                 console.warn('Failed to load DIL stats:', e.message);
             }
 
             try {
                 // DilV chain
-                const [dilvInfo, dilvSupplyRaw] = await Promise.all([
-                    fetch('https://explorer.dilithion.org/dilv/api/v1/info').then(r => r.json()),
-                    fetch('https://explorer.dilithion.org/api/supply.php?chain=dilv&q=circulating').then(r => r.text())
+                const [dilvSupplyRaw, dilvNodes] = await Promise.all([
+                    fetch('https://explorer.dilithion.org/api/supply.php?chain=dilv&q=circulating').then(r => r.text()),
+                    fetch('https://explorer.dilithion.org/api/nodes.php?chain=dilv').then(r => r.json())
                 ]);
+                const dilvNyc = dilvNodes.nodes && dilvNodes.nodes.find(n => n.id === 'nyc');
                 const dilvHeight = document.getElementById('dilv-height');
                 const dilvSupply = document.getElementById('dilv-supply');
                 const dilvDifficulty = document.getElementById('dilv-difficulty');
-                if (dilvHeight) dilvHeight.textContent = formatNum(dilvInfo.height);
+                const dilvMiners = document.getElementById('dilv-miners');
+                if (dilvHeight && dilvNodes.consensusHeight) dilvHeight.textContent = formatNum(dilvNodes.consensusHeight);
                 if (dilvSupply) dilvSupply.textContent = formatNum(parseFloat(dilvSupplyRaw));
-                if (dilvDifficulty) dilvDifficulty.textContent = formatNum(Math.round(dilvInfo.difficulty));
-
-                // DilV peer count
-                try {
-                    const dilvNodes = await fetch('https://explorer.dilithion.org/api/nodes.php?chain=dilv').then(r => r.json());
-                    const dilvNyc = dilvNodes.nodes && dilvNodes.nodes.find(n => n.id === 'nyc');
-                    if (dilvNyc && dilvNyc.peers) {
-                        const dilvMiners = document.getElementById('dilv-miners');
-                        if (dilvMiners) dilvMiners.textContent = formatNum(dilvNyc.peers);
-                    }
-                } catch(e) {}
+                if (dilvDifficulty && dilvNyc) dilvDifficulty.textContent = formatNum(Math.round(dilvNyc.difficulty));
+                if (dilvMiners && dilvNyc) dilvMiners.textContent = formatNum(dilvNyc.peers);
             } catch(e) {
                 console.warn('Failed to load DilV stats:', e.message);
             }
