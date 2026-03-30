@@ -830,14 +830,14 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     // an inconsistent state (DisconnectTip only removes identities first seen at
     // the disconnected height — incomplete for multi-block reorgs).
     //
-    // BUG #280 FIX: Cooldown/consecutive/window-cap checks are now OUTSIDE this
-    // gate. The cooldown tracker IS properly maintained during reorgs via
-    // OnBlockDisconnected callbacks — after disconnecting old chain blocks, the
-    // tracker state at the common ancestor is correct for validating the new
-    // chain's blocks. Previously, these checks were inside !skipValidation,
-    // meaning blocks connected during reorgs (Case 3) bypassed cooldown
-    // enforcement. This allowed cooldown-violating blocks into the canonical
-    // chain, which IBD then correctly rejected — breaking fresh sync.
+    // BUG #280/281 FIX: The following checks are now OUTSIDE this gate and
+    // run for ALL block connects (including reorg/skipValidation):
+    //   - Cooldown, consecutive, window-cap (BUG #280 — tracker-based)
+    //   - Seed attestation (BUG #281 — context-independent, reads block + keys)
+    //   - DNA hash equality (BUG #281 — degrades gracefully if registry missing)
+    //
+    // Only CheckProofOfWorkDFMP remains inside !skipValidation because it
+    // depends on the identity DB which has incomplete undo during reorgs.
 
     // ====================================================================
     // ASSUME-VALID: Skip cooldown, consecutive, window cap, and attestation
