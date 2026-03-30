@@ -845,6 +845,20 @@
                 </div>
             </div>
 
+            <!-- Light Wallet Unlock Prompt (shown when wallet is locked in light mode) -->
+            <div id="dashboardUnlockPrompt" style="display: none; background: rgba(200,162,78,0.08); border: 1px solid rgba(200,162,78,0.3); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; display: none;">
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Wallet is locked</div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">Enter your password to view your balance and manage funds.</div>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="password" class="form-input" id="dashboardUnlockPw" placeholder="Password" style="width: 180px; padding: 8px 12px;" onkeypress="if(event.key==='Enter')dashboardQuickUnlock()">
+                        <button class="btn btn-primary" onclick="dashboardQuickUnlock()" style="padding: 8px 16px; white-space: nowrap;">Unlock</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Chain Health Warning Banner -->
             <div id="chainWarning" style="display:none; color:#ff4444; background:#1a0000; padding:12px 16px; margin-bottom:16px; border:1px solid #ff4444; border-radius:8px; font-weight:600;"></div>
 
@@ -1754,6 +1768,22 @@
 
     <script>
         // Auto-fit balance text — shrinks font only when it overflows the card
+        // Quick unlock from dashboard prompt
+        async function dashboardQuickUnlock() {
+            const pw = document.getElementById('dashboardUnlockPw').value;
+            if (!pw) return;
+            try {
+                await localWallet.unlock(pw);
+                document.getElementById('dashboardUnlockPw').value = '';
+                document.getElementById('dashboardUnlockPrompt').style.display = 'none';
+                showNotification('Wallet unlocked', 'success');
+                updateLightWalletUI();
+                refreshAll();
+            } catch (e) {
+                showNotification('Wrong password', 'error');
+            }
+        }
+
         function fitBalanceText() {
             document.querySelectorAll('.balance-amount').forEach(el => {
                 el.style.fontSize = '';  // reset to CSS default (2rem)
@@ -1811,6 +1841,8 @@
             rpcConfig.port = chainPorts[chain];
             document.getElementById('rpcPort').value = rpcConfig.port;
             localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
+            // Update chain ID for transaction signing (DIL=1, DilV=2)
+            if (txBuilder) txBuilder.chainId = chain === 'dilv' ? 2 : 1;
             connect();
         }
 
@@ -2335,13 +2367,16 @@
                     }
                 } else if (!isFullNode) {
                     // LIGHT WALLET MODE: Use browser wallet addresses
+                    const unlockPrompt = document.getElementById('dashboardUnlockPrompt');
                     if (!localWallet || !localWallet.isWalletUnlocked()) {
-                        document.getElementById('totalBalance').textContent = '0.00000000';
-                        document.getElementById('matureBalance').textContent = '0.00000000';
-                        document.getElementById('immatureBalance').textContent = '0.00000000';
+                        document.getElementById('totalBalance').textContent = '---';
+                        document.getElementById('matureBalance').textContent = '---';
+                        document.getElementById('immatureBalance').textContent = '---';
                         document.getElementById('availableForSend').textContent = '0.00000000';
+                        if (unlockPrompt) unlockPrompt.style.display = 'block';
                         return;
                     }
+                    if (unlockPrompt) unlockPrompt.style.display = 'none';
 
                     const addresses = await localWallet.getAddresses();
                     let confirmedBalance = 0;
@@ -3169,10 +3204,18 @@
 
                 try {
                     await localWallet.importWallet(passphrase, words);
-                    alertDiv.innerHTML = '<div class="alert alert-success">Wallet imported successfully! Your addresses are now available in the browser.</div>';
+                    alertDiv.innerHTML = '<div class="alert alert-success">Wallet imported! Scanning for addresses...</div>';
                     document.getElementById('recoveryMnemonic').value = '';
                     document.getElementById('recoveryPassphrase').value = '';
                     updateLightWalletUI();
+
+                    // HD address scan
+                    if (connectionManager && connectionManager.isConnected()) {
+                        const result = await localWallet.scanHDAddresses(connectionManager, (index, found) => {
+                            alertDiv.innerHTML = `<div class="alert" style="background: rgba(200,162,78,0.1); border: 1px solid rgba(200,162,78,0.3); color: var(--primary);">Scanning: checked ${index} addresses, found ${found} with balance...</div>`;
+                        });
+                        alertDiv.innerHTML = `<div class="alert alert-success">Import complete! Found ${result.found + 1} addresses with balance.</div>`;
+                    }
                     await refreshBalance();
                 } catch(e) {
                     alertDiv.innerHTML = `<div class="alert alert-error">Import failed: ${e.message}</div>`;
@@ -3801,6 +3844,7 @@
             const chain = bridgeDepositChain;
             const statusDiv = document.getElementById('bridgeDepositStatus');
             const btn = document.getElementById('bridgeDepositBtn');
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
 
             statusDiv.style.display = 'block';
             statusDiv.innerHTML = '';
@@ -3819,91 +3863,199 @@
                 statusDiv.scrollTop = statusDiv.scrollHeight;
             }
 
-            try {
-                // Step 1: Get UTXOs from node
-                log('Connecting to node...');
-                let utxos;
+            // Build OP_RETURN data (DBRG tag + Base address) — same for both modes
+            const tag = new Uint8Array([0x44, 0x42, 0x52, 0x47]); // "DBRG"
+            const baseAddrBytes = bridgeHexToBytes(baseAddr.slice(2));
+            const opReturnData = bridgeConcatBytes(tag, baseAddrBytes);
+
+            if (isLightMode) {
+                // ============================================================
+                // LIGHT MODE: Sign locally with browser wallet, broadcast via API
+                // ============================================================
                 try {
-                    utxos = await rpcCall('listunspent');
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        log('Wallet is locked. Unlock it first in Settings.', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    // Step 1: Get addresses and UTXOs from API
+                    log('Fetching UTXOs from network...');
+                    const addresses = await localWallet.getAddresses();
+                    let allUtxos = [];
+                    for (const addr of addresses) {
+                        try {
+                            const utxoResponse = await connectionManager.getUTXOs(addr.address);
+                            const utxos = utxoResponse.utxos || utxoResponse;
+                            if (Array.isArray(utxos)) {
+                                for (const u of utxos) {
+                                    u.address = addr.address;
+                                    u.addressPath = addr.path;
+                                    u.amount_sats = u.value || u.amount || 0;
+                                    allUtxos.push(u);
+                                }
+                            }
+                        } catch (e) { /* skip failed addresses */ }
+                    }
+
+                    allUtxos = allUtxos.filter(u => u.address !== bridgeAddr);
+                    allUtxos.sort((a, b) => b.amount_sats - a.amount_sats);
+                    log('Found ' + allUtxos.length + ' UTXOs across ' + addresses.length + ' addresses.');
+
+                    if (allUtxos.length === 0) {
+                        log('No UTXOs available.', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    // Step 2: Select UTXOs
+                    const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
+                    const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
+                    let selected = [];
+                    let totalSats = 0;
+                    for (const u of allUtxos) {
+                        if (selected.length >= MAX_INPUTS) break;
+                        selected.push(u);
+                        totalSats += u.amount_sats;
+                        if (totalSats >= needed) break;
+                    }
+
+                    const estSignedSize = selected.length * 5400 + 200;
+                    const feeSats = estSignedSize * FEE_RATE;
+                    const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
+
+                    if (totalSats < actualNeeded) {
+                        log(`Insufficient funds. Have ${(totalSats / 1e8).toFixed(4)} ${limits.coin}, need ${(actualNeeded / 1e8).toFixed(4)}`, 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
+                    const changeAddr = selected[0].address;
+                    log(`Selected ${selected.length} UTXOs. Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}`);
+
+                    // Step 3: Build transaction with OP_RETURN
+                    log('Building transaction...');
+                    const tx = txBuilder.buildTransaction(
+                        selected.map(u => ({ txid: u.txid, vout: u.vout })),
+                        bridgeAddr, depositSats, changeAddr, changeSats
+                    );
+
+                    // Add OP_RETURN output (between bridge payment and change)
+                    const opReturnScript = new Uint8Array(2 + opReturnData.length);
+                    opReturnScript[0] = 0x6a; // OP_RETURN
+                    opReturnScript[1] = opReturnData.length;
+                    opReturnScript.set(opReturnData, 2);
+                    tx.outputs.splice(1, 0, { value: OP_RETURN_VALUE, scriptPubKey: Array.from(opReturnScript) });
+
+                    // Step 4: Confirm
+                    const confirmed = confirm(
+                        `Bridge ${amountStr} ${limits.coin}?\n\n` +
+                        `Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}\n` +
+                        `To: ${baseAddr}\n` +
+                        `Inputs: ${selected.length}`
+                    );
+                    if (!confirmed) { log('Cancelled.', 'error'); btn.disabled = false; return; }
+
+                    // Step 5: Sign locally with browser wallet keys
+                    log('Signing locally (' + selected.length + ' inputs)...');
+                    const signingAddr = selected[0].address;
+                    const addrRecord = (await localWallet.getAddresses()).find(a => a.address === signingAddr);
+                    if (!addrRecord) throw new Error('Signing address not found in wallet');
+
+                    const privateKey = await localWallet.getPrivateKey(signingAddr);
+                    const keyData = await DilithiumCrypto.deriveChildKey(localWallet.decryptedSeed, addrRecord.path);
+                    const signedTx = await txBuilder.signTransaction(tx, privateKey, keyData.publicKey);
+                    const rawHex = txBuilder.serializeTransaction(signedTx);
+                    log('Signed. Size: ' + (rawHex.length / 2 / 1024).toFixed(1) + ' KB');
+
+                    // Step 6: Broadcast via API
+                    log('Broadcasting...');
+                    const result = await connectionManager.broadcast(rawHex);
+                    log('Sent! TxID: ' + result.txid, 'success');
+                    log(`${limits.wrapped} will arrive in your MetaMask after confirmations.`, 'success');
+
                 } catch (e) {
-                    log('Cannot connect to node. Is it running?', 'error');
-                    log('The node must be running locally for deposits.', 'error');
-                    btn.disabled = false;
-                    return;
+                    log('Error: ' + e.message, 'error');
                 }
-                log('Connected. Found ' + utxos.length + ' UTXOs.');
+            } else {
+                // ============================================================
+                // FULL NODE MODE: Use node RPC for UTXOs, signing, broadcasting
+                // ============================================================
+                try {
+                    log('Connecting to node...');
+                    let utxos;
+                    try {
+                        utxos = await rpcCall('listunspent');
+                    } catch (e) {
+                        log('Cannot connect to node. Is it running?', 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+                    log('Connected. Found ' + utxos.length + ' UTXOs.');
 
-                // Step 2: Select UTXOs
-                for (const u of utxos) {
-                    const amt = u.amount;
-                    u.amount_sats = (typeof amt === 'number' && amt < 10000) ? Math.round(amt * 1e8) : parseInt(amt);
+                    for (const u of utxos) {
+                        const amt = u.amount;
+                        u.amount_sats = (typeof amt === 'number' && amt < 10000) ? Math.round(amt * 1e8) : parseInt(amt);
+                    }
+                    utxos = utxos.filter(u => u.address !== bridgeAddr);
+                    utxos.sort((a, b) => b.amount_sats - a.amount_sats);
+
+                    const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
+                    const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
+                    let selected = [];
+                    let totalSats = 0;
+                    for (const u of utxos) {
+                        if (selected.length >= MAX_INPUTS) break;
+                        selected.push(u);
+                        totalSats += u.amount_sats;
+                        if (totalSats >= needed) break;
+                    }
+
+                    const estSignedSize = selected.length * 5400 + 200;
+                    const feeSats = estSignedSize * FEE_RATE;
+                    const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
+
+                    if (totalSats < actualNeeded) {
+                        log(`Insufficient funds. Have ${(totalSats / 1e8).toFixed(4)} ${limits.coin}, need ${(actualNeeded / 1e8).toFixed(4)}`, 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
+                    const changeAddr = selected[0].address;
+                    log(`Selected ${selected.length} UTXOs. Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}`);
+
+                    log('Building transaction...');
+                    const inputs = selected.map(u => ({ txid: u.txid, vout: u.vout }));
+                    const rawTx = bridgeBuildRawTx(inputs, bridgeAddr, depositSats, changeAddr, changeSats, opReturnData);
+                    const rawHex = bridgeBytesToHex(rawTx);
+
+                    const confirmed = confirm(
+                        `Bridge ${amountStr} ${limits.coin}?\n\n` +
+                        `Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}\n` +
+                        `To: ${baseAddr}\n` +
+                        `Inputs: ${selected.length}`
+                    );
+                    if (!confirmed) { log('Cancelled.', 'error'); btn.disabled = false; return; }
+
+                    log('Signing (' + selected.length + ' inputs)...');
+                    const signResult = await rpcCall('signrawtransaction', { hex: rawHex }, 120000);
+                    if (!signResult.complete) {
+                        log('Signing failed: ' + JSON.stringify(signResult), 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+                    log('Signed. Size: ' + (signResult.hex.length / 2 / 1024).toFixed(1) + ' KB');
+
+                    log('Broadcasting...');
+                    const txid = await rpcCall('sendrawtransaction', { hex: signResult.hex }, 120000);
+                    log('Sent! TxID: ' + txid, 'success');
+                    log(`${limits.wrapped} will arrive in your MetaMask after confirmations.`, 'success');
+
+                } catch (e) {
+                    log('Error: ' + e.message, 'error');
                 }
-                utxos = utxos.filter(u => u.address !== bridgeAddr);
-                utxos.sort((a, b) => b.amount_sats - a.amount_sats);
-
-                const estFeeSats = MAX_INPUTS * 5400 * FEE_RATE;
-                const needed = depositSats + estFeeSats + OP_RETURN_VALUE + 1000;
-                let selected = [];
-                let totalSats = 0;
-                for (const u of utxos) {
-                    if (selected.length >= MAX_INPUTS) break;
-                    selected.push(u);
-                    totalSats += u.amount_sats;
-                    if (totalSats >= needed) break;
-                }
-
-                const estSignedSize = selected.length * 5400 + 200;
-                const feeSats = estSignedSize * FEE_RATE;
-                const actualNeeded = depositSats + feeSats + OP_RETURN_VALUE;
-
-                if (totalSats < actualNeeded) {
-                    log(`Insufficient funds. Have ${(totalSats / 1e8).toFixed(4)} ${limits.coin}, need ${(actualNeeded / 1e8).toFixed(4)}`, 'error');
-                    btn.disabled = false;
-                    return;
-                }
-
-                const changeSats = totalSats - depositSats - OP_RETURN_VALUE - feeSats;
-                const changeAddr = selected[0].address;
-                log(`Selected ${selected.length} UTXOs. Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}`);
-
-                // Step 3: Build OP_RETURN (DBRG tag + Base address)
-                const tag = new Uint8Array([0x44, 0x42, 0x52, 0x47]); // "DBRG"
-                const baseAddrBytes = bridgeHexToBytes(baseAddr.slice(2));
-                const opReturnData = bridgeConcatBytes(tag, baseAddrBytes);
-
-                // Step 4: Build raw tx
-                log('Building transaction...');
-                const inputs = selected.map(u => ({ txid: u.txid, vout: u.vout }));
-                const rawTx = bridgeBuildRawTx(inputs, bridgeAddr, depositSats, changeAddr, changeSats, opReturnData);
-                const rawHex = bridgeBytesToHex(rawTx);
-
-                // Step 5: Confirm
-                const confirmed = confirm(
-                    `Bridge ${amountStr} ${limits.coin}?\n\n` +
-                    `Fee: ${(feeSats / 1e8).toFixed(4)} ${limits.coin}\n` +
-                    `To: ${baseAddr}\n` +
-                    `Inputs: ${selected.length}`
-                );
-                if (!confirmed) { log('Cancelled.', 'error'); btn.disabled = false; return; }
-
-                // Step 6: Sign
-                log('Signing (' + selected.length + ' inputs)...');
-                const signResult = await rpcCall('signrawtransaction', { hex: rawHex }, 120000);
-                if (!signResult.complete) {
-                    log('Signing failed: ' + JSON.stringify(signResult), 'error');
-                    btn.disabled = false;
-                    return;
-                }
-                log('Signed. Size: ' + (signResult.hex.length / 2 / 1024).toFixed(1) + ' KB');
-
-                // Step 7: Broadcast
-                log('Broadcasting...');
-                const txid = await rpcCall('sendrawtransaction', { hex: signResult.hex }, 120000);
-                log('Sent! TxID: ' + txid, 'success');
-                log(`${limits.wrapped} will arrive in your MetaMask after confirmations.`, 'success');
-
-            } catch (e) {
-                log('Error: ' + e.message, 'error');
             }
 
             btn.disabled = false;
@@ -3959,8 +4111,11 @@
         }
 
         function bridgeInitTab() {
-            // Initialize active states
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+
+            // Both tabs work in both modes — light mode signs locally via WASM
             switchBridgeTab('deposit');
+
             bridgeSelectDepositChain('dil');
             bridgeSelectWithdrawChain('dil');
             // Show warning if on HTTPS (deposits need local node RPC)
@@ -4070,6 +4225,8 @@
                 // Initialize transaction builder
                 if (window.TransactionBuilder) {
                     txBuilder = new window.TransactionBuilder(connectionManager, window.DilithiumCrypto, localWallet);
+                    // Set chain ID for sighash (DIL=1, DilV=2)
+                    txBuilder.chainId = activeChain === 'dilv' ? 2 : 1;
                 }
 
                 console.log('[LightWallet] All modules initialized');
@@ -4598,10 +4755,45 @@
 
             try {
                 await localWallet.importWallet(pw, words);
-                showNotification('Wallet imported successfully!', 'success');
+                showNotification('Wallet imported! Scanning for addresses...', 'success');
                 welcomeFinish();
+
+                // Start HD address scan in background after wallet is loaded
+                if (connectionManager && connectionManager.isConnected()) {
+                    welcomeStartHDScan();
+                } else {
+                    // Connect first, then scan
+                    try {
+                        await handleModeChange();
+                        welcomeStartHDScan();
+                    } catch (e) {
+                        showNotification('Connected but address scan requires API. Try refreshing.', 'warning');
+                    }
+                }
             } catch (e) {
                 showNotification('Import failed: ' + e.message, 'error');
+            }
+        }
+
+        async function welcomeStartHDScan() {
+            const scanStatus = document.getElementById('recentTxList');
+            if (scanStatus) {
+                scanStatus.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">' +
+                    '<div style="margin-bottom: 8px;">Scanning for addresses...</div>' +
+                    '<div id="hdScanProgress" style="font-size: 0.8rem; color: var(--text-muted);">Checking index 1...</div></div>';
+            }
+
+            try {
+                const result = await localWallet.scanHDAddresses(connectionManager, (index, found, addr, hasBalance) => {
+                    const el = document.getElementById('hdScanProgress');
+                    if (el) el.textContent = `Checked ${index} addresses, found ${found} with balance...`;
+                });
+
+                showNotification(`Scan complete: found ${result.found} additional addresses`, 'success');
+                await refreshBalance();
+                await refreshTransactions();
+            } catch (e) {
+                console.warn('[HDScan] Error:', e.message);
             }
         }
 

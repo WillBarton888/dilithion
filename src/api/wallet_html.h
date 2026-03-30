@@ -716,6 +716,117 @@ inline const std::string& GetWalletHTML() {
 
     <!-- Main Content -->
     <main class="main-content">
+        <!-- Welcome Page (shown when no wallet exists in light mode) -->
+        <div class="page" id="page-welcome" style="display: none;">
+            <div style="max-width: 520px; margin: 40px auto; text-align: center;">
+                <div style="font-size: 3rem; margin-bottom: 16px;">&#x1f6e1;</div>
+                <h1 style="font-family: 'DM Serif Display', serif; font-size: 1.8rem; margin-bottom: 8px;">Welcome to Dilithion</h1>
+                <p style="color: var(--text-secondary); margin-bottom: 32px; line-height: 1.6;">
+                    Quantum-resistant wallet — your keys stay in your browser. No account, no signup, no server.
+                </p>
+
+                <div style="display: flex; flex-direction: column; gap: 16px; text-align: left;">
+                    <!-- Create New Wallet -->
+                    <div class="card" style="cursor: pointer; transition: border-color 0.2s;" onclick="welcomeCreate()" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 48px; height: 48px; background: rgba(200,162,78,0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            </div>
+                            <div>
+                                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 4px;">Create New Wallet</div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem;">Generate a new wallet with a 24-word recovery phrase</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Import Existing Wallet -->
+                    <div class="card" style="cursor: pointer; transition: border-color 0.2s;" onclick="welcomeImport()" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div style="width: 48px; height: 48px; background: rgba(200,162,78,0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            </div>
+                            <div>
+                                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 4px;">Import Existing Wallet</div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem;">Restore using your 24-word recovery phrase from a node or backup</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Create Wallet Flow -->
+            <div id="welcomeCreateFlow" style="display: none; max-width: 520px; margin: 0 auto;">
+                <div class="card">
+                    <div class="card-title">Create New Wallet</div>
+                    <div class="form-group">
+                        <label class="form-label">Choose a password (8+ characters)</label>
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="welcomeCreatePassword" placeholder="Password to encrypt your wallet" style="padding-right: 48px;">
+                            <span onclick="const i=document.getElementById('welcomeCreatePassword');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'Show':'Hide'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:0.75rem;color:var(--text-muted);user-select:none;">Show</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm password</label>
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="welcomeCreatePasswordConfirm" placeholder="Re-enter your password" style="padding-right: 48px;">
+                            <span onclick="const i=document.getElementById('welcomeCreatePasswordConfirm');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'Show':'Hide'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:0.75rem;color:var(--text-muted);user-select:none;">Show</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="welcomeDoCreate()" style="width: 100%;">Create Wallet</button>
+                </div>
+            </div>
+
+            <!-- Mnemonic Display (after creation) -->
+            <div id="welcomeMnemonicDisplay" style="display: none; max-width: 520px; margin: 0 auto;">
+                <div class="card" style="border-color: var(--warning);">
+                    <div class="card-title" style="color: var(--warning);">Write Down Your Recovery Phrase</div>
+                    <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 0.85rem; color: var(--warning); line-height: 1.6;">
+                        <strong>This is the ONLY time your recovery phrase will be shown.</strong><br>
+                        Write it down on paper and store it in a secure location. Anyone with these 24 words can access your funds. Never share it. Never store it digitally.
+                    </div>
+                    <div id="welcomeMnemonicWords" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px;"></div>
+                    <div style="background: var(--bg-darker); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
+                        <strong style="color: var(--text-secondary);">Tips:</strong><br>
+                        - Write it on paper, not digitally<br>
+                        - Store in a fireproof/waterproof location<br>
+                        - Consider a metal backup for extra durability<br>
+                        - Never take a photo or screenshot
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Your wallet address</label>
+                        <div id="welcomeAddress" style="background: var(--bg-darker); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--accent); word-break: break-all; cursor: pointer;" onclick="navigator.clipboard.writeText(this.textContent).then(()=>{showNotification('Address copied!','success')})"></div>
+                    </div>
+                    <button class="btn btn-primary" onclick="welcomeFinish()" style="width: 100%;">I have written it down — Continue to wallet</button>
+                </div>
+            </div>
+
+            <!-- Import Wallet Flow -->
+            <div id="welcomeImportFlow" style="display: none; max-width: 520px; margin: 0 auto;">
+                <div class="card">
+                    <div class="card-title">Import Wallet</div>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+                        Enter the 24-word recovery phrase from your node wallet or paper backup.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">Recovery phrase (24 words)</label>
+                        <textarea class="form-input" id="welcomeImportMnemonic" rows="4" placeholder="Enter your 24 words separated by spaces" style="resize: vertical; font-family: 'JetBrains Mono', monospace;"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Browser wallet password (8+ characters)</label>
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="welcomeImportPassword" placeholder="Password to protect your wallet in this browser" style="padding-right: 48px;">
+                            <span onclick="const i=document.getElementById('welcomeImportPassword');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'Show':'Hide'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:0.75rem;color:var(--text-muted);user-select:none;">Show</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
+                            This encrypts your keys in the browser. You can use the same password as your node wallet, or choose a different one.
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="welcomeDoImport()" style="width: 100%;">Import Wallet</button>
+                    <button class="btn" onclick="welcomeImportBack()" style="width: 100%; margin-top: 8px; background: transparent; color: var(--text-secondary);">Back</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Dashboard Page -->
         <div class="page active" id="page-dashboard">
             <div class="page-header">
@@ -743,6 +854,20 @@ inline const std::string& GetWalletHTML() {
                     <div class="balance-amount">
                         <span id="immatureBalance">0.00000000</span>
                         <span class="balance-unit">DIL</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Light Wallet Unlock Prompt (shown when wallet is locked in light mode) -->
+            <div id="dashboardUnlockPrompt" style="display: none; background: rgba(200,162,78,0.08); border: 1px solid rgba(200,162,78,0.3); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; display: none;">
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Wallet is locked</div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">Enter your password to view your balance and manage funds.</div>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="password" class="form-input" id="dashboardUnlockPw" placeholder="Password" style="width: 180px; padding: 8px 12px;" onkeypress="if(event.key==='Enter')dashboardQuickUnlock()">
+                        <button class="btn btn-primary" onclick="dashboardQuickUnlock()" style="padding: 8px 16px; white-space: nowrap;">Unlock</button>
                     </div>
                 </div>
             </div>
@@ -1145,9 +1270,9 @@ inline const std::string& GetWalletHTML() {
                     <div class="form-hint">Enter all 24 words in the correct order, separated by spaces</div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Passphrase (optional)</label>
+                    <label class="form-label" id="recoveryPassphraseLabel">Passphrase (optional)</label>
                     <input type="password" class="form-input" id="recoveryPassphrase" placeholder="Leave empty if you didn't set a passphrase">
-                    <div class="form-hint">Only enter if you used a passphrase when creating the wallet</div>
+                    <div class="form-hint" id="recoveryPassphraseHint">Only enter if you used a passphrase when creating the wallet</div>
                 </div>
                 <button class="btn btn-primary" onclick="recoverWallet()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
@@ -1656,6 +1781,22 @@ inline const std::string& GetWalletHTML() {
 
     <script>
         // Auto-fit balance text — shrinks font only when it overflows the card
+        // Quick unlock from dashboard prompt
+        async function dashboardQuickUnlock() {
+            const pw = document.getElementById('dashboardUnlockPw').value;
+            if (!pw) return;
+            try {
+                await localWallet.unlock(pw);
+                document.getElementById('dashboardUnlockPw').value = '';
+                document.getElementById('dashboardUnlockPrompt').style.display = 'none';
+                showNotification('Wallet unlocked', 'success');
+                updateLightWalletUI();
+                refreshAll();
+            } catch (e) {
+                showNotification('Wrong password', 'error');
+            }
+        }
+
         function fitBalanceText() {
             document.querySelectorAll('.balance-amount').forEach(el => {
                 el.style.fontSize = '';  // reset to CSS default (2rem)
@@ -2179,7 +2320,8 @@ inline const std::string& GetWalletHTML() {
         }
 
         async function refreshAll() {
-            if (!connected) return;
+            const isLightConnected = connectionManager && connectionManager.isConnected();
+            if (!connected && !isLightConnected) return;
             const wait = () => new Promise(r => setTimeout(r, 300));  // 300ms between function calls
             try {
                 // Serialize requests with delays to prevent server socket issues
@@ -2236,13 +2378,16 @@ inline const std::string& GetWalletHTML() {
                     }
                 } else if (!isFullNode) {
                     // LIGHT WALLET MODE: Use browser wallet addresses
+                    const unlockPrompt = document.getElementById('dashboardUnlockPrompt');
                     if (!localWallet || !localWallet.isWalletUnlocked()) {
-                        document.getElementById('totalBalance').textContent = '0.00000000';
-                        document.getElementById('matureBalance').textContent = '0.00000000';
-                        document.getElementById('immatureBalance').textContent = '0.00000000';
+                        document.getElementById('totalBalance').textContent = '---';
+                        document.getElementById('matureBalance').textContent = '---';
+                        document.getElementById('immatureBalance').textContent = '---';
                         document.getElementById('availableForSend').textContent = '0.00000000';
+                        if (unlockPrompt) unlockPrompt.style.display = 'block';
                         return;
                     }
+                    if (unlockPrompt) unlockPrompt.style.display = 'none';
 
                     const addresses = await localWallet.getAddresses();
                     let confirmedBalance = 0;
@@ -2887,6 +3032,17 @@ inline const std::string& GetWalletHTML() {
         async function showMnemonic() {
             const alertDiv = document.getElementById('backupAlert');
             const password = document.getElementById('exportPassword').value;
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+
+            // Light mode: mnemonic not stored after creation
+            if (isLightMode) {
+                alertDiv.innerHTML = '<div class="alert" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: var(--warning); line-height: 1.6;">' +
+                    '<strong>Browser Wallet</strong><br>' +
+                    'Your recovery phrase was shown when you created the wallet. It is not stored in the browser for security.<br><br>' +
+                    'If you lost it, you cannot recover it from here. If you have a node wallet with the same keys, you can export the mnemonic from your node using the <strong>Node Wallet</strong> at <a href="http://127.0.0.1:8332/" style="color:var(--warning);text-decoration:underline;">http://127.0.0.1:8332/</a>.<br><br>' +
+                    'To import a mnemonic into this browser wallet, use the <strong>Recover Wallet</strong> section below.</div>';
+                return;
+            }
 
             // Show confirmation dialog first
             const confirmed = confirm(
@@ -3037,6 +3193,7 @@ inline const std::string& GetWalletHTML() {
             const alertDiv = document.getElementById('backupAlert');
             const mnemonicInput = document.getElementById('recoveryMnemonic').value.trim();
             const passphrase = document.getElementById('recoveryPassphrase').value;
+            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
 
             // Validate mnemonic
             const words = mnemonicInput.toLowerCase().split(/\s+/).filter(w => w.length > 0);
@@ -3047,6 +3204,37 @@ inline const std::string& GetWalletHTML() {
 
             const mnemonic = words.join(' ');
 
+            if (isLightMode) {
+                // Light mode: import into browser wallet
+                if (!passphrase || passphrase.length < 8) {
+                    alertDiv.innerHTML = '<div class="alert alert-error">Enter a password (8+ characters) to encrypt your browser wallet.</div>';
+                    return;
+                }
+
+                alertDiv.innerHTML = '<div class="alert" style="background: rgba(200, 162, 78, 0.1); border: 1px solid rgba(200, 162, 78, 0.3); color: var(--primary);">Importing wallet... This may take a moment.</div>';
+
+                try {
+                    await localWallet.importWallet(passphrase, words);
+                    alertDiv.innerHTML = '<div class="alert alert-success">Wallet imported! Scanning for addresses...</div>';
+                    document.getElementById('recoveryMnemonic').value = '';
+                    document.getElementById('recoveryPassphrase').value = '';
+                    updateLightWalletUI();
+
+                    // HD address scan
+                    if (connectionManager && connectionManager.isConnected()) {
+                        const result = await localWallet.scanHDAddresses(connectionManager, (index, found) => {
+                            alertDiv.innerHTML = `<div class="alert" style="background: rgba(200,162,78,0.1); border: 1px solid rgba(200,162,78,0.3); color: var(--primary);">Scanning: checked ${index} addresses, found ${found} with balance...</div>`;
+                        });
+                        alertDiv.innerHTML = `<div class="alert alert-success">Import complete! Found ${result.found + 1} addresses with balance.</div>`;
+                    }
+                    await refreshBalance();
+                } catch(e) {
+                    alertDiv.innerHTML = `<div class="alert alert-error">Import failed: ${e.message}</div>`;
+                }
+                return;
+            }
+
+            // Full node mode: use RPC
             alertDiv.innerHTML = '<div class="alert" style="background: rgba(200, 162, 78, 0.1); border: 1px solid rgba(200, 162, 78, 0.3); color: var(--primary);">Recovering wallet... This may take a moment.</div>';
 
             try {
@@ -3566,12 +3754,13 @@ inline const std::string& GetWalletHTML() {
         }
 
         // Bridge deposit helpers (ported from bridge.html)
-        const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+        // Note: BASE58_ALPHABET is already defined in dilithium-crypto.js
+        const BRIDGE_BASE58 = typeof BASE58_ALPHABET !== 'undefined' ? BASE58_ALPHABET : '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
         function bridgeBase58Decode(str) {
             let n = BigInt(0);
             for (const c of str) {
-                const idx = BASE58_ALPHABET.indexOf(c);
+                const idx = BRIDGE_BASE58.indexOf(c);
                 if (idx < 0) throw new Error('Invalid Base58 character: ' + c);
                 n = n * 58n + BigInt(idx);
             }
@@ -3865,6 +4054,20 @@ inline const std::string& GetWalletHTML() {
             if (pageName === 'bridge') {
                 bridgeInitTab();
             }
+            if (pageName === 'backup') {
+                const isLight = connectionManager && connectionManager.getMode() === 'light';
+                const label = document.getElementById('recoveryPassphraseLabel');
+                const hint = document.getElementById('recoveryPassphraseHint');
+                if (isLight && label && hint) {
+                    label.textContent = 'Password (required)';
+                    hint.textContent = 'Choose a password (8+ characters) to encrypt your wallet in the browser';
+                    document.getElementById('recoveryPassphrase').placeholder = 'Choose a password to protect your wallet';
+                } else if (label && hint) {
+                    label.textContent = 'Passphrase (optional)';
+                    hint.textContent = 'Only enter if you used a passphrase when creating the wallet';
+                    document.getElementById('recoveryPassphrase').placeholder = 'Leave empty if you didn\'t set a passphrase';
+                }
+            }
         }
 
         // ========================================================================
@@ -3885,16 +4088,22 @@ inline const std::string& GetWalletHTML() {
                     console.log('[LightWallet] Crypto module initialized');
                 }
 
-                // Initialize connection manager
+                // Initialize connection manager (don't auto-connect yet — welcome screen check happens later)
                 if (window.ConnectionManager) {
                     connectionManager = new window.ConnectionManager();
                     connectionManager.init();
 
-                    // Load saved mode
+                    // Set UI to match saved mode, but don't connect
                     const savedMode = localStorage.getItem('dilithionWalletMode');
                     if (savedMode === 'light') {
                         document.getElementById('connectionMode').value = 'light';
-                        handleModeChange();
+                        const fullModeDesc = document.getElementById('fullModeDesc');
+                        const lightModeDesc = document.getElementById('lightModeDesc');
+                        const fullNodeSettings = document.getElementById('fullNodeSettingsCard');
+                        if (fullModeDesc) fullModeDesc.style.display = 'none';
+                        if (lightModeDesc) lightModeDesc.style.display = 'block';
+                        if (fullNodeSettings) fullNodeSettings.style.display = 'none';
+                        connectionManager.setMode('light');
                     }
                 }
 
@@ -4372,13 +4581,192 @@ inline const std::string& GetWalletHTML() {
             });
         });
 
+        // ========================================================================
+        // Welcome Flow (first-time light wallet setup)
+        // ========================================================================
+
+        function welcomeCreate() {
+            document.getElementById('welcomeCreateFlow').style.display = 'block';
+            document.getElementById('welcomeImportFlow').style.display = 'none';
+        }
+
+        function welcomeImport() {
+            document.getElementById('welcomeImportFlow').style.display = 'block';
+            document.getElementById('welcomeCreateFlow').style.display = 'none';
+        }
+
+        function welcomeImportBack() {
+            document.getElementById('welcomeImportFlow').style.display = 'none';
+        }
+
+        async function welcomeDoCreate() {
+            const pw = document.getElementById('welcomeCreatePassword').value;
+            const pw2 = document.getElementById('welcomeCreatePasswordConfirm').value;
+
+            if (!pw || pw.length < 8) {
+                showNotification('Password must be at least 8 characters', 'error');
+                return;
+            }
+            if (pw !== pw2) {
+                showNotification('Passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                const result = await localWallet.createWallet(pw);
+                const words = result.mnemonic;
+                const wordsArray = Array.isArray(words) ? words : words.split(' ');
+
+                // Display mnemonic
+                const container = document.getElementById('welcomeMnemonicWords');
+                container.innerHTML = '';
+                wordsArray.forEach((word, i) => {
+                    const div = document.createElement('div');
+                    div.style.cssText = 'background: var(--bg-darker); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-family: "JetBrains Mono", monospace; font-size: 0.8rem;';
+                    div.innerHTML = '<span style="color: var(--text-muted); margin-right: 6px;">' + (i + 1) + '.</span>' + word;
+                    container.appendChild(div);
+                });
+
+                document.getElementById('welcomeAddress').textContent = result.addresses[0];
+                document.getElementById('welcomeCreateFlow').style.display = 'none';
+                document.getElementById('welcomeMnemonicDisplay').style.display = 'block';
+            } catch (e) {
+                showNotification('Failed to create wallet: ' + e.message, 'error');
+            }
+        }
+
+        async function welcomeDoImport() {
+            const mnemonic = document.getElementById('welcomeImportMnemonic').value.trim();
+            const pw = document.getElementById('welcomeImportPassword').value;
+
+            if (!pw || pw.length < 8) {
+                showNotification('Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            const words = mnemonic.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+            if (words.length !== 24) {
+                showNotification('Please enter exactly 24 words. You entered ' + words.length, 'error');
+                return;
+            }
+
+            try {
+                await localWallet.importWallet(pw, words);
+                showNotification('Wallet imported! Scanning for addresses...', 'success');
+                welcomeFinish();
+
+                // Start HD address scan in background after wallet is loaded
+                if (connectionManager && connectionManager.isConnected()) {
+                    welcomeStartHDScan();
+                } else {
+                    // Connect first, then scan
+                    try {
+                        await handleModeChange();
+                        welcomeStartHDScan();
+                    } catch (e) {
+                        showNotification('Connected but address scan requires API. Try refreshing.', 'warning');
+                    }
+                }
+            } catch (e) {
+                showNotification('Import failed: ' + e.message, 'error');
+            }
+        }
+
+        async function welcomeStartHDScan() {
+            const scanStatus = document.getElementById('recentTxList');
+            if (scanStatus) {
+                scanStatus.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">' +
+                    '<div style="margin-bottom: 8px;">Scanning for addresses...</div>' +
+                    '<div id="hdScanProgress" style="font-size: 0.8rem; color: var(--text-muted);">Checking index 1...</div></div>';
+            }
+
+            try {
+                const result = await localWallet.scanHDAddresses(connectionManager, (index, found, addr, hasBalance) => {
+                    const el = document.getElementById('hdScanProgress');
+                    if (el) el.textContent = `Checked ${index} addresses, found ${found} with balance...`;
+                });
+
+                showNotification(`Scan complete: found ${result.found} additional addresses`, 'success');
+                await refreshBalance();
+                await refreshTransactions();
+            } catch (e) {
+                console.warn('[HDScan] Error:', e.message);
+            }
+        }
+
+        async function welcomeFinish() {
+            document.getElementById('page-welcome').style.display = 'none';
+            // Show sidebar nav items
+            document.querySelectorAll('.nav-item').forEach(i => i.style.display = '');
+            updateLightWalletUI();
+            navigateTo('dashboard');
+
+            // Establish connection to seed nodes before loading data
+            const savedMode = localStorage.getItem('dilithionWalletMode');
+            if (savedMode === 'light') {
+                await handleModeChange();
+            } else {
+                connect();
+            }
+        }
+
+        // Check if welcome screen should be shown
+        // Light mode: show if no browser wallet exists
+        // Full mode: show if no node is reachable
+        async function checkWelcomeScreen() {
+            const isLightMode = localStorage.getItem('dilithionWalletMode') === 'light';
+
+            if (isLightMode) {
+                // Light mode: check browser wallet
+                if (localWallet) {
+                    try {
+                        const hasBrowserWallet = await localWallet.hasWallet();
+                        if (hasBrowserWallet) return false;
+                    } catch (e) {
+                        console.log('[Welcome] Could not check browser wallet:', e.message);
+                    }
+                }
+                // No localWallet module OR no wallet exists → show welcome
+            } else {
+                // Full mode: check if node is reachable
+                try {
+                    await rpcCall('getblockchaininfo');
+                    return false;  // Node is running, skip welcome
+                } catch (e) {
+                    // Node not reachable — but don't show welcome in full mode,
+                    // just let the normal "Connection failed" flow handle it
+                    return false;
+                }
+            }
+
+            // No wallet — show welcome
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById('page-welcome').style.display = 'block';
+            document.getElementById('page-welcome').classList.add('active');
+            return true;
+        }
+
+        // Check for ?mode=light URL parameter (from website "Web Wallet" link)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('mode') === 'light') {
+            localStorage.setItem('dilithionWalletMode', 'light');
+        }
+
         // Initialize light wallet modules first
-        initLightWallet().then(() => {
+        initLightWallet().then(async () => {
             loadSettings();
             initChainSelector();
-            // Only auto-connect in full mode
+
+            // Show welcome screen if no wallet exists
+            const showedWelcome = await checkWelcomeScreen();
+            if (showedWelcome) return;
+
+            // Auto-connect based on mode
             const savedMode = localStorage.getItem('dilithionWalletMode');
-            if (savedMode !== 'light') {
+            if (savedMode === 'light') {
+                // Light mode: connect to seed nodes
+                handleModeChange();
+            } else {
                 connect();
             }
         });

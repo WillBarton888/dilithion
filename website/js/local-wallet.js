@@ -205,6 +205,93 @@ class LocalWallet {
     }
 
     /**
+     * Scan HD addresses and add any with on-chain balance.
+     * Derives sequential addresses and queries the API until GAP_LIMIT
+     * consecutive empty addresses are found (BIP44 standard).
+     * @param {Object} connectionManager - ConnectionManager instance for API queries
+     * @param {Function} onProgress - Optional callback(index, found, address) for UI updates
+     * @returns {Promise<Object>} {scanned, found, addresses}
+     */
+    async scanHDAddresses(connectionManager, onProgress = null) {
+        if (!this.isUnlocked) {
+            throw new Error('Wallet is locked');
+        }
+
+        const GAP_LIMIT = 20;
+        const accountIndex = 0;
+        let consecutiveEmpty = 0;
+        let index = 1; // Start at 1 since index 0 was created during import
+        let found = 0;
+        const foundAddresses = [];
+
+        // Get existing addresses to avoid duplicates
+        const existing = await this.getAddresses();
+        const existingSet = new Set(existing.map(a => a.address));
+
+        console.log('[LocalWallet] Starting HD address scan (gap limit: ' + GAP_LIMIT + ')...');
+
+        while (consecutiveEmpty < GAP_LIMIT) {
+            const keyPath = `m/44'/573'/${accountIndex}'/0'/${index}'`;
+
+            try {
+                const { publicKey } = await this.crypto.deriveChildKey(this.decryptedSeed, keyPath);
+                const address = this.crypto.deriveAddress(publicKey);
+
+                // Query balance from API
+                let hasBalance = false;
+                try {
+                    const balanceInfo = await connectionManager.getBalance(address);
+                    hasBalance = (balanceInfo.confirmed || 0) > 0 || (balanceInfo.unconfirmed || 0) > 0;
+                } catch (e) {
+                    // API error — assume empty, continue scanning
+                }
+
+                if (hasBalance) {
+                    consecutiveEmpty = 0;
+                    found++;
+
+                    // Save address if not already known
+                    if (!existingSet.has(address)) {
+                        // Update wallet's nextAddressIndex
+                        const wallet = await this.getWallet();
+                        const account = wallet.accounts[accountIndex];
+                        if (index >= account.nextAddressIndex) {
+                            account.nextAddressIndex = index + 1;
+                            await this.saveWallet(wallet);
+                        }
+
+                        await this.saveAddress({
+                            walletId: this.walletId,
+                            address,
+                            path: keyPath,
+                            accountIndex,
+                            addressIndex: index,
+                            label: '',
+                            createdAt: Date.now()
+                        });
+                        existingSet.add(address);
+                        foundAddresses.push(address);
+                    }
+                } else {
+                    consecutiveEmpty++;
+                }
+
+                if (onProgress) {
+                    onProgress(index, found, address, hasBalance);
+                }
+            } catch (e) {
+                console.warn('[LocalWallet] HD scan error at index ' + index + ':', e.message);
+                consecutiveEmpty++;
+            }
+
+            index++;
+        }
+
+        console.log('[LocalWallet] HD scan complete. Scanned: ' + (index - 1) + ', Found: ' + found);
+        return { scanned: index - 1, found, addresses: foundAddresses };
+    }
+
+    /**
      * Unlock wallet with password
      * @param {string} password - Wallet password
      * @returns {Promise<boolean>} True if unlocked successfully

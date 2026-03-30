@@ -19,12 +19,9 @@ const CONNECTION_MODE = {
 // This allows the light wallet to work from HTTPS pages without mixed-content issues
 const HTTPS_API_BASE = 'https://explorer.dilithion.org';
 
-// Default seed nodes (mainnet) - HTTPS proxy preferred, direct HTTP as fallback
+// Default seed nodes (mainnet) - HTTPS only (HTTP blocked by mixed-content on HTTPS pages)
 const DEFAULT_SEED_NODES = [
-    { host: 'explorer.dilithion.org', port: 443, region: 'US', https: true },  // HTTPS proxy (NYC)
-    { host: '138.197.68.128', port: 8334, region: 'US' },      // NYC direct
-    { host: '167.172.56.119', port: 8334, region: 'EU' },      // London direct
-    { host: '165.22.103.114', port: 8334, region: 'APAC' }     // Singapore direct
+    { host: 'explorer.dilithion.org', port: 443, region: 'US', https: true }  // HTTPS proxy (NYC)
 ];
 
 // Testnet seed nodes - REST API on port 18334
@@ -464,7 +461,12 @@ class ConnectionManager {
             let errorMessage = `HTTP ${response.status}`;
             try {
                 const errorData = await response.json();
-                errorMessage = errorData.error || errorData.message || errorMessage;
+                const errField = errorData.error || errorData.message;
+                if (typeof errField === 'object') {
+                    errorMessage = errField.message || JSON.stringify(errField);
+                } else if (errField) {
+                    errorMessage = errField;
+                }
             } catch (e) {}
 
             const err = new Error(errorMessage);

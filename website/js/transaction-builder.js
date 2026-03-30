@@ -258,30 +258,69 @@ class TransactionBuilder {
      * @returns {Promise<Object>} Signed transaction
      */
     async signTransaction(tx, privateKey, publicKey) {
-        // Compute signing hash
+        // Compute the base signing hash (tx serialized with empty scriptSigs)
         const serialized = this.serializeForSigning(tx);
-        const signingHash = this.crypto.sha3_256(serialized);
+        const txSigningHash = this.crypto.sha3_256(serialized);
 
-        // Sign with Dilithium
-        const signature = await this.crypto.sign(signingHash, privateKey);
-
-        if (signature.length !== DILITHIUM3_SIG_SIZE) {
-            throw new Error(`Invalid signature size: ${signature.length}`);
-        }
         if (publicKey.length !== DILITHIUM3_PK_SIZE) {
             throw new Error(`Invalid public key size: ${publicKey.length}`);
         }
 
-        // Build scriptSig for all inputs (same signature for all in single-key spend)
-        const scriptSig = this.buildScriptSig(signature, publicKey);
+        // Chain ID for cross-chain replay protection (DIL=1, DilV=2)
+        const chainId = this.chainId || 1;
 
-        // Clone transaction and add scriptSig to all inputs
-        const signedTx = JSON.parse(JSON.stringify(tx));
-        for (let i = 0; i < signedTx.inputs.length; i++) {
-            signedTx.inputs[i].scriptSig = Array.from(scriptSig);
+        // Sign EACH input with its own sighash (input_idx differs per input)
+        // Sighash = SHA3-256(tx_signing_hash(32) || input_idx(4 LE) || version(4 LE) || chain_id(4 LE))
+        const signedInputs = [];
+        for (let i = 0; i < tx.inputs.length; i++) {
+            const sigMessage = new Uint8Array(44);
+            sigMessage.set(txSigningHash, 0);
+
+            // Input index (4 bytes LE)
+            sigMessage[32] = i & 0xFF;
+            sigMessage[33] = (i >> 8) & 0xFF;
+            sigMessage[34] = (i >> 16) & 0xFF;
+            sigMessage[35] = (i >> 24) & 0xFF;
+
+            // Transaction version (4 bytes LE)
+            sigMessage[36] = tx.version & 0xFF;
+            sigMessage[37] = (tx.version >> 8) & 0xFF;
+            sigMessage[38] = (tx.version >> 16) & 0xFF;
+            sigMessage[39] = (tx.version >> 24) & 0xFF;
+
+            // Chain ID (4 bytes LE)
+            sigMessage[40] = chainId & 0xFF;
+            sigMessage[41] = (chainId >> 8) & 0xFF;
+            sigMessage[42] = (chainId >> 16) & 0xFF;
+            sigMessage[43] = (chainId >> 24) & 0xFF;
+
+            // Hash the 44-byte message
+            const sigHash = this.crypto.sha3_256(sigMessage);
+
+            // Sign with Dilithium
+            const signature = await this.crypto.sign(sigHash, privateKey);
+            if (signature.length !== DILITHIUM3_SIG_SIZE) {
+                throw new Error(`Invalid signature size: ${signature.length}`);
+            }
+
+            const scriptSig = this.buildScriptSig(signature, publicKey);
+            signedInputs.push({
+                txid: tx.inputs[i].txid,
+                vout: tx.inputs[i].vout,
+                scriptSig: Array.from(scriptSig),
+                sequence: tx.inputs[i].sequence
+            });
         }
 
-        return signedTx;
+        return {
+            version: tx.version,
+            lockTime: tx.lockTime,
+            inputs: signedInputs,
+            outputs: tx.outputs.map(out => ({
+                value: out.value,
+                scriptPubKey: Array.from(out.scriptPubKey)
+            }))
+        };
     }
 
     /**
