@@ -1159,6 +1159,16 @@
                 // Update footer block height
                 const copyright = document.querySelector('.copyright-right');
                 if (copyright) copyright.textContent = 'Block ' + formatNum(dilInfo.height) + ' — Network live';
+
+                // Peer count from NYC as proxy for active miners
+                try {
+                    const nodes = await fetch('https://explorer.dilithion.org/api/nodes.php').then(r => r.json());
+                    const nyc = nodes.nodes && nodes.nodes.find(n => n.id === 'nyc');
+                    if (nyc && nyc.peers) {
+                        const dilMiners = document.getElementById('dil-miners');
+                        if (dilMiners) dilMiners.textContent = formatNum(nyc.peers);
+                    }
+                } catch(e) {}
             } catch(e) {
                 console.warn('Failed to load DIL stats:', e.message);
             }
@@ -1175,6 +1185,16 @@
                 if (dilvHeight) dilvHeight.textContent = formatNum(dilvInfo.height);
                 if (dilvSupply) dilvSupply.textContent = formatNum(parseFloat(dilvSupplyRaw));
                 if (dilvDifficulty) dilvDifficulty.textContent = formatNum(Math.round(dilvInfo.difficulty));
+
+                // DilV peer count
+                try {
+                    const dilvNodes = await fetch('https://explorer.dilithion.org/api/nodes.php?chain=dilv').then(r => r.json());
+                    const dilvNyc = dilvNodes.nodes && dilvNodes.nodes.find(n => n.id === 'nyc');
+                    if (dilvNyc && dilvNyc.peers) {
+                        const dilvMiners = document.getElementById('dilv-miners');
+                        if (dilvMiners) dilvMiners.textContent = formatNum(dilvNyc.peers);
+                    }
+                } catch(e) {}
             } catch(e) {
                 console.warn('Failed to load DilV stats:', e.message);
             }
