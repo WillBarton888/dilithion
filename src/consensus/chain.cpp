@@ -903,25 +903,44 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
             }
         }
 
-        // ====================================================================
-        // SEED ATTESTATION CHECK (Phase 2+3, hard fork at seedAttestationActivationHeight)
-        // ====================================================================
-        // After activation, MIK registration blocks must include 3+ valid
-        // attestations signed by known seed node keys.
-        // Skip attestation for genesis (height 0) — no MIK exists yet
-        if (block.IsVDFBlock() && pindex->nHeight > 0 && !assumeValid) {
-            std::string attestError;
-            if (!CheckMIKAttestations(block, pindex->nHeight, attestError)) {
-                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
-                          << " REJECTED: attestation check failed" << std::endl;
-                std::cerr << "[Chain] " << attestError << std::endl;
+    }
 
-                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
-                if (pdb != nullptr) {
-                    pdb->WriteBlockIndex(blockHash, *pindex);
-                }
-                return false;
+    // ========================================================================
+    // CONTEXT-INDEPENDENT CONSENSUS CHECKS (run for ALL block connects)
+    // ========================================================================
+    // These checks do NOT depend on chain-local state (identity DB, DNA
+    // registry) — they only read block data and hardcoded chainparams.
+    // They MUST run even during reorg connects (skipValidation=true),
+    // because VDF block selection is effectively a reorg every block.
+    //
+    // BUG #281 FIX: Attestation was previously inside !skipValidation,
+    // so reorg-connected blocks bypassed it — allowing unattested MIK
+    // registrations into the canonical chain. Same class of bug as #280.
+    //
+    // MIK validation and DNA hash-equality remain inside !skipValidation
+    // because they depend on identity DB / DNA registry state, which is
+    // incomplete during multi-block reorgs.
+    // ========================================================================
+
+    // ====================================================================
+    // SEED ATTESTATION CHECK (Phase 2+3, hard fork at seedAttestationActivationHeight)
+    // ====================================================================
+    // After activation, MIK registration blocks must include 3+ valid
+    // attestations signed by known seed node keys.
+    // Context-independent: reads only block coinbase + hardcoded seed pubkeys.
+    // Skip attestation for genesis (height 0) — no MIK exists yet
+    if (block.IsVDFBlock() && pindex->nHeight > 0 && !assumeValid) {
+        std::string attestError;
+        if (!CheckMIKAttestations(block, pindex->nHeight, attestError)) {
+            std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                      << " REJECTED: attestation check failed" << std::endl;
+            std::cerr << "[Chain] " << attestError << std::endl;
+
+            pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+            if (pdb != nullptr) {
+                pdb->WriteBlockIndex(blockHash, *pindex);
             }
+            return false;
         }
     }
 
@@ -932,13 +951,6 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     // maintained during reorgs via OnBlockDisconnected/OnBlockConnected
     // callbacks. After disconnecting old chain blocks, the tracker state at
     // the common ancestor is correct for validating the new chain's blocks.
-    //
-    // Previously these were inside !skipValidation, so reorg-connected blocks
-    // (Case 3, skipValidation=true) bypassed cooldown enforcement — allowing
-    // violations into the canonical chain that IBD then rejected.
-    //
-    // MIK validation, DNA, and attestation remain inside !skipValidation
-    // because the identity DB undo is incomplete for multi-block reorgs.
     // ========================================================================
 
     // ====================================================================
