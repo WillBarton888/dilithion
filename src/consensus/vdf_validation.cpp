@@ -328,8 +328,11 @@ bool CheckConsecutiveMiner(
         // many MIKs are registered) deadlocks permanently — the sole miner
         // hits the consecutive cap and nobody else produces blocks.
         //
-        // 600s threshold matches the cooldown stall exemption Tier 1.
-        static constexpr int64_t CONSECUTIVE_STALL_THRESHOLD_SECS = 600;
+        // 3600s threshold (raised from 600s): at 600s, a solo miner produced
+        // ~18 blocks/hour, fast enough to outpace legitimate chains. At 3600s,
+        // a solo miner produces ~3 blocks/hour — too slow to exploit but
+        // keeps chain alive when genuinely only one miner is online.
+        static constexpr int64_t CONSECUTIVE_STALL_THRESHOLD_SECS = 3600;
 
         if (pindex->pprev) {
             int64_t gap = static_cast<int64_t>(block.nTime) -
