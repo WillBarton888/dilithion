@@ -293,7 +293,7 @@ ChainParams ChainParams::Testnet() {
     params.vdfLotteryActivationHeight = 0;     // Active from genesis for MVP testing
     params.vdfLotteryGracePeriod = 45;         // 45s grace period (MVP)
     params.vdfMinBlockTime = 0;                // Disabled — grace period controls pacing
-    params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
+    params.vdfCooldownActiveWindow = 200;      // 200 × 45s ≈ 2.5h (reduced from 1920 — count actual producers, not all historical MIKs)
     params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
     params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive from genesis
@@ -423,7 +423,7 @@ ChainParams ChainParams::DilV() {
     params.vdfLotteryActivationHeight = 0;
     params.vdfLotteryGracePeriod = 45;         // 45 seconds — collection window for all miners' VDF outputs
     params.vdfMinBlockTime = 0;                // Disabled — grace period controls pacing now
-    params.vdfCooldownActiveWindow = 1920;     // 1920 × 45s ≈ 24 hours
+    params.vdfCooldownActiveWindow = 200;      // 200 × 45s ≈ 2.5h (reduced from 1920 — count actual producers, not all historical MIKs)
     params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
     params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive blocks from same miner from genesis
@@ -478,6 +478,8 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(2700, uint256S("475d9fcb367c512c65eb24d6feb962c3eaafb847a3c45265d108863cadbf4a0f"));
     params.checkpoints.emplace_back(2800, uint256S("dda53ab45040a889457f21bd828fc82b3c81dfc797be671e157d9e4d8c6438fa"));
     params.checkpoints.emplace_back(2900, uint256S("a0ce1e87001b1440837bfc3c2d2be8f481f68bf85cb9038b4a89360d9497be3e"));
+    params.checkpoints.emplace_back(2935, uint256S("64abd9e3f640b683145e2a8fe10339573c658da53457611817c4b10a642698ee"));
+    params.checkpoints.emplace_back(2949, uint256S("d8d2c97abb1d6e5aa15285ece31b44d6e9b779fcf97abfff65dfee62542938a0"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";

@@ -25,6 +25,7 @@ class CASNDatabase;
 #include <string>
 #include <sstream>
 #include <map>
+#include <mutex>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -190,6 +191,12 @@ private:
     Attestation::CSeedAttestationKey* m_seedAttestationKey{nullptr};
     CASNDatabase* m_asnDatabase{nullptr};
     int m_seedId{-1};  // This seed's index (0-3), or -1 if not a seed
+
+    // Attestation rate limiting (Sybil defense Phase 0)
+    // Key: /24 subnet prefix (e.g., "192.168.1") -> {day_number, count_today}
+    std::mutex m_attestRateMutex;
+    std::map<std::string, std::pair<int64_t, int>> m_attestationRateLimit;
+    int m_attestationMaxPerDay{1};  // configurable via --attestation-rate-limit
 
     // Server socket
     int m_serverSocket;
@@ -367,6 +374,9 @@ private:
     std::string RPC_UnbanMIK(const std::string& params);
     std::string RPC_ListBannedMIKs(const std::string& params);
 
+    // Sybil defense methods
+    std::string RPC_GetSybilRelays(const std::string& params);
+
     // UTXO set query methods
     std::string RPC_GetHolderCount(const std::string& params);
     std::string RPC_GetTopHolders(const std::string& params);
@@ -507,6 +517,12 @@ public:
      * Check if public API mode is enabled
      */
     bool IsPublicAPI() const { return m_publicAPI; }
+
+    /**
+     * Set attestation rate limit (Sybil defense Phase 0).
+     * @param maxPerDay Maximum attestations per /24 subnet per day (default 1)
+     */
+    void SetAttestationRateLimit(int maxPerDay) { m_attestationMaxPerDay = maxPerDay; }
 
     /**
      * Register network manager instance

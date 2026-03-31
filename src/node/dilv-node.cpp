@@ -46,6 +46,7 @@
 #include <miner/vdf_miner.h>
 #include <vdf/vdf.h>
 #include <vdf/cooldown_tracker.h>
+#include <node/peer_mik_tracker.h>
 #include <consensus/vdf_validation.h>
 #include <wallet/wallet.h>
 #include <rpc/server.h>
@@ -451,6 +452,7 @@ struct NodeConfig {
     bool public_api = false;        // --public-api: Enable public REST API for light wallets (seed nodes only)
     int max_connections = 0;         // --maxconnections: Maximum peer connections (0 = default 125)
     int max_connections_per_ip = 2;  // --max-connections-per-ip: Max inbound per IP (default 2, range 1-64)
+    int attestation_rate_limit = 1;  // --attestation-rate-limit: Max attestations per /24 subnet per day (Sybil defense)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -622,6 +624,20 @@ struct NodeConfig {
                     max_connections_per_ip = val;
                 } catch (const std::exception& e) {
                     std::cerr << "Error: Invalid max-connections-per-ip format: " << arg << std::endl;
+                    return false;
+                }
+            }
+            else if (arg.find("--attestation-rate-limit=") == 0) {
+                // Max MIK attestations per /24 subnet per day (Sybil defense)
+                try {
+                    int val = std::stoi(arg.substr(24));
+                    if (val < 1 || val > 100) {
+                        std::cerr << "Error: Invalid attestation-rate-limit (must be 1-100): " << arg << std::endl;
+                        return false;
+                    }
+                    attestation_rate_limit = val;
+                } catch (const std::exception& e) {
+                    std::cerr << "Error: Invalid attestation-rate-limit format: " << arg << std::endl;
                     return false;
                 }
             }
@@ -4045,6 +4061,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                           stabilization_height, target_block_time);
         g_node_context.cooldown_tracker = &cooldown_tracker;
 
+        // Sybil defense Phase 1: Block relay source tracker
+        CPeerMIKTracker peer_mik_tracker;
+        g_node_context.peer_mik_tracker = &peer_mik_tracker;
+
         CVDFMiner vdf_miner;
         g_node_context.vdf_miner = &vdf_miner;
 
@@ -5728,6 +5748,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterX402Facilitator(&x402_facilitator);  // x402 payment protocol
         rpc_server.SetTestnet(config.testnet);
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
+        rpc_server.SetAttestationRateLimit(config.attestation_rate_limit);  // Sybil defense Phase 0
         rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
 
         // Phase 2+3: Seed attestation initialization (relay-only DilV nodes only)
@@ -6675,6 +6696,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
         g_node_context.vdf_miner = nullptr;
         g_node_context.cooldown_tracker = nullptr;
+        g_node_context.peer_mik_tracker = nullptr;
 
         // REMOVED: CMessageProcessorQueue shutdown (no longer used)
 

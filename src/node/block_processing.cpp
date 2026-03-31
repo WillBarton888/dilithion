@@ -3,6 +3,7 @@
 
 #include <node/block_processing.h>
 #include <node/blockchain_storage.h>
+#include <node/peer_mik_tracker.h>
 #include <consensus/vdf_validation.h>
 #include <node/block_index.h>
 #include <node/block_validation_queue.h>
@@ -258,20 +259,21 @@ BlockProcessResult ProcessNewBlock(
     // =========================================================================
     // MIK BAN CHECK (node policy, NOT consensus)
     // Reject blocks from banned MIK identities before any expensive processing.
+    // Also extract MIK hex for Sybil relay tracking (Phase 1).
     // =========================================================================
+    std::string blockMikHex;  // Persisted for Sybil relay tracking
     {
         std::array<uint8_t, 20> blockMik{};
         if (ExtractCoinbaseMIKIdentity(block, blockMik)) {
             // Convert to hex for lookup
-            std::string mikHex;
-            mikHex.reserve(40);
+            blockMikHex.reserve(40);
             for (int i = 0; i < 20; i++) {
                 char hex[3];
                 snprintf(hex, sizeof(hex), "%02x", blockMik[i]);
-                mikHex += hex;
+                blockMikHex += hex;
             }
-            if (g_bannedMIKs.IsBanned(mikHex)) {
-                std::cout << "[ProcessNewBlock] REJECTED: banned MIK " << mikHex.substr(0, 12) << "..." << std::endl;
+            if (g_bannedMIKs.IsBanned(blockMikHex)) {
+                std::cout << "[ProcessNewBlock] REJECTED: banned MIK " << blockMikHex.substr(0, 12) << "..." << std::endl;
                 if (peer_id >= 0 && ctx.block_fetcher) {
                     ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                 }
@@ -754,6 +756,10 @@ BlockProcessResult ProcessNewBlock(
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                 ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight, blockHash);
             }
+            // Sybil defense Phase 1: record which peer relayed this MIK's block
+            if (ctx.peer_mik_tracker && peer_id >= 0 && !blockMikHex.empty()) {
+                ctx.peer_mik_tracker->RecordMIKRelay(peer_id, blockMikHex);
+            }
             return BlockProcessResult::ACCEPTED;
         } else {
             std::cerr << "[ProcessNewBlock] Failed to activate stuck block at height " << pindex->nHeight << std::endl;
@@ -1181,6 +1187,11 @@ BlockProcessResult ProcessNewBlock(
                         ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight, blockHash);
                     }
 
+                    // Sybil defense Phase 1: record which peer relayed this MIK's block
+                    if (ctx.peer_mik_tracker && peer_id >= 0 && !blockMikHex.empty()) {
+                        ctx.peer_mik_tracker->RecordMIKRelay(peer_id, blockMikHex);
+                    }
+
                     auto handler_end = std::chrono::steady_clock::now();
                     auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
                     std::cout << "[ProcessNewBlock] EXIT (fork switch) total=" << handler_ms << "ms" << std::endl;
@@ -1364,6 +1375,11 @@ BlockProcessResult ProcessNewBlock(
         if (ctx.block_fetcher) {
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
             ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight, blockHash);
+        }
+
+        // Sybil defense Phase 1: record which peer relayed this MIK's block
+        if (ctx.peer_mik_tracker && peer_id >= 0 && !blockMikHex.empty()) {
+            ctx.peer_mik_tracker->RecordMIKRelay(peer_id, blockMikHex);
         }
 
         return BlockProcessResult::ACCEPTED;

@@ -34,6 +34,7 @@ class PartiallyDownloadedBlock;  // BIP 152: Compact block reconstruction state
 class uint256;  // Forward declaration for block hash
 class CVDFMiner;         // VDF fair mining controller
 class CCooldownTracker;  // VDF cooldown rate limiter
+class CPeerMIKTracker;   // Sybil defense: block relay source tracking
 
 // Digital DNA: Sybil-resistant identity system
 // Full include required because unique_ptr needs the complete type for default_delete
@@ -88,6 +89,9 @@ struct NodeContext {
     // VDF Fair Mining
     CVDFMiner* vdf_miner{nullptr};              // VDF miner controller (raw ptr, owned by main)
     CCooldownTracker* cooldown_tracker{nullptr}; // VDF cooldown tracker (raw ptr, owned by main)
+
+    // Sybil Defense Phase 1: Block relay source tracker
+    CPeerMIKTracker* peer_mik_tracker{nullptr};
 
     // Digital DNA: Sybil-resistant identity system
     std::unique_ptr<digital_dna::DNARegistryDB> dna_registry;

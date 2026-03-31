@@ -45,6 +45,7 @@
 #include <amount.h>
 #include <net/peers.h>  // For CPeerManager
 #include <core/node_context.h>  // For g_node_context
+#include <node/peer_mik_tracker.h>  // Sybil defense Phase 1
 #include <net/net.h>  // For CNetMessageProcessor and other networking types
 #include <net/protocol.h>  // For NetProtocol::CAddress
 #include <net/connman.h>  // Phase 5: For CConnman methods
@@ -261,6 +262,9 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["banmik"] = [this](const std::string& p) { return RPC_BanMIK(p); };
     m_handlers["unbanmik"] = [this](const std::string& p) { return RPC_UnbanMIK(p); };
     m_handlers["listbannedmiks"] = [this](const std::string& p) { return RPC_ListBannedMIKs(p); };
+
+    // Sybil defense
+    m_handlers["getsybilrelays"] = [this](const std::string& p) { return RPC_GetSybilRelays(p); };
 
     // UTXO set queries
     m_handlers["getholdercount"] = [this](const std::string& p) { return RPC_GetHolderCount(p); };
@@ -5368,6 +5372,40 @@ std::string CRPCServer::RPC_ListBannedMIKs(const std::string& params) {
 }
 
 // ============================================================================
+// SYBIL DEFENSE METHODS
+// ============================================================================
+
+std::string CRPCServer::RPC_GetSybilRelays(const std::string& params) {
+    (void)params;
+    if (!g_node_context.peer_mik_tracker) {
+        return "{\"peers\":[],\"note\":\"Peer MIK tracker not initialized\"}";
+    }
+
+    auto data = g_node_context.peer_mik_tracker->GetAllRelayData();
+
+    std::ostringstream oss;
+    oss << "{\"peers\":[";
+    bool first = true;
+    for (const auto& [peerId, info] : data) {
+        if (!first) oss << ",";
+        first = false;
+        oss << "{\"peer_id\":" << peerId
+            << ",\"addr\":\"" << info.peerAddr << "\""
+            << ",\"unique_miks\":" << info.uniqueMIKs
+            << ",\"miks\":[";
+        bool firstMik = true;
+        for (const auto& mik : info.miks) {
+            if (!firstMik) oss << ",";
+            firstMik = false;
+            oss << "\"" << mik.substr(0, 12) << "...\"";
+        }
+        oss << "]}";
+    }
+    oss << "]}";
+    return oss.str();
+}
+
+// ============================================================================
 // MINING METHODS - GENERATETOADDRESS (CRITICAL FOR FUNCTIONAL TESTS)
 // ============================================================================
 
@@ -7372,6 +7410,52 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
         throw std::runtime_error("Mining not available from datacenter IPs. "
             "Your IP (" + clientIP + ") belongs to ASN " + std::to_string(asn) +
             " (" + desc + "). Use a residential connection to mine.");
+    }
+
+    // Sybil defense Phase 0: Rate limit attestations per /24 subnet per day.
+    // Prevents mass MIK registration from a single network.
+    {
+        // Extract /24 subnet prefix (e.g., "192.168.1.100" -> "192.168.1")
+        std::string subnetKey = clientIP;
+        size_t lastDot = subnetKey.rfind('.');
+        if (lastDot != std::string::npos) {
+            subnetKey = subnetKey.substr(0, lastDot);
+        }
+
+        int64_t today = static_cast<int64_t>(std::time(nullptr)) / 86400;
+
+        std::lock_guard<std::mutex> lock(m_attestRateMutex);
+        auto it = m_attestationRateLimit.find(subnetKey);
+        if (it != m_attestationRateLimit.end()) {
+            if (it->second.first == today) {
+                // Same day — check count
+                if (it->second.second >= m_attestationMaxPerDay) {
+                    std::cout << "[Attestation] RATE LIMITED: subnet " << subnetKey
+                              << ".* already attested " << it->second.second
+                              << " MIK(s) today (limit: " << m_attestationMaxPerDay << ")" << std::endl;
+                    throw std::runtime_error("Attestation rate limit exceeded. "
+                        "Maximum " + std::to_string(m_attestationMaxPerDay) +
+                        " MIK attestation(s) per /24 subnet per day. Try again tomorrow.");
+                }
+                it->second.second++;
+            } else {
+                // New day — reset counter
+                it->second = {today, 1};
+            }
+        } else {
+            m_attestationRateLimit[subnetKey] = {today, 1};
+        }
+
+        // Periodic cleanup: remove entries older than 2 days to prevent unbounded growth
+        if (m_attestationRateLimit.size() > 10000) {
+            for (auto cleanIt = m_attestationRateLimit.begin(); cleanIt != m_attestationRateLimit.end(); ) {
+                if (cleanIt->second.first < today - 1) {
+                    cleanIt = m_attestationRateLimit.erase(cleanIt);
+                } else {
+                    ++cleanIt;
+                }
+            }
+        }
     }
 
     // Build attestation message

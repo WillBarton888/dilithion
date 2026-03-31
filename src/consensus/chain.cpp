@@ -988,20 +988,11 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         int stabilizationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
 
-        if (pindex->nHeight >= stabilizationHeight && pindex->pprev) {
-            // Post-stabilization: time-based expiry is primary mechanism,
-            // but add safety-net stall exemption to prevent permanent deadlock
-            // when too few miners are online to exhaust individual cooldowns.
-            // Threshold = cooldown * targetBlockTime (same as time-based expiry).
-            int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
-            int cooldownBlocks = g_node_context.cooldown_tracker ?
-                g_node_context.cooldown_tracker->GetCooldownBlocks() : 97;
-            int targetTime = Dilithion::g_chainParams ?
-                Dilithion::g_chainParams->blockTime : 45;
-            int64_t stallThreshold = static_cast<int64_t>(cooldownBlocks) * targetTime;
-            if (gap >= stallThreshold) {
-                chainStalled = true;
-            }
+        if (pindex->nHeight >= stabilizationHeight) {
+            // Post-stabilization: NO stall exemption.
+            // Time-based cooldown expiry handles stalls naturally.
+            // Stall exemption was exploited for private fork mining (2026-03-31).
+            // chainStalled stays false.
         } else if (pindex->pprev) {
             int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
 
