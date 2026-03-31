@@ -468,8 +468,16 @@ ChainParams ChainParams::DilV() {
     };
     params.seedAttestationRPCPort = 9332;  // DilV mainnet RPC port
 
-    // DilV Checkpoints (cleared for chain reset)
-    // New checkpoints will be added after the reset chain stabilizes.
+    // DilV Checkpoints — enforce legitimate chain, reject Sybil fork at height 2631
+    params.checkpoints.emplace_back(500,  uint256S("88c3760b617f4295176a76871acc60904e8dfc9ccd62d6d460475c520a039f1e"));
+    params.checkpoints.emplace_back(1000, uint256S("9884fa2d1fcd8b2c7b5c3b49a6aa6c11c60a467ad93048cd871d0ebba42cc81e"));
+    params.checkpoints.emplace_back(1500, uint256S("3fd46e642ef3b8a4a0ba29c80293dff82956bb10dedc26f6679045994d2b97de"));
+    params.checkpoints.emplace_back(2000, uint256S("6b7f65e2e1c9171ec26dd68bf49b44c72eb1b6ad819b08864f79d9e48136d1a6"));
+    params.checkpoints.emplace_back(2500, uint256S("05dff2b9b58ab6145e8345f103a12fd605a71092c7113527acc743d58d34f233"));
+    params.checkpoints.emplace_back(2632, uint256S("7e250f5f24081906aeea465c546a371937812939dc00ead70a9621f897619caf"));
+    params.checkpoints.emplace_back(2700, uint256S("475d9fcb367c512c65eb24d6feb962c3eaafb847a3c45265d108863cadbf4a0f"));
+    params.checkpoints.emplace_back(2800, uint256S("dda53ab45040a889457f21bd828fc82b3c81dfc797be671e157d9e4d8c6438fa"));
+    params.checkpoints.emplace_back(2900, uint256S("a0ce1e87001b1440837bfc3c2d2be8f481f68bf85cb9038b4a89360d9497be3e"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
