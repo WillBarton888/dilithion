@@ -100,7 +100,7 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
                 std::cerr << "[ValidationQueue] Block from peer " << peer_id << " has invalid basic PoW, rejecting" << std::endl;
                 SendRejectMessage(peer_id, "block", "Invalid proof of work");
                 if (g_node_context.peer_manager) {
-                    g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+                    g_node_context.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_BLOCK_POW);  // Severe: invalid PoW
                 }
                 return false;
             }
@@ -132,7 +132,7 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
                 }
 
                 if (g_node_context.peer_manager) {
-                    g_node_context.peer_manager->Misbehaving(peer_id, 100);  // Severe: invalid PoW
+                    g_node_context.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_BLOCK_POW);  // Severe: invalid PoW
                 }
                 return false;
             }

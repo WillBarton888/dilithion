@@ -3747,7 +3747,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                   << " (block has " << transactions.size() << " txns)" << std::endl;
                     // Misbehave
                     if (g_node_context.peer_manager) {
-                        g_node_context.peer_manager->Misbehaving(peer_id, 10);
+                        g_node_context.peer_manager->Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
                     }
                     return;
                 }

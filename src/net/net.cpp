@@ -355,7 +355,7 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
                       << "' from peer " << peer_id << " (got " << payload_size
                       << " bytes, expected " << it->second.min_size << "-" << it->second.max_size << ")"
                       << std::endl;
-            peer_manager.Misbehaving(peer_id, 20);
+            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
     }
@@ -536,7 +536,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             LogPrintf(ALL, WARN, "%s", CErrorFormatter::FormatForLog(error).c_str());
             std::cout << "[P2P] ERROR: User agent too long from peer " << peer_id
                       << " (" << msg.user_agent.length() << " bytes, max 256)" << std::endl;
-            peer_manager.Misbehaving(peer_id, 20);
+            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_HANDSHAKE);
             return false;
         }
 
@@ -655,13 +655,13 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: VERSION message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: VERSION message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -733,13 +733,13 @@ bool CNetMessageProcessor::ProcessPingMessage(int peer_id, CDataStream& stream) 
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: PING message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: PING message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -752,13 +752,13 @@ bool CNetMessageProcessor::ProcessPongMessage(int peer_id, CDataStream& stream) 
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: PONG message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: PONG message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -823,7 +823,7 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
                 std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded ADDR rate limit ("
                           << timestamps.size() << " messages in last " << RATE_LIMIT_WINDOW << " seconds)" << std::endl;
                 // NET-011 FIX: Penalize peer for rate limit violation
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::ADDR_RATE_EXCEEDED);
                 return false;
             }
 
@@ -835,7 +835,7 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
         if (count > Consensus::MAX_INV_SIZE) {
             std::cout << "[P2P] ERROR: ADDR message too large from peer " << peer_id
                       << " (count=" << count << ")" << std::endl;
-            peer_manager.Misbehaving(peer_id, 20);
+            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -859,13 +859,13 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: ADDR message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: ADDR message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -894,7 +894,7 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
                 std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded INV rate limit ("
                           << timestamps.size() << " messages in last second)" << std::endl;
                 // NET-011 FIX: Penalize peer for rate limit violation
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INV_RATE_EXCEEDED);
                 return false;
             }
 
@@ -907,7 +907,7 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
             std::cout << "[P2P] ERROR: INV message too large from peer " << peer_id
                       << " (count=" << count << ")" << std::endl;
             // NET-011 FIX: Penalize peer for sending oversized message
-            peer_manager.Misbehaving(peer_id, 20);
+            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -932,7 +932,7 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
             if (inv_item.type < 1 || inv_item.type > 4) {
                 std::cout << "[P2P] WARNING: Invalid INV type " << inv_item.type
                           << " from peer " << peer_id << " - penalizing" << std::endl;
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
                 continue;  // Skip invalid items but continue processing valid ones
             }
 
@@ -983,13 +983,13 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: INV message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: INV message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1012,7 +1012,7 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             if (timestamps.size() >= MAX_GETDATA_PER_SECOND) {
                 std::cout << "[P2P] RATE LIMIT: Too many GETDATA from peer " << peer_id
                           << " (" << timestamps.size() << "/" << MAX_GETDATA_PER_SECOND << " per second)" << std::endl;
-                peer_manager.Misbehaving(peer_id, 2);  // Reduced from 10 - IBD sync is legitimate
+                peer_manager.Misbehaving(peer_id, 2, MisbehaviorType::GETDATA_RATE_EXCEEDED);  // Reduced from 10 - IBD sync is legitimate
                 return false;
             }
             timestamps.push_back(now);
@@ -1042,7 +1042,7 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
             if (inv.type < 1 || inv.type > 4) {
                 std::cout << "[P2P] WARNING: Invalid GETDATA type " << inv.type
                           << " from peer " << peer_id << " - penalizing" << std::endl;
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
                 continue;  // Skip invalid items
             }
             getdata.push_back(inv);
@@ -1117,7 +1117,7 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                       << duplicate_count << " already-served blocks (+"
                       << penalty << " misbehavior, strike "
                       << strikes << "/" << MAX_DEDUP_STRIKES << ")" << std::endl;
-            peer_manager.Misbehaving(peer_id, penalty);
+            peer_manager.Misbehaving(peer_id, penalty, MisbehaviorType::GETDATA_RATE_EXCEEDED);
 
             if (strikes >= MAX_DEDUP_STRIKES) {
                 std::cout << "[P2P] DEDUP: Disconnecting peer " << peer_id
@@ -1183,13 +1183,13 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: GETDATA message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: GETDATA message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1218,7 +1218,7 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
         if (vtx_size > MAX_BLOCK_VTX_BYTES) {
             // NET-011 FIX: Penalize peer for sending invalid block
             SendRejectMessage(peer_id, "block", "Block vtx data exceeds maximum size (" + std::to_string(vtx_size) + " bytes)");
-            peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
+            peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::BLOCK_TOO_LARGE);  // Severe penalty - likely attack
             throw std::runtime_error("Block vtx data exceeds maximum size");
         }
 
@@ -1236,13 +1236,13 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: BLOCK message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: BLOCK message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1260,7 +1260,7 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         if (vin_size_raw > MAX_TX_INPUTS) {
             // NET-011 FIX: Penalize peer for sending invalid transaction
             SendRejectMessage(peer_id, "tx", "Transaction input count exceeds limit");
-            peer_manager.Misbehaving(peer_id, 100);  // Severe penalty - likely attack
+            peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_TRANSACTION);  // Severe penalty - likely attack
             throw std::runtime_error("Transaction input count exceeds limit");
         }
 
@@ -1361,7 +1361,7 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
                                   error.find("invalid signature") != std::string::npos ||
                                   error.find("malformed") != std::string::npos);
                 int penalty = is_severe ? 50 : 10;  // Severe violations get higher penalty
-                peer_manager.Misbehaving(peer_id, penalty);
+                peer_manager.Misbehaving(peer_id, penalty, MisbehaviorType::INVALID_TRANSACTION);
                 return false;
             }
 
@@ -1397,13 +1397,13 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
         std::cout << "[P2P] ERROR: TX message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
         std::cout << "[P2P] ERROR: TX message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1418,7 +1418,7 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
         // Validate locator size (max 32 hashes in locator)
         if (locator_size > 32) {
             std::cout << "[P2P] ERROR: GETHEADERS locator size too large: " << locator_size << std::endl;
-            peer_manager.Misbehaving(peer_id, 20);
+            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -1449,12 +1449,12 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
         return true;
     } catch (const std::out_of_range& e) {
         std::cout << "[P2P] ERROR: GETHEADERS message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         std::cout << "[P2P] ERROR: GETHEADERS message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1502,7 +1502,7 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
         // Validate count (Bitcoin Core max is 2000, wired via Consensus::MAX_HEADERS_RESULTS)
         if (header_count > Consensus::MAX_HEADERS_RESULTS) {
             std::cout << "[P2P] ERROR: HEADERS count too large: " << header_count << std::endl;
-            peer_manager.Misbehaving(peer_id, 20);
+            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -1529,7 +1529,7 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
             uint64_t tx_count = stream.ReadCompactSize();
             if (tx_count != 0) {
                 std::cout << "[P2P] ERROR: HEADERS message with tx_count != 0" << std::endl;
-                peer_manager.Misbehaving(peer_id, 20);
+                peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_BLOCK_HEADER);
                 return false;
             }
 
@@ -1546,12 +1546,12 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
         return true;
     } catch (const std::out_of_range& e) {
         std::cout << "[P2P] ERROR: HEADERS message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         std::cout << "[P2P] ERROR: HEADERS message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1599,12 +1599,12 @@ bool CNetMessageProcessor::ProcessSendCmpctMessage(int peer_id, CDataStream& str
         return true;
     } catch (const std::out_of_range& e) {
         std::cout << "[P2P] ERROR: SENDCMPCT message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         std::cout << "[P2P] ERROR: SENDCMPCT message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1637,7 +1637,7 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
         if (prefilled_count > 10000) {  // Sanity limit
             std::cout << "[P2P] ERROR: CMPCTBLOCK with too many prefilled txs from peer "
                       << peer_id << std::endl;
-            peer_manager.Misbehaving(peer_id, 100);
+            peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -1692,7 +1692,7 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
         if (shortid_count > 100000) {  // Sanity limit
             std::cout << "[P2P] ERROR: CMPCTBLOCK with too many short IDs from peer "
                       << peer_id << std::endl;
-            peer_manager.Misbehaving(peer_id, 100);
+            peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -1722,12 +1722,12 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
         return true;
     } catch (const std::out_of_range& e) {
         std::cout << "[P2P] ERROR: CMPCTBLOCK message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         std::cout << "[P2P] ERROR: CMPCTBLOCK message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1745,7 +1745,7 @@ bool CNetMessageProcessor::ProcessGetBlockTxnMessage(int peer_id, CDataStream& s
         if (index_count > 50000) {  // Sanity limit
             std::cout << "[P2P] ERROR: GETBLOCKTXN with too many indices from peer "
                       << peer_id << std::endl;
-            peer_manager.Misbehaving(peer_id, 100);
+            peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -1767,12 +1767,12 @@ bool CNetMessageProcessor::ProcessGetBlockTxnMessage(int peer_id, CDataStream& s
         return true;
     } catch (const std::out_of_range& e) {
         std::cout << "[P2P] ERROR: GETBLOCKTXN message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         std::cout << "[P2P] ERROR: GETBLOCKTXN message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -1790,7 +1790,7 @@ bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stre
         if (tx_count > 100000) {  // Sanity limit
             std::cout << "[P2P] ERROR: BLOCKTXN with too many transactions from peer "
                       << peer_id << std::endl;
-            peer_manager.Misbehaving(peer_id, 100);
+            peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -1850,12 +1850,12 @@ bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stre
         return true;
     } catch (const std::out_of_range& e) {
         std::cout << "[P2P] ERROR: BLOCKTXN message truncated from peer " << peer_id << std::endl;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         std::cout << "[P2P] ERROR: BLOCKTXN message parsing failed from peer " << peer_id
                   << ": " << e.what() << std::endl;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -2291,7 +2291,7 @@ bool CNetMessageProcessor::ProcessDNALatencyPingMessage(int peer_id, CDataStream
             int64_t now = GetTime();
             auto& last = peer_dna_ping_timestamps[peer_id];
             if (now - last < DNA_PING_COOLDOWN_SEC) {
-                peer_manager.Misbehaving(peer_id, 5);
+                peer_manager.Misbehaving(peer_id, 5, MisbehaviorType::PING_RATE_EXCEEDED);
                 return false;
             }
             last = now;
@@ -2301,10 +2301,10 @@ bool CNetMessageProcessor::ProcessDNALatencyPingMessage(int peer_id, CDataStream
         on_dna_latency_ping(peer_id, nonce);
         return true;
     } catch (const std::out_of_range&) {
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -2315,7 +2315,7 @@ bool CNetMessageProcessor::ProcessDNALatencyPongMessage(int peer_id, CDataStream
 
         // Pong must match a pending nonce we sent
         if (!ValidateDNANonce(nonce, peer_id)) {
-            peer_manager.Misbehaving(peer_id, 10);
+            peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_HANDSHAKE);
             return false;
         }
 
@@ -2325,10 +2325,10 @@ bool CNetMessageProcessor::ProcessDNALatencyPongMessage(int peer_id, CDataStream
         on_dna_latency_pong(peer_id, nonce, static_cast<uint64_t>(now_us));
         return true;
     } catch (const std::out_of_range&) {
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -2348,7 +2348,7 @@ bool CNetMessageProcessor::ProcessDNATimeSyncMessage(int peer_id, CDataStream& s
             local_send_ts_us = GetDNANonceSendTimestamp(nonce);
             // Response: must match a pending nonce
             if (!ValidateDNANonce(nonce, peer_id)) {
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_HANDSHAKE);
                 return false;
             }
         } else {
@@ -2357,7 +2357,7 @@ bool CNetMessageProcessor::ProcessDNATimeSyncMessage(int peer_id, CDataStream& s
             int64_t now = GetTime();
             auto& last = peer_dna_tsync_timestamps[peer_id];
             if (now - last < DNA_TSYNC_COOLDOWN_SEC) {
-                peer_manager.Misbehaving(peer_id, 5);
+                peer_manager.Misbehaving(peer_id, 5, MisbehaviorType::PING_RATE_EXCEEDED);
                 return false;
             }
             last = now;
@@ -2366,10 +2366,10 @@ bool CNetMessageProcessor::ProcessDNATimeSyncMessage(int peer_id, CDataStream& s
         on_dna_time_sync(peer_id, sender_ts_us, sender_wall_ms, nonce, is_response, local_send_ts_us);
         return true;
     } catch (const std::out_of_range&) {
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -2384,7 +2384,7 @@ bool CNetMessageProcessor::ProcessDNABWTestMessage(int peer_id, CDataStream& str
         // Validate: claimed payload_size must match actual remaining bytes
         size_t actual_remaining = stream.remaining();
         if (actual_remaining != payload_size) {
-            peer_manager.Misbehaving(peer_id, 20);
+            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
 
@@ -2394,7 +2394,7 @@ bool CNetMessageProcessor::ProcessDNABWTestMessage(int peer_id, CDataStream& str
             int64_t now = GetTime();
             auto& last = peer_dna_bwtest_timestamps[peer_id];
             if (now - last < DNA_BWTEST_COOLDOWN_SEC) {
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PING_RATE_EXCEEDED);
                 return false;
             }
             if (dna_bwtest_global_count_.load() >= DNA_BWTEST_GLOBAL_MAX) {
@@ -2411,11 +2411,11 @@ bool CNetMessageProcessor::ProcessDNABWTestMessage(int peer_id, CDataStream& str
         return true;
     } catch (const std::out_of_range&) {
         if (counter_incremented) dna_bwtest_global_count_--;
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         if (counter_incremented) dna_bwtest_global_count_--;
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -2426,7 +2426,7 @@ bool CNetMessageProcessor::ProcessDNABWResultMessage(int peer_id, CDataStream& s
 
         // Must match a pending nonce
         if (!ValidateDNANonce(nonce, peer_id)) {
-            peer_manager.Misbehaving(peer_id, 10);
+            peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_HANDSHAKE);
             return false;
         }
 
@@ -2439,17 +2439,17 @@ bool CNetMessageProcessor::ProcessDNABWResultMessage(int peer_id, CDataStream& s
         // Sanity check values
         if (upload_mbps < 0.0 || upload_mbps > 100000.0 ||
             download_mbps < 0.0 || download_mbps > 100000.0) {
-            peer_manager.Misbehaving(peer_id, 10);
+            peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
             return false;
         }
 
         on_dna_bw_result(peer_id, nonce, upload_mbps, download_mbps);
         return true;
     } catch (const std::out_of_range&) {
-        peer_manager.Misbehaving(peer_id, 20);
+        peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -2527,7 +2527,7 @@ CNetMessage CNetMessageProcessor::CreateDNABWResultMessage(uint64_t nonce,
 bool CNetMessageProcessor::ProcessDNAIdentReqMessage(int peer_id, CDataStream& stream) {
     try {
         if (stream.size() < 20) {
-            peer_manager.Misbehaving(peer_id, 10);
+            peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::TRUNCATED_MESSAGE);
             return false;
         }
 
@@ -2551,7 +2551,7 @@ bool CNetMessageProcessor::ProcessDNAIdentReqMessage(int peer_id, CDataStream& s
         }
         return true;
     } catch (...) {
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }
@@ -2559,7 +2559,7 @@ bool CNetMessageProcessor::ProcessDNAIdentReqMessage(int peer_id, CDataStream& s
 bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& stream) {
     try {
         if (stream.size() < 21) {
-            peer_manager.Misbehaving(peer_id, 10);
+            peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::TRUNCATED_MESSAGE);
             return false;
         }
 
@@ -2572,7 +2572,7 @@ bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& s
         if (found == 0x01 && stream.size() >= 2) {
             uint16_t data_len = stream.ReadUint16();
             if (data_len > 4096 || stream.size() < data_len) {
-                peer_manager.Misbehaving(peer_id, 10);
+                peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_MESSAGE_SIZE);
                 return false;
             }
             dna_data.resize(data_len);
@@ -2584,7 +2584,7 @@ bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& s
         }
         return true;
     } catch (...) {
-        peer_manager.Misbehaving(peer_id, 10);
+        peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
 }

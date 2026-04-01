@@ -684,7 +684,7 @@ BlockProcessResult ProcessNewBlock(
                 std::cerr << "[ProcessNewBlock] ERROR: Coinbase validation failed: " << validationError << std::endl;
                 SendRejectMessage(peer_id, "block", "Invalid coinbase: " + validationError);
                 if (ctx.peer_manager) {
-                    ctx.peer_manager->Misbehaving(peer_id, 100);  // Ban peer for invalid coinbase
+                    ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_COINBASE);  // Ban peer for invalid coinbase
                 }
                 g_metrics.RecordInvalidBlock();
                 return BlockProcessResult::VALIDATION_ERROR;
@@ -700,7 +700,7 @@ BlockProcessResult ProcessNewBlock(
                     std::cerr << "[ProcessNewBlock] ERROR: Coinbase structure invalid: " << structError << std::endl;
                     SendRejectMessage(peer_id, "block", "Invalid coinbase: " + structError);
                     if (ctx.peer_manager) {
-                        ctx.peer_manager->Misbehaving(peer_id, 100);
+                        ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_COINBASE);
                     }
                     g_metrics.RecordInvalidBlock();
                     return BlockProcessResult::VALIDATION_ERROR;
@@ -916,7 +916,7 @@ BlockProcessResult ProcessNewBlock(
             std::cerr << "  Error: " << validationError << std::endl;
             SendRejectMessage(peer_id, "block", "Failed to deserialize block transactions");
             if (ctx.peer_manager) {
-                ctx.peer_manager->Misbehaving(peer_id, 100);
+                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::PARSE_FAILURE);
             }
             g_metrics.RecordInvalidBlock();
             return BlockProcessResult::VALIDATION_ERROR;
@@ -927,7 +927,7 @@ BlockProcessResult ProcessNewBlock(
             std::cerr << "  Error: " << validationError << std::endl;
             SendRejectMessage(peer_id, "block", "Invalid merkle root");
             if (ctx.peer_manager) {
-                ctx.peer_manager->Misbehaving(peer_id, 100);
+                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MERKLE_ROOT);
             }
             g_metrics.RecordInvalidBlock();
             return BlockProcessResult::VALIDATION_ERROR;
@@ -938,7 +938,7 @@ BlockProcessResult ProcessNewBlock(
             std::cerr << "[Orphan] ERROR: Orphan block contains duplicate transactions" << std::endl;
             SendRejectMessage(peer_id, "block", "Block contains duplicate transactions", REJECT_DUPLICATE);
             if (ctx.peer_manager) {
-                ctx.peer_manager->Misbehaving(peer_id, 100);
+                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::DUPLICATE_TRANSACTIONS);
             }
             g_metrics.RecordInvalidBlock();
             return BlockProcessResult::VALIDATION_ERROR;
@@ -949,7 +949,7 @@ BlockProcessResult ProcessNewBlock(
             std::cerr << "[Orphan] ERROR: Orphan block contains double-spend" << std::endl;
             SendRejectMessage(peer_id, "block", "Block contains double-spend");
             if (ctx.peer_manager) {
-                ctx.peer_manager->Misbehaving(peer_id, 100);
+                ctx.peer_manager->Misbehaving(peer_id, 100, MisbehaviorType::DOUBLE_SPEND_IN_BLOCK);
             }
             g_metrics.RecordInvalidBlock();
             return BlockProcessResult::VALIDATION_ERROR;
