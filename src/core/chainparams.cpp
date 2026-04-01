@@ -481,6 +481,7 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(2935, uint256S("64abd9e3f640b683145e2a8fe10339573c658da53457611817c4b10a642698ee"));
     params.checkpoints.emplace_back(2949, uint256S("d8d2c97abb1d6e5aa15285ece31b44d6e9b779fcf97abfff65dfee62542938a0"));
     params.checkpoints.emplace_back(2951, uint256S("31cfe3012d8fe67482ed99474433c4f365d89c76003c90adf11e5fcd49438077"));
+    params.checkpoints.emplace_back(2961, uint256S("0727d34f6604ec5f4c1efe92825f8b5c7f325f65d4a220005cd6f2ee1ee122b2"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
