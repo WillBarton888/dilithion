@@ -718,6 +718,20 @@ BlockProcessResult ProcessNewBlock(
     // =========================================================================
     CBlockIndex* pindex = g_chainstate.GetBlockIndex(blockHash);
     if (pindex && pindex->HaveData()) {
+        // If this block was previously marked invalid by authoritative validation,
+        // never retry activation. Retrying here can starve fresh block processing.
+        if (pindex->IsInvalid()) {
+            std::cout << "[ProcessNewBlock] Block is permanently invalid, skipping activation"
+                      << " height=" << pindex->nHeight
+                      << " hash=" << blockHash.GetHex().substr(0, 16) << std::endl;
+            tracker_guard.released = true;
+            if (ctx.block_fetcher) {
+                ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
+                ctx.block_fetcher->OnBlockReceived(peer_id, pindex->nHeight, blockHash);
+            }
+            return BlockProcessResult::VALIDATION_ERROR;
+        }
+
         // Check if block is actually on main chain (BLOCK_VALID_CHAIN flag)
         if (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN) {
             std::cout << "[ProcessNewBlock] Block already in chain and connected, skipping"
