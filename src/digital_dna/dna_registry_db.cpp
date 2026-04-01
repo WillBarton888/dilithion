@@ -72,7 +72,7 @@ IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& 
         return RegisterResult::ALREADY_REGISTERED;
     }
 
-    // Advisory Sybil check: always store, log warnings
+    // Sybil check: compare DNA against all known identities
     bool sybil_flagged = false;
     for (const auto& [addr, other] : cache_) {
         if (addr == dna.address) continue;
@@ -80,7 +80,9 @@ IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& 
         auto score = compare(dna, other);
 
         if (score.is_same_identity() || score.is_suspicious()) {
-            std::cout << "[DNA-SYBIL] ADVISORY: " << address_to_hex(dna.address)
+            std::string logPrefix = m_enforceDNADedup && score.is_same_identity()
+                ? "[DNA-SYBIL] REJECTED: " : "[DNA-SYBIL] ADVISORY: ";
+            std::cout << logPrefix << address_to_hex(dna.address)
                       << " matches " << address_to_hex(addr)
                       << " (" << score.verdict()
                       << ", score=" << std::fixed << std::setprecision(3) << score.combined_score
@@ -95,6 +97,12 @@ IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& 
             if (score.has_behavioral) std::cout << " BP=" << score.behavioral_similarity;
             std::cout << std::endl;
             sybil_flagged = true;
+
+            // Phase 2A: Reject (don't store) when enforcement enabled and
+            // DNA matches at the SAME_IDENTITY level (>=0.92 or physics rule)
+            if (m_enforceDNADedup && score.is_same_identity()) {
+                return RegisterResult::SYBIL_REJECTED;
+            }
         }
 
         // ML supplementary logging (advisory only)
@@ -127,7 +135,7 @@ IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& 
         }
     }
 
-    // Always store (advisory mode — never reject for Sybil)
+    // Store identity (reached here = passed enforcement check or enforcement disabled)
     auto data = dna.serialize();
     std::string value(data.begin(), data.end());
 

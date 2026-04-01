@@ -84,6 +84,8 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
         if (dna_registry->Open(dna_path)) {
             LogPrintf(ALL, INFO, "DNA registry opened (%zu identities) at %s",
                       dna_registry->count(), dna_path.c_str());
+            // Sybil defense Phase 2A: reject identities with DNA score >= 0.92
+            dna_registry->SetEnforceDNADedup(true);
         } else {
             LogPrintf(ALL, WARN, "Failed to open DNA registry at %s", dna_path.c_str());
             dna_registry.reset();  // Non-fatal, DNA is advisory

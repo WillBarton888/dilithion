@@ -266,3 +266,112 @@ void CCooldownTracker::RecalcShortActiveMiners(int height) const
     m_cachedShortActiveMinersMut = static_cast<int>(unique.size());
     m_cachedShortAtHeightMut = height;
 }
+
+// ============================================================================
+// Sybil Defense Phase 4: Correlated Availability Detection
+// ============================================================================
+
+std::vector<CCooldownTracker::CorrelatedGroup> CCooldownTracker::DetectCorrelatedGroups(
+    int currentHeight,
+    int lookbackBlocks,
+    int proximityBlocks,
+    int minGroupSize) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<CorrelatedGroup> result;
+
+    int startHeight = std::max(1, currentHeight - lookbackBlocks);
+
+    // Build per-MIK activity ranges: first and last block mined in the lookback window
+    struct MIKActivity {
+        Address addr;
+        int firstSeen;  // first block mined in window
+        int lastSeen;   // last block mined in window
+    };
+
+    std::map<Address, MIKActivity> activity;
+    for (auto it = m_heightToWinner.lower_bound(startHeight);
+         it != m_heightToWinner.end() && it->first <= currentHeight; ++it) {
+        auto& a = activity[it->second];
+        a.addr = it->second;
+        if (a.firstSeen == 0) a.firstSeen = it->first;
+        a.lastSeen = it->first;
+    }
+
+    // Detect "appearing" groups: MIKs whose firstSeen is within proximityBlocks of each other
+    // (and whose firstSeen is well after the window start, indicating they weren't mining before)
+    std::vector<MIKActivity> miners;
+    for (auto& [addr, a] : activity) {
+        if (a.firstSeen > startHeight + proximityBlocks) {  // appeared after window started
+            miners.push_back(a);
+        }
+    }
+
+    // Sort by firstSeen and group
+    std::sort(miners.begin(), miners.end(),
+              [](const MIKActivity& a, const MIKActivity& b) { return a.firstSeen < b.firstSeen; });
+
+    std::vector<MIKActivity> currentGroup;
+    for (size_t i = 0; i < miners.size(); ++i) {
+        if (currentGroup.empty() ||
+            miners[i].firstSeen - currentGroup.back().firstSeen <= proximityBlocks) {
+            currentGroup.push_back(miners[i]);
+        } else {
+            if (static_cast<int>(currentGroup.size()) >= minGroupSize) {
+                CorrelatedGroup g;
+                g.transitionHeight = currentGroup[0].firstSeen;
+                g.appearing = true;
+                for (auto& m : currentGroup) g.miks.push_back(m.addr);
+                result.push_back(std::move(g));
+            }
+            currentGroup.clear();
+            currentGroup.push_back(miners[i]);
+        }
+    }
+    if (static_cast<int>(currentGroup.size()) >= minGroupSize) {
+        CorrelatedGroup g;
+        g.transitionHeight = currentGroup[0].firstSeen;
+        g.appearing = true;
+        for (auto& m : currentGroup) g.miks.push_back(m.addr);
+        result.push_back(std::move(g));
+    }
+
+    // Detect "disappearing" groups: MIKs whose lastSeen is within proximityBlocks
+    // of each other AND well before the current tip (stopped mining together)
+    std::vector<MIKActivity> stoppers;
+    for (auto& [addr, a] : activity) {
+        if (a.lastSeen < currentHeight - 20) {  // stopped mining at least 20 blocks ago
+            stoppers.push_back(a);
+        }
+    }
+
+    std::sort(stoppers.begin(), stoppers.end(),
+              [](const MIKActivity& a, const MIKActivity& b) { return a.lastSeen < b.lastSeen; });
+
+    currentGroup.clear();
+    for (size_t i = 0; i < stoppers.size(); ++i) {
+        if (currentGroup.empty() ||
+            stoppers[i].lastSeen - currentGroup.back().lastSeen <= proximityBlocks) {
+            currentGroup.push_back(stoppers[i]);
+        } else {
+            if (static_cast<int>(currentGroup.size()) >= minGroupSize) {
+                CorrelatedGroup g;
+                g.transitionHeight = currentGroup[0].lastSeen;
+                g.appearing = false;
+                for (auto& m : currentGroup) g.miks.push_back(m.addr);
+                result.push_back(std::move(g));
+            }
+            currentGroup.clear();
+            currentGroup.push_back(stoppers[i]);
+        }
+    }
+    if (static_cast<int>(currentGroup.size()) >= minGroupSize) {
+        CorrelatedGroup g;
+        g.transitionHeight = currentGroup[0].lastSeen;
+        g.appearing = false;
+        for (auto& m : currentGroup) g.miks.push_back(m.addr);
+        result.push_back(std::move(g));
+    }
+
+    return result;
+}

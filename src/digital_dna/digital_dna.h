@@ -146,6 +146,7 @@ public:
         SUCCESS,
         ALREADY_REGISTERED,
         SYBIL_FLAGGED,      // Advisory: stored but flagged
+        SYBIL_REJECTED,     // Enforcement: rejected, NOT stored (Phase 2A)
         UPDATED,             // Progressive enrichment: existing record updated
         DNA_CHANGED,         // Identity updated with core dimension changes
         INVALID_DNA,

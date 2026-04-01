@@ -75,6 +75,13 @@ public:
     /** Clear all data (for testing) */
     void clear();
 
+    /** Enable/disable DNA deduplication enforcement (Sybil defense Phase 2A).
+     *  When enabled, register_identity() rejects (does not store) identities
+     *  that match an existing identity at the SAME_IDENTITY threshold (>=0.92).
+     *  Default: false (advisory mode — store and flag). */
+    void SetEnforceDNADedup(bool enforce) { m_enforceDNADedup = enforce; }
+    bool GetEnforceDNADedup() const { return m_enforceDNADedup; }
+
     /** Set ML detector (ADVISORY or SUPPLEMENTARY mode) */
     void set_ml_detector(std::shared_ptr<MLSybilDetector> detector);
 
@@ -102,6 +109,7 @@ public:
 
 private:
     std::shared_ptr<MLSybilDetector> ml_detector_;
+    bool m_enforceDNADedup{false};  // Phase 2A: reject same-identity DNA (default: advisory)
 
     std::unique_ptr<leveldb::DB> db_;
     mutable std::mutex mutex_;

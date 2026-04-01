@@ -46,6 +46,7 @@
 #include <net/peers.h>  // For CPeerManager
 #include <core/node_context.h>  // For g_node_context
 #include <node/peer_mik_tracker.h>  // Sybil defense Phase 1
+#include <vdf/cooldown_tracker.h>   // Sybil defense Phase 4
 #include <net/net.h>  // For CNetMessageProcessor and other networking types
 #include <net/protocol.h>  // For NetProtocol::CAddress
 #include <net/connman.h>  // Phase 5: For CConnman methods
@@ -265,6 +266,7 @@ CRPCServer::CRPCServer(uint16_t port)
 
     // Sybil defense
     m_handlers["getsybilrelays"] = [this](const std::string& p) { return RPC_GetSybilRelays(p); };
+    m_handlers["getcorrelatedalerts"] = [this](const std::string& p) { return RPC_GetCorrelatedAlerts(p); };
 
     // UTXO set queries
     m_handlers["getholdercount"] = [this](const std::string& p) { return RPC_GetHolderCount(p); };
@@ -5398,6 +5400,43 @@ std::string CRPCServer::RPC_GetSybilRelays(const std::string& params) {
             if (!firstMik) oss << ",";
             firstMik = false;
             oss << "\"" << mik.substr(0, 12) << "...\"";
+        }
+        oss << "]}";
+    }
+    oss << "]}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetCorrelatedAlerts(const std::string& params) {
+    (void)params;
+    if (!g_node_context.cooldown_tracker) {
+        return "{\"groups\":[],\"note\":\"Cooldown tracker not initialized\"}";
+    }
+
+    int currentHeight = m_chainstate ? m_chainstate->GetHeight() : 0;
+    auto groups = g_node_context.cooldown_tracker->DetectCorrelatedGroups(currentHeight);
+
+    std::ostringstream oss;
+    oss << "{\"height\":" << currentHeight << ",\"groups\":[";
+    bool first = true;
+    for (const auto& g : groups) {
+        if (!first) oss << ",";
+        first = false;
+        oss << "{\"type\":\"" << (g.appearing ? "appeared" : "disappeared") << "\""
+            << ",\"transition_height\":" << g.transitionHeight
+            << ",\"count\":" << g.miks.size()
+            << ",\"miks\":[";
+        bool firstMik = true;
+        for (const auto& mik : g.miks) {
+            if (!firstMik) oss << ",";
+            firstMik = false;
+            oss << "\"";
+            for (int i = 0; i < 6; i++) {
+                char hex[3];
+                snprintf(hex, sizeof(hex), "%02x", mik[i]);
+                oss << hex;
+            }
+            oss << "...\"";
         }
         oss << "]}";
     }

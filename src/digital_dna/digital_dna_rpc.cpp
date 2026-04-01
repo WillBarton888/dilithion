@@ -7,6 +7,7 @@
 #include "dna_registry_db.h"
 #include "verification_manager.h"
 #include <core/node_context.h>
+#include <vdf/cooldown_tracker.h>
 #include <wallet/wallet.h>
 #include <util/base58.h>
 #include <net/peers.h>
@@ -160,6 +161,11 @@ JsonObject DigitalDNARpc::cmd_registerdigitaldna(const JsonObject& params) {
             response["address"] = address_to_hex(dna->address);
             response["message"] = "Identity registered (advisory: similar identity exists)";
             response["sybil_flagged"] = "true";
+            break;
+        case IDNARegistry::RegisterResult::SYBIL_REJECTED:
+            response["status"] = "error";
+            response["error"] = "sybil_rejected";
+            response["message"] = "Identity rejected: DNA too similar to existing registered identity (score >= 0.92)";
             break;
         case IDNARegistry::RegisterResult::INVALID_DNA:
             response["status"] = "error";
@@ -1226,6 +1232,62 @@ JsonObject DigitalDNARpc::cmd_getdnamonitor(const JsonObject& /*params*/) {
     else if (health >= 20) grade = "D";
     else grade = "F";
     result["health_grade"] = grade;
+
+    // Sybil Defense Phase 5: Mining concentration (Gini coefficient)
+    // Gini = 0.0 (perfect equality) to 1.0 (one miner has everything)
+    // Healthy network: 0.2-0.5. Sybil attack: very low (<0.15, too uniform)
+    // or very high (>0.7, one entity dominates).
+    if (g_node_context.cooldown_tracker) {
+        // Get per-MIK block counts from the cooldown tracker's height→winner map
+        auto knownAddrs = g_node_context.cooldown_tracker->GetKnownAddresses();
+        int currentHeight = 0;
+        // Estimate current height from last known winner
+        for (const auto& addr : knownAddrs) {
+            int h = g_node_context.cooldown_tracker->GetLastWinHeight(addr);
+            if (h > currentHeight) currentHeight = h;
+        }
+
+        // Count blocks per MIK in last 200 blocks
+        std::map<std::array<uint8_t, 20>, int> mikBlocks;
+        int window = 200;
+        for (const auto& addr : knownAddrs) {
+            int count = g_node_context.cooldown_tracker->GetBlockCountInWindow(addr, currentHeight, window);
+            if (count > 0) {
+                mikBlocks[addr] = count;
+            }
+        }
+
+        if (mikBlocks.size() >= 2) {
+            // Compute Gini coefficient
+            std::vector<double> shares;
+            double total = 0;
+            for (auto& [addr, count] : mikBlocks) {
+                shares.push_back(static_cast<double>(count));
+                total += count;
+            }
+            std::sort(shares.begin(), shares.end());
+
+            int n = static_cast<int>(shares.size());
+            double sumWeighted = 0;
+            for (int i = 0; i < n; i++) {
+                sumWeighted += (2.0 * (i + 1) - n - 1) * shares[i];
+            }
+            double gini = sumWeighted / (n * total);
+
+            std::ostringstream giniStr;
+            giniStr << std::fixed << std::setprecision(3) << gini;
+            result["mining_gini"] = giniStr.str();
+            result["mining_active_miners"] = std::to_string(n);
+            result["mining_window_blocks"] = std::to_string(window);
+
+            // Alert levels (monitoring only)
+            std::string giniAlert = "normal";
+            if (gini > 0.7) giniAlert = "CRITICAL_HIGH";    // one entity dominates
+            else if (gini < 0.15 && n > 20) giniAlert = "SUSPICIOUS_LOW";  // too uniform (Sybil)
+            else if (gini > 0.5) giniAlert = "elevated";
+            result["mining_gini_alert"] = giniAlert;
+        }
+    }
 
     return result;
 }

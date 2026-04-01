@@ -376,6 +376,7 @@ private:
 
     // Sybil defense methods
     std::string RPC_GetSybilRelays(const std::string& params);
+    std::string RPC_GetCorrelatedAlerts(const std::string& params);
 
     // UTXO set query methods
     std::string RPC_GetHolderCount(const std::string& params);

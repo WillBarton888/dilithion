@@ -91,6 +91,24 @@ public:
     /** All MIK addresses that have ever mined (for DNA discovery). */
     std::vector<Address> GetKnownAddresses() const;
 
+    // --- Sybil Defense Phase 4: Correlated Availability Detection ---
+
+    /** A group of MIKs that appeared or disappeared simultaneously. */
+    struct CorrelatedGroup {
+        std::vector<Address> miks;
+        int transitionHeight;    // height where they all appeared/disappeared
+        bool appearing;          // true = all started mining, false = all stopped
+    };
+
+    /** Detect groups of MIKs that started or stopped mining within `proximityBlocks`
+     *  of each other. Returns groups of size >= `minGroupSize`.
+     *  Looks at the trailing `lookbackBlocks` from the current tip. */
+    std::vector<CorrelatedGroup> DetectCorrelatedGroups(
+        int currentHeight,
+        int lookbackBlocks = 200,
+        int proximityBlocks = 3,
+        int minGroupSize = 5) const;
+
     /** Height at which this address last won (or -1 if never). */
     int GetLastWinHeight(const Address& addr) const;
 
