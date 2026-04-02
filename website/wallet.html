@@ -3486,8 +3486,12 @@
                     }
                     addressBalances.sort((a, b) => b.balance - a.balance);
 
-                } else if (!isFullNode && localWallet && localWallet.isWalletUnlocked()) {
+                } else if (!isFullNode) {
                     // Light wallet mode — query balances via HTTPS API
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Unlock your wallet to see address balances</div>';
+                        return;
+                    }
                     const addresses = await localWallet.getAddresses();
                     for (const a of addresses) {
                         let bal = 0;
@@ -3498,7 +3502,7 @@
                         addressBalances.push({ address: a.address, balance: bal, isMining: false });
                     }
                 } else {
-                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Connect to a node to see address balances</div>';
+                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Connecting...</div>';
                     return;
                 }
 
@@ -3508,7 +3512,7 @@
                 }
 
                 // Determine coin label
-                const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
+                const coinLabel = (typeof activeChain !== 'undefined' && activeChain === 'dilv') ? 'DilV' : 'DIL';
 
                 // Split into addresses with balance and empty addresses
                 const withBalance = addressBalances.filter(a => a.balance > 0 || a.isMining);
