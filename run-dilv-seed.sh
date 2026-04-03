@@ -7,10 +7,15 @@
 # Usage: nohup ./run-dilv-seed.sh > /root/dilv-seed.log 2>&1 &
 
 BINARY="./dilv-node"
-FLAGS="--relay-only --public-api"
 LOG="/root/dilv-node.log"
 
-echo "$(date): DilV seed node wrapper starting"
+# Auto-detect external IP for correct seed ID assignment.
+# Without this, all seeds default to seedId=0 and attestations fail
+# (duplicate seed ID → miners can't register MIK after activation height).
+EXTERNAL_IP=$(hostname -I | awk '{print $1}')
+FLAGS="--relay-only --public-api --externalip=${EXTERNAL_IP}"
+
+echo "$(date): DilV seed node wrapper starting (externalip=${EXTERNAL_IP})"
 
 while true; do
     echo "$(date): Starting $BINARY $FLAGS"

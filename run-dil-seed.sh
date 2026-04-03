@@ -6,12 +6,16 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BINARY="$SCRIPT_DIR/dilithion-node"
-FLAGS="--relay-only --public-api"
 LOG="/root/node.log"
+
+# Auto-detect external IP for correct seed ID assignment.
+# Without this, all seeds default to seedId=0 and attestations fail.
+EXTERNAL_IP=$(hostname -I | awk '{print $1}')
+FLAGS="--relay-only --public-api --externalip=${EXTERNAL_IP}"
 
 cd "$SCRIPT_DIR" || exit 1
 
-echo "$(date): DIL seed node wrapper starting (dir=$SCRIPT_DIR)"
+echo "$(date): DIL seed node wrapper starting (dir=$SCRIPT_DIR, externalip=${EXTERNAL_IP})"
 
 while true; do
     echo "$(date): Starting $BINARY $FLAGS"
