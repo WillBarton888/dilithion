@@ -587,17 +587,17 @@
                 <div class="result-card">
                     <div class="result-period">Daily</div>
                     <div class="result-amount" id="resDailyDIL">-</div>
-                    <div class="result-unit">DIL</div>
+                    <div class="result-unit coin-unit">DIL</div>
                 </div>
                 <div class="result-card">
                     <div class="result-period">Monthly</div>
                     <div class="result-amount" id="resMonthlyDIL">-</div>
-                    <div class="result-unit">DIL</div>
+                    <div class="result-unit coin-unit">DIL</div>
                 </div>
                 <div class="result-card">
                     <div class="result-period">Yearly</div>
                     <div class="result-amount" id="resYearlyDIL">-</div>
-                    <div class="result-unit">DIL</div>
+                    <div class="result-unit coin-unit">DIL</div>
                 </div>
             </div>
 
@@ -697,6 +697,7 @@
     ];
 
     let networkData = null;
+    let coinUnit = 'DIL';
 
     async function fetchNetworkData() {
         // Try API proxy first (works when hosted on dilithion.org)
@@ -754,6 +755,11 @@
             statusBadge.className = 'status-badge live';
             statusText.textContent = 'Live';
 
+            if (networkData.chain === 'dilv' || networkData.chain === 'dilv_main') {
+                coinUnit = 'DilV';
+            }
+            document.querySelectorAll('.coin-unit').forEach(el => el.textContent = coinUnit);
+
             const height = networkData.blockHeight || 0;
             const difficulty = networkData.difficulty || 0;
             const reward = networkData.blockReward || INITIAL_BLOCK_REWARD;
@@ -764,7 +770,7 @@
             document.getElementById('netBlockHeight').textContent = height.toLocaleString();
             document.getElementById('netDifficulty').textContent = difficulty.toLocaleString();
             document.getElementById('netHashrate').textContent = formatHashrate(networkHashrate);
-            document.getElementById('netBlockReward').textContent = currentReward + ' DIL (' + (currentReward * MINER_REWARD_FRACTION).toFixed(2) + ' to miner)';
+            document.getElementById('netBlockReward').textContent = currentReward + ' ' + coinUnit + ' (' + (currentReward * MINER_REWARD_FRACTION).toFixed(2) + ' to miner)';
             document.getElementById('netHalving').textContent = (networkData.blocksUntilHalving || (HALVING_INTERVAL - (height % HALVING_INTERVAL))).toLocaleString();
             document.getElementById('netPeers').textContent = (networkData.peerCount || 0).toLocaleString();
 

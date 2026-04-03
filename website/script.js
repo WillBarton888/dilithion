@@ -13,6 +13,13 @@ const UPDATE_INTERVAL = 5000; // 5 seconds for live network updates
 // State
 let isNetworkLive = false;
 let dashboardUpdateInterval = null;
+let coinUnit = 'DIL';
+
+function detectCoinUnit(data) {
+    if (data && (data.chain === 'dilv' || data.chain === 'dilv_main')) {
+        coinUnit = 'DilV';
+    }
+}
 
 /**
  * Countdown Timer
@@ -26,7 +33,7 @@ function updateCountdown() {
         // Hide countdown timer and show status message
         const countdownContainer = document.querySelector('.countdown');
         if (countdownContainer) {
-            countdownContainer.innerHTML = '<div class="mainnet-live-banner" style="background: linear-gradient(135deg, #22c55e, #16a34a);"><h2>MAINNET IS LIVE!</h2><p>Download v3.4.3 and start mining real DIL coins today!</p></div>';
+            countdownContainer.innerHTML = '<div class="mainnet-live-banner" style="background: linear-gradient(135deg, #22c55e, #16a34a);"><h2>MAINNET IS LIVE!</h2><p>Download and start mining today!</p></div>';
         }
 
         // Update status to live
@@ -191,11 +198,14 @@ async function updateDashboard() {
                 formatHashRate(miningInfo.networkhashps);
         }
 
+        // Detect chain
+        detectCoinUnit(blockchainInfo);
+
         // Calculate total supply (blocks * current reward)
         if (blockchainInfo.blocks !== undefined) {
             const totalSupply = calculateTotalSupply(blockchainInfo.blocks);
             document.getElementById('total-supply').textContent =
-                totalSupply.toLocaleString() + ' DIL';
+                totalSupply.toLocaleString() + ' ' + coinUnit;
         }
 
         // Calculate current block reward and next halving
@@ -203,7 +213,7 @@ async function updateDashboard() {
         const currentReward = getCurrentBlockReward(blockHeight);
         const blocksUntilHalving = getBlocksUntilHalving(blockHeight);
 
-        document.getElementById('block-reward').textContent = currentReward + ' DIL';
+        document.getElementById('block-reward').textContent = currentReward + ' ' + coinUnit;
         document.getElementById('next-halving').textContent =
             blocksUntilHalving.toLocaleString() + ' blocks';
 
@@ -252,16 +262,19 @@ function updateDashboardFromStats(stats) {
             formatHashRate(stats.networkHashRate);
     }
 
+    // Detect chain
+    detectCoinUnit(stats);
+
     // Update total supply
     if (stats.totalSupply !== undefined) {
         document.getElementById('total-supply').textContent =
-            stats.totalSupply.toLocaleString() + ' DIL';
+            stats.totalSupply.toLocaleString() + ' ' + coinUnit;
     }
 
     // Update block reward
     if (stats.blockReward !== undefined) {
         document.getElementById('block-reward').textContent =
-            stats.blockReward + ' DIL';
+            stats.blockReward + ' ' + coinUnit;
     }
 
     // Update next halving
