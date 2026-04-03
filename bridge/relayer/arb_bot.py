@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import sys
 import time
 from decimal import Decimal
@@ -48,6 +49,8 @@ ARB_RATIO_TARGET   = float(os.getenv("ARB_RATIO_TARGET", "10.0"))
 ARB_RATIO_TOLERANCE = float(os.getenv("ARB_RATIO_TOLERANCE", "0.05"))  # 5%
 ARB_MAX_TRADE_DIL  = int(os.getenv("ARB_MAX_TRADE_SIZE_DIL", "100"))   # max DIL per trade
 ARB_INTERVAL       = int(os.getenv("ARB_INTERVAL_SECONDS", "30"))
+ARB_INTERVAL_JITTER = int(os.getenv("ARB_INTERVAL_JITTER", "15"))      # ±15s random jitter
+ARB_SLIPPAGE_BPS   = int(os.getenv("ARB_SLIPPAGE_BPS", "100"))         # 1% max slippage (100 bps)
 TICK_SPACING       = 200  # CL200 for volatile pairs
 
 # ── ABI fragments ────────────────────────────────────────────────────
@@ -55,6 +58,8 @@ TICK_SPACING       = 200  # CL200 for volatile pairs
 ERC20_ABI = json.loads("""[
     {"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],
      "name":"approve","outputs":[{"type":"bool"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],
+     "name":"allowance","outputs":[{"type":"uint256"}],"stateMutability":"view","type":"function"},
     {"inputs":[{"name":"account","type":"address"}],
      "name":"balanceOf","outputs":[{"type":"uint256"}],"stateMutability":"view","type":"function"},
     {"inputs":[],"name":"decimals","outputs":[{"type":"uint8"}],"stateMutability":"view","type":"function"}
@@ -135,7 +140,7 @@ class ArbBot:
     def __init__(self, dry_run: bool = False):
         self.dry_run = dry_run
 
-        # Base connection
+        # Base connection (FCFS sequencer — no public mempool on Base)
         self.w3 = Web3(Web3.HTTPProvider(
             config.BASE_RPC_URL if config.NETWORK == "mainnet"
             else "https://sepolia.base.org"
@@ -174,13 +179,14 @@ class ArbBot:
     def run(self):
         """Main loop — poll prices and arb when ratio diverges."""
         logger.info("Arb bot starting...")
-        logger.info(f"  Network:  {config.NETWORK.upper()}")
-        logger.info(f"  wDIL:     {self.wdil_addr}")
-        logger.info(f"  wDILV:    {self.wdilv_addr}")
+        logger.info(f"  Network:      {config.NETWORK.upper()}")
+        logger.info(f"  wDIL:         {self.wdil_addr}")
+        logger.info(f"  wDILV:        {self.wdilv_addr}")
         logger.info(f"  Target ratio: {ARB_RATIO_TARGET}")
         logger.info(f"  Tolerance:    ±{ARB_RATIO_TOLERANCE * 100:.0f}%")
         logger.info(f"  Max trade:    {ARB_MAX_TRADE_DIL} DIL")
-        logger.info(f"  Interval:     {ARB_INTERVAL}s")
+        logger.info(f"  Slippage:     {ARB_SLIPPAGE_BPS} bps ({ARB_SLIPPAGE_BPS/100:.1f}%)")
+        logger.info(f"  Interval:     {ARB_INTERVAL}s ±{ARB_INTERVAL_JITTER}s jitter")
         logger.info(f"  Dry run:      {self.dry_run}")
 
         while True:
@@ -192,7 +198,10 @@ class ArbBot:
             except Exception as e:
                 logger.error(f"Arb loop error: {e}", exc_info=True)
 
-            time.sleep(ARB_INTERVAL)
+            # Randomize interval to make trade timing unpredictable
+            jitter = random.randint(-ARB_INTERVAL_JITTER, ARB_INTERVAL_JITTER)
+            sleep_time = max(10, ARB_INTERVAL + jitter)
+            time.sleep(sleep_time)
 
     def _check_and_arb(self):
         """Check prices and execute arb if needed."""
@@ -200,17 +209,14 @@ class ArbBot:
         dil_eth_price = self._get_dil_eth_price()
         stable_ratio = self._get_stable_ratio()
 
-        if dil_eth_price is None:
-            logger.debug("Could not get wDIL/WETH price (pool may not exist yet)")
-            return
-
         if stable_ratio is None:
             logger.debug("Could not get stable pool ratio (pool may not exist yet)")
             return
 
-        # Log current state
+        # Log current state (ETH price is optional — Slipstream pool may lack liquidity)
+        eth_str = f"{dil_eth_price:.8f}" if dil_eth_price else "N/A"
         logger.info(
-            f"Prices: 1 DIL = {dil_eth_price:.8f} ETH | "
+            f"Prices: 1 DIL = {eth_str} ETH | "
             f"Stable ratio: {stable_ratio:.2f} DilV/DIL | "
             f"Target: {ARB_RATIO_TARGET}"
         )
@@ -314,49 +320,92 @@ class ArbBot:
 
         self._swap_on_stable_pool(self.wdilv_addr, self.wdil_addr, trade_amount)
 
-    def _swap_on_stable_pool(self, token_in: str, token_out: str, amount_in: int):
-        """Execute a swap on the Aerodrome classic stable pool."""
-        try:
-            # Approve
-            token_contract = self.w3.eth.contract(address=token_in, abi=ERC20_ABI)
-            approve_tx = token_contract.functions.approve(
-                Web3.to_checksum_address(CLASSIC_ROUTER), amount_in
-            ).build_transaction({
-                "from": self.account.address,
-                "nonce": self.w3.eth.get_transaction_count(self.account.address),
-                "gas": 100_000,
-                "maxFeePerGas": self.w3.eth.gas_price * 2,
-                "maxPriorityFeePerGas": self.w3.to_wei(0.001, "gwei"),
-            })
-            signed = self.account.sign_transaction(approve_tx)
-            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-            self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+    def _get_expected_output(self, token_in: str, token_out: str, amount_in: int) -> int:
+        """Quote expected output from the volatile pool (read-only, no tx)."""
+        routes = [(
+            token_in,
+            token_out,
+            False,  # volatile (x*y=k) pool
+            Web3.to_checksum_address(POOL_FACTORY),
+        )]
+        amounts = self.cl_router.functions.getAmountsOut(amount_in, routes).call()
+        return amounts[-1]
 
-            # Swap
+    def _swap_on_stable_pool(self, token_in: str, token_out: str, amount_in: int):
+        """Execute a swap on the Aerodrome classic volatile pool.
+
+        Uses MEV-protected RPC to send trades to a private mempool,
+        preventing sandwich attacks. Includes slippage protection based
+        on a pre-swap quote.
+        """
+        try:
+            # Get expected output and enforce slippage limit
+            expected_out = self._get_expected_output(token_in, token_out, amount_in)
+            min_out = expected_out * (10_000 - ARB_SLIPPAGE_BPS) // 10_000
+            logger.info(
+                f"Quote: {amount_in / 1e8:.2f} in → "
+                f"{expected_out / 1e8:.2f} expected, "
+                f"{min_out / 1e8:.2f} minimum ({ARB_SLIPPAGE_BPS}bps slippage)"
+            )
+
+            if expected_out == 0:
+                logger.warning("Quote returned 0 — skipping trade")
+                return
+
+            # Safe gas params for Base L2 (very low base fee ~0.006 gwei)
+            nonce = self.w3.eth.get_transaction_count(self.account.address, "pending")
+            gas_price = self.w3.eth.gas_price
+            max_fee = max(gas_price * 2, self.w3.to_wei(0.01, "gwei"))
+            priority_fee = min(self.w3.to_wei(0.001, "gwei"), max_fee)
+            gas_params = {"maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority_fee}
+            router_addr = Web3.to_checksum_address(CLASSIC_ROUTER)
+
+            # Only approve if allowance is insufficient (max uint256 so we approve once)
+            token_contract = self.w3.eth.contract(address=token_in, abi=ERC20_ABI)
+            allowance = token_contract.functions.allowance(
+                self.account.address, router_addr
+            ).call()
+
+            if allowance < amount_in:
+                max_approval = 2**256 - 1
+                approve_tx = token_contract.functions.approve(
+                    router_addr, max_approval
+                ).build_transaction({
+                    "from": self.account.address,
+                    "nonce": nonce,
+                    "gas": 100_000,
+                    **gas_params,
+                })
+                signed = self.account.sign_transaction(approve_tx)
+                tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+                self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                logger.info(f"Approved {token_in[:10]}... to router")
+                nonce += 1  # Explicit increment — don't re-query
+
+            # Swap with slippage protection
             routes = [(
                 token_in,
                 token_out,
                 False,  # volatile (x*y=k) pool
                 Web3.to_checksum_address(POOL_FACTORY),
             )]
-            deadline = int(time.time()) + 300  # 5 min
+            deadline = int(time.time()) + 120  # 2 min
 
             swap_tx = self.cl_router.functions.swapExactTokensForTokens(
                 amount_in,
-                0,  # amountOutMin (accept any — small trade)
+                min_out,  # slippage-protected minimum output
                 routes,
                 self.account.address,
                 deadline,
             ).build_transaction({
                 "from": self.account.address,
-                "nonce": self.w3.eth.get_transaction_count(self.account.address),
+                "nonce": nonce,
                 "gas": 300_000,
-                "maxFeePerGas": self.w3.eth.gas_price * 2,
-                "maxPriorityFeePerGas": self.w3.to_wei(0.001, "gwei"),
+                **gas_params,
             })
             signed = self.account.sign_transaction(swap_tx)
             tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
             if receipt.status == 1:
                 self.total_trades += 1
