@@ -136,12 +136,12 @@ int PassphraseValidator::CalculateLengthScore(const std::string& passphrase) con
         return 0;  // Too short
     }
 
-    // Linear scoring: 12 chars = 10 points, 16+ chars = 25 points
+    // Linear scoring: 8 chars = 10 points, 16+ chars = 25 points
     if (len >= RECOMMENDED_LENGTH) {
         return 25;
     }
 
-    // Interpolate between 10 and 25 for lengths 12-15
+    // Interpolate between 10 and 25 for lengths 8-15
     return 10 + ((len - MIN_LENGTH) * 15) / (RECOMMENDED_LENGTH - MIN_LENGTH);
 }
 
@@ -210,32 +210,11 @@ PassphraseValidationResult PassphraseValidator::Validate(const std::string& pass
         return result;
     }
 
-    // Check character type requirements
+    // Check character type presence (advisory, not enforced)
     bool has_upper = HasUppercase(passphrase);
     bool has_lower = HasLowercase(passphrase);
     bool has_digit = HasDigit(passphrase);
     bool has_special = HasSpecialChar(passphrase);
-
-    if (!has_upper || !has_lower || !has_digit || !has_special) {
-        result.is_valid = false;
-        result.strength_score = 0;
-
-        result.error_message = "Passphrase must contain: ";
-        std::vector<std::string> missing;
-        if (!has_upper) missing.push_back("uppercase letter");
-        if (!has_lower) missing.push_back("lowercase letter");
-        if (!has_digit) missing.push_back("digit");
-        if (!has_special) missing.push_back("special character");
-
-        for (size_t i = 0; i < missing.size(); ++i) {
-            if (i > 0) {
-                result.error_message += (i == missing.size() - 1) ? " and " : ", ";
-            }
-            result.error_message += missing[i];
-        }
-
-        return result;
-    }
 
     // Check for common passwords
     if (IsCommonPassword(passphrase)) {
@@ -254,17 +233,24 @@ PassphraseValidationResult PassphraseValidator::Validate(const std::string& pass
 
     result.strength_score = diversity_score + length_score + complexity_score + entropy_score;
 
-    // Check if score meets minimum threshold
-    if (result.strength_score < MIN_ACCEPTABLE_SCORE) {
-        result.is_valid = false;
-        result.error_message = "Passphrase is too weak (strength score: " +
-                              std::to_string(result.strength_score) + "/100). " +
-                              "Please use a longer, more complex passphrase";
-        return result;
-    }
-
-    // Passphrase is valid, but provide warnings for improvements
+    // Passphrase is valid — provide advisory tips for improvements
     result.is_valid = true;
+
+    // Suggest missing character types
+    if (!has_upper || !has_lower || !has_digit || !has_special) {
+        std::vector<std::string> missing;
+        if (!has_upper) missing.push_back("uppercase letter");
+        if (!has_lower) missing.push_back("lowercase letter");
+        if (!has_digit) missing.push_back("number");
+        if (!has_special) missing.push_back("special character (!@#$ etc)");
+
+        std::string tip = "For stronger security, add: ";
+        for (size_t i = 0; i < missing.size(); ++i) {
+            if (i > 0) tip += (i == missing.size() - 1) ? " and " : ", ";
+            tip += missing[i];
+        }
+        result.warnings.push_back(tip);
+    }
 
     if (HasRepeatingChars(passphrase)) {
         result.warnings.push_back("Contains repeating characters (reduces strength)");
@@ -277,10 +263,6 @@ PassphraseValidationResult PassphraseValidator::Validate(const std::string& pass
     if (passphrase.length() < RECOMMENDED_LENGTH) {
         result.warnings.push_back("Consider using " + std::to_string(RECOMMENDED_LENGTH) +
                                  "+ characters for better security");
-    }
-
-    if (result.strength_score < 60) {
-        result.warnings.push_back("Passphrase strength is moderate. Consider making it more complex");
     }
 
     return result;

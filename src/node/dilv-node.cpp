@@ -49,6 +49,7 @@
 #include <node/peer_mik_tracker.h>
 #include <consensus/vdf_validation.h>
 #include <wallet/wallet.h>
+#include <wallet/passphrase_validator.h>
 #include <rpc/server.h>
 #include <rpc/rest_api.h>  // REST API for light wallet
 #include <x402/facilitator.h>  // x402 payment facilitator
@@ -4506,15 +4507,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         encrypt_choice == "yes" || encrypt_choice == "YES") {
                         // Prompt for password
                         std::string password1, password2;
+                        PassphraseValidator validator;
                         while (true) {
                             std::cout << std::endl;
                             std::cout << "  Enter encryption password (min 8 characters): ";
                             std::cout.flush();
                             std::getline(std::cin, password1);
 
-                            if (password1.length() < 8) {
-                                std::cout << "  Password too short. Please use at least 8 characters." << std::endl;
+                            // Validate at prompt level so user gets clear feedback
+                            PassphraseValidationResult validation = validator.Validate(password1);
+                            if (!validation.is_valid) {
+                                std::cout << "  " << validation.error_message << std::endl;
                                 continue;
+                            }
+
+                            // Show strength tips (advisory, not required)
+                            for (const auto& warning : validation.warnings) {
+                                std::cout << "  [TIP] " << warning << std::endl;
                             }
 
                             std::cout << "  Confirm password: ";
@@ -4535,6 +4544,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             std::cout << "       You will need this password to unlock the wallet." << std::endl;
                         } else {
                             std::cout << "  [WARN] Failed to encrypt wallet. Continuing without encryption." << std::endl;
+                            std::cout << "         You can encrypt later with 'encryptwallet' RPC command." << std::endl;
                         }
                         std::cout << std::endl;
                     } else {
@@ -6291,6 +6301,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (peerHeight > 0 || hasHandshakes) {
                         std::cout << "  [IBD] Progress: height=" << height
                                   << " peers_best=" << peerHeight << std::endl;
+
+                        // Diagnostic: warn if stuck at height 0 for >10 minutes despite having peers
+                        if (height == 0 && peerHeight > 0) {
+                            static auto stuck_since = std::chrono::steady_clock::now();
+                            static auto last_warning = std::chrono::steady_clock::time_point();
+                            auto now = std::chrono::steady_clock::now();
+                            auto stuck_mins = std::chrono::duration_cast<std::chrono::minutes>(now - stuck_since).count();
+                            auto since_warning = std::chrono::duration_cast<std::chrono::minutes>(now - last_warning).count();
+                            if (stuck_mins >= 10 && since_warning >= 5) {
+                                last_warning = now;
+                                std::cout << "\n  [WARN] Node stuck at height 0 for " << stuck_mins << " minutes despite having peers." << std::endl;
+                                std::cout << "  [WARN] This usually means your ISP or firewall is blocking P2P data." << std::endl;
+                                std::cout << "  [WARN] Try these fixes:" << std::endl;
+                                std::cout << "  [WARN]   1. Download bootstrap from https://github.com/dilithion/dilithion/releases" << std::endl;
+                                std::cout << "  [WARN]   2. Use --addnode=138.197.68.128:9444 to connect directly to seed nodes" << std::endl;
+                                std::cout << "  [WARN]   3. If in a country with internet restrictions, use a VPN\n" << std::endl;
+                            }
+                        }
                     } else {
                         size_t peerCount = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
                         std::cout << "  [IBD] Waiting for peer handshakes... (connections=" << peerCount << ")" << std::endl;

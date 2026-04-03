@@ -51,6 +51,7 @@
 #include <vdf/cooldown_tracker.h>
 #include <consensus/vdf_validation.h>
 #include <wallet/wallet.h>
+#include <wallet/passphrase_validator.h>
 #include <rpc/server.h>
 #include <rpc/rest_api.h>  // REST API for light wallet
 #include <core/chainparams.h>
@@ -76,6 +77,7 @@
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
 #include <digital_dna/dna_verification.h>       // Phase 3: Verification status for DFMP v3.4
 #include <attestation/seed_attestation.h>       // Phase 2+3: Seed-attested MIK registration
+#include <net/asn_database.h>                    // Phase 2+3: ASN database for datacenter IP check
 #include <util/strencodings.h>                   // HexStr, ParseHex
 
 #include <algorithm>  // Phase 4: Trust-based relay sorting
@@ -453,6 +455,7 @@ struct NodeConfig {
     bool public_api = false;        // --public-api: Enable public REST API for light wallets (seed nodes only)
     int max_connections = 0;         // --maxconnections: Maximum peer connections (0 = default 125)
     int max_connections_per_ip = 2;  // --max-connections-per-ip: Max inbound per IP (default 2, range 1-64)
+    int attestation_rate_limit = 1;  // --attestation-rate-limit: Max attestations per /24 subnet per day
     bool shared_heat = true;         // Phase 3b: shared cluster heat (default ON)
 
     bool ParseArgs(int argc, char* argv[]) {
@@ -4350,15 +4353,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         encrypt_choice == "yes" || encrypt_choice == "YES") {
                         // Prompt for password
                         std::string password1, password2;
+                        PassphraseValidator validator;
                         while (true) {
                             std::cout << std::endl;
                             std::cout << "  Enter encryption password (min 8 characters): ";
                             std::cout.flush();
                             std::getline(std::cin, password1);
 
-                            if (password1.length() < 8) {
-                                std::cout << "  Password too short. Please use at least 8 characters." << std::endl;
+                            // Validate at prompt level so user gets clear feedback
+                            PassphraseValidationResult validation = validator.Validate(password1);
+                            if (!validation.is_valid) {
+                                std::cout << "  " << validation.error_message << std::endl;
                                 continue;
+                            }
+
+                            // Show strength tips (advisory, not required)
+                            for (const auto& warning : validation.warnings) {
+                                std::cout << "  [TIP] " << warning << std::endl;
                             }
 
                             std::cout << "  Confirm password: ";
@@ -4379,6 +4390,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             std::cout << "       You will need this password to unlock the wallet." << std::endl;
                         } else {
                             std::cout << "  [WARN] Failed to encrypt wallet. Continuing without encryption." << std::endl;
+                            std::cout << "         You can encrypt later with 'encryptwallet' RPC command." << std::endl;
                         }
                         std::cout << std::endl;
                     } else {
@@ -5811,6 +5823,64 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.RegisterUTXOSet(&utxo_set);
         rpc_server.SetTestnet(config.testnet);
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
+        rpc_server.SetAttestationRateLimit(config.attestation_rate_limit);  // Sybil defense Phase 0
+        rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
+
+        // Phase 2+3: Seed attestation initialization (relay-only seed nodes only)
+        // Loads ASN database and attestation signing key so seeds can serve
+        // getmikattestation RPC requests from miners.
+        static Attestation::CSeedAttestationKey seedAttestKey;
+        static CASNDatabase asnDatabase;
+        if (config.relay_only && Dilithion::g_chainParams) {
+            std::string dataDir = Dilithion::g_chainParams->dataDir;
+
+            // Load ASN database from data directory (or project root)
+            std::string asnPath = dataDir + "/ip2asn-v4.tsv";
+            if (!asnDatabase.LoadDatabase(asnPath)) {
+                std::cerr << "[Attestation] ASN database not found at " << asnPath
+                          << ", trying ./ip2asn-v4.tsv" << std::endl;
+                if (!asnDatabase.LoadDatabase("ip2asn-v4.tsv")) {
+                    std::cerr << "[Attestation] WARNING: ASN database not loaded. "
+                              << "getmikattestation RPC will be unavailable." << std::endl;
+                }
+            }
+
+            if (asnDatabase.IsLoaded()) {
+                std::string dcPath = dataDir + "/datacenter-asns.txt";
+                if (!asnDatabase.LoadDatacenterList(dcPath)) {
+                    asnDatabase.LoadDatacenterList("datacenter-asns.txt");
+                }
+                std::cout << "  [OK] ASN database loaded (" << asnDatabase.RangeCount()
+                          << " ranges, " << asnDatabase.DatacenterASNCount()
+                          << " datacenter ASNs)" << std::endl;
+            }
+
+            // Load or generate attestation key
+            if (seedAttestKey.LoadOrGenerate(dataDir)) {
+                int seedId = -1;
+                const auto& seedIPs = Dilithion::g_chainParams->seedAttestationIPs;
+                if (!config.external_ip.empty()) {
+                    for (size_t i = 0; i < seedIPs.size(); i++) {
+                        if (seedIPs[i] == config.external_ip) {
+                            seedId = static_cast<int>(i);
+                            break;
+                        }
+                    }
+                }
+                if (seedId < 0) {
+                    seedId = 0;
+                    std::cerr << "[Attestation] WARNING: Could not determine seed ID. "
+                              << "Use --externalip=<IP> to set. Defaulting to seed_id=0" << std::endl;
+                }
+
+                if (asnDatabase.IsLoaded()) {
+                    rpc_server.RegisterSeedAttestation(&seedAttestKey, &asnDatabase, seedId);
+                    std::cout << "  [OK] Seed attestation ready (seed_id=" << seedId
+                              << ", key=" << seedAttestKey.GetPubKeyHex().substr(0, 16) << "...)"
+                              << std::endl;
+                }
+            }
+        }
 
         // Register Digital DNA RPC commands
         std::unique_ptr<digital_dna::DigitalDNARpc> dna_rpc;
@@ -6389,6 +6459,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (peerHeight > 0 || hasHandshakes) {
                         std::cout << "  [IBD] Progress: height=" << height
                                   << " peers_best=" << peerHeight << std::endl;
+
+                        // Diagnostic: warn if stuck at height 0 for >10 minutes despite having peers
+                        if (height == 0 && peerHeight > 0) {
+                            static auto stuck_since = std::chrono::steady_clock::now();
+                            static auto last_warning = std::chrono::steady_clock::time_point();
+                            auto now = std::chrono::steady_clock::now();
+                            auto stuck_mins = std::chrono::duration_cast<std::chrono::minutes>(now - stuck_since).count();
+                            auto since_warning = std::chrono::duration_cast<std::chrono::minutes>(now - last_warning).count();
+                            if (stuck_mins >= 10 && since_warning >= 5) {
+                                last_warning = now;
+                                std::cout << "\n  [WARN] Node stuck at height 0 for " << stuck_mins << " minutes despite having peers." << std::endl;
+                                std::cout << "  [WARN] This usually means your ISP or firewall is blocking P2P data." << std::endl;
+                                std::cout << "  [WARN] Try these fixes:" << std::endl;
+                                std::cout << "  [WARN]   1. Download bootstrap from https://github.com/dilithion/dilithion/releases" << std::endl;
+                                std::cout << "  [WARN]   2. Use --addnode=138.197.68.128:8444 to connect directly to seed nodes" << std::endl;
+                                std::cout << "  [WARN]   3. If in a country with internet restrictions, use a VPN\n" << std::endl;
+                            }
+                        }
                     } else {
                         size_t peerCount = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
                         std::cout << "  [IBD] Waiting for peer handshakes... (connections=" << peerCount << ")" << std::endl;

@@ -26,13 +26,12 @@ struct PassphraseValidationResult {
 /**
  * Passphrase Validator
  *
- * Enforces strong passphrase requirements for wallet encryption:
- * - Minimum 16 characters (WL-009: increased from 12)
- * - Must contain uppercase, lowercase, digit, and special character
- * - Rejects common passwords
- * - Detects repeating patterns
- * - Calculates strength score (0-100)
- * - Minimum score of 60 required (WL-009: increased from 40)
+ * Validates wallet encryption passphrases:
+ * - Minimum 8 characters (hard requirement)
+ * - Rejects common passwords (hard requirement)
+ * - Uppercase, lowercase, digit, special character (advisory — shown as tips)
+ * - Detects repeating/sequential patterns (advisory)
+ * - Calculates strength score (0-100) for informational display
  *
  * Usage:
  *   PassphraseValidator validator;
@@ -43,12 +42,10 @@ struct PassphraseValidationResult {
  */
 class PassphraseValidator {
 private:
-    // WL-009 FIX: Strengthen passphrase requirements
-    // Increased from 12 to 16 characters (NIST SP 800-63B recommends 15+ for user-chosen passwords)
-    // Increased score from 40 to 60 (reject weak passphrases that barely meet character requirements)
-    static const size_t MIN_LENGTH = 16;
-    static const size_t RECOMMENDED_LENGTH = 20;
-    static const int MIN_ACCEPTABLE_SCORE = 60;  // Minimum score to be considered valid
+    // Minimum 8 characters required; complexity is advisory (shown as tips, not enforced)
+    static const size_t MIN_LENGTH = 8;
+    static const size_t RECOMMENDED_LENGTH = 16;
+    static const int MIN_ACCEPTABLE_SCORE = 0;  // Complexity is advisory, not enforced
 
     // Common passwords list (top 100 most common)
     static const std::vector<std::string> COMMON_PASSWORDS;
