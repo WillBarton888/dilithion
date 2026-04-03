@@ -30,6 +30,12 @@ mkdir -p "releases/${RELEASE_NAME}/lib"
 
 # Copy binaries (Linux executables)
 echo "[2/5] Copying binaries..."
+if [ ! -f dilithion-node ]; then
+    echo "ERROR: dilithion-node binary not found! Build it first with: make dilithion-node -j4"
+    echo "Aborting — will NOT create an archive without the main binary."
+    rm -rf "releases/${RELEASE_NAME}"
+    exit 1
+fi
 cp dilithion-node "${RELEASE_DIR}/"
 cp check-wallet-balance "${RELEASE_DIR}/"
 # genesis_gen is optional - only copy if it exists
@@ -64,9 +70,10 @@ chmod +x "${RELEASE_DIR}/start-mining.sh"
 chmod +x "${RELEASE_DIR}/start-miner-gui.sh"
 chmod +x "${RELEASE_DIR}/setup-and-start.sh"
 
-# Copy documentation
+# Copy documentation and wallet
 cp README-LINUX.txt "${RELEASE_DIR}/README.txt"
 cp TESTNET-GUIDE.md "${RELEASE_DIR}/TESTNET-GUIDE.md"
+cp website/wallet.html "${RELEASE_DIR}/wallet.html"
 
 # Create wrapper script that sets LD_LIBRARY_PATH
 cat > "${RELEASE_DIR}/run-node.sh" << 'WRAPPER_EOF'
@@ -83,6 +90,16 @@ echo "[5/5] Creating tar.gz archive..."
 cd releases
 tar -czf "${RELEASE_NAME}.tar.gz" "${RELEASE_NAME}"
 cd ..
+
+# Verify the archive contains the binary (safety check)
+echo ""
+echo "Verifying archive..."
+if ! tar -tzf "releases/${RELEASE_NAME}.tar.gz" | grep -q 'dilithion-node$'; then
+    echo "ERROR: Archive verification FAILED — dilithion-node not found in archive!"
+    echo "Something went wrong during packaging. Do NOT upload this file."
+    exit 1
+fi
+echo "  ✓ dilithion-node found in archive"
 
 # Show results
 echo ""
