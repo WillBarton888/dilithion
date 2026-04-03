@@ -967,6 +967,9 @@
                     </div>
                     <button class="btn btn-primary" onclick="welcomeDoUnlock()" style="width: 100%;">Unlock</button>
                     <button class="btn" onclick="welcomeUnlockBack()" style="width: 100%; margin-top: 8px; background: transparent; color: var(--text-secondary);">Back</button>
+                    <p style="text-align: center; margin-top: 12px; font-size: 0.8rem; color: var(--text-muted);">
+                        Forgot your password? Go back and choose <strong>Restore Wallet</strong> using your 24-word recovery phrase.
+                    </p>
                 </div>
             </div>
 
@@ -1111,10 +1114,63 @@
                         <button class="btn btn-primary" onclick="dashboardQuickUnlock()" style="padding: 8px 16px; white-space: nowrap;">Unlock</button>
                     </div>
                 </div>
+                <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">
+                    Forgot your password? Go to Settings and restore your wallet using your 24-word recovery phrase.
+                </div>
             </div>
 
             <!-- Chain Health Warning Banner -->
             <div id="chainWarning" style="display:none; color:#ff4444; background:#1a0000; padding:12px 16px; margin-bottom:16px; border:1px solid #ff4444; border-radius:8px; font-weight:600;"></div>
+
+            <!-- Wallet Encryption Warning Banner (shown when wallet is NOT encrypted) -->
+            <div id="encryptionWarningBanner" style="display: none; background: rgba(255,68,68,0.06); border: 1px solid rgba(255,68,68,0.4); border-radius: 10px; padding: 20px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="2" style="flex-shrink: 0; margin-top: 2px;">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    <div>
+                        <div style="font-weight: 700; color: #ff4444; font-size: 1rem; margin-bottom: 4px;">Your wallet is not encrypted</div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">
+                            Anyone with access to your computer can spend your funds. Set a password to protect your wallet.
+                        </div>
+                    </div>
+                </div>
+                <div id="encryptBannerForm">
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="bannerEncryptPw" placeholder="Enter password (min 8 characters)" style="padding-right: 50px;">
+                            <button type="button" onclick="togglePasswordVisibility('bannerEncryptPw', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                        </div>
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="bannerEncryptPwConfirm" placeholder="Confirm password" style="padding-right: 50px;">
+                            <button type="button" onclick="togglePasswordVisibility('bannerEncryptPwConfirm', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="btn btn-primary" onclick="encryptFromBanner()" style="padding: 10px 24px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: middle;">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0110 0v4"></path>
+                                </svg>
+                                Encrypt Wallet
+                            </button>
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">You'll need this password to unlock for mining &amp; sending</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wallet Encrypted Confirmation (shown briefly after encrypting, or on load when encrypted) -->
+            <div id="encryptionOkBanner" style="display: none; background: rgba(76,175,80,0.06); border: 1px solid rgba(76,175,80,0.3); border-radius: 10px; padding: 14px 20px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4caf50" stroke-width="2" style="flex-shrink: 0;">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0110 0v4"></path>
+                    </svg>
+                    <span style="font-size: 0.9rem; color: #4caf50; font-weight: 600;">Wallet is encrypted</span>
+                </div>
+            </div>
 
             <!-- Node Wallet Security Card (Dashboard) -->
             <div class="card" id="dashboardWalletSecurity" style="margin-bottom: 16px; display: none;">
@@ -1146,7 +1202,10 @@
                         <button class="btn btn-primary" onclick="unlockNodeWalletFromDash()">Unlock</button>
                     </div>
                     <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
-                        ⚠️ Mining requires wallet to be unlocked for block signing
+                        Mining requires wallet to be unlocked for block signing
+                    </p>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">
+                        Forgot your password? Stop the node, restart it, and restore from your 24-word recovery phrase.
                     </p>
                 </div>
             </div>
@@ -1688,6 +1747,9 @@
                                 </div>
                             </div>
                             <button class="btn btn-primary" onclick="changeNodeWalletPassword()">Change Password</button>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 12px;">
+                                Forgot your current password? Stop the node, restart it, and choose <strong>Restore Wallet</strong> with your 24-word recovery phrase. This will create a new wallet file with a new password.
+                            </p>
                         </div>
                     </details>
                 </div>
@@ -2458,9 +2520,10 @@
                 console.log('[Connect] Waiting 1 second before loading data...');
                 await new Promise(r => setTimeout(r, 1000));
 
-                // MINIMAL initial load - just get balance
+                // MINIMAL initial load - just get balance + check encryption
                 console.log('[Connect] Loading initial balance...');
                 await refreshBalance();
+                await updateDashboardEncryptionBanner();
                 console.log('[Connect] Initial load complete');
 
             } catch(e) {
@@ -4790,6 +4853,9 @@
                 checkSecurityStatus();
                 checkNodeWalletEncryption();
             }
+            if (pageName === 'dashboard') {
+                updateDashboardEncryptionBanner();
+            }
             if (pageName === 'mining-stats') {
                 refreshMiningStats();
             }
@@ -4923,6 +4989,7 @@
 
             // Update node wallet security card visibility
             await checkNodeWalletEncryption();
+            await updateDashboardEncryptionBanner();
 
             // Update wallet UI (same wallet, just different connection)
             await updateLightWalletUI();
@@ -5179,6 +5246,78 @@
                 setTimeout(() => checkNodeWalletEncryption(), 2000);
             } catch (e) {
                 showNotification('Failed to encrypt wallet: ' + e.message, 'error');
+            }
+        }
+
+        // Encrypt wallet from dashboard banner
+        async function encryptFromBanner() {
+            const password = document.getElementById('bannerEncryptPw').value;
+            const confirmPassword = document.getElementById('bannerEncryptPwConfirm').value;
+
+            if (!password || password.length < 8) {
+                showNotification('Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showNotification('Passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                showNotification('Encrypting wallet...', 'info');
+                await rpcCall('encryptwallet', {passphrase: password});
+
+                // Clear password fields
+                document.getElementById('bannerEncryptPw').value = '';
+                document.getElementById('bannerEncryptPwConfirm').value = '';
+
+                showNotification('Wallet encrypted successfully! You will need this password to unlock for mining and sending.', 'success');
+
+                // Update banners
+                document.getElementById('encryptionWarningBanner').style.display = 'none';
+                document.getElementById('encryptionOkBanner').style.display = 'block';
+
+                // Refresh encryption status after node processes the change
+                setTimeout(() => {
+                    checkNodeWalletEncryption();
+                    updateDashboardEncryptionBanner();
+                }, 2000);
+            } catch (e) {
+                showNotification('Failed to encrypt wallet: ' + e.message, 'error');
+            }
+        }
+
+        // Update dashboard encryption banner based on wallet state
+        async function updateDashboardEncryptionBanner() {
+            const mode = connectionManager ? connectionManager.getMode() : 'full';
+            const warningBanner = document.getElementById('encryptionWarningBanner');
+            const okBanner = document.getElementById('encryptionOkBanner');
+
+            // Only show in full node mode when connected
+            if (mode !== 'full' || !connected) {
+                warningBanner.style.display = 'none';
+                okBanner.style.display = 'none';
+                return;
+            }
+
+            try {
+                const walletInfo = await rpcCall('getwalletinfo');
+                const isEncrypted = walletInfo.encrypted === true || walletInfo.encrypted === 'true';
+
+                warningBanner.style.display = isEncrypted ? 'none' : 'block';
+                okBanner.style.display = isEncrypted ? 'block' : 'none';
+
+                // Auto-hide the "encrypted OK" banner after 10 seconds (not a permanent fixture)
+                if (isEncrypted) {
+                    setTimeout(() => {
+                        okBanner.style.display = 'none';
+                    }, 10000);
+                }
+            } catch (e) {
+                // If we can't check, hide both banners
+                warningBanner.style.display = 'none';
+                okBanner.style.display = 'none';
             }
         }
 
