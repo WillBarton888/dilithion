@@ -53,6 +53,7 @@ $supply = ($height * $config['reward']) + $prefundSupply;
 
 // Known address labels
 $labels = [
+    "DJrywx4AsVQSPLZCKRdg8erZdPMNaRSrKq" => "Dev Fund",
     "DTHGN3XiZ9LRxHVPUWMumX8B9q6B4BuPdp" => "Bridge",
     "DNaTbwZgm6x23zf4DnJm4vjEG2qGc6cinx" => "Bridge",
 ];
