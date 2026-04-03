@@ -148,17 +148,16 @@ std::string CRestAPI::HandleBalance(const std::string& address, const std::strin
             const std::vector<uint8_t>& addrData = addr.GetData();
 
             // Compare address data (version byte + 20-byte hash)
-            if (addrData.size() >= 21 && script.size() >= 20) {
-                // Simple comparison: check if script contains the address hash
+            if (addrData.size() >= 21) {
                 bool matches = false;
-                if (script.size() == 20) {
-                    // Direct 20-byte hash
+                if (script.size() == 25 &&
+                    script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 &&
+                    script[23] == 0x88 && script[24] == 0xac) {
+                    // P2PKH: OP_DUP OP_HASH160 PUSH20 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+                    matches = std::equal(addrData.begin() + 1, addrData.begin() + 21, script.begin() + 3);
+                } else if (script.size() == 20) {
+                    // Direct 20-byte hash (legacy)
                     matches = std::equal(addrData.begin() + 1, addrData.begin() + 21, script.begin());
-                } else if (script.size() >= 23) {
-                    // P2PKH: OP_DUP(0x76) OP_HASH160(0xa9) 0x14 <20-bytes> OP_EQUALVERIFY(0x88) OP_CHECKSIG(0xac)
-                    if (script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14) {
-                        matches = std::equal(addrData.begin() + 1, addrData.begin() + 21, script.begin() + 3);
-                    }
                 }
 
                 if (matches) {
