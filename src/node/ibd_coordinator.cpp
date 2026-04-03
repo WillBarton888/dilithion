@@ -553,13 +553,17 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     auto elapsed_secs = std::chrono::duration_cast<std::chrono::seconds>(now - m_creation_time).count();
     bool past_startup_grace = (elapsed_secs >= STARTUP_GRACE_PERIOD_SECS);
 
-    // B2: Allow Layer 1 when headers are at or ahead of our chain height.
-    // Old guard (exactly_synced) required headers == chain, and layer1_near_tip
-    // required gap < 100. Both suppressed detection when forked with headers ahead.
-    // Now only requires: headers exist at our chain height + past startup grace.
+    // BUG #282 FIX: Suppress fork detection during bulk IBD.
+    // During fresh IBD (chain far behind headers), hash comparisons always mismatch
+    // because blocks haven't been validated yet. This caused false-positive fork
+    // detection, constant peer disconnections, and extremely slow sync (109 blocks
+    // in 30 minutes for a 5800-block chain). Checkpoints + PoW validation are
+    // sufficient protection during IBD. Fork detection only needed near tip.
+    bool bulk_ibd = (header_height - chain_height > 100);
+
     bool has_headers = (header_height >= chain_height && chain_height > 0);
 
-    if (past_startup_grace && has_headers && m_node_context.headers_manager && !m_fork_detected.load()) {
+    if (past_startup_grace && has_headers && !bulk_ibd && m_node_context.headers_manager && !m_fork_detected.load()) {
         CBlockIndex* tip = m_chainstate.GetTip();
         if (tip) {  // Only check if we have a valid tip
             uint256 our_tip_hash = tip->GetBlockHash();
@@ -596,9 +600,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // Layer 3's 60-cycle stall threshold (which can deadlock due to counter resets).
     //
     // BUG #261 FIX: Skip Layer 2 during startup grace period
+    // BUG #282 FIX: Skip Layer 2 during bulk IBD (orphans are normal during IBD)
     int orphan_count = m_consecutive_orphan_blocks.load();
     bool force_fork_check = orphan_count >= ORPHAN_FORK_THRESHOLD;
-    if (past_startup_grace && force_fork_check && !m_fork_detected.load()) {
+    if (past_startup_grace && !bulk_ibd && force_fork_check && !m_fork_detected.load()) {
         std::cout << "[FORK-DETECT] Layer 2 triggered: " << m_consecutive_orphan_blocks.load()
                   << " consecutive orphan blocks received - attempting immediate fork recovery" << std::endl;
         m_consecutive_orphan_blocks.store(0);  // Reset counter
@@ -638,7 +643,8 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
         }
 
         // BUG #261 FIX: Skip Layer 3 during startup grace period
-        if (past_startup_grace && has_ibd_activity && stall_cycles >= FORK_DETECTION_THRESHOLD) {
+        // BUG #282 FIX: Skip Layer 3 during bulk IBD
+        if (past_startup_grace && !bulk_ibd && has_ibd_activity && stall_cycles >= FORK_DETECTION_THRESHOLD) {
             // Issue #6 FIX: Throttle fork detection to avoid CPU overhead
             auto now_check = std::chrono::steady_clock::now();
             auto elapsed_check = std::chrono::duration_cast<std::chrono::seconds>(now_check - m_last_fork_check).count();
