@@ -140,6 +140,15 @@ ChainParams ChainParams::Mainnet() {
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
 
+    // Layer 2: MIK Expiration — disabled on DIL for now
+    params.mikExpirationActivationHeight = 999999999;
+    params.mikExpirationThreshold = 1080;              // ~3 days at 240s blocks
+
+    // Layer 3: Registration Rate Limit — disabled on DIL for now
+    params.mikRegistrationRateLimitHeight = 999999999;
+    params.mikRegistrationRateWindow = 37;             // ~2.5 hours at 240s blocks
+    params.mikRegistrationMaxPerWindow = 10;
+
     // Seed attestation: residential IP verification for MIK registration
     // Activates at height 40,000 (~11 days from v4.0.0 release)
     // After activation, new MIK registrations require 3-of-4 seed attestations
@@ -315,6 +324,13 @@ ChainParams ChainParams::Testnet() {
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
 
+    // Layer 2+3: Sybil defense — disabled on DIL testnet
+    params.mikExpirationActivationHeight = 999999999;
+    params.mikExpirationThreshold = 200;
+    params.mikRegistrationRateLimitHeight = 999999999;
+    params.mikRegistrationRateWindow = 50;
+    params.mikRegistrationMaxPerWindow = 5;
+
     // Seed attestation: disabled on DIL testnet (DilV-only feature)
     params.seedAttestationActivationHeight = 999999999;
     params.seedAttestationPubkeys = {};
@@ -450,6 +466,17 @@ ChainParams ChainParams::DilV() {
     params.dnaHashEnforcementHeight = 999999999;       // Disabled until calibration complete
     params.trustWeightedNetworkHeight = 999999999;     // Phase 4: trust-weighted P2P (disabled)
     params.dnaRotationActivationHeight = 999999999;   // Phase 5: DNA rotation penalties (disabled)
+
+    // Layer 2: MIK Expiration — dormant MIKs must re-register
+    // Activation TBD (~2 days after deploy). Threshold: 5760 blocks (~3 days at 45s).
+    params.mikExpirationActivationHeight = 999999999;  // Set after deploy + announce
+    params.mikExpirationThreshold = 5760;
+
+    // Layer 3: Registration Rate Limit — cap new MIK registrations per window
+    // Activation TBD (same height as Layer 2).
+    params.mikRegistrationRateLimitHeight = 999999999;  // Set after deploy + announce
+    params.mikRegistrationRateWindow = 200;             // ~2.5 hours at 45s blocks
+    params.mikRegistrationMaxPerWindow = 10;
 
     // Seed-attested MIK registration (Phase 2+3)
     // Disabled until seed nodes generate their keys and pubkeys are hardcoded here.

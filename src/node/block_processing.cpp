@@ -94,6 +94,115 @@ static struct PeerForkTracker {
 } s_forkTracker;
 
 // ---------------------------------------------------------------------------
+// Hardcoded Sybil ban list: DilV March 30, 2026 attack (97 MIKs)
+// One operator created 97 identities and mined 698 blocks (12.4% of supply)
+// in a single 13-hour window. All confirmed via forensic analysis:
+// - Identical 1:1 address-to-block ratio (new address every block)
+// - All active only in blocks 1543-2631 (March 30 09:22-23:14 UTC)
+// - 70.2% consecutive blocks (gap=1)
+// ---------------------------------------------------------------------------
+static const char* HARDCODED_BANNED_MIKS[] = {
+    "07a15b1fda57bde1528053af9179259b7ffdf618",
+    "1382eb69cc2ba25be09df59386afbdcfdca33c39",
+    "143658c6e84262883b976d50d80e17271c8c797b",
+    "15753ce782c421fbcaa35e6ef25e7a9efd8b6798",
+    "16cdcd49af1fbaca4ef74c04e6ce8ba6ab2631a7",
+    "211e948c67cb7c921b3d83401f0654bd852b97a4",
+    "22d9929ad567ceaa04c05252f1141e6facc66d41",
+    "2f70042cd51b05dbb53fd8e216a1a6625adbb1a3",
+    "32462815e1f2b6d465fddf86432920a9f24d4fc8",
+    "392ffb18cdfd0d656d38e2ad6c01d0483c316a5b",
+    "3a3123d8cd40e54da9961ad46fca3295ad2b0612",
+    "3b88a1416e3da53e10b2ec084f07dea96b3caec4",
+    "3fcac01ad86e7783d4acca31a7ce5eae02d5a737",
+    "40342ee387029399d2766e56e74e31e49548126c",
+    "43f011daa32194cd863bfe8eb544d1b1b6a9c778",
+    "4588be4d68cd77e67c83e315b60c8e3dbd4bc207",
+    "4937fabc53031b0063b1810eff87a24ccf63e07e",
+    "4bbc43dc118d7bc27c7fb62051afc3359315427a",
+    "4d1b9e435e972fce96f518ccda84835106f267fd",
+    "56aed37350a69f174b052257d4afb163cc569dd9",
+    "589cabca22ba9d9d5fdd76a492dd891d23291e37",
+    "5aacfdad89569709ea67db85f7450923bcfed875",
+    "5b1830676b592574d3b091c75a75a2ee5a8b8972",
+    "5cbfadccd8620dfa686137537038eabf880acf8c",
+    "6121bb3600623c0dd86daff64238207db8c5201e",
+    "6332541d823aceecf45f82cd7b1d011dd8e392bf",
+    "666028abb676a4a5574ab358db106a62e504ee6f",
+    "6833f81601a7ef3807b1dcbba4edfb2b469e9fa7",
+    "68c6629cc458ca8642c611da8825bd11b608868a",
+    "6a80a261591c3fe9150c51c2da31b529637160f7",
+    "6f91ff9260d3b1e0633287066dc92b75a32f7d64",
+    "6fbb2212684cd11b481eef39c2a2a91f287b73c6",
+    "71530bf0bf3cd11d9e7ee4d840e58a2297691433",
+    "72df1a7ed049ae851f5c9537a913a47d939b44dc",
+    "7899dd8a1e57f1c4afb16e38eaa7213c0dc64a83",
+    "7d892d4ab74e5575188b6badab9676cc64aae320",
+    "81b009b01c73862f941282b717402cf6377e6c63",
+    "83dd12cb97a30fd1e5085f77b830d0fb4f2a1dfe",
+    "855b2ab535f4deb72e49a4087e60925ba808dc21",
+    "85d52d5e6f0f58c145066df9ecc5b25e919c833f",
+    "8a8c5c4ed3df83f2942597fa4a2c04898354673f",
+    "8bb67d74f95193168c900ce225e90952ea50798c",
+    "8eedb27daf1585410962ca02f8a2faaef0790119",
+    "915b2fa8c55f97554085482329ec41daf2b24257",
+    "958ef4879b8ed61003d565046e23c945e177a84d",
+    "96a7af8b36f55002aff8ed4bb8a64f00505d4e20",
+    "96e65340959b6577bb84f9680721597772f3b00a",
+    "9a9fc953323c8a594d19298bdfa5ae259dd797c5",
+    "9d9eecf0ab8307a39744d775629fcfc20363619c",
+    "9f92f3696abb60d4ea3c2acd3987118684be2b34",
+    "a04247f80fc02613c6b93e5658225b842338e494",
+    "a0d0b05c224846e5482efbe4d6f9857cb95fcb1b",
+    "a3219c068d1890ff23eb1ec230bf5de460dd54ce",
+    "a5f43e95e988136e2a6b88167641e8affefecd64",
+    "a7aeef53c0e3e7851def7c50c3e75df8c4981017",
+    "a8d752238f8576c1148ed5a61a54607864606ce2",
+    "ab690eba0a2f56faf59c0c130913ae946e4ba1fa",
+    "abb98db15179ded901648bc20eb6d9741b59c971",
+    "b7d30cfed74c1555bf1160e2256b6cf87c973b9d",
+    "b85248a1e6d1dc1e49a882ba3e7cd5d61d383e08",
+    "b8e544ac2ce9098eead7a1e37f473b9a09e51b6b",
+    "b9516a2e4bbbadb57a24d1ad2f8c4645c7418041",
+    "b999bd9444ecbe0eedd5e35c219ceab77298599c",
+    "be7c3f02caf635d3d2db5251ec35bbe23bceb3b6",
+    "bf4f0a11b757afa8f125a7a9d3d75598f3ba2bad",
+    "c116dc13321f14e6ca367c029951738956d9e987",
+    "c3015b97997c86127920254f98509926f267962e",
+    "c4282edfa14bfe3d3f43321661d58abc259a3304",
+    "c81581bb2cbc322ae27f869e180d9cc295af7b39",
+    "c9027dad7595025517ea3b00a3cfef6cf0ed1426",
+    "ce6d413f3ff0e4b145de437bf460d0804a737adb",
+    "d01dce74783e6b1903361bedccfad754daa30066",
+    "d13a3777266c814ee9310dfe4fce5f161dfc824c",
+    "d2db717b17a914abca3aaf66ef064aa0f2b3ef2b",
+    "d468861db4492b691e510091c877e9a1c9ad55b4",
+    "dcfc5f9d4b35c19193a8cbb6b7d20e1d26327249",
+    "dd2b01eeefb3f09b7dba699f432fe5212098e263",
+    "dd46ccfa2a237bbac42f24c679a075a481cf98b8",
+    "de3d7cadf1ee96b3a0eb22b4dc2f90e03a37d15a",
+    "e3768997759f6a3b9e3dd639791f9b04c0681cc4",
+    "e3c478423c5e0b0cc16f2dd0dfff13b31da00246",
+    "e7be40b85ba4061a810205f7fb850be95c524b0f",
+    "ea687388c2f0a2de07c39b3043db0fa4d43f6e39",
+    "eb2ae41318016d4969d087fbc93c6ffd804e1d3a",
+    "eca8acae259c44446c86c5d57b105e9fa9ac0be4",
+    "edce6b7f9d8748a37ede0cc83c2aec520f1dd273",
+    "edf05cea505d408a2f075c640ef1aec882e19beb",
+    "ee17ce2a0d2c7a13455f5b660ea46cc0fed060ba",
+    "ee499856ab7cc466469f3f10211126499044f7be",
+    "ee5a8dfc72208003ec208267c82927c79afa6f5a",
+    "eeb5e8fe894a5be3faffde1ae7d67b5492aade6d",
+    "f085ee4769ea03400fd17bc305ea679c90808e63",
+    "f77241bbbe1ed12d58d3c597c3d19447133e6126",
+    "f9dc7ed21d764c9e0e75f1a03fe42a645752b784",
+    "fc57d1ba6e08b2743b96bf5e5c0ab10fbcb11061",
+    "fd12ef5effe930387c89aff09f2e24c9180f8935",
+    "fe4fa16cf2229555b64a7068b58db7e877927bfb",
+    nullptr  // sentinel
+};
+
+// ---------------------------------------------------------------------------
 // Banned MIK identities (node policy, NOT consensus)
 // ---------------------------------------------------------------------------
 // Blocks from banned MIKs are rejected locally and not relayed.
@@ -101,6 +210,13 @@ static struct PeerForkTracker {
 static struct BannedMIKSet {
     std::mutex mutex;
     std::set<std::string> banned;  // MIK hex strings (40 chars)
+
+    BannedMIKSet() {
+        // Load hardcoded Sybil bans at startup
+        for (int i = 0; HARDCODED_BANNED_MIKS[i] != nullptr; i++) {
+            banned.insert(HARDCODED_BANNED_MIKS[i]);
+        }
+    }
 
     bool IsBanned(const std::string& mikHex) {
         std::lock_guard<std::mutex> lock(mutex);

@@ -184,6 +184,7 @@ void CCooldownTracker::OnBlockDisconnected(int height)
     Address winner = it->second;
     m_heightToWinner.erase(it);
     m_heightToTimestamp.erase(height);
+    m_heightToRegistration.erase(height);  // Layer 3: undo registration tracking
 
     // Recompute the address's last win height from remaining entries.
     // Scan backwards from the end of m_heightToWinner.
@@ -221,6 +222,7 @@ void CCooldownTracker::Clear()
     m_heightToWinner.clear();
     m_lastWinTimestamp.clear();
     m_heightToTimestamp.clear();
+    m_heightToRegistration.clear();
     m_cachedActiveMinersMut = 0;
     m_cachedAtHeightMut = -1;
     m_cachedShortActiveMinersMut = 0;
@@ -374,4 +376,27 @@ std::vector<CCooldownTracker::CorrelatedGroup> CCooldownTracker::DetectCorrelate
     }
 
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Layer 3 Sybil Defense: Registration Rate Tracking
+// ---------------------------------------------------------------------------
+
+void CCooldownTracker::OnRegistrationConnected(int height, const Address& mikId)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_heightToRegistration[height] = mikId;
+}
+
+int CCooldownTracker::GetRegistrationCount(int height, int window) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    int fromHeight = std::max(0, height - window + 1);
+    int count = 0;
+    auto it = m_heightToRegistration.lower_bound(fromHeight);
+    auto end = m_heightToRegistration.upper_bound(height);
+    for (; it != end; ++it) {
+        ++count;
+    }
+    return count;
 }

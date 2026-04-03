@@ -873,6 +873,27 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
             }
         }
 
+        // ====================================================================
+        // MIK EXPIRATION CHECK (Layer 2 Sybil Defense, hard fork)
+        // ====================================================================
+        // After activation, reference blocks from expired MIK identities are
+        // rejected. Depends on identity DB (GetLastMined), so must be inside
+        // !skipValidation gate. IBD blocks below assumeValid are exempt.
+        if (block.IsVDFBlock() && !assumeValid && pindex->nHeight > 0) {
+            std::string expirationError;
+            if (!CheckMIKExpiration(block, pindex->nHeight, expirationError)) {
+                std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                          << " REJECTED: MIK expired" << std::endl;
+                std::cerr << "[Chain] " << expirationError << std::endl;
+
+                pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                if (pdb != nullptr) {
+                    pdb->WriteBlockIndex(blockHash, *pindex);
+                }
+                return false;
+            }
+        }
+
         if (assumeValid && block.IsVDFBlock() && g_node_context.cooldown_tracker) {
             // Update tracker without enforcement so state is correct at assume-valid boundary
             std::array<uint8_t, 20> mikId{};
@@ -942,7 +963,8 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     // attestations signed by known seed node keys.
     // Context-independent: reads only block coinbase + hardcoded seed pubkeys.
     // Skip attestation for genesis (height 0) — no MIK exists yet
-    if (block.IsVDFBlock() && pindex->nHeight > 0 && !assumeValid) {
+    // Applies to both DIL (PoW, height 40,000) and DilV (VDF, height 2,000)
+    if (pindex->nHeight > 0 && !assumeValid) {
         std::string attestError;
         if (!CheckMIKAttestations(block, pindex->nHeight, attestError)) {
             std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
@@ -1110,6 +1132,29 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
             std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
                       << " REJECTED: window cap exceeded" << std::endl;
             std::cerr << "[Chain] " << capError << std::endl;
+
+            pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+            if (pdb != nullptr) {
+                pdb->WriteBlockIndex(blockHash, *pindex);
+            }
+            return false;
+        }
+    }
+
+    // ====================================================================
+    // REGISTRATION RATE LIMIT (Layer 3 Sybil Defense, hard fork)
+    // ====================================================================
+    // After activation, reject MIK registration blocks if too many new
+    // registrations have occurred in the trailing window.
+    // Uses cooldown tracker (reorg-safe): runs for all block connects.
+    if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
+        std::string rateLimitError;
+        if (!CheckRegistrationRateLimit(block, pindex->nHeight,
+                                         *g_node_context.cooldown_tracker,
+                                         rateLimitError)) {
+            std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                      << " REJECTED: registration rate limit exceeded" << std::endl;
+            std::cerr << "[Chain] " << rateLimitError << std::endl;
 
             pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
             if (pdb != nullptr) {

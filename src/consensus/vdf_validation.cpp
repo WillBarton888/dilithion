@@ -7,6 +7,8 @@
 #include <vdf/coinbase_vdf.h>
 #include <vdf/cooldown_tracker.h>
 #include <dfmp/mik.h>
+#include <dfmp/dfmp.h>
+#include <dfmp/identity_db.h>
 #include <core/chainparams.h>
 #include <digital_dna/digital_dna.h>
 #include <node/blockchain_storage.h>
@@ -618,14 +620,10 @@ bool CheckMIKAttestations(
     std::string& error)
 {
     // Pre-activation: always pass
+    // DIL activates at height 40,000; DilV at height 2,000
     int activationHeight = Dilithion::g_chainParams ?
         Dilithion::g_chainParams->seedAttestationActivationHeight : 999999999;
     if (height < activationHeight) {
-        return true;
-    }
-
-    // Only applies to VDF blocks
-    if (!block.IsVDFBlock()) {
         return true;
     }
 
@@ -719,6 +717,167 @@ bool CheckMIKAttestations(
             attestSet, mikData.pubkey, dnaHash,
             seedPubkeys, blockTimestamp, verifyError)) {
         error = "CheckMIKAttestations: " + verifyError + " at height " + std::to_string(height);
+        return false;
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Layer 2 Sybil Defense: MIK Expiration After Dormancy
+// ============================================================================
+
+bool CheckMIKExpiration(
+    const CBlock& block,
+    int height,
+    std::string& error)
+{
+    // Pre-activation: always pass
+    int activationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->mikExpirationActivationHeight : 999999999;
+    if (height < activationHeight) {
+        return true;
+    }
+
+    int threshold = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->mikExpirationThreshold : 5760;
+
+    // Deserialize coinbase
+    if (block.vtx.empty()) {
+        return true;  // No coinbase to check
+    }
+
+    const uint8_t* data = block.vtx.data();
+    size_t dataSize = block.vtx.size();
+
+    // Parse tx count varint
+    size_t txCountSize = 0;
+    if (data[0] < 253) {
+        txCountSize = 1;
+    } else if (data[0] == 253 && dataSize >= 3) {
+        txCountSize = 3;
+    } else {
+        return true;  // Can't parse — let other checks handle
+    }
+
+    CTransaction coinbase;
+    size_t consumed = 0;
+    if (!coinbase.Deserialize(data + txCountSize, dataSize - txCountSize, nullptr, &consumed)) {
+        return true;  // Can't parse — let other checks handle
+    }
+
+    if (coinbase.vin.empty()) {
+        return true;
+    }
+
+    // Parse MIK data
+    DFMP::CMIKScriptData mikData;
+    if (!DFMP::ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData)) {
+        return true;  // No MIK data — let other checks handle
+    }
+
+    // Registration blocks always pass (re-registering is the cure for expiration)
+    if (mikData.isRegistration) {
+        return true;
+    }
+
+    // Reference block: check if MIK is expired
+    if (!DFMP::g_identityDb) {
+        return true;  // No identity DB — can't check
+    }
+
+    int lastMined = DFMP::g_identityDb->GetLastMined(mikData.identity);
+    if (lastMined < 0) {
+        // Never mined before — check first-seen as fallback
+        int firstSeen = DFMP::g_identityDb->GetFirstSeen(mikData.identity);
+        if (firstSeen >= 0) {
+            lastMined = firstSeen;  // Use registration height as anchor
+        } else {
+            // Unknown identity using a reference block — reject
+            error = "CheckMIKExpiration: unknown identity using reference block at height " +
+                    std::to_string(height);
+            return false;
+        }
+    }
+
+    if (height - lastMined > threshold) {
+        error = "CheckMIKExpiration: MIK expired at height " + std::to_string(height) +
+                " (last mined at " + std::to_string(lastMined) +
+                ", dormant " + std::to_string(height - lastMined) +
+                " blocks, threshold " + std::to_string(threshold) +
+                "). Must re-register with type 0x01 and fresh attestations.";
+        return false;
+    }
+
+    return true;
+}
+
+// ============================================================================
+// Layer 3 Sybil Defense: Registration Rate Limit
+// ============================================================================
+
+bool CheckRegistrationRateLimit(
+    const CBlock& block,
+    int height,
+    CCooldownTracker& tracker,
+    std::string& error)
+{
+    // Pre-activation: always pass
+    int activationHeight = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->mikRegistrationRateLimitHeight : 999999999;
+    if (height < activationHeight) {
+        return true;
+    }
+
+    int window = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->mikRegistrationRateWindow : 200;
+    int maxPerWindow = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->mikRegistrationMaxPerWindow : 10;
+
+    // Deserialize coinbase
+    if (block.vtx.empty()) {
+        return true;
+    }
+
+    const uint8_t* data = block.vtx.data();
+    size_t dataSize = block.vtx.size();
+
+    size_t txCountSize = 0;
+    if (data[0] < 253) {
+        txCountSize = 1;
+    } else if (data[0] == 253 && dataSize >= 3) {
+        txCountSize = 3;
+    } else {
+        return true;
+    }
+
+    CTransaction coinbase;
+    size_t consumed = 0;
+    if (!coinbase.Deserialize(data + txCountSize, dataSize - txCountSize, nullptr, &consumed)) {
+        return true;
+    }
+
+    if (coinbase.vin.empty()) {
+        return true;
+    }
+
+    DFMP::CMIKScriptData mikData;
+    if (!DFMP::ParseMIKFromScriptSig(coinbase.vin[0].scriptSig, mikData)) {
+        return true;
+    }
+
+    // Only registration blocks are rate-limited
+    if (!mikData.isRegistration) {
+        return true;
+    }
+
+    // Check registration count in trailing window (height-1 because current block not yet counted)
+    int count = tracker.GetRegistrationCount(height - 1, window);
+    if (count >= maxPerWindow) {
+        error = "CheckRegistrationRateLimit: registration rate limit exceeded at height " +
+                std::to_string(height) + " (" + std::to_string(count) +
+                " registrations in last " + std::to_string(window) +
+                " blocks, max " + std::to_string(maxPerWindow) + ")";
         return false;
     }
 

@@ -217,4 +217,37 @@ bool CheckMIKAttestations(
     std::string& error
 );
 
+/**
+ * Check MIK expiration (Layer 2 Sybil Defense, hard fork).
+ *
+ * After mikExpirationActivationHeight, reference blocks (type 0x02) from
+ * MIK identities that haven't mined in mikExpirationThreshold blocks are
+ * rejected. The MIK must re-register with a full registration block (0x01).
+ *
+ * Registration blocks always pass. Depends on identity DB (GetLastMined).
+ */
+bool CheckMIKExpiration(
+    const CBlock& block,
+    int height,
+    std::string& error
+);
+
+class CCooldownTracker;  // forward declaration
+
+/**
+ * Check MIK registration rate limit (Layer 3 Sybil Defense, hard fork).
+ *
+ * After mikRegistrationRateLimitHeight, reject registration blocks if more
+ * than mikRegistrationMaxPerWindow new registrations have occurred in the
+ * trailing mikRegistrationRateWindow blocks.
+ *
+ * Reference blocks always pass. Uses cooldown tracker (reorg-safe).
+ */
+bool CheckRegistrationRateLimit(
+    const CBlock& block,
+    int height,
+    CCooldownTracker& tracker,
+    std::string& error
+);
+
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

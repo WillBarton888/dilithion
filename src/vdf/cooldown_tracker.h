@@ -119,6 +119,15 @@ public:
      *  Used for per-MIK window cap enforcement. */
     int GetBlockCountInWindow(const Address& addr, int height, int window) const;
 
+    // --- Layer 3 Sybil Defense: Registration Rate Tracking ---
+
+    /** Record that height contained a new MIK registration.
+     *  Called from block connect callback when isRegistration=true. */
+    void OnRegistrationConnected(int height, const Address& mikId);
+
+    /** Count new MIK registrations in the trailing window [height-window+1, height]. */
+    int GetRegistrationCount(int height, int window) const;
+
     // --- Mutation interface (called from block connect/disconnect) ---
 
     /** Record that `winner` mined the block at `height`.
@@ -150,6 +159,9 @@ private:
 
     // height → timestamp (for recovering timestamps during disconnect)
     std::map<int, int64_t> m_heightToTimestamp;
+
+    // Layer 3: height → MIK identity (only for registration blocks, for rate limiting)
+    std::map<int, Address> m_heightToRegistration;
 
     /** Recount active miners up to `height` (long window).  Caller must hold m_mutex. */
     void RecalcActiveMiners(int height) const;

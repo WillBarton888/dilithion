@@ -266,6 +266,19 @@ public:
     // After this height: DNA changes trigger trust penalties and stabilization
     int dnaRotationActivationHeight;
 
+    // MIK Expiration (Layer 2 Sybil Defense, hard fork)
+    // After this height: reference blocks (type 0x02) from MIKs idle for
+    // mikExpirationThreshold blocks are rejected. Must re-register (type 0x01).
+    int mikExpirationActivationHeight;
+    int mikExpirationThreshold;          // Blocks of inactivity before expiry
+
+    // Registration Rate Limit (Layer 3 Sybil Defense, hard fork)
+    // After this height: no more than mikRegistrationMaxPerWindow new MIK
+    // registrations in a rolling window of mikRegistrationRateWindow blocks.
+    int mikRegistrationRateLimitHeight;
+    int mikRegistrationRateWindow;       // Rolling window in blocks
+    int mikRegistrationMaxPerWindow;     // Max new registrations per window
+
     // Seed-attested MIK registration activation height (Phase 2+3)
     // After this height: MIK registration blocks on DilV must include 3+ valid
     // attestations signed by known seed node keys (hardcoded below).
