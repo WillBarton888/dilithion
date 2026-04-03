@@ -1195,14 +1195,68 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     bool isRegistrationBlock = mikDataIncluded &&
         DFMP::g_identityDb && !mikIdentity.IsNull() &&
         !DFMP::g_identityDb->HasMIKPubKey(mikIdentity);
-    if (isRegistrationBlock && s_attestationsCollected.load()) {
-        std::vector<uint8_t> attestData;
-        if (Attestation::BuildAttestationScriptData(s_cachedAttestations, attestData)) {
-            scriptSig.insert(scriptSig.end(), attestData.begin(), attestData.end());
-            if (verbose) {
-                std::cout << "  Attestations: " << s_cachedAttestations.Count()
-                          << " seed attestations included ("
-                          << attestData.size() << " bytes)" << std::endl;
+    if (isRegistrationBlock) {
+        int activationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->seedAttestationActivationHeight : 999999999;
+
+        if (static_cast<int>(nHeight) >= activationHeight) {
+            // BUG #283 FIX: Re-collect stale attestations inline.
+            // EnsureMIKRegistered() only runs once at startup. If attestations expire
+            // (1-hour validity window) or the rejection handler clears the cache, the
+            // template builder must handle re-collection itself — otherwise every
+            // registration block is built without attestations and rejected by consensus.
+            bool needRefresh = !s_attestationsCollected.load() || !s_cachedAttestations.HasMinimum();
+            if (!needRefresh) {
+                int64_t attestAge = std::time(nullptr) - static_cast<int64_t>(s_cachedAttestations.attestations[0].timestamp);
+                if (attestAge > Attestation::ATTESTATION_VALIDITY_WINDOW - 600) {
+                    std::cout << "[Mining] Attestations are " << attestAge / 60
+                              << "m old (max " << Attestation::ATTESTATION_VALIDITY_WINDOW / 60
+                              << "m) — refreshing..." << std::endl;
+                    needRefresh = true;
+                }
+            }
+
+            if (needRefresh && Dilithion::g_chainParams &&
+                !Dilithion::g_chainParams->seedAttestationIPs.empty() &&
+                s_dnaHashCached.load()) {  // DNA hash must be valid — attestations are bound to it
+                std::vector<uint8_t> mikPubkey;
+                if (wallet.GetMIKPubKey(mikPubkey)) {
+                    std::string mikHex = HexStr(mikPubkey);
+                    std::string dnaHex = HexStr(s_cachedDnaHash.data(), 32);
+                    Attestation::CAttestationSet freshAttest;
+                    std::string attestErr;
+                    if (Attestation::CollectAttestations(
+                            Dilithion::g_chainParams->seedAttestationIPs,
+                            Dilithion::g_chainParams->seedAttestationRPCPort,
+                            mikHex, dnaHex, freshAttest, attestErr)) {
+                        s_cachedAttestations = std::move(freshAttest);
+                        s_attestationsCollected.store(true);
+                        std::cout << "[Mining] Fresh attestations collected for registration block" << std::endl;
+                        needRefresh = false;
+                    } else {
+                        std::cerr << "[Mining] Attestation re-collection failed: " << attestErr << std::endl;
+                    }
+                }
+            }
+
+            // Guard: refuse to build registration block without valid attestations
+            if (needRefresh) {
+                std::cerr << "[Mining] Template rejected — registration block at height "
+                          << nHeight << " requires seed attestations" << std::endl;
+                return std::nullopt;
+            }
+        }
+
+        // Include attestations in coinbase (must meet consensus quorum)
+        if (s_attestationsCollected.load() && s_cachedAttestations.HasMinimum()) {
+            std::vector<uint8_t> attestData;
+            if (Attestation::BuildAttestationScriptData(s_cachedAttestations, attestData)) {
+                scriptSig.insert(scriptSig.end(), attestData.begin(), attestData.end());
+                if (verbose) {
+                    std::cout << "  Attestations: " << s_cachedAttestations.Count()
+                              << " seed attestations included ("
+                              << attestData.size() << " bytes)" << std::endl;
+                }
             }
         }
     }
@@ -2815,6 +2869,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // DFMP v3.0: Rebuild last-mined heights for dormancy
                     if (DFMP::g_identityDb) {
                         DFMP::g_identityDb->SetLastMined(mikData.identity, blockIndex->nHeight);
+                    }
+
+                    // Layer 3: Rebuild registration tracking for rate limiting
+                    if (mikData.isRegistration && g_node_context.cooldown_tracker) {
+                        std::array<uint8_t, 20> mikArr{};
+                        std::copy(mikData.identity.data, mikData.identity.data + 20, mikArr.begin());
+                        g_node_context.cooldown_tracker->OnRegistrationConnected(blockIndex->nHeight, mikArr);
                     }
 
                     populated++;
@@ -4960,6 +5021,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (DFMP::g_identityDb) {
                             DFMP::g_identityDb->SetLastMined(mikData.identity, height);
                         }
+
+                        // Layer 3: Track registrations for rate limiting
+                        if (mikData.isRegistration && g_node_context.cooldown_tracker) {
+                            std::array<uint8_t, 20> mikArr{};
+                            std::copy(mikData.identity.data, mikData.identity.data + 20, mikArr.begin());
+                            g_node_context.cooldown_tracker->OnRegistrationConnected(height, mikArr);
+                        }
                     }
                 }
             }
@@ -5269,7 +5337,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     s_attestationsCollected.store(false);
 
                     std::vector<uint8_t> mikPubkey;
-                    if (wallet.GetMIKPubKey(mikPubkey)) {
+                    if (wallet.GetMIKPubKey(mikPubkey) && s_dnaHashCached.load()) {
                         std::string mikHex = HexStr(mikPubkey);
                         std::string dnaHex = HexStr(s_cachedDnaHash.data(), 32);
 
