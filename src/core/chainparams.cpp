@@ -67,7 +67,7 @@ ChainParams ChainParams::Mainnet() {
     // PoW and MIK signature verification skipped for historical blocks during IBD.
     // This fixes IBD where identity database is empty/incomplete.
     // NOTE: Chain built with MIK bypassed - cannot be removed, only raised
-    params.dfmpAssumeValidHeight = 18600;  // Covers blocks affected by v3.4.4 memory stomp crash
+    params.dfmpAssumeValidHeight = 34000;  // BUG #284: match checkpoint height — skip cooldown/ban validation for checkpointed blocks during IBD
 
     // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
     params.dfmpV3ActivationHeight = 7000;
