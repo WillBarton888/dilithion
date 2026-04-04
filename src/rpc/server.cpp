@@ -4078,6 +4078,13 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         throw std::runtime_error("Wallet not initialized - need address for coinbase");
     }
 
+    // Prevent mining during IBD (same fix as VDF path above)
+    if (g_node_context.ibd_coordinator &&
+        g_node_context.ibd_coordinator->IsInitialBlockDownload()) {
+        g_node_state.mining_enabled = true;
+        throw std::runtime_error("Node is still syncing (Initial Block Download). Mining will start automatically once sync completes.");
+    }
+
     // BUG #76 FIX: Wait for RandomX FULL mode before starting mining
     // Following XMRig's proven pattern: "dataset ready" before thread creation
     // Mining threads created in LIGHT mode get LIGHT VMs and never upgrade
