@@ -45,6 +45,7 @@
 #include <amount.h>
 #include <net/peers.h>  // For CPeerManager
 #include <core/node_context.h>  // For g_node_context
+#include <node/ibd_coordinator.h>  // For CIbdCoordinator::IsInitialBlockDownload
 #include <node/peer_mik_tracker.h>  // Sybil defense Phase 1
 #include <vdf/cooldown_tracker.h>   // Sybil defense Phase 4
 #include <net/net.h>  // For CNetMessageProcessor and other networking types
@@ -3426,14 +3427,20 @@ std::string CRPCServer::RPC_GetTopHolders(const std::string& params) {
         throw std::runtime_error("UTXO set not initialized");
     }
 
-    // Parse optional count parameter (default 100, max 500)
+    // Parse optional parameters
     int count = 100;
+    std::string prefix;  // Optional address prefix filter (e.g. "DGUP")
     try {
         auto parsed = nlohmann::json::parse(params);
         if (parsed.contains("count")) {
             count = parsed["count"].get<int>();
             if (count < 1) count = 1;
             if (count > 500) count = 500;
+        }
+        if (parsed.contains("prefix")) {
+            prefix = parsed["prefix"].get<std::string>();
+            // Prefix search: allow up to 1000 results to cover all matches
+            if (count == 100) count = 500;  // Bump default for prefix searches
         }
     } catch (...) {
         // Use default
@@ -3457,27 +3464,38 @@ std::string CRPCServer::RPC_GetTopHolders(const std::string& params) {
     std::sort(sorted.begin(), sorted.end(),
         [](const auto& a, const auto& b) { return a.second > b.second; });
 
-    // Trim to requested count
-    if ((int)sorted.size() > count) {
-        sorted.resize(count);
-    }
-
-    // Build JSON response
+    // Build JSON response — apply prefix filter during output if specified
     std::ostringstream oss;
-    oss << "{\"holders\":" << balances.size() << ",\"utxos\":" << totalUTXOs << ",\"top\":[";
+    oss << "{\"holders\":" << balances.size() << ",\"utxos\":" << totalUTXOs;
+    if (!prefix.empty()) {
+        oss << ",\"prefix\":\"" << prefix << "\"";
+    }
+    oss << ",\"top\":[";
 
-    for (size_t i = 0; i < sorted.size(); i++) {
-        if (i > 0) oss << ",";
-
+    int emitted = 0;
+    int rank = 0;
+    for (size_t i = 0; i < sorted.size() && emitted < count; i++) {
         // Encode pubkey hash to address
         std::vector<uint8_t> addrData;
         addrData.push_back(0x1E);  // Dilithion version byte ('D' prefix)
         addrData.insert(addrData.end(), sorted[i].first.begin(), sorted[i].first.end());
         std::string address = EncodeBase58Check(addrData);
 
+        rank++;  // Overall rank (before filtering)
+
+        // Apply prefix filter if specified
+        if (!prefix.empty()) {
+            if (address.length() < prefix.length() ||
+                address.compare(0, prefix.length(), prefix) != 0) {
+                continue;  // Skip non-matching addresses
+            }
+        }
+
+        if (emitted > 0) oss << ",";
         oss << "{\"address\":\"" << address << "\","
             << "\"balance\":" << FormatAmount(sorted[i].second) << ","
-            << "\"rank\":" << (i + 1) << "}";
+            << "\"rank\":" << rank << "}";
+        emitted++;
     }
 
     oss << "]}";
@@ -4022,6 +4040,19 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         if (m_vdfMiner->IsRunning()) {
             return "true";  // Already mining
         }
+
+        // BUG FIX: Prevent mining during IBD (Initial Block Download)
+        // Without this check, the wallet UI "Start Mining" button could start
+        // the VDF miner while the node is still syncing, producing blocks on
+        // a local fork that will be rejected by checkpoints.
+        if (g_node_context.ibd_coordinator &&
+            g_node_context.ibd_coordinator->IsInitialBlockDownload()) {
+            // Set mining_enabled so the main loop will auto-start mining
+            // once IBD completes (via the mining_deferred_for_ibd path)
+            g_node_state.mining_enabled = true;
+            throw std::runtime_error("Node is still syncing (Initial Block Download). Mining will start automatically once sync completes.");
+        }
+
         m_vdfMiner->Start();
         g_node_state.mining_enabled = true;
         return "true";

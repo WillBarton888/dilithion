@@ -64,12 +64,29 @@ if (preg_match('/^[0-9a-fA-F]{64}$/', $query)) {
     ]);
 }
 
-// Starts with D -> address
+// Starts with D -> address (full) or address prefix search (partial)
 if (str_starts_with($query, 'D')) {
-    sendJSON([
-        'type' => 'address',
-        'result' => ['address' => $query]
-    ]);
+    // Full address: 26-35 chars (base58check). Route directly to address page.
+    if (strlen($query) >= 26) {
+        sendJSON([
+            'type' => 'address',
+            'result' => ['address' => $query]
+        ]);
+    }
+
+    // Short prefix (3-25 chars): search UTXO set for matching addresses
+    if (strlen($query) >= 2) {
+        $holders = dilithionRPC('gettopholders', ['count' => 500, 'prefix' => $query]);
+        $matches = $holders['top'] ?? [];
+        sendJSON([
+            'type' => 'address_prefix',
+            'result' => [
+                'prefix' => $query,
+                'matches' => $matches,
+                'total_matches' => count($matches),
+            ]
+        ]);
+    }
 }
 
 // Nothing matched

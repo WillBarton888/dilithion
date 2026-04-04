@@ -1331,12 +1331,66 @@ async function handleSearch(query) {
             return;
         }
 
+        if (data.type === 'address_prefix') {
+            renderAddressPrefixResults(data.result);
+            return;
+        }
+
         // Unknown
         showError('Not Found', data.message || 'No results found for "' + query + '". Try a block height, block hash, transaction ID, or address.');
 
     } catch (err) {
         showError('Search Failed', err.message);
     }
+}
+
+// ============================================================
+// View: Address Prefix Search Results
+// ============================================================
+
+function renderAddressPrefixResults(result) {
+    const prefix = result.prefix || '';
+    const matches = result.matches || [];
+    const total = result.total_matches || 0;
+
+    let totalBalance = 0;
+    for (const m of matches) totalBalance += (m.balance || 0);
+
+    let html = '';
+    html += '<div class="page-header"><h1>Address Search: ' + escapeHtml(prefix) + '*</h1>';
+    html += '<p>' + formatNumber(total) + ' address' + (total !== 1 ? 'es' : '') + ' found';
+    if (total > 0) html += ' — total balance: ' + formatNumber(Math.floor(totalBalance)) + ' ' + UNIT;
+    html += '</p></div>';
+
+    if (total === 0) {
+        html += '<div class="card"><div class="card-body"><p>No addresses with a balance match the prefix "' + escapeHtml(prefix) + '".</p></div></div>';
+        getApp().innerHTML = html;
+        return;
+    }
+
+    html += '<div class="card">';
+    html += '<div class="card-body-flush"><div class="table-container">';
+    html += '<table class="data-table">';
+    html += '<thead><tr>';
+    html += '<th class="center">Rank</th>';
+    html += '<th>Address</th>';
+    html += '<th class="right">Balance</th>';
+    html += '</tr></thead>';
+    html += '<tbody>';
+
+    for (const m of matches) {
+        const balance = m.balance || 0;
+        html += '<tr>';
+        html += '<td class="center">' + m.rank + '</td>';
+        html += '<td><a href="#/address/' + escapeHtml(m.address) + '" class="address">' + escapeHtml(m.address) + '</a></td>';
+        html += '<td class="right amount">' + formatNumber(Math.floor(balance)) + ' ' + UNIT + '</td>';
+        html += '</tr>';
+    }
+
+    html += '</tbody></table></div></div>';
+    html += '</div>';
+
+    getApp().innerHTML = html;
 }
 
 // ============================================================
