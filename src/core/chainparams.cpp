@@ -409,7 +409,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 8330;  // BUG #284: match checkpoint height — skip cooldown/ban validation for checkpointed blocks during IBD
+    params.dfmpAssumeValidHeight = 8370;  // BUG #284: match checkpoint height — skip cooldown/ban validation for checkpointed blocks during IBD
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;
@@ -511,8 +511,8 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(2961, uint256S("0727d34f6604ec5f4c1efe92825f8b5c7f325f65d4a220005cd6f2ee1ee122b2"));
     // Checkpoint at height 8000
     params.checkpoints.emplace_back(8000, uint256S("9453c0150d81df7785c4b95c4ca50df75a1a561f092192a8ca55c15507397876"));
-    // Checkpoint at height 8330 — covers all pre-ban-deployment blocks (ban list deployed Apr 4)
-    params.checkpoints.emplace_back(8330, uint256S("854e5877cba9f42fe1c4bc43e769569a9a423fa9486accc8ae320c25d39fd164"));
+    // Checkpoint at height 8370 — covers all pre-ban-deployment blocks (ban deployed to all seeds Apr 4)
+    params.checkpoints.emplace_back(8370, uint256S("ef1e3a7de515523cde0b224865b26dc049c92033bc5a86b31e0e32cd1ca852be"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
