@@ -376,6 +376,10 @@ BlockProcessResult ProcessNewBlock(
     // MIK BAN CHECK (node policy, NOT consensus)
     // Reject blocks from banned MIK identities before any expensive processing.
     // Also extract MIK hex for Sybil relay tracking (Phase 1).
+    //
+    // BUG #284 FIX: Skip ban check during IBD when below checkpoint height.
+    // The Sybil ban list includes MIKs that mined blocks 1543-2631, which are
+    // part of the checkpointed chain. Rejecting them during IBD prevents sync.
     // =========================================================================
     std::string blockMikHex;  // Persisted for Sybil relay tracking
     {
@@ -388,7 +392,9 @@ BlockProcessResult ProcessNewBlock(
                 snprintf(hex, sizeof(hex), "%02x", blockMik[i]);
                 blockMikHex += hex;
             }
-            if (g_bannedMIKs.IsBanned(blockMikHex)) {
+            // Only enforce ban for blocks above checkpoint (new blocks).
+            // Below checkpoint, blocks are already trusted via checkpoint validation.
+            if (!skipPoWCheck && g_bannedMIKs.IsBanned(blockMikHex)) {
                 std::cout << "[ProcessNewBlock] REJECTED: banned MIK " << blockMikHex.substr(0, 12) << "..." << std::endl;
                 if (peer_id >= 0 && ctx.block_fetcher) {
                     ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
