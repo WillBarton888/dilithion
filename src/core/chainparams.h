@@ -280,16 +280,22 @@ public:
     int mikRegistrationMaxPerWindow;     // Max new registrations per window
 
     // Seed-attested MIK registration activation height (Phase 2+3)
-    // After this height: MIK registration blocks on DilV must include 3+ valid
+    // After this height: MIK registration blocks must include 3+ valid
     // attestations signed by known seed node keys (hardcoded below).
-    // Seeds verify the miner's TCP source IP against ASN database at registration
-    // time, refusing to sign for datacenter IPs.
     // 999999999 = disabled
     int seedAttestationActivationHeight;
 
+    // Whether seeds should reject attestation requests from datacenter IPs.
+    // true on DilV (VDF Sybil defense — VM farms are the primary threat).
+    // false on DIL (PoW — hashrate is the limiting factor, not MIK count;
+    // banning datacenter IPs would shrink the miner pool without meaningful
+    // security gain since DFMP heat penalties + registration PoW already
+    // limit MIK rotation attacks).
+    bool attestationDatacenterBan;
+
     // Seed node public keys for attestation verification (Dilithium3, 1952 bytes each)
     // Ordered by seed index (0-3): NYC, London, Singapore, Sydney
-    // Populated only for DilV chain. Empty for DIL mainnet/testnet.
+    // Populated for both DIL mainnet and DilV mainnet. Empty for testnet.
     std::vector<std::vector<uint8_t>> seedAttestationPubkeys;
 
     // Seed node IPs and RPC port (used by miners to request attestations)

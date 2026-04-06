@@ -56,6 +56,7 @@
 #include <net/block_fetcher.h>  // For CBlockFetcher
 #include <net/headers_manager.h>  // For CHeadersManager
 
+#include <array>
 #include <sstream>
 #include <cstring>
 #include <cctype>  // CID 1675176: For std::isxdigit
@@ -90,6 +91,11 @@ extern uint64_t g_regCachedNonce;
 extern std::atomic<bool> g_regNonceMined;
 extern std::atomic<bool> g_regPowInProgress;
 extern DFMP::Identity g_regNonceIdentity;
+
+// Cached DNA hash for registration — defined in globals.cpp
+// Needed so RPC startmining can bind DNA hash to registration PoW.
+extern std::array<uint8_t, 32> g_cachedDnaHash;
+extern std::atomic<bool> g_dnaHashCached;
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -4163,6 +4169,22 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         if (!m_wallet->GetMIKPubKey(mikData.pubkey)) {
             throw std::runtime_error("Failed to get MIK public key for registration");
         }
+
+        // Guard: RPC CreateBlockTemplate/CreateCoinbaseTransaction does NOT append
+        // DNA commitment (0xDD) or attestation data (0xDA) to the coinbase scriptSig.
+        // Only the --mine startup path (EnsureMIKRegistered + BuildMiningTemplate)
+        // handles the full registration flow. At/above attestation activation height,
+        // a registration block without these fields is consensus-invalid.
+        if (Dilithion::g_chainParams) {
+            int attestHeight = Dilithion::g_chainParams->seedAttestationActivationHeight;
+            if (attestHeight != 999999999 && static_cast<int>(nHeight) >= attestHeight) {
+                throw std::runtime_error(
+                    "Cannot register new MIK via RPC at height " + std::to_string(nHeight) +
+                    " (requires DNA collection + seed attestations). "
+                    "Please restart with --mine flag to complete registration first.");
+            }
+        }
+
         std::cout << "[RPC] MIK not registered - will include full pubkey in coinbase" << std::endl;
 
         // DFMP v3.0: Registration PoW nonce (required at/above v3 activation height)
@@ -4201,7 +4223,8 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
                 std::cout << "[RPC] Mining registration PoW (one-time, ~10-15 minutes)..." << std::endl;
                 g_regPowInProgress.store(true);
                 int rpBits = Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : DFMP::REGISTRATION_POW_BITS;
-                if (DFMP::MineRegistrationPoW(mikData.pubkey, rpBits, regNonce, &g_node_state.running)) {
+                const std::array<uint8_t, 32>* dnaForPow = g_dnaHashCached.load() ? &g_cachedDnaHash : nullptr;
+                if (DFMP::MineRegistrationPoW(mikData.pubkey, rpBits, regNonce, &g_node_state.running, dnaForPow)) {
                     g_regCachedNonce = regNonce;
                     g_regNonceIdentity = mikData.identity;
                     g_regNonceMined.store(true);
@@ -4968,7 +4991,14 @@ std::string CRPCServer::RPC_GetRawMempool(const std::string& params) {
 // ============================================================================
 
 std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
-    // Parse params - expecting {"txid":"...", "verbosity":0}
+    if (!m_mempool) {
+        throw std::runtime_error("Mempool not initialized");
+    }
+    if (!m_blockchain) {
+        throw std::runtime_error("Blockchain not initialized");
+    }
+
+    // Parse params - expecting {"txid":"...", "verbose":true} or {"txid":"...", "verbosity":1}
     size_t txid_pos = params.find("\"txid\"");
     if (txid_pos == std::string::npos) {
         throw std::runtime_error("Missing txid parameter");
@@ -4985,23 +5015,137 @@ std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
     uint256 txid;
     txid.SetHex(txid_str);
 
-    // Parse verbosity (default 0)
-    int verbosity = 0;
-    size_t verb_pos = params.find("\"verbosity\"");
+    // Parse verbosity: accept "verbose":true/false or "verbosity":0/1
+    bool verbose = false;
+    size_t verb_pos = params.find("\"verbose\"");
     if (verb_pos != std::string::npos) {
+        // Check for "verbose":true
         size_t verb_colon = params.find(":", verb_pos);
+        std::string after = params.substr(verb_colon + 1, 10);
+        if (after.find("true") != std::string::npos) {
+            verbose = true;
+        }
+    }
+    size_t verbosity_pos = params.find("\"verbosity\"");
+    if (verbosity_pos != std::string::npos) {
+        size_t verb_colon = params.find(":", verbosity_pos);
         size_t num_start = verb_colon + 1;
         while (num_start < params.length() && isspace(params[num_start])) num_start++;
-        if (num_start < params.length() && params[num_start] >= '0' && params[num_start] <= '9') {
-            verbosity = params[num_start] - '0';
+        if (num_start < params.length() && params[num_start] >= '1' && params[num_start] <= '9') {
+            verbose = true;
         }
     }
 
-    // TODO: Check mempool for transaction (requires CTxMemPool::GetTransaction method)
-    // TODO: Check blockchain for confirmed transactions
+    // Helper lambda to build verbose JSON for a transaction
+    auto txToJSON = [&](const CTransactionRef& tx, const std::string& blockHash,
+                        int blockHeight, int confirmations) -> std::string {
+        std::ostringstream oss;
+        oss << "{";
+        oss << "\"txid\":\"" << tx->GetHash().GetHex() << "\",";
+        oss << "\"version\":" << tx->nVersion << ",";
+        oss << "\"size\":" << tx->GetSerializedSize() << ",";
 
-    // For now, return not implemented
-    throw std::runtime_error("getrawtransaction not fully implemented - requires mempool/blockchain integration");
+        // Inputs
+        oss << "\"vin\":[";
+        for (size_t i = 0; i < tx->vin.size(); i++) {
+            if (i > 0) oss << ",";
+            const CTxIn& txin = tx->vin[i];
+            oss << "{";
+            if (txin.prevout.hash.IsNull()) {
+                oss << "\"coinbase\":true";
+            } else {
+                oss << "\"txid\":\"" << txin.prevout.hash.GetHex() << "\",";
+                oss << "\"vout\":" << txin.prevout.n << ",";
+                oss << "\"scriptSig\":\"" << HexStr(txin.scriptSig) << "\",";
+                oss << "\"sequence\":" << txin.nSequence;
+            }
+            oss << "}";
+        }
+        oss << "],";
+
+        // Outputs
+        oss << "\"vout\":[";
+        for (size_t i = 0; i < tx->vout.size(); i++) {
+            if (i > 0) oss << ",";
+            const CTxOut& txout = tx->vout[i];
+            std::string addr = DecodeScriptPubKeyToAddress(txout.scriptPubKey);
+            oss << "{";
+            oss << "\"value\":" << txout.nValue << ",";
+            oss << "\"n\":" << i << ",";
+            if (!addr.empty()) {
+                oss << "\"address\":\"" << addr << "\",";
+            }
+            oss << "\"scriptPubKey\":\"" << HexStr(txout.scriptPubKey) << "\"";
+            oss << "}";
+        }
+        oss << "],";
+
+        oss << "\"locktime\":" << tx->nLockTime << ",";
+        oss << "\"hex\":\"" << HexStr(tx->Serialize()) << "\",";
+
+        if (!blockHash.empty()) {
+            oss << "\"blockhash\":\"" << blockHash << "\",";
+            oss << "\"blockheight\":" << blockHeight << ",";
+            oss << "\"confirmations\":" << confirmations;
+        } else {
+            oss << "\"confirmations\":0";
+        }
+
+        oss << "}";
+        return oss.str();
+    };
+
+    // 1. Check mempool first
+    auto mempoolEntry = m_mempool->GetTxIfExists(txid);
+    if (mempoolEntry.has_value()) {
+        CTransactionRef tx = mempoolEntry->GetSharedTx();
+        if (!verbose) {
+            // verbosity 0: return raw hex
+            return "\"" + HexStr(tx->Serialize()) + "\"";
+        }
+        return txToJSON(tx, "", 0, 0);
+    }
+
+    // 2. Search blockchain
+    CBlockIndex* pTip = m_chainstate->GetTip();
+    if (pTip == nullptr) {
+        throw std::runtime_error("Chain state not initialized");
+    }
+
+    CBlockIndex* pCurrent = pTip;
+    while (pCurrent != nullptr) {
+        CBlock block;
+        uint256 blockHash = pCurrent->GetBlockHash();
+
+        if (!m_blockchain->ReadBlock(blockHash, block)) {
+            pCurrent = pCurrent->pprev;
+            continue;
+        }
+
+        CBlockValidator validator;
+        std::vector<CTransactionRef> transactions;
+        std::string deserializeError;
+
+        if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
+            pCurrent = pCurrent->pprev;
+            continue;
+        }
+
+        for (const auto& tx : transactions) {
+            if (tx->GetHash() == txid) {
+                int confirmations = (pTip->nHeight - pCurrent->nHeight) + 1;
+
+                if (!verbose) {
+                    return "\"" + HexStr(tx->Serialize()) + "\"";
+                }
+                return txToJSON(tx, blockHash.GetHex(), pCurrent->nHeight, confirmations);
+            }
+        }
+
+        pCurrent = pCurrent->pprev;
+    }
+
+    throw std::runtime_error("Transaction not found in mempool or blockchain");
 }
 
 std::string CRPCServer::RPC_DecodeRawTransaction(const std::string& params) {
@@ -7481,7 +7625,12 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
         }
     }
 
-    if (m_asnDatabase->IsDatacenterIP(clientIP)) {
+    // Datacenter IP ban: chain-specific.
+    // DilV (VDF): enabled — VM farms are the primary Sybil vector.
+    // DIL (PoW): disabled — hashrate is the limiting factor, not MIK count.
+    bool dcBanEnabled = Dilithion::g_chainParams ?
+        Dilithion::g_chainParams->attestationDatacenterBan : true;
+    if (dcBanEnabled && m_asnDatabase->IsDatacenterIP(clientIP)) {
         uint32_t asn = m_asnDatabase->LookupASN(clientIP);
         std::string desc = m_asnDatabase->LookupDescription(clientIP);
         throw std::runtime_error("Mining not available from datacenter IPs. "
@@ -7489,8 +7638,12 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
             " (" + desc + "). Use a residential connection to mine.");
     }
 
-    // Sybil defense Phase 0: Rate limit attestations per /24 subnet per day.
-    // Prevents mass MIK registration from a single network.
+    // Derive MIK identity early — needed for rate limit tracking and logging
+    DFMP::Identity mikIdentity = DFMP::DeriveIdentityFromMIK(mikPubkey);
+    std::string mikIdHex = mikIdentity.GetHex();
+
+    // Sybil defense Phase 0: Rate limit NEW MIK registrations per /24 subnet per day.
+    // Re-attestation for the same MIK (restarts, refreshes) bypasses the limit.
     {
         // Extract /24 subnet prefix (e.g., "192.168.1.100" -> "192.168.1")
         std::string subnetKey = clientIP;
@@ -7502,31 +7655,50 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
         int64_t today = static_cast<int64_t>(std::time(nullptr)) / 86400;
 
         std::lock_guard<std::mutex> lock(m_attestRateMutex);
-        auto it = m_attestationRateLimit.find(subnetKey);
-        if (it != m_attestationRateLimit.end()) {
-            if (it->second.first == today) {
-                // Same day — check count
-                if (it->second.second >= m_attestationMaxPerDay) {
-                    std::cout << "[Attestation] RATE LIMITED: subnet " << subnetKey
-                              << ".* already attested " << it->second.second
-                              << " MIK(s) today (limit: " << m_attestationMaxPerDay << ")" << std::endl;
-                    throw std::runtime_error("Attestation rate limit exceeded. "
-                        "Maximum " + std::to_string(m_attestationMaxPerDay) +
-                        " MIK attestation(s) per /24 subnet per day. Try again tomorrow.");
-                }
-                it->second.second++;
-            } else {
-                // New day — reset counter
-                it->second = {today, 1};
-            }
-        } else {
-            m_attestationRateLimit[subnetKey] = {today, 1};
+        auto& state = m_attestationRateLimit[subnetKey];
+
+        // Reset daily counter if new day
+        if (state.currentDay != today) {
+            state.currentDay = today;
+            state.newMIKsToday = 0;
         }
 
-        // Periodic cleanup: remove entries older than 2 days to prevent unbounded growth
+        // Check if this MIK has been attested before from this subnet
+        bool isRenewal = (state.knownMIKs.find(mikIdHex) != state.knownMIKs.end());
+
+        if (!isRenewal) {
+            // New MIK for this subnet — apply rate limit
+            if (state.newMIKsToday >= m_attestationMaxPerDay) {
+                std::cout << "[Attestation] RATE LIMITED: subnet " << subnetKey
+                          << ".* already registered " << state.newMIKsToday
+                          << " new MIK(s) today (limit: " << m_attestationMaxPerDay << ")" << std::endl;
+                throw std::runtime_error("Attestation rate limit exceeded. "
+                    "Maximum " + std::to_string(m_attestationMaxPerDay) +
+                    " new MIK registration(s) per /24 subnet per day. Try again tomorrow.");
+            }
+            state.newMIKsToday++;
+            std::cout << "[Attestation] New MIK " << mikIdHex.substr(0, 12) << "..."
+                      << " from subnet " << subnetKey << ".* (new #" << state.newMIKsToday
+                      << " today, limit: " << m_attestationMaxPerDay << ")" << std::endl;
+        } else {
+            std::cout << "[Attestation] Renewal for known MIK " << mikIdHex.substr(0, 12) << "..."
+                      << " from subnet " << subnetKey << ".* (bypassing rate limit)" << std::endl;
+        }
+
+        // Record this MIK as known for this subnet
+        state.knownMIKs[mikIdHex] = today;
+
+        // Periodic cleanup: remove stale MIK entries (>30 days) and empty subnets
         if (m_attestationRateLimit.size() > 10000) {
             for (auto cleanIt = m_attestationRateLimit.begin(); cleanIt != m_attestationRateLimit.end(); ) {
-                if (cleanIt->second.first < today - 1) {
+                for (auto mikIt = cleanIt->second.knownMIKs.begin(); mikIt != cleanIt->second.knownMIKs.end(); ) {
+                    if (mikIt->second < today - 30) {
+                        mikIt = cleanIt->second.knownMIKs.erase(mikIt);
+                    } else {
+                        ++mikIt;
+                    }
+                }
+                if (cleanIt->second.knownMIKs.empty() && cleanIt->second.currentDay < today - 1) {
                     cleanIt = m_attestationRateLimit.erase(cleanIt);
                 } else {
                     ++cleanIt;
@@ -7549,8 +7721,7 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
     // Log the attestation
     uint32_t asn = m_asnDatabase->LookupASN(clientIP);
     std::string desc = m_asnDatabase->LookupDescription(clientIP);
-    DFMP::Identity identity = DFMP::DeriveIdentityFromMIK(mikPubkey);
-    std::cout << "[Attestation] Signed attestation for MIK " << identity.GetHex().substr(0, 12) << "..."
+    std::cout << "[Attestation] Signed attestation for MIK " << mikIdHex.substr(0, 12) << "..."
               << " from " << clientIP << " (ASN " << asn << " " << desc << ")" << std::endl;
 
     // Build response
@@ -7558,7 +7729,7 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
     result << "{\"seed_id\":" << m_seedId
            << ",\"timestamp\":" << timestamp
            << ",\"signature\":\"" << HexStr(signature) << "\""
-           << ",\"mik_identity\":\"" << identity.GetHex() << "\""
+           << ",\"mik_identity\":\"" << mikIdHex << "\""
            << ",\"client_ip\":\"" << clientIP << "\""
            << ",\"asn\":" << asn
            << ",\"asn_description\":\"" << EscapeJSON(desc) << "\""

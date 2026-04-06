@@ -149,11 +149,13 @@ ChainParams ChainParams::Mainnet() {
     params.mikRegistrationRateWindow = 37;             // ~2.5 hours at 240s blocks
     params.mikRegistrationMaxPerWindow = 10;
 
-    // Seed attestation: residential IP verification for MIK registration
+    // Seed attestation: MIK registration requires 3-of-4 seed attestations
     // Activates at height 40,000 (~11 days from v4.0.0 release)
-    // After activation, new MIK registrations require 3-of-4 seed attestations
-    // confirming the miner connects from a residential (non-datacenter) IP
+    // Datacenter ban DISABLED on DIL: PoW economics + DFMP heat penalties
+    // already limit MIK rotation. Banning datacenter IPs would shrink the
+    // miner pool without meaningful security gain. See DilV for contrast.
     params.seedAttestationActivationHeight = 40000;
+    params.attestationDatacenterBan = false;  // DIL: allow datacenter miners
     // Same seed servers as DilV — same attestation keys
     params.seedAttestationPubkeys = Attestation::GetMainnetSeedPubkeys();
     params.seedAttestationIPs = {
@@ -331,8 +333,9 @@ ChainParams ChainParams::Testnet() {
     params.mikRegistrationRateWindow = 50;
     params.mikRegistrationMaxPerWindow = 5;
 
-    // Seed attestation: disabled on DIL testnet (DilV-only feature)
+    // Seed attestation: disabled on DIL testnet
     params.seedAttestationActivationHeight = 999999999;
+    params.attestationDatacenterBan = false;
     params.seedAttestationPubkeys = {};
     params.seedAttestationIPs = {};
     params.seedAttestationRPCPort = 0;
@@ -479,9 +482,10 @@ ChainParams ChainParams::DilV() {
     params.mikRegistrationMaxPerWindow = 10;
 
     // Seed-attested MIK registration (Phase 2+3)
-    // Disabled until seed nodes generate their keys and pubkeys are hardcoded here.
-    // Activation height will be set once all seeds have keys deployed.
+    // Datacenter ban ENABLED on DilV: VDF = one miner per machine, so VM farms
+    // are the primary Sybil vector. Proven by the March 31 attack (97-MIK round-robin).
     params.seedAttestationActivationHeight = 2000;  // BUG #281: pre-2000 blocks mined before attestation deployed, lack seed signatures
+    params.attestationDatacenterBan = true;   // DilV: block datacenter miners
 
     // Seed attestation public keys (mainnet — extracted from seed nodes)
     params.seedAttestationPubkeys = Attestation::GetMainnetSeedPubkeys();

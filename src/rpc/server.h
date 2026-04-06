@@ -193,9 +193,15 @@ private:
     int m_seedId{-1};  // This seed's index (0-3), or -1 if not a seed
 
     // Attestation rate limiting (Sybil defense Phase 0)
-    // Key: /24 subnet prefix (e.g., "192.168.1") -> {day_number, count_today}
+    // Rate limits NEW MIK registrations per /24 subnet per day.
+    // Re-attestation for previously-seen MIKs (restarts, refreshes) bypasses the limit.
     std::mutex m_attestRateMutex;
-    std::map<std::string, std::pair<int64_t, int>> m_attestationRateLimit;
+    struct SubnetAttestationState {
+        int64_t currentDay{0};          // UTC day number for rate limiting new MIKs
+        int newMIKsToday{0};            // Count of NEW (distinct) MIKs attested today
+        std::map<std::string, int64_t> knownMIKs;  // MIK identity hex -> last attested day
+    };
+    std::map<std::string, SubnetAttestationState> m_attestationRateLimit;
     int m_attestationMaxPerDay{1};  // configurable via --attestation-rate-limit
 
     // Server socket

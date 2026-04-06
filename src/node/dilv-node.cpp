@@ -1293,9 +1293,14 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     std::vector<CTransactionRef> selectedTxs;
     uint64_t totalFees = 0;
 
+    // DEBUG: Log mempool state at template build time
+    std::cout << "[Mining-DEBUG] Template build: mempool=" << (mempool ? "OK" : "NULL")
+              << " utxoSet=" << (utxoSet ? "OK" : "NULL") << std::endl;
+
     if (mempool && utxoSet) {
         // Get transactions ordered by fee rate (highest first)
         std::vector<CTransactionRef> candidateTxs = mempool->GetOrderedTxs();
+        std::cout << "[Mining-DEBUG] Mempool candidates: " << candidateTxs.size() << std::endl;
 
         // Limit candidates and set resource limits
         const size_t MAX_CANDIDATES = 50000;
@@ -4404,8 +4409,43 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         bool wallet_loaded = false;
 
         if (config.relay_only) {
-            // Relay-only mode: skip wallet creation (for seed nodes)
-            std::cout << "Initializing wallet... SKIPPED (relay-only mode)" << std::endl;
+            // Relay-only mode: load existing wallet but skip interactive creation
+            if (std::filesystem::exists(wallet_path)) {
+                std::cout << "Initializing wallet (relay-only, load-only)..." << std::endl;
+                if (wallet.Load(wallet_path)) {
+                    wallet_loaded = true;
+                    std::cout << "  [OK] Wallet loaded (" << wallet.GetAddresses().size() << " addresses)" << std::endl;
+
+                    // Enable auto-save and register chain callbacks (required for sendtoaddress)
+                    wallet.SetWalletFile(wallet_path);
+                    g_chainstate.RegisterBlockConnectCallback([&wallet](const CBlock& block, int height, const uint256& hash) {
+                        wallet.blockConnected(block, height, hash);
+                    });
+                    g_chainstate.RegisterBlockDisconnectCallback([&wallet](const CBlock& block, int height, const uint256& hash) {
+                        wallet.blockDisconnected(block, height, hash);
+                    });
+                    std::cout << "  [OK] Wallet chain callbacks registered" << std::endl;
+
+                    // Incremental rescan to sync wallet with chain tip
+                    int32_t wallet_height = wallet.GetBestBlockHeight();
+                    int chain_height = g_chainstate.GetHeight();
+                    if (wallet_height < 0 || wallet_height > chain_height) {
+                        std::cout << "  Rescanning blockchain (full)..." << std::endl;
+                        wallet.RescanFromHeight(g_chainstate, blockchain, 0, chain_height);
+                    } else if (wallet_height < chain_height) {
+                        std::cout << "  Rescanning blocks " << (wallet_height + 1) << " to " << chain_height << "..." << std::endl;
+                        wallet.RescanFromHeight(g_chainstate, blockchain, wallet_height + 1, chain_height);
+                    }
+                    unsigned int h = static_cast<unsigned int>(g_chainstate.GetHeight());
+                    int64_t mature = wallet.GetAvailableBalance(utxo_set, h);
+                    std::cout << "  [OK] Wallet synced — balance: " << std::fixed << std::setprecision(8)
+                              << (static_cast<double>(mature) / 100000000.0) << " DilV" << std::endl;
+                } else {
+                    std::cerr << "  WARNING: Failed to load wallet" << std::endl;
+                }
+            } else {
+                std::cout << "Initializing wallet... SKIPPED (relay-only, no wallet.dat)" << std::endl;
+            }
         } else {
         std::cout << "Initializing wallet..." << std::endl;
 
