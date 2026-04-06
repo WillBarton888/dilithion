@@ -392,9 +392,14 @@ BlockProcessResult ProcessNewBlock(
                 snprintf(hex, sizeof(hex), "%02x", blockMik[i]);
                 blockMikHex += hex;
             }
-            // Only enforce ban for blocks above checkpoint (new blocks).
-            // Below checkpoint, blocks are already trusted via checkpoint validation.
-            if (!skipPoWCheck && g_bannedMIKs.IsBanned(blockMikHex)) {
+            // Only enforce ban for new blocks at chain tip (post-IBD).
+            // During IBD, skip ban check — these blocks were already accepted by
+            // the network. The ban list includes DilV Sybil MIKs that may overlap
+            // with legitimate DIL miners (shared ban list, separate chains).
+            // Bans are node policy (NOT consensus) per line 206.
+            bool is_ibd = g_node_context.ibd_coordinator &&
+                          !g_node_context.ibd_coordinator->IsSynced();
+            if (!skipPoWCheck && !is_ibd && g_bannedMIKs.IsBanned(blockMikHex)) {
                 std::cout << "[ProcessNewBlock] REJECTED: banned MIK " << blockMikHex.substr(0, 12) << "..." << std::endl;
                 if (peer_id >= 0 && ctx.block_fetcher) {
                     ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
