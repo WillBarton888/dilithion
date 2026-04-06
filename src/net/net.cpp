@@ -84,6 +84,7 @@ static std::map<int, std::set<uint256>> g_peer_served_blocks;
 static std::mutex cs_served_blocks;
 static const size_t MAX_SERVED_BLOCKS_TRACK = 500;  // Track last N served blocks per peer
 static const int DUPLICATE_GETDATA_PENALTY = 5;     // Penalize re-requesting already-served blocks
+static const int MAX_DEDUP_BATCH_PENALTY = 20;      // Cap per-batch penalty so one IBD retry can't trigger ban
 static const int MAX_DEDUP_STRIKES = 3;             // Disconnect after this many duplicate GETDATA batches
 static std::map<int, int> g_peer_dedup_strikes;      // Per-peer strike counter
 
@@ -1107,7 +1108,7 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         }
 
         if (duplicate_count > 0) {
-            int penalty = duplicate_count * DUPLICATE_GETDATA_PENALTY;
+            int penalty = std::min(duplicate_count * DUPLICATE_GETDATA_PENALTY, MAX_DEDUP_BATCH_PENALTY);
             int strikes = 0;
             {
                 std::lock_guard<std::mutex> lock(cs_served_blocks);
