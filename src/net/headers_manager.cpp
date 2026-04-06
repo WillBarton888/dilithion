@@ -156,10 +156,12 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         auto heightIt = mapHeightIndex.find(expectedHeight);
         bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-        // FAST PATH 1: Below checkpoint - skip hash computation entirely.
+        // FAST PATH 1: Below checkpoint - skip PoW validation but still store.
         // Checkpoints are hardcoded guarantees of the canonical chain.
         // No competing header below a checkpoint can ever produce a valid reorg,
-        // so there's no reason to compute expensive RandomX hashes for them.
+        // so there's no reason to compute expensive RandomX PoW hashes.
+        // But we MUST still store headers so the chain walk in
+        // GetBestChainHashAtHeight() works during IBD block fetching.
         if (expectedHeight <= highestCheckpoint) {
             if (heightHasHeaders) {
                 // We have our canonical header at this height - use it as pprev
@@ -172,11 +174,28 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
                     continue;  // Skip without computing hash
                 }
             }
-            // No canonical header in index (e.g. synced via compact blocks).
-            // Skip hash computation - checkpoint guarantees this height is settled.
-            // pprev stays unchanged; sequentialHeight tracks correct position.
-            pprev = nullptr;
-            continue;
+            // BUG FIX: Previously set pprev=nullptr and continued, silently
+            // dropping the header. On a fresh sync this meant NO headers below
+            // the checkpoint were stored, breaking GetBestChainHashAtHeight()
+            // for ALL heights (chain walk can't traverse the gap).
+            // Fix: compute hash and store the header, just skip PoW validation.
+            uint256 storageHash = header.GetHash();
+            if (mapHeaders.find(storageHash) != mapHeaders.end()) {
+                // Already stored (duplicate) - advance pprev and continue
+                pprev = &mapHeaders[storageHash];
+                prevHash = storageHash;
+                continue;
+            }
+            int height = pprev ? (pprev->height + 1) : expectedHeight;
+            uint256 chainWork = CalculateChainWork(header, pprev);
+            HeaderWithChainWork headerData(header, height);
+            headerData.chainWork = chainWork;
+            mapHeaders[storageHash] = headerData;
+            AddToHeightIndex(storageHash, height);
+            pprev = &mapHeaders[storageHash];
+            prevHash = storageHash;
+            if (heightStart < 0) heightStart = height;
+            continue;  // Skip PoW validation but header is now stored
         }
 
         // FAST PATH 2: Below common ancestor height, headers are identical on both chains
