@@ -368,7 +368,7 @@ void CTxMemPool::ExpirationThreadFunc() {
 }
 
 // CID 1675250 FIX: Internal unlocked version - caller MUST hold cs lock
-bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error) {
+bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) {
     // NOTE: This function assumes caller holds cs lock - no lock acquisition here
     if (!tx) { if (error) *error = "Null tx"; return false; }
 
@@ -418,10 +418,14 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
         return false;
     }
 
-    std::string fee_error;
-    if (!Consensus::CheckFee(*tx, fee, true, &fee_error)) {
-        if (error) *error = fee_error;
-        return false;
+    // Skip fee check for transactions being restored after a reorg (Bitcoin Core pattern).
+    // These txs already passed fee validation when first accepted — reorg doesn't change the fee.
+    if (!bypass_fee_check) {
+        std::string fee_error;
+        if (!Consensus::CheckFee(*tx, fee, true, &fee_error)) {
+            if (error) *error = fee_error;
+            return false;
+        }
     }
 
     size_t tx_size = tx->GetSerializedSize();
@@ -540,9 +544,9 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
 }
 
 // Public wrapper that acquires lock
-bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error) {
+bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) {
     std::lock_guard<std::mutex> lock(cs);
-    return AddTxUnlocked(tx, fee, time, height, error);
+    return AddTxUnlocked(tx, fee, time, height, error, bypass_fee_check);
 }
 
 // ============================================================================

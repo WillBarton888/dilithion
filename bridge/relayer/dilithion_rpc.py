@@ -125,8 +125,26 @@ class DilithionRPC:
     # ── Wallet operations ────────────────────────────────────────────
 
     def send_to_address(self, address: str, amount: float) -> str:
-        """Send coins to an address. Returns txid."""
-        return self._call("sendtoaddress", {"address": address, "amount": amount})
+        """Send coins to an address. Returns txid string."""
+        result = self._call("sendtoaddress", {"address": address, "amount": amount})
+        # RPC returns {"txid": "..."} dict — unwrap to plain string
+        if isinstance(result, dict):
+            return result.get("txid", str(result))
+        return str(result)
+
+    def get_balance(self) -> float:
+        """Get wallet balance in coins."""
+        result = self._call("getbalance")
+        if isinstance(result, dict):
+            return float(result.get("balance", 0.0))
+        return float(result)
+
+    def list_transactions(self, count: int = 50) -> list:
+        """List recent wallet transactions for reconciliation."""
+        result = self._call("listtransactions", {"count": count})
+        if isinstance(result, dict):
+            return result.get("transactions", [])
+        return result if isinstance(result, list) else []
 
     # ── Utility ──────────────────────────────────────────────────────
 

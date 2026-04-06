@@ -3535,29 +3535,9 @@ std::string CRPCServer::RPC_EncryptWallet(const std::string& params) {
         throw std::runtime_error("Error: Wallet is already encrypted");
     }
 
-    // Parse params to get passphrase
-    // Expected format: {"passphrase":"password"}
-    size_t pos = params.find("\"passphrase\"");
-    if (pos == std::string::npos) {
-        throw std::runtime_error("Missing passphrase parameter");
-    }
-
-    pos = params.find(":", pos);
-    if (pos == std::string::npos) {
-        throw std::runtime_error("Invalid passphrase format");
-    }
-
-    pos = params.find("\"", pos + 1);
-    if (pos == std::string::npos) {
-        throw std::runtime_error("Invalid passphrase format");
-    }
-
-    size_t end = params.find("\"", pos + 1);
-    if (end == std::string::npos) {
-        throw std::runtime_error("Invalid passphrase format");
-    }
-
-    std::string passphrase = params.substr(pos + 1, end - pos - 1);
+    // Parse params using proper JSON parser (handles special characters in passwords)
+    json j = json::parse(params);
+    std::string passphrase = RPCUtil::GetRequiredString(j, "passphrase");
 
     if (passphrase.empty()) {
         throw std::runtime_error("Error: Passphrase cannot be empty");
@@ -3597,29 +3577,9 @@ std::string CRPCServer::RPC_WalletPassphrase(const std::string& params) {
         throw std::runtime_error("Error: Wallet is not encrypted");
     }
 
-    // Parse params: {"passphrase":"password", "timeout":60}
-    size_t pos = params.find("\"passphrase\"");
-    if (pos == std::string::npos) {
-        throw std::runtime_error("Missing passphrase parameter");
-    }
-
-    // P4-RPC-001 FIX: Validate all find() results before arithmetic operations
-    size_t colon_pos = params.find(":", pos);
-    if (colon_pos == std::string::npos) {
-        throw std::runtime_error("Invalid passphrase format: missing colon");
-    }
-
-    pos = params.find("\"", colon_pos + 1);
-    if (pos == std::string::npos) {
-        throw std::runtime_error("Invalid passphrase format: missing opening quote");
-    }
-
-    size_t end = params.find("\"", pos + 1);
-    if (end == std::string::npos || end <= pos) {
-        throw std::runtime_error("Invalid passphrase format: missing closing quote");
-    }
-
-    std::string passphrase = params.substr(pos + 1, end - pos - 1);
+    // Parse params using proper JSON parser (handles special characters in passwords)
+    json j = json::parse(params);
+    std::string passphrase = RPCUtil::GetRequiredString(j, "passphrase");
 
     // P4-RPC-004 FIX: Limit passphrase length to prevent DoS via excessive PBKDF2 work
     static const size_t MAX_PASSPHRASE_LENGTH = 1024;
@@ -3627,21 +3587,8 @@ std::string CRPCServer::RPC_WalletPassphrase(const std::string& params) {
         throw std::runtime_error("Passphrase too long (max " + std::to_string(MAX_PASSPHRASE_LENGTH) + " characters)");
     }
 
-    // Parse timeout (optional, default 60 seconds)
-    int64_t timeout = 60;
-    size_t timeoutPos = params.find("\"timeout\"");
-    if (timeoutPos != std::string::npos) {
-        timeoutPos = params.find(":", timeoutPos);
-        size_t numStart = timeoutPos + 1;
-        while (numStart < params.length() && isspace(params[numStart])) numStart++;
-        size_t numEnd = numStart;
-        while (numEnd < params.length() && isdigit(params[numEnd])) numEnd++;
-        if (numEnd > numStart) {
-            // MEDIUM-004: Use SafeParseInt64 to prevent RPC crashes from malformed input
-            // Max timeout is 24 hours (86400 seconds)
-            timeout = SafeParseInt64(params.substr(numStart, numEnd - numStart), 0, 86400);
-        }
-    }
+    // Parse timeout (optional, default 60 seconds, max 24 hours, 0 = forever)
+    int64_t timeout = RPCUtil::GetOptionalInt64(j, "timeout", 60, 0, 86400);
 
     if (!m_wallet->Unlock(passphrase, timeout)) {
         throw std::runtime_error("Error: The wallet passphrase entered was incorrect");
@@ -3681,26 +3628,10 @@ std::string CRPCServer::RPC_WalletPassphraseChange(const std::string& params) {
         throw std::runtime_error("Error: Wallet is not encrypted");
     }
 
-    // Parse params: {"oldpassphrase":"old", "newpassphrase":"new"}
-    size_t pos = params.find("\"oldpassphrase\"");
-    if (pos == std::string::npos) {
-        throw std::runtime_error("Missing oldpassphrase parameter");
-    }
-
-    pos = params.find(":", pos);
-    pos = params.find("\"", pos + 1);
-    size_t end = params.find("\"", pos + 1);
-    std::string oldPass = params.substr(pos + 1, end - pos - 1);
-
-    pos = params.find("\"newpassphrase\"", end);
-    if (pos == std::string::npos) {
-        throw std::runtime_error("Missing newpassphrase parameter");
-    }
-
-    pos = params.find(":", pos);
-    pos = params.find("\"", pos + 1);
-    end = params.find("\"", pos + 1);
-    std::string newPass = params.substr(pos + 1, end - pos - 1);
+    // Parse params using proper JSON parser (handles special characters in passwords)
+    json j = json::parse(params);
+    std::string oldPass = RPCUtil::GetRequiredString(j, "oldpassphrase");
+    std::string newPass = RPCUtil::GetRequiredString(j, "newpassphrase");
 
     if (newPass.empty()) {
         throw std::runtime_error("Error: New passphrase cannot be empty");
@@ -4048,15 +3979,32 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         }
 
         // BUG FIX: Prevent mining during IBD (Initial Block Download)
-        // Without this check, the wallet UI "Start Mining" button could start
-        // the VDF miner while the node is still syncing, producing blocks on
-        // a local fork that will be rejected by checkpoints.
         if (g_node_context.ibd_coordinator &&
             g_node_context.ibd_coordinator->IsInitialBlockDownload()) {
-            // Set mining_enabled so the main loop will auto-start mining
-            // once IBD completes (via the mining_deferred_for_ibd path)
             g_node_state.mining_enabled = true;
             throw std::runtime_error("Node is still syncing (Initial Block Download). Mining will start automatically once sync completes.");
+        }
+
+        // Check wallet is unlocked (required for MIK signing)
+        if (m_wallet && m_wallet->IsCrypted() && m_wallet->IsLocked()) {
+            throw std::runtime_error("Wallet is locked. Unlock first with walletpassphrase, then call startmining.");
+        }
+
+        // Set miner address and MIK identity from wallet if not already set
+        // This handles the case where mining was disabled at startup due to locked wallet
+        if (m_wallet) {
+            std::vector<uint8_t> pubKeyHash = m_wallet->GetPubKeyHash();
+            if (pubKeyHash.size() >= 20) {
+                std::array<uint8_t, 20> addr{};
+                std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                m_vdfMiner->SetMinerAddress(addr);
+            }
+            DFMP::Identity mikId = m_wallet->GetMIKIdentity();
+            if (!mikId.IsNull()) {
+                std::array<uint8_t, 20> mikArr{};
+                std::memcpy(mikArr.data(), mikId.data, 20);
+                m_vdfMiner->SetMIKIdentity(mikArr);
+            }
         }
 
         m_vdfMiner->Start();

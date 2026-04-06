@@ -1293,18 +1293,14 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     std::vector<CTransactionRef> selectedTxs;
     uint64_t totalFees = 0;
 
-    // DEBUG: Log mempool state at template build time
-    std::cout << "[Mining-DEBUG] Template build: mempool=" << (mempool ? "OK" : "NULL")
-              << " utxoSet=" << (utxoSet ? "OK" : "NULL") << std::endl;
-
     if (mempool && utxoSet) {
         // Get transactions ordered by fee rate (highest first)
         std::vector<CTransactionRef> candidateTxs = mempool->GetOrderedTxs();
-        std::cout << "[Mining-DEBUG] Mempool candidates: " << candidateTxs.size() << std::endl;
 
         // Limit candidates and set resource limits
         const size_t MAX_CANDIDATES = 50000;
-        const size_t MAX_BLOCK_SIZE = 1000000;  // 1 MB
+        const size_t MAX_BLOCK_SIZE = Dilithion::g_chainParams
+            ? Dilithion::g_chainParams->maxBlockSize : 4 * 1024 * 1024;  // Use chain params (4 MB)
         size_t currentBlockSize = 200;  // Reserve for coinbase
 
         if (candidateTxs.size() > MAX_CANDIDATES) {
@@ -4706,31 +4702,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 CDilithiumAddress addr = walletAddresses.empty() ? wallet.GetNewAddress() : walletAddresses[0];
                 std::string addrStr = addr.ToString();
 
-                // Save seed phrase to backup file
-                std::string backup_path = config.datadir + "/SEED-BACKUP-DO-NOT-SHARE.txt";
-                std::ofstream backup_file(backup_path);
-                if (backup_file.is_open()) {
-                    // Get current time
-                    auto now = std::chrono::system_clock::now();
-                    auto time_t_now = std::chrono::system_clock::to_time_t(now);
-
-                    backup_file << "=== DILITHION WALLET RECOVERY SEED ===" << std::endl;
-                    backup_file << "Created: " << std::ctime(&time_t_now);
-                    backup_file << std::endl;
-                    backup_file << "Your 24-word recovery phrase:" << std::endl;
-                    for (size_t i = 0; i < words.size(); ++i) {
-                        backup_file << (i + 1) << ". " << words[i] << std::endl;
-                    }
-                    backup_file << std::endl;
-                    backup_file << "Mining Address: " << addrStr << std::endl;
-                    backup_file << std::endl;
-                    backup_file << "WARNING: Anyone with this phrase can steal your coins!" << std::endl;
-                    backup_file << "Store this file securely or delete after writing it down on paper." << std::endl;
-                    backup_file.close();
-
-                    std::cout << "  [OK] Backup saved to: " << backup_path << std::endl;
-                    std::cout << std::endl;
-                }
+                // SECURITY: Seed phrase is displayed on screen only — never saved to disk.
+                // Users must write it down on paper. Digital copies are a theft vector.
 
                 std::cout << "+==============================================================================+" << std::endl;
                 std::cout << "|              YOUR MINING WALLET                                             |" << std::endl;

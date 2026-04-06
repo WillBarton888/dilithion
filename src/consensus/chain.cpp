@@ -1350,16 +1350,22 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
 
         if (validator.DeserializeBlockTransactions(block, block_txs, error)) {
             int returned = 0;
+            int failed = 0;
             for (const auto& tx : block_txs) {
                 if (!tx || tx->IsCoinBase()) continue;
                 int64_t current_time = std::chrono::duration_cast<std::chrono::seconds>(
                     std::chrono::system_clock::now().time_since_epoch()
                 ).count();
                 std::string add_error;
-                if (pMemPool->AddTx(tx, 0, current_time, disconnectHeight - 1, &add_error)) {
+                // bypass_fee_check=true: tx already passed fee validation when first accepted.
+                // Reorg doesn't change the fee — only the chain tip changed.
+                if (pMemPool->AddTx(tx, 0, current_time, disconnectHeight - 1, &add_error, true)) {
                     ++returned;
+                } else {
+                    ++failed;
+                    std::cerr << "[Chain] WARNING: Failed to return tx " << tx->GetHash().GetHex().substr(0, 16)
+                              << "... to mempool after disconnect: " << add_error << std::endl;
                 }
-                // Silently skip failures (tx may conflict with new chain's txs)
             }
             if (returned > 0) {
                 std::cout << "[Chain] Returned " << returned << " tx to mempool from disconnected block at height "

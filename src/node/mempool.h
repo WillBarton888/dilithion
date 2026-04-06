@@ -109,12 +109,12 @@ private:
     // CID 1675260/1675290/1675250 FIX: Internal unlocked versions to prevent deadlock
     // These MUST only be called while holding cs lock
     bool RemoveTxUnlocked(const uint256& txid);
-    bool AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error);
+    bool AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check = false);
 
 public:
     CTxMemPool();
     ~CTxMemPool();  // MEMPOOL-007 FIX: Destructor to stop expiration thread
-    bool AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error = nullptr);
+    bool AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false);
     bool RemoveTx(const uint256& txid);
     bool ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error = nullptr);  // MEMPOOL-008 FIX: RBF support
     bool Exists(const uint256& txid) const;
