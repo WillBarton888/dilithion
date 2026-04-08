@@ -10,6 +10,23 @@
 
 ---
 
+## Community
+
+### Official Channels
+
+- **Website:** [dilithion.org](https://dilithion.org)
+- **GitHub:** [github.com/dilithion/dilithion](https://github.com/dilithion/dilithion)
+- **Discord:** [Join our Discord](https://discord.gg/DS3gjmsFEJ)
+- **Telegram Channel:** [Telegram News](https://t.me/dilithion_news)
+- **Telegram Community:** [Telegram Community](https://t.me/dilithion_org)
+
+### Support
+
+- **Documentation:** `docs/` directory
+- **Issues:** [GitHub Issues](https://github.com/dilithion/dilithion/issues)
+
+---
+
 ## Disclaimers
 
 **This is experimental software developed with AI assistance (Claude Code):**
@@ -383,21 +400,6 @@ See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
 - **Memory Usage:** ~500MB base
 - **CPU Usage:** Low (when not mining)
 - **Storage:** LevelDB optimized
-
----
-
-## Community
-
-### Official Channels
-
-- **Website:** [dilithion.org](https://dilithion.org)
-- **GitHub:** [github.com/dilithion/dilithion](https://github.com/dilithion/dilithion)
-- **Discord:** [Join our Discord](https://discord.gg/DS3gjmsFEJ)
-
-### Support
-
-- **Documentation:** `docs/` directory
-- **Issues:** [GitHub Issues](https://github.com/dilithion/dilithion/issues)
 
 ---
 
