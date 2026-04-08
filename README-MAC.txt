@@ -234,7 +234,7 @@ Alternatively, use nohup:
 ================================================================
 
 Website:        https://dilithion.org
-Telegram:       https://t.me/dilithion
+Telegram:       https://t.me/dilithion_org
 Source Code:    https://github.com/dilithion/dilithion
 Report bugs:    https://github.com/dilithion/dilithion/issues
 

@@ -117,7 +117,7 @@ echo.
 echo  The node will start shortly.
 echo  Press Ctrl+C anytime to stop mining.
 echo.
-echo  Need help? Join us: https://t.me/dilithion
+echo  Need help? Join us: https://t.me/dilithion_org
 echo.
 echo  ========================================================
 echo.

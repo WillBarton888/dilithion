@@ -23,7 +23,7 @@ echo.
 timeout /t 3 /nobreak >nul
 
 echo  NOTE: First sync requires ~2.5 GB RAM for RandomX mining.
-echo  Need help? Join us: https://t.me/dilithion
+echo  Need help? Join us: https://t.me/dilithion_org
 echo.
 echo  Starting node...
 echo.

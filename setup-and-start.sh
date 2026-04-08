@@ -174,7 +174,7 @@ if [ ! -f "./dilithion-node" ]; then
     echo "  Make sure you extracted the release package and are running from"
     echo "  inside the extracted folder."
     echo ""
-    echo "  Need help? Join us: https://t.me/dilithion"
+    echo "  Need help? Join us: https://t.me/dilithion_org"
     exit 1
 fi
 
@@ -238,7 +238,7 @@ echo "  NOTE: First sync requires ~2.5 GB RAM for RandomX mining."
 echo "  The node may appear to pause briefly while initializing."
 echo "  This is normal - please be patient!"
 echo ""
-echo "  Need help? Join us: https://t.me/dilithion"
+echo "  Need help? Join us: https://t.me/dilithion_org"
 echo ""
 
 ./dilithion-node --mine --threads="$threads"

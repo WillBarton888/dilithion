@@ -59,7 +59,7 @@ if [ ! -f "dilithion-node" ]; then
     echo ""
     echo "Current directory: $(pwd)"
     echo ""
-    echo "For support: https://t.me/dilithion"
+    echo "For support: https://t.me/dilithion_org"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     exit 1
 fi
@@ -167,7 +167,7 @@ elif [ "$OS_TYPE" = "Darwin" ]; then
         echo ""
         echo "  5. Then run this mining script again"
         echo ""
-        echo "For support: https://t.me/dilithion"
+        echo "For support: https://t.me/dilithion_org"
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         exit 1
     fi

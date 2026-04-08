@@ -31,6 +31,16 @@
 #include <digital_dna/dna_verification.h>
 #include <consensus/vdf_validation.h>
 
+// --- Destructor stubs for non-virtual types held via unique_ptr in NodeContext ---
+// These have explicit destructors in heavy .cpp files. None have virtual methods,
+// so stubbing them won't trigger vtable cascade (unlike DNARegistryDB).
+
+CBlockValidationQueue::~CBlockValidationQueue() {}
+CHeadersManager::~CHeadersManager() {}
+CConnman::~CConnman() {}
+CPeerDiscovery::~CPeerDiscovery() {}
+CBanManager::~CBanManager() {}
+
 // --- NodeContext stubs ---
 
 NodeContext g_node_context;
