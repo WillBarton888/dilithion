@@ -101,7 +101,7 @@ class DilithionRPC:
         result = self._call("getblockhash", {"height": height})
         # Server returns {"blockhash": "..."} — unwrap
         if isinstance(result, dict):
-            return result.get("blockhash", result)
+            return result.get("blockhash", str(result))
         return result
 
     def get_block(self, block_hash: str, verbosity: int = 2) -> dict:
