@@ -1000,6 +1000,8 @@ static void InitEDATestParams() {
     Dilithion::g_chainParams->difficultyMaxChange = 2;
     Dilithion::g_chainParams->blockTime = 240;  // 4 minutes
     Dilithion::g_chainParams->edaActivationHeight = 100;  // Active from height 100
+    Dilithion::g_chainParams->difficultyV3ForkHeight = 999999;  // Pre-v3 for EDA tests (6-block threshold)
+    Dilithion::g_chainParams->compactEncodingFixHeight = -1;  // Disable compact encoding fix
 }
 
 /**

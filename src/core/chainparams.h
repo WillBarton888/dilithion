@@ -224,7 +224,7 @@ public:
     // Coinbase maturity (blocks before mining rewards are spendable)
     // DIL mainnet/testnet: 100 (PoW reorg safety)
     // DilV: 6 (VDF is deterministic/sequential — reorgs are virtually impossible)
-    int coinbaseMaturity;
+    int coinbaseMaturity{100};
 
     // Script V2 activation height
     // Before this height: Only standard P2PKH scripts are accepted

@@ -509,8 +509,11 @@ BOOST_AUTO_TEST_CASE(calculate_fee_dust) {
     tx.vin.push_back(CTxIn(outpoint, {0x01, 0x02}));
     tx.vout.push_back(CTxOut(500, CreateP2PKHScript())); // Very small
 
-    // Should fail - insufficient fee
-    BOOST_CHECK(!validator.CheckTransactionInputs(tx, utxoSet, 100, fee, error));
+    // CheckTransactionInputs validates fees and coinbase maturity, not dust.
+    // Dust threshold is enforced in CheckTransaction (structural validation).
+    // Here: input 100000, output 500, fee 99500 — passes fee check.
+    BOOST_CHECK(validator.CheckTransactionInputs(tx, utxoSet, 100, fee, error));
+    BOOST_CHECK_EQUAL(fee, 100000 - 500);
 
     utxoSet.Close();
 }
