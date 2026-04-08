@@ -737,6 +737,11 @@ $(OBJ_DIR)/test/fuzz/%.o: src/test/fuzz/%.cpp | $(OBJ_DIR)/test/fuzz
 	@echo "$(COLOR_BLUE)[FUZZ-CXX]$(COLOR_RESET) $<"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -c $< -o $@
 
+# Fuzz stubs: compiled WITHOUT sanitizers (dependency code, not harness)
+$(OBJ_DIR)/test/fuzz/fuzz_stubs.o: src/test/fuzz/fuzz_stubs.cpp | $(OBJ_DIR)/test/fuzz
+	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $< (fuzz stubs)"
+	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
 # ============================================================================
 # Dependencies
 # ============================================================================
@@ -992,6 +997,14 @@ FUZZ_DFMP_OBJECTS := $(OBJ_DIR)/dfmp/dfmp.o \
 
 FUZZ_NODE_OBJECTS := $(OBJ_DIR)/node/utxo_set.o
 
+# Stubs for heavy dependencies (NodeContext, DNA, VDF) that would cascade into 20+ objects.
+# Real self-contained objects for symbols that don't cascade.
+# See src/test/fuzz/fuzz_stubs.cpp for details.
+FUZZ_STUBS_OBJ := $(OBJ_DIR)/test/fuzz/fuzz_stubs.o
+FUZZ_EXTRA_OBJECTS := $(OBJ_DIR)/node/block_index.o \
+                      $(OBJ_DIR)/util/logging.o \
+                      $(OBJ_DIR)/script/interpreter.o
+
 # Fuzz test binaries
 FUZZ_SHA3 := fuzz_sha3
 FUZZ_TRANSACTION := fuzz_transaction
@@ -1068,7 +1081,7 @@ fuzz_address: $(FUZZ_ADDRESS_OBJ) $(OBJ_DIR)/crypto/sha3.o $(OBJ_DIR)/util/base5
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_difficulty: Full consensus + UTXO + DFMP dependencies (pow.o and tx_validation.o use DFMP and UTXO)
-fuzz_difficulty: $(FUZZ_DIFFICULTY_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+fuzz_difficulty: $(FUZZ_DIFFICULTY_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(FUZZ_STUBS_OBJ) $(FUZZ_EXTRA_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (6 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
@@ -1080,19 +1093,19 @@ fuzz_subsidy: $(FUZZ_SUBSIDY_OBJ) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_merkle: Full consensus + UTXO + DFMP for CBlockValidator::BuildMerkleRoot
-fuzz_merkle: $(FUZZ_MERKLE_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+fuzz_merkle: $(FUZZ_MERKLE_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(FUZZ_STUBS_OBJ) $(FUZZ_EXTRA_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (7 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_tx_validation: Full consensus + UTXO + DFMP dependencies
-fuzz_tx_validation: $(FUZZ_TX_VALIDATION_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+fuzz_tx_validation: $(FUZZ_TX_VALIDATION_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(FUZZ_STUBS_OBJ) $(FUZZ_EXTRA_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_utxo: Full consensus + UTXO + DFMP dependencies
-fuzz_utxo: $(FUZZ_UTXO_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(DILITHIUM_OBJECTS)
+fuzz_utxo: $(FUZZ_UTXO_OBJ) $(FUZZ_COMMON_OBJECTS) $(FUZZ_CONSENSUS_OBJECTS) $(FUZZ_DFMP_OBJECTS) $(FUZZ_NODE_OBJECTS) $(FUZZ_STUBS_OBJ) $(FUZZ_EXTRA_OBJECTS) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@ (4 targets)"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lleveldb -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"

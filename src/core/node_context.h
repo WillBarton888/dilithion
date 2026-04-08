@@ -40,9 +40,7 @@ class CPeerMIKTracker;   // Sybil defense: block relay source tracking
 // Full include required because unique_ptr needs the complete type for default_delete
 #include <digital_dna/dna_registry_db.h>
 #include <digital_dna/trust_score.h>
-
-// Forward declaration for verification manager (Phase 2)
-namespace digital_dna { namespace verification { class VerificationManager; } }
+#include <digital_dna/verification_manager.h>
 
 /**
  * NodeContext - Bitcoin Core-style global state management
