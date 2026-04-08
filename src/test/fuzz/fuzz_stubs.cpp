@@ -31,22 +31,26 @@
 #include <digital_dna/dna_verification.h>
 #include <consensus/vdf_validation.h>
 
-// --- Destructor stubs for types held by unique_ptr in NodeContext ---
-// These classes have non-trivial destructors defined in heavy .cpp files.
-// We stub them here to avoid cascading into the full networking stack.
-
-CBlockValidationQueue::~CBlockValidationQueue() {}
-CHeadersManager::~CHeadersManager() {}
-CConnman::~CConnman() {}
-CPeerDiscovery::~CPeerDiscovery() {}
-CBanManager::~CBanManager() {}
-digital_dna::DNARegistryDB::~DNARegistryDB() {}
-
 // --- NodeContext stubs ---
 
 NodeContext g_node_context;
 
-NodeContext::~NodeContext() = default;
+// Custom destructor that releases (leaks) unique_ptrs instead of deleting.
+// This avoids cascading destructor dependencies for CPeerManager, CConnman,
+// CHeadersManager, DNARegistryDB, etc. — each of which would pull in dozens
+// of additional objects. In fuzz context all members are null anyway.
+NodeContext::~NodeContext() {
+    peer_manager.release();
+    connman.release();
+    headers_manager.release();
+    orphan_manager.release();
+    block_fetcher.release();
+    block_tracker.release();
+    validation_queue.release();
+    dna_registry.release();
+    trust_manager.release();
+    verification_manager.release();
+}
 
 void NodeContext::Reset() {
     // No-op in fuzz context — all unique_ptrs are null
