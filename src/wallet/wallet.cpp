@@ -3439,15 +3439,14 @@ bool CWallet::SelectCoins(CAmount target_value,
         return false;
     }
 
-    // WALLET-007 FIX: Randomize coin selection for privacy
-    // Previous code used deterministic greedy algorithm (largest first), which creates
-    // wallet fingerprinting vulnerability. Attackers observing blockchain can identify
-    // transactions from same wallet by consistent UTXO selection patterns.
-    // Fix: Shuffle UTXOs randomly before selection to prevent fingerprinting.
-    // Impact: Improves user privacy, prevents wallet identification attacks
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(unspent.begin(), unspent.end(), g);
+    // Select largest UTXOs first to minimise input count.
+    // Dilithium signatures are ~2.4KB each, so fewer inputs = much smaller transactions.
+    // This prevents the "too many small UTXOs" problem where random selection creates
+    // 350KB+ transactions that fail fee checks or get evicted from mempools.
+    std::sort(unspent.begin(), unspent.end(),
+              [](const CWalletTx& a, const CWalletTx& b) {
+                  return a.nValue > b.nValue;
+              });
 
     // Select coins until we reach target
     for (const CWalletTx& wtx : unspent) {

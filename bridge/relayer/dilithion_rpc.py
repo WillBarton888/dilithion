@@ -146,6 +146,28 @@ class DilithionRPC:
             return result.get("transactions", [])
         return result if isinstance(result, list) else []
 
+    def get_transaction(self, txid: str) -> dict:
+        """Get wallet transaction details by txid. Returns dict or None."""
+        try:
+            return self._call("gettransaction", {"txid": txid})
+        except Exception:
+            return None
+
+    def validate_address(self, address: str) -> bool:
+        """Validate a native chain address via the node's RPC.
+        Returns True if the address is valid (base58check passes)."""
+        try:
+            result = self._call("validateaddress", {"address": address})
+            if isinstance(result, dict):
+                return result.get("isvalid", False)
+            return False
+        except Exception:
+            return False
+
+    def rescan_wallet(self) -> dict:
+        """Rescan blockchain for wallet transactions."""
+        return self._call("rescanblockchain")
+
     # ── Utility ──────────────────────────────────────────────────────
 
     def is_connected(self) -> bool:

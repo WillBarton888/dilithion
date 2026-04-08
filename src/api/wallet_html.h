@@ -1129,6 +1129,24 @@ inline const std::string& GetWalletHTML() {
             <!-- Chain Health Warning Banner -->
             <div id="chainWarning" style="display:none; color:#ff4444; background:#1a0000; padding:12px 16px; margin-bottom:16px; border:1px solid #ff4444; border-radius:8px; font-weight:600;"></div>
 
+            <!-- Wallet Optimization Banner (shown when too many small UTXOs) -->
+            <div id="optimizeBanner" style="display:none; background: rgba(200,162,78,0.08); border: 1px solid rgba(200,162,78,0.3); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">
+                            Wallet needs optimization
+                        </div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                            Mining creates many small payments. Combining them makes sending faster and cheaper.
+                            <span id="optimizeUtxoCount"></span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="optimizeBtn" onclick="optimizeWallet()" style="white-space: nowrap;">
+                        Optimize Now
+                    </button>
+                </div>
+            </div>
+
             <!-- Node Wallet Security Card (Dashboard) -->
             <div class="card" id="dashboardWalletSecurity" style="margin-bottom: 16px; display: none;">
                 <div class="card-title">
@@ -2725,6 +2743,8 @@ inline const std::string& GetWalletHTML() {
                         } else {
                             warningEl.style.display = 'none';
                         }
+                        // Check if wallet needs UTXO optimization
+                        checkUtxoHealth();
                     } catch (e) {
                         console.error('[Balance] RPC error:', e.message);
                         // Connection loss is handled centrally in rpcCall()
@@ -3057,6 +3077,56 @@ inline const std::string& GetWalletHTML() {
                     btnText.textContent = 'Failed';
                     setTimeout(() => { btnText.textContent = originalText; }, 2000);
                 }
+            }
+        }
+
+        // Check UTXO count and show optimization banner if needed
+        async function checkUtxoHealth() {
+            const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
+            const banner = document.getElementById('optimizeBanner');
+            if (!banner || !isFullNode || !connected) return;
+            try {
+                const utxos = await rpcCall('listunspent');
+                const count = Array.isArray(utxos) ? utxos.length : 0;
+                if (count > 20) {
+                    document.getElementById('optimizeUtxoCount').textContent =
+                        'You currently have ' + count + ' separate payments to combine.';
+                    banner.style.display = 'block';
+                } else {
+                    banner.style.display = 'none';
+                }
+            } catch(e) {
+                banner.style.display = 'none';
+            }
+        }
+
+        async function optimizeWallet() {
+            const btn = document.getElementById('optimizeBtn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Optimizing...';
+            btn.disabled = true;
+            try {
+                const result = await rpcCall('consolidateutxos', {max_inputs: 50}, 60000);
+                btn.textContent = 'Done! Combined ' + (result.inputs_consolidated || '?') + ' payments';
+                await refreshBalance();
+                // Check if more consolidation needed
+                setTimeout(async () => {
+                    await checkUtxoHealth();
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }, 3000);
+            } catch(e) {
+                const msg = e.message || String(e);
+                if (msg.includes('locked')) {
+                    btn.textContent = 'Unlock wallet first';
+                } else if (msg.includes('Nothing to consolidate')) {
+                    btn.textContent = 'Already optimized!';
+                    document.getElementById('optimizeBanner').style.display = 'none';
+                } else {
+                    btn.textContent = 'Failed — try again';
+                    console.error('[Optimize]', msg);
+                }
+                setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3000);
             }
         }
 

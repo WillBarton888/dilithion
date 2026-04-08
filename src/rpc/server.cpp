@@ -198,6 +198,7 @@ CRPCServer::CRPCServer(uint16_t port)
     // Transaction creation
     m_handlers["sendtoaddress"] = [this](const std::string& p) { return RPC_SendToAddress(p); };
     m_handlers["estimatesendfee"] = [this](const std::string& p) { return RPC_EstimateSendFee(p); };
+    m_handlers["consolidateutxos"] = [this](const std::string& p) { return RPC_ConsolidateUTXOs(p); };
     m_handlers["signrawtransaction"] = [this](const std::string& p) { return RPC_SignRawTransaction(p); };
     m_handlers["sendrawtransaction"] = [this](const std::string& p) { return RPC_SendRawTransaction(p); };
 
@@ -2284,6 +2285,140 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
     m_wallet->RecordSentTransaction(txid, recipient_address, amount, fee);
     std::ostringstream oss;
     oss << "{\"txid\":\"" << txid.GetHex() << "\"}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ConsolidateUTXOs(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+    if (!m_utxo_set) {
+        throw std::runtime_error("UTXO set not initialized");
+    }
+    if (!m_chainstate) {
+        throw std::runtime_error("Chain state not initialized");
+    }
+    if (!m_mempool) {
+        throw std::runtime_error("Mempool not initialized");
+    }
+    if (m_wallet->IsLocked()) {
+        throw std::runtime_error("Wallet is locked. Use walletpassphrase first.");
+    }
+
+    // Parse optional max_inputs parameter (default 50, max 200)
+    size_t max_inputs = 50;
+    if (!params.empty()) {
+        try {
+            auto j = nlohmann::json::parse(params);
+            if (j.is_object() && j.contains("max_inputs")) {
+                max_inputs = j["max_inputs"].get<size_t>();
+            } else if (j.is_array() && !j.empty()) {
+                max_inputs = j[0].get<size_t>();
+            }
+        } catch (...) {}
+    }
+    if (max_inputs < 2) max_inputs = 2;
+    if (max_inputs > 200) max_inputs = 200;
+
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    std::vector<CWalletTx> utxos = m_wallet->ListUnspentOutputs(*m_utxo_set, currentHeight);
+
+    if (utxos.size() <= 1) {
+        throw std::runtime_error("Nothing to consolidate (0 or 1 UTXOs)");
+    }
+
+    // Sort smallest first — consolidate the small ones
+    std::sort(utxos.begin(), utxos.end(),
+              [](const CWalletTx& a, const CWalletTx& b) {
+                  return a.nValue < b.nValue;
+              });
+
+    // Take up to max_inputs of the smallest UTXOs
+    size_t count = std::min(utxos.size(), max_inputs);
+    std::vector<CWalletTx> to_consolidate(utxos.begin(), utxos.begin() + count);
+
+    // Calculate total value
+    CAmount total = 0;
+    for (const auto& u : to_consolidate) {
+        total += u.nValue;
+    }
+
+    // Estimate fee for consolidation tx (count inputs, 1 output)
+    size_t est_size = Consensus::EstimateDilithiumTxSize(count, 1);
+    CAmount fee = Consensus::CalculateMinFee(est_size);
+
+    if (total <= fee) {
+        throw std::runtime_error("Selected UTXOs total (" +
+            std::to_string(total) + " ions) doesn't cover fee (" +
+            std::to_string(fee) + " ions). Try fewer inputs or wait for larger UTXOs.");
+    }
+
+    CAmount output_value = total - fee;
+    if (output_value < DUST_THRESHOLD) {
+        throw std::runtime_error("Consolidated output would be dust. Need more value in UTXOs.");
+    }
+
+    // Build transaction
+    CTransaction tx;
+    tx.nVersion = 1;
+    tx.nLockTime = 0;
+
+    for (const auto& u : to_consolidate) {
+        COutPoint outpoint(u.txid, u.vout);
+        m_wallet->LockCoin(outpoint);
+        tx.vin.push_back(CTxIn(outpoint));
+    }
+
+    // Send back to own wallet
+    std::vector<uint8_t> own_hash = m_wallet->GetPubKeyHash();
+    if (own_hash.empty()) {
+        for (const auto& u : to_consolidate) {
+            m_wallet->UnlockCoin(COutPoint(u.txid, u.vout));
+        }
+        throw std::runtime_error("Failed to get wallet public key hash");
+    }
+
+    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(own_hash);
+    tx.vout.push_back(CTxOut(output_value, std::move(scriptPubKey)));
+
+    // Sign
+    std::string error;
+    if (!m_wallet->SignTransaction(tx, *m_utxo_set, error)) {
+        for (const auto& u : to_consolidate) {
+            m_wallet->UnlockCoin(COutPoint(u.txid, u.vout));
+        }
+        throw std::runtime_error("Failed to sign consolidation tx: " + error);
+    }
+
+    // Verify fee covers actual size
+    size_t actual_size = tx.GetSerializedSize();
+    CAmount required_fee = Consensus::CalculateMinFee(actual_size);
+    if (fee < required_fee) {
+        for (const auto& u : to_consolidate) {
+            m_wallet->UnlockCoin(COutPoint(u.txid, u.vout));
+        }
+        throw std::runtime_error("Fee insufficient for actual tx size. Try fewer inputs.");
+    }
+
+    // Send
+    CTransactionRef txref = MakeTransactionRef(std::move(tx));
+    if (!m_wallet->SendTransaction(txref, *m_mempool, *m_utxo_set, currentHeight, error)) {
+        for (const auto& u : to_consolidate) {
+            m_wallet->UnlockCoin(COutPoint(u.txid, u.vout));
+        }
+        throw std::runtime_error("Failed to send consolidation tx: " + error);
+    }
+
+    uint256 txid = txref->GetHash();
+
+    std::ostringstream oss;
+    oss << "{\"txid\":\"" << txid.GetHex() << "\","
+        << "\"inputs_consolidated\":" << count << ","
+        << "\"total_utxos_before\":" << utxos.size() << ","
+        << "\"total_utxos_after\":" << (utxos.size() - count + 1) << ","
+        << "\"amount\":" << FormatAmount(output_value) << ","
+        << "\"fee\":" << FormatAmount(fee) << ","
+        << "\"tx_size\":" << actual_size << "}";
     return oss.str();
 }
 

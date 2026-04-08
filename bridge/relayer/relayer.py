@@ -52,6 +52,13 @@ WRAPPED_TOKEN_ABI = json.loads("""[
         "type": "function"
     },
     {
+        "inputs": [],
+        "name": "totalSupply",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
         "anonymous": false,
         "inputs": [
             {"indexed": true,  "name": "to",         "type": "address"},
@@ -112,6 +119,10 @@ class BridgeRelayer:
                 abi=WRAPPED_TOKEN_ABI,
             )
 
+        # Bridge pause state — set by auto-pause on invariant breach
+        self.paused = False
+        self.pause_reason = ""
+
         # State DB
         self.db = StateDB(
             os.path.join(os.path.dirname(__file__), "bridge_state.db")
@@ -165,21 +176,50 @@ class BridgeRelayer:
 
         self._check_connections()
 
+        # Reconcile any incomplete sends from a prior crash
+        self._reconcile_incomplete_sends()
+        self._reconcile_incomplete_refunds()
+
+        loop_count = 0
+
         while True:
             try:
+                if self.paused:
+                    logger.warning(
+                        f"BRIDGE PAUSED — skipping all processing. "
+                        f"Reason: {self.pause_reason}"
+                    )
+                    time.sleep(config.POLL_INTERVAL_SECONDS)
+                    continue
+
                 for chain in ("dil", "dilv"):
                     self._check_reorgs(chain)
+                    if self.paused:
+                        break  # Reorg check may have triggered pause
                     self._scan_deposits(chain)
 
-                self._update_confirmations()
-                self._process_confirmed_deposits()
-                self._process_refunds()
+                if not self.paused:
+                    self._update_confirmations()
+                    self._process_confirmed_deposits()
+                    self._process_refunds()
 
-                self._scan_base_burns()
-                self._update_withdrawal_confirmations()
-                self._process_confirmed_withdrawals()
+                    self._scan_base_burns()
+                    self._update_withdrawal_confirmations()
+                    self._process_confirmed_withdrawals()
+
+                    self._check_backing_invariant()
 
                 self._log_health()
+
+                # Rescan wallets every hour (360 iterations * 10s interval)
+                loop_count += 1
+                if loop_count % 360 == 0:
+                    for chain in ("dil", "dilv"):
+                        try:
+                            self.chain_config[chain]["rpc"].rescan_wallet()
+                            logger.info(f"[{chain}] Periodic wallet rescan complete")
+                        except Exception as e:
+                            logger.warning(f"[{chain}] Wallet rescan failed: {e}")
 
             except KeyboardInterrupt:
                 logger.info("Shutting down...")
@@ -211,6 +251,21 @@ class BridgeRelayer:
         except Exception as e:
             logger.warning(f"  [base] Not connected: {e}")
 
+    # ── Bridge pause control ───────────────────────────────────────
+
+    def _pause_bridge(self, reason: str):
+        """Pause all bridge processing. Requires manual intervention to resume.
+
+        This is a fail-safe for backing invariant breaches, catastrophic
+        reorgs, or other conditions where continuing could lose funds.
+        """
+        self.paused = True
+        self.pause_reason = reason
+        logger.critical(
+            f"BRIDGE PAUSED: {reason}. "
+            f"Manual intervention required to resume."
+        )
+
     # ── Reorg detection ──────────────────────────────────────────────
 
     def _check_reorgs(self, chain: str):
@@ -221,6 +276,25 @@ class BridgeRelayer:
             return
 
         stored_height, stored_hash = sync
+        try:
+            current_height = rpc.get_block_count()
+        except Exception:
+            return  # Can't reach node, skip
+
+        # Chain reset detection: stored height is beyond actual chain tip
+        if stored_height > current_height:
+            bridge_start = self.chain_config[chain].get("start_height", 0)
+            logger.warning(
+                f"[{chain}] CHAIN RESET DETECTED: stored height {stored_height} > "
+                f"chain height {current_height}. Resetting sync to {bridge_start}."
+            )
+            try:
+                reset_hash = rpc.get_block_hash(bridge_start) if bridge_start <= current_height else ""
+                self.db.set_sync_state(chain, bridge_start, reset_hash)
+            except Exception as e:
+                logger.error(f"[{chain}] Failed to reset sync after chain reset: {e}")
+            return
+
         try:
             current_hash = rpc.get_block_hash(stored_height)
         except Exception:
@@ -234,24 +308,59 @@ class BridgeRelayer:
             f"Expected {stored_hash[:16]}..., got {current_hash[:16]}..."
         )
 
-        # Walk back to find the fork point
+        # Walk back to find the true fork point using stored block hashes
         fork_height = stored_height
-        while fork_height > 0:
+        max_walkback = 100  # safety bound — configurable
+        walked = 0
+        while fork_height > 0 and walked < max_walkback:
             fork_height -= 1
+            walked += 1
             try:
                 chain_hash = rpc.get_block_hash(fork_height)
             except Exception:
                 break
+            stored_block_hash = self.db.get_block_hash(chain, fork_height)
+            if stored_block_hash and chain_hash == stored_block_hash:
+                # Found common ancestor — reorg starts one above
+                fork_height += 1
+                break
 
-            # Check if we have a record for this height
-            # For simplicity, just roll back to fork_height
-            # A more precise approach would check our DB for matching hashes
-            break
+        if walked >= max_walkback:
+            # Catastrophic reorg — auto-pause bridge
+            logger.critical(
+                f"[{chain}] CATASTROPHIC REORG: walkback exceeded {max_walkback} "
+                f"blocks without finding common ancestor! AUTO-PAUSING BRIDGE."
+            )
+            self._pause_bridge(
+                f"Catastrophic reorg on {chain}: >{max_walkback} blocks deep"
+            )
+            return
+
+        # Check for backing invariant breach: were any reorged deposits
+        # already minted (wTokens issued on Base)?
+        minted_at_risk = self.db.get_minted_deposits_above_height(
+            chain, fork_height
+        )
+        if minted_at_risk:
+            logger.critical(
+                f"[{chain}] BACKING INVARIANT BREACH: {len(minted_at_risk)} "
+                f"minted deposit(s) are in the reorged range (height >= {fork_height}). "
+                f"wTokens are potentially unbacked! AUTO-PAUSING BRIDGE."
+            )
+            for dep in minted_at_risk:
+                logger.critical(
+                    f"  - Deposit {dep['id']}: {dep['amount'] / 1e8:.8f} "
+                    f"at height {dep['block_height']}, mint_txid={dep['mint_txid']}"
+                )
+            self._pause_bridge(
+                f"Backing invariant breach on {chain}: "
+                f"{len(minted_at_risk)} minted deposits reorged"
+            )
 
         reorged_count = self.db.mark_deposits_reorged(chain, fork_height)
         logger.warning(
             f"[{chain}] Marked {reorged_count} deposits as reorged "
-            f"(from height {fork_height})"
+            f"(from height {fork_height}, walked back {walked} blocks)"
         )
 
         # Reset sync state to fork point
@@ -287,7 +396,15 @@ class BridgeRelayer:
         start_height = (sync[0] + 1) if sync else max(bridge_start, 0)
 
         if start_height > current_height:
-            return  # Already up to date
+            # Sync pointer is ahead of actual chain — likely a chain reset.
+            # Reset to bridge start height so we don't silently miss deposits.
+            logger.warning(
+                f"[{chain}] Sync height {start_height} > chain height {current_height}! "
+                f"Possible chain reset. Resetting scan to bridge start height {bridge_start}."
+            )
+            start_height = max(bridge_start, 0)
+            if start_height > current_height:
+                return  # Bridge start is still ahead (shouldn't happen)
 
         # Scan blocks (verbosity=2 gives full tx details in one RPC call)
         for height in range(start_height, current_height + 1):
@@ -314,6 +431,10 @@ class BridgeRelayer:
                     self._check_tx_for_retired_deposit(chain, txid, tx, height)
 
             self.db.set_sync_state(chain, height, block_hash)
+            self.db.store_block_hash(chain, height, block_hash)
+
+        # Prune old block hashes periodically (keep last 200)
+        self.db.prune_block_hashes(chain, keep_last=200)
 
     def _check_tx_for_deposit_by_id(self, chain, txid, height, block_hash, rpc, bridge_addr):
         """Fetch tx by ID and check for deposit (fallback for verbosity=1)."""
@@ -425,10 +546,11 @@ class BridgeRelayer:
             )
 
     def _check_tx_for_retired_deposit(self, chain: str, txid: str, tx: dict, height: int):
-        """Alert if a deposit was sent to a retired (old) bridge address.
+        """Handle deposits sent to retired (old) bridge addresses.
 
-        These funds cannot be processed automatically — the operator must
-        manually mint wTokens for the affected user.
+        The native coins at retired addresses aren't directly spendable by the
+        relayer, but since this is a custodial bridge and we control minting,
+        we honor these deposits by recording and auto-minting for the user.
         """
         retired = self.retired_addresses.get(chain, [])
         if not retired:
@@ -444,6 +566,7 @@ class BridgeRelayer:
             value = vout.get("value", 0)
             amount = int(round(value * 1e8)) if isinstance(value, float) and value < 1e9 else int(value)
             coin = self.chain_config[chain]["coin"]
+            deposit_vout = vout.get("n", 0)
 
             # Try to parse the OP_RETURN for the destination Base address
             base_address = None
@@ -454,15 +577,77 @@ class BridgeRelayer:
                 if base_address:
                     break
 
-            logger.error(
-                f"[{chain}] *** RETIRED ADDRESS DEPOSIT DETECTED ***\n"
+            logger.warning(
+                f"[{chain}] *** RETIRED ADDRESS DEPOSIT ***\n"
                 f"  TxID:         {txid}\n"
                 f"  Amount:       {amount / 1e8:.8f} {coin}\n"
-                f"  Sent to:      {addr}  (RETIRED — funds unrecoverable by relayer)\n"
-                f"  Base address: {base_address or 'NOT FOUND — check OP_RETURN manually'}\n"
+                f"  Sent to:      {addr}  (RETIRED bridge address)\n"
+                f"  Base address: {base_address or 'NOT FOUND'}\n"
                 f"  Height:       {height}\n"
-                f"  ACTION:       Manually call mint() on the w{coin} contract to make user whole."
+                f"  Auto-processing: recording deposit for minting."
             )
+
+            if not base_address:
+                logger.error(
+                    f"[{chain}] Retired address deposit {txid} has NO valid OP_RETURN! "
+                    f"Amount: {amount / 1e8:.8f} {coin}. Manual recovery needed."
+                )
+                continue
+
+            # Validate per-deposit limit
+            max_deposit = self.chain_config[chain]["max_per_deposit"]
+            if amount > max_deposit:
+                logger.warning(
+                    f"[{chain}] Retired address deposit {txid} exceeds limit: "
+                    f"{amount / 1e8:.2f} > {max_deposit / 1e8:.2f} {coin}. "
+                    f"Recording as over_limit."
+                )
+                sender = self._get_sender_address(chain, tx)
+                self.db.insert_deposit(
+                    chain, txid, deposit_vout, amount,
+                    base_address, height, "", sender
+                )
+                row = self.db.conn.execute(
+                    "SELECT id FROM deposits WHERE native_txid = ? AND native_vout = ?",
+                    (txid, deposit_vout)
+                ).fetchone()
+                if row:
+                    self.db.conn.execute(
+                        "UPDATE deposits SET status = 'over_limit' WHERE id = ?",
+                        (row["id"],)
+                    )
+                    self.db.conn.commit()
+                continue
+
+            # Record the deposit as 'retired_pending' — requires manual
+            # approval before minting.  This prevents accidental minting of
+            # historical deposits that may have been handled out-of-band.
+            sender = self._get_sender_address(chain, tx)
+            try:
+                block_hash = tx.get("blockhash", "")
+            except Exception:
+                block_hash = ""
+            inserted = self.db.insert_deposit(
+                chain, txid, deposit_vout, amount,
+                base_address, height, block_hash, sender
+            )
+            if inserted:
+                # Mark as retired_pending so it doesn't auto-mint
+                row = self.db.conn.execute(
+                    "SELECT id FROM deposits WHERE native_txid = ? AND native_vout = ?",
+                    (txid, deposit_vout)
+                ).fetchone()
+                if row:
+                    self.db.conn.execute(
+                        "UPDATE deposits SET status = 'retired_pending' WHERE id = ?",
+                        (row["id"],)
+                    )
+                    self.db.conn.commit()
+                logger.info(
+                    f"[{chain}] Retired-address deposit recorded (NEEDS MANUAL APPROVAL): "
+                    f"{amount / 1e8:.8f} {coin} -> {base_address} "
+                    f"(tx: {txid[:16]}... height: {height})"
+                )
 
     def _parse_bridge_op_return(self, spk_hex: str) -> str | None:
         """
@@ -536,6 +721,12 @@ class BridgeRelayer:
     def _process_refunds(self):
         """Auto-refund deposits that exceed per-deposit limits.
 
+        Uses crash-safe flow (same pattern as withdrawals):
+          1. CAS: over_limit -> refunding
+          2. RPC: send_to_address
+          3. Record tentative_refund_txid immediately
+          4. Finalize: refunding -> refunded
+
         Sends coins back to the sender minus a small fee for the return tx.
         """
         refunds = self.db.get_pending_refunds()
@@ -555,7 +746,6 @@ class BridgeRelayer:
                     f"[{chain}] Cannot refund deposit {dep['native_txid'][:16]}... "
                     f"— sender address unknown. Manual refund needed."
                 )
-                # Use 'refund_failed' status so it doesn't enter the mint retry loop
                 self.db.conn.execute(
                     """UPDATE deposits SET status = 'refund_failed', error_msg = ?,
                        updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
@@ -573,28 +763,109 @@ class BridgeRelayer:
                 self.db.mark_deposit_failed(dep["id"], "Too small to refund after fee")
                 continue
 
+            # Step 1: CAS — mark as "refunding"
+            if not self.db.mark_deposit_refunding(dep["id"]):
+                logger.warning(
+                    f"[{chain}] Refund CAS failed for deposit {dep['id']} "
+                    f"(not in 'over_limit' state), skipping"
+                )
+                continue
+
             try:
                 rpc = self.chain_config[chain]["rpc"]
-                # sendtoaddress expects coins (float), not ions/volts
                 refund_coins = refund_amount / 1e8
+
+                # Step 2: Send refund
                 refund_txid = rpc.send_to_address(sender, refund_coins)
+
+                # Step 3: Record tentative txid immediately
+                self.db.update_deposit_tentative_refund_txid(
+                    dep["id"], refund_txid
+                )
+
+                # Step 4: Finalize
+                self.db.mark_deposit_refunded(dep["id"], refund_txid)
                 logger.info(
                     f"[{chain}] AUTO-REFUND: {refund_amount / 1e8:.8f} {coin} "
                     f"back to {sender} (tx: {refund_txid[:16]}...)"
                 )
-                self.db.mark_deposit_refunded(dep["id"], refund_txid)
             except Exception as e:
                 logger.error(
                     f"[{chain}] Refund failed for {dep['native_txid'][:16]}...: {e}"
                 )
-                # Use refund_failed so it doesn't enter the mint retry loop
-                self.db.conn.execute(
-                    """UPDATE deposits SET status = 'refund_failed', error_msg = ?,
-                       retry_count = COALESCE(retry_count, 0) + 1,
-                       updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
-                    (f"Refund failed: {e}", dep["id"])
-                )
-                self.db.conn.commit()
+                # Reset to over_limit for retry
+                self.db.reset_deposit_to_over_limit(dep["id"])
+
+    def _reconcile_incomplete_refunds(self):
+        """Resolve refunds stuck in 'refunding' state after a crash.
+
+        Same logic as withdrawal reconciliation — check tentative txid
+        first, fall back to wallet history, flag old stuck ones.
+        """
+        stuck = self.db.get_refunding_deposits()
+        if not stuck:
+            return
+
+        logger.warning(
+            f"RECONCILIATION: Found {len(stuck)} refund(s) in 'refunding' state"
+        )
+
+        for dep in stuck:
+            chain = dep["chain"]
+            rpc = self.chain_config[chain]["rpc"]
+            coin = self.chain_config[chain]["coin"]
+            sender = dep["sender_address"]
+            did = dep["id"]
+            tentative_txid = dep["tentative_refund_txid"]
+            refund_coins = (dep["amount"] - 10000) / 1e8  # same fee logic
+
+            # Strategy 1: Verify tentative txid on chain
+            if tentative_txid:
+                try:
+                    tx_info = rpc.get_transaction(tentative_txid)
+                    if tx_info:
+                        self.db.mark_deposit_refunded(did, tentative_txid)
+                        logger.info(
+                            f"[{chain}] RECONCILED refund {did}: "
+                            f"tx {tentative_txid[:16]}... confirmed"
+                        )
+                        continue
+                except Exception:
+                    pass
+
+            # Strategy 2: Check wallet history
+            if sender:
+                try:
+                    recent_txs = rpc.list_transactions(100)
+                    found_txid = None
+                    for tx in recent_txs:
+                        tx_addr = tx.get("address", "")
+                        tx_amount = abs(float(tx.get("amount", 0)))
+                        tx_category = tx.get("category", "")
+                        if (tx_category == "send"
+                                and tx_addr == sender
+                                and abs(tx_amount - refund_coins) < 0.00000001):
+                            found_txid = tx.get("txid", "")
+                            break
+
+                    if found_txid:
+                        self.db.mark_deposit_refunded(did, found_txid)
+                        logger.info(
+                            f"[{chain}] RECONCILED refund {did}: "
+                            f"matched tx {found_txid[:16]}... in wallet history"
+                        )
+                        continue
+                except Exception as e:
+                    logger.warning(
+                        f"[{chain}] Refund reconciliation failed for {did}: {e}"
+                    )
+
+            # Strategy 3: Reset for retry
+            self.db.reset_deposit_to_over_limit(did)
+            logger.warning(
+                f"[{chain}] RECONCILED refund {did}: "
+                f"not found, reset to over_limit for retry"
+            )
 
     # ── Confirmation updates ─────────────────────────────────────────
 
@@ -784,7 +1055,17 @@ class BridgeRelayer:
     # ── Native coin withdrawal ───────────────────────────────────────
 
     def _process_confirmed_withdrawals(self):
-        """Send native coins for confirmed burn events."""
+        """Send native coins for confirmed burn events.
+
+        Uses a crash-safe flow:
+          1. CAS: confirmed -> sending (with durable attempt_id)
+          2. RPC: send_to_address
+          3. Record tentative_txid immediately
+          4. Finalize: sending -> sent
+
+        If the process crashes between steps 2-4, the reconciliation
+        method (_reconcile_incomplete_sends) resolves it on next startup.
+        """
         for w in self.db.get_confirmed_withdrawals():
             chain = w["chain"]
             rpc = self.chain_config[chain]["rpc"]
@@ -798,17 +1079,226 @@ class BridgeRelayer:
                 )
                 continue
 
+            # Phase 3: Validate native address before sending
+            if not rpc.validate_address(w["native_address"]):
+                self.db.mark_withdrawal_failed(
+                    w["id"], f"Invalid native address: {w['native_address']}"
+                )
+                logger.error(
+                    f"[{chain}] Withdrawal {w['id']} rejected: "
+                    f"invalid address {w['native_address']}"
+                )
+                continue
+
+            # Phase 3: Reject dust withdrawals (below 0.0001 coins)
+            if amount_coins < 0.0001:
+                self.db.mark_withdrawal_failed(
+                    w["id"], f"Amount below dust threshold: {amount_coins}"
+                )
+                logger.warning(
+                    f"[{chain}] Withdrawal {w['id']} rejected: "
+                    f"dust amount {amount_coins:.8f} {coin}"
+                )
+                continue
+
+            # Step 1: Atomic CAS — mark as "sending" with durable intent
+            retry_count = w["retry_count"] if w["retry_count"] else 0
+            attempt_id = f"{w['id']}_{retry_count}"
+            if not self.db.mark_withdrawal_sending(w["id"], attempt_id):
+                logger.warning(
+                    f"[{chain}] Withdrawal {w['id']} CAS failed "
+                    f"(not in 'confirmed' state), skipping"
+                )
+                continue
+
             try:
-                native_txid = rpc.send_to_address(w["native_address"], amount_coins)
+                # Step 2: Send native coins
+                native_txid = rpc.send_to_address(
+                    w["native_address"], amount_coins
+                )
+
+                # Step 3: Record tentative txid immediately (durable intent)
+                self.db.update_withdrawal_tentative_txid(w["id"], native_txid)
+
+                # Step 4: Finalize
                 self.db.mark_withdrawal_sent(w["id"], native_txid)
                 logger.info(
                     f"[{chain}] Sent {amount_coins:.8f} {coin} "
                     f"to {w['native_address']} (tx: {native_txid[:16]}...)"
                 )
             except Exception as e:
-                self.db.mark_withdrawal_failed(w["id"], str(e))
+                # RPC call failed — coins were NOT sent.
+                # Reset to confirmed so it can be retried next cycle.
+                self.db.reset_withdrawal_to_confirmed(w["id"])
                 logger.error(
-                    f"[{chain}] Withdrawal send failed: {e}"
+                    f"[{chain}] Withdrawal {w['id']} send failed, "
+                    f"reset to confirmed for retry: {e}"
+                )
+
+    def _reconcile_incomplete_sends(self):
+        """Resolve withdrawals stuck in 'sending' state after a crash.
+
+        Called once at startup before the main loop. For each stuck
+        withdrawal:
+          - If tentative_txid exists: verify it on-chain, finalize if found
+          - If no tentative_txid: check list_transactions as fallback
+          - If unresolvable and >30 min old: log CRITICAL, leave for manual review
+        """
+        stuck = self.db.get_sending_withdrawals()
+        if not stuck:
+            return
+
+        logger.warning(
+            f"RECONCILIATION: Found {len(stuck)} withdrawal(s) in 'sending' state"
+        )
+
+        for w in stuck:
+            chain = w["chain"]
+            rpc = self.chain_config[chain]["rpc"]
+            coin = self.chain_config[chain]["coin"]
+            amount_coins = w["amount"] / 1e8
+            wid = w["id"]
+
+            # Check age — if >30 min old with no resolution, flag for manual review
+            sent_intent_at = w["sent_intent_at"]
+            tentative_txid = w["tentative_txid"]
+
+            # Strategy 1: We have a tentative txid — verify on chain
+            if tentative_txid:
+                try:
+                    tx_info = rpc.get_transaction(tentative_txid)
+                    if tx_info:
+                        # Transaction exists on chain — finalize it
+                        self.db.mark_withdrawal_sent(wid, tentative_txid)
+                        logger.info(
+                            f"[{chain}] RECONCILED withdrawal {wid}: "
+                            f"tentative tx {tentative_txid[:16]}... confirmed on chain"
+                        )
+                        continue
+                except Exception:
+                    pass  # tx not found or RPC error — fall through
+
+            # Strategy 2: No tentative txid — check wallet transaction history
+            try:
+                recent_txs = rpc.list_transactions(100)
+                found_txid = None
+                for tx in recent_txs:
+                    tx_addr = tx.get("address", "")
+                    tx_amount = abs(float(tx.get("amount", 0)))
+                    tx_category = tx.get("category", "")
+                    if (tx_category == "send"
+                            and tx_addr == w["native_address"]
+                            and abs(tx_amount - amount_coins) < 0.00000001):
+                        found_txid = tx.get("txid", "")
+                        break
+
+                if found_txid:
+                    self.db.mark_withdrawal_sent(wid, found_txid)
+                    logger.info(
+                        f"[{chain}] RECONCILED withdrawal {wid}: "
+                        f"matched tx {found_txid[:16]}... in wallet history"
+                    )
+                    continue
+            except Exception as e:
+                logger.warning(
+                    f"[{chain}] Reconciliation list_transactions failed "
+                    f"for withdrawal {wid}: {e}"
+                )
+
+            # Strategy 3: Unresolvable — check age
+            # If no sent_intent_at or it's recent, reset to confirmed for retry
+            # If old (>30 min), leave in 'sending' for manual review
+            if not sent_intent_at:
+                # No timestamp — likely very old or corrupted, reset
+                self.db.reset_withdrawal_to_confirmed(wid)
+                logger.warning(
+                    f"[{chain}] RECONCILED withdrawal {wid}: "
+                    f"no intent timestamp, reset to confirmed for retry"
+                )
+            else:
+                # Check age by querying DB (SQLite datetime comparison)
+                row = self.db.conn.execute(
+                    """SELECT CASE WHEN sent_intent_at <= datetime('now', '-30 minutes')
+                       THEN 1 ELSE 0 END as is_old FROM withdrawals WHERE id = ?""",
+                    (wid,)
+                ).fetchone()
+
+                if row and row["is_old"]:
+                    logger.critical(
+                        f"[{chain}] MANUAL REVIEW NEEDED: Withdrawal {wid} "
+                        f"stuck in 'sending' for >30 min. "
+                        f"Amount: {amount_coins:.8f} {coin}, "
+                        f"Address: {w['native_address']}, "
+                        f"Tentative TX: {tentative_txid or 'NONE'}, "
+                        f"Attempt: {w['attempt_id']}"
+                    )
+                else:
+                    # Recent — reset to confirmed for retry
+                    self.db.reset_withdrawal_to_confirmed(wid)
+                    logger.warning(
+                        f"[{chain}] RECONCILED withdrawal {wid}: "
+                        f"recent send attempt not found, reset to confirmed"
+                    )
+
+    # ── Backing invariant monitor ───────────────────────────────────
+
+    def _check_backing_invariant(self):
+        """Verify that locked native coins >= circulating wrapped tokens.
+
+        If the invariant is violated, auto-pause the bridge. This catches
+        reorg-related unbacking, bugs, or exploits.
+        """
+        for chain, cfg in self.chain_config.items():
+            contract = cfg["contract"]
+            rpc = cfg["rpc"]
+
+            if not contract:
+                continue
+
+            try:
+                # Native side: bridge wallet balance (in ions/volts)
+                native_balance_coins = rpc.get_balance()
+                native_balance = int(round(native_balance_coins * 1e8))
+
+                # Base side: total supply of wrapped token
+                wrapped_supply = contract.functions.totalSupply().call()
+
+                # Account for in-flight withdrawals (confirmed + sending)
+                inflight = self.db.get_inflight_withdrawal_total(chain)
+
+                # Effective backing: native balance + inflight (coins on the way out)
+                effective_native = native_balance + inflight
+                delta = effective_native - wrapped_supply
+
+                status = "ok" if delta >= 0 else "BREACH"
+
+                self.db.record_invariant_check(
+                    chain, native_balance, wrapped_supply,
+                    inflight, status, delta
+                )
+
+                if delta < 0:
+                    logger.critical(
+                        f"[{chain}] BACKING INVARIANT BREACH! "
+                        f"Native: {native_balance / 1e8:.8f}, "
+                        f"Wrapped: {wrapped_supply / 1e8:.8f}, "
+                        f"Inflight: {inflight / 1e8:.8f}, "
+                        f"Delta: {delta / 1e8:.8f} (UNBACKED). "
+                        f"AUTO-PAUSING BRIDGE."
+                    )
+                    self._pause_bridge(
+                        f"Backing invariant breach on {chain}: "
+                        f"delta = {delta / 1e8:.8f}"
+                    )
+                else:
+                    logger.debug(
+                        f"[{chain}] Invariant OK: native={native_balance / 1e8:.4f}, "
+                        f"wrapped={wrapped_supply / 1e8:.4f}, delta={delta / 1e8:.4f}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"[{chain}] Invariant check failed (non-fatal): {e}"
                 )
 
     # ── Health logging ───────────────────────────────────────────────
