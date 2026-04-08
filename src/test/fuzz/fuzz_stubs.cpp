@@ -16,7 +16,7 @@
 //   CheckVDFProof     — returns true (skips VDF validation in fuzz context)
 
 // NodeContext needs complete types for unique_ptr member destructors.
-// These are header-only includes (no linker deps).
+// Include all headers that define types held by unique_ptr in NodeContext.
 #include <core/node_context.h>
 #include <net/peers.h>
 #include <net/connman.h>
@@ -30,6 +30,17 @@
 #include <digital_dna/verification_manager.h>
 #include <digital_dna/dna_verification.h>
 #include <consensus/vdf_validation.h>
+
+// --- Destructor stubs for types held by unique_ptr in NodeContext ---
+// These classes have non-trivial destructors defined in heavy .cpp files.
+// We stub them here to avoid cascading into the full networking stack.
+
+CBlockValidationQueue::~CBlockValidationQueue() {}
+CHeadersManager::~CHeadersManager() {}
+CConnman::~CConnman() {}
+CPeerDiscovery::~CPeerDiscovery() {}
+CBanManager::~CBanManager() {}
+digital_dna::DNARegistryDB::~DNARegistryDB() {}
 
 // --- NodeContext stubs ---
 
