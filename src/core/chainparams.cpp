@@ -197,6 +197,7 @@ ChainParams ChainParams::Mainnet() {
     params.checkpoints.emplace_back(30000, uint256S("0000000f1cadcbc897976ebe04f1171a5d591ebdb580bdd229d2e310f1a09f05"));
     // Checkpoint at height 34000 - post v3.9.0 stabilization
     params.checkpoints.emplace_back(34000, uint256S("00000009b2312644f10b286934ed982520e92aaa54b2736e46f365a77bd92d98"));
+    params.checkpoints.emplace_back(40000, uint256S("000000271909e84a5a31fe60c27a9e40a2a51828efc89c6af059a2db2f6e2576"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)
@@ -517,6 +518,7 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(8000, uint256S("9453c0150d81df7785c4b95c4ca50df75a1a561f092192a8ca55c15507397876"));
     // Checkpoint at height 8370 — covers all pre-ban-deployment blocks (ban deployed to all seeds Apr 4)
     params.checkpoints.emplace_back(8370, uint256S("ef1e3a7de515523cde0b224865b26dc049c92033bc5a86b31e0e32cd1ca852be"));
+    params.checkpoints.emplace_back(15000, uint256S("45f5877adcc1ec2dab453412d6a5cb3fd9383fc97a184aa4ec855db55212f5d6"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
