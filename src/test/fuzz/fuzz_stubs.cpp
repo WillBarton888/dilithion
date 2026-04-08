@@ -26,6 +26,8 @@
 #include <net/block_tracker.h>
 #include <net/blockencodings.h>
 #include <node/block_validation_queue.h>
+#include <node/validation_watchdog.h>
+#include <net/node.h>
 #include <digital_dna/dna_registry_db.h>
 #include <digital_dna/verification_manager.h>
 #include <digital_dna/dna_verification.h>
@@ -36,8 +38,10 @@
 // so stubbing them won't trigger vtable cascade (unlike DNARegistryDB).
 
 CBlockValidationQueue::~CBlockValidationQueue() {}
+CValidationWatchdog::~CValidationWatchdog() {}
 CHeadersManager::~CHeadersManager() {}
 CConnman::~CConnman() {}
+CNode::~CNode() {}
 CPeerDiscovery::~CPeerDiscovery() {}
 CBanManager::~CBanManager() {}
 
