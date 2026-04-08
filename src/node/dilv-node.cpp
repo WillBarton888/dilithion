@@ -756,7 +756,28 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
     }
 
     // Already registered in identity DB?
-    if (DFMP::g_identityDb->HasMIKPubKey(identity)) return true;
+    if (DFMP::g_identityDb->HasMIKPubKey(identity)) {
+        // BUG #284: Pre-cache DNA even when MIK is registered, in case the
+        // registration block gets orphaned later. Without cached DNA, the
+        // template builder cannot re-collect attestations for re-registration.
+        if (!s_dnaHashCached.load() && Dilithion::g_chainParams &&
+            static_cast<int>(nextHeight) >= Dilithion::g_chainParams->dnaCommitmentActivationHeight) {
+            auto collector = g_node_context.GetDNACollector();
+            if (collector) {
+                auto dna = collector->get_dna();
+                if (dna) {
+                    s_cachedDnaHash = dna->hash();
+                    bool allZero = true;
+                    for (auto b : s_cachedDnaHash) { if (b != 0) { allZero = false; break; } }
+                    if (!allZero) {
+                        s_dnaHashCached.store(true);
+                        std::cout << "[Mining] MIK registered — pre-cached DNA for future use" << std::endl;
+                    }
+                }
+            }
+        }
+        return true;
+    }
 
     // Already cached from a previous call?
     if (s_regNonceMined.load() && s_regNonceIdentity == identity) return true;
@@ -1101,6 +1122,35 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 // First block with this MIK - include full pubkey (registration)
                 std::vector<uint8_t> mikPubkey;
                 if (wallet.GetMIKPubKey(mikPubkey)) {
+                    // BUG #284 FIX: Ensure DNA is cached before registration PoW.
+                    // If EnsureMIKRegistered() returned early (MIK was registered at
+                    // startup but later orphaned by reorg), s_dnaHashCached is false.
+                    // Without DNA, PoW is mined without it and attestation re-collection
+                    // is impossible, causing infinite template rejection loops.
+                    if (!s_dnaHashCached.load() && Dilithion::g_chainParams &&
+                        static_cast<int>(nHeight) >= Dilithion::g_chainParams->dnaCommitmentActivationHeight) {
+                        auto collector = g_node_context.GetDNACollector();
+                        if (collector) {
+                            auto dna = collector->get_dna();
+                            if (dna) {
+                                s_cachedDnaHash = dna->hash();
+                                bool allZero = true;
+                                for (auto b : s_cachedDnaHash) { if (b != 0) { allZero = false; break; } }
+                                if (!allZero) {
+                                    s_dnaHashCached.store(true);
+                                    std::cout << "[Mining] DNA collected inline for registration (hash " << std::hex;
+                                    for (int i = 0; i < 4; i++) std::cout << std::setfill('0') << std::setw(2) << (int)s_cachedDnaHash[i];
+                                    std::cout << std::dec << "...)" << std::endl;
+                                    // Invalidate any PoW mined without DNA — must re-mine with DNA in challenge
+                                    if (s_regNonceMined.load()) {
+                                        std::cout << "[Mining] Invalidating PoW (was mined without DNA) — will re-mine" << std::endl;
+                                        s_regNonceMined.store(false);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // DFMP v3.0: Mine registration PoW nonce (cached to avoid re-mining)
                     // Thread-safety: atomic flag prevents duplicate PoW mining when
                     // BuildMiningTemplate is called concurrently (e.g. main thread
@@ -1242,7 +1292,10 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             // Guard: refuse to build registration block without valid attestations
             if (needRefresh) {
                 std::cerr << "[Mining] Template rejected — registration block at height "
-                          << nHeight << " requires seed attestations" << std::endl;
+                          << nHeight << " requires seed attestations"
+                          << " (collected=" << s_attestationsCollected.load()
+                          << ", dna=" << s_dnaHashCached.load()
+                          << ", mikPub=" << (wallet.HasMIK() ? "yes" : "no") << ")" << std::endl;
                 return std::nullopt;
             }
         }
