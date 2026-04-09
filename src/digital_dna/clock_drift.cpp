@@ -179,8 +179,9 @@ ClockDriftFingerprint ClockDriftCollector::get_fingerprint() const {
             double dt = static_cast<double>(samples_[i].local_timestamp_us - t0);
             if (dt > 0) sum2 += samples_[i].offset_us / dt;
         }
-        double rate1 = (mid > 0) ? sum1 / mid * 1e6 : 0;
-        double rate2 = (samples_.size() - mid > 0) ? sum2 / (samples_.size() - mid) * 1e6 : 0;
+        // offset_us / elapsed_us already gives drift in us/us (= ppm), no 1e6 needed
+        double rate1 = (mid > 0) ? sum1 / mid : 0;
+        double rate2 = (samples_.size() - mid > 0) ? sum2 / (samples_.size() - mid) : 0;
         fp.drift_stability = std::abs(rate1 - rate2);
     }
 

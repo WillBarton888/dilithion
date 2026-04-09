@@ -112,6 +112,7 @@
     #include <arpa/inet.h>  // For inet_pton on Unix
     #include <netdb.h>      // For gethostname, getaddrinfo
     #include <unistd.h>     // For gethostname
+    #include <sys/stat.h>   // For chmod (RPC cookie file permissions)
 #endif
 
 // Windows API macro conflicts - undef after including headers
@@ -1027,6 +1028,18 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     // Block timestamps are uint32_t per blockchain protocol (valid until year 2106)
     time_t currentTime = std::time(nullptr);
     block.nTime = static_cast<uint32_t>(currentTime & 0xFFFFFFFF);
+
+    // MTP validation: block timestamp must exceed Median-Time-Past.
+    // If current time is behind MTP (e.g. clock skew), bump to MTP + 1
+    // to avoid mining a block that consensus would reject.
+    // Same approach as Bitcoin Core's CreateNewBlock().
+    if (pindexPrev) {
+        int64_t nMedianTimePast = GetMedianTimePast(pindexPrev);
+        if (static_cast<int64_t>(block.nTime) <= nMedianTimePast) {
+            block.nTime = static_cast<uint32_t>(nMedianTimePast + 1);
+        }
+    }
+
     // Pass block timestamp to GetNextWorkRequired for EDA (Emergency Difficulty Adjustment)
     // If the gap since the last block exceeds the EDA threshold, difficulty is reduced
     block.nBits = GetNextWorkRequired(pindexPrev, static_cast<int64_t>(block.nTime));
@@ -3344,6 +3357,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rest_api.RegisterBlockchain(&blockchain);
         rest_api.RegisterUTXOSet(&utxo_set);
         rest_api.RegisterChainState(&g_chainstate);
+        rest_api.SetTestnet(config.testnet);
         // Note: Rate limiter is optional for HTTP server (RPC server has its own)
 
         http_server.SetRestApiHandler([](const std::string& method,
@@ -3493,7 +3507,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     CNetMessage sendheaders_msg = g_node_context.message_processor->CreateSendHeadersMessage();
                     g_node_context.connman->PushMessage(peer_id, sendheaders_msg);
                     node->fSentSendHeaders.store(true);
-                    std::cout << "[P2P] Sent sendheaders to peer " << peer_id << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[P2P] Sent sendheaders to peer " << peer_id << std::endl;
                 }
             }
 
@@ -3533,7 +3548,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 return;
             }
 
-            std::cout << "[P2P] Received " << addrs.size() << " addresses from peer " << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] Received " << addrs.size() << " addresses from peer " << peer_id << std::endl;
 
             // Add each address to AddrMan via peer manager
             int added = 0;
@@ -3556,7 +3572,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
             }
 
-            if (added > 0) {
+            if (added > 0 && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[P2P] Added " << added << " new addresses to AddrMan from peer " << peer_id << std::endl;
             }
         });
@@ -3579,8 +3595,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
                     // Check if we already have this block
                     if (!exists) {
-                        std::cout << "[P2P] Peer " << peer_id << " announced new block: "
-                                  << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[P2P] Peer " << peer_id << " announced new block: "
+                                      << item.hash.GetHex().substr(0, 16) << "..." << std::endl;
                         hasUnknownBlocks = true;
                         getdata.push_back(item);
                     }
@@ -3598,8 +3615,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 int our_header_height = g_node_context.headers_manager->GetBestHeight();
                 // Use large number - peer sends whatever they actually have (up to 2000 per batch)
                 int assumed_peer_height = our_header_height + 2000;
-                std::cout << "[INV-SYNC] Unknown block announced by peer " << peer_id
-                          << ", requesting headers (force=true)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[INV-SYNC] Unknown block announced by peer " << peer_id
+                              << ", requesting headers (force=true)" << std::endl;
                 g_node_context.headers_manager->SyncHeadersFromPeer(peer_id, assumed_peer_height, true);
             }
 
@@ -3612,7 +3630,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // This legacy path bypassed tracking, breaking chunk-based downloads.
             // It is now permanently disabled - all block requests go through
             // headers-first download exclusively.
-            if (!getdata.empty()) {
+            if (!getdata.empty() && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[P2P] Ignoring INV-announced blocks (using headers-first approach)" << std::endl;
             }
         });
@@ -3633,11 +3651,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         if (g_node_context.connman && g_node_context.message_processor) {
                             CNetMessage blockMsg = g_node_context.message_processor->CreateBlockMessage(block);
                             auto serialized = blockMsg.Serialize();
-                            std::cout << "[BLOCK-SERVE] Sending block " << item.hash.GetHex().substr(0, 16)
-                                      << "... to peer " << peer_id
-                                      << " (vtx=" << block.vtx.size() << " bytes, msg=" << serialized.size() << " bytes)" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed)) {
+                                std::cout << "[BLOCK-SERVE] Sending block " << item.hash.GetHex().substr(0, 16)
+                                          << "... to peer " << peer_id
+                                          << " (vtx=" << block.vtx.size() << " bytes, msg=" << serialized.size() << " bytes)" << std::endl;
+                            }
                             g_node_context.connman->PushMessage(peer_id, blockMsg);
-                            std::cout << "[BLOCK-SERVE] PushMessage SUCCEEDED for block to peer " << peer_id << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[BLOCK-SERVE] PushMessage SUCCEEDED for block to peer " << peer_id << std::endl;
                         }
                     } else {
                         std::cout << "[P2P] Peer " << peer_id << " requested unknown block: "
@@ -3663,15 +3684,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         message_processor.SetBlockHandler([&blockchain](int peer_id, const CBlock& block) {
             auto result = ProcessNewBlock(g_node_context, blockchain, peer_id, block);
             // Note: Invalid PoW tracking is handled inside ProcessNewBlock
-            std::cout << "[BLOCK-HANDLER] Result: " << BlockProcessResultToString(result) << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[BLOCK-HANDLER] Result: " << BlockProcessResultToString(result) << std::endl;
         });
 
         // Register GETHEADERS handler - respond with block headers from our chain (Bug #12 - Phase 4.2)
         message_processor.SetGetHeadersHandler([&blockchain](
             int peer_id, const NetProtocol::CGetHeadersMessage& msg) {
 
-            std::cout << "[IBD] Peer " << peer_id << " requested headers (locator size: "
-                      << msg.locator.size() << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Peer " << peer_id << " requested headers (locator size: "
+                          << msg.locator.size() << ")" << std::endl;
 
             // Find the best common block between us and the peer
             uint256 hashStart;
@@ -3682,7 +3705,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 if (g_chainstate.HasBlockIndex(hash)) {
                     hashStart = hash;
                     found = true;
-                    std::cout << "[IBD] Found common block: " << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] Found common block: " << hash.GetHex().substr(0, 16) << "..." << std::endl;
                     break;
                 }
             }
@@ -3694,12 +3718,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 hashStart = Genesis::GetGenesisHash();
                 found = true;
 
-                if (msg.locator.empty()) {
-                    std::cout << "[IBD] Empty locator - sending from genesis: "
-                              << hashStart.GetHex().substr(0,16) << "..." << std::endl;
-                } else {
-                    std::cout << "[IBD] No common block in locator - falling back to genesis: "
-                              << hashStart.GetHex().substr(0,16) << "..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed)) {
+                    if (msg.locator.empty()) {
+                        std::cout << "[IBD] Empty locator - sending from genesis: "
+                                  << hashStart.GetHex().substr(0,16) << "..." << std::endl;
+                    } else {
+                        std::cout << "[IBD] No common block in locator - falling back to genesis: "
+                                  << hashStart.GetHex().substr(0,16) << "..." << std::endl;
+                    }
                 }
             }
 
@@ -3727,8 +3753,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 break;
                             }
                         }
-                        std::cout << "[IBD] Common block at height " << pindex->nHeight
-                                  << " is on a fork, fork point at height " << forkHeight << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[IBD] Common block at height " << pindex->nHeight
+                                      << " is on a fork, fork point at height " << forkHeight << std::endl;
                         // Send headers from active chain starting after fork point
                         for (int h = forkHeight + 1; h <= pTip->nHeight && headers.size() < 2000; h++) {
                             CBlockIndex* pBlock = pTip->GetAncestor(h);
@@ -3753,7 +3780,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
 
             // Always send HEADERS response, even if empty (Bitcoin Core protocol requirement)
-            std::cout << "[IBD] Sending " << headers.size() << " header(s) to peer " << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Sending " << headers.size() << " header(s) to peer " << peer_id << std::endl;
             if (g_node_context.connman && g_node_context.message_processor) {
                 CNetMessage headersMsg = g_node_context.message_processor->CreateHeadersMessage(headers);
                 g_node_context.connman->PushMessage(peer_id, headersMsg);
@@ -3768,7 +3796,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 return;
             }
 
-            std::cout << "[IBD] Received " << headers.size() << " header(s) from peer " << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Received " << headers.size() << " header(s) from peer " << peer_id << std::endl;
 
             // FULLY ASYNC: Queue raw headers for background processing
             // P2P thread doesn't compute any hashes - just queues and returns immediately
@@ -3778,7 +3807,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             );
 
             if (success) {
-                std::cout << "[IBD] Headers queued for async processing (P2P thread released)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] Headers queued for async processing (P2P thread released)" << std::endl;
 
                 // Note: Best height will be updated by background thread after processing
                 // Peer height update moved to background thread completion
@@ -3795,7 +3825,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 CNode* node = g_node_context.connman->GetNode(peer_id);
                 if (node) {
                     node->fPreferHeaders.store(true);
-                    std::cout << "[P2P] Peer " << peer_id << " now prefers HEADERS announcements" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[P2P] Peer " << peer_id << " now prefers HEADERS announcements" << std::endl;
                 }
             }
         });
@@ -4111,10 +4142,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     (recv_wall_ms - send_wall_ms) : 1;
                 if (elapsed_ms < 1) elapsed_ms = 1;  // Floor to 1ms
 
-                double download_mbps = digital_dna::BandwidthProofCollector::compute_throughput_mbps(
+                double throughput_mbps = digital_dna::BandwidthProofCollector::compute_throughput_mbps(
                     payload_size, elapsed_ms);
+                // Receiver's download = sender's upload. Report as sender's upload.
                 CNetMessage result = message_processor.CreateDNABWResultMessage(
-                    nonce, 0.0, download_mbps);
+                    nonce, throughput_mbps, 0.0);
                 g_node_context.connman->PushMessage(peer_id, result);
             }
         });
@@ -6284,7 +6316,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::string rpcuser = config_parser.GetString("rpcuser", "");
         std::string rpcpassword = config_parser.GetString("rpcpassword", "");
         std::string rpc_permissions_file = config.datadir + "/rpc_permissions.json";
-        
+
         if (!rpcuser.empty() && !rpcpassword.empty()) {
             // Initialize permissions system
             if (!rpc_server.InitializePermissions(rpc_permissions_file, rpcuser, rpcpassword)) {
@@ -6292,8 +6324,51 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             } else {
                 std::cout << "  [AUTH] RPC authentication enabled" << std::endl;
             }
+        } else if (config.public_api) {
+            // Public API mode binds to all interfaces — REFUSE to run without auth
+            std::cerr << "ERROR: --public-api requires RPC authentication. "
+                      << "Set rpcuser and rpcpassword in your config file." << std::endl;
+            return 1;
         } else {
-            std::cout << "  [INFO] RPC authentication disabled (no rpcuser/rpcpassword in config)" << std::endl;
+            // No credentials configured — generate a cookie file for local auth.
+            // This mirrors Bitcoin Core's .cookie mechanism: a random credential
+            // is written to <datadir>/.cookie on each startup. Local tools (relayer,
+            // CLI) can read it. The file is deleted on clean shutdown.
+            std::string cookie_path = config.datadir + "/.cookie";
+            std::vector<uint8_t> cookie_bytes(32);
+            extern bool GenerateSalt(std::vector<uint8_t>&);
+            if (GenerateSalt(cookie_bytes)) {
+                // Convert to hex string for use as password
+                std::string cookie_password;
+                for (auto b : cookie_bytes) {
+                    char hex[3];
+                    snprintf(hex, sizeof(hex), "%02x", b);
+                    cookie_password += hex;
+                }
+                rpcuser = "__cookie__";
+                rpcpassword = cookie_password;
+
+                // Write cookie file (mode 0600 on Unix for owner-only access)
+                std::ofstream cookie_file(cookie_path);
+                if (cookie_file.is_open()) {
+                    cookie_file << rpcuser << ":" << rpcpassword;
+                    cookie_file.close();
+#ifndef _WIN32
+                    chmod(cookie_path.c_str(), 0600);
+#endif
+                    std::cout << "  [AUTH] RPC cookie authentication enabled (credentials in "
+                              << cookie_path << ")" << std::endl;
+
+                    // Initialize permissions with cookie credentials
+                    rpc_server.InitializePermissions(rpc_permissions_file, rpcuser, rpcpassword);
+                } else {
+                    std::cerr << "  [WARNING] Failed to write RPC cookie file. "
+                              << "RPC authentication disabled." << std::endl;
+                }
+            } else {
+                std::cerr << "  [WARNING] Failed to generate RPC cookie. "
+                          << "RPC authentication disabled." << std::endl;
+            }
         }
 
         // Phase 1: Initialize request logging
@@ -6679,8 +6754,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     int peerHeight = g_node_context.peer_manager ? g_node_context.peer_manager->GetBestPeerHeight() : 0;
                     bool hasHandshakes = g_node_context.peer_manager && g_node_context.peer_manager->HasCompletedHandshakes();
                     if (peerHeight > 0 || hasHandshakes) {
-                        std::cout << "  [IBD] Progress: height=" << height
-                                  << " peers_best=" << peerHeight << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "  [IBD] Progress: height=" << height
+                                      << " peers_best=" << peerHeight << std::endl;
 
                         // Diagnostic: warn if stuck at height 0 for >10 minutes despite having peers
                         if (height == 0 && peerHeight > 0) {
@@ -6704,8 +6780,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             }
                         }
                     } else {
-                        size_t peerCount = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
-                        std::cout << "  [IBD] Waiting for peer handshakes... (connections=" << peerCount << ")" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed)) {
+                            size_t peerCount = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
+                            std::cout << "  [IBD] Waiting for peer handshakes... (connections=" << peerCount << ")" << std::endl;
+                        }
                     }
                 }
             }
@@ -6757,10 +6835,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // 3. We're not in IBD
                 //
                 // This is similar to Bitcoin Core's getblocktemplate behavior.
-                // Template refresh temporarily disabled for deadlock diagnosis.
-                // The initial template built at mining start already includes
-                // minimum difficulty for overdue blocks on testnet.
-                // TODO: Re-enable once deadlock root cause is identified.
+                // Template refresh is active: rebuilds on mempool changes and
+                // EDA gap detection (every 60s when gap > 6 blocks).
                 if (miner.IsMining()) {
                     bool shouldRefresh = false;
 

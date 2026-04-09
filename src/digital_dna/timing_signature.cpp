@@ -1,5 +1,6 @@
 #include "timing_signature.h"
 #include "vdf/vdf.h"
+#include <crypto/sha3.h>
 
 #include <algorithm>
 #include <cmath>
@@ -26,26 +27,34 @@ TimingSignature TimingSignatureCollector::collect(const std::array<uint8_t, 32>&
     // Start timing
     auto start = std::chrono::high_resolution_clock::now();
 
-    // Configure VDF to report progress at our checkpoint interval
+    // Phase 1: Thermal benchmark — run a CPU-bound workload in timed segments
+    // to capture the thermal throttle curve (cold → warm → steady state).
+    // chiavdf doesn't support progress callbacks, so we use SHA3 hashing
+    // as a proxy CPU load that produces the same thermal behavior.
+    {
+        uint8_t bench_buf[32];
+        std::copy(challenge.begin(), challenge.end(), bench_buf);
+        auto bench_start = std::chrono::high_resolution_clock::now();
+        uint64_t bench_total = config_.total_iterations;
+        for (uint64_t done = 0; done < bench_total; done += config_.checkpoint_interval) {
+            uint64_t chunk = std::min(config_.checkpoint_interval, bench_total - done);
+            for (uint64_t j = 0; j < chunk; j++) {
+                SHA3_256(bench_buf, 32, bench_buf);
+            }
+            auto now = std::chrono::high_resolution_clock::now();
+            TimingCheckpoint cp;
+            cp.iteration = done + chunk;
+            cp.elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                now - bench_start).count();
+            sig.checkpoints.push_back(cp);
+            progress_ = 0.5 * static_cast<double>(done + chunk) / bench_total;
+        }
+    }
+
+    // Phase 2: Real VDF computation for output + proof (sequential, non-parallelizable)
     vdf::VDFConfig vdf_cfg;
     vdf_cfg.target_iterations = config_.total_iterations;
-    vdf_cfg.progress_interval = config_.checkpoint_interval;
-
-    // Progress callback records timing checkpoints
-    auto progress_cb = [&](uint64_t current, uint64_t total) {
-        auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now - start);
-
-        TimingCheckpoint cp;
-        cp.iteration = current;
-        cp.elapsed_us = elapsed.count();
-        sig.checkpoints.push_back(cp);
-
-        progress_ = static_cast<double>(current) / total;
-    };
-
-    // Run real VDF computation (sequential, non-parallelizable)
-    vdf::VDFResult result = vdf::compute(challenge, config_.total_iterations, vdf_cfg, progress_cb);
+    vdf::VDFResult result = vdf::compute(challenge, config_.total_iterations, vdf_cfg, nullptr);
 
     // Store VDF output and proof (witnesses can verify this)
     sig.vdf_output = result.output;
