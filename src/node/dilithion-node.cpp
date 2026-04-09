@@ -6675,12 +6675,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             auto since_warning = std::chrono::duration_cast<std::chrono::minutes>(now - last_warning).count();
                             if (stuck_mins >= 10 && since_warning >= 5) {
                                 last_warning = now;
+                                int hdrHeight = g_node_context.headers_manager ? g_node_context.headers_manager->GetBestHeight() : -1;
+                                int syncPeer = g_node_context.ibd_coordinator ? g_node_context.ibd_coordinator->GetHeadersSyncPeer() : -1;
                                 std::cout << "\n  [WARN] Node stuck at height 0 for " << stuck_mins << " minutes despite having peers." << std::endl;
-                                std::cout << "  [WARN] This usually means your ISP or firewall is blocking P2P data." << std::endl;
+                                std::cout << "  [WARN] Headers height: " << hdrHeight << ", sync peer: " << syncPeer << std::endl;
+                                std::cout << "  [WARN] If headers=0, the seed may not be responding to GETHEADERS." << std::endl;
                                 std::cout << "  [WARN] Try these fixes:" << std::endl;
                                 std::cout << "  [WARN]   1. Download bootstrap from https://github.com/dilithion/dilithion/releases" << std::endl;
-                                std::cout << "  [WARN]   2. Use --addnode=138.197.68.128:8444 to connect directly to seed nodes" << std::endl;
-                                std::cout << "  [WARN]   3. If in a country with internet restrictions, use a VPN\n" << std::endl;
+                                std::cout << "  [WARN]   2. Delete your data folder and restart with a fresh sync" << std::endl;
+                                std::cout << "  [WARN]   3. Use --addnode=138.197.68.128:8444 to connect directly to seed nodes" << std::endl;
+                                std::cout << "  [WARN]   4. If in a country with internet restrictions, use a VPN\n" << std::endl;
                             }
                         }
                     } else {

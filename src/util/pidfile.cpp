@@ -11,6 +11,7 @@
 #ifdef _WIN32
     #include <windows.h>
     #include <tlhelp32.h>
+    #include <psapi.h>  // For GetProcessImageFileNameA
 #else
     #include <unistd.h>
     #include <signal.h>
@@ -140,7 +141,9 @@ bool CPidFile::IsStale(const std::string& pidfile_path) {
 
 bool CPidFile::IsProcessRunning(int pid) {
 #ifdef _WIN32
-    // Windows: Use OpenProcess
+    // Windows: Use OpenProcess + verify the process is actually a Dilithion node.
+    // After a crash, Windows can reassign the old PID to an unrelated process
+    // (e.g., SmartScreen, svchost), causing a false "already running" detection.
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
     if (process == NULL) {
         return false;  // Can't open - not running or no access
@@ -149,13 +152,38 @@ bool CPidFile::IsProcessRunning(int pid) {
     // Check if the process has exited
     DWORD exitCode = 0;
     BOOL result = GetExitCodeProcess(process, &exitCode);
-    CloseHandle(process);
-
-    if (!result) {
-        return false;  // Can't get status
+    if (!result || exitCode != STILL_ACTIVE) {
+        CloseHandle(process);
+        return false;
     }
 
-    return (exitCode == STILL_ACTIVE);
+    // Verify the process is actually a Dilithion/DilV node, not a recycled PID.
+    // GetProcessImageFileNameA returns the full path of the executable.
+    char imagePath[MAX_PATH] = {0};
+    DWORD pathLen = GetProcessImageFileNameA(process, imagePath, MAX_PATH);
+    CloseHandle(process);
+
+    if (pathLen == 0) {
+        // Can't determine process name (access denied for system processes).
+        // Treat as stale — the user's own node process should be readable.
+        return false;
+    }
+
+    // Check if the executable name contains "dilithion" or "dilv"
+    // (handles dilithion-node.exe, dilv-node.exe, and any path variations)
+    std::string path(imagePath);
+    // Convert to lowercase for case-insensitive comparison
+    for (auto& c : path) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+
+    bool is_dilithion = (path.find("dilithion") != std::string::npos ||
+                         path.find("dilv") != std::string::npos);
+
+    if (!is_dilithion) {
+        std::cout << "[PidFile] PID " << pid << " exists but belongs to a different process, treating as stale" << std::endl;
+        return false;
+    }
+
+    return true;
 #else
     // Unix: Use kill with signal 0 (doesn't actually send signal)
     if (kill(static_cast<pid_t>(pid), 0) == 0) {

@@ -1558,8 +1558,9 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // Check if we have the complete message
         if (buffer.size() < total_size) {
-            // DEBUG: Log partial message waiting
-            if (g_verbose.load(std::memory_order_relaxed) && cmd == "block") {
+            // Log partial message waiting for headers/blocks (helps diagnose stuck-at-0)
+            if (cmd == "headers" || cmd == "block" ||
+                (g_verbose.load(std::memory_order_relaxed) && header.payload_size > 1000)) {
                 std::cout << "[EXTRACT-PARTIAL] node=" << pnode->id << " cmd=" << cmd
                           << " need=" << total_size << " have=" << buffer.size() << std::endl;
             }
@@ -1603,10 +1604,14 @@ void CConnman::ExtractMessages(CNode* pnode) {
         // Create processed message and push to queue
         std::string command = header.GetCommand();
 
-        // DEBUG: Log when message is fully extracted and pushed to queue
-        if (g_verbose.load(std::memory_order_relaxed))
+        // Log when headers or blocks are fully extracted from TCP (always, for diagnostics)
+        if (command == "headers" || command == "block") {
+            std::cout << "[EXTRACT] node=" << pnode->id << " cmd=" << command
+                      << " payload=" << header.payload_size << " bytes" << std::endl;
+        } else if (g_verbose.load(std::memory_order_relaxed)) {
             std::cout << "[EXTRACT-PUSHED] node=" << pnode->id << " cmd=" << command
                       << " payload_size=" << header.payload_size << std::endl;
+        }
 
         // PIPELINE COUNTER: Step 1 & 2 - Block extracted from TCP and pushed to vProcessMsg
         // Note: Steps 1 & 2 are atomic (PushProcessMsg is just a vector push)

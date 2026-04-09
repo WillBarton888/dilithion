@@ -120,6 +120,9 @@ public:
      */
     bool IsInitialBlockDownload() const;
 
+    /** @brief Get current headers sync peer ID (-1 if none) */
+    int GetHeadersSyncPeer() const { return m_headers_sync_peer; }
+
     /**
      * @brief Called when an orphan block is received (Layer 2 fork detection)
      *
