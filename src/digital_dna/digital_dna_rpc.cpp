@@ -710,6 +710,8 @@ JsonObject DigitalDNARpc::score_to_json(const SimilarityScore& score) const {
     result["latency_similarity"] = std::to_string(score.latency_similarity);
     result["timing_similarity"] = std::to_string(score.timing_similarity);
     result["perspective_similarity"] = std::to_string(score.perspective_similarity);
+    result["has_perspective"] = score.has_perspective ? "true" : "false";
+    result["dimensions_scored"] = std::to_string(score.dimensions_scored);
     result["combined_score"] = std::to_string(score.combined_score);
     result["verdict"] = score.verdict();
     return result;
@@ -1014,8 +1016,10 @@ JsonObject DigitalDNARpc::cmd_getdnamonitor(const JsonObject& /*params*/) {
     }
 
     // --- 1. Dimension coverage ---
-    int has_memory = 0, has_drift = 0, has_bw = 0, has_thermal = 0, has_behavioral = 0;
+    int has_perspective = 0, has_memory = 0, has_drift = 0, has_bw = 0, has_thermal = 0, has_behavioral = 0;
     for (const auto& dna : all) {
+        // Perspective is "present" only if there's actual peer data (snapshots or cached count)
+        if (dna.perspective.total_unique_peers() > 0 || !dna.perspective.snapshots.empty()) has_perspective++;
         if (dna.memory) has_memory++;
         if (dna.clock_drift) has_drift++;
         if (dna.bandwidth) has_bw++;
@@ -1029,7 +1033,7 @@ JsonObject DigitalDNARpc::cmd_getdnamonitor(const JsonObject& /*params*/) {
         oss << "{";
         oss << "\"latency\": 100.0, ";  // Always present (core)
         oss << "\"timing\": 100.0, ";   // Always present (core)
-        oss << "\"perspective\": 100.0, "; // Always present (core)
+        oss << "\"perspective\": " << (100.0 * has_perspective / n) << ", ";
         oss << "\"memory\": " << (100.0 * has_memory / n) << ", ";
         oss << "\"clock_drift\": " << (100.0 * has_drift / n) << ", ";
         oss << "\"bandwidth\": " << (100.0 * has_bw / n) << ", ";

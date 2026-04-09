@@ -99,6 +99,7 @@ struct SimilarityScore {
     double behavioral_similarity = 0.0;    // BP: Activity patterns
 
     // Data availability flags (0.0 is a valid score — "completely different")
+    bool has_perspective = true;   // Core dim, but false when peer data unavailable
     bool has_memory = false;
     bool has_clock_drift = false;
     bool has_bandwidth = false;

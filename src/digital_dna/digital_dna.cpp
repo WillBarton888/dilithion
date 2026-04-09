@@ -423,7 +423,19 @@ void DigitalDNACollector::start_collection() {
             memory_result_ = memory_collector_.collect();
         }
 
-        // Perspective + behavioral collection are ongoing via on_peer_* / on_block_* hooks
+        // 5. Perspective snapshots: take periodic snapshots while waiting for
+        // perspective collection to complete. Peers connect/disconnect via
+        // on_peer_connected/disconnected hooks, but snapshots must be explicitly
+        // recorded to capture the peer set state over time.
+        uint32_t snapshot_height = 0;
+        while (collecting_ && !perspective_collector_.is_complete()) {
+            perspective_collector_.take_snapshot(snapshot_height++);
+            // Sleep 60 seconds between snapshots (interruptible via collecting_ flag)
+            for (int i = 0; i < 60 && collecting_; i++) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        }
+        // Behavioral collection is ongoing via on_block_* hooks
     });
 }
 
@@ -434,6 +446,9 @@ void DigitalDNACollector::stop_collection() {
     if (collection_thread_.joinable()) {
         collection_thread_.join();
     }
+
+    // Take a final perspective snapshot to capture current peer state
+    perspective_collector_.take_snapshot(0);
 
     // Finalize perspective
     perspective_result_ = perspective_collector_.get_proof();
@@ -625,7 +640,16 @@ SimilarityScore DigitalDNARegistry::compare(const DigitalDNA& a, const DigitalDN
     // Core v2.0 dimensions (always available)
     score.latency_similarity = calculate_latency_similarity(a.latency, b.latency);
     score.timing_similarity = calculate_timing_similarity(a.timing, b.timing);
-    score.perspective_similarity = calculate_perspective_similarity(a.perspective, b.perspective);
+
+    // Perspective may return -1.0 if both have no peer data (e.g. after deserialization)
+    double p_sim = calculate_perspective_similarity(a.perspective, b.perspective);
+    if (p_sim < 0.0) {
+        score.perspective_similarity = 0.0;
+        score.has_perspective = false;
+    } else {
+        score.perspective_similarity = p_sim;
+        score.has_perspective = true;
+    }
 
     // v3.0 extended dimensions (scored only when both identities have data)
     if (a.memory && b.memory) {
@@ -673,7 +697,8 @@ SimilarityScore DigitalDNARegistry::compute_combined_score(SimilarityScore score
 
     // Independent dimensions: full weight (1.0 each)
     add(score.latency_similarity, 1.0);         // L: geographic
-    add(score.perspective_similarity, 1.0);       // P: network topology
+    if (score.has_perspective)
+        add(score.perspective_similarity, 1.0); // P: network topology (skipped if no peer data)
 
     // V/M/T correlation cluster: check if they move together
     double vmt_weight = 1.0;  // default: full weight each
@@ -709,7 +734,8 @@ SimilarityScore DigitalDNARegistry::compute_combined_score(SimilarityScore score
         add(score.behavioral_similarity, 1.0);     // BP: activity patterns
 
     score.dimensions_scored = static_cast<uint32_t>(
-        3 + (score.has_memory ? 1 : 0) + (score.has_clock_drift ? 1 : 0) +
+        2 + (score.has_perspective ? 1 : 0) +
+        (score.has_memory ? 1 : 0) + (score.has_clock_drift ? 1 : 0) +
         (score.has_bandwidth ? 1 : 0) + (score.has_thermal ? 1 : 0) +
         (score.has_behavioral ? 1 : 0));
     score.combined_score = (weight_sum > 0.0) ? sum / weight_sum : 0.0;

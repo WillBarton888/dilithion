@@ -171,6 +171,14 @@ double PerspectiveProof::similarity(const PerspectiveProof& a, const Perspective
         }
     }
 
+    // If both have empty snapshots (e.g. deserialized from DB), check cached counts.
+    // If both originally had peers but snapshots were lost in serialization,
+    // we can't compute Jaccard — return -1.0 (unknown).
+    if (peers_a.empty() && peers_b.empty()) {
+        // Both truly had no peers observed → unknown similarity
+        return -1.0;
+    }
+
     return jaccard_similarity(peers_a, peers_b);
 }
 
@@ -308,7 +316,8 @@ std::array<uint8_t, 20> generate_random_peer_id() {
 
 double jaccard_similarity(const std::set<std::array<uint8_t, 20>>& a,
                           const std::set<std::array<uint8_t, 20>>& b) {
-    if (a.empty() && b.empty()) return 1.0;
+    // Both empty = no data, not "identical". Return -1.0 as sentinel for "unknown".
+    if (a.empty() && b.empty()) return -1.0;
     if (a.empty() || b.empty()) return 0.0;
 
     size_t intersection = 0;
