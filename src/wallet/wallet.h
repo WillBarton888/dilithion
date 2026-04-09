@@ -1243,7 +1243,8 @@ public:
                     CAmount& total_value,
                     class CUTXOSet& utxo_set,
                     unsigned int current_height,
-                    std::string& error) const;
+                    std::string& error,
+                    const CDilithiumAddress& from_address = CDilithiumAddress()) const;
 
     /**
      * Create a new transaction
@@ -1271,7 +1272,8 @@ public:
                           class CUTXOSet& utxo_set,
                           unsigned int current_height,
                           CTransactionRef& tx_out,
-                          std::string& error);
+                          std::string& error,
+                          const CDilithiumAddress& from_address = CDilithiumAddress());
 
     /**
      * Create a transaction with a custom scriptPubKey (e.g., HTLC).

@@ -1514,17 +1514,11 @@ void CRPCServer::HandleClient(int clientSocket) {
 // ============================================================================
 // RPC-013 FIX: Mining Operation Resource Limits (Configuration)
 // ============================================================================
-// Current RPC_StartMining() has no resource limits on:
-// - Concurrent mining sessions (should be 1 per node)
-// - Thread allocation (should respect system cores)
-// - Mining duration (should have optional timeout)
-//
-// Mitigation: Mining controller should enforce:
-// 1. Max 1 concurrent mining session
-// 2. Thread count = min(user_config, system_cores - 1)
-// 3. Optional max_mining_duration config parameter
-//
-// TODO: Add checks in CMiningController::StartMining() before allowing start
+// CMiningController::StartMining() enforces:
+// 1. Max 1 concurrent mining session (atomic compare_exchange_strong)
+// 2. Block template validation (null/invalid target rejection)
+// 3. Auto RAM detection for RandomX mode (LIGHT vs FULL)
+// 4. Thread count based on system cores
 // ============================================================================
 
 // ============================================================================
@@ -2266,6 +2260,24 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
         throw std::runtime_error("Invalid Dilithion address: " + address_str);
     }
 
+    // Parse optional from_address (spend only from this address)
+    CDilithiumAddress from_address;
+    if (!params.empty()) {
+        try {
+            auto j = nlohmann::json::parse(params);
+            if (j.is_object() && j.contains("from_address")) {
+                std::string from_str = j["from_address"].get<std::string>();
+                if (!from_str.empty()) {
+                    if (!from_address.SetString(from_str)) {
+                        throw std::runtime_error("Invalid from_address: " + from_str);
+                    }
+                }
+            }
+        } catch (const nlohmann::json::parse_error&) {
+            // Not JSON object format — no from_address
+        }
+    }
+
     // Create transaction - fee is auto-adjusted internally based on actual input count
     unsigned int currentHeight = m_chainstate->GetHeight();
     size_t est_size = Consensus::EstimateDilithiumTxSize(2, 2);
@@ -2274,7 +2286,7 @@ std::string CRPCServer::RPC_SendToAddress(const std::string& params) {
     std::string error;
 
     if (!m_wallet->CreateTransaction(recipient_address, amount, fee,
-                                     *m_utxo_set, currentHeight, tx, error)) {
+                                     *m_utxo_set, currentHeight, tx, error, from_address)) {
         throw std::runtime_error("Failed to create transaction: " + error);
     }
 

@@ -1781,7 +1781,6 @@ bool CWallet::Load(const std::string& filename) {
             // Create address from public key
             CDilithiumAddress keyAddr(encKey.vchPubKey);
             temp_mapCryptedKeys[keyAddr] = encKey;
-            // CID 1675XXX FIX: Use std::move after last use as map key
             temp_vchAddresses.push_back(std::move(keyAddr));
         } else {
             // Read unencrypted key
@@ -1798,7 +1797,6 @@ bool CWallet::Load(const std::string& filename) {
             // Create address from public key
             CDilithiumAddress keyAddr(key.vchPubKey);
             temp_mapKeys[keyAddr] = key;
-            // CID 1675XXX FIX: Use std::move after last use as map key
             temp_vchAddresses.push_back(std::move(keyAddr));
         }
     }
@@ -3486,15 +3484,29 @@ bool CWallet::SelectCoins(CAmount target_value,
                           CAmount& total_value,
                           CUTXOSet& utxo_set,
                           unsigned int current_height,
-                          std::string& error) const {
+                          std::string& error,
+                          const CDilithiumAddress& from_address) const {
     selected_coins.clear();
     total_value = 0;
 
     // Get all spendable UTXOs
     std::vector<CWalletTx> unspent = ListUnspentOutputs(utxo_set, current_height);
 
+    // Filter by from_address if specified
+    if (from_address.IsValid()) {
+        std::vector<CWalletTx> filtered;
+        for (const auto& wtx : unspent) {
+            if (wtx.address == from_address) {
+                filtered.push_back(wtx);
+            }
+        }
+        unspent = std::move(filtered);
+    }
+
     if (unspent.empty()) {
-        error = "No spendable outputs available";
+        error = from_address.IsValid()
+            ? "No spendable outputs at address " + from_address.ToString()
+            : "No spendable outputs available";
         return false;
     }
 
@@ -3548,7 +3560,8 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
                                 CUTXOSet& utxo_set,
                                 unsigned int current_height,
                                 CTransactionRef& tx_out,
-                                std::string& error) {
+                                std::string& error,
+                                const CDilithiumAddress& from_address) {
     // Input validation
     if (!recipient_address.IsValid()) {
         error = "Invalid recipient address";
@@ -3591,7 +3604,7 @@ bool CWallet::CreateTransaction(const CDilithiumAddress& recipient_address,
     std::vector<CWalletTx> selected_coins;
     CAmount total_selected = 0;
 
-    if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error)) {
+    if (!SelectCoins(total_needed, selected_coins, total_selected, utxo_set, current_height, error, from_address)) {
         return false;
     }
 
